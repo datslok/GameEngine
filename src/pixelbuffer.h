@@ -11,4 +11,5 @@ class PixelBuffer {
 
     public:
         PixelBuffer(std::size_t width, std::size_t height);
+        void print() const;
 };

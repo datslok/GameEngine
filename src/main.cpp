@@ -9,6 +9,7 @@ int main() {
           << ", B: " << static_cast<int>(pixel.b)
           << "\n";
 
-    PixelBuffer pixelBuffer{4, 3};
+    PixelBuffer pixelBuffer{1920, 1080};
+    pixelBuffer.print();
     return 0; 
 }
