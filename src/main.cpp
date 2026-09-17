@@ -2,7 +2,6 @@
 #include "pixel.h"
 
 int main() {
-    std::cout << "Hello, World! \n"; 
     Pixel pixel{255, 0, 0};
     std::cout << "R: " << static_cast<int>(pixel.r)
           << ", G: " << static_cast<int>(pixel.g)
