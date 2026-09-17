@@ -13,8 +13,8 @@ class PixelBuffer {
         PixelBuffer(std::size_t width, std::size_t height);
         void print() const;
         void setPixel(std::size_t x, std::size_t y, Pixel colour);
-        void clear(Pixel colour);
         Pixel getPixel(std::size_t x, std::size_t y) const;
+        void clear(Pixel colour);
         std::size_t getWidth() const;
         std::size_t getHeight() const;
 };
