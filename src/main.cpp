@@ -4,15 +4,15 @@
 #include <cassert>
 
 int main() {
-    PixelBuffer buffer{4, 3};
+    PixelBuffer buffer{1920, 1080};
 
     // Check dimensions.
-    assert(buffer.getWidth() == 4);
-    assert(buffer.getHeight() == 3);
+    assert(buffer.getWidth() == 1920);
+    assert(buffer.getHeight() == 1080);
 
     // Set a pixel and read it back.
-    buffer.setPixel(2, 1, Pixel{255, 128, 64});
-    Pixel colour = buffer.getPixel(2, 1);
+    buffer.setPixel(456, 321, Pixel{255, 128, 64});
+    Pixel colour = buffer.getPixel(456, 321);
 
     assert(colour.r == 255);
     assert(colour.g == 128);
