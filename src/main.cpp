@@ -15,6 +15,8 @@
 #include <iostream>
 #include <numbers>
 
+#include "camera.h"
+
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
@@ -29,12 +31,15 @@ int main(int argc, char* argv[]) {
             static_cast<float>(buffer.getWidth()) /
             static_cast<float>(buffer.getHeight());
 
-        const Mat4 projection = Mat4::perspective(
+        Camera camera{
+            Vec3{2.0f, 1.0f, 0.0f},
+            Vec3{0.0f, 0.0f, -5.0f},
+            Vec3{0.0f, 1.0f, 0.0f},
             std::numbers::pi_v<float> / 2.0f,
             aspectRatio,
             0.1f,
             100.0f
-        );
+        };
 
         const std::array<Vec4, 8> vertices{
             Vec4{-1.0f, -1.0f, -1.0f, 1.0f},
@@ -65,17 +70,6 @@ int main(int argc, char* argv[]) {
             bool visible = false;
         };
 
-        // Camera setup.
-        Vec3 cameraPosition{2.0f, 1.0f, 0.0f};
-
-        const Vec3 cameraUp{0.0f, 1.0f, 0.0f};
-
-        const Vec3 cameraForward =
-            (Vec3{0.0f, 0.0f, -5.0f} - cameraPosition).normalized();
-
-        const Vec3 cameraRight =
-            cameraForward.cross(cameraUp).normalized();
-
         const float cameraSpeed = 3.0f;
 
         // Timing setup.
@@ -102,40 +96,34 @@ int main(int argc, char* argv[]) {
             Vec3 movement{};
 
             if (keys[SDL_SCANCODE_W]) {
-                movement = movement + cameraForward;
+                movement = movement + camera.getForward();
             }
 
             if (keys[SDL_SCANCODE_S]) {
-                movement = movement - cameraForward;
+                movement = movement - camera.getForward();
             }
 
             if (keys[SDL_SCANCODE_A]) {
-                movement = movement - cameraRight;
+                movement = movement - camera.getRight();
             }
 
             if (keys[SDL_SCANCODE_D]) {
-                movement = movement + cameraRight;
+                movement = movement + camera.getRight();
             }
 
             if (keys[SDL_SCANCODE_Q]) {
-                movement = movement - cameraUp;
+                movement = movement - camera.getUp();
             }
 
             if (keys[SDL_SCANCODE_E]) {
-                movement = movement + cameraUp;
+                movement = movement + camera.getUp();
             }
 
             if (movement.lengthSquared() > 0.0f) {
-                cameraPosition = cameraPosition +
-                    movement.normalized() * (cameraSpeed * deltaTime);
+                camera.move(
+                    movement.normalized() * (cameraSpeed * deltaTime)
+                );
             }
-
-            // Rebuild the view from the updated camera position.
-            const Mat4 view = Mat4::lookAt(
-                cameraPosition,
-                cameraPosition + cameraForward,
-                cameraUp
-            );
 
             // Rotate the cube using elapsed time.
             const float elapsedSeconds = static_cast<float>(
@@ -150,7 +138,8 @@ int main(int argc, char* argv[]) {
                 Mat4::rotationY(angle) *
                 Mat4::rotationX(0.3f);
 
-            const Mat4 transform = projection * view * model;
+            // Rebuild the view from the updated camera position.
+            const Mat4 transform = camera.getProjectionMatrix() * camera.getViewMatrix() * model;
 
             buffer.clear(Pixel{0, 0, 0});
 
