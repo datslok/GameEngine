@@ -19,19 +19,23 @@
 #include "camera.h"
 #include "camera_controller.h"
 #include "clipper.h"
+#include "depthbuffer.h"
 
 struct ScreenPoint {
     int x;
     int y;
+    float depth;
 };
 
 ScreenPoint projectToScreen(
     const Vec4& point,
     std::size_t width,
     std::size_t height
-) {
+){
     const float ndcX = point.x / point.w;
     const float ndcY = point.y / point.w;
+    const float ndcZ = point.z / point.w;
+    const float depth = (ndcZ + 1.0f) * 0.5f;
 
     const float screenX =
         (ndcX + 1.0f) * 0.5f *
@@ -43,7 +47,8 @@ ScreenPoint projectToScreen(
 
     return ScreenPoint{
         static_cast<int>(std::lround(screenX)),
-        static_cast<int>(std::lround(screenY))
+        static_cast<int>(std::lround(screenY)),
+        depth
     };
 }
 
@@ -53,6 +58,10 @@ int main(int argc, char* argv[]) {
 
     try {
         PixelBuffer buffer{1280, 720};
+        DepthBuffer depthBuffer{
+            buffer.getWidth(),
+            buffer.getHeight()
+        };
         Display display{"My Engine", 1280, 720};
 
         Uint64 targetFPS = 240; // 0 means unlimited.
@@ -167,6 +176,7 @@ int main(int argc, char* argv[]) {
             const Mat4 transform = camera.getProjectionMatrix() * camera.getViewMatrix() * model;
 
             buffer.clear(Pixel{0, 0, 0});
+            depthBuffer.clear();
 
             std::array<Vec4, 8> clipVertices{};
 
@@ -221,14 +231,22 @@ int main(int argc, char* argv[]) {
                             buffer.getHeight()
                         );
 
-                    fillTriangle(
+                    fillTriangleDepth(
                         buffer,
+                        depthBuffer,
+
                         screenFirst.x,
                         screenFirst.y,
+                        screenFirst.depth,
+
                         screenSecond.x,
                         screenSecond.y,
+                        screenSecond.depth,
+
                         screenThird.x,
                         screenThird.y,
+                        screenThird.depth,
+
                         Pixel{80, 120, 220}
                     );
                 }
