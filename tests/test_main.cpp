@@ -6,6 +6,7 @@ void testFilledTriangle();
 void testVec2();
 void testVec3();
 void testVec4();
+void testMat4();
 
 int main() {
     testPixelBuffer();
@@ -14,6 +15,7 @@ int main() {
     testVec2();
     testVec3();
     testVec4();
+    testMat4();
 
     std::cout << "All tests passed!\n";
     return 0;
