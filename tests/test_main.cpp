@@ -8,6 +8,7 @@ void testVec3();
 void testVec4();
 void testMat4();
 void testClipper();
+void testDepthBuffer();
 
 int main(){
     testPixelBuffer();
@@ -18,6 +19,7 @@ int main(){
     testVec4();
     testMat4();
     testClipper();
+    testDepthBuffer();
 
     std::cout << "All tests passed!\n";
     return 0;
