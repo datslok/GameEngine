@@ -1,12 +1,14 @@
 #include "clipper.h"
 
-namespace{
+#include <vector>
+
+namespace {
     bool clipAgainstPlane(
         Vec4& start,
         Vec4& end,
         float startDistance,
         float endDistance
-    ){
+    ) {
         const bool startInside = startDistance >= 0.0f;
         const bool endInside = endDistance >= 0.0f;
 
@@ -30,10 +32,73 @@ namespace{
 
         return true;
     }
+
+    float planeDistance(const Vec4& point, int plane){
+        switch (plane){
+            case 0:
+                return point.x + point.w; // left
+
+            case 1:
+                return point.w - point.x; // right
+
+            case 2:
+                return point.y + point.w; // bottom
+
+            case 3:
+                return point.w - point.y; // top
+
+            case 4:
+                return point.z + point.w; // near
+
+            case 5:
+                return point.w - point.z; // far
+        }
+
+        return 0.0f;
+    }
+
+    std::vector<Vec4> clipPolygonAgainstPlane(
+        const std::vector<Vec4>& polygon,
+        int plane
+    ){
+        std::vector<Vec4> result;
+
+        if (polygon.empty()){
+            return result;
+        }
+
+        const Vec4* previous = &polygon.back();
+        float previousDistance = planeDistance(*previous, plane);
+        bool previousInside = previousDistance >= 0.0f;
+
+        for (const Vec4& current : polygon){
+            const float currentDistance = planeDistance(current, plane);
+
+            const bool currentInside = currentDistance >= 0.0f;
+
+            if (currentInside != previousInside){
+                const float t =
+                    previousDistance / (previousDistance - currentDistance);
+
+                result.push_back(
+                    *previous + (current - *previous) * t
+                );
+            }
+
+            if (currentInside) {
+                result.push_back(current);
+            }
+
+            previous = &current;
+            previousDistance = currentDistance;
+            previousInside = currentInside;
+        }
+
+        return result;
+    }
 }
 
 bool clipLine(Vec4& start, Vec4& end){
-    // Left plane:  x + w >= 0
     if (!clipAgainstPlane(
             start, end,
             start.x + start.w,
@@ -41,7 +106,6 @@ bool clipLine(Vec4& start, Vec4& end){
         return false;
     }
 
-    // Right plane: w - x >= 0
     if (!clipAgainstPlane(
             start, end,
             start.w - start.x,
@@ -49,7 +113,6 @@ bool clipLine(Vec4& start, Vec4& end){
         return false;
     }
 
-    // Bottom plane: y + w >= 0
     if (!clipAgainstPlane(
             start, end,
             start.y + start.w,
@@ -57,7 +120,6 @@ bool clipLine(Vec4& start, Vec4& end){
         return false;
     }
 
-    // Top plane: w - y >= 0
     if (!clipAgainstPlane(
             start, end,
             start.w - start.y,
@@ -65,7 +127,6 @@ bool clipLine(Vec4& start, Vec4& end){
         return false;
     }
 
-    // Near plane: z + w >= 0
     if (!clipAgainstPlane(
             start, end,
             start.z + start.w,
@@ -73,7 +134,6 @@ bool clipLine(Vec4& start, Vec4& end){
         return false;
     }
 
-    // Far plane: w - z >= 0
     if (!clipAgainstPlane(
             start, end,
             start.w - start.z,
@@ -82,4 +142,26 @@ bool clipLine(Vec4& start, Vec4& end){
     }
 
     return true;
+}
+
+std::vector<Vec4> clipTriangle(
+    const Vec4& first,
+    const Vec4& second,
+    const Vec4& third
+) {
+    std::vector<Vec4> polygon{
+        first,
+        second,
+        third
+    };
+
+    for (int plane = 0; plane < 6; ++plane){
+        polygon = clipPolygonAgainstPlane(polygon, plane);
+
+        if (polygon.empty()) {
+            break;
+        }
+    }
+
+    return polygon;
 }

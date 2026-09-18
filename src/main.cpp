@@ -68,6 +68,39 @@ int main(int argc, char* argv[]) {
             Edge{0, 4}, Edge{1, 5}, Edge{2, 6}, Edge{3, 7}
         };
 
+        // Make a triangle
+        struct Triangle {
+            std::size_t first;
+            std::size_t second;
+            std::size_t third;
+        };
+
+        const std::array<Triangle, 12> triangles{
+            // Front face
+            Triangle{0, 3, 2},
+            Triangle{0, 2, 1},
+
+            // Back face
+            Triangle{4, 5, 6},
+            Triangle{4, 6, 7},
+
+            // Left face
+            Triangle{0, 4, 7},
+            Triangle{0, 7, 3},
+
+            // Right face
+            Triangle{1, 2, 6},
+            Triangle{1, 6, 5},
+
+            // Top face
+            Triangle{3, 7, 6},
+            Triangle{3, 6, 2},
+
+            // Bottom face
+            Triangle{0, 1, 5},
+            Triangle{0, 5, 4}
+        };
+
         // Timing setup.
         const Uint64 animationStart = SDL_GetTicksNS();
         Uint64 previousFrameStart = animationStart;
