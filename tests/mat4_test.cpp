@@ -171,4 +171,21 @@ void testMat4(){
         assert(result.z == 32.0f);
         assert(result.w == 1.0f);
     }
+
+    {
+        const float fov = std::numbers::pi_v<float> / 2.0f;
+        Mat4 projection = Mat4::perspective(fov, 1.0f, 1.0f, 10.0f);
+
+        Vec4 nearby = projection * Vec4{1.0f, 0.0f, -2.0f, 1.0f};
+        Vec4 distant = projection * Vec4{1.0f, 0.0f, -4.0f, 1.0f};
+
+        assert(std::abs(nearby.x / nearby.w - 0.5f) < 0.00001f);
+        assert(std::abs(distant.x / distant.w - 0.25f) < 0.00001f);
+
+        Vec4 nearPoint = projection * Vec4{0.0f, 0.0f, -1.0f, 1.0f};
+        Vec4 farPoint = projection * Vec4{0.0f, 0.0f, -10.0f, 1.0f};
+
+        assert(std::abs(nearPoint.z / nearPoint.w + 1.0f) < 0.00001f);
+        assert(std::abs(farPoint.z / farPoint.w - 1.0f) < 0.00001f);
+    }
 }

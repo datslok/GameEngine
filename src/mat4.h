@@ -14,4 +14,11 @@ struct Mat4 {
     static Mat4 rotationZ(float radians);
 
     Mat4 operator*(const Mat4& other) const;
+
+    static Mat4 perspective(
+        float verticalFovRadians,
+        float aspectRatio,
+        float nearPlane,
+        float farPlane
+    );
 };
