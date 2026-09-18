@@ -3,12 +3,16 @@
 
 class PixelBuffer;
 
+/*
+* Manages the SDL resources required to display pixel data.
+* Provides an interface for rendering a PixelBuffer and processing display events.
+*/
 class Display {
 public:
     Display(const char* title, int width, int height);
     ~Display();
 
-    // Prevent two objects from owning the same SDL resources.
+    // Prevent copying to ensure SDL resources have a single owner.
     Display(const Display&) = delete;
     Display& operator=(const Display&) = delete;
 
