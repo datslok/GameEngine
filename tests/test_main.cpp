@@ -7,8 +7,9 @@ void testVec2();
 void testVec3();
 void testVec4();
 void testMat4();
+void testClipper();
 
-int main() {
+int main(){
     testPixelBuffer();
     testRasterizer();
     testFilledTriangle();
@@ -16,6 +17,7 @@ int main() {
     testVec3();
     testVec4();
     testMat4();
+    testClipper();
 
     std::cout << "All tests passed!\n";
     return 0;
