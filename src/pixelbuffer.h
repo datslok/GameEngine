@@ -17,4 +17,5 @@ class PixelBuffer {
         void clear(Pixel colour);
         std::size_t getWidth() const;
         std::size_t getHeight() const;
+        const Pixel* data() const;
 };
