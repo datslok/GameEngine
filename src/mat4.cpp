@@ -1,5 +1,7 @@
 #include "mat4.h"
 #include <cmath>
+#include <stdexcept>
+#include <numbers>
 
 Mat4::Mat4()
     : values{} {
@@ -111,6 +113,34 @@ Mat4 Mat4::operator*(const Mat4& other) const{
             }
         }
     }
+
+    return result;
+}
+
+Mat4 Mat4::perspective(
+    float verticalFovRadians,
+    float aspectRatio,
+    float nearPlane,
+    float farPlane
+){
+    if (!(verticalFovRadians > 0.0f &&
+          verticalFovRadians < std::numbers::pi_v<float> &&
+          aspectRatio > 0.0f &&
+          nearPlane > 0.0f &&
+          farPlane > nearPlane)){
+        throw std::invalid_argument("Invalid perspective parameters");
+    }
+
+    const float focalScale =
+        1.0f / std::tan(verticalFovRadians / 2.0f);
+
+    Mat4 result;
+
+    result.values[0][0] = focalScale / aspectRatio;
+    result.values[1][1] = focalScale;
+    result.values[2][2] = -(farPlane + nearPlane) / (farPlane - nearPlane);
+    result.values[2][3] = -(2.0f * farPlane * nearPlane) / (farPlane - nearPlane);
+    result.values[3][2] = -1.0f;
 
     return result;
 }
