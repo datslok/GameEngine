@@ -4,6 +4,7 @@ SHELL := /bin/sh
 CXX := g++
 CXXFLAGS := -std=c++20 -Wall -Wextra -g
 CPPFLAGS := -Iinclude -Isrc
+LDLIBS := -lSDL3
 
 TARGET := build/game.exe
 TEST_TARGET := build/tests.exe
@@ -18,10 +19,10 @@ HEADERS := $(wildcard src/*.h include/*.h tests/*.h)
 all: $(TARGET)
 
 $(TARGET): $(SOURCES) $(HEADERS) Makefile | build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -o $(TARGET)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -o $(TARGET) $(LDLIBS)
 
 $(TEST_TARGET): $(ENGINE_SOURCES) $(TEST_SOURCES) $(HEADERS) Makefile | build
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCES) $(TEST_SOURCES) -o $(TEST_TARGET)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCES) $(TEST_SOURCES) -o $(TEST_TARGET) $(LDLIBS)
 
 build:
 	mkdir -p build

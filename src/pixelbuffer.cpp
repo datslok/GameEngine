@@ -50,3 +50,7 @@ std::size_t PixelBuffer::getWidth() const{
 std::size_t PixelBuffer::getHeight() const{
     return height;
 }
+
+const Pixel* PixelBuffer::data() const {
+    return pixels.data();
+}
