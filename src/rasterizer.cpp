@@ -2,7 +2,13 @@
 #include <algorithm>
 #include <cmath>
 
-static void plot(PixelBuffer& buffer, double x, double y, Pixel colour) {
+static long long edgeFunction(int ax, int ay, int bx, int by, int px, int py){
+    return
+        (static_cast<long long>(bx) - ax) * (static_cast<long long>(py) - ay) -
+        (static_cast<long long>(by) - ay) * (static_cast<long long>(px) - ax);
+}
+
+static void plot(PixelBuffer& buffer, double x, double y, Pixel colour){
     const double px = std::round(x);
     const double py = std::round(y);
 
@@ -26,5 +32,63 @@ void drawLine(PixelBuffer& buffer, int x0, int y0, int x1, int y1, Pixel colour)
         const double t = i / steps;
 
         plot(buffer, x0 + t * dx, y0 + t * dy, colour);
+    }
+}
+
+void drawTriangleOutline(PixelBuffer& buffer, int x0, int y0, int x1, int y1, int x2, int y2, Pixel colour){
+    drawLine(buffer, x0, y0, x1, y1, colour);
+    drawLine(buffer, x1, y1, x2, y2, colour);
+    drawLine(buffer, x2, y2, x0, y0, colour);
+}
+
+void fillTriangle(PixelBuffer& buffer, int x0, int y0, int x1, int y1, int x2, int y2, Pixel colour){
+    const int bufferWidth = static_cast<int>(buffer.getWidth());
+    const int bufferHeight = static_cast<int>(buffer.getHeight());
+
+    if (bufferWidth == 0 || bufferHeight == 0){
+        return;
+    }
+
+    const int minX = std::max(0, std::min({x0, x1, x2}));
+    const int maxX = std::min(bufferWidth - 1, std::max({x0, x1, x2}));
+    const int minY = std::max(0, std::min({y0, y1, y2}));
+    const int maxY = std::min(bufferHeight - 1, std::max({y0, y1, y2}));
+
+    if (minX > maxX || minY > maxY){
+        return;
+    }
+
+    const long long area = edgeFunction(x0, y0, x1, y1, x2, y2);
+
+    // The three vertices are collinear.
+    if (area == 0){
+        return;
+    }
+
+    for (int y = minY; y <= maxY; ++y){
+        for (int x = minX; x <= maxX; ++x){
+            const long long edge0 =
+                edgeFunction(x1, y1, x2, y2, x, y);
+
+            const long long edge1 =
+                edgeFunction(x2, y2, x0, y0, x, y);
+
+            const long long edge2 =
+                edgeFunction(x0, y0, x1, y1, x, y);
+
+            const bool allPositive =
+                edge0 >= 0 && edge1 >= 0 && edge2 >= 0;
+
+            const bool allNegative =
+                edge0 <= 0 && edge1 <= 0 && edge2 <= 0;
+
+            if (allPositive || allNegative){
+                buffer.setPixel(
+                    static_cast<std::size_t>(x),
+                    static_cast<std::size_t>(y),
+                    colour
+                );
+            }
+        }
     }
 }
