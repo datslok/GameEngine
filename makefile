@@ -3,18 +3,25 @@ SHELL := /bin/sh
 
 CXX := g++
 CXXFLAGS := -std=c++20 -Wall -Wextra -g
-CPPFLAGS := -Iinclude
+CPPFLAGS := -Iinclude -Isrc
 
 TARGET := build/game.exe
-SOURCES := $(wildcard src/*.cpp)
-HEADERS := $(wildcard src/*.h include/*.h)
+TEST_TARGET := build/tests.exe
 
-.PHONY: all run clean
+SOURCES := $(wildcard src/*.cpp)
+ENGINE_SOURCES := $(filter-out src/main.cpp,$(SOURCES))
+TEST_SOURCES := $(wildcard tests/*.cpp)
+HEADERS := $(wildcard src/*.h include/*.h tests/*.h)
+
+.PHONY: all run test clean
 
 all: $(TARGET)
 
 $(TARGET): $(SOURCES) $(HEADERS) Makefile | build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -o $(TARGET)
+
+$(TEST_TARGET): $(ENGINE_SOURCES) $(TEST_SOURCES) $(HEADERS) Makefile | build
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(ENGINE_SOURCES) $(TEST_SOURCES) -o $(TEST_TARGET)
 
 build:
 	mkdir -p build
@@ -22,5 +29,8 @@ build:
 run: $(TARGET)
 	./$(TARGET)
 
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(TEST_TARGET)
