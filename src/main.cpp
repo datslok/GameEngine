@@ -4,6 +4,7 @@
 #include <SDL3/SDL_main.h>
 #include <exception>
 #include <iostream>
+#include "rasterizer.h"
 
 int main(int argc, char* argv[]) {
     (void)argc;
@@ -24,7 +25,7 @@ int main(int argc, char* argv[]) {
 
             // Update and draw your scene here.
             buffer.clear(Pixel{0, 0, 255});
-            buffer.setPixel(400, 300, Pixel{255, 0, 0});
+            drawLine(buffer, 100, 250, 300, 100, Pixel{255, 0, 0});
 
             display.present(buffer);
 
