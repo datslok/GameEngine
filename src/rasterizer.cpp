@@ -31,7 +31,7 @@ void fillTriangleDepth(
     const int bufferHeight =
         static_cast<int>(buffer.getHeight());
 
-    if (bufferWidth == 0 || bufferHeight == 0) {
+    if (bufferWidth == 0 || bufferHeight == 0){
         return;
     }
 
@@ -51,15 +51,14 @@ void fillTriangleDepth(
         return;
     }
 
-    const long long area =
-        edgeFunction(x0, y0, x1, y1, x2, y2);
+    const long long area = edgeFunction(x0, y0, x1, y1, x2, y2);
 
-    if (area == 0) {
+    if (area == 0){
         return;
     }
 
-    for (int y = minY; y <= maxY; ++y) {
-        for (int x = minX; x <= maxX; ++x) {
+    for (int y = minY; y <= maxY; ++y){
+        for (int x = minX; x <= maxX; ++x){
             const long long edge0 =
                 edgeFunction(x1, y1, x2, y2, x, y);
 
@@ -79,7 +78,7 @@ void fillTriangleDepth(
                 edge1 <= 0 &&
                 edge2 <= 0;
 
-            if (!allPositive && !allNegative) {
+            if (!allPositive && !allNegative){
                 continue;
             }
 
