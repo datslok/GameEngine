@@ -16,6 +16,7 @@
 #include <numbers>
 
 #include "camera.h"
+#include "camera_controller.h"
 
 int main(int argc, char* argv[]) {
     (void)argc;
@@ -40,6 +41,8 @@ int main(int argc, char* argv[]) {
             0.1f,
             100.0f
         };
+
+        CameraController cameraController{3.0f}; // Camera speed
 
         const std::array<Vec4, 8> vertices{
             Vec4{-1.0f, -1.0f, -1.0f, 1.0f},
@@ -70,8 +73,6 @@ int main(int argc, char* argv[]) {
             bool visible = false;
         };
 
-        const float cameraSpeed = 3.0f;
-
         // Timing setup.
         const Uint64 animationStart = SDL_GetTicksNS();
         Uint64 previousFrameStart = animationStart;
@@ -91,39 +92,7 @@ int main(int argc, char* argv[]) {
             previousFrameStart = frameStart;
 
             // Keyboard movement.
-            const bool* keys = SDL_GetKeyboardState(nullptr);
-
-            Vec3 movement{};
-
-            if (keys[SDL_SCANCODE_W]) {
-                movement = movement + camera.getForward();
-            }
-
-            if (keys[SDL_SCANCODE_S]) {
-                movement = movement - camera.getForward();
-            }
-
-            if (keys[SDL_SCANCODE_A]) {
-                movement = movement - camera.getRight();
-            }
-
-            if (keys[SDL_SCANCODE_D]) {
-                movement = movement + camera.getRight();
-            }
-
-            if (keys[SDL_SCANCODE_Q]) {
-                movement = movement - camera.getUp();
-            }
-
-            if (keys[SDL_SCANCODE_E]) {
-                movement = movement + camera.getUp();
-            }
-
-            if (movement.lengthSquared() > 0.0f) {
-                camera.move(
-                    movement.normalized() * (cameraSpeed * deltaTime)
-                );
-            }
+            cameraController.update(camera, deltaTime);
 
             // Rotate the cube using elapsed time.
             const float elapsedSeconds = static_cast<float>(
