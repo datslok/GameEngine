@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <vector>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -18,6 +19,33 @@
 #include "camera.h"
 #include "camera_controller.h"
 #include "clipper.h"
+
+struct ScreenPoint {
+    int x;
+    int y;
+};
+
+ScreenPoint projectToScreen(
+    const Vec4& point,
+    std::size_t width,
+    std::size_t height
+) {
+    const float ndcX = point.x / point.w;
+    const float ndcY = point.y / point.w;
+
+    const float screenX =
+        (ndcX + 1.0f) * 0.5f *
+        static_cast<float>(width - 1);
+
+    const float screenY =
+        (1.0f - ndcY) * 0.5f *
+        static_cast<float>(height - 1);
+
+    return ScreenPoint{
+        static_cast<int>(std::lround(screenX)),
+        static_cast<int>(std::lround(screenY))
+    };
+}
 
 int main(int argc, char* argv[]) {
     (void)argc;
@@ -145,6 +173,65 @@ int main(int argc, char* argv[]) {
             // Transform each cube vertex into clip space.
             for (std::size_t index = 0; index < vertices.size(); ++index) {
                 clipVertices[index] = transform * vertices[index];
+            }
+
+            // Render the filled cube faces.
+            for (const Triangle& triangle : triangles) {
+                const std::vector<Vec4> clippedPolygon =
+                    clipTriangle(
+                        clipVertices[triangle.first],
+                        clipVertices[triangle.second],
+                        clipVertices[triangle.third]
+                    );
+
+                // A clipped triangle may become a polygon.
+                // Triangulate it using a triangle fan.
+                for (std::size_t index = 1;
+                    index + 1 < clippedPolygon.size();
+                    ++index) {
+
+                    const Vec4& first = clippedPolygon[0];
+                    const Vec4& second = clippedPolygon[index];
+                    const Vec4& third = clippedPolygon[index + 1];
+
+                    if (first.w <= 0.0f ||
+                        second.w <= 0.0f ||
+                        third.w <= 0.0f) {
+                        continue;
+                    }
+
+                    const ScreenPoint screenFirst =
+                        projectToScreen(
+                            first,
+                            buffer.getWidth(),
+                            buffer.getHeight()
+                        );
+
+                    const ScreenPoint screenSecond =
+                        projectToScreen(
+                            second,
+                            buffer.getWidth(),
+                            buffer.getHeight()
+                        );
+
+                    const ScreenPoint screenThird =
+                        projectToScreen(
+                            third,
+                            buffer.getWidth(),
+                            buffer.getHeight()
+                        );
+
+                    fillTriangle(
+                        buffer,
+                        screenFirst.x,
+                        screenFirst.y,
+                        screenSecond.x,
+                        screenSecond.y,
+                        screenThird.x,
+                        screenThird.y,
+                        Pixel{80, 120, 220}
+                    );
+                }
             }
 
             // Clip and draw each edge independently.
