@@ -1,5 +1,7 @@
 #include "mat4.h"
 #include <cmath>
+#include <stdexcept>
+#include <numbers>
 
 Mat4::Mat4()
     : values{} {
@@ -111,6 +113,87 @@ Mat4 Mat4::operator*(const Mat4& other) const{
             }
         }
     }
+
+    return result;
+}
+
+Mat4 Mat4::perspective(
+    float verticalFovRadians,
+    float aspectRatio,
+    float nearPlane,
+    float farPlane
+){
+    if (!(verticalFovRadians > 0.0f &&
+          verticalFovRadians < std::numbers::pi_v<float> &&
+          aspectRatio > 0.0f &&
+          nearPlane > 0.0f &&
+          farPlane > nearPlane)){
+        throw std::invalid_argument("Invalid perspective parameters");
+    }
+
+    const float focalScale =
+        1.0f / std::tan(verticalFovRadians / 2.0f);
+
+    Mat4 result;
+
+    result.values[0][0] = focalScale / aspectRatio;
+    result.values[1][1] = focalScale;
+    result.values[2][2] = -(farPlane + nearPlane) / (farPlane - nearPlane);
+    result.values[2][3] = -(2.0f * farPlane * nearPlane) / (farPlane - nearPlane);
+    result.values[3][2] = -1.0f;
+
+    return result;
+}
+
+Mat4 Mat4::lookAt(
+    const Vec3& eye,
+    const Vec3& target,
+    const Vec3& up
+){
+    const Vec3 offset = target - eye;
+
+    if (offset.lengthSquared() == 0.0f) {
+        throw std::invalid_argument(
+            "Camera eye and target must be different"
+        );
+    }
+
+    if (up.lengthSquared() == 0.0f) {
+        throw std::invalid_argument(
+            "Camera up vector must be nonzero"
+        );
+    }
+
+    const Vec3 forward = offset.normalized();
+    const Vec3 rightCandidate = forward.cross(up.normalized());
+
+    if (rightCandidate.lengthSquared() < 0.000001f) {
+        throw std::invalid_argument(
+            "Camera up vector must not be parallel to its direction"
+        );
+    }
+
+    const Vec3 right = rightCandidate.normalized();
+    const Vec3 cameraUp = right.cross(forward);
+
+    Mat4 result = identity();
+
+    //The first three columns express the cameras axes. The last column accounts for its position. We use negative forward because objects in front of our camera must have negative camera-space Z.
+
+    result.values[0][0] = right.x;
+    result.values[0][1] = right.y;
+    result.values[0][2] = right.z;
+    result.values[0][3] = -right.dot(eye);
+
+    result.values[1][0] = cameraUp.x;
+    result.values[1][1] = cameraUp.y;
+    result.values[1][2] = cameraUp.z;
+    result.values[1][3] = -cameraUp.dot(eye);
+
+    result.values[2][0] = -forward.x;
+    result.values[2][1] = -forward.y;
+    result.values[2][2] = -forward.z;
+    result.values[2][3] = forward.dot(eye);
 
     return result;
 }
