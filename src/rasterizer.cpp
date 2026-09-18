@@ -2,12 +2,18 @@
 #include <algorithm>
 #include <cmath>
 
+/*
+* Calculate the signed area between two vectors to determine their orientation.
+*/
 static long long edgeFunction(int ax, int ay, int bx, int by, int px, int py){
     return
         (static_cast<long long>(bx) - ax) * (static_cast<long long>(py) - ay) -
         (static_cast<long long>(by) - ay) * (static_cast<long long>(px) - ax);
 }
 
+/*
+* Round coordinates to pixel position and set the pixel when it lies within the buffer.
+*/
 static void plot(PixelBuffer& buffer, double x, double y, Pixel colour){
     const double px = std::round(x);
     const double py = std::round(y);
@@ -17,6 +23,9 @@ static void plot(PixelBuffer& buffer, double x, double y, Pixel colour){
     }
 }
 
+/*
+* Draw a line by interpolating between endpoints, using enough steps to ensure a continous line across the pixel buffer.
+*/
 void drawLine(PixelBuffer& buffer, int x0, int y0, int x1, int y1, Pixel colour){
     const double dx = static_cast<double>(x1) - x0;
     const double dy = static_cast<double>(y1) - y0;
@@ -27,7 +36,7 @@ void drawLine(PixelBuffer& buffer, int x0, int y0, int x1, int y1, Pixel colour)
         return;
     }
 
-    // By using steps and the individual stepping distance along each axis we avoid using a slope and dont run into singularities for vertical or horizontal lines.
+    // By using steps and the individual stepping distance along each axis, we avoid using a slope and don't run into singularities for vertical or horizontal lines.
     for (double i = 0; i <= steps; ++i) {
         const double t = i / steps;
 
@@ -35,12 +44,19 @@ void drawLine(PixelBuffer& buffer, int x0, int y0, int x1, int y1, Pixel colour)
     }
 }
 
+/*
+* Draw each pair of triangle vertices to create a complete outline of the triangle.
+*/
 void drawTriangleOutline(PixelBuffer& buffer, int x0, int y0, int x1, int y1, int x2, int y2, Pixel colour){
     drawLine(buffer, x0, y0, x1, y1, colour);
     drawLine(buffer, x1, y1, x2, y2, colour);
     drawLine(buffer, x2, y2, x0, y0, colour);
 }
 
+/*
+* Fill the area within the triangle by checking pixels within the bounding box, reducing unnecessary checks outside the area where the triangle can exist.
+* The edge function is used to determine whether a pixel lies within the triangle.
+*/
 void fillTriangle(PixelBuffer& buffer, int x0, int y0, int x1, int y1, int x2, int y2, Pixel colour){
     const int bufferWidth = static_cast<int>(buffer.getWidth());
     const int bufferHeight = static_cast<int>(buffer.getHeight());
