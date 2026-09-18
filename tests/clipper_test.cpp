@@ -46,4 +46,38 @@ void testClipper(){
 
         assert(!clipLine(start, end));
     }
+
+    {
+        Vec4 first{-0.5f, -0.5f, 0.0f, 1.0f};
+        Vec4 second{0.5f, -0.5f, 0.0f, 1.0f};
+        Vec4 third{0.0f, 0.5f, 0.0f, 1.0f};
+
+        const std::vector<Vec4> result =
+            clipTriangle(first, second, third);
+
+        assert(result.size() == 3);
+    }
+
+    {
+        Vec4 first{-2.0f, -0.5f, 0.0f, 1.0f};
+        Vec4 second{0.5f, -0.5f, 0.0f, 1.0f};
+        Vec4 third{0.0f, 0.5f, 0.0f, 1.0f};
+
+        const std::vector<Vec4> result =
+            clipTriangle(first, second, third);
+
+        assert(!result.empty());
+        assert(result.size() == 4);
+    }
+
+    {
+        Vec4 first{-3.0f, 0.0f, 0.0f, 1.0f};
+        Vec4 second{-2.0f, 0.0f, 0.0f, 1.0f};
+        Vec4 third{-2.0f, 0.5f, 0.0f, 1.0f};
+
+        const std::vector<Vec4> result =
+            clipTriangle(first, second, third);
+
+        assert(result.empty());
+    }
 }
