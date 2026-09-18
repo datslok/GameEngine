@@ -26,6 +26,8 @@ int main(int argc, char* argv[]) {
             // Update and draw your scene here.
             buffer.clear(Pixel{0, 0, 255});
             drawLine(buffer, 100, 250, 300, 100, Pixel{255, 0, 0});
+            drawTriangleOutline(buffer, 400, 100, 200, 400, 600, 400, Pixel{255, 0, 0});
+            fillTriangle(buffer, 400, 180, 300, 330, 500, 330, Pixel{0, 255, 0});
 
             display.present(buffer);
 
