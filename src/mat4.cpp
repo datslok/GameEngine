@@ -144,3 +144,56 @@ Mat4 Mat4::perspective(
 
     return result;
 }
+
+Mat4 Mat4::lookAt(
+    const Vec3& eye,
+    const Vec3& target,
+    const Vec3& up
+){
+    const Vec3 offset = target - eye;
+
+    if (offset.lengthSquared() == 0.0f) {
+        throw std::invalid_argument(
+            "Camera eye and target must be different"
+        );
+    }
+
+    if (up.lengthSquared() == 0.0f) {
+        throw std::invalid_argument(
+            "Camera up vector must be nonzero"
+        );
+    }
+
+    const Vec3 forward = offset.normalized();
+    const Vec3 rightCandidate = forward.cross(up.normalized());
+
+    if (rightCandidate.lengthSquared() < 0.000001f) {
+        throw std::invalid_argument(
+            "Camera up vector must not be parallel to its direction"
+        );
+    }
+
+    const Vec3 right = rightCandidate.normalized();
+    const Vec3 cameraUp = right.cross(forward);
+
+    Mat4 result = identity();
+
+    //The first three columns express the cameras axes. The last column accounts for its position. We use negative forward because objects in front of our camera must have negative camera-space Z.
+
+    result.values[0][0] = right.x;
+    result.values[0][1] = right.y;
+    result.values[0][2] = right.z;
+    result.values[0][3] = -right.dot(eye);
+
+    result.values[1][0] = cameraUp.x;
+    result.values[1][1] = cameraUp.y;
+    result.values[1][2] = cameraUp.z;
+    result.values[1][3] = -cameraUp.dot(eye);
+
+    result.values[2][0] = -forward.x;
+    result.values[2][1] = -forward.y;
+    result.values[2][2] = -forward.z;
+    result.values[2][3] = forward.dot(eye);
+
+    return result;
+}

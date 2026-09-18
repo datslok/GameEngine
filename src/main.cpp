@@ -1,29 +1,33 @@
 #include "display.h"
 #include "pixelbuffer.h"
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-#include <exception>
-#include <iostream>
 #include "rasterizer.h"
 #include "mat4.h"
+#include "vec3.h"
 #include "vec4.h"
-#include <cmath>
-#include <numbers>
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+
 #include <array>
+#include <cmath>
+#include <cstddef>
+#include <exception>
+#include <iostream>
+#include <numbers>
 
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
     try {
-        PixelBuffer buffer{800, 600};
-        Display display{"My Engine", 800, 600};
+        PixelBuffer buffer{1280, 720};
+        Display display{"My Engine", 1280, 720};
 
-        Uint64 targetFPS = 240;  // 0 means unlimited
+        Uint64 targetFPS = 240; // 0 means unlimited.
 
         const float aspectRatio =
-        static_cast<float>(buffer.getWidth()) /
-        static_cast<float>(buffer.getHeight());
+            static_cast<float>(buffer.getWidth()) /
+            static_cast<float>(buffer.getHeight());
 
         const Mat4 projection = Mat4::perspective(
             std::numbers::pi_v<float> / 2.0f,
@@ -61,7 +65,22 @@ int main(int argc, char* argv[]) {
             bool visible = false;
         };
 
+        // Camera setup.
+        Vec3 cameraPosition{2.0f, 1.0f, 0.0f};
+
+        const Vec3 cameraUp{0.0f, 1.0f, 0.0f};
+
+        const Vec3 cameraForward =
+            (Vec3{0.0f, 0.0f, -5.0f} - cameraPosition).normalized();
+
+        const Vec3 cameraRight =
+            cameraForward.cross(cameraUp).normalized();
+
+        const float cameraSpeed = 3.0f;
+
+        // Timing setup.
         const Uint64 animationStart = SDL_GetTicksNS();
+        Uint64 previousFrameStart = animationStart;
 
         while (true) {
             const Uint64 frameStart = SDL_GetTicksNS();
@@ -70,6 +89,55 @@ int main(int argc, char* argv[]) {
                 break;
             }
 
+            const float deltaTime = static_cast<float>(
+                static_cast<double>(frameStart - previousFrameStart) /
+                1'000'000'000.0
+            );
+
+            previousFrameStart = frameStart;
+
+            // Keyboard movement.
+            const bool* keys = SDL_GetKeyboardState(nullptr);
+
+            Vec3 movement{};
+
+            if (keys[SDL_SCANCODE_W]) {
+                movement = movement + cameraForward;
+            }
+
+            if (keys[SDL_SCANCODE_S]) {
+                movement = movement - cameraForward;
+            }
+
+            if (keys[SDL_SCANCODE_A]) {
+                movement = movement - cameraRight;
+            }
+
+            if (keys[SDL_SCANCODE_D]) {
+                movement = movement + cameraRight;
+            }
+
+            if (keys[SDL_SCANCODE_Q]) {
+                movement = movement - cameraUp;
+            }
+
+            if (keys[SDL_SCANCODE_E]) {
+                movement = movement + cameraUp;
+            }
+
+            if (movement.lengthSquared() > 0.0f) {
+                cameraPosition = cameraPosition +
+                    movement.normalized() * (cameraSpeed * deltaTime);
+            }
+
+            // Rebuild the view from the updated camera position.
+            const Mat4 view = Mat4::lookAt(
+                cameraPosition,
+                cameraPosition + cameraForward,
+                cameraUp
+            );
+
+            // Rotate the cube using elapsed time.
             const float elapsedSeconds = static_cast<float>(
                 static_cast<double>(frameStart - animationStart) /
                 1'000'000'000.0
@@ -82,19 +150,23 @@ int main(int argc, char* argv[]) {
                 Mat4::rotationY(angle) *
                 Mat4::rotationX(0.3f);
 
-            const Mat4 transform = projection * model;
+            const Mat4 transform = projection * view * model;
 
             buffer.clear(Pixel{0, 0, 0});
 
             std::array<ScreenPoint, 8> screenPoints{};
 
+            // Project the vertices into pixel coordinates.
             for (std::size_t index = 0; index < vertices.size(); ++index) {
                 const Vec4 projected = transform * vertices[index];
 
                 if (projected.w > 0.0f &&
-                    projected.x >= -projected.w && projected.x <= projected.w &&
-                    projected.y >= -projected.w && projected.y <= projected.w &&
-                    projected.z >= -projected.w && projected.z <= projected.w) {
+                    projected.x >= -projected.w &&
+                    projected.x <= projected.w &&
+                    projected.y >= -projected.w &&
+                    projected.y <= projected.w &&
+                    projected.z >= -projected.w &&
+                    projected.z <= projected.w) {
 
                     const float ndcX = projected.x / projected.w;
                     const float ndcY = projected.y / projected.w;
@@ -115,6 +187,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // Connect the projected vertices.
             for (const Edge& edge : edges) {
                 const ScreenPoint& start = screenPoints[edge.start];
                 const ScreenPoint& end = screenPoints[edge.end];

@@ -1,5 +1,6 @@
 #pragma once
 #include "vec4.h"
+#include "vec3.h"
 
 struct Mat4 {
     float values[4][4];
@@ -20,5 +21,11 @@ struct Mat4 {
         float aspectRatio,
         float nearPlane,
         float farPlane
+    );
+
+    static Mat4 lookAt(
+    const Vec3& eye,
+    const Vec3& target,
+    const Vec3& up
     );
 };
