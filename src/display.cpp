@@ -4,6 +4,10 @@
 #include <stdexcept>
 #include <string>
 
+/*
+* Initalises SDL and creates the resources required to display pixel data.
+* Throws an exception if any of the SDL calls fail.
+*/
 Display::Display(const char* title, int width, int height)
     : width(width), height(height)
 {
@@ -52,10 +56,17 @@ Display::Display(const char* title, int width, int height)
     }
 }
 
+/*
+* Clean up SDL resources if construction fails before the object is created.
+* This is necessary as a failed constructor will not run the destructor, and failing to clean up SDL resources may result in memory leaks. 
+*/
 Display::~Display() {
     cleanup();
 }
 
+/*
+* Destroys the SDL resources created by the constructor to prevent resource leaks.
+*/
 void Display::cleanup() noexcept {
     if (texture != nullptr) {
         SDL_DestroyTexture(texture);
@@ -78,6 +89,10 @@ void Display::cleanup() noexcept {
     }
 }
 
+/*
+* Process SDL events and indicate whether the display should remain open.
+* Will returns false if the user has requested to close the display, otherwise returns true.
+*/
 bool Display::processEvents() {
     SDL_Event event;
 
@@ -95,6 +110,10 @@ bool Display::processEvents() {
     return true;
 }
 
+/*
+* Update the texture with the pixel buffer and present it to the display.
+* Throws an exception if the pixel buffer dimensions do not match the display dimensions.
+*/
 void Display::present(const PixelBuffer& buffer) {
     if (buffer.getWidth() != static_cast<std::size_t>(width) ||
         buffer.getHeight() != static_cast<std::size_t>(height)) {
@@ -103,15 +122,17 @@ void Display::present(const PixelBuffer& buffer) {
         );
     }
 
-    // SDL represents row sizes using int.
+    // SDL represents row sizes using int. Calculates the number of bytes in each row to match SDL's texture layout.
     const std::size_t rowBytes = buffer.getWidth() * sizeof(Pixel);
 
+    
     if (rowBytes > static_cast<std::size_t>(SDL_MAX_SINT32)) {
         throw std::overflow_error("Pixel row is too large");
     }
 
     const int pitch = static_cast<int>(rowBytes);
 
+    // Update and render the texture to display the pixel buffer. Throws an exception if any of the SDL calls fail.
     if (!SDL_UpdateTexture(texture, nullptr, buffer.data(), pitch) ||
         !SDL_RenderClear(renderer) ||
         !SDL_RenderTexture(renderer, texture, nullptr, nullptr) ||
