@@ -17,6 +17,7 @@
 
 #include "camera.h"
 #include "camera_controller.h"
+#include "clipper.h"
 
 int main(int argc, char* argv[]) {
     (void)argc;
@@ -67,12 +68,6 @@ int main(int argc, char* argv[]) {
             Edge{0, 4}, Edge{1, 5}, Edge{2, 6}, Edge{3, 7}
         };
 
-        struct ScreenPoint {
-            int x = 0;
-            int y = 0;
-            bool visible = false;
-        };
-
         // Timing setup.
         const Uint64 animationStart = SDL_GetTicksNS();
         Uint64 previousFrameStart = animationStart;
@@ -112,52 +107,56 @@ int main(int argc, char* argv[]) {
 
             buffer.clear(Pixel{0, 0, 0});
 
-            std::array<ScreenPoint, 8> screenPoints{};
+            std::array<Vec4, 8> clipVertices{};
 
-            // Project the vertices into pixel coordinates.
+            // Transform each cube vertex into clip space.
             for (std::size_t index = 0; index < vertices.size(); ++index) {
-                const Vec4 projected = transform * vertices[index];
-
-                if (projected.w > 0.0f &&
-                    projected.x >= -projected.w &&
-                    projected.x <= projected.w &&
-                    projected.y >= -projected.w &&
-                    projected.y <= projected.w &&
-                    projected.z >= -projected.w &&
-                    projected.z <= projected.w) {
-
-                    const float ndcX = projected.x / projected.w;
-                    const float ndcY = projected.y / projected.w;
-
-                    const float screenX =
-                        (ndcX + 1.0f) * 0.5f *
-                        static_cast<float>(buffer.getWidth() - 1);
-
-                    const float screenY =
-                        (1.0f - ndcY) * 0.5f *
-                        static_cast<float>(buffer.getHeight() - 1);
-
-                    screenPoints[index] = ScreenPoint{
-                        static_cast<int>(std::lround(screenX)),
-                        static_cast<int>(std::lround(screenY)),
-                        true
-                    };
-                }
+                clipVertices[index] = transform * vertices[index];
             }
 
-            // Connect the projected vertices.
+            // Clip and draw each edge independently.
             for (const Edge& edge : edges) {
-                const ScreenPoint& start = screenPoints[edge.start];
-                const ScreenPoint& end = screenPoints[edge.end];
+                Vec4 start = clipVertices[edge.start];
+                Vec4 end = clipVertices[edge.end];
 
-                if (start.visible && end.visible) {
-                    drawLine(
-                        buffer,
-                        start.x, start.y,
-                        end.x, end.y,
-                        Pixel{255, 255, 255}
-                    );
+                if (!clipLine(start, end)) {
+                    continue;
                 }
+
+                if (start.w <= 0.0f || end.w <= 0.0f) {
+                    continue;
+                }
+
+                const float startNdcX = start.x / start.w;
+                const float startNdcY = start.y / start.w;
+
+                const float endNdcX = end.x / end.w;
+                const float endNdcY = end.y / end.w;
+
+                const float startScreenX =
+                    (startNdcX + 1.0f) * 0.5f *
+                    static_cast<float>(buffer.getWidth() - 1);
+
+                const float startScreenY =
+                    (1.0f - startNdcY) * 0.5f *
+                    static_cast<float>(buffer.getHeight() - 1);
+
+                const float endScreenX =
+                    (endNdcX + 1.0f) * 0.5f *
+                    static_cast<float>(buffer.getWidth() - 1);
+
+                const float endScreenY =
+                    (1.0f - endNdcY) * 0.5f *
+                    static_cast<float>(buffer.getHeight() - 1);
+
+                drawLine(
+                    buffer,
+                    static_cast<int>(std::lround(startScreenX)),
+                    static_cast<int>(std::lround(startScreenY)),
+                    static_cast<int>(std::lround(endScreenX)),
+                    static_cast<int>(std::lround(endScreenY)),
+                    Pixel{255, 255, 255}
+                );
             }
 
             display.present(buffer);
