@@ -1,5 +1,8 @@
 #pragma once
 
+/*
+* Represents a 3D vector for storing coordinates and performing vector calculations needed for geometric operations.
+*/
 struct Vec3{
     float x;
     float y;

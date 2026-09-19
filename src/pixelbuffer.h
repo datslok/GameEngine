@@ -3,6 +3,10 @@
 #include <vector>
 #include "pixel.h"
 
+/*
+* This class represents a 2D pixel buffer for storing and manipulating pixel data.
+* It provides a consistent interface for accessing and modifying pixel values.
+*/
 class PixelBuffer {
     private:
         std::size_t width;

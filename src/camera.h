@@ -3,6 +3,9 @@
 #include "mat4.h"
 #include "vec3.h"
 
+/*
+* Represents a camera that controls its position, orientation, and projection to transform the scene from world space into viewable screen space.
+*/
 class Camera {
     public:
         Camera(
