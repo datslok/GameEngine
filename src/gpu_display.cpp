@@ -128,11 +128,11 @@ void GpuDisplay::createPipeline() {
         attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
         attributes[0].offset = static_cast<Uint32>(offsetof(GpuVertex, x));
 
-        // Colour: shader input location 1.
+        // Surface normal.
         attributes[1].location = 1;
         attributes[1].buffer_slot = 0;
         attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-        attributes[1].offset = static_cast<Uint32>(offsetof(GpuVertex, r));
+        attributes[1].offset = static_cast<Uint32>(offsetof(GpuVertex, nx));
 
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vertexShader;
@@ -370,10 +370,10 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-    void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, Pixel colour) {
-        if (commands == nullptr || pass == nullptr) {
-            throw std::logic_error("drawMesh requires an active frame");
-        }
+void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour) {
+    if (commands == nullptr || pass == nullptr) {
+        throw std::logic_error("drawMesh requires an active frame");
+    }
 
     SDL_GPUBufferBinding vertexBinding{};
     vertexBinding.buffer = mesh.getVertexBuffer();
@@ -391,15 +391,19 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         SDL_GPU_INDEXELEMENTSIZE_32BIT
     );
 
+    const Mat4 transform = viewProjection * model;
 
-    // GLSL uses column-major matrix storage by default.
-    // Pack our values[row][column] into that layout.
-    float matrixData[16]{};
+    // The shader expects two consecutive column-major matrices:
+    // the complete transform, followed by the model matrix.
+    float matrixData[32]{};
 
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
             matrixData[column * 4 + row] =
                 transform.values[row][column];
+
+            matrixData[16 + column * 4 + row] =
+                model.values[row][column];
         }
     }
 
@@ -420,9 +424,7 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
 
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
-    // Draw every triangle in the uploaded mesh.
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
-
 }
 
 void GpuDisplay::endFrame() {
