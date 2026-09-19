@@ -170,5 +170,34 @@ void testObjLoader() {
 
     // Only triangle faces are supported.
     expectObjError(vertices + "f 1 2\n", "three vertex entries");
-    expectObjError(vertices + "f 1 2 3 1\n", "Only triangle faces");
+
+    // A quad becomes two triangles and four boundary edges.
+    {
+        std::istringstream input{
+            "v 0 0 0\n"
+            "v 2 0 0\n"
+            "v 2 2 0\n"
+            "v 0 2 0\n"
+            "f 1 2 3 4\n"
+        };
+
+        const Mesh mesh = parseObj(input);
+
+        assert(mesh.triangles.size() == 2);
+
+        assert(mesh.triangles[0].first == 0);
+        assert(mesh.triangles[0].second == 1);
+        assert(mesh.triangles[0].third == 2);
+
+        assert(mesh.triangles[1].first == 0);
+        assert(mesh.triangles[1].second == 2);
+        assert(mesh.triangles[1].third == 3);
+
+        assert(mesh.edges.size() == 4);
+
+        for (std::size_t index = 0; index < 4; ++index) {
+            assert(mesh.edges[index].start == index);
+            assert(mesh.edges[index].end == (index + 1) % 4);
+        }
+    }
 }

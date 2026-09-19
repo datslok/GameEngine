@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 namespace {
     std::size_t parseVertexIndex(const std::string& entry, std::size_t vertexCount){
@@ -117,37 +118,44 @@ Mesh parseObj(std::istream& input) {
                 mesh.vertices.push_back(Vec4{x, y, z, 1.0f});
             }
             else if (type == "f") {
-                std::array<std::size_t, 3> indices{};
+                std::vector<std::size_t> indices;
+                std::string entry;
 
-                for (std::size_t corner = 0; corner < 3; ++corner) {
-                    std::string entry;
-
-                    if (!(lineStream >> entry)) {
-                        throw std::runtime_error(
-                            "Face requires three vertex entries"
-                        );
-                    }
-
-                    indices[corner] =
-                        parseVertexIndex(entry, mesh.vertices.size());
-                }
-
-                std::string extra;
-
-                if (lineStream >> extra) {
-                    throw std::runtime_error(
-                        "Only triangle faces are supported"
+                // Read all vertex entries belonging to this face.
+                while (lineStream >> entry) {
+                    indices.push_back(
+                        parseVertexIndex(entry, mesh.vertices.size())
                     );
                 }
 
-                mesh.triangles.push_back(
-                    Triangle{indices[0], indices[1], indices[2]}
-                );
+                if (indices.size() < 3) {
+                    throw std::runtime_error(
+                        "Face requires at least three vertex entries"
+                    );
+                }
 
-                // Add edges for optional wireframe rendering.
-                mesh.edges.push_back(Edge{indices[0], indices[1]});
-                mesh.edges.push_back(Edge{indices[1], indices[2]});
-                mesh.edges.push_back(Edge{indices[2], indices[0]});
+                // Create a triangle fan around the first vertex.
+                for (std::size_t index = 1;
+                    index + 1 < indices.size();
+                    ++index) {
+
+                    mesh.triangles.push_back(
+                        Triangle{
+                            indices[0],
+                            indices[index],
+                            indices[index + 1]
+                        }
+                    );
+                }
+
+                // Add the original polygon's boundary edges.
+                for (std::size_t index = 0; index < indices.size(); ++index) {
+                    const std::size_t next = (index + 1) % indices.size();
+
+                    mesh.edges.push_back(
+                        Edge{indices[index], indices[next]}
+                    );
+                }
             }
 
             // Other records, such as normals and materials,
