@@ -84,6 +84,9 @@ void Application::createScene(){
     scene.add(fourth);
 }
 
+/*
+* Run the main loop continuously process input, update the scene, and render each frame.
+*/
 void Application::run() {
     Uint64 previousFrameStart = SDL_GetTicksNS();
 
@@ -119,6 +122,9 @@ void Application::run() {
     }
 }
 
+/*
+* Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
+*/
 void Application::update(float deltaTime) {
     cameraController.update(camera, deltaTime);
 

@@ -11,6 +11,9 @@
 #include <memory>
 #include <unordered_map>
 
+/*
+* Coordinates the main engine components to manage input, updates, rendering, and the applications main execution loop.
+*/
 class Application {
 public:
     Application(int width, int height);

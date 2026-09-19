@@ -4,6 +4,9 @@
 #include <exception>
 #include <iostream>
 
+/*
+* Starts the application and handles any exceptions so runtime errors are reported cleanly before the program exits.
+*/
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;

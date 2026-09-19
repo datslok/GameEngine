@@ -3,6 +3,10 @@
 #include <cstddef>
 #include <vector>
 
+/*
+* Stores the per-pixel depth values so the renderer can determine which geometry is closest to the camera
+* and prevent hidden surfaces from being drawn.
+*/
 class DepthBuffer {
     public:
         DepthBuffer(std::size_t width, std::size_t height);
