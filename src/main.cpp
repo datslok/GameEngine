@@ -55,18 +55,26 @@ int main(int argc, char* argv[]) {
                 )
             );
 
-            const Mat4 model =
-                Mat4::translation(0.0f, 0.0f, -5.0f) *
+            const Mat4 viewProjection =
+                depthCorrection *
+                camera.getProjectionMatrix() *
+                camera.getViewMatrix();
+
+            const Mat4 firstModel =
+                Mat4::translation(-1.5f, 0.0f, -6.0f) *
                 Mat4::rotationY(angle) *
                 Mat4::rotationX(0.4f);
 
-            const Mat4 transform =
-                depthCorrection *
-                camera.getProjectionMatrix() *
-                camera.getViewMatrix() *
-                model;
+            const Mat4 secondModel =
+                Mat4::translation(1.5f, 0.0f, -6.0f) *
+                Mat4::rotationY(-angle) *
+                Mat4::scaling(0.7f, 0.7f, 0.7f);
 
-            display.drawMesh(cube, transform, 0.08f, 0.12f, 0.20f);
+            if (display.beginFrame(0.08f, 0.12f, 0.20f)) {
+                display.drawMesh(cube, viewProjection * firstModel);
+                display.drawMesh(cube, viewProjection * secondModel);
+                display.endFrame();
+            }
         }
     }
     catch (const std::exception& error) {

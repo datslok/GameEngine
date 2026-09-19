@@ -16,8 +16,15 @@ public:
 
     bool processEvents();
 
-    // Colour components range from 0.0f to 1.0f.
-    void drawMesh(const GpuMesh& mesh, const Mat4& transform, float red, float green, float blue);
+    // Clear colour and depth once. Returns false if no frame is available.
+    // Background colour components range from 0.0f to 1.0f.
+    bool beginFrame(float red, float green, float blue);
+
+    // Draw into the active frame.
+    void drawMesh(const GpuMesh& mesh, const Mat4& transform);
+
+    // Finish and present the active frame.
+    void endFrame();
 
     SDL_GPUDevice* getDevice() const;
 
@@ -38,4 +45,7 @@ private:
     Uint32 depthHeight = 0;
 
     void ensureDepthTexture(Uint32 width, Uint32 height);
+
+    SDL_GPUCommandBuffer* commands = nullptr;
+    SDL_GPURenderPass* pass = nullptr;
 };

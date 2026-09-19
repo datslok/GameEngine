@@ -218,6 +218,16 @@ void GpuDisplay::ensureDepthTexture(Uint32 width, Uint32 height) {
 
 void GpuDisplay::cleanup() noexcept {
     if (device != nullptr) {
+        // Finish any frame still open during shutdown.
+        if (pass != nullptr) {
+            SDL_EndGPURenderPass(pass);
+            pass = nullptr;
+        }
+
+        if (commands != nullptr) {
+            SDL_SubmitGPUCommandBuffer(commands);
+            commands = nullptr;
+        }
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
 
@@ -274,8 +284,14 @@ bool GpuDisplay::processEvents() {
     return true;
 }
 
-void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, float red, float green, float blue) {
-    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
+bool GpuDisplay::beginFrame(float red, float green, float blue) {
+    if (commands != nullptr) {
+        throw std::logic_error(
+            "Finish the current frame before beginning another"
+        );
+    }
+
+    commands = SDL_AcquireGPUCommandBuffer(device);
 
     if (commands == nullptr) {
         throw gpuError("GPU command buffer acquisition failed");
@@ -297,25 +313,30 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, float red,
             gpuError("Swapchain acquisition failed");
 
         SDL_CancelGPUCommandBuffer(commands);
+        commands = nullptr;
         throw error;
     }
 
     // A minimized window may have no image available.
     if (swapchainTexture == nullptr) {
-        if (!SDL_SubmitGPUCommandBuffer(commands)) {
+        const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
+        commands = nullptr;
+
+        if (!submitted) {
             throw gpuError("GPU submission failed");
         }
 
         SDL_Delay(10);
-        return;
+        return false;
     }
 
     try {
         ensureDepthTexture(frameWidth, frameHeight);
     }
     catch (...) {
-        // Submit because a swapchain image has already been acquired.
+        // A swapchain image has been acquired, so submit rather than cancel.
         SDL_SubmitGPUCommandBuffer(commands);
+        commands = nullptr;
         throw;
     }
 
@@ -334,18 +355,25 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, float red,
     depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
     depthTarget.cycle = true;
 
-    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, &depthTarget);
+    pass = SDL_BeginGPURenderPass(commands, &target, 1, &depthTarget);
 
     if (pass == nullptr) {
         const std::runtime_error error =
             gpuError("GPU render pass creation failed");
 
-        // After acquiring a swapchain image, submit rather than cancel.
         SDL_SubmitGPUCommandBuffer(commands);
+        commands = nullptr;
         throw error;
     }
 
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
+        return true;
+    }
+
+    void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform) {
+        if (commands == nullptr || pass == nullptr) {
+            throw std::logic_error("drawMesh requires an active frame");
+        }
 
     SDL_GPUBufferBinding vertexBinding{};
     vertexBinding.buffer = mesh.getVertexBuffer();
@@ -385,10 +413,20 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, float red,
     // Draw every triangle in the uploaded mesh.
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 
-    SDL_EndGPURenderPass(pass);
+}
 
-    // Submit the commands and present the acquired window image.
-    if (!SDL_SubmitGPUCommandBuffer(commands)) {
+void GpuDisplay::endFrame() {
+    if (commands == nullptr || pass == nullptr) {
+        throw std::logic_error("endFrame requires an active frame");
+    }
+
+    SDL_EndGPURenderPass(pass);
+    pass = nullptr;
+
+    const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
+    commands = nullptr;
+
+    if (!submitted) {
         throw gpuError("GPU submission failed");
     }
 }
