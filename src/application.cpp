@@ -1,6 +1,7 @@
 #include "application.h"
 #include "mat4.h"
 #include "vec3.h"
+#include "obj_loader.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
@@ -43,14 +44,16 @@ Application::Application(int width, int height):
 
 void Application::createScene(){
     const std::shared_ptr<const Mesh> cubeMesh = std::make_shared<Mesh>(Mesh::cube());
+    const std::shared_ptr<const Mesh> pyramidMesh = std::make_shared<Mesh>(loadObj("assets/models/pyramid.obj"));
+    const std::shared_ptr<const Mesh> teapotMesh = std::make_shared<Mesh>(loadObj("assets/models/teapot.obj"));
 
     MeshInstance first{cubeMesh};
-    first.transform.position = Vec3{-2.0f, 0.0f, -7.0f};
+    first.transform.position  = Vec3{-3.0f,  0.0f, -10.0f};
     first.transform.rotation.x = 0.3f;
     first.colour = Pixel{220, 80, 80};
 
     MeshInstance second{cubeMesh};
-    second.transform.position = Vec3{2.0f, 0.0f, -7.0f};
+    second.transform.position = Vec3{ 3.0f,  0.0f, -10.0f};
     second.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
     second.colour = Pixel{80, 120, 220};
 
@@ -60,8 +63,26 @@ void Application::createScene(){
     second.initialRotation = second.transform.rotation;
     second.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
 
+    MeshInstance third{pyramidMesh};
+    third.transform.position  = Vec3{ 0.0f,  3.0f, -10.0f};
+    third.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
+    third.colour = Pixel{80, 200, 120};
+
+    third.initialRotation = third.transform.rotation;
+    third.rotationSpeed = Vec3{0.0f, 1.0f, 0.0f};
+
+    MeshInstance fourth{teapotMesh};
+    fourth.transform.position = Vec3{ 0.0f, -3.0f, -10.0f};
+    fourth.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
+    fourth.colour = Pixel{230, 180, 60};
+
+    fourth.initialRotation = fourth.transform.rotation;
+    fourth.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
+
     scene.add(first);
     scene.add(second);
+    scene.add(third);
+    scene.add(fourth);
 }
 
 void Application::run() {
