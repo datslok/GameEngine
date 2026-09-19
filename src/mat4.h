@@ -1,7 +1,10 @@
 #pragma once
 #include "vec4.h"
 #include "vec3.h"
-
+¨
+/*
+* Represents a 4x4 matrix for storing and combining transformations used in 3D graphics and coordinate calculations.
+*/
 struct Mat4 {
     float values[4][4];
     Mat4();
