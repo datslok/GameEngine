@@ -2,6 +2,8 @@
 #include "camera.h"
 #include "mat4.h"
 #include "vec3.h"
+#include "gpu_mesh.h"
+#include "mesh.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -20,6 +22,7 @@ int main(int argc, char* argv[]) {
         const int height = 720;
 
         GpuDisplay display{"GPU Cube", width, height};
+        GpuMesh cube{display.getDevice(), Mesh::cube()};
 
         Camera camera{
             Vec3{0.0f, 0.0f, 0.0f},
@@ -63,7 +66,7 @@ int main(int argc, char* argv[]) {
                 camera.getViewMatrix() *
                 model;
 
-            display.drawMesh(transform, 0.08f, 0.12f, 0.20f);
+            display.drawMesh(cube, transform, 0.08f, 0.12f, 0.20f);
         }
     }
     catch (const std::exception& error) {

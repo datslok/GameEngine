@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mat4.h"
+#include "gpu_mesh.h"
 
 #include <SDL3/SDL.h>
 
@@ -16,7 +17,9 @@ public:
     bool processEvents();
 
     // Colour components range from 0.0f to 1.0f.
-    void drawMesh(const Mat4& transform, float red, float green, float blue);
+    void drawMesh(const GpuMesh& mesh, const Mat4& transform, float red, float green, float blue);
+
+    SDL_GPUDevice* getDevice() const;
 
 private:
     SDL_Window* window = nullptr;
@@ -29,13 +32,6 @@ private:
 
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
     void createPipeline();
-
-    SDL_GPUBuffer* vertexBuffer = nullptr;
-    void createGeometry();
-
-    SDL_GPUBuffer* indexBuffer = nullptr;
-
-    Uint32 indexCount = 0;
 
     SDL_GPUTexture* depthTexture = nullptr;
     Uint32 depthWidth = 0;

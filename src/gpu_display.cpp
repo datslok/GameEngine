@@ -1,23 +1,10 @@
 #include "gpu_display.h"
-#include "mesh.h"
 
-#include <vector>
 #include <stdexcept>
 #include <string>
 #include <cstddef>
-#include <cstring>
 
 namespace {
-    struct GpuVertex {
-        float x;
-        float y;
-        float z;
-
-        float r;
-        float g;
-        float b;
-    };
-
     std::runtime_error gpuError(const char* message) {
         return std::runtime_error(
             std::string{message} + ": " + SDL_GetError()
@@ -97,7 +84,6 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
 
         windowClaimed = true;
         createPipeline();
-        createGeometry();
     }
     catch (...) {
         cleanup();
@@ -194,165 +180,6 @@ void GpuDisplay::createPipeline() {
     SDL_ReleaseGPUShader(device, vertexShader);
 }
 
-void GpuDisplay::createGeometry() {
-    const Mesh mesh = Mesh::cube();
-
-    std::vector<GpuVertex> vertices;
-    vertices.reserve(mesh.vertices.size());
-
-    for (const Vec4& position : mesh.vertices) {
-        // Map the cube's coordinates to colours between zero and one.
-        vertices.push_back(GpuVertex{
-            position.x,
-            position.y,
-            position.z,
-            (position.x + 1.0f) * 0.5f,
-            (position.y + 1.0f) * 0.5f,
-            (position.z + 1.0f) * 0.5f
-        });
-    }
-
-    std::vector<Uint32> indices;
-    indices.reserve(mesh.triangles.size() * 3);
-
-    for (const Triangle& triangle : mesh.triangles) {
-        indices.push_back(static_cast<Uint32>(triangle.first));
-        indices.push_back(static_cast<Uint32>(triangle.second));
-        indices.push_back(static_cast<Uint32>(triangle.third));
-    }
-
-    indexCount = static_cast<Uint32>(indices.size());
-
-    const Uint32 vertexBytes =
-        static_cast<Uint32>(vertices.size() * sizeof(GpuVertex));
-
-    const Uint32 indexBytes =
-        static_cast<Uint32>(indices.size() * sizeof(Uint32));
-
-    // Create the GPU buffer for vertex positions and colours.
-    SDL_GPUBufferCreateInfo vertexInfo{};
-    vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-    vertexInfo.size = vertexBytes;
-
-    vertexBuffer = SDL_CreateGPUBuffer(device, &vertexInfo);
-
-    if (vertexBuffer == nullptr) {
-        throw gpuError("Vertex buffer creation failed");
-    }
-
-    // Create the GPU buffer for triangle indices.
-    SDL_GPUBufferCreateInfo indexInfo{};
-    indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-    indexInfo.size = indexBytes;
-
-    indexBuffer = SDL_CreateGPUBuffer(device, &indexInfo);
-
-    if (indexBuffer == nullptr) {
-        throw gpuError("Index buffer creation failed");
-    }
-
-    // One temporary upload buffer holds both arrays.
-    SDL_GPUTransferBufferCreateInfo transferInfo{};
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    transferInfo.size = vertexBytes + indexBytes;
-
-    SDL_GPUTransferBuffer* transfer =
-        SDL_CreateGPUTransferBuffer(device, &transferInfo);
-
-    if (transfer == nullptr) {
-        throw gpuError("Transfer buffer creation failed");
-    }
-
-    SDL_GPUCommandBuffer* commands = nullptr;
-
-    try {
-        void* mapped =
-            SDL_MapGPUTransferBuffer(device, transfer, false);
-
-        if (mapped == nullptr) {
-            throw gpuError("Transfer buffer mapping failed");
-        }
-
-        Uint8* destination = static_cast<Uint8*>(mapped);
-
-        // Vertices first, then indices immediately afterward.
-        std::memcpy(destination, vertices.data(), vertexBytes);
-
-        std::memcpy(
-            destination + vertexBytes,
-            indices.data(),
-            indexBytes
-        );
-
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-
-        commands = SDL_AcquireGPUCommandBuffer(device);
-
-        if (commands == nullptr) {
-            throw gpuError("Upload command buffer acquisition failed");
-        }
-
-        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commands);
-
-        if (copyPass == nullptr) {
-            throw gpuError("GPU copy pass creation failed");
-        }
-
-        // Copy the first part into the vertex buffer.
-        SDL_GPUTransferBufferLocation vertexSource{};
-        vertexSource.transfer_buffer = transfer;
-        vertexSource.offset = 0;
-
-        SDL_GPUBufferRegion vertexRegion{};
-        vertexRegion.buffer = vertexBuffer;
-        vertexRegion.offset = 0;
-        vertexRegion.size = vertexBytes;
-
-        SDL_UploadToGPUBuffer(
-            copyPass,
-            &vertexSource,
-            &vertexRegion,
-            false
-        );
-
-        // Copy the second part into the index buffer.
-        SDL_GPUTransferBufferLocation indexSource{};
-        indexSource.transfer_buffer = transfer;
-        indexSource.offset = vertexBytes;
-
-        SDL_GPUBufferRegion indexRegion{};
-        indexRegion.buffer = indexBuffer;
-        indexRegion.offset = 0;
-        indexRegion.size = indexBytes;
-
-        SDL_UploadToGPUBuffer(
-            copyPass,
-            &indexSource,
-            &indexRegion,
-            false
-        );
-
-        SDL_EndGPUCopyPass(copyPass);
-
-        const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
-        commands = nullptr;
-
-        if (!submitted) {
-            throw gpuError("Geometry upload submission failed");
-        }
-    }
-    catch (...) {
-        if (commands != nullptr) {
-            SDL_CancelGPUCommandBuffer(commands);
-        }
-
-        SDL_ReleaseGPUTransferBuffer(device, transfer);
-        throw;
-    }
-
-    SDL_ReleaseGPUTransferBuffer(device, transfer);
-}
-
 GpuDisplay::~GpuDisplay() {
     cleanup();
 }
@@ -401,16 +228,6 @@ void GpuDisplay::cleanup() noexcept {
             depthHeight = 0;
         }
 
-        if (indexBuffer != nullptr) {
-            SDL_ReleaseGPUBuffer(device, indexBuffer);
-            indexBuffer = nullptr;
-        }
-
-        if (vertexBuffer != nullptr) {
-            SDL_ReleaseGPUBuffer(device, vertexBuffer);
-            vertexBuffer = nullptr;
-        }
-
         if (pipeline != nullptr) {
             SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
             pipeline = nullptr;
@@ -436,6 +253,10 @@ void GpuDisplay::cleanup() noexcept {
     }
 }
 
+SDL_GPUDevice* GpuDisplay::getDevice() const {
+    return device;
+}
+
 bool GpuDisplay::processEvents() {
     SDL_Event event;
 
@@ -453,7 +274,7 @@ bool GpuDisplay::processEvents() {
     return true;
 }
 
-void GpuDisplay::drawMesh(const Mat4& transform, float red, float green, float blue) {
+void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, float red, float green, float blue) {
     SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
 
     if (commands == nullptr) {
@@ -527,13 +348,13 @@ void GpuDisplay::drawMesh(const Mat4& transform, float red, float green, float b
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
 
     SDL_GPUBufferBinding vertexBinding{};
-    vertexBinding.buffer = vertexBuffer;
+    vertexBinding.buffer = mesh.getVertexBuffer();
     vertexBinding.offset = 0;
 
     SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
 
     SDL_GPUBufferBinding indexBinding{};
-    indexBinding.buffer = indexBuffer;
+    indexBinding.buffer = mesh.getIndexBuffer();
     indexBinding.offset = 0;
 
     SDL_BindGPUIndexBuffer(
@@ -562,7 +383,7 @@ void GpuDisplay::drawMesh(const Mat4& transform, float red, float green, float b
     );
 
     // Draw every triangle in the uploaded mesh.
-    SDL_DrawGPUIndexedPrimitives(pass, indexCount, 1, 0, 0, 0);
+    SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 
     SDL_EndGPURenderPass(pass);
 
