@@ -1,5 +1,8 @@
 #include "mesh.h"
 
+/*
+* Create a cube mesh with vertices, edges, and triangles so it can be represented and rendered as a complete 3D object.
+*/
 Mesh Mesh::cube() {
     Mesh mesh;
 
@@ -21,29 +24,29 @@ Mesh Mesh::cube() {
         Edge{0, 4}, Edge{1, 5}, Edge{2, 6}, Edge{3, 7}
     };
 
-    // Vertices are ordered so face normals point outward.
+    // Order the vertices so the triangle winding produces outward-facing normals.
     mesh.triangles = {
-        // Negative Z face
+        // Negative Z face.
         Triangle{0, 3, 2},
         Triangle{0, 2, 1},
 
-        // Positive Z face
+        // Positive Z face.
         Triangle{4, 5, 6},
         Triangle{4, 6, 7},
 
-        // Negative X face
+        // Negative X face.
         Triangle{0, 4, 7},
         Triangle{0, 7, 3},
 
-        // Positive X face
+        // Positive X face.
         Triangle{1, 2, 6},
         Triangle{1, 6, 5},
 
-        // Positive Y face
+        // Positive Y face.
         Triangle{3, 7, 6},
         Triangle{3, 6, 2},
 
-        // Negative Y face
+        // Negative Y face.
         Triangle{0, 1, 5},
         Triangle{0, 5, 4}
     };
