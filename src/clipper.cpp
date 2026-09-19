@@ -1,5 +1,8 @@
 #include "clipper.h"
 
+/*
+* Clip a line segment against a plane to remove points outside the view volume.
+*/
 namespace{
     bool clipAgainstPlane(
         Vec4& start,
@@ -32,6 +35,9 @@ namespace{
     }
 }
 
+/*
+* Clip the line against each boundary of the view volume so only the visible portion of the line remains.
+*/
 bool clipLine(Vec4& start, Vec4& end){
     // Left plane:  x + w >= 0
     if (!clipAgainstPlane(
