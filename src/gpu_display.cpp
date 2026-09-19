@@ -1,5 +1,7 @@
 #include "gpu_display.h"
+#include "mesh.h"
 
+#include <vector>
 #include <stdexcept>
 #include <string>
 #include <cstddef>
@@ -163,6 +165,12 @@ void GpuDisplay::createPipeline() {
         info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
         info.vertex_input_state.num_vertex_attributes = 2;
         info.vertex_input_state.vertex_attributes = attributes;
+        info.target_info.has_depth_stencil_target = true;
+        info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+
+        info.depth_stencil_state.enable_depth_test = true;
+        info.depth_stencil_state.enable_depth_write = true;
+        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
         pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
 
         if (pipeline == nullptr) {
@@ -187,24 +195,39 @@ void GpuDisplay::createPipeline() {
 }
 
 void GpuDisplay::createGeometry() {
-    const GpuVertex vertices[] = {
-        // Position             Colour
-        {-0.6f, -0.6f, 0.5f,    1.0f, 0.0f, 0.0f},
-        { 0.6f, -0.6f, 0.5f,    0.0f, 1.0f, 0.0f},
-        { 0.6f,  0.6f, 0.5f,    0.0f, 0.0f, 1.0f},
-        {-0.6f,  0.6f, 0.5f,    1.0f, 1.0f, 0.0f}
-    };
+    const Mesh mesh = Mesh::cube();
 
-    const Uint32 indices[] = {
-        0, 1, 2,
-        0, 2, 3
-    };
+    std::vector<GpuVertex> vertices;
+    vertices.reserve(mesh.vertices.size());
+
+    for (const Vec4& position : mesh.vertices) {
+        // Map the cube's coordinates to colours between zero and one.
+        vertices.push_back(GpuVertex{
+            position.x,
+            position.y,
+            position.z,
+            (position.x + 1.0f) * 0.5f,
+            (position.y + 1.0f) * 0.5f,
+            (position.z + 1.0f) * 0.5f
+        });
+    }
+
+    std::vector<Uint32> indices;
+    indices.reserve(mesh.triangles.size() * 3);
+
+    for (const Triangle& triangle : mesh.triangles) {
+        indices.push_back(static_cast<Uint32>(triangle.first));
+        indices.push_back(static_cast<Uint32>(triangle.second));
+        indices.push_back(static_cast<Uint32>(triangle.third));
+    }
+
+    indexCount = static_cast<Uint32>(indices.size());
 
     const Uint32 vertexBytes =
-        static_cast<Uint32>(sizeof(vertices));
+        static_cast<Uint32>(vertices.size() * sizeof(GpuVertex));
 
     const Uint32 indexBytes =
-        static_cast<Uint32>(sizeof(indices));
+        static_cast<Uint32>(indices.size() * sizeof(Uint32));
 
     // Create the GPU buffer for vertex positions and colours.
     SDL_GPUBufferCreateInfo vertexInfo{};
@@ -253,11 +276,12 @@ void GpuDisplay::createGeometry() {
         Uint8* destination = static_cast<Uint8*>(mapped);
 
         // Vertices first, then indices immediately afterward.
-        std::memcpy(destination, vertices, sizeof(vertices));
+        std::memcpy(destination, vertices.data(), vertexBytes);
+
         std::memcpy(
             destination + vertexBytes,
-            indices,
-            sizeof(indices)
+            indices.data(),
+            indexBytes
         );
 
         SDL_UnmapGPUTransferBuffer(device, transfer);
@@ -333,10 +357,49 @@ GpuDisplay::~GpuDisplay() {
     cleanup();
 }
 
+void GpuDisplay::ensureDepthTexture(Uint32 width, Uint32 height) {
+    if (depthTexture != nullptr &&
+        depthWidth == width &&
+        depthHeight == height) {
+        return;
+    }
+
+    SDL_GPUTextureCreateInfo info{};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    info.width = width;
+    info.height = height;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    SDL_GPUTexture* replacement = SDL_CreateGPUTexture(device, &info);
+
+    if (replacement == nullptr) {
+        throw gpuError("Depth texture creation failed");
+    }
+
+    if (depthTexture != nullptr) {
+        SDL_ReleaseGPUTexture(device, depthTexture);
+    }
+
+    depthTexture = replacement;
+    depthWidth = width;
+    depthHeight = height;
+}
+
 void GpuDisplay::cleanup() noexcept {
     if (device != nullptr) {
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
+
+        if (depthTexture != nullptr) {
+            SDL_ReleaseGPUTexture(device, depthTexture);
+            depthTexture = nullptr;
+            depthWidth = 0;
+            depthHeight = 0;
+        }
 
         if (indexBuffer != nullptr) {
             SDL_ReleaseGPUBuffer(device, indexBuffer);
@@ -390,7 +453,7 @@ bool GpuDisplay::processEvents() {
     return true;
 }
 
-void GpuDisplay::drawQuad(const Mat4& transform, float red, float green, float blue) {
+void GpuDisplay::drawMesh(const Mat4& transform, float red, float green, float blue) {
     SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
 
     if (commands == nullptr) {
@@ -399,13 +462,15 @@ void GpuDisplay::drawQuad(const Mat4& transform, float red, float green, float b
 
     // Get the image that will become the next displayed frame.
     SDL_GPUTexture* swapchainTexture = nullptr;
+    Uint32 frameWidth = 0;
+    Uint32 frameHeight = 0;
 
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(
             commands,
             window,
             &swapchainTexture,
-            nullptr,
-            nullptr)) {
+            &frameWidth,
+            &frameHeight)) {
 
         const std::runtime_error error =
             gpuError("Swapchain acquisition failed");
@@ -424,14 +489,31 @@ void GpuDisplay::drawQuad(const Mat4& transform, float red, float green, float b
         return;
     }
 
+    try {
+        ensureDepthTexture(frameWidth, frameHeight);
+    }
+    catch (...) {
+        // Submit because a swapchain image has already been acquired.
+        SDL_SubmitGPUCommandBuffer(commands);
+        throw;
+    }
+
     SDL_GPUColorTargetInfo target{};
     target.texture = swapchainTexture;
     target.clear_color = SDL_FColor{red, green, blue, 1.0f};
     target.load_op = SDL_GPU_LOADOP_CLEAR;
     target.store_op = SDL_GPU_STOREOP_STORE;
 
-    SDL_GPURenderPass* pass =
-        SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+    SDL_GPUDepthStencilTargetInfo depthTarget{};
+    depthTarget.texture = depthTexture;
+    depthTarget.clear_depth = 1.0f;
+    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.cycle = true;
+
+    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, &depthTarget);
 
     if (pass == nullptr) {
         const std::runtime_error error =
@@ -478,9 +560,9 @@ void GpuDisplay::drawQuad(const Mat4& transform, float red, float green, float b
         matrixData,
         static_cast<Uint32>(sizeof(matrixData))
     );
-    
-    // Six indices, one instance, starting at index zero.
-    SDL_DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0);
+
+    // Draw every triangle in the uploaded mesh.
+    SDL_DrawGPUIndexedPrimitives(pass, indexCount, 1, 0, 0, 0);
 
     SDL_EndGPURenderPass(pass);
 

@@ -16,7 +16,7 @@ public:
     bool processEvents();
 
     // Colour components range from 0.0f to 1.0f.
-    void drawQuad(const Mat4& transform, float red, float green, float blue);
+    void drawMesh(const Mat4& transform, float red, float green, float blue);
 
 private:
     SDL_Window* window = nullptr;
@@ -34,4 +34,12 @@ private:
     void createGeometry();
 
     SDL_GPUBuffer* indexBuffer = nullptr;
+
+    Uint32 indexCount = 0;
+
+    SDL_GPUTexture* depthTexture = nullptr;
+    Uint32 depthWidth = 0;
+    Uint32 depthHeight = 0;
+
+    void ensureDepthTexture(Uint32 width, Uint32 height);
 };
