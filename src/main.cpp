@@ -1,96 +1,6 @@
-#include "gpu_display.h"
-#include "camera.h"
-#include "mat4.h"
-#include "vec3.h"
-#include "gpu_mesh.h"
-#include "mesh.h"
-
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-
-#include <cmath>
-#include <exception>
-#include <iostream>
-#include <numbers>
-
-int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
-
-    try {
-        const int width = 1280;
-        const int height = 720;
-
-        GpuDisplay display{"GPU Cube", width, height};
-        GpuMesh cube{display.getDevice(), Mesh::cube()};
-
-        Camera camera{
-            Vec3{0.0f, 0.0f, 0.0f},
-            Vec3{0.0f, 0.0f, -5.0f},
-            Vec3{0.0f, 1.0f, 0.0f},
-            std::numbers::pi_v<float> / 3.0f,
-            static_cast<float>(width) / static_cast<float>(height),
-            0.1f,
-            100.0f
-        };
-
-        // Convert our projection's depth range from [-1, 1] to [0, 1].
-        // In clip space: new z = 0.5 * z + 0.5 * w.
-        Mat4 depthCorrection = Mat4::identity();
-        depthCorrection.values[2][2] = 0.5f;
-        depthCorrection.values[2][3] = 0.5f;
-
-        const Uint64 startTime = SDL_GetTicksNS();
-
-        while (display.processEvents()) {
-            const double elapsedSeconds =
-                static_cast<double>(SDL_GetTicksNS() - startTime) /
-                1'000'000'000.0;
-
-            // Rotate at one radian per second, keeping the angle small.
-            const float angle = static_cast<float>(
-                std::fmod(
-                    elapsedSeconds * 0.2, // radians per second
-                    2.0 * std::numbers::pi_v<double>
-                )
-            );
-
-            const Mat4 viewProjection =
-                depthCorrection *
-                camera.getProjectionMatrix() *
-                camera.getViewMatrix();
-
-            const Mat4 firstModel =
-                Mat4::translation(-1.5f, 0.0f, -6.0f) *
-                Mat4::rotationY(angle) *
-                Mat4::rotationX(0.4f);
-
-            const Mat4 secondModel =
-                Mat4::translation(1.5f, 0.0f, -6.0f) *
-                Mat4::rotationY(-angle) *
-                Mat4::scaling(0.7f, 0.7f, 0.7f);
-
-            if (display.beginFrame(0.08f, 0.12f, 0.20f)) {
-                display.drawMesh(cube, viewProjection * firstModel);
-                display.drawMesh(cube, viewProjection * secondModel);
-                display.endFrame();
-            }
-        }
-    }
-    catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
-
-    return 0;
-}
-
-
-/*
-
 #include "application.h"
-
 #include <SDL3/SDL_main.h>
+
 #include <exception>
 #include <iostream>
 
@@ -99,7 +9,7 @@ int main(int argc, char* argv[]) {
     (void)argv;
 
     try {
-        Application application(1920, 1080);
+        Application application{1280, 720};
         application.run();
     }
     catch (const std::exception& error) {
@@ -109,5 +19,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
-*/

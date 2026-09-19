@@ -2,6 +2,7 @@
 
 #include "mat4.h"
 #include "gpu_mesh.h"
+#include "pixel.h"
 
 #include <SDL3/SDL.h>
 
@@ -21,7 +22,7 @@ public:
     bool beginFrame(float red, float green, float blue);
 
     // Draw into the active frame.
-    void drawMesh(const GpuMesh& mesh, const Mat4& transform);
+    void drawMesh(const GpuMesh& mesh, const Mat4& transform, Pixel colour);
 
     // Finish and present the active frame.
     void endFrame();
