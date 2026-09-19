@@ -3,6 +3,7 @@
 #include "mat4.h"
 #include "gpu_mesh.h"
 #include "pixel.h"
+#include "vec2.h"
 
 #include <SDL3/SDL.h>
 
@@ -16,6 +17,8 @@ public:
     GpuDisplay& operator=(const GpuDisplay&) = delete;
 
     bool processEvents();
+    bool isMouseCaptured() const;
+    Vec2 getMouseDelta() const;
 
     // Clear colour and depth once. Returns false if no frame is available.
     // Background colour components range from 0.0f to 1.0f.
@@ -49,4 +52,9 @@ private:
 
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
+    
+    bool mouseCaptured = false;
+    Vec2 mouseDelta{};
+
+    void setMouseCaptured(bool captured);
 };

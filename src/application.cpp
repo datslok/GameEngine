@@ -35,7 +35,8 @@ Application::Application(int width, int height):
         0.1f,
         100.0f
     ),
-    cameraController(3.0f)
+    // Movement speed, mouse sensitivity.
+    cameraController(3.0f, 0.002f)
 {
     createScene();
     uploadSceneMeshes();
@@ -120,7 +121,13 @@ void Application::run() {
 }
 
 void Application::update(float deltaTime) {
-    cameraController.update(camera, deltaTime);
+    if (display.isMouseCaptured()) {
+        const Vec2 mouseDelta = display.getMouseDelta();
+
+        cameraController.look(camera, mouseDelta.x, mouseDelta.y);
+
+        cameraController.update(camera, deltaTime);
+    }
 
     for (MeshInstance& object : scene.getObjects()) {
         object.transform.rotation = Vec3{

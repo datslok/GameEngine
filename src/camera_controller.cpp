@@ -5,8 +5,11 @@
 /*
 * Set the movement speed in order to consistently control camera movement.
 */
-CameraController::CameraController(float moveSpeed):
-    moveSpeed(moveSpeed) {
+CameraController::CameraController(float moveSpeed, float mouseSensitivity):
+    moveSpeed(moveSpeed),
+    mouseSensitivity(mouseSensitivity)
+{
+
 }
 
 /*
@@ -46,4 +49,8 @@ void CameraController::update(Camera& camera, float deltaTime) const {
             movement.normalized() * (moveSpeed * deltaTime)
         );
     }
+}
+
+void CameraController::look(Camera& camera, float mouseDeltaX, float mouseDeltaY) const {
+    camera.rotate(mouseDeltaX * mouseSensitivity, -mouseDeltaY * mouseSensitivity);
 }
