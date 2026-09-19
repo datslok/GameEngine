@@ -9,7 +9,6 @@
 #include <SDL3/SDL_main.h>
 
 #include <vector>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <exception>
@@ -20,6 +19,7 @@
 #include "camera_controller.h"
 #include "clipper.h"
 #include "depthbuffer.h"
+#include "mesh.h"
 
 struct ScreenPoint {
     int x;
@@ -82,61 +82,7 @@ int main(int argc, char* argv[]) {
 
         CameraController cameraController{3.0f}; // Camera speed
 
-        const std::array<Vec4, 8> vertices{
-            Vec4{-1.0f, -1.0f, -1.0f, 1.0f},
-            Vec4{ 1.0f, -1.0f, -1.0f, 1.0f},
-            Vec4{ 1.0f,  1.0f, -1.0f, 1.0f},
-            Vec4{-1.0f,  1.0f, -1.0f, 1.0f},
-
-            Vec4{-1.0f, -1.0f,  1.0f, 1.0f},
-            Vec4{ 1.0f, -1.0f,  1.0f, 1.0f},
-            Vec4{ 1.0f,  1.0f,  1.0f, 1.0f},
-            Vec4{-1.0f,  1.0f,  1.0f, 1.0f}
-        };
-
-        struct Edge {
-            std::size_t start;
-            std::size_t end;
-        };
-
-        const std::array<Edge, 12> edges{
-            Edge{0, 1}, Edge{1, 2}, Edge{2, 3}, Edge{3, 0},
-            Edge{4, 5}, Edge{5, 6}, Edge{6, 7}, Edge{7, 4},
-            Edge{0, 4}, Edge{1, 5}, Edge{2, 6}, Edge{3, 7}
-        };
-
-        // Make a triangle
-        struct Triangle {
-            std::size_t first;
-            std::size_t second;
-            std::size_t third;
-        };
-
-        const std::array<Triangle, 12> triangles{
-            // Front face
-            Triangle{0, 3, 2},
-            Triangle{0, 2, 1},
-
-            // Back face
-            Triangle{4, 5, 6},
-            Triangle{4, 6, 7},
-
-            // Left face
-            Triangle{0, 4, 7},
-            Triangle{0, 7, 3},
-
-            // Right face
-            Triangle{1, 2, 6},
-            Triangle{1, 6, 5},
-
-            // Top face
-            Triangle{3, 7, 6},
-            Triangle{3, 6, 2},
-
-            // Bottom face
-            Triangle{0, 1, 5},
-            Triangle{0, 5, 4}
-        };
+        const Mesh cube = Mesh::cube();
 
         // Timing setup.
         const Uint64 animationStart = SDL_GetTicksNS();
@@ -182,20 +128,20 @@ int main(int argc, char* argv[]) {
             buffer.clear(Pixel{0, 0, 0});
             depthBuffer.clear();
 
-            std::array<Vec4, 8> clipVertices{};
+            std::vector<Vec4> clipVertices(cube.vertices.size());
 
             // Transform each cube vertex into clip space.
-            for (std::size_t index = 0; index < vertices.size(); ++index) {
-                clipVertices[index] = transform * vertices[index];
+            for (std::size_t index = 0; index < cube.vertices.size(); ++index){
+                clipVertices[index] = transform * cube.vertices[index];
             }
 
             // Render the filled cube faces.
-            for (const Triangle& triangle : triangles) {
-                    const Vec4 viewFirst = modelView * vertices[triangle.first];
+            for (const Triangle& triangle : cube.triangles){
+                    const Vec4 viewFirst = modelView * cube.vertices[triangle.first];
 
-                    const Vec4 viewSecond = modelView * vertices[triangle.second];
+                    const Vec4 viewSecond = modelView * cube.vertices[triangle.second];
 
-                    const Vec4 viewThird = modelView * vertices[triangle.third];
+                    const Vec4 viewThird = modelView * cube.vertices[triangle.third];
 
                     const Vec3 edgeFirst{
                         viewSecond.x - viewFirst.x,
@@ -287,10 +233,10 @@ int main(int argc, char* argv[]) {
             }
 
             // Clip and draw each edge independently.
-            for (const Edge& edge : edges) {
+            for (const Edge& edge : cube.edges){
                 Vec4 start = clipVertices[edge.start];
                 Vec4 end = clipVertices[edge.end];
-
+                
                 if (!clipLine(start, end)) {
                     continue;
                 }
