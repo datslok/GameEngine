@@ -2,10 +2,16 @@
 
 #include <SDL3/SDL.h>
 
+/*
+* Set the movement speed in order to consistently control camera movement.
+*/
 CameraController::CameraController(float moveSpeed):
     moveSpeed(moveSpeed) {
 }
 
+/*
+* Process keyboard input to move the camera in the direction of the pressed keys, scaled by movement speed and delta time for consistent movement across frame rates.
+*/
 void CameraController::update(Camera& camera, float deltaTime) const {
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
