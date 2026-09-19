@@ -21,6 +21,10 @@ Application::Application(int width, int height):
     ),
     cameraController(3.0f)
 {
+    createScene();
+}
+
+void Application::createScene(){
     const std::shared_ptr<const Mesh> cubeMesh = std::make_shared<Mesh>(Mesh::cube());
 
     MeshInstance first{cubeMesh};
@@ -33,10 +37,9 @@ Application::Application(int width, int height):
     second.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
     second.colour = Pixel{80, 120, 220};
 
-    objects.push_back(first);
-    objects.push_back(second);
+    scene.add(first);
+    scene.add(second);
 }
-
 
 void Application::run() {
     Uint64 previousFrameStart = SDL_GetTicksNS();
@@ -75,15 +78,18 @@ void Application::run() {
 
 void Application::update(float deltaTime) {
     cameraController.update(camera, deltaTime);
+
+    std::vector<MeshInstance>& objects = scene.getObjects();
+
     objects[0].transform.rotation.x += 2.0f * deltaTime;
     objects[0].transform.rotation.y += 2.0f * deltaTime;
     objects[1].transform.rotation.y -= 1.0f * deltaTime;
 }
 
-void Application::render(){
+void Application::render() {
     renderer.clear(Pixel{0, 0, 0});
 
-    for (const MeshInstance& object : objects) {
+    for (const MeshInstance& object : scene.getObjects()) {
         renderer.drawMesh(
             *object.mesh,
             object.transform.getMatrix(),
