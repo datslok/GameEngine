@@ -1,5 +1,4 @@
 #include "application.h"
-
 #include <SDL3/SDL_main.h>
 
 #include <exception>
@@ -13,7 +12,7 @@ int main(int argc, char* argv[]) {
     (void)argv;
 
     try {
-        Application application(1920, 1080);
+        Application application{1280, 720};
         application.run();
     }
     catch (const std::exception& error) {

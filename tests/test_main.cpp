@@ -11,6 +11,9 @@ void testClipper();
 void testDepthBuffer();
 void testTriangleDepth();
 void testShading();
+void testTransform();
+void testScene();
+void testObjLoader();
 
 int main(){
     testPixelBuffer();
@@ -24,6 +27,9 @@ int main(){
     testDepthBuffer();
     testTriangleDepth();
     testShading();
+    testTransform();
+    testScene();
+    testObjLoader();
 
     std::cout << "All tests passed!\n";
     return 0;

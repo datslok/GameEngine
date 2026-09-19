@@ -1,30 +1,29 @@
 #pragma once
 
+#include "vec3.h"
 #include "vec4.h"
+
+#include <array>
 #include <cstddef>
+#include <optional>
 #include <vector>
 
-/*
-* Represents a connection between two vertices so the mesh can define its edges.
-*/
-struct Edge{
+struct Edge {
     std::size_t start;
     std::size_t end;
 };
 
-/*
-* Represents a triangle using three vertex indices so the mesh can define its surfaces.
-*/
-struct Triangle{
+struct Triangle {
     std::size_t first;
     std::size_t second;
     std::size_t third;
+
+    // One optional normal for each corner, in the same order.
+    // An empty optional means: use the triangle's face normal.
+    std::array<std::optional<Vec3>, 3> normals{};
 };
 
-/*
-* Stores the vertices, edges, and triangles that make up a 3D object so it can be represented and rendered by the engine.
-*/
-struct Mesh{
+struct Mesh {
     std::vector<Vec4> vertices;
     std::vector<Edge> edges;
     std::vector<Triangle> triangles;

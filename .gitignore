@@ -63,4 +63,7 @@ $RECYCLE.BIN/
 
 build/
 
+# Compiled shaders
+*.spv
+
 # End of https://www.toptal.com/developers/gitignore/api/windows,c++
