@@ -3,8 +3,8 @@
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
 
-// Every vertex of a triangle carries the same face normal.
-layout(location = 0) flat out vec3 worldNormal;
+// Interpolate the corner normals across each triangle.
+layout(location = 0) out vec3 worldNormal;
 
 layout(std140, set = 1, binding = 0) uniform TransformData {
     mat4 transform;
@@ -15,13 +15,18 @@ void main() {
     gl_Position = transform * vec4(position, 1.0);
 
     mat3 modelLinear = mat3(model);
-
-    // The inverse transpose handles rotation and non-uniform scaling.
-    // A zero scale makes the matrix singular, so use a zero normal.
     worldNormal = vec3(0.0);
 
+    // Transform normals correctly under non-uniform scaling.
     if (determinant(modelLinear) != 0.0) {
         mat3 normalMatrix = transpose(inverse(modelLinear));
-        worldNormal = normalMatrix * normal;
+        vec3 transformedNormal = normalMatrix * normal;
+
+        // Normalize each corner before interpolation.
+        float normalLength = length(transformedNormal);
+
+        if (normalLength > 0.0) {
+            worldNormal = transformedNormal / normalLength;
+        }
     }
 }

@@ -1,6 +1,6 @@
 #version 450
 
-layout(location = 0) flat in vec3 worldNormal;
+layout(location = 0) in vec3 worldNormal;
 
 layout(std140, set = 3, binding = 0) uniform MaterialData {
     vec4 baseColour;
