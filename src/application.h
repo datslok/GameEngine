@@ -9,6 +9,9 @@
 
 #include <cstdint>
 
+/*
+* Coordinates the main engine components to manage input, updates, rendering, and the applications main execution loop.
+*/
 class Application {
 public:
     Application(int width, int height);
@@ -19,7 +22,7 @@ private:
     void update(float deltaTime);
     void render();
 
-    // Members are constructed in this order.
+    // Members are initialised in this order to match their declaration order.
     PixelBuffer buffer;
     Display display;
     Renderer renderer;
