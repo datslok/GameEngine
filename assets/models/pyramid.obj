@@ -1,0 +1,16 @@
+# Square pyramid, with outward-facing triangles.
+
+v -1 -1 -1
+v  1 -1 -1
+v  1 -1  1
+v -1 -1  1
+v  0  1  0
+
+# Sides
+f 1 5 2
+f 2 5 3
+f 3 5 4
+f 4 5 1
+
+# Bottom
+f 1 2 3 4
