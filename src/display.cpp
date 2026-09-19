@@ -4,6 +4,10 @@
 #include <stdexcept>
 #include <string>
 
+/*
+* Initalises SDL and creates the window, renderer, and texture required to display pixel data.
+* Throws an exception if any of the SDL calls fail, or if the display dimensions are invalid.
+*/
 Display::Display(const char* title, int width, int height)
     : width(width), height(height)
 {
@@ -11,7 +15,7 @@ Display::Display(const char* title, int width, int height)
         throw std::invalid_argument("Display dimensions must be positive");
     }
 
-    // Check that Pixel matches the RGB24 texture layout.
+    // Ensure pixel matches the RGB24 texture format required by SDL.
     static_assert(sizeof(Pixel) == 3,
                   "Pixel must contain exactly 3 bytes");
 
@@ -46,16 +50,22 @@ Display::Display(const char* title, int width, int height)
         }
     }
     catch (...) {
-        // A failed constructor does not run this object's destructor.
+        // Clean up any resources created before construction failed as the destructor will not be called for a failed constructor.
         cleanup();
         throw;
     }
 }
 
+/*
+* Clean up the SDL resources created by the constructor to prevent resource leaks.
+*/
 Display::~Display() {
     cleanup();
 }
 
+/*
+* Destroys the SDL resources owned by the display and shut down the video subsystem if it was initialized, ensuring that all resources are released properly.
+*/
 void Display::cleanup() noexcept {
     if (texture != nullptr) {
         SDL_DestroyTexture(texture);
@@ -78,6 +88,9 @@ void Display::cleanup() noexcept {
     }
 }
 
+/*
+* Process SDL events and return false when the user requests the display to close, allowing the application to terminate cleanly. Otherwise, return true to continue running the application.
+*/
 bool Display::processEvents() {
     SDL_Event event;
 
@@ -95,6 +108,9 @@ bool Display::processEvents() {
     return true;
 }
 
+/*
+* Update the SDL texture with the pixel buffer and present it on the display, the buffer dimensions must match the display dimensions to ensure proper rendering. Throws an exception if any of the SDL calls fail.
+*/
 void Display::present(const PixelBuffer& buffer) {
     if (buffer.getWidth() != static_cast<std::size_t>(width) ||
         buffer.getHeight() != static_cast<std::size_t>(height)) {
@@ -103,15 +119,17 @@ void Display::present(const PixelBuffer& buffer) {
         );
     }
 
-    // SDL represents row sizes using int.
+    // SDL represents row sizes using int. Calculates the number of bytes in each row to match SDL's texture layout.
     const std::size_t rowBytes = buffer.getWidth() * sizeof(Pixel);
 
+    
     if (rowBytes > static_cast<std::size_t>(SDL_MAX_SINT32)) {
         throw std::overflow_error("Pixel row is too large");
     }
 
     const int pitch = static_cast<int>(rowBytes);
 
+    // Update and render the texture to display the pixel buffer. Throws an exception if any of the SDL calls fail.
     if (!SDL_UpdateTexture(texture, nullptr, buffer.data(), pitch) ||
         !SDL_RenderClear(renderer) ||
         !SDL_RenderTexture(renderer, texture, nullptr, nullptr) ||

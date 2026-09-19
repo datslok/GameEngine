@@ -3,10 +3,17 @@
 #include <stdexcept>
 #include <numbers>
 
+/*
+* Initialise the matrix to zero so all components start with defined values.
+*/
 Mat4::Mat4()
     : values{} {
 }
 
+/*
+* Create an identity matrix with 1s along the diagonal and 0s elsewhere, which does not change a vector when multiplied.
+* Used as a neutral transformation matrix to build other transformations from.
+*/
 Mat4 Mat4::identity() {
     Mat4 result;
 
@@ -17,6 +24,9 @@ Mat4 Mat4::identity() {
     return result;
 }
 
+/*
+* Multiply the matrix by a vector to apply the matrix transformation.
+*/
 Vec4 Mat4::operator*(const Vec4& vector) const{
     return Vec4{
         (values[0][0] * vector.x +
@@ -41,6 +51,9 @@ Vec4 Mat4::operator*(const Vec4& vector) const{
     };
 }
 
+/*
+* Create a translation matrix to move objects by the specified x,y, and z values.
+*/
 Mat4 Mat4::translation(float x, float y, float z){
     Mat4 result = identity();
 
@@ -51,6 +64,9 @@ Mat4 Mat4::translation(float x, float y, float z){
     return result;
 }
 
+/*
+* Create a scaling matrix to resize objects along the specified x,y, and z axes.
+*/ 
 Mat4 Mat4::scaling(float x, float y, float z){
     Mat4 result = identity();
 
@@ -61,6 +77,9 @@ Mat4 Mat4::scaling(float x, float y, float z){
     return result;
 }
 
+/*
+* Create a rotation matrix around the X-axis to rotate objects by the specified angle.
+*/
 Mat4 Mat4::rotationX(float radians){
     Mat4 result = identity();
 
@@ -75,6 +94,9 @@ Mat4 Mat4::rotationX(float radians){
     return result;
 }
 
+/*
+* Create a rotation matrix around the Y-axis to rotate objects by the specified angle.
+*/
 Mat4 Mat4::rotationY(float radians){
     Mat4 result = identity();
 
@@ -89,6 +111,9 @@ Mat4 Mat4::rotationY(float radians){
     return result;
 }
 
+/*
+* Create a rotation matrix around the Z-axis to rotate objects by the specified angle.
+*/
 Mat4 Mat4::rotationZ(float radians){
     Mat4 result = identity();
 
@@ -103,6 +128,9 @@ Mat4 Mat4::rotationZ(float radians){
     return result;
 }
 
+/*
+* Multiply two matrices together to combine their transformations into a single matrix.
+*/
 Mat4 Mat4::operator*(const Mat4& other) const{
     Mat4 result;
 
@@ -117,6 +145,9 @@ Mat4 Mat4::operator*(const Mat4& other) const{
     return result;
 }
 
+/*
+* Create a perspective projection matrix to represent depth and field of view.
+*/
 Mat4 Mat4::perspective(
     float verticalFovRadians,
     float aspectRatio,
@@ -145,6 +176,9 @@ Mat4 Mat4::perspective(
     return result;
 }
 
+/*
+* Create a view matrix from the camera position and orientation to transform world coordinates into camera space.
+*/
 Mat4 Mat4::lookAt(
     const Vec3& eye,
     const Vec3& target,
@@ -178,7 +212,7 @@ Mat4 Mat4::lookAt(
 
     Mat4 result = identity();
 
-    //The first three columns express the cameras axes. The last column accounts for its position. We use negative forward because objects in front of our camera must have negative camera-space Z.
+    //The first three columns represent the camera's axes, while the last column accounts for its position. Forward is negated so objects in front of the camera have negative camera-space z.
 
     result.values[0][0] = right.x;
     result.values[0][1] = right.y;
