@@ -10,6 +10,10 @@
 #include <cstddef>
 #include <vector>
 
+/*
+* Provides the rendering pipeline for transforming, lighting, clipping, projecting, and rasterising
+* mesh geometry into the pixel buffer.
+*/
 namespace{
     struct ScreenPoint{
         int x;
@@ -40,16 +44,27 @@ namespace{
     }
 }
 
+/*
+* Initialise the renderer with the target pixel buffer and a matching depth buffer so geometry can be rendered 
+* with depth testing.
+*/
 Renderer::Renderer(PixelBuffer& buffer)
     : buffer(buffer),
       depthBuffer(buffer.getWidth(), buffer.getHeight()){
 }
 
+/*
+* Clear the colour and depth buffers so each frame starts without data from the previous frame.
+*/
 void Renderer::clear(Pixel colour){
     buffer.clear(colour);
     depthBuffer.clear();
 }
 
+/*
+* Transform, shade, clip and rasterise the mesh so its visible geometry
+* can be rendered to the pixel buffer.
+*/
 void Renderer::drawMesh(
     const Mesh& mesh,
     const Mat4& model,
@@ -65,11 +80,11 @@ void Renderer::drawMesh(
     const Mat4 modelView = view * model;
     const Mat4 projection = camera.getProjectionMatrix();
 
-    // Direction toward the light in world space.
+    // Define the light direction in world space for calculating surface lighting.
     const Vec3 toLightWorld = Vec3{-1.0f, 2.0f, 1.0f}.normalized();
 
-    // Transform the direction into view space.
-    // w = 0 prevents translation from affecting it.
+    // Transform the light direction into view space so it matches the geometry's coordinate system.
+    // w = 0 prevents the camera translation from affecting the direction.
     const Vec4 lightInView = view * Vec4{
         toLightWorld.x,
         toLightWorld.y,
@@ -165,7 +180,7 @@ void Renderer::drawMesh(
         }
     }
 
-    // Optional debug overlay: edges are not depth-tested.
+    // Optionally draw the mesh edges as a wireframe overlay; these edges are not depth-tested.
     if (wireframe){
         for (const Edge& edge : mesh.edges){
             Vec4 start = clipVertices[edge.start];
