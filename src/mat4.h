@@ -1,7 +1,7 @@
 #pragma once
 #include "vec4.h"
 #include "vec3.h"
-¨
+
 /*
 * Represents a 4x4 matrix for storing and combining transformations used in 3D graphics and coordinate calculations.
 */
