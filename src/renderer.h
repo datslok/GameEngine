@@ -6,6 +6,10 @@
 #include "mesh.h"
 #include "pixelbuffer.h"
 
+/*
+* Handles the rendering pipeline by transforming and drawing mesh geometry
+* into the pixel buffer while using depth testing to determine visible surfaces.
+*/
 class Renderer {
 public:
     explicit Renderer(PixelBuffer& buffer);
