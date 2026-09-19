@@ -1,5 +1,7 @@
 #include "gpu_display.h"
+#include "camera.h"
 #include "mat4.h"
+#include "vec3.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -17,7 +19,23 @@ int main(int argc, char* argv[]) {
         const int width = 1280;
         const int height = 720;
 
-        GpuDisplay display{"GPU Renderer", width, height};
+        GpuDisplay display{"GPU Cube", width, height};
+
+        Camera camera{
+            Vec3{0.0f, 0.0f, 0.0f},
+            Vec3{0.0f, 0.0f, -5.0f},
+            Vec3{0.0f, 1.0f, 0.0f},
+            std::numbers::pi_v<float> / 3.0f,
+            static_cast<float>(width) / static_cast<float>(height),
+            0.1f,
+            100.0f
+        };
+
+        // Convert our projection's depth range from [-1, 1] to [0, 1].
+        // In clip space: new z = 0.5 * z + 0.5 * w.
+        Mat4 depthCorrection = Mat4::identity();
+        depthCorrection.values[2][2] = 0.5f;
+        depthCorrection.values[2][3] = 0.5f;
 
         const Uint64 startTime = SDL_GetTicksNS();
 
@@ -26,26 +44,26 @@ int main(int argc, char* argv[]) {
                 static_cast<double>(SDL_GetTicksNS() - startTime) /
                 1'000'000'000.0;
 
-            // Rotate at one radian per second.
+            // Rotate at one radian per second, keeping the angle small.
             const float angle = static_cast<float>(
                 std::fmod(
-                    elapsedSeconds,
+                    elapsedSeconds * 0.2, // radians per second
                     2.0 * std::numbers::pi_v<double>
                 )
             );
 
-            // Correct for the window's aspect ratio after rotation.
-            const Mat4 aspectCorrection = Mat4::scaling(
-                static_cast<float>(height) /
-                    static_cast<float>(width),
-                1.0f,
-                1.0f
-            );
+            const Mat4 model =
+                Mat4::translation(0.0f, 0.0f, -5.0f) *
+                Mat4::rotationY(angle) *
+                Mat4::rotationX(0.4f);
 
             const Mat4 transform =
-                aspectCorrection * Mat4::rotationZ(angle);
+                depthCorrection *
+                camera.getProjectionMatrix() *
+                camera.getViewMatrix() *
+                model;
 
-            display.drawQuad(transform, 0.08f, 0.12f, 0.20f);
+            display.drawMesh(transform, 0.08f, 0.12f, 0.20f);
         }
     }
     catch (const std::exception& error) {
