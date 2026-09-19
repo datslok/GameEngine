@@ -59,7 +59,7 @@ Vec2 Vec2::operator/(float scalar) const
 }
 
 /*
-* Calculate the squared length of the vector to measure the vector's maginitude without the computational cost of a square root.
+* Calculate the squared length of the vector to measure the vector's magnitude without the computational cost of a square root.
 */
 float Vec2::lengthSquared() const
 {
