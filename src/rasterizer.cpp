@@ -2,6 +2,10 @@
 #include <algorithm>
 #include <cmath>
 
+
+/*
+* Calculate the signed area between two vectors to determine their orientation.
+*/
 static long long edgeFunction(
     int ax, int ay,
     int bx, int by,
