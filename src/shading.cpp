@@ -4,6 +4,10 @@
 #include <cmath>
 #include <cstdint>
 
+/*
+* Apply flat diffuse lighting to a colour so the rendered surface reflects
+* its orientation relative to the light source while retaining ambient light.
+*/
 Pixel shadeFlat(
     Pixel baseColour,
     const Vec3& normal,
