@@ -64,23 +64,16 @@ void Application::update(float deltaTime) {
     cameraController.update(camera, deltaTime);
 }
 
-void Application::render() {
+void Application::render(){
     const float angle =
-        static_cast<float>(elapsedSeconds * 2.0);
+        static_cast<float>(elapsedSeconds * 0.2f); // rotation speed
 
     const Mat4 model =
-        Mat4::translation(0.0f, 0.0f, -5.0f) *
-        Mat4::rotationY(angle) *
-        Mat4::rotationX(0.3f);
+        Mat4::translation(0.0f, 0.0f, -5.0f) * Mat4::rotationY(angle) * Mat4::rotationX(0.3f);
 
     renderer.clear(Pixel{0, 0, 0});
 
-    renderer.drawMesh(
-        cube,
-        model,
-        camera,
-        Pixel{80, 120, 220}
-    );
+    renderer.drawMesh(cube, model, camera, Pixel{80, 120, 220}, false);
 
     display.present(buffer);
 }

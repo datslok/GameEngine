@@ -4,6 +4,7 @@
 #include "rasterizer.h"
 #include "vec3.h"
 #include "vec4.h"
+#include "shading.h"
 
 #include <cmath>
 #include <cstddef>
@@ -60,8 +61,27 @@ void Renderer::drawMesh(
         return;
     }
 
-    const Mat4 modelView = camera.getViewMatrix() * model;
+    const Mat4 view = camera.getViewMatrix();
+    const Mat4 modelView = view * model;
     const Mat4 projection = camera.getProjectionMatrix();
+
+    // Direction toward the light in world space.
+    const Vec3 toLightWorld = Vec3{-1.0f, 2.0f, 1.0f}.normalized();
+
+    // Transform the direction into view space.
+    // w = 0 prevents translation from affecting it.
+    const Vec4 lightInView = view * Vec4{
+        toLightWorld.x,
+        toLightWorld.y,
+        toLightWorld.z,
+        0.0f
+    };
+
+    const Vec3 toLightView{
+        lightInView.x,
+        lightInView.y,
+        lightInView.z
+    };
 
     std::vector<Vec4> viewVertices(mesh.vertices.size());
     std::vector<Vec4> clipVertices(mesh.vertices.size());
@@ -100,6 +120,13 @@ void Renderer::drawMesh(
             continue;
         }
 
+        const Pixel shadedColour = shadeFlat(
+            colour,
+            normal,
+            toLightView,
+            0.2f
+        );
+
         const std::vector<Vec4> polygon = clipTriangle(
             clipVertices[triangle.first],
             clipVertices[triangle.second],
@@ -133,7 +160,7 @@ void Renderer::drawMesh(
                 screenFirst.x, screenFirst.y, screenFirst.depth,
                 screenSecond.x, screenSecond.y, screenSecond.depth,
                 screenThird.x, screenThird.y, screenThird.depth,
-                colour
+                shadedColour
             );
         }
     }
