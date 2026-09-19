@@ -8,63 +8,125 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <optional>
 
 namespace {
-    std::size_t parseVertexIndex(const std::string& entry, std::size_t vertexCount){
-        // In "3/2/1", only "3" identifies the vertex position.
-        const std::size_t slashPosition = entry.find('/');
-        const std::string indexText = entry.substr(0, slashPosition);
+    struct FaceCorner {
+        std::size_t vertex;
+        std::optional<Vec3> normal;
+    };
 
-        if (indexText.empty()) {
-            throw std::runtime_error("OBJ face is missing a vertex index");
+    // Resolve an OBJ index against either the vertex or normal list.
+    std::size_t parseIndex(
+        const std::string& text,
+        std::size_t count,
+        const std::string& kind
+    ) {
+        if (text.empty()) {
+            throw std::runtime_error(
+                "OBJ face is missing a " + kind + " index"
+            );
         }
 
         std::size_t charactersRead = 0;
         long long objIndex;
 
         try {
-            objIndex = std::stoll(indexText, &charactersRead);
+            objIndex = std::stoll(text, &charactersRead);
         }
         catch (const std::invalid_argument&) {
-            throw std::runtime_error("OBJ vertex index is not an integer");
+            throw std::runtime_error(
+                "OBJ " + kind + " index is not an integer"
+            );
         }
         catch (const std::out_of_range&) {
-            throw std::runtime_error("OBJ vertex index is too large");
+            throw std::runtime_error(
+                "OBJ " + kind + " index is too large"
+            );
         }
 
-        // Reject entries such as "3abc".
-        if (charactersRead != indexText.size()) {
-            throw std::runtime_error("OBJ vertex index contains invalid characters");
+        if (charactersRead != text.size()) {
+            throw std::runtime_error(
+                "OBJ " + kind + " index contains invalid characters"
+            );
         }
 
         if (objIndex == 0) {
-            throw std::runtime_error("OBJ vertex indices cannot be zero");
+            throw std::runtime_error(
+                "OBJ " + kind + " indices cannot be zero"
+            );
         }
 
         if (objIndex > 0) {
-            const unsigned long long index = static_cast<unsigned long long>(objIndex);
+            const unsigned long long index =
+                static_cast<unsigned long long>(objIndex);
 
-            if (index > vertexCount) {
-                throw std::runtime_error("OBJ vertex index is outside the vertex list");
+            if (index > count) {
+                throw std::runtime_error(
+                    "OBJ index is outside the " + kind + " list"
+                );
             }
 
             return static_cast<std::size_t>(index - 1);
         }
 
-        // Calculate the distance backward without overflowing
-        // when objIndex is the smallest possible long long.
-        const unsigned long long distance = static_cast<unsigned long long>(-(objIndex + 1)) + 1ULL;
+        // Avoid overflow even for the smallest possible long long.
+        const unsigned long long distance =
+            static_cast<unsigned long long>(-(objIndex + 1)) + 1ULL;
 
-        if (distance > vertexCount) {
-            throw std::runtime_error("OBJ negative index is outside the vertex list");
+        if (distance > count) {
+            throw std::runtime_error(
+                "OBJ negative index is outside the " + kind + " list"
+            );
         }
 
-        return vertexCount - static_cast<std::size_t>(distance);
+        return count - static_cast<std::size_t>(distance);
+    }
+
+    FaceCorner parseCorner(
+        const std::string& entry,
+        std::size_t vertexCount,
+        const std::vector<Vec3>& normals
+    ) {
+        const std::size_t firstSlash = entry.find('/');
+
+        FaceCorner corner{
+            parseIndex(entry.substr(0, firstSlash), vertexCount, "vertex"),
+            std::nullopt
+        };
+
+        // Position only: "3".
+        if (firstSlash == std::string::npos) {
+            return corner;
+        }
+
+        const std::size_t secondSlash = entry.find('/', firstSlash + 1);
+
+        // Position and texture coordinate: "3/2".
+        // Texture coordinates are still ignored.
+        if (secondSlash == std::string::npos) {
+            return corner;
+        }
+
+        if (entry.find('/', secondSlash + 1) != std::string::npos) {
+            throw std::runtime_error("OBJ face entry has too many slashes");
+        }
+
+        // Position and normal: "3//1" or "3/2/1".
+        const std::size_t normalIndex = parseIndex(
+            entry.substr(secondSlash + 1),
+            normals.size(),
+            "normal"
+        );
+
+        corner.normal = normals[normalIndex];
+        return corner;
     }
 }
 
 Mesh parseObj(std::istream& input) {
     Mesh mesh;
+    std::vector<Vec3> normals;
     std::string line;
     std::size_t lineNumber = 0;
 
@@ -116,50 +178,98 @@ Mesh parseObj(std::istream& input) {
                 }
 
                 mesh.vertices.push_back(Vec4{x, y, z, 1.0f});
-            }
-            else if (type == "f") {
-                std::vector<std::size_t> indices;
-                std::string entry;
+            } else if (type == "vn") {
+                float x;
+                float y;
+                float z;
 
-                // Read all vertex entries belonging to this face.
-                while (lineStream >> entry) {
-                    indices.push_back(
-                        parseVertexIndex(entry, mesh.vertices.size())
+                if (!(lineStream >> x >> y >> z)) {
+                    throw std::runtime_error(
+                        "Normal requires three coordinates"
                     );
                 }
 
-                if (indices.size() < 3) {
+                if (!std::isfinite(x) ||
+                    !std::isfinite(y) ||
+                    !std::isfinite(z)) {
+                    throw std::runtime_error(
+                        "Normal coordinates must be finite"
+                    );
+                }
+
+                std::string extra;
+
+                if (lineStream >> extra) {
+                    throw std::runtime_error(
+                        "Extra normal values are not supported"
+                    );
+                }
+
+                // Normalize using double intermediates to avoid
+                // overflow when the input components are large.
+                const double length = std::hypot(
+                    static_cast<double>(x),
+                    static_cast<double>(y),
+                    static_cast<double>(z)
+                );
+
+                if (length == 0.0) {
+                    throw std::runtime_error("Normal cannot be zero");
+                }
+
+                normals.push_back(Vec3{
+                    static_cast<float>(x / length),
+                    static_cast<float>(y / length),
+                    static_cast<float>(z / length)
+                });
+            } else if (type == "f") {
+                std::vector<FaceCorner> corners;
+                std::string entry;
+
+                while (lineStream >> entry) {
+                    corners.push_back(
+                        parseCorner(entry, mesh.vertices.size(), normals)
+                    );
+                }
+
+                if (corners.size() < 3) {
                     throw std::runtime_error(
                         "Face requires at least three vertex entries"
                     );
                 }
 
-                // Create a triangle fan around the first vertex.
+                // Triangulate a convex polygon while preserving
+                // the normal belonging to each original corner.
                 for (std::size_t index = 1;
-                    index + 1 < indices.size();
-                    ++index) {
+                     index + 1 < corners.size();
+                     ++index) {
 
-                    mesh.triangles.push_back(
-                        Triangle{
-                            indices[0],
-                            indices[index],
-                            indices[index + 1]
-                        }
-                    );
+                    Triangle triangle{
+                        corners[0].vertex,
+                        corners[index].vertex,
+                        corners[index + 1].vertex
+                    };
+
+                    triangle.normals[0] = corners[0].normal;
+                    triangle.normals[1] = corners[index].normal;
+                    triangle.normals[2] = corners[index + 1].normal;
+
+                    mesh.triangles.push_back(triangle);
                 }
 
-                // Add the original polygon's boundary edges.
-                for (std::size_t index = 0; index < indices.size(); ++index) {
-                    const std::size_t next = (index + 1) % indices.size();
+                // Keep only the original polygon's boundary edges.
+                for (std::size_t index = 0; index < corners.size(); ++index) {
+                    const std::size_t next = (index + 1) % corners.size();
 
-                    mesh.edges.push_back(
-                        Edge{indices[index], indices[next]}
-                    );
+                    mesh.edges.push_back(Edge{
+                        corners[index].vertex,
+                        corners[next].vertex
+                    });
                 }
             }
 
-            // Other records, such as normals and materials,
-            // are ignored by this first version.
+            // Other records, such as texture coordinates, smoothing
+            // groups and materials, are currently ignored.
         }
         catch (const std::runtime_error& error) {
             throw std::runtime_error(
