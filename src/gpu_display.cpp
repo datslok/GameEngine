@@ -1,0 +1,491 @@
+#include "gpu_display.h"
+
+#include <stdexcept>
+#include <string>
+#include <cstddef>
+#include <cstring>
+
+namespace {
+    struct GpuVertex {
+        float x;
+        float y;
+        float z;
+
+        float r;
+        float g;
+        float b;
+    };
+
+    std::runtime_error gpuError(const char* message) {
+        return std::runtime_error(
+            std::string{message} + ": " + SDL_GetError()
+        );
+    }
+    SDL_GPUShader* loadShader(
+        SDL_GPUDevice* device,
+        const char* filename,
+        SDL_GPUShaderStage stage,
+        Uint32 uniformBufferCount
+    ) {
+        std::size_t codeSize = 0;
+        void* code = SDL_LoadFile(filename, &codeSize);
+
+        if (code == nullptr) {
+            throw gpuError(filename);
+        }
+
+        SDL_GPUShaderCreateInfo info{};
+        info.code = static_cast<const Uint8*>(code);
+        info.code_size = codeSize;
+        info.entrypoint = "main";
+        info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        info.stage = stage;
+        info.num_uniform_buffers = uniformBufferCount;
+
+        SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
+
+        if (shader == nullptr) {
+            const std::runtime_error error =
+                gpuError("Shader creation failed");
+
+            SDL_free(code);
+            throw error;
+        }
+
+        SDL_free(code);
+        return shader;
+    }
+}
+
+GpuDisplay::GpuDisplay(const char* title, int width, int height) {
+    if (width <= 0 || height <= 0) {
+        throw std::invalid_argument(
+            "Display dimensions must be positive"
+        );
+    }
+
+    try {
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+            throw gpuError("SDL initialization failed");
+        }
+
+        videoInitialized = true;
+
+        // Select Vulkan and the shader format we will use later.
+        device = SDL_CreateGPUDevice(
+            SDL_GPU_SHADERFORMAT_SPIRV,
+            true,
+            "vulkan"
+        );
+
+        if (device == nullptr) {
+            throw gpuError("GPU device creation failed");
+        }
+
+        window = SDL_CreateWindow(title, width, height, 0);
+
+        if (window == nullptr) {
+            throw gpuError("Window creation failed");
+        }
+
+        // Connect this window to the GPU device.
+        if (!SDL_ClaimWindowForGPUDevice(device, window)) {
+            throw gpuError("GPU window claim failed");
+        }
+
+        windowClaimed = true;
+        createPipeline();
+        createGeometry();
+    }
+    catch (...) {
+        cleanup();
+        throw;
+    }
+}
+
+void GpuDisplay::createPipeline() {
+    SDL_GPUShader* vertexShader = nullptr;
+    SDL_GPUShader* fragmentShader = nullptr;
+
+    try {
+        vertexShader = loadShader(
+            device,
+            "assets/shaders/triangle.vert.spv",
+            SDL_GPU_SHADERSTAGE_VERTEX,
+            1
+        );
+
+        fragmentShader = loadShader(
+            device,
+            "assets/shaders/triangle.frag.spv",
+            SDL_GPU_SHADERSTAGE_FRAGMENT,
+            0
+        );
+
+        SDL_GPUColorTargetDescription colourTarget{};
+        colourTarget.format =
+            SDL_GetGPUSwapchainTextureFormat(device, window);
+
+
+        SDL_GPUVertexBufferDescription vertexDescription{};
+        vertexDescription.slot = 0;
+        vertexDescription.pitch = static_cast<Uint32>(sizeof(GpuVertex));
+        vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+        SDL_GPUVertexAttribute attributes[2]{};
+
+        // Position: shader input location 0.
+        attributes[0].location = 0;
+        attributes[0].buffer_slot = 0;
+        attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+        attributes[0].offset = static_cast<Uint32>(offsetof(GpuVertex, x));
+
+        // Colour: shader input location 1.
+        attributes[1].location = 1;
+        attributes[1].buffer_slot = 0;
+        attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+        attributes[1].offset = static_cast<Uint32>(offsetof(GpuVertex, r));
+
+        SDL_GPUGraphicsPipelineCreateInfo info{};
+        info.vertex_shader = vertexShader;
+        info.fragment_shader = fragmentShader;
+        info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+
+        info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+        info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+        info.target_info.num_color_targets = 1;
+        info.target_info.color_target_descriptions = &colourTarget;
+
+        info.vertex_input_state.num_vertex_buffers = 1;
+        info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
+        info.vertex_input_state.num_vertex_attributes = 2;
+        info.vertex_input_state.vertex_attributes = attributes;
+        pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+
+        if (pipeline == nullptr) {
+            throw gpuError("Graphics pipeline creation failed");
+        }
+    }
+    catch (...) {
+        if (fragmentShader != nullptr) {
+            SDL_ReleaseGPUShader(device, fragmentShader);
+        }
+
+        if (vertexShader != nullptr) {
+            SDL_ReleaseGPUShader(device, vertexShader);
+        }
+
+        throw;
+    }
+
+    // The pipeline retains what it needs from the shaders.
+    SDL_ReleaseGPUShader(device, fragmentShader);
+    SDL_ReleaseGPUShader(device, vertexShader);
+}
+
+void GpuDisplay::createGeometry() {
+    const GpuVertex vertices[] = {
+        // Position             Colour
+        {-0.6f, -0.6f, 0.5f,    1.0f, 0.0f, 0.0f},
+        { 0.6f, -0.6f, 0.5f,    0.0f, 1.0f, 0.0f},
+        { 0.6f,  0.6f, 0.5f,    0.0f, 0.0f, 1.0f},
+        {-0.6f,  0.6f, 0.5f,    1.0f, 1.0f, 0.0f}
+    };
+
+    const Uint32 indices[] = {
+        0, 1, 2,
+        0, 2, 3
+    };
+
+    const Uint32 vertexBytes =
+        static_cast<Uint32>(sizeof(vertices));
+
+    const Uint32 indexBytes =
+        static_cast<Uint32>(sizeof(indices));
+
+    // Create the GPU buffer for vertex positions and colours.
+    SDL_GPUBufferCreateInfo vertexInfo{};
+    vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+    vertexInfo.size = vertexBytes;
+
+    vertexBuffer = SDL_CreateGPUBuffer(device, &vertexInfo);
+
+    if (vertexBuffer == nullptr) {
+        throw gpuError("Vertex buffer creation failed");
+    }
+
+    // Create the GPU buffer for triangle indices.
+    SDL_GPUBufferCreateInfo indexInfo{};
+    indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+    indexInfo.size = indexBytes;
+
+    indexBuffer = SDL_CreateGPUBuffer(device, &indexInfo);
+
+    if (indexBuffer == nullptr) {
+        throw gpuError("Index buffer creation failed");
+    }
+
+    // One temporary upload buffer holds both arrays.
+    SDL_GPUTransferBufferCreateInfo transferInfo{};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = vertexBytes + indexBytes;
+
+    SDL_GPUTransferBuffer* transfer =
+        SDL_CreateGPUTransferBuffer(device, &transferInfo);
+
+    if (transfer == nullptr) {
+        throw gpuError("Transfer buffer creation failed");
+    }
+
+    SDL_GPUCommandBuffer* commands = nullptr;
+
+    try {
+        void* mapped =
+            SDL_MapGPUTransferBuffer(device, transfer, false);
+
+        if (mapped == nullptr) {
+            throw gpuError("Transfer buffer mapping failed");
+        }
+
+        Uint8* destination = static_cast<Uint8*>(mapped);
+
+        // Vertices first, then indices immediately afterward.
+        std::memcpy(destination, vertices, sizeof(vertices));
+        std::memcpy(
+            destination + vertexBytes,
+            indices,
+            sizeof(indices)
+        );
+
+        SDL_UnmapGPUTransferBuffer(device, transfer);
+
+        commands = SDL_AcquireGPUCommandBuffer(device);
+
+        if (commands == nullptr) {
+            throw gpuError("Upload command buffer acquisition failed");
+        }
+
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commands);
+
+        if (copyPass == nullptr) {
+            throw gpuError("GPU copy pass creation failed");
+        }
+
+        // Copy the first part into the vertex buffer.
+        SDL_GPUTransferBufferLocation vertexSource{};
+        vertexSource.transfer_buffer = transfer;
+        vertexSource.offset = 0;
+
+        SDL_GPUBufferRegion vertexRegion{};
+        vertexRegion.buffer = vertexBuffer;
+        vertexRegion.offset = 0;
+        vertexRegion.size = vertexBytes;
+
+        SDL_UploadToGPUBuffer(
+            copyPass,
+            &vertexSource,
+            &vertexRegion,
+            false
+        );
+
+        // Copy the second part into the index buffer.
+        SDL_GPUTransferBufferLocation indexSource{};
+        indexSource.transfer_buffer = transfer;
+        indexSource.offset = vertexBytes;
+
+        SDL_GPUBufferRegion indexRegion{};
+        indexRegion.buffer = indexBuffer;
+        indexRegion.offset = 0;
+        indexRegion.size = indexBytes;
+
+        SDL_UploadToGPUBuffer(
+            copyPass,
+            &indexSource,
+            &indexRegion,
+            false
+        );
+
+        SDL_EndGPUCopyPass(copyPass);
+
+        const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
+        commands = nullptr;
+
+        if (!submitted) {
+            throw gpuError("Geometry upload submission failed");
+        }
+    }
+    catch (...) {
+        if (commands != nullptr) {
+            SDL_CancelGPUCommandBuffer(commands);
+        }
+
+        SDL_ReleaseGPUTransferBuffer(device, transfer);
+        throw;
+    }
+
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+}
+
+GpuDisplay::~GpuDisplay() {
+    cleanup();
+}
+
+void GpuDisplay::cleanup() noexcept {
+    if (device != nullptr) {
+        // Finish outstanding work before releasing resources.
+        SDL_WaitForGPUIdle(device);
+
+        if (indexBuffer != nullptr) {
+            SDL_ReleaseGPUBuffer(device, indexBuffer);
+            indexBuffer = nullptr;
+        }
+
+        if (vertexBuffer != nullptr) {
+            SDL_ReleaseGPUBuffer(device, vertexBuffer);
+            vertexBuffer = nullptr;
+        }
+
+        if (pipeline != nullptr) {
+            SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+            pipeline = nullptr;
+        }
+
+        if (windowClaimed) {
+            SDL_ReleaseWindowFromGPUDevice(device, window);
+            windowClaimed = false;
+        }
+
+        SDL_DestroyGPUDevice(device);
+        device = nullptr;
+    }
+
+    if (window != nullptr) {
+        SDL_DestroyWindow(window);
+        window = nullptr;
+    }
+
+    if (videoInitialized) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        videoInitialized = false;
+    }
+}
+
+bool GpuDisplay::processEvents() {
+    SDL_Event event;
+
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_EVENT_QUIT) {
+            return false;
+        }
+
+        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+            event.window.windowID == SDL_GetWindowID(window)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void GpuDisplay::drawQuad(const Mat4& transform, float red, float green, float blue) {
+    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
+
+    if (commands == nullptr) {
+        throw gpuError("GPU command buffer acquisition failed");
+    }
+
+    // Get the image that will become the next displayed frame.
+    SDL_GPUTexture* swapchainTexture = nullptr;
+
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(
+            commands,
+            window,
+            &swapchainTexture,
+            nullptr,
+            nullptr)) {
+
+        const std::runtime_error error =
+            gpuError("Swapchain acquisition failed");
+
+        SDL_CancelGPUCommandBuffer(commands);
+        throw error;
+    }
+
+    // A minimized window may have no image available.
+    if (swapchainTexture == nullptr) {
+        if (!SDL_SubmitGPUCommandBuffer(commands)) {
+            throw gpuError("GPU submission failed");
+        }
+
+        SDL_Delay(10);
+        return;
+    }
+
+    SDL_GPUColorTargetInfo target{};
+    target.texture = swapchainTexture;
+    target.clear_color = SDL_FColor{red, green, blue, 1.0f};
+    target.load_op = SDL_GPU_LOADOP_CLEAR;
+    target.store_op = SDL_GPU_STOREOP_STORE;
+
+    SDL_GPURenderPass* pass =
+        SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+
+    if (pass == nullptr) {
+        const std::runtime_error error =
+            gpuError("GPU render pass creation failed");
+
+        // After acquiring a swapchain image, submit rather than cancel.
+        SDL_SubmitGPUCommandBuffer(commands);
+        throw error;
+    }
+
+    SDL_BindGPUGraphicsPipeline(pass, pipeline);
+
+    SDL_GPUBufferBinding vertexBinding{};
+    vertexBinding.buffer = vertexBuffer;
+    vertexBinding.offset = 0;
+
+    SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+
+    SDL_GPUBufferBinding indexBinding{};
+    indexBinding.buffer = indexBuffer;
+    indexBinding.offset = 0;
+
+    SDL_BindGPUIndexBuffer(
+        pass,
+        &indexBinding,
+        SDL_GPU_INDEXELEMENTSIZE_32BIT
+    );
+
+
+    // GLSL uses column-major matrix storage by default.
+    // Pack our values[row][column] into that layout.
+    float matrixData[16]{};
+
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            matrixData[column * 4 + row] =
+                transform.values[row][column];
+        }
+    }
+
+    SDL_PushGPUVertexUniformData(
+        commands,
+        0,
+        matrixData,
+        static_cast<Uint32>(sizeof(matrixData))
+    );
+    
+    // Six indices, one instance, starting at index zero.
+    SDL_DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0);
+
+    SDL_EndGPURenderPass(pass);
+
+    // Submit the commands and present the acquired window image.
+    if (!SDL_SubmitGPUCommandBuffer(commands)) {
+        throw gpuError("GPU submission failed");
+    }
+}
