@@ -5,6 +5,23 @@
 #include <SDL3/SDL.h>
 #include <numbers>
 #include <memory>
+#include <cmath>
+
+namespace {
+    float animatedAngle(
+        float initialAngle,
+        float speed,
+        double elapsedSeconds
+    ) {
+        const double angle =
+            static_cast<double>(initialAngle) +
+            static_cast<double>(speed) * elapsedSeconds;
+
+        const double fullTurn = 2.0 * std::numbers::pi_v<double>;
+
+        return static_cast<float>(std::fmod(angle, fullTurn));
+    }
+}
 
 Application::Application(int width, int height):
     buffer(width, height),
@@ -36,6 +53,12 @@ void Application::createScene(){
     second.transform.position = Vec3{2.0f, 0.0f, -7.0f};
     second.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
     second.colour = Pixel{80, 120, 220};
+
+    first.initialRotation = first.transform.rotation;
+    first.rotationSpeed = Vec3{2.0f, 2.0f, 0.0f};
+
+    second.initialRotation = second.transform.rotation;
+    second.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
 
     scene.add(first);
     scene.add(second);
@@ -79,11 +102,25 @@ void Application::run() {
 void Application::update(float deltaTime) {
     cameraController.update(camera, deltaTime);
 
-    std::vector<MeshInstance>& objects = scene.getObjects();
-
-    objects[0].transform.rotation.x += 2.0f * deltaTime;
-    objects[0].transform.rotation.y += 2.0f * deltaTime;
-    objects[1].transform.rotation.y -= 1.0f * deltaTime;
+    for (MeshInstance& object : scene.getObjects()) {
+        object.transform.rotation = Vec3{
+            animatedAngle(
+                object.initialRotation.x,
+                object.rotationSpeed.x,
+                elapsedSeconds
+            ),
+            animatedAngle(
+                object.initialRotation.y,
+                object.rotationSpeed.y,
+                elapsedSeconds
+            ),
+            animatedAngle(
+                object.initialRotation.z,
+                object.rotationSpeed.z,
+                elapsedSeconds
+            )
+        };
+    }
 }
 
 void Application::render() {
