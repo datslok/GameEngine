@@ -273,6 +273,10 @@ SDL_GPUDevice* GpuDisplay::getDevice() const {
 }
 
 bool GpuDisplay::processEvents() {
+    // Accumulate only the mouse motion received during this frame.
+    mouseDelta = Vec2{};
+
+    const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
@@ -281,12 +285,63 @@ bool GpuDisplay::processEvents() {
         }
 
         if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-            event.window.windowID == SDL_GetWindowID(window)) {
+            event.window.windowID == windowID) {
             return false;
+        }
+
+        // Release the mouse when switching to another window.
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+            event.window.windowID == windowID) {
+            setMouseCaptured(false);
+        }
+
+        // Click inside the window to enable camera controls.
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            event.button.windowID == windowID &&
+            event.button.button == SDL_BUTTON_LEFT &&
+            SDL_GetKeyboardFocus() == window) {
+            setMouseCaptured(true);
+        }
+
+        // Escape releases the cursor without closing the application.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            event.key.windowID == windowID &&
+            event.key.scancode == SDL_SCANCODE_ESCAPE) {
+            setMouseCaptured(false);
+        }
+
+        if (event.type == SDL_EVENT_MOUSE_MOTION &&
+            event.motion.windowID == windowID &&
+            mouseCaptured) {
+            mouseDelta.x += event.motion.xrel;
+            mouseDelta.y += event.motion.yrel;
         }
     }
 
     return true;
+}
+
+void GpuDisplay::setMouseCaptured(bool captured) {
+    if (mouseCaptured == captured) {
+        return;
+    }
+
+    if (!SDL_SetWindowRelativeMouseMode(window, captured)) {
+        throw gpuError("Could not change relative mouse mode");
+    }
+
+    mouseCaptured = captured;
+
+    // Discard motion collected before capture changed.
+    mouseDelta = Vec2{};
+}
+
+bool GpuDisplay::isMouseCaptured() const {
+    return mouseCaptured;
+}
+
+Vec2 GpuDisplay::getMouseDelta() const {
+    return mouseDelta;
 }
 
 bool GpuDisplay::beginFrame(float red, float green, float blue) {

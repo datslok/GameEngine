@@ -1,5 +1,9 @@
 #include "camera.h"
 
+#include <algorithm>
+#include <cmath>
+#include <numbers>
+
 /*
 * Initialise the camera's position, direction, and projection so it can transform and view objects in the scene.
 */
@@ -30,6 +34,40 @@ Camera::Camera(
 */
 void Camera::move(const Vec3& displacement){
     position = position + displacement;
+}
+
+void Camera::rotate(float yawRadians, float pitchRadians) {
+    // Find the current elevation relative to the camera's fixed up axis.
+    const float verticalComponent =
+        std::clamp(forward.dot(up), -1.0f, 1.0f);
+
+    const float currentPitch = std::asin(verticalComponent);
+
+    // Stop just short of looking straight up or down.
+    const float pitchLimit =
+        89.0f * std::numbers::pi_v<float> / 180.0f;
+
+    const float newPitch = std::clamp(
+        currentPitch + pitchRadians,
+        -pitchLimit,
+        pitchLimit
+    );
+
+    // Remove the vertical component to get the horizontal heading.
+    const Vec3 horizontal =
+        (forward - up * verticalComponent).normalized();
+
+    // Rotate around the fixed up axis.
+    // The minus sign makes positive yaw turn toward the right.
+    const Vec3 newHorizontal =
+        horizontal * std::cos(yawRadians) -
+        up.cross(horizontal) * std::sin(yawRadians);
+
+    // Rebuild a unit direction using the new heading and elevation.
+    forward = (
+        newHorizontal * std::cos(newPitch) +
+        up * std::sin(newPitch)
+    ).normalized();
 }
 
 /*

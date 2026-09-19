@@ -19,6 +19,8 @@ class Camera {
         );
 
         void move(const Vec3& displacement);
+        // Positive yaw turns right; positive pitch looks up.
+        void rotate(float yawRadians, float pitchRadians);
 
         Vec3 getForward() const;
         Vec3 getRight() const;

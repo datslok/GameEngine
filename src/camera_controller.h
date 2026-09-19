@@ -2,15 +2,25 @@
 
 #include "camera.h"
 
-/*
-* Controls the camera movement using keyboard input and a configurable movement speed to provide consistent movement over time.
-*/
+// Controls camera movement and mouse-look sensitivity.
 class CameraController {
-    public:
-        explicit CameraController(float moveSpeed);
+public:
+    explicit CameraController(
+        float moveSpeed,
+        float mouseSensitivity = 0.002f
+    );
 
-        void update(Camera& camera, float deltaTime) const;
+    void update(Camera& camera, float deltaTime) const;
 
-    private:
-        float moveSpeed;
+    void look(
+        Camera& camera,
+        float mouseDeltaX,
+        float mouseDeltaY
+    ) const;
+
+private:
+    float moveSpeed;
+
+    // Radians of rotation per unit of mouse movement.
+    float mouseSensitivity;
 };
