@@ -1,5 +1,8 @@
 #include "vec4.h"
 
+/*
+* Initialise the vector to zero so all components start with defined values.
+*/
 Vec4::Vec4():
     x(0.0f), 
     y(0.0f), 
@@ -7,6 +10,9 @@ Vec4::Vec4():
     w(0.0f){
 }
 
+/*
+* Initialise the vector with the specified x,y,z,w coordinates.
+*/
 Vec4::Vec4(float x, float y, float z, float w):
     x(x), 
     y(y), 
@@ -14,6 +20,9 @@ Vec4::Vec4(float x, float y, float z, float w):
     w(w){
 }
 
+/*
+* Add the corresponding components to combine the two vectors.
+*/
 Vec4 Vec4::operator+(const Vec4& other) const{
     return Vec4{
         x + other.x,
@@ -23,6 +32,9 @@ Vec4 Vec4::operator+(const Vec4& other) const{
     };
 }
 
+/*
+* Subtract the corresponding components to find the difference between the vectors.
+*/
 Vec4 Vec4::operator-(const Vec4& other) const{
     return Vec4{
         x - other.x,
@@ -32,6 +44,9 @@ Vec4 Vec4::operator-(const Vec4& other) const{
     };
 }
 
+/*
+* Scale each component by the given value to change the vector's magnitude.
+*/
 Vec4 Vec4::operator*(float scalar) const{
     return Vec4{
         x * scalar,
