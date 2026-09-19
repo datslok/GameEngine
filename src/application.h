@@ -6,7 +6,10 @@
 #include "mesh.h"
 #include "pixelbuffer.h"
 #include "renderer.h"
+#include "mesh_instance.h"
+#include "scene.h"
 
+#include <vector>
 #include <cstdint>
 
 class Application {
@@ -18,6 +21,7 @@ public:
 private:
     void update(float deltaTime);
     void render();
+    void createScene();
 
     // Members are constructed in this order.
     PixelBuffer buffer;
@@ -26,7 +30,7 @@ private:
 
     Camera camera;
     CameraController cameraController;
-    Mesh cube;
+    Scene scene;
 
     double elapsedSeconds = 0.0;
     std::uint64_t targetFPS = 240;
