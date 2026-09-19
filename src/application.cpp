@@ -25,21 +25,20 @@ namespace {
 }
 
 Application::Application(int width, int height):
-    buffer(width, height),
     display("My Engine", width, height),
-    renderer(buffer),
     camera(
         Vec3{2.0f, 1.0f, 0.0f},
         Vec3{0.0f, 0.0f, -5.0f},
         Vec3{0.0f, 1.0f, 0.0f},
         std::numbers::pi_v<float> / 2.0f,
-        static_cast<float>(buffer.getWidth()) / static_cast<float>(buffer.getHeight()),
+        static_cast<float>(width) / static_cast<float>(height),
         0.1f,
         100.0f
     ),
     cameraController(3.0f)
 {
     createScene();
+    uploadSceneMeshes();
 }
 
 void Application::createScene(){
@@ -144,18 +143,39 @@ void Application::update(float deltaTime) {
     }
 }
 
-void Application::render() {
-    renderer.clear(Pixel{0, 0, 0});
-
+void Application::uploadSceneMeshes() {
     for (const MeshInstance& object : scene.getObjects()) {
-        renderer.drawMesh(
-            *object.mesh,
-            object.transform.getMatrix(),
-            camera,
-            object.colour,
-            false
-        );
+        if (!gpuMeshes.contains(object.mesh)) {
+            gpuMeshes.emplace(
+                object.mesh,
+                std::make_unique<GpuMesh>(
+                    display.getDevice(),
+                    *object.mesh
+                )
+            );
+        }
+    }
+}
+
+void Application::render() {
+    Mat4 depthCorrection = Mat4::identity();
+    depthCorrection.values[2][2] = 0.5f;
+    depthCorrection.values[2][3] = 0.5f;
+
+    const Mat4 viewProjection =
+        depthCorrection *
+        camera.getProjectionMatrix() *
+        camera.getViewMatrix();
+
+    if (!display.beginFrame(0.0f, 0.0f, 0.0f)) {
+        return;
     }
 
-    display.present(buffer);
+    for (const MeshInstance& object : scene.getObjects()) {
+        const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
+
+        display.drawMesh(gpuMesh, viewProjection * object.transform.getMatrix(), object.colour);
+    }
+
+    display.endFrame();
 }

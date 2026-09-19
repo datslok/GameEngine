@@ -107,7 +107,7 @@ void GpuDisplay::createPipeline() {
             device,
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
-            0
+            1
         );
 
         SDL_GPUColorTargetDescription colourTarget{};
@@ -370,7 +370,7 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-    void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform) {
+    void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& transform, Pixel colour) {
         if (commands == nullptr || pass == nullptr) {
             throw std::logic_error("drawMesh requires an active frame");
         }
@@ -409,6 +409,16 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         matrixData,
         static_cast<Uint32>(sizeof(matrixData))
     );
+
+    // Convert our byte colour channels to the shader's 0–1 range.
+    const float colourData[4] = {
+        static_cast<float>(colour.r) / 255.0f,
+        static_cast<float>(colour.g) / 255.0f,
+        static_cast<float>(colour.b) / 255.0f,
+        1.0f
+    };
+
+    SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
     // Draw every triangle in the uploaded mesh.
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
