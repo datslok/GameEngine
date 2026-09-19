@@ -7,6 +7,9 @@
 
 #include <numbers>
 
+/*
+* Initialises the main application components, so they can share the same buffer, display, renderer, and camera.
+*/
 Application::Application(int width, int height)
     : buffer(width, height),
       display("My Engine", width, height),
@@ -25,6 +28,9 @@ Application::Application(int width, int height)
       cube(Mesh::cube()) {
 }
 
+/*
+* Run the main loop continuously process input, update the scene, and render each frame.
+*/
 void Application::run() {
     Uint64 previousFrameStart = SDL_GetTicksNS();
 
@@ -60,10 +66,16 @@ void Application::run() {
     }
 }
 
+/*
+* Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
+*/
 void Application::update(float deltaTime) {
     cameraController.update(camera, deltaTime);
 }
 
+/*
+* Render the scene using the current camera and model transformation, to produce the frame showed on the display.
+*/
 void Application::render(){
     const float angle =
         static_cast<float>(elapsedSeconds * 0.2f); // rotation speed
