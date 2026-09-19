@@ -1,5 +1,8 @@
 #pragma once
 
+/*
+* Represents a 4D vector for storing coordinates and performing vector calculations needed for geometric operations.
+*/
 struct Vec4 {
     float x;
     float y;

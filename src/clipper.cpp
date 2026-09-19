@@ -98,6 +98,9 @@ namespace {
     }
 }
 
+/*
+* Clip the line against each boundary of the view volume so only the visible portion of the line remains.
+*/
 bool clipLine(Vec4& start, Vec4& end){
     if (!clipAgainstPlane(
             start, end,
