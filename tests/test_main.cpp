@@ -13,6 +13,7 @@ void testTriangleDepth();
 void testShading();
 void testTransform();
 void testScene();
+void testObjLoader();
 
 int main(){
     testPixelBuffer();
@@ -28,6 +29,7 @@ int main(){
     testShading();
     testTransform();
     testScene();
+    testObjLoader();
 
     std::cout << "All tests passed!\n";
     return 0;
