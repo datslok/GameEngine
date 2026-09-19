@@ -140,8 +140,13 @@ void GpuDisplay::createPipeline() {
         info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 
         info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 
+        // Skip triangles facing away from the camera.
+        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
+
+        // Counter-clockwise vertex order identifies a front face.
+        info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+        
         info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
         info.target_info.num_color_targets = 1;
