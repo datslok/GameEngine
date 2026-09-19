@@ -6,7 +6,9 @@
 #include "mesh.h"
 #include "pixelbuffer.h"
 #include "renderer.h"
+#include "mesh_instance.h"
 
+#include <vector>
 #include <cstdint>
 
 class Application {
@@ -26,7 +28,7 @@ private:
 
     Camera camera;
     CameraController cameraController;
-    Mesh cube;
+    std::vector<MeshInstance> objects;
 
     double elapsedSeconds = 0.0;
     std::uint64_t targetFPS = 240;

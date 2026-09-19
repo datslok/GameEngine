@@ -1,7 +1,6 @@
 #include "application.h"
 
 #include <SDL3/SDL_main.h>
-
 #include <exception>
 #include <iostream>
 
