@@ -3,8 +3,10 @@
 #include "pixel.h"
 #include "vec3.h"
 
-// normal and toLight must use the same coordinate space.
-// toLight points from the surface toward the light.
+/*
+* The normal and light direction must use the same coordinate space.
+* The light direction points from the surface toward the light source.
+*/
 Pixel shadeFlat(
     Pixel baseColour,
     const Vec3& normal,
