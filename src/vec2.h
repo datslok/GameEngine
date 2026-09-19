@@ -1,5 +1,8 @@
 #pragma once
 
+/*
+* Represents a 2D vector and provides common operations for manipulating vector coordinates, and performing vector calculations needed for geometric operations.
+*/
 struct Vec2{
     float x;
     float y;
