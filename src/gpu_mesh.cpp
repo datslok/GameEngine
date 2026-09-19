@@ -102,19 +102,32 @@ GpuMesh::GpuMesh(SDL_GPUDevice* device, const Mesh& mesh):
             nz = static_cast<float>(normalZ / normalLength);
         }
 
-        const Uint32 firstIndex =
-            static_cast<Uint32>(vertices.size());
+        const Uint32 firstIndex = static_cast<Uint32>(vertices.size());
+
+        const Vec3 faceNormal{nx, ny, nz};
+
+        const Vec3 firstNormal =
+            triangle.normals[0].value_or(faceNormal);
+
+        const Vec3 secondNormal =
+            triangle.normals[1].value_or(faceNormal);
+
+        const Vec3 thirdNormal =
+            triangle.normals[2].value_or(faceNormal);
 
         vertices.push_back(GpuVertex{
-            first.x, first.y, first.z, nx, ny, nz
+            first.x, first.y, first.z,
+            firstNormal.x, firstNormal.y, firstNormal.z
         });
 
         vertices.push_back(GpuVertex{
-            second.x, second.y, second.z, nx, ny, nz
+            second.x, second.y, second.z,
+            secondNormal.x, secondNormal.y, secondNormal.z
         });
 
         vertices.push_back(GpuVertex{
-            third.x, third.y, third.z, nx, ny, nz
+            third.x, third.y, third.z,
+            thirdNormal.x, thirdNormal.y, thirdNormal.z
         });
 
         indices.push_back(firstIndex);

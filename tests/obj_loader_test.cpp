@@ -200,4 +200,111 @@ void testObjLoader() {
             assert(mesh.edges[index].end == (index + 1) % 4);
         }
     }
+
+    // A face without normals keeps the flat-shading fallback.
+    {
+        std::istringstream input{vertices + "f 1 2 3\n"};
+        const Mesh mesh = parseObj(input);
+
+        assert(!mesh.triangles[0].normals[0].has_value());
+        assert(!mesh.triangles[0].normals[1].has_value());
+        assert(!mesh.triangles[0].normals[2].has_value());
+    }
+
+    // Normal indices are independent of position indices.
+    // Negative indices work, and non-unit normals are normalized.
+    {
+        std::istringstream input{
+            vertices +
+            "vn 2 0 0\n"
+            "vn 0 3 0\n"
+            "vn 0 0 4\n"
+            "f 1//-1 2//-3 3//-2\n"
+        };
+
+        const Mesh mesh = parseObj(input);
+        const Triangle& triangle = mesh.triangles[0];
+
+        assert(triangle.normals[0].value().z == 1.0f);
+        assert(triangle.normals[1].value().x == 1.0f);
+        assert(triangle.normals[2].value().y == 1.0f);
+    }
+
+    // A shared position may use different normals on different faces.
+    {
+        std::istringstream input{
+            vertices +
+            "vn 0 0 1\n"
+            "vn 0 1 0\n"
+            "f 1//1 2//1 3//1\n"
+            "f 1//2 2//2 3//2\n"
+        };
+
+        const Mesh mesh = parseObj(input);
+
+        assert(mesh.triangles[0].first == mesh.triangles[1].first);
+        assert(mesh.triangles[0].normals[0].value().z == 1.0f);
+        assert(mesh.triangles[1].normals[0].value().y == 1.0f);
+    }
+
+    // Quad triangulation preserves the original corner normals.
+    // Also exercise the position/texture/normal form.
+    {
+        std::istringstream input{
+            "v 0 0 0\n"
+            "v 1 0 0\n"
+            "v 1 1 0\n"
+            "v 0 1 0\n"
+            "vt 0 0\n"
+            "vn 1 0 0\n"
+            "vn 0 1 0\n"
+            "vn 0 0 1\n"
+            "vn -1 0 0\n"
+            "f 1/1/1 2/1/2 3/1/3 4/1/4\n"
+        };
+
+        const Mesh mesh = parseObj(input);
+
+        assert(mesh.triangles.size() == 2);
+
+        const Triangle& firstTriangle = mesh.triangles[0];
+        const Triangle& secondTriangle = mesh.triangles[1];
+
+        assert(firstTriangle.normals[0].value().x == 1.0f);
+        assert(firstTriangle.normals[1].value().y == 1.0f);
+        assert(firstTriangle.normals[2].value().z == 1.0f);
+
+        assert(secondTriangle.normals[0].value().x == 1.0f);
+        assert(secondTriangle.normals[1].value().z == 1.0f);
+        assert(secondTriangle.normals[2].value().x == -1.0f);
+    }
+
+    // Invalid normal records and references.
+    expectObjError("vn 0 1\n", "three coordinates");
+    expectObjError("vn 0 0 0\n", "Normal cannot be zero");
+
+    expectObjError(
+        vertices + "vn 0 0 1\nf 1//0 2//1 3//1\n",
+        "normal indices cannot be zero"
+    );
+
+    expectObjError(
+        vertices + "vn 0 0 1\nf 1//2 2//1 3//1\n",
+        "outside the normal list"
+    );
+
+    expectObjError(
+        vertices + "vn 0 0 1\nf 1//-2 2//1 3//1\n",
+        "outside the normal list"
+    );
+
+    expectObjError(
+        vertices + "vn 0 0 1\nf 1//abc 2//1 3//1\n",
+        "normal index is not an integer"
+    );
+
+    expectObjError(
+        vertices + "f 1// 2 3\n",
+        "missing a normal index"
+    );
 }
