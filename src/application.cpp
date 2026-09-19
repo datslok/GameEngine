@@ -30,7 +30,7 @@ Application::Application(int width, int height):
         Vec3{2.0f, 1.0f, 0.0f},
         Vec3{0.0f, 0.0f, -5.0f},
         Vec3{0.0f, 1.0f, 0.0f},
-        std::numbers::pi_v<float> / 2.0f,
+        70.0f * std::numbers::pi_v<float> / 180.0f, // FoV
         static_cast<float>(width) / static_cast<float>(height),
         0.1f,
         100.0f
