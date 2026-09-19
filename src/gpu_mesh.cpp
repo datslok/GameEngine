@@ -29,33 +29,19 @@ GpuMesh::GpuMesh(SDL_GPUDevice* device, const Mesh& mesh):
         );
     }
 
-    // SDL buffer sizes are measured in bytes using Uint32.
+    // Each triangle gets three separate GPU vertices.
+    // This lets neighbouring faces have different normals.
     const std::size_t maxBytes =
         std::numeric_limits<Uint32>::max();
 
-    if (mesh.vertices.size() > maxBytes / sizeof(GpuVertex)) {
-        throw std::overflow_error("Mesh vertex data is too large");
-    }
+    const std::size_t bytesPerTriangle =
+        3 * (sizeof(GpuVertex) + sizeof(Uint32));
 
-    if (mesh.triangles.size() > maxBytes / (3 * sizeof(Uint32))) {
-        throw std::overflow_error("Mesh index data is too large");
-    }
-
-    const Uint32 vertexBytes = static_cast<Uint32>(
-        mesh.vertices.size() * sizeof(GpuVertex)
-    );
-
-    const Uint32 indexBytes = static_cast<Uint32>(
-        mesh.triangles.size() * 3 * sizeof(Uint32)
-    );
-
-    if (vertexBytes > std::numeric_limits<Uint32>::max() - indexBytes) {
+    if (mesh.triangles.size() > maxBytes / bytesPerTriangle) {
         throw std::overflow_error("Combined mesh upload is too large");
     }
 
-    std::vector<GpuVertex> vertices;
-    vertices.reserve(mesh.vertices.size());
-
+    // Validate positions before calculating normals.
     for (const Vec4& position : mesh.vertices) {
         if (!std::isfinite(position.x) ||
             !std::isfinite(position.y) ||
@@ -65,20 +51,15 @@ GpuMesh::GpuMesh(SDL_GPUDevice* device, const Mesh& mesh):
                 "GpuMesh requires finite XYZ positions with w = 1"
             );
         }
-
-        // Temporary position-based colours for the GPU demo.
-        vertices.push_back(GpuVertex{
-            position.x,
-            position.y,
-            position.z,
-            std::clamp(position.x * 0.5f + 0.5f, 0.0f, 1.0f),
-            std::clamp(position.y * 0.5f + 0.5f, 0.0f, 1.0f),
-            std::clamp(position.z * 0.5f + 0.5f, 0.0f, 1.0f)
-        });
     }
 
+    const std::size_t vertexCount = mesh.triangles.size() * 3;
+
+    std::vector<GpuVertex> vertices;
+    vertices.reserve(vertexCount);
+
     std::vector<Uint32> indices;
-    indices.reserve(mesh.triangles.size() * 3);
+    indices.reserve(vertexCount);
 
     for (const Triangle& triangle : mesh.triangles) {
         if (triangle.first >= mesh.vertices.size() ||
@@ -89,10 +70,65 @@ GpuMesh::GpuMesh(SDL_GPUDevice* device, const Mesh& mesh):
             );
         }
 
-        indices.push_back(static_cast<Uint32>(triangle.first));
-        indices.push_back(static_cast<Uint32>(triangle.second));
-        indices.push_back(static_cast<Uint32>(triangle.third));
+        const Vec4& first = mesh.vertices[triangle.first];
+        const Vec4& second = mesh.vertices[triangle.second];
+        const Vec4& third = mesh.vertices[triangle.third];
+
+        // Use double for the intermediate normal calculation.
+        const double edgeAX = static_cast<double>(second.x) - first.x;
+        const double edgeAY = static_cast<double>(second.y) - first.y;
+        const double edgeAZ = static_cast<double>(second.z) - first.z;
+
+        const double edgeBX = static_cast<double>(third.x) - first.x;
+        const double edgeBY = static_cast<double>(third.y) - first.y;
+        const double edgeBZ = static_cast<double>(third.z) - first.z;
+
+        // Cross product: a direction perpendicular to the triangle.
+        const double normalX = edgeAY * edgeBZ - edgeAZ * edgeBY;
+        const double normalY = edgeAZ * edgeBX - edgeAX * edgeBZ;
+        const double normalZ = edgeAX * edgeBY - edgeAY * edgeBX;
+
+        const double normalLength =
+            std::hypot(normalX, normalY, normalZ);
+
+        float nx = 0.0f;
+        float ny = 0.0f;
+        float nz = 0.0f;
+
+        // Degenerate triangles keep a zero normal.
+        if (normalLength > 0.0) {
+            nx = static_cast<float>(normalX / normalLength);
+            ny = static_cast<float>(normalY / normalLength);
+            nz = static_cast<float>(normalZ / normalLength);
+        }
+
+        const Uint32 firstIndex =
+            static_cast<Uint32>(vertices.size());
+
+        vertices.push_back(GpuVertex{
+            first.x, first.y, first.z, nx, ny, nz
+        });
+
+        vertices.push_back(GpuVertex{
+            second.x, second.y, second.z, nx, ny, nz
+        });
+
+        vertices.push_back(GpuVertex{
+            third.x, third.y, third.z, nx, ny, nz
+        });
+
+        indices.push_back(firstIndex);
+        indices.push_back(firstIndex + 1);
+        indices.push_back(firstIndex + 2);
     }
+
+    const Uint32 vertexBytes = static_cast<Uint32>(
+        vertices.size() * sizeof(GpuVertex)
+    );
+
+    const Uint32 indexBytes = static_cast<Uint32>(
+        indices.size() * sizeof(Uint32)
+    );
 
     indexCount = static_cast<Uint32>(indices.size());
 

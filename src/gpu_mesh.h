@@ -10,9 +10,9 @@ struct GpuVertex {
     float y;
     float z;
 
-    float r;
-    float g;
-    float b;
+    float nx;
+    float ny;
+    float nz;
 };
 
 class GpuMesh {

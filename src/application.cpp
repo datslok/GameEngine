@@ -174,7 +174,9 @@ void Application::render() {
     for (const MeshInstance& object : scene.getObjects()) {
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
 
-        display.drawMesh(gpuMesh, viewProjection * object.transform.getMatrix(), object.colour);
+        const Mat4 model = object.transform.getMatrix();
+
+        display.drawMesh(gpuMesh, model, viewProjection, object.colour);
     }
 
     display.endFrame();
