@@ -173,7 +173,11 @@ int main(int argc, char* argv[]) {
                 Mat4::rotationX(0.3f);
 
             // Rebuild the view from the updated camera position.
-            const Mat4 transform = camera.getProjectionMatrix() * camera.getViewMatrix() * model;
+            const Mat4 view = camera.getViewMatrix();
+            const Mat4 modelView = view * model;
+
+            const Mat4 transform =
+                camera.getProjectionMatrix() * modelView;
 
             buffer.clear(Pixel{0, 0, 0});
             depthBuffer.clear();
@@ -187,6 +191,36 @@ int main(int argc, char* argv[]) {
 
             // Render the filled cube faces.
             for (const Triangle& triangle : triangles) {
+                    const Vec4 viewFirst = modelView * vertices[triangle.first];
+
+                    const Vec4 viewSecond = modelView * vertices[triangle.second];
+
+                    const Vec4 viewThird = modelView * vertices[triangle.third];
+
+                    const Vec3 edgeFirst{
+                        viewSecond.x - viewFirst.x,
+                        viewSecond.y - viewFirst.y,
+                        viewSecond.z - viewFirst.z
+                    };
+
+                    const Vec3 edgeSecond{
+                        viewThird.x - viewFirst.x,
+                        viewThird.y - viewFirst.y,
+                        viewThird.z - viewFirst.z
+                    };
+
+                    const Vec3 normal = edgeFirst.cross(edgeSecond);
+
+                    const Vec3 toCamera{
+                        -viewFirst.x,
+                        -viewFirst.y,
+                        -viewFirst.z
+                    };
+
+                    if (normal.dot(toCamera) <= 0.0f) {
+                        continue;
+                    }
+
                 const std::vector<Vec4> clippedPolygon =
                     clipTriangle(
                         clipVertices[triangle.first],
