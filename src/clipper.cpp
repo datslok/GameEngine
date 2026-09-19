@@ -2,6 +2,9 @@
 
 #include <vector>
 
+/*
+* Clip a line segment against a plane to remove points outside the view volume.
+*/
 namespace {
     bool clipAgainstPlane(
         Vec4& start,
