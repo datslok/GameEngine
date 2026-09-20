@@ -14,7 +14,8 @@ namespace {
         SDL_GPUDevice* device,
         const char* filename,
         SDL_GPUShaderStage stage,
-        Uint32 uniformBufferCount
+        Uint32 uniformBufferCount,
+        Uint32 samplerCount
     ) {
         std::size_t codeSize = 0;
         void* code = SDL_LoadFile(filename, &codeSize);
@@ -30,6 +31,7 @@ namespace {
         info.format = SDL_GPU_SHADERFORMAT_SPIRV;
         info.stage = stage;
         info.num_uniform_buffers = uniformBufferCount;
+        info.num_samplers = samplerCount;
 
         SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
 
@@ -84,6 +86,7 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
 
         windowClaimed = true;
         createPipeline();
+        createCheckerTexture();
     }
     catch (...) {
         cleanup();
@@ -100,13 +103,15 @@ void GpuDisplay::createPipeline() {
             device,
             "assets/shaders/triangle.vert.spv",
             SDL_GPU_SHADERSTAGE_VERTEX,
-            1
+            1,
+            0
         );
 
         fragmentShader = loadShader(
             device,
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
+            1,
             1
         );
 
@@ -120,7 +125,7 @@ void GpuDisplay::createPipeline() {
         vertexDescription.pitch = static_cast<Uint32>(sizeof(GpuVertex));
         vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-        SDL_GPUVertexAttribute attributes[2]{};
+        SDL_GPUVertexAttribute attributes[3]{};
 
         // Position: shader input location 0.
         attributes[0].location = 0;
@@ -133,6 +138,12 @@ void GpuDisplay::createPipeline() {
         attributes[1].buffer_slot = 0;
         attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
         attributes[1].offset = static_cast<Uint32>(offsetof(GpuVertex, nx));
+
+        // Texture coordinates: shader input location 2.
+        attributes[2].location = 2;
+        attributes[2].buffer_slot = 0;
+        attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+        attributes[2].offset = static_cast<Uint32>(offsetof(GpuVertex, u));
 
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vertexShader;
@@ -154,7 +165,7 @@ void GpuDisplay::createPipeline() {
 
         info.vertex_input_state.num_vertex_buffers = 1;
         info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
-        info.vertex_input_state.num_vertex_attributes = 2;
+        info.vertex_input_state.num_vertex_attributes = 3;
         info.vertex_input_state.vertex_attributes = attributes;
         info.target_info.has_depth_stencil_target = true;
         info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
@@ -235,6 +246,16 @@ void GpuDisplay::cleanup() noexcept {
         }
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
+
+        if (checkerSampler != nullptr) {
+            SDL_ReleaseGPUSampler(device, checkerSampler);
+            checkerSampler = nullptr;
+        }
+
+        if (checkerTexture != nullptr) {
+            SDL_ReleaseGPUTexture(device, checkerTexture);
+            checkerTexture = nullptr;
+        }
 
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -484,6 +505,12 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
 
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
+    SDL_GPUTextureSamplerBinding textureBinding{};
+    textureBinding.texture = checkerTexture;
+    textureBinding.sampler = checkerSampler;
+
+    SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
+
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }
 
@@ -501,4 +528,139 @@ void GpuDisplay::endFrame() {
     if (!submitted) {
         throw gpuError("GPU submission failed");
     }
+}
+
+void GpuDisplay::createCheckerTexture() {
+    constexpr Uint32 width = 64;
+    constexpr Uint32 height = 64;
+    constexpr Uint32 cellSize = 8;
+    constexpr Uint32 byteCount = width * height * 4;
+
+    SDL_GPUTextureCreateInfo textureInfo{};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    textureInfo.width = width;
+    textureInfo.height = height;
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = 1;
+    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    checkerTexture = SDL_CreateGPUTexture(device, &textureInfo);
+
+    if (checkerTexture == nullptr) {
+        throw gpuError("Checker texture creation failed");
+    }
+
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+
+    checkerSampler = SDL_CreateGPUSampler(device, &samplerInfo);
+
+    if (checkerSampler == nullptr) {
+        throw gpuError("Checker sampler creation failed");
+    }
+
+    SDL_GPUTransferBuffer* transfer = nullptr;
+    SDL_GPUCommandBuffer* uploadCommands = nullptr;
+
+    try {
+        SDL_GPUTransferBufferCreateInfo transferInfo{};
+        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        transferInfo.size = byteCount;
+
+        transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+
+        if (transfer == nullptr) {
+            throw gpuError("Texture transfer buffer creation failed");
+        }
+
+        Uint8* pixels = static_cast<Uint8*>(
+            SDL_MapGPUTransferBuffer(device, transfer, false)
+        );
+
+        if (pixels == nullptr) {
+            throw gpuError("Texture transfer buffer mapping failed");
+        }
+
+        // Generate an 8-by-8 grid of alternating white and dark cells.
+        for (Uint32 y = 0; y < height; ++y) {
+            for (Uint32 x = 0; x < width; ++x) {
+                const bool white =
+                    ((x / cellSize + y / cellSize) % 2) == 0;
+
+                const Uint8 shade = white ? 255 : 50;
+                const Uint32 offset = (y * width + x) * 4;
+
+                pixels[offset] = shade;
+                pixels[offset + 1] = shade;
+                pixels[offset + 2] = shade;
+                pixels[offset + 3] = 255;
+            }
+        }
+
+        SDL_UnmapGPUTransferBuffer(device, transfer);
+
+        uploadCommands = SDL_AcquireGPUCommandBuffer(device);
+
+        if (uploadCommands == nullptr) {
+            throw gpuError("Texture upload command acquisition failed");
+        }
+
+        SDL_GPUCopyPass* copyPass =
+            SDL_BeginGPUCopyPass(uploadCommands);
+
+        if (copyPass == nullptr) {
+            throw gpuError("Texture copy pass creation failed");
+        }
+
+        SDL_GPUTextureTransferInfo source{};
+        source.transfer_buffer = transfer;
+        source.offset = 0;
+        source.pixels_per_row = width;
+        source.rows_per_layer = height;
+
+        SDL_GPUTextureRegion destination{};
+        destination.texture = checkerTexture;
+        destination.w = width;
+        destination.h = height;
+        destination.d = 1;
+
+        SDL_UploadToGPUTexture(
+            copyPass,
+            &source,
+            &destination,
+            false
+        );
+
+        SDL_EndGPUCopyPass(copyPass);
+
+        const bool submitted =
+            SDL_SubmitGPUCommandBuffer(uploadCommands);
+
+        uploadCommands = nullptr;
+
+        if (!submitted) {
+            throw gpuError("Texture upload submission failed");
+        }
+    }
+    catch (...) {
+        if (uploadCommands != nullptr) {
+            SDL_CancelGPUCommandBuffer(uploadCommands);
+        }
+
+        if (transfer != nullptr) {
+            SDL_ReleaseGPUTransferBuffer(device, transfer);
+        }
+
+        // The constructor's catch block releases the texture and sampler.
+        throw;
+    }
+
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
 }
