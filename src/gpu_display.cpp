@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <string>
 #include <cstddef>
+#include <vector>
 
 namespace {
     std::runtime_error gpuError(const char* message) {
@@ -247,15 +248,8 @@ void GpuDisplay::cleanup() noexcept {
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
 
-        if (checkerSampler != nullptr) {
-            SDL_ReleaseGPUSampler(device, checkerSampler);
-            checkerSampler = nullptr;
-        }
-
-        if (checkerTexture != nullptr) {
-            SDL_ReleaseGPUTexture(device, checkerTexture);
-            checkerTexture = nullptr;
-        }
+        // Destroy the texture while its borrowed GPU device still exists.
+        checkerTexture.reset();
 
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -506,8 +500,8 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
     SDL_GPUTextureSamplerBinding textureBinding{};
-    textureBinding.texture = checkerTexture;
-    textureBinding.sampler = checkerSampler;
+    textureBinding.texture = checkerTexture->getTexture();
+    textureBinding.sampler = checkerTexture->getSampler();
 
     SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
@@ -534,133 +528,30 @@ void GpuDisplay::createCheckerTexture() {
     constexpr Uint32 width = 64;
     constexpr Uint32 height = 64;
     constexpr Uint32 cellSize = 8;
-    constexpr Uint32 byteCount = width * height * 4;
 
-    SDL_GPUTextureCreateInfo textureInfo{};
-    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    textureInfo.width = width;
-    textureInfo.height = height;
-    textureInfo.layer_count_or_depth = 1;
-    textureInfo.num_levels = 1;
-    textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    std::vector<Uint8> pixels(width * height * 4);
 
-    checkerTexture = SDL_CreateGPUTexture(device, &textureInfo);
+    // Generate an 8-by-8 checkerboard in CPU memory.
+    for (Uint32 y = 0; y < height; ++y) {
+        for (Uint32 x = 0; x < width; ++x) {
+            const bool white =
+                ((x / cellSize + y / cellSize) % 2) == 0;
 
-    if (checkerTexture == nullptr) {
-        throw gpuError("Checker texture creation failed");
-    }
+            const Uint8 shade = white ? 255 : 50;
+            const Uint32 offset = (y * width + x) * 4;
 
-    SDL_GPUSamplerCreateInfo samplerInfo{};
-    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
-    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
-    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-
-    checkerSampler = SDL_CreateGPUSampler(device, &samplerInfo);
-
-    if (checkerSampler == nullptr) {
-        throw gpuError("Checker sampler creation failed");
-    }
-
-    SDL_GPUTransferBuffer* transfer = nullptr;
-    SDL_GPUCommandBuffer* uploadCommands = nullptr;
-
-    try {
-        SDL_GPUTransferBufferCreateInfo transferInfo{};
-        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        transferInfo.size = byteCount;
-
-        transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
-
-        if (transfer == nullptr) {
-            throw gpuError("Texture transfer buffer creation failed");
-        }
-
-        Uint8* pixels = static_cast<Uint8*>(
-            SDL_MapGPUTransferBuffer(device, transfer, false)
-        );
-
-        if (pixels == nullptr) {
-            throw gpuError("Texture transfer buffer mapping failed");
-        }
-
-        // Generate an 8-by-8 grid of alternating white and dark cells.
-        for (Uint32 y = 0; y < height; ++y) {
-            for (Uint32 x = 0; x < width; ++x) {
-                const bool white =
-                    ((x / cellSize + y / cellSize) % 2) == 0;
-
-                const Uint8 shade = white ? 255 : 50;
-                const Uint32 offset = (y * width + x) * 4;
-
-                pixels[offset] = shade;
-                pixels[offset + 1] = shade;
-                pixels[offset + 2] = shade;
-                pixels[offset + 3] = 255;
-            }
-        }
-
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-
-        uploadCommands = SDL_AcquireGPUCommandBuffer(device);
-
-        if (uploadCommands == nullptr) {
-            throw gpuError("Texture upload command acquisition failed");
-        }
-
-        SDL_GPUCopyPass* copyPass =
-            SDL_BeginGPUCopyPass(uploadCommands);
-
-        if (copyPass == nullptr) {
-            throw gpuError("Texture copy pass creation failed");
-        }
-
-        SDL_GPUTextureTransferInfo source{};
-        source.transfer_buffer = transfer;
-        source.offset = 0;
-        source.pixels_per_row = width;
-        source.rows_per_layer = height;
-
-        SDL_GPUTextureRegion destination{};
-        destination.texture = checkerTexture;
-        destination.w = width;
-        destination.h = height;
-        destination.d = 1;
-
-        SDL_UploadToGPUTexture(
-            copyPass,
-            &source,
-            &destination,
-            false
-        );
-
-        SDL_EndGPUCopyPass(copyPass);
-
-        const bool submitted =
-            SDL_SubmitGPUCommandBuffer(uploadCommands);
-
-        uploadCommands = nullptr;
-
-        if (!submitted) {
-            throw gpuError("Texture upload submission failed");
+            pixels[offset] = shade;
+            pixels[offset + 1] = shade;
+            pixels[offset + 2] = shade;
+            pixels[offset + 3] = 255;
         }
     }
-    catch (...) {
-        if (uploadCommands != nullptr) {
-            SDL_CancelGPUCommandBuffer(uploadCommands);
-        }
 
-        if (transfer != nullptr) {
-            SDL_ReleaseGPUTransferBuffer(device, transfer);
-        }
-
-        // The constructor's catch block releases the texture and sampler.
-        throw;
-    }
-
-    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    // GpuTexture handles resource creation and uploading.
+    checkerTexture = std::make_unique<GpuTexture>(
+        device,
+        width,
+        height,
+        std::span<const Uint8>{pixels.data(), pixels.size()}
+    );
 }
