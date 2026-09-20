@@ -60,7 +60,7 @@ private:
 
     void setMouseCaptured(bool captured);
 
-    std::unique_ptr<GpuTexture> checkerTexture;
+    std::unique_ptr<GpuTexture> colourTexture;
 
-    void createCheckerTexture();
+    void loadDemoTexture();
 };
