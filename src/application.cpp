@@ -79,6 +79,9 @@ void Application::createScene(){
     fourth.initialRotation = fourth.transform.rotation;
     fourth.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
 
+    first.useTexture = true;
+    second.useTexture = true;
+
     scene.add(first);
     scene.add(second);
     scene.add(third);
@@ -183,7 +186,7 @@ void Application::render() {
 
         const Mat4 model = object.transform.getMatrix();
 
-        display.drawMesh(gpuMesh, model, viewProjection, object.colour);
+        display.drawMesh(gpuMesh, model, viewProjection, object.colour, object.useTexture);
     }
 
     display.endFrame();

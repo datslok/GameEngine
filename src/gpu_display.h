@@ -27,7 +27,7 @@ public:
     bool beginFrame(float red, float green, float blue);
 
     // Draw into the active frame.
-        void drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour);
+    void drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour, bool useTexture = false);
 
     // Finish and present the active frame.
     void endFrame();
@@ -61,6 +61,7 @@ private:
     void setMouseCaptured(bool captured);
 
     std::unique_ptr<GpuTexture> colourTexture;
+    std::unique_ptr<GpuTexture> whiteTexture;
 
     void loadDemoTexture();
 };

@@ -251,6 +251,7 @@ void GpuDisplay::cleanup() noexcept {
 
         // Destroy the texture while its borrowed GPU device still exists.
         colourTexture.reset();
+        whiteTexture.reset();
 
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -446,7 +447,7 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour) {
+void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour, bool useTexture) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("drawMesh requires an active frame");
     }
@@ -500,9 +501,15 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
 
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
+    const GpuTexture* selectedTexture = whiteTexture.get();
+
+    if (useTexture) {
+        selectedTexture = colourTexture.get();
+    }
+
     SDL_GPUTextureSamplerBinding textureBinding{};
-    textureBinding.texture = colourTexture->getTexture();
-    textureBinding.sampler = colourTexture->getSampler();
+    textureBinding.texture = selectedTexture->getTexture();
+    textureBinding.sampler = selectedTexture->getSampler();
 
     SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
@@ -532,9 +539,11 @@ void GpuDisplay::loadDemoTexture() {
         device,
         image.width,
         image.height,
-        std::span<const Uint8>{
-            image.pixels.data(),
-            image.pixels.size()
-        }
+        std::span<const Uint8>{image.pixels.data(), image.pixels.size()}
     );
+
+    // White leaves the object's colour unchanged when multiplied.
+    const Uint8 whitePixel[4] = {255, 255, 255, 255};
+
+    whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4});
 }
