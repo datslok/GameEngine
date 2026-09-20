@@ -4,7 +4,7 @@ SHELL := /bin/sh
 CXX := g++
 CXXFLAGS := -std=c++20 -Wall -Wextra -g
 CPPFLAGS := -Iinclude -Isrc
-LDLIBS := -lSDL3
+LDLIBS := -lSDL3_image -lSDL3
 
 GLSLC := glslc
 

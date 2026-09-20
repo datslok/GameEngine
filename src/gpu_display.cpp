@@ -1,4 +1,5 @@
 #include "gpu_display.h"
+#include "image_loader.h"
 
 #include <stdexcept>
 #include <string>
@@ -87,7 +88,7 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
 
         windowClaimed = true;
         createPipeline();
-        createCheckerTexture();
+        loadDemoTexture();
     }
     catch (...) {
         cleanup();
@@ -249,7 +250,7 @@ void GpuDisplay::cleanup() noexcept {
         SDL_WaitForGPUIdle(device);
 
         // Destroy the texture while its borrowed GPU device still exists.
-        checkerTexture.reset();
+        colourTexture.reset();
 
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -500,8 +501,8 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
     SDL_GPUTextureSamplerBinding textureBinding{};
-    textureBinding.texture = checkerTexture->getTexture();
-    textureBinding.sampler = checkerTexture->getSampler();
+    textureBinding.texture = colourTexture->getTexture();
+    textureBinding.sampler = colourTexture->getSampler();
 
     SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
@@ -524,34 +525,16 @@ void GpuDisplay::endFrame() {
     }
 }
 
-void GpuDisplay::createCheckerTexture() {
-    constexpr Uint32 width = 64;
-    constexpr Uint32 height = 64;
-    constexpr Uint32 cellSize = 8;
+void GpuDisplay::loadDemoTexture() {
+    const ImageData image = loadImage("assets/textures/demo.png");
 
-    std::vector<Uint8> pixels(width * height * 4);
-
-    // Generate an 8-by-8 checkerboard in CPU memory.
-    for (Uint32 y = 0; y < height; ++y) {
-        for (Uint32 x = 0; x < width; ++x) {
-            const bool white =
-                ((x / cellSize + y / cellSize) % 2) == 0;
-
-            const Uint8 shade = white ? 255 : 50;
-            const Uint32 offset = (y * width + x) * 4;
-
-            pixels[offset] = shade;
-            pixels[offset + 1] = shade;
-            pixels[offset + 2] = shade;
-            pixels[offset + 3] = 255;
-        }
-    }
-
-    // GpuTexture handles resource creation and uploading.
-    checkerTexture = std::make_unique<GpuTexture>(
+    colourTexture = std::make_unique<GpuTexture>(
         device,
-        width,
-        height,
-        std::span<const Uint8>{pixels.data(), pixels.size()}
+        image.width,
+        image.height,
+        std::span<const Uint8>{
+            image.pixels.data(),
+            image.pixels.size()
+        }
     );
 }
