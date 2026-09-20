@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <stdexcept>
 
 /*
 * Initialise the camera's position, direction, and projection so it can transform and view objects in the scene.
@@ -103,4 +104,16 @@ Mat4 Camera::getViewMatrix() const{
 */
 Mat4 Camera::getProjectionMatrix() const{
     return projection;
+}
+
+void Camera::setAspectRatio(float aspectRatio) {
+    if (!std::isfinite(aspectRatio) || aspectRatio <= 0.0f) {
+        throw std::invalid_argument(
+            "Camera aspect ratio must be finite and positive"
+        );
+    }
+
+    // Adjust horizontal projection while preserving vertical FOV.
+    projection.values[0][0] =
+        projection.values[1][1] / aspectRatio;
 }

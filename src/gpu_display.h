@@ -40,6 +40,11 @@ public:
 
     SDL_GPUDevice* getDevice() const;
 
+    void toggleFullscreen();
+
+    // Read after beginFrame() returns true.
+    float getFrameAspectRatio() const;
+
 private:
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;

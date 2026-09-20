@@ -320,6 +320,15 @@ bool GpuDisplay::processEvents() {
             setMouseCaptured(true);
         }
 
+        // Alt+Enter toggles fullscreen once per key press.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            event.key.windowID == windowID &&
+            !event.key.repeat &&
+            event.key.scancode == SDL_SCANCODE_RETURN &&
+            (event.key.mod & SDL_KMOD_ALT) != 0) {
+            toggleFullscreen();
+        }
+
         // Escape releases the cursor without closing the application.
         if (event.type == SDL_EVENT_KEY_DOWN &&
             event.key.windowID == windowID &&
@@ -567,4 +576,29 @@ void GpuDisplay::prepareMaterial(const Material& material) {
             }
         )
     );
+}
+
+void GpuDisplay::toggleFullscreen() {
+    const bool fullscreen =
+        (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+
+    // Use the desktop resolution when entering borderless fullscreen.
+    if (!fullscreen) {
+        if (!SDL_SetWindowFullscreenMode(window, nullptr)) {
+            throw gpuError("Could not set borderless fullscreen mode");
+        }
+    }
+
+    if (!SDL_SetWindowFullscreen(window, !fullscreen)) {
+        throw gpuError("Could not toggle fullscreen");
+    }
+}
+
+float GpuDisplay::getFrameAspectRatio() const {
+    if (depthWidth == 0 || depthHeight == 0) {
+        throw std::logic_error("No frame dimensions are available");
+    }
+
+    return static_cast<float>(depthWidth) /
+           static_cast<float>(depthHeight);
 }
