@@ -4,7 +4,9 @@
 #include "gpu_mesh.h"
 #include "pixel.h"
 #include "vec2.h"
+#include "gpu_texture.h"
 
+#include <memory>
 #include <SDL3/SDL.h>
 
 class GpuDisplay {
@@ -58,8 +60,7 @@ private:
 
     void setMouseCaptured(bool captured);
 
-    SDL_GPUTexture* checkerTexture = nullptr;
-    SDL_GPUSampler* checkerSampler = nullptr;
+    std::unique_ptr<GpuTexture> checkerTexture;
 
     void createCheckerTexture();
 };
