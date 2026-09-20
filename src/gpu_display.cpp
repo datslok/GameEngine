@@ -88,7 +88,7 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
 
         windowClaimed = true;
         createPipeline();
-        loadDemoTexture();
+        createWhiteTexture();
     }
     catch (...) {
         cleanup();
@@ -249,8 +249,8 @@ void GpuDisplay::cleanup() noexcept {
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
 
-        // Destroy the texture while its borrowed GPU device still exists.
-        colourTexture.reset();
+        // Release all textures before destroying their GPU device.
+        textures.clear();
         whiteTexture.reset();
 
         if (depthTexture != nullptr) {
@@ -447,7 +447,7 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour, bool useTexture) {
+void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("drawMesh requires an active frame");
     }
@@ -493,9 +493,9 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
 
     // Convert our byte colour channels to the shader's 0–1 range.
     const float colourData[4] = {
-        static_cast<float>(colour.r) / 255.0f,
-        static_cast<float>(colour.g) / 255.0f,
-        static_cast<float>(colour.b) / 255.0f,
+        static_cast<float>(material.colour.r) / 255.0f,
+        static_cast<float>(material.colour.g) / 255.0f,
+        static_cast<float>(material.colour.b) / 255.0f,
         1.0f
     };
 
@@ -503,8 +503,8 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
 
     const GpuTexture* selectedTexture = whiteTexture.get();
 
-    if (useTexture) {
-        selectedTexture = colourTexture.get();
+    if (!material.texturePath.empty()) {
+        selectedTexture = textures.at(material.texturePath).get();
     }
 
     SDL_GPUTextureSamplerBinding textureBinding{};
@@ -532,18 +532,39 @@ void GpuDisplay::endFrame() {
     }
 }
 
-void GpuDisplay::loadDemoTexture() {
-    const ImageData image = loadImage("assets/textures/demo.png");
-
-    colourTexture = std::make_unique<GpuTexture>(
-        device,
-        image.width,
-        image.height,
-        std::span<const Uint8>{image.pixels.data(), image.pixels.size()}
-    );
-
-    // White leaves the object's colour unchanged when multiplied.
+void GpuDisplay::createWhiteTexture() {
     const Uint8 whitePixel[4] = {255, 255, 255, 255};
 
-    whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4});
+    whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4}
+    );
+}
+
+void GpuDisplay::prepareMaterial(const Material& material) {
+    const std::string& path = material.texturePath;
+
+    // No upload is needed for plain colours or cached images.
+    if (path.empty() || textures.contains(path)) {
+        return;
+    }
+
+    if (commands != nullptr) {
+        throw std::logic_error(
+            "Prepare new textures before beginning a frame"
+        );
+    }
+
+    const ImageData image = loadImage(path);
+
+    textures.emplace(
+        path,
+        std::make_unique<GpuTexture>(
+            device,
+            image.width,
+            image.height,
+            std::span<const Uint8>{
+                image.pixels.data(),
+                image.pixels.size()
+            }
+        )
+    );
 }

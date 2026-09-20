@@ -36,11 +36,13 @@ void CameraController::update(Camera& camera, float deltaTime) const {
         movement = movement + camera.getRight();
     }
 
-    if (keys[SDL_SCANCODE_Q]) {
+    // Ctrl moves down.
+    if (keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL]) {
         movement = movement - camera.getUp();
     }
 
-    if (keys[SDL_SCANCODE_E]) {
+    // Space moves up.
+    if (keys[SDL_SCANCODE_SPACE]) {
         movement = movement + camera.getUp();
     }
 

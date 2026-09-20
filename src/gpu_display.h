@@ -5,7 +5,10 @@
 #include "pixel.h"
 #include "vec2.h"
 #include "gpu_texture.h"
+#include "material.h"
 
+#include <string>
+#include <unordered_map>
 #include <memory>
 #include <SDL3/SDL.h>
 
@@ -26,8 +29,11 @@ public:
     // Background colour components range from 0.0f to 1.0f.
     bool beginFrame(float red, float green, float blue);
 
-    // Draw into the active frame.
-    void drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour, bool useTexture = false);
+    // Load a material's texture if it is not already cached.
+    // Call before beginFrame().
+    void prepareMaterial(const Material& material);
+
+    void drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material);
 
     // Finish and present the active frame.
     void endFrame();
@@ -60,8 +66,9 @@ private:
 
     void setMouseCaptured(bool captured);
 
-    std::unique_ptr<GpuTexture> colourTexture;
+    // Objects using the same path share one uploaded texture.
+    std::unordered_map<std::string, std::unique_ptr<GpuTexture>> textures;
     std::unique_ptr<GpuTexture> whiteTexture;
 
-    void loadDemoTexture();
+    void createWhiteTexture();
 };
