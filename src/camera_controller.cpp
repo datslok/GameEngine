@@ -5,8 +5,11 @@
 /*
 * Set the movement speed in order to consistently control camera movement.
 */
-CameraController::CameraController(float moveSpeed):
-    moveSpeed(moveSpeed) {
+CameraController::CameraController(float moveSpeed, float mouseSensitivity):
+    moveSpeed(moveSpeed),
+    mouseSensitivity(mouseSensitivity)
+{
+
 }
 
 /*
@@ -33,11 +36,13 @@ void CameraController::update(Camera& camera, float deltaTime) const {
         movement = movement + camera.getRight();
     }
 
-    if (keys[SDL_SCANCODE_Q]) {
+    // Ctrl moves down.
+    if (keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL]) {
         movement = movement - camera.getUp();
     }
 
-    if (keys[SDL_SCANCODE_E]) {
+    // Space moves up.
+    if (keys[SDL_SCANCODE_SPACE]) {
         movement = movement + camera.getUp();
     }
 
@@ -46,4 +51,8 @@ void CameraController::update(Camera& camera, float deltaTime) const {
             movement.normalized() * (moveSpeed * deltaTime)
         );
     }
+}
+
+void CameraController::look(Camera& camera, float mouseDeltaX, float mouseDeltaY) const {
+    camera.rotate(mouseDeltaX * mouseSensitivity, -mouseDeltaY * mouseSensitivity);
 }
