@@ -30,12 +30,13 @@ Application::Application(int width, int height):
         Vec3{2.0f, 1.0f, 0.0f},
         Vec3{0.0f, 0.0f, -5.0f},
         Vec3{0.0f, 1.0f, 0.0f},
-        std::numbers::pi_v<float> / 2.0f,
+        70.0f * std::numbers::pi_v<float> / 180.0f, // FoV
         static_cast<float>(width) / static_cast<float>(height),
         0.1f,
         100.0f
     ),
-    cameraController(3.0f)
+    // Movement speed, mouse sensitivity.
+    cameraController(3.0f, 0.002f)
 {
     createScene();
     uploadSceneMeshes();
@@ -49,12 +50,12 @@ void Application::createScene(){
     MeshInstance first{cubeMesh};
     first.transform.position  = Vec3{-3.0f,  0.0f, -10.0f};
     first.transform.rotation.x = 0.3f;
-    first.colour = Pixel{220, 80, 80};
+    first.material.colour = Pixel{255, 255, 255};
 
     MeshInstance second{cubeMesh};
     second.transform.position = Vec3{ 3.0f,  0.0f, -10.0f};
     second.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
-    second.colour = Pixel{80, 120, 220};
+    second.material.colour = Pixel{255, 255, 255};
 
     first.initialRotation = first.transform.rotation;
     first.rotationSpeed = Vec3{2.0f, 2.0f, 0.0f};
@@ -65,7 +66,7 @@ void Application::createScene(){
     MeshInstance third{pyramidMesh};
     third.transform.position  = Vec3{ 0.0f,  3.0f, -10.0f};
     third.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
-    third.colour = Pixel{80, 200, 120};
+    third.material.colour = Pixel{80, 200, 120};
 
     third.initialRotation = third.transform.rotation;
     third.rotationSpeed = Vec3{0.0f, 1.0f, 0.0f};
@@ -73,10 +74,13 @@ void Application::createScene(){
     MeshInstance fourth{teapotMesh};
     fourth.transform.position = Vec3{ 0.0f, -3.0f, -10.0f};
     fourth.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
-    fourth.colour = Pixel{230, 180, 60};
+    fourth.material.colour = Pixel{230, 180, 60};
 
     fourth.initialRotation = fourth.transform.rotation;
     fourth.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
+
+    first.material.texturePath = "assets/textures/demo.png";
+    second.material.texturePath = "assets/textures/demo.png";
 
     scene.add(first);
     scene.add(second);
@@ -126,7 +130,13 @@ void Application::run() {
 * Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
 */
 void Application::update(float deltaTime) {
-    cameraController.update(camera, deltaTime);
+    if (display.isMouseCaptured()) {
+        const Vec2 mouseDelta = display.getMouseDelta();
+
+        cameraController.look(camera, mouseDelta.x, mouseDelta.y);
+
+        cameraController.update(camera, deltaTime);
+    }
 
     for (MeshInstance& object : scene.getObjects()) {
         object.transform.rotation = Vec3{
@@ -164,14 +174,17 @@ void Application::uploadSceneMeshes() {
 }
 
 void Application::render() {
+    // Upload any newly requested textures before starting the frame.
+    // Already-cached textures require only a lookup.
+    for (const MeshInstance& object : scene.getObjects()) {
+        display.prepareMaterial(object.material);
+    }
+
     Mat4 depthCorrection = Mat4::identity();
     depthCorrection.values[2][2] = 0.5f;
     depthCorrection.values[2][3] = 0.5f;
 
-    const Mat4 viewProjection =
-        depthCorrection *
-        camera.getProjectionMatrix() *
-        camera.getViewMatrix();
+    const Mat4 viewProjection = depthCorrection * camera.getProjectionMatrix() * camera.getViewMatrix();
 
     if (!display.beginFrame(0.0f, 0.0f, 0.0f)) {
         return;
@@ -179,10 +192,9 @@ void Application::render() {
 
     for (const MeshInstance& object : scene.getObjects()) {
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
-
         const Mat4 model = object.transform.getMatrix();
 
-        display.drawMesh(gpuMesh, model, viewProjection, object.colour);
+        display.drawMesh(gpuMesh, model, viewProjection, object.material);
     }
 
     display.endFrame();

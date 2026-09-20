@@ -1,8 +1,10 @@
 #include "gpu_display.h"
+#include "image_loader.h"
 
 #include <stdexcept>
 #include <string>
 #include <cstddef>
+#include <vector>
 
 namespace {
     std::runtime_error gpuError(const char* message) {
@@ -14,7 +16,8 @@ namespace {
         SDL_GPUDevice* device,
         const char* filename,
         SDL_GPUShaderStage stage,
-        Uint32 uniformBufferCount
+        Uint32 uniformBufferCount,
+        Uint32 samplerCount
     ) {
         std::size_t codeSize = 0;
         void* code = SDL_LoadFile(filename, &codeSize);
@@ -30,6 +33,7 @@ namespace {
         info.format = SDL_GPU_SHADERFORMAT_SPIRV;
         info.stage = stage;
         info.num_uniform_buffers = uniformBufferCount;
+        info.num_samplers = samplerCount;
 
         SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
 
@@ -84,6 +88,7 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
 
         windowClaimed = true;
         createPipeline();
+        createWhiteTexture();
     }
     catch (...) {
         cleanup();
@@ -100,13 +105,15 @@ void GpuDisplay::createPipeline() {
             device,
             "assets/shaders/triangle.vert.spv",
             SDL_GPU_SHADERSTAGE_VERTEX,
-            1
+            1,
+            0
         );
 
         fragmentShader = loadShader(
             device,
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
+            1,
             1
         );
 
@@ -120,7 +127,7 @@ void GpuDisplay::createPipeline() {
         vertexDescription.pitch = static_cast<Uint32>(sizeof(GpuVertex));
         vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-        SDL_GPUVertexAttribute attributes[2]{};
+        SDL_GPUVertexAttribute attributes[3]{};
 
         // Position: shader input location 0.
         attributes[0].location = 0;
@@ -133,6 +140,12 @@ void GpuDisplay::createPipeline() {
         attributes[1].buffer_slot = 0;
         attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
         attributes[1].offset = static_cast<Uint32>(offsetof(GpuVertex, nx));
+
+        // Texture coordinates: shader input location 2.
+        attributes[2].location = 2;
+        attributes[2].buffer_slot = 0;
+        attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+        attributes[2].offset = static_cast<Uint32>(offsetof(GpuVertex, u));
 
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vertexShader;
@@ -154,7 +167,7 @@ void GpuDisplay::createPipeline() {
 
         info.vertex_input_state.num_vertex_buffers = 1;
         info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
-        info.vertex_input_state.num_vertex_attributes = 2;
+        info.vertex_input_state.num_vertex_attributes = 3;
         info.vertex_input_state.vertex_attributes = attributes;
         info.target_info.has_depth_stencil_target = true;
         info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
@@ -236,6 +249,10 @@ void GpuDisplay::cleanup() noexcept {
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
 
+        // Release all textures before destroying their GPU device.
+        textures.clear();
+        whiteTexture.reset();
+
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
             depthTexture = nullptr;
@@ -273,6 +290,10 @@ SDL_GPUDevice* GpuDisplay::getDevice() const {
 }
 
 bool GpuDisplay::processEvents() {
+    // Accumulate only the mouse motion received during this frame.
+    mouseDelta = Vec2{};
+
+    const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
@@ -281,12 +302,63 @@ bool GpuDisplay::processEvents() {
         }
 
         if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-            event.window.windowID == SDL_GetWindowID(window)) {
+            event.window.windowID == windowID) {
             return false;
+        }
+
+        // Release the mouse when switching to another window.
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+            event.window.windowID == windowID) {
+            setMouseCaptured(false);
+        }
+
+        // Click inside the window to enable camera controls.
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            event.button.windowID == windowID &&
+            event.button.button == SDL_BUTTON_LEFT &&
+            SDL_GetKeyboardFocus() == window) {
+            setMouseCaptured(true);
+        }
+
+        // Escape releases the cursor without closing the application.
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            event.key.windowID == windowID &&
+            event.key.scancode == SDL_SCANCODE_ESCAPE) {
+            setMouseCaptured(false);
+        }
+
+        if (event.type == SDL_EVENT_MOUSE_MOTION &&
+            event.motion.windowID == windowID &&
+            mouseCaptured) {
+            mouseDelta.x += event.motion.xrel;
+            mouseDelta.y += event.motion.yrel;
         }
     }
 
     return true;
+}
+
+void GpuDisplay::setMouseCaptured(bool captured) {
+    if (mouseCaptured == captured) {
+        return;
+    }
+
+    if (!SDL_SetWindowRelativeMouseMode(window, captured)) {
+        throw gpuError("Could not change relative mouse mode");
+    }
+
+    mouseCaptured = captured;
+
+    // Discard motion collected before capture changed.
+    mouseDelta = Vec2{};
+}
+
+bool GpuDisplay::isMouseCaptured() const {
+    return mouseCaptured;
+}
+
+Vec2 GpuDisplay::getMouseDelta() const {
+    return mouseDelta;
 }
 
 bool GpuDisplay::beginFrame(float red, float green, float blue) {
@@ -375,7 +447,7 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, Pixel colour) {
+void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("drawMesh requires an active frame");
     }
@@ -421,13 +493,25 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
 
     // Convert our byte colour channels to the shader's 0–1 range.
     const float colourData[4] = {
-        static_cast<float>(colour.r) / 255.0f,
-        static_cast<float>(colour.g) / 255.0f,
-        static_cast<float>(colour.b) / 255.0f,
+        static_cast<float>(material.colour.r) / 255.0f,
+        static_cast<float>(material.colour.g) / 255.0f,
+        static_cast<float>(material.colour.b) / 255.0f,
         1.0f
     };
 
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
+
+    const GpuTexture* selectedTexture = whiteTexture.get();
+
+    if (!material.texturePath.empty()) {
+        selectedTexture = textures.at(material.texturePath).get();
+    }
+
+    SDL_GPUTextureSamplerBinding textureBinding{};
+    textureBinding.texture = selectedTexture->getTexture();
+    textureBinding.sampler = selectedTexture->getSampler();
+
+    SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
 
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }
@@ -446,4 +530,41 @@ void GpuDisplay::endFrame() {
     if (!submitted) {
         throw gpuError("GPU submission failed");
     }
+}
+
+void GpuDisplay::createWhiteTexture() {
+    const Uint8 whitePixel[4] = {255, 255, 255, 255};
+
+    whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4}
+    );
+}
+
+void GpuDisplay::prepareMaterial(const Material& material) {
+    const std::string& path = material.texturePath;
+
+    // No upload is needed for plain colours or cached images.
+    if (path.empty() || textures.contains(path)) {
+        return;
+    }
+
+    if (commands != nullptr) {
+        throw std::logic_error(
+            "Prepare new textures before beginning a frame"
+        );
+    }
+
+    const ImageData image = loadImage(path);
+
+    textures.emplace(
+        path,
+        std::make_unique<GpuTexture>(
+            device,
+            image.width,
+            image.height,
+            std::span<const Uint8>{
+                image.pixels.data(),
+                image.pixels.size()
+            }
+        )
+    );
 }

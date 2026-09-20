@@ -50,6 +50,20 @@ Mesh Mesh::cube() {
         Triangle{0, 1, 5},
         Triangle{0, 5, 4}
     };
+    
+    // Each face consists of two consecutive triangles.
+    // Map a complete texture square onto each face.
+    for (std::size_t index = 0; index < mesh.triangles.size(); index += 2) {
+        Triangle& first = mesh.triangles[index];
+        Triangle& second = mesh.triangles[index + 1];
 
+        first.uvs[0] = Vec2{0.0f, 0.0f};
+        first.uvs[1] = Vec2{1.0f, 0.0f};
+        first.uvs[2] = Vec2{1.0f, 1.0f};
+
+        second.uvs[0] = Vec2{0.0f, 0.0f};
+        second.uvs[1] = Vec2{1.0f, 1.0f};
+        second.uvs[2] = Vec2{0.0f, 1.0f};
+    }
     return mesh;
 }

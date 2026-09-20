@@ -14,9 +14,10 @@ namespace {
     struct FaceCorner {
         std::size_t vertex;
         std::optional<Vec3> normal;
+        std::optional<Vec2> uv;
     };
 
-    // Resolve an OBJ index against either the vertex or normal list.
+    // Resolve an OBJ index against a position, normal or UV list.
     std::size_t parseIndex(
         const std::string& text,
         std::size_t count,
@@ -83,15 +84,12 @@ namespace {
         return count - static_cast<std::size_t>(distance);
     }
 
-    FaceCorner parseCorner(
-        const std::string& entry,
-        std::size_t vertexCount,
-        const std::vector<Vec3>& normals
-    ) {
+    FaceCorner parseCorner(const std::string& entry, std::size_t vertexCount, const std::vector<Vec3>& normals, const std::vector<Vec2>& textureCoordinates) {
         const std::size_t firstSlash = entry.find('/');
 
         FaceCorner corner{
             parseIndex(entry.substr(0, firstSlash), vertexCount, "vertex"),
+            std::nullopt,
             std::nullopt
         };
 
@@ -100,19 +98,43 @@ namespace {
             return corner;
         }
 
-        const std::size_t secondSlash = entry.find('/', firstSlash + 1);
+        const std::size_t secondSlash =
+            entry.find('/', firstSlash + 1);
 
-        // Position and texture coordinate: "3/2".
-        // Texture coordinates are still ignored.
+        // Position and UV: "3/2".
         if (secondSlash == std::string::npos) {
+            const std::size_t uvIndex = parseIndex(
+                entry.substr(firstSlash + 1),
+                textureCoordinates.size(),
+                "texture"
+            );
+
+            corner.uv = textureCoordinates[uvIndex];
             return corner;
         }
 
         if (entry.find('/', secondSlash + 1) != std::string::npos) {
-            throw std::runtime_error("OBJ face entry has too many slashes");
+            throw std::runtime_error(
+                "OBJ face entry has too many slashes"
+            );
         }
 
-        // Position and normal: "3//1" or "3/2/1".
+        // The middle field may be empty: "3//1".
+        const std::string uvText = entry.substr(
+            firstSlash + 1,
+            secondSlash - firstSlash - 1
+        );
+
+        if (!uvText.empty()) {
+            const std::size_t uvIndex = parseIndex(
+                uvText,
+                textureCoordinates.size(),
+                "texture"
+            );
+
+            corner.uv = textureCoordinates[uvIndex];
+        }
+
         const std::size_t normalIndex = parseIndex(
             entry.substr(secondSlash + 1),
             normals.size(),
@@ -127,6 +149,7 @@ namespace {
 Mesh parseObj(std::istream& input) {
     Mesh mesh;
     std::vector<Vec3> normals;
+    std::vector<Vec2> textureCoordinates;
     std::string line;
     std::size_t lineNumber = 0;
 
@@ -222,13 +245,40 @@ Mesh parseObj(std::istream& input) {
                     static_cast<float>(y / length),
                     static_cast<float>(z / length)
                 });
+            } else if (type == "vt") {
+                float u;
+                float v;
+
+                // For now, support two-dimensional texture coordinates.
+                if (!(lineStream >> u >> v)) {
+                    throw std::runtime_error(
+                        "Texture coordinate requires two values"
+                    );
+                }
+
+                if (!std::isfinite(u) || !std::isfinite(v)) {
+                    throw std::runtime_error(
+                        "Texture coordinates must be finite"
+                    );
+                }
+
+                std::string extra;
+
+                if (lineStream >> extra) {
+                    throw std::runtime_error(
+                        "Extra texture coordinate values are not supported"
+                    );
+                }
+
+                // Preserve coordinates outside 0–1 for texture tiling.
+                textureCoordinates.push_back(Vec2{u, v});
             } else if (type == "f") {
                 std::vector<FaceCorner> corners;
                 std::string entry;
 
                 while (lineStream >> entry) {
                     corners.push_back(
-                        parseCorner(entry, mesh.vertices.size(), normals)
+                        parseCorner(entry, mesh.vertices.size(), normals, textureCoordinates)
                     );
                 }
 
@@ -254,6 +304,10 @@ Mesh parseObj(std::istream& input) {
                     triangle.normals[1] = corners[index].normal;
                     triangle.normals[2] = corners[index + 1].normal;
 
+                    triangle.uvs[0] = corners[0].uv;
+                    triangle.uvs[1] = corners[index].uv;
+                    triangle.uvs[2] = corners[index + 1].uv;
+
                     mesh.triangles.push_back(triangle);
                 }
 
@@ -268,8 +322,8 @@ Mesh parseObj(std::istream& input) {
                 }
             }
 
-            // Other records, such as texture coordinates, smoothing
-            // groups and materials, are currently ignored.
+            // Other records, such as smoothing groups and materials,
+            // are currently ignored.
         }
         catch (const std::runtime_error& error) {
             throw std::runtime_error(
