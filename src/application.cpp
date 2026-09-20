@@ -36,7 +36,7 @@ Application::Application(int width, int height):
         100.0f
     ),
     // Movement speed, mouse sensitivity.
-    cameraController(3.0f, 0.002f)
+    cameraController(3.0f, 0.001f)
 {
     createScene();
     uploadSceneMeshes();
@@ -180,21 +180,33 @@ void Application::render() {
         display.prepareMaterial(object.material);
     }
 
+    if (!display.beginFrame(0.0f, 0.0f, 0.0f)) {
+        return;
+    }
+
+    // Use the actual dimensions of the frame acquired by beginFrame().
+    camera.setAspectRatio(display.getFrameAspectRatio());
+
+    // Convert our projection's depth range to the GPU depth range.
     Mat4 depthCorrection = Mat4::identity();
     depthCorrection.values[2][2] = 0.5f;
     depthCorrection.values[2][3] = 0.5f;
 
-    const Mat4 viewProjection = depthCorrection * camera.getProjectionMatrix() * camera.getViewMatrix();
-
-    if (!display.beginFrame(0.0f, 0.0f, 0.0f)) {
-        return;
-    }
+    const Mat4 viewProjection =
+        depthCorrection *
+        camera.getProjectionMatrix() *
+        camera.getViewMatrix();
 
     for (const MeshInstance& object : scene.getObjects()) {
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
         const Mat4 model = object.transform.getMatrix();
 
-        display.drawMesh(gpuMesh, model, viewProjection, object.material);
+        display.drawMesh(
+            gpuMesh,
+            model,
+            viewProjection,
+            object.material
+        );
     }
 
     display.endFrame();
