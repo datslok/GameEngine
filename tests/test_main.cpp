@@ -14,6 +14,7 @@ void testShading();
 void testTransform();
 void testScene();
 void testObjLoader();
+void testObjUvs();
 
 int main(){
     testPixelBuffer();
@@ -30,6 +31,7 @@ int main(){
     testTransform();
     testScene();
     testObjLoader();
+    testObjUvs();
 
     std::cout << "All tests passed!\n";
     return 0;

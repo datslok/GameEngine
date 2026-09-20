@@ -1,5 +1,6 @@
 #pragma once
 
+#include "vec2.h"
 #include "vec3.h"
 #include "vec4.h"
 
@@ -21,6 +22,8 @@ struct Triangle {
     // One optional normal for each corner, in the same order.
     // An empty optional means: use the triangle's face normal.
     std::array<std::optional<Vec3>, 3> normals{};
+    // One optional texture coordinate per triangle corner.
+    std::array<std::optional<Vec2>, 3> uvs{};
 };
 
 struct Mesh {

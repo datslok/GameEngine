@@ -57,4 +57,9 @@ private:
     Vec2 mouseDelta{};
 
     void setMouseCaptured(bool captured);
+
+    SDL_GPUTexture* checkerTexture = nullptr;
+    SDL_GPUSampler* checkerSampler = nullptr;
+
+    void createCheckerTexture();
 };

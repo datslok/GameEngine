@@ -115,19 +115,27 @@ GpuMesh::GpuMesh(SDL_GPUDevice* device, const Mesh& mesh):
         const Vec3 thirdNormal =
             triangle.normals[2].value_or(faceNormal);
 
+        // Missing UVs sample the white corner of our checkerboard.
+        const Vec2 firstUv = triangle.uvs[0].value_or(Vec2{});
+        const Vec2 secondUv = triangle.uvs[1].value_or(Vec2{});
+        const Vec2 thirdUv = triangle.uvs[2].value_or(Vec2{});
+
         vertices.push_back(GpuVertex{
             first.x, first.y, first.z,
-            firstNormal.x, firstNormal.y, firstNormal.z
+            firstNormal.x, firstNormal.y, firstNormal.z,
+            firstUv.x, firstUv.y
         });
 
         vertices.push_back(GpuVertex{
             second.x, second.y, second.z,
-            secondNormal.x, secondNormal.y, secondNormal.z
+            secondNormal.x, secondNormal.y, secondNormal.z,
+            secondUv.x, secondUv.y
         });
 
         vertices.push_back(GpuVertex{
             third.x, third.y, third.z,
-            thirdNormal.x, thirdNormal.y, thirdNormal.z
+            thirdNormal.x, thirdNormal.y, thirdNormal.z,
+            thirdUv.x, thirdUv.y
         });
 
         indices.push_back(firstIndex);

@@ -1,6 +1,9 @@
 #version 450
 
 layout(location = 0) in vec3 worldNormal;
+layout(location = 1) in vec2 textureUv;
+
+layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 
 layout(std140, set = 3, binding = 0) uniform MaterialData {
     vec4 baseColour;
@@ -9,6 +12,9 @@ layout(std140, set = 3, binding = 0) uniform MaterialData {
 layout(location = 0) out vec4 outputColour;
 
 void main() {
+    // Read the texture at this fragment's interpolated UV coordinate.
+    vec4 textureColour = texture(colourTexture, textureUv);
+
     // World-space direction from the surface toward the light.
     vec3 toLight = normalize(vec3(-1.0, 2.0, 1.0));
 
@@ -25,7 +31,7 @@ void main() {
     float brightness = ambient + (1.0 - ambient) * diffuse;
 
     outputColour = vec4(
-        baseColour.rgb * brightness,
-        baseColour.a
+        textureColour.rgb * baseColour.rgb * brightness,
+        textureColour.a * baseColour.a
     );
 }
