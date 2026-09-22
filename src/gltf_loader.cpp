@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <utility>
+#include <cstdint>
 
 namespace {
     // cgltf data must be released with cgltf_free(), not delete.
@@ -278,6 +279,50 @@ namespace {
         return result;
     }
 
+    std::uint8_t colourChannelToByte(float value) {
+        if (!std::isfinite(value) ||
+            value < 0.0f ||
+            value > 1.0f) {
+            throw std::runtime_error(
+                "glTF colour channel must be between 0 and 1"
+            );
+        }
+
+        return static_cast<std::uint8_t>(
+            std::lround(value * 255.0f)
+        );
+    }
+
+    Material readMaterial(const cgltf_material* source) {
+        Material material;
+
+        // No assigned material means the default white colour.
+        if (source == nullptr) {
+            return material;
+        }
+
+        // Our renderer currently supports opaque materials only.
+        if (source->alpha_mode != cgltf_alpha_mode_opaque) {
+            throw std::runtime_error(
+                "glTF transparency and alpha masking are not supported yet"
+            );
+        }
+
+        if (source->has_pbr_metallic_roughness) {
+            const cgltf_pbr_metallic_roughness& properties =
+                source->pbr_metallic_roughness;
+
+            material.colour = Pixel{
+                colourChannelToByte(properties.base_color_factor[0]),
+                colourChannelToByte(properties.base_color_factor[1]),
+                colourChannelToByte(properties.base_color_factor[2])
+            };
+        }
+
+        // Texture loading will be added next.
+        return material;
+    }
+
     void appendNode(const cgltf_node& node, Model& model) {
         if (node.skin != nullptr) {
             throw std::runtime_error(
@@ -291,16 +336,18 @@ namespace {
             for (std::size_t index = 0;
                  index < node.mesh->primitives_count;
                  ++index) {
-                Mesh mesh = readPrimitive(
-                    node.mesh->primitives[index]
-                );
+                const cgltf_primitive& primitive =
+                    node.mesh->primitives[index];
+
+                Mesh mesh = readPrimitive(primitive);
 
                 ModelPart part;
                 part.mesh =
                     std::make_shared<Mesh>(std::move(mesh));
-                part.transform = transform;
 
-                // Keep the default white material for now.
+                part.transform = transform;
+                part.material = readMaterial(primitive.material);
+
                 model.parts.push_back(std::move(part));
             }
         }
