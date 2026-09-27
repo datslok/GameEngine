@@ -99,4 +99,6 @@ private:
     bool mouseLookEnabled = true;
 
     std::array<bool, SDL_SCANCODE_COUNT> pressedKeys{};
+
+    void setCursorConfined(bool confined);
 };
