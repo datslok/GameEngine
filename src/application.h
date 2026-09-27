@@ -7,6 +7,7 @@
 #include "mesh.h"
 #include "scene.h"
 #include "model_instance.h"
+#include "control_mode.h"
 
 #include <cstdint>
 #include <memory>
@@ -20,6 +21,8 @@ public:
     Application(int width, int height);
 
     void run();
+    void setControlMode(ControlMode mode);
+    void setDebugModeSwitching(bool enabled);
 
 private:
     void update(float deltaTime);
@@ -45,4 +48,15 @@ private:
     std::uint64_t targetFPS = 240;
 
     std::shared_ptr<ModelInstance> duck;
+    void updateCameraControls(float deltaTime);
+
+    ControlMode controlMode = ControlMode::FreeCamera;
+    bool enableDebugModeSwitching = true;
+    void updateMobaCamera(float deltaTime);
+
+    bool mobaCameraLocked = false;
+    float mobaPanSpeed = 9.0f;
+
+    // Relative to the duck's position.
+    Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
 };

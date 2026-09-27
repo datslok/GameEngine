@@ -292,6 +292,7 @@ SDL_GPUDevice* GpuDisplay::getDevice() const {
 bool GpuDisplay::processEvents() {
     // Accumulate only the mouse motion received during this frame.
     mouseDelta = Vec2{};
+    pressedKeys.fill(false);
 
     const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
@@ -310,14 +311,29 @@ bool GpuDisplay::processEvents() {
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
             event.window.windowID == windowID) {
             setMouseCaptured(false);
+            pressedKeys.fill(false);
+            setCursorConfined(false);
         }
 
-        // Click inside the window to enable camera controls.
+        // Clicking resumes mouse look or confines the visible MOBA cursor.
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
             event.button.windowID == windowID &&
             event.button.button == SDL_BUTTON_LEFT &&
-            SDL_GetKeyboardFocus() == window) {
-            setMouseCaptured(true);
+            hasKeyboardFocus()) {
+            if (mouseLookEnabled) {
+                setMouseCaptured(true);
+            } else {
+                setCursorConfined(true);
+            }
+        }
+
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            event.key.windowID == windowID &&
+            !event.key.repeat &&
+            hasKeyboardFocus()) {
+            pressedKeys.at(
+                static_cast<std::size_t>(event.key.scancode)
+            ) = true;
         }
 
         // Alt+Enter toggles fullscreen once per key press.
@@ -329,11 +345,11 @@ bool GpuDisplay::processEvents() {
             toggleFullscreen();
         }
 
-        // Escape releases the cursor without closing the application.
         if (event.type == SDL_EVENT_KEY_DOWN &&
             event.key.windowID == windowID &&
             event.key.scancode == SDL_SCANCODE_ESCAPE) {
             setMouseCaptured(false);
+            setCursorConfined(false);
         }
 
         if (event.type == SDL_EVENT_MOUSE_MOTION &&
@@ -634,4 +650,74 @@ float GpuDisplay::getFrameAspectRatio() const {
 
     return static_cast<float>(depthWidth) /
            static_cast<float>(depthHeight);
+}
+
+void GpuDisplay::setMouseLookEnabled(bool enabled) {
+    mouseLookEnabled = enabled;
+
+    const bool focused = hasKeyboardFocus();
+
+    setMouseCaptured(enabled && focused);
+    setCursorConfined(!enabled && focused);
+
+    mouseDelta = Vec2{};
+}
+
+bool GpuDisplay::hasKeyboardFocus() const {
+    return SDL_GetKeyboardFocus() == window;
+}
+
+bool GpuDisplay::wasKeyPressed(SDL_Scancode key) const {
+    return pressedKeys.at(static_cast<std::size_t>(key));
+}
+
+void GpuDisplay::setCursorConfined(bool confined) {
+    if (!SDL_SetWindowMouseGrab(window, confined)) {
+        throw gpuError("Could not change cursor confinement");
+    }
+    cursorConfined = confined;
+}
+
+bool GpuDisplay::isCursorConfined() const {
+    return cursorConfined;
+}
+
+Vec2 GpuDisplay::getEdgePanDirection(float margin) const {
+    if (!cursorConfined ||
+        !hasKeyboardFocus() ||
+        SDL_GetMouseFocus() != window) {
+        return Vec2{};
+    }
+
+    int width = 0;
+    int height = 0;
+
+    if (!SDL_GetWindowSize(window, &width, &height)) {
+        throw gpuError("Could not get window size");
+    }
+
+    if (width <= 0 || height <= 0) {
+        return Vec2{};
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+
+    SDL_GetMouseState(&mouseX, &mouseY);
+
+    Vec2 direction{};
+
+    if (mouseX < margin) {
+        direction.x = -1.0f;
+    } else if (mouseX >= static_cast<float>(width) - margin) {
+        direction.x = 1.0f;
+    }
+
+    if (mouseY < margin) {
+        direction.y = -1.0f;
+    } else if (mouseY >= static_cast<float>(height) - margin) {
+        direction.y = 1.0f;
+    }
+
+    return direction;
 }
