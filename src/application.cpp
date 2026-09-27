@@ -8,6 +8,7 @@
 #include <numbers>
 #include <memory>
 #include <cmath>
+#include <stdexcept>
 
 namespace {
     float animatedAngle(
@@ -138,13 +139,7 @@ void Application::run() {
 * Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
 */
 void Application::update(float deltaTime) {
-    if (display.isMouseCaptured()) {
-        const Vec2 mouseDelta = display.getMouseDelta();
-
-        cameraController.look(camera, mouseDelta.x, mouseDelta.y);
-
-        cameraController.update(camera, deltaTime);
-    }
+    updateCameraControls(deltaTime);
 
     const auto animateRotation = [this](Transform& transform, const Vec3& initial, const Vec3& speed) {
         // Leave manually controlled axes alone when their speed is zero.
@@ -239,4 +234,123 @@ void Application::render() {
     }
 
     display.endFrame();
+}
+
+void Application::setControlMode(ControlMode mode) {
+    const Vec3 worldUp{0.0f, 1.0f, 0.0f};
+
+    // Each selection starts from a predictable test position.
+    switch (mode) {
+    case ControlMode::FirstPerson:
+        camera.setPose(
+            Vec3{0.0f, 1.0f, 0.0f},
+            Vec3{0.0f, 1.0f, -6.0f},
+            worldUp
+        );
+        break;
+
+    case ControlMode::Moba:
+        camera.setPose(
+            Vec3{0.0f, 12.0f, 4.0f},
+            Vec3{0.0f, 0.0f, -6.0f},
+            worldUp
+        );
+        break;
+
+    case ControlMode::FreeCamera:
+        camera.setPose(
+            Vec3{2.0f, 1.0f, 0.0f},
+            Vec3{0.0f, 0.0f, -5.0f},
+            worldUp
+        );
+        break;
+
+    default:
+        throw std::invalid_argument("Unknown control mode");
+    }
+
+    controlMode = mode;
+
+    display.setMouseLookEnabled(
+        mode != ControlMode::Moba
+    );
+}
+
+void Application::setDebugModeSwitching(bool enabled) {
+    enableDebugModeSwitching = enabled;
+}
+
+void Application::updateCameraControls(float deltaTime) {
+    if (!display.hasKeyboardFocus()) {
+        return;
+    }
+
+    if (enableDebugModeSwitching) {
+        if (display.wasKeyPressed(SDL_SCANCODE_F1)) {
+            setControlMode(ControlMode::FirstPerson);
+        } else if (display.wasKeyPressed(SDL_SCANCODE_F2)) {
+            setControlMode(ControlMode::Moba);
+        } else if (display.wasKeyPressed(SDL_SCANCODE_F3)) {
+            setControlMode(ControlMode::FreeCamera);
+        }
+    }
+
+    if (controlMode == ControlMode::Moba) {
+        updateMobaCamera(deltaTime);
+        return;
+    }
+
+    if (controlMode != ControlMode::Moba) {
+        // Escape pauses mouse-look controls until the next click.
+        if (!display.isMouseCaptured()) {
+            return;
+        }
+
+        const Vec2 mouseDelta = display.getMouseDelta();
+
+        cameraController.look(
+            camera,
+            mouseDelta.x,
+            mouseDelta.y
+        );
+    }
+
+    cameraController.update(
+        camera,
+        deltaTime,
+        controlMode
+    );
+}
+
+void Application::updateMobaCamera(float deltaTime) {
+    if (display.isCursorConfined() &&
+        display.wasKeyPressed(SDL_SCANCODE_SPACE)) {
+        mobaCameraLocked = !mobaCameraLocked;
+    }
+
+    if (mobaCameraLocked) {
+        if (duck) {
+            const Vec3 target = duck->transform.position;
+
+            camera.setPose(
+                target + mobaCameraOffset,
+                target,
+                Vec3{0.0f, 1.0f, 0.0f}
+            );
+        }
+
+        return;
+    }
+
+    const Vec2 edge = display.getEdgePanDirection();
+
+    // Screen left/right maps to world X.
+    // Screen top/bottom maps to world -Z/+Z.
+    const Vec3 movement{edge.x, 0.0f, edge.y};
+
+    if (movement.lengthSquared() > 0.0f) {
+        camera.move(
+            movement.normalized() * (mobaPanSpeed * deltaTime)
+        );
+    }
 }

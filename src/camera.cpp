@@ -117,3 +117,19 @@ void Camera::setAspectRatio(float aspectRatio) {
     projection.values[0][0] =
         projection.values[1][1] / aspectRatio;
 }
+
+void Camera::setPose(const Vec3& newPosition, const Vec3& target, const Vec3& upDirection) {
+    // Validate before changing the camera.
+    Mat4::lookAt(newPosition, target, upDirection);
+
+    const Vec3 newForward = (target - newPosition).normalized();
+    const Vec3 newUp = upDirection.normalized();
+
+    position = newPosition;
+    forward = newForward;
+    up = newUp;
+}
+
+Vec3 Camera::getPosition() const {
+    return position;
+}
