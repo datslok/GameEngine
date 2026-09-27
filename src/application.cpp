@@ -5,6 +5,7 @@
 #include "gltf_loader.h"
 #include "ray.h"
 
+#include <algorithm>
 #include <SDL3/SDL.h>
 #include <numbers>
 #include <memory>
@@ -434,13 +435,39 @@ void Application::updateDuckMovement(float deltaTime) {
         duck->transform.position - previousPosition;
 
     if (movement.x != 0.0f || movement.z != 0.0f) {
-        // Heading measured from world +Z toward world +X.
         const float heading = std::atan2(movement.x, movement.z);
 
-        // Adjust this if the imported model faces a different direction.
-        constexpr float modelForwardYaw = std::numbers::pi_v<float> / 2.0f;
+        constexpr float modelForwardYaw =
+            std::numbers::pi_v<float> / 2.0f;
 
-        duck->transform.rotation.y = heading - modelForwardYaw;
+        const float targetYaw = heading - modelForwardYaw;
+        const float currentYaw = duck->transform.rotation.y;
+
+        constexpr float fullTurn =
+            2.0f * std::numbers::pi_v<float>;
+
+        // Signed shortest difference, between -pi and +pi.
+        const float difference = std::remainder(
+            targetYaw - currentYaw,
+            fullTurn
+        );
+
+        // Radians per second: one full turn per second.
+        constexpr float turnSpeed =
+            6.0f * std::numbers::pi_v<float>;
+
+        const float maximumTurn = turnSpeed * deltaTime;
+
+        const float turn = std::clamp(
+            difference,
+            -maximumTurn,
+            maximumTurn
+        );
+
+        duck->transform.rotation.y = std::remainder(
+            currentYaw + turn,
+            fullTurn
+        );
     }
 }
 
