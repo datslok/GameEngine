@@ -11,3 +11,7 @@ MeshInstance::MeshInstance(std::shared_ptr<const Mesh> mesh):
         );
     }
 }
+
+Mat4 MeshInstance::getModelMatrix() const {
+    return transform.getMatrix() * localTransform;
+}

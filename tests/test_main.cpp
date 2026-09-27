@@ -17,6 +17,7 @@ void testObjLoader();
 void testObjUvs();
 void testGltfLoader();
 void testGltfAttributes();
+void testGltfTextures();
 
 int main(){
     testPixelBuffer();
@@ -36,6 +37,7 @@ int main(){
     testObjUvs();
     testGltfLoader();
     testGltfAttributes();
+    testGltfTextures();
 
     std::cout << "All tests passed!\n";
     return 0;
