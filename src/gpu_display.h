@@ -111,6 +111,7 @@ private:
     std::array<bool, SDL_SCANCODE_COUNT> pressedKeys{};
     void setCursorConfined(bool confined);
     bool cursorConfined = false;
-
     std::optional<GroundClick> groundClick;
+    bool groundSteeringActive = false;
+    void updateGroundSteering();
 };

@@ -315,6 +315,7 @@ bool GpuDisplay::processEvents() {
             pressedKeys.fill(false);
             setCursorConfined(false);
             groundClick.reset();
+            groundSteeringActive = false;
         }
 
         // Clicking resumes mouse look or confines the visible MOBA cursor.
@@ -353,6 +354,7 @@ bool GpuDisplay::processEvents() {
             setMouseCaptured(false);
             setCursorConfined(false);
             groundClick.reset();
+            groundSteeringActive = false;
         }
 
         if (event.type == SDL_EVENT_MOUSE_MOTION &&
@@ -381,6 +383,7 @@ bool GpuDisplay::processEvents() {
                 event.button.y >= 0.0f &&
                 event.button.x < static_cast<float>(width) &&
                 event.button.y < static_cast<float>(height)) {
+                groundSteeringActive = true;
                 groundClick = GroundClick{
                     event.button.x / static_cast<float>(width),
                     event.button.y / static_cast<float>(height),
@@ -388,7 +391,15 @@ bool GpuDisplay::processEvents() {
                 };
             }
         }
+
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+            event.button.windowID == windowID &&
+            event.button.button == SDL_BUTTON_RIGHT) {
+            groundSteeringActive = false;
+        }
     }
+
+    updateGroundSteering();
 
     return true;
 }
@@ -683,6 +694,8 @@ float GpuDisplay::getFrameAspectRatio() const {
 }
 
 void GpuDisplay::setMouseLookEnabled(bool enabled) {
+    groundSteeringActive = false;
+    groundClick.reset();
     mouseLookEnabled = enabled;
 
     const bool focused = hasKeyboardFocus();
@@ -754,4 +767,54 @@ Vec2 GpuDisplay::getEdgePanDirection(float margin) const {
 
 std::optional<GroundClick> GpuDisplay::getGroundClick() const {
     return groundClick;
+}
+
+void GpuDisplay::updateGroundSteering() {
+    if (!groundSteeringActive) {
+        return;
+    }
+
+    if (mouseLookEnabled ||
+        !cursorConfined ||
+        !hasKeyboardFocus() ||
+        SDL_GetMouseFocus() != window) {
+        groundSteeringActive = false;
+        return;
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+
+    const SDL_MouseButtonFlags buttons =
+        SDL_GetMouseState(&mouseX, &mouseY);
+
+    if ((buttons & SDL_BUTTON_RMASK) == 0) {
+        groundSteeringActive = false;
+        return;
+    }
+
+    // Preserve an initial click recorded during this frame.
+    if (groundClick) {
+        return;
+    }
+
+    int width = 0;
+    int height = 0;
+
+    if (!SDL_GetWindowSize(window, &width, &height)) {
+        throw gpuError("Could not get window size");
+    }
+
+    if (width <= 0 || height <= 0 ||
+        mouseX < 0.0f || mouseY < 0.0f ||
+        mouseX >= static_cast<float>(width) ||
+        mouseY >= static_cast<float>(height)) {
+        return;
+    }
+
+    groundClick = GroundClick{
+        mouseX / static_cast<float>(width),
+        mouseY / static_cast<float>(height),
+        static_cast<float>(width) / static_cast<float>(height)
+    };
 }
