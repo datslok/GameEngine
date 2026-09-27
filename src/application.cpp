@@ -423,10 +423,25 @@ void Application::updateDuckMovement(float deltaTime) {
     }
 
     // Continue an existing command regardless of cursor or focus.
+    const Vec3 previousPosition = duck->transform.position;
+
     duckMovement.update(
         duck->transform.position,
         deltaTime
     );
+
+    const Vec3 movement =
+        duck->transform.position - previousPosition;
+
+    if (movement.x != 0.0f || movement.z != 0.0f) {
+        // Heading measured from world +Z toward world +X.
+        const float heading = std::atan2(movement.x, movement.z);
+
+        // Adjust this if the imported model faces a different direction.
+        constexpr float modelForwardYaw = std::numbers::pi_v<float> / 2.0f;
+
+        duck->transform.rotation.y = heading - modelForwardYaw;
+    }
 }
 
 void Application::followDuckWithCamera() {
