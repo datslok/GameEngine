@@ -292,6 +292,7 @@ SDL_GPUDevice* GpuDisplay::getDevice() const {
 bool GpuDisplay::processEvents() {
     // Accumulate only the mouse motion received during this frame.
     mouseDelta = Vec2{};
+    pressedKeys.fill(false);
 
     const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
@@ -310,14 +311,25 @@ bool GpuDisplay::processEvents() {
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
             event.window.windowID == windowID) {
             setMouseCaptured(false);
+            pressedKeys.fill(false);
         }
 
-        // Click inside the window to enable camera controls.
+        // Clicking resumes mouse look only in modes that use it.
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
             event.button.windowID == windowID &&
             event.button.button == SDL_BUTTON_LEFT &&
-            SDL_GetKeyboardFocus() == window) {
+            mouseLookEnabled &&
+            hasKeyboardFocus()) {
             setMouseCaptured(true);
+        }
+
+        if (event.type == SDL_EVENT_KEY_DOWN &&
+            event.key.windowID == windowID &&
+            !event.key.repeat &&
+            hasKeyboardFocus()) {
+            pressedKeys.at(
+                static_cast<std::size_t>(event.key.scancode)
+            ) = true;
         }
 
         // Alt+Enter toggles fullscreen once per key press.
@@ -634,4 +646,21 @@ float GpuDisplay::getFrameAspectRatio() const {
 
     return static_cast<float>(depthWidth) /
            static_cast<float>(depthHeight);
+}
+
+void GpuDisplay::setMouseLookEnabled(bool enabled) {
+    mouseLookEnabled = enabled;
+
+    setMouseCaptured(enabled && hasKeyboardFocus());
+
+    // Discard motion from before the mode change.
+    mouseDelta = Vec2{};
+}
+
+bool GpuDisplay::hasKeyboardFocus() const {
+    return SDL_GetKeyboardFocus() == window;
+}
+
+bool GpuDisplay::wasKeyPressed(SDL_Scancode key) const {
+    return pressedKeys.at(static_cast<std::size_t>(key));
 }

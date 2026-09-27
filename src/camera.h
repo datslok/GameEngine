@@ -30,6 +30,7 @@ class Camera {
         Mat4 getProjectionMatrix() const;
 
         void setAspectRatio(float aspectRatio);
+        void setPose(const Vec3& newPosition, const Vec3& target, const Vec3& upDirection);
 
     private:
         Vec3 position;
