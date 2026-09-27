@@ -62,7 +62,7 @@ private:
 
     // Relative to the duck's position.
     Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
-    MoveToController duckMovement{3.0f};
+    MoveToController duckMovement{6.0f};
 
     void updateDuckMovement(float deltaTime);
     void followDuckWithCamera();
