@@ -312,15 +312,19 @@ bool GpuDisplay::processEvents() {
             event.window.windowID == windowID) {
             setMouseCaptured(false);
             pressedKeys.fill(false);
+            setCursorConfined(false);
         }
 
-        // Clicking resumes mouse look only in modes that use it.
+        // Clicking resumes mouse look or confines the visible MOBA cursor.
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
             event.button.windowID == windowID &&
             event.button.button == SDL_BUTTON_LEFT &&
-            mouseLookEnabled &&
             hasKeyboardFocus()) {
-            setMouseCaptured(true);
+            if (mouseLookEnabled) {
+                setMouseCaptured(true);
+            } else {
+                setCursorConfined(true);
+            }
         }
 
         if (event.type == SDL_EVENT_KEY_DOWN &&
@@ -341,11 +345,11 @@ bool GpuDisplay::processEvents() {
             toggleFullscreen();
         }
 
-        // Escape releases the cursor without closing the application.
         if (event.type == SDL_EVENT_KEY_DOWN &&
             event.key.windowID == windowID &&
             event.key.scancode == SDL_SCANCODE_ESCAPE) {
             setMouseCaptured(false);
+            setCursorConfined(false);
         }
 
         if (event.type == SDL_EVENT_MOUSE_MOTION &&
@@ -651,9 +655,11 @@ float GpuDisplay::getFrameAspectRatio() const {
 void GpuDisplay::setMouseLookEnabled(bool enabled) {
     mouseLookEnabled = enabled;
 
-    setMouseCaptured(enabled && hasKeyboardFocus());
+    const bool focused = hasKeyboardFocus();
 
-    // Discard motion from before the mode change.
+    setMouseCaptured(enabled && focused);
+    setCursorConfined(!enabled && focused);
+
     mouseDelta = Vec2{};
 }
 
@@ -663,4 +669,10 @@ bool GpuDisplay::hasKeyboardFocus() const {
 
 bool GpuDisplay::wasKeyPressed(SDL_Scancode key) const {
     return pressedKeys.at(static_cast<std::size_t>(key));
+}
+
+void GpuDisplay::setCursorConfined(bool confined) {
+    if (!SDL_SetWindowMouseGrab(window, confined)) {
+        throw gpuError("Could not change cursor confinement");
+    }
 }
