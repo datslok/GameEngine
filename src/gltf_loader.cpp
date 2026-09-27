@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <utility>
 #include <cstdint>
+#include <filesystem>
 
 namespace {
     // cgltf data must be released with cgltf_free(), not delete.
@@ -293,7 +294,83 @@ namespace {
         );
     }
 
-    Material readMaterial(const cgltf_material* source) {
+    std::string readTexturePath(
+        const cgltf_texture_view& view,
+        const std::filesystem::path& modelDirectory
+    ) {
+        if (view.texture == nullptr) {
+            return {};
+        }
+
+        if (view.texcoord != 0) {
+            throw std::runtime_error(
+                "Only glTF TEXCOORD_0 is supported so far"
+            );
+        }
+
+        if (view.has_transform) {
+            throw std::runtime_error(
+                "glTF texture transforms are not supported yet"
+            );
+        }
+
+        const cgltf_image* image = view.texture->image;
+
+        if (image == nullptr) {
+            throw std::runtime_error(
+                "glTF texture has no supported image"
+            );
+        }
+
+        if (image->buffer_view != nullptr) {
+            throw std::runtime_error(
+                "Embedded glTF images are not supported yet"
+            );
+        }
+
+        if (image->uri == nullptr || image->uri[0] == '\0') {
+            throw std::runtime_error(
+                "glTF texture image has no filename"
+            );
+        }
+
+        std::string uri = image->uri;
+
+        // Reject data URIs and remote URLs for this first version.
+        if (uri.find(':') != std::string::npos ||
+            uri.starts_with("//") ||
+            uri.find_first_of("?#") != std::string::npos) {
+            throw std::runtime_error(
+                "Only local relative glTF image paths are supported"
+            );
+        }
+
+        // Convert URI escapes, for example "body%20colour.png".
+        const std::size_t decodedLength = cgltf_decode_uri(uri.data());
+        uri.resize(decodedLength);
+
+        if (uri.find('\0') != std::string::npos ||
+            uri.find(':') != std::string::npos ||
+            uri.find('\\') != std::string::npos) {
+            throw std::runtime_error(
+                "Unsupported glTF image path"
+            );
+        }
+
+        const std::filesystem::path imagePath{uri};
+
+        if (imagePath.is_absolute() || imagePath.has_root_path()) {
+            throw std::runtime_error(
+                "glTF image path must be relative"
+            );
+        }
+
+        return (modelDirectory / imagePath)
+            .lexically_normal()
+            .generic_string();
+    }
+
+    Material readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
         Material material;
 
         // No assigned material means the default white colour.
@@ -317,13 +394,12 @@ namespace {
                 colourChannelToByte(properties.base_color_factor[1]),
                 colourChannelToByte(properties.base_color_factor[2])
             };
+            material.texturePath = readTexturePath(properties.base_color_texture, modelDirectory);
         }
-
-        // Texture loading will be added next.
         return material;
     }
 
-    void appendNode(const cgltf_node& node, Model& model) {
+    void appendNode(const cgltf_node& node, Model& model, const std::filesystem::path& modelDirectory) {
         if (node.skin != nullptr) {
             throw std::runtime_error(
                 "Skinned glTF meshes are not supported yet"
@@ -346,17 +422,26 @@ namespace {
                     std::make_shared<Mesh>(std::move(mesh));
 
                 part.transform = transform;
-                part.material = readMaterial(primitive.material);
+                part.material = readMaterial(primitive.material, modelDirectory);
+
+                if (!part.material.texturePath.empty() &&
+                    cgltf_find_accessor(
+                        &primitive,
+                        cgltf_attribute_type_texcoord,
+                        0
+                    ) == nullptr) {
+                    throw std::runtime_error(
+                        "Textured glTF primitive needs TEXCOORD_0"
+                    );
+                }
 
                 model.parts.push_back(std::move(part));
             }
         }
 
         // Visit each child node too.
-        for (std::size_t index = 0;
-             index < node.children_count;
-             ++index) {
-            appendNode(*node.children[index], model);
+        for (std::size_t index = 0; index < node.children_count; ++index) {
+            appendNode(*node.children[index], model, modelDirectory);
         }
     }
 }
@@ -419,10 +504,10 @@ Model loadGltf(const std::string& filename) {
 
     Model model;
 
-    for (std::size_t index = 0;
-         index < scene->nodes_count;
-         ++index) {
-        appendNode(*scene->nodes[index], model);
+    const std::filesystem::path modelDirectory = std::filesystem::path{filename}.parent_path();
+
+    for (std::size_t index = 0; index < scene->nodes_count; ++index) {
+        appendNode(*scene->nodes[index], model, modelDirectory);
     }
 
     return model;
