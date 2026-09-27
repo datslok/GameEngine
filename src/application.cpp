@@ -2,6 +2,7 @@
 #include "mat4.h"
 #include "vec3.h"
 #include "obj_loader.h"
+#include "gltf_loader.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
@@ -86,6 +87,19 @@ void Application::createScene(){
     scene.add(second);
     scene.add(third);
     scene.add(fourth);
+
+    const Model model = loadGltf("assets/models/textured_quad.gltf");
+
+    for (const ModelPart& part : model.parts) {
+        MeshInstance object{part.mesh};
+
+        object.material = part.material;
+        object.localTransform = part.transform;
+
+        object.transform.position = Vec3{0.0f, 0.0f, -6.0f};
+
+        scene.add(object);
+    }
 }
 
 /*
@@ -199,7 +213,7 @@ void Application::render() {
 
     for (const MeshInstance& object : scene.getObjects()) {
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
-        const Mat4 model = object.transform.getMatrix();
+        const Mat4 model = object.getModelMatrix();
 
         display.drawMesh(
             gpuMesh,
