@@ -295,6 +295,11 @@ void Application::updateCameraControls(float deltaTime) {
         }
     }
 
+    if (controlMode == ControlMode::Moba) {
+        updateMobaCamera(deltaTime);
+        return;
+    }
+
     if (controlMode != ControlMode::Moba) {
         // Escape pauses mouse-look controls until the next click.
         if (!display.isMouseCaptured()) {
@@ -315,4 +320,37 @@ void Application::updateCameraControls(float deltaTime) {
         deltaTime,
         controlMode
     );
+}
+
+void Application::updateMobaCamera(float deltaTime) {
+    if (display.isCursorConfined() &&
+        display.wasKeyPressed(SDL_SCANCODE_SPACE)) {
+        mobaCameraLocked = !mobaCameraLocked;
+    }
+
+    if (mobaCameraLocked) {
+        if (duck) {
+            const Vec3 target = duck->transform.position;
+
+            camera.setPose(
+                target + mobaCameraOffset,
+                target,
+                Vec3{0.0f, 1.0f, 0.0f}
+            );
+        }
+
+        return;
+    }
+
+    const Vec2 edge = display.getEdgePanDirection();
+
+    // Screen left/right maps to world X.
+    // Screen top/bottom maps to world -Z/+Z.
+    const Vec3 movement{edge.x, 0.0f, edge.y};
+
+    if (movement.lengthSquared() > 0.0f) {
+        camera.move(
+            movement.normalized() * (mobaPanSpeed * deltaTime)
+        );
+    }
 }

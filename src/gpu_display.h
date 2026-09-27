@@ -52,6 +52,8 @@ public:
     void setMouseLookEnabled(bool enabled);
     bool hasKeyboardFocus() const;
     bool wasKeyPressed(SDL_Scancode key) const;
+    bool isCursorConfined() const;
+    Vec2 getEdgePanDirection(float margin = 5.0f) const;
 
 private:
     SDL_Window* window = nullptr;
@@ -95,10 +97,8 @@ private:
     std::map<TextureKey, std::unique_ptr<GpuTexture>> textures;
     std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
-
     bool mouseLookEnabled = true;
-
     std::array<bool, SDL_SCANCODE_COUNT> pressedKeys{};
-
     void setCursorConfined(bool confined);
+    bool cursorConfined = false;
 };

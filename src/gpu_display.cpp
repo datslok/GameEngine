@@ -675,4 +675,49 @@ void GpuDisplay::setCursorConfined(bool confined) {
     if (!SDL_SetWindowMouseGrab(window, confined)) {
         throw gpuError("Could not change cursor confinement");
     }
+    cursorConfined = confined;
+}
+
+bool GpuDisplay::isCursorConfined() const {
+    return cursorConfined;
+}
+
+Vec2 GpuDisplay::getEdgePanDirection(float margin) const {
+    if (!cursorConfined ||
+        !hasKeyboardFocus() ||
+        SDL_GetMouseFocus() != window) {
+        return Vec2{};
+    }
+
+    int width = 0;
+    int height = 0;
+
+    if (!SDL_GetWindowSize(window, &width, &height)) {
+        throw gpuError("Could not get window size");
+    }
+
+    if (width <= 0 || height <= 0) {
+        return Vec2{};
+    }
+
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+
+    SDL_GetMouseState(&mouseX, &mouseY);
+
+    Vec2 direction{};
+
+    if (mouseX < margin) {
+        direction.x = -1.0f;
+    } else if (mouseX >= static_cast<float>(width) - margin) {
+        direction.x = 1.0f;
+    }
+
+    if (mouseY < margin) {
+        direction.y = -1.0f;
+    } else if (mouseY >= static_cast<float>(height) - margin) {
+        direction.y = 1.0f;
+    }
+
+    return direction;
 }

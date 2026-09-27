@@ -129,3 +129,7 @@ void Camera::setPose(const Vec3& newPosition, const Vec3& target, const Vec3& up
     forward = newForward;
     up = newUp;
 }
+
+Vec3 Camera::getPosition() const {
+    return position;
+}
