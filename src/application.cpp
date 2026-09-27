@@ -313,6 +313,7 @@ void Application::setControlMode(ControlMode mode) {
 
     controlMode = mode;
     duckMovement.stop();
+    duckTargetYaw.reset();
 
     display.setMouseLookEnabled(
         mode != ControlMode::Moba
@@ -434,40 +435,53 @@ void Application::updateDuckMovement(float deltaTime) {
     const Vec3 movement =
         duck->transform.position - previousPosition;
 
+    // Update the desired heading whenever the duck moves.
     if (movement.x != 0.0f || movement.z != 0.0f) {
         const float heading = std::atan2(movement.x, movement.z);
 
         constexpr float modelForwardYaw =
             std::numbers::pi_v<float> / 2.0f;
 
-        const float targetYaw = heading - modelForwardYaw;
-        const float currentYaw = duck->transform.rotation.y;
+        duckTargetYaw = heading - modelForwardYaw;
+    }
 
+    // Continue turning even after reaching the destination.
+    if (duckTargetYaw) {
         constexpr float fullTurn =
             2.0f * std::numbers::pi_v<float>;
 
-        // Signed shortest difference, between -pi and +pi.
+        constexpr float turnSpeed =
+            2.0f * std::numbers::pi_v<float>;
+
+        const float currentYaw = duck->transform.rotation.y;
+
         const float difference = std::remainder(
-            targetYaw - currentYaw,
+            *duckTargetYaw - currentYaw,
             fullTurn
         );
-
-        // Radians per second: one full turn per second.
-        constexpr float turnSpeed =
-            6.0f * std::numbers::pi_v<float>;
 
         const float maximumTurn = turnSpeed * deltaTime;
 
-        const float turn = std::clamp(
-            difference,
-            -maximumTurn,
-            maximumTurn
-        );
+        if (std::abs(difference) <= maximumTurn) {
+            // Finish exactly at the desired heading.
+            duck->transform.rotation.y = std::remainder(
+                *duckTargetYaw,
+                fullTurn
+            );
 
-        duck->transform.rotation.y = std::remainder(
-            currentYaw + turn,
-            fullTurn
-        );
+            duckTargetYaw.reset();
+        } else {
+            const float turn = std::clamp(
+                difference,
+                -maximumTurn,
+                maximumTurn
+            );
+
+            duck->transform.rotation.y = std::remainder(
+                currentYaw + turn,
+                fullTurn
+            );
+        }
     }
 }
 
