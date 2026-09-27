@@ -2,14 +2,31 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
-#include <initializer_list>
+#include <vector>
 
 namespace {
     bool nearlyEqual(float actual, float expected) {
         return std::abs(actual - expected) < 0.00001f;
+    }
+
+    void assertPosition(
+        const MeshInstance& object,
+        float x,
+        float y,
+        float z
+    ) {
+        const Vec4 position =
+            object.getModelMatrix() *
+            Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+
+        assert(nearlyEqual(position.x, x));
+        assert(nearlyEqual(position.y, y));
+        assert(nearlyEqual(position.z, z));
     }
 }
 
@@ -37,66 +54,79 @@ void testSceneModel() {
     model.parts = {first, second};
 
     Scene scene;
-
-    // Adding a model must preserve existing scene objects.
     scene.add(MeshInstance{mesh});
 
     Transform placement;
     placement.position = Vec3{0.0f, 0.0f, -6.0f};
     placement.rotation.z = std::numbers::pi_v<float> / 2.0f;
 
-    scene.addModel(
+    const auto instance = scene.addModel(
         model,
         placement,
         Mat4::scaling(0.5f, 0.5f, 0.5f),
         Vec3{0.0f, 0.5f, 0.0f}
     );
 
-    const auto& objects = scene.getObjects();
+    assert(scene.getObjects().size() == 3);
+    assert(scene.getModelInstances().size() == 1);
+    assert(scene.getModelInstances()[0] == instance);
 
-    assert(objects.size() == 3);
+    {
+        const auto& objects = scene.getObjects();
+        const MeshInstance& a = objects[1];
+        const MeshInstance& b = objects[2];
 
-    const MeshInstance& a = objects[1];
-    const MeshInstance& b = objects[2];
+        assert(!objects[0].modelInstance);
+        assert(a.modelInstance == instance);
+        assert(b.modelInstance == instance);
 
-    // Meshes and embedded image bytes remain shared.
-    assert(a.mesh == mesh);
-    assert(b.mesh == mesh);
-    assert(b.material.embeddedImage == second.material.embeddedImage);
+        assert(a.mesh == mesh);
+        assert(b.mesh == mesh);
 
-    // Materials remain specific to their model parts.
-    assert(a.material.colour.r == 10);
-    assert(a.material.colour.g == 20);
-    assert(a.material.colour.b == 30);
-    assert(a.material.texturePath == "first.png");
-    assert(!a.material.flipTextureVertically);
-    assert(b.material.colour.r == 40);
-    assert(b.material.texturePath.empty());
+        assert(a.material.colour.r == 10);
+        assert(a.material.colour.g == 20);
+        assert(a.material.colour.b == 30);
+        assert(a.material.texturePath == "first.png");
+        assert(!a.material.flipTextureVertically);
 
-    // Initial rotation must survive the application's update loop.
-    assert(nearlyEqual(
-        a.initialRotation.z,
-        placement.rotation.z
-    ));
-    assert(nearlyEqual(a.rotationSpeed.y, 0.5f));
-    assert(nearlyEqual(b.rotationSpeed.y, 0.5f));
+        assert(b.material.colour.r == 40);
+        assert(b.material.embeddedImage == second.material.embeddedImage);
 
-    // Imported translation -> normalization -> scene placement.
-    // The two part origins become (0, 1, -6) and (0, -1, -6).
-    const Vec4 origin{0.0f, 0.0f, 0.0f, 1.0f};
+        assert(nearlyEqual(
+            instance->initialRotation.z,
+            placement.rotation.z
+        ));
+        assert(nearlyEqual(instance->rotationSpeed.y, 0.5f));
 
-    const Vec4 firstPosition = a.getModelMatrix() * origin;
-    const Vec4 secondPosition = b.getModelMatrix() * origin;
+        assertPosition(a, 0.0f, 1.0f, -6.0f);
+        assertPosition(b, 0.0f, -1.0f, -6.0f);
 
-    assert(nearlyEqual(firstPosition.x, 0.0f));
-    assert(nearlyEqual(firstPosition.y, 1.0f));
-    assert(nearlyEqual(firstPosition.z, -6.0f));
+        // Changing one shared position moves both parts.
+        instance->transform.position.x = 3.0f;
 
-    assert(nearlyEqual(secondPosition.x, 0.0f));
-    assert(nearlyEqual(secondPosition.y, -1.0f));
-    assert(nearlyEqual(secondPosition.z, -6.0f));
+        assertPosition(a, 3.0f, 1.0f, -6.0f);
+        assertPosition(b, 3.0f, -1.0f, -6.0f);
 
-    // A bad later part must not leave a partially added model.
+        // Shared scaling also affects both parts.
+        instance->transform.scale = Vec3{2.0f, 2.0f, 2.0f};
+
+        assertPosition(a, 3.0f, 2.0f, -6.0f);
+        assertPosition(b, 3.0f, -2.0f, -6.0f);
+    }
+
+    // Another placement of the same asset has an independent transform.
+    const auto other = scene.addModel(model);
+
+    assert(other != instance);
+    assert(scene.getModelInstances().size() == 2);
+
+    other->transform.position.x = 10.0f;
+
+    assertPosition(scene.getObjects()[3], 12.0f, 0.0f, 0.0f);
+    assertPosition(scene.getObjects()[4], 8.0f, 0.0f, 0.0f);
+    assertPosition(scene.getObjects()[1], 3.0f, 2.0f, -6.0f);
+
+    // A bad part must not leave a partially added model.
     Model invalid;
     invalid.parts.push_back(first);
     invalid.parts.push_back(ModelPart{});
@@ -110,9 +140,12 @@ void testSceneModel() {
     }
 
     assert(rejected);
-    assert(scene.getObjects().size() == 3);
+    assert(scene.getObjects().size() == 5);
+    assert(scene.getModelInstances().size() == 2);
 
-    // An empty model adds nothing.
-    scene.addModel(Model{});
-    assert(scene.getObjects().size() == 3);
+    const auto empty = scene.addModel(Model{});
+
+    assert(empty != nullptr);
+    assert(scene.getObjects().size() == 5);
+    assert(scene.getModelInstances().size() == 2);
 }

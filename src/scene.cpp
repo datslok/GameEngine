@@ -1,5 +1,6 @@
 #include "scene.h"
 
+#include <iterator>
 #include <stdexcept>
 #include <utility>
 
@@ -18,10 +19,21 @@ const std::vector<MeshInstance>& Scene::getObjects() const
     return objects;
 }
 
-void Scene::addModel(const Model& model, const Transform& placement, const Mat4& normalization, const Vec3& rotationSpeed) {
-    // Build the instances before modifying the scene.
-    std::vector<MeshInstance> instances;
-    instances.reserve(model.parts.size());
+const std::vector<std::shared_ptr<ModelInstance>>&Scene::getModelInstances() const {
+    return modelInstances;
+}
+
+std::shared_ptr<ModelInstance> Scene::addModel(const Model& model, const Transform& placement, const Mat4& normalization, const Vec3& rotationSpeed) {
+    auto instance = std::make_shared<ModelInstance>();
+
+    instance->transform = placement;
+    instance->normalization = normalization;
+    instance->initialRotation = placement.rotation;
+    instance->rotationSpeed = rotationSpeed;
+
+    // Validate and prepare all parts before changing the scene.
+    std::vector<MeshInstance> parts;
+    parts.reserve(model.parts.size());
 
     for (const ModelPart& part : model.parts) {
         if (!part.mesh) {
@@ -33,18 +45,27 @@ void Scene::addModel(const Model& model, const Transform& placement, const Mat4&
         MeshInstance object{part.mesh};
 
         object.material = part.material;
-        object.localTransform = normalization * part.transform;
+        object.localTransform = part.transform;
+        object.modelInstance = instance;
 
-        object.transform = placement;
-        object.initialRotation = placement.rotation;
-        object.rotationSpeed = rotationSpeed;
-
-        instances.push_back(std::move(object));
+        parts.push_back(std::move(object));
     }
+
+    // An empty model produces a handle but adds nothing to the scene.
+    if (parts.empty()) {
+        return instance;
+    }
+
+    objects.reserve(objects.size() + parts.size());
+    modelInstances.reserve(modelInstances.size() + 1);
 
     objects.insert(
         objects.end(),
-        instances.begin(),
-        instances.end()
+        std::make_move_iterator(parts.begin()),
+        std::make_move_iterator(parts.end())
     );
+
+    modelInstances.push_back(instance);
+
+    return instance;
 }
