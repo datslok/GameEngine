@@ -2,14 +2,19 @@
 
 #include "pixel.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
 
 struct Material {
     Pixel colour{255, 255, 255};
 
-    // Empty means plain colour, using the white fallback texture.
+    // A texture can come from a file or embedded image bytes.
+    // If both are empty, use the white fallback texture.
     std::string texturePath;
-    
-    // Existing meshes use flipped images; glTF uses unflipped images.
+
+    std::shared_ptr<const std::vector<std::uint8_t>> embeddedImage;
+
     bool flipTextureVertically = true;
 };

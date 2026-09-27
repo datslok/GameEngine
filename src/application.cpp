@@ -88,7 +88,7 @@ void Application::createScene(){
     scene.add(third);
     scene.add(fourth);
 
-    const Model model = loadGltf("assets/models/textured_quad.gltf");
+    const Model model = loadGltf("assets/models/textured_quad.glb");
 
     for (const ModelPart& part : model.parts) {
         MeshInstance object{part.mesh};

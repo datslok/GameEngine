@@ -512,9 +512,10 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
 
     const GpuTexture* selectedTexture = whiteTexture.get();
 
-    if (!material.texturePath.empty()) {
-        const TextureKey key{material.texturePath, material.flipTextureVertically};
-        selectedTexture = textures.at(key).get();
+    if (!material.texturePath.empty() || material.embeddedImage) {
+        selectedTexture = textures.at(
+            makeTextureKey(material)
+        ).get();
     }
 
     SDL_GPUTextureSamplerBinding textureBinding{};
@@ -550,16 +551,22 @@ void GpuDisplay::createWhiteTexture() {
 }
 
 void GpuDisplay::prepareMaterial(const Material& material) {
-    const std::string& path = material.texturePath;
+    const bool hasFile = !material.texturePath.empty();
+    const bool hasEmbedded = static_cast<bool>(
+        material.embeddedImage
+    );
 
-    if (path.empty()) {
+    if (!hasFile && !hasEmbedded) {
         return;
     }
 
-    const TextureKey key{
-        path,
-        material.flipTextureVertically
-    };
+    if (hasFile && hasEmbedded) {
+        throw std::invalid_argument(
+            "Material must use either a file or an embedded image"
+        );
+    }
+
+    const TextureKey key = makeTextureKey(material);
 
     if (textures.contains(key)) {
         return;
@@ -571,10 +578,24 @@ void GpuDisplay::prepareMaterial(const Material& material) {
         );
     }
 
-    const ImageData image = loadImage(
-        path,
-        material.flipTextureVertically
-    );
+    ImageData image;
+
+    if (hasEmbedded) {
+        const auto& bytes = *material.embeddedImage;
+
+        image = loadImageFromMemory(
+            std::span<const std::uint8_t>{
+                bytes.data(),
+                bytes.size()
+            },
+            material.flipTextureVertically
+        );
+    } else {
+        image = loadImage(
+            material.texturePath,
+            material.flipTextureVertically
+        );
+    }
 
     textures.emplace(
         key,

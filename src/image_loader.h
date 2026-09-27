@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <span>
 
 struct ImageData {
     std::uint32_t width = 0;
@@ -15,5 +16,10 @@ struct ImageData {
 // Flip rows by default to use bottom-left UV coordinates.
 ImageData loadImage(
     const std::string& filename,
+    bool flipVertically = true
+);
+
+ImageData loadImageFromMemory(
+    std::span<const std::uint8_t> bytes,
     bool flipVertically = true
 );
