@@ -3,6 +3,7 @@
 #include "vec3.h"
 #include "obj_loader.h"
 #include "gltf_loader.h"
+#include "ray.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
@@ -173,7 +174,13 @@ void Application::run() {
 * Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
 */
 void Application::update(float deltaTime) {
+    // Pick using the camera pose before this frame's panning.
+    updateDuckMovement(deltaTime);
+
     updateCameraControls(deltaTime);
+
+    // Follow the duck's updated position.
+    followDuckWithCamera();
 
     const auto animateRotation = [this](Transform& transform, const Vec3& initial, const Vec3& speed) {
         // Leave manually controlled axes alone when their speed is zero.
@@ -304,6 +311,7 @@ void Application::setControlMode(ControlMode mode) {
     }
 
     controlMode = mode;
+    duckMovement.stop();
 
     display.setMouseLookEnabled(
         mode != ControlMode::Moba
@@ -363,16 +371,6 @@ void Application::updateMobaCamera(float deltaTime) {
     }
 
     if (mobaCameraLocked) {
-        if (duck) {
-            const Vec3 target = duck->transform.position;
-
-            camera.setPose(
-                target + mobaCameraOffset,
-                target,
-                Vec3{0.0f, 1.0f, 0.0f}
-            );
-        }
-
         return;
     }
 
@@ -385,6 +383,60 @@ void Application::updateMobaCamera(float deltaTime) {
     if (movement.lengthSquared() > 0.0f) {
         camera.move(
             movement.normalized() * (mobaPanSpeed * deltaTime)
+        );
+    }
+}
+
+void Application::updateDuckMovement(float deltaTime) {
+    if (!duck) {
+        return;
+    }
+
+    // Only accept new commands while MOBA input is active.
+    if (controlMode == ControlMode::Moba &&
+        display.hasKeyboardFocus() &&
+        display.isCursorConfined()) {
+        const auto click = display.getGroundClick();
+
+        if (click) {
+            const Ray ray = makeCameraRay(
+                camera,
+                click->x,
+                click->y,
+                click->aspectRatio
+            );
+
+            const auto hit = intersectGround(ray, 0.0f);
+
+            if (hit) {
+                const bool insideGround =
+                    hit->x >= -20.0f &&
+                    hit->x <= 20.0f &&
+                    hit->z >= -26.0f &&
+                    hit->z <= 14.0f;
+
+                if (insideGround) {
+                    duckMovement.setTarget(*hit);
+                }
+            }
+        }
+    }
+
+    // Continue an existing command regardless of cursor or focus.
+    duckMovement.update(
+        duck->transform.position,
+        deltaTime
+    );
+}
+
+void Application::followDuckWithCamera() {
+    if (controlMode == ControlMode::Moba && mobaCameraLocked && duck) {
+        const Vec3 target = duck->transform.position;
+
+        camera.setPose(
+            target + mobaCameraOffset,
+            target,
+            Vec3{0.0f, 1.0f, 0.0f}
         );
     }
 }
