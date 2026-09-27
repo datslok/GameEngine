@@ -14,6 +14,7 @@
 #include <memory>
 #include <unordered_map>
 #include <optional>
+#include <cstddef>
 
 /*
 * Coordinates the main engine components to manage input, updates, rendering, and the applications main execution loop.
@@ -66,4 +67,5 @@ private:
     void updateDuckMovement(float deltaTime);
     void followDuckWithCamera();
     std::optional<float> duckTargetYaw;
+    std::size_t destinationMarkerIndex = 0;
 };
