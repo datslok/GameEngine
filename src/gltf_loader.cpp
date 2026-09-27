@@ -10,6 +10,7 @@
 #include <utility>
 #include <cstdint>
 #include <filesystem>
+#include <vector>
 
 namespace {
     // cgltf data must be released with cgltf_free(), not delete.
@@ -370,6 +371,74 @@ namespace {
             .generic_string();
     }
 
+    void readBaseColourTexture(const cgltf_texture_view& view, const std::filesystem::path& modelDirectory, Material& material) {
+        if (view.texture == nullptr) {
+            return;
+        }
+
+        if (view.texcoord != 0) {
+            throw std::runtime_error(
+                "Only glTF TEXCOORD_0 is supported so far"
+            );
+        }
+
+        if (view.has_transform) {
+            throw std::runtime_error(
+                "glTF texture transforms are not supported yet"
+            );
+        }
+
+        const cgltf_image* image = view.texture->image;
+
+        if (image == nullptr) {
+            throw std::runtime_error(
+                "glTF texture has no supported image"
+            );
+        }
+
+        // External image: use the path handling we already implemented.
+        if (image->buffer_view == nullptr) {
+            material.texturePath = readTexturePath(
+                view,
+                modelDirectory
+            );
+            return;
+        }
+
+        if (image->uri != nullptr) {
+            throw std::runtime_error(
+                "glTF image cannot have both a URI and a buffer view"
+            );
+        }
+
+        const std::string mimeType =
+            image->mime_type != nullptr ? image->mime_type : "";
+
+        if (mimeType != "image/png" && mimeType != "image/jpeg") {
+            throw std::runtime_error(
+                "Embedded glTF images must be PNG or JPEG"
+            );
+        }
+
+        const cgltf_buffer_view& bufferView = *image->buffer_view;
+
+        const std::uint8_t* bytes =
+            cgltf_buffer_view_data(&bufferView);
+
+        if (bytes == nullptr || bufferView.size == 0) {
+            throw std::runtime_error(
+                "Embedded glTF image has no data"
+            );
+        }
+
+        // Copy the compressed image before cgltf frees its buffers.
+        material.embeddedImage =
+            std::make_shared<const std::vector<std::uint8_t>>(
+                bytes,
+                bytes + bufferView.size
+            );
+    }
+
     Material readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
         Material material;
         material.flipTextureVertically = false;
@@ -395,7 +464,7 @@ namespace {
                 colourChannelToByte(properties.base_color_factor[1]),
                 colourChannelToByte(properties.base_color_factor[2])
             };
-            material.texturePath = readTexturePath(properties.base_color_texture, modelDirectory);
+            readBaseColourTexture(properties.base_color_texture, modelDirectory, material);
         }
         return material;
     }
@@ -425,12 +494,7 @@ namespace {
                 part.transform = transform;
                 part.material = readMaterial(primitive.material, modelDirectory);
 
-                if (!part.material.texturePath.empty() &&
-                    cgltf_find_accessor(
-                        &primitive,
-                        cgltf_attribute_type_texcoord,
-                        0
-                    ) == nullptr) {
+                if ((!part.material.texturePath.empty() || part.material.embeddedImage) && cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 0) == nullptr) {
                     throw std::runtime_error(
                         "Textured glTF primitive needs TEXCOORD_0"
                     );
