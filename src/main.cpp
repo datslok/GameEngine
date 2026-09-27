@@ -13,6 +13,8 @@ int main(int argc, char* argv[]) {
 
     try {
         Application application{1920, 1080};
+        application.setControlMode(ControlMode::FreeCamera);
+        application.setDebugModeSwitching(true);
         application.run();
     }
     catch (const std::exception& error) {

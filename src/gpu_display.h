@@ -13,6 +13,8 @@
 #include <memory>
 #include <SDL3/SDL.h>
 #include <tuple>
+#include <array>
+#include <cstddef>
 
 class GpuDisplay {
 public:
@@ -46,6 +48,10 @@ public:
 
     // Read after beginFrame() returns true.
     float getFrameAspectRatio() const;
+
+    void setMouseLookEnabled(bool enabled);
+    bool hasKeyboardFocus() const;
+    bool wasKeyPressed(SDL_Scancode key) const;
 
 private:
     SDL_Window* window = nullptr;
@@ -89,4 +95,8 @@ private:
     std::map<TextureKey, std::unique_ptr<GpuTexture>> textures;
     std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
+
+    bool mouseLookEnabled = true;
+
+    std::array<bool, SDL_SCANCODE_COUNT> pressedKeys{};
 };
