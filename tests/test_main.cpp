@@ -22,6 +22,7 @@ void testGlbTextures();
 void testModelBounds();
 void testSceneModel();
 void testRay();
+void testMoveToController();
 
 int main(){
     testPixelBuffer();
@@ -46,6 +47,7 @@ int main(){
     testModelBounds();
     testSceneModel();
     testRay();
+    testMoveToController();
 
     std::cout << "All tests passed!\n";
     return 0;

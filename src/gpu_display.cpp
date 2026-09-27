@@ -293,6 +293,7 @@ bool GpuDisplay::processEvents() {
     // Accumulate only the mouse motion received during this frame.
     mouseDelta = Vec2{};
     pressedKeys.fill(false);
+    groundClick.reset();
 
     const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
@@ -313,6 +314,7 @@ bool GpuDisplay::processEvents() {
             setMouseCaptured(false);
             pressedKeys.fill(false);
             setCursorConfined(false);
+            groundClick.reset();
         }
 
         // Clicking resumes mouse look or confines the visible MOBA cursor.
@@ -350,6 +352,7 @@ bool GpuDisplay::processEvents() {
             event.key.scancode == SDL_SCANCODE_ESCAPE) {
             setMouseCaptured(false);
             setCursorConfined(false);
+            groundClick.reset();
         }
 
         if (event.type == SDL_EVENT_MOUSE_MOTION &&
@@ -357,6 +360,33 @@ bool GpuDisplay::processEvents() {
             mouseCaptured) {
             mouseDelta.x += event.motion.xrel;
             mouseDelta.y += event.motion.yrel;
+        }
+
+        // Only accept ground clicks while the visible cursor is confined.
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            event.button.windowID == windowID &&
+            event.button.button == SDL_BUTTON_RIGHT &&
+            !mouseLookEnabled &&
+            cursorConfined &&
+            hasKeyboardFocus()) {
+            int width = 0;
+            int height = 0;
+
+            if (!SDL_GetWindowSize(window, &width, &height)) {
+                throw gpuError("Could not get window size");
+            }
+
+            if (width > 0 && height > 0 &&
+                event.button.x >= 0.0f &&
+                event.button.y >= 0.0f &&
+                event.button.x < static_cast<float>(width) &&
+                event.button.y < static_cast<float>(height)) {
+                groundClick = GroundClick{
+                    event.button.x / static_cast<float>(width),
+                    event.button.y / static_cast<float>(height),
+                    static_cast<float>(width) / static_cast<float>(height)
+                };
+            }
         }
     }
 
@@ -720,4 +750,8 @@ Vec2 GpuDisplay::getEdgePanDirection(float margin) const {
     }
 
     return direction;
+}
+
+std::optional<GroundClick> GpuDisplay::getGroundClick() const {
+    return groundClick;
 }

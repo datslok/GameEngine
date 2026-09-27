@@ -8,6 +8,7 @@
 #include "scene.h"
 #include "model_instance.h"
 #include "control_mode.h"
+#include "move_to_controller.h"
 
 #include <cstdint>
 #include <memory>
@@ -59,4 +60,8 @@ private:
 
     // Relative to the duck's position.
     Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
+    MoveToController duckMovement{3.0f};
+
+    void updateDuckMovement(float deltaTime);
+    void followDuckWithCamera();
 };

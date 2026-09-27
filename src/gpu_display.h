@@ -15,6 +15,14 @@
 #include <tuple>
 #include <array>
 #include <cstddef>
+#include <optional>
+
+struct GroundClick {
+    // Normalized window coordinates.
+    float x;
+    float y;
+    float aspectRatio;
+};
 
 class GpuDisplay {
 public:
@@ -54,6 +62,8 @@ public:
     bool wasKeyPressed(SDL_Scancode key) const;
     bool isCursorConfined() const;
     Vec2 getEdgePanDirection(float margin = 5.0f) const;
+
+    std::optional<GroundClick> getGroundClick() const;
 
 private:
     SDL_Window* window = nullptr;
@@ -101,4 +111,6 @@ private:
     std::array<bool, SDL_SCANCODE_COUNT> pressedKeys{};
     void setCursorConfined(bool confined);
     bool cursorConfined = false;
+
+    std::optional<GroundClick> groundClick;
 };
