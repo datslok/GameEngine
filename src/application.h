@@ -52,4 +52,11 @@ private:
 
     ControlMode controlMode = ControlMode::FreeCamera;
     bool enableDebugModeSwitching = true;
+    void updateMobaCamera(float deltaTime);
+
+    bool mobaCameraLocked = false;
+    float mobaPanSpeed = 9.0f;
+
+    // Relative to the duck's position.
+    Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
 };

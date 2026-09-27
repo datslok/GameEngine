@@ -20,6 +20,9 @@ void CameraController::update(
     float deltaTime,
     ControlMode mode
 ) const {
+    if (mode == ControlMode::Moba) {
+        return;
+    }
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
     Vec3 forward;
