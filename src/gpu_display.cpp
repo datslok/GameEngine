@@ -513,7 +513,8 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
     const GpuTexture* selectedTexture = whiteTexture.get();
 
     if (!material.texturePath.empty()) {
-        selectedTexture = textures.at(material.texturePath).get();
+        const TextureKey key{material.texturePath, material.flipTextureVertically};
+        selectedTexture = textures.at(key).get();
     }
 
     SDL_GPUTextureSamplerBinding textureBinding{};
@@ -551,8 +552,16 @@ void GpuDisplay::createWhiteTexture() {
 void GpuDisplay::prepareMaterial(const Material& material) {
     const std::string& path = material.texturePath;
 
-    // No upload is needed for plain colours or cached images.
-    if (path.empty() || textures.contains(path)) {
+    if (path.empty()) {
+        return;
+    }
+
+    const TextureKey key{
+        path,
+        material.flipTextureVertically
+    };
+
+    if (textures.contains(key)) {
         return;
     }
 
@@ -562,10 +571,13 @@ void GpuDisplay::prepareMaterial(const Material& material) {
         );
     }
 
-    const ImageData image = loadImage(path);
+    const ImageData image = loadImage(
+        path,
+        material.flipTextureVertically
+    );
 
     textures.emplace(
-        path,
+        key,
         std::make_unique<GpuTexture>(
             device,
             image.width,

@@ -35,6 +35,7 @@ void testGltfTextures() {
             .generic_string();
 
     assert(part.material.texturePath == expectedTexture);
+    assert(!part.material.flipTextureVertically);
     assert(std::filesystem::is_regular_file(expectedTexture));
 
     assert(part.material.colour.r == 255);
