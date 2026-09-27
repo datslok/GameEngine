@@ -131,6 +131,21 @@ void Application::createScene(){
         normalization,
         Vec3{0.0f, 0.0f, 0.0f}
     );
+
+    const auto markerMesh =
+    std::make_shared<Mesh>(Mesh::plane(0.2f));
+
+    // Movement marker
+    MeshInstance marker{markerMesh};
+
+    marker.material.colour = Pixel{255, 220, 40};
+    marker.visible = false;
+
+    // Slightly above the ground to avoid overlapping surfaces.
+    marker.transform.position = Vec3{0.0f, 0.02f, 0.0f};
+
+    destinationMarkerIndex = scene.getObjects().size();
+    scene.add(marker);
 }
 
 /*
@@ -264,6 +279,10 @@ void Application::render() {
         camera.getViewMatrix();
 
     for (const MeshInstance& object : scene.getObjects()) {
+        if (!object.visible) {
+            continue;
+        }
+
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
         const Mat4 model = object.getModelMatrix();
 
@@ -314,6 +333,7 @@ void Application::setControlMode(ControlMode mode) {
     controlMode = mode;
     duckMovement.stop();
     duckTargetYaw.reset();
+    scene.getObjects().at(destinationMarkerIndex).visible = false;
 
     display.setMouseLookEnabled(
         mode != ControlMode::Moba
@@ -419,6 +439,17 @@ void Application::updateDuckMovement(float deltaTime) {
 
                 if (insideGround) {
                     duckMovement.setTarget(*hit);
+
+                    MeshInstance& marker =
+                        scene.getObjects().at(destinationMarkerIndex);
+
+                    marker.transform.position = Vec3{
+                        hit->x,
+                        0.02f,
+                        hit->z
+                    };
+
+                    marker.visible = true;
                 }
             }
         }
@@ -431,6 +462,10 @@ void Application::updateDuckMovement(float deltaTime) {
         duck->transform.position,
         deltaTime
     );
+
+    if (!duckMovement.isMoving()) {
+        scene.getObjects().at(destinationMarkerIndex).visible = false;
+    }
 
     const Vec3 movement =
         duck->transform.position - previousPosition;
