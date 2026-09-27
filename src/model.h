@@ -3,6 +3,7 @@
 #include "mat4.h"
 #include "material.h"
 #include "mesh.h"
+#include "vec3.h"
 
 #include <memory>
 #include <vector>
@@ -16,6 +17,19 @@ struct ModelPart {
     Mat4 transform = Mat4::identity();
 };
 
+struct ModelBounds {
+    Vec3 minimum;
+    Vec3 maximum;
+
+    Vec3 centre() const;
+    Vec3 size() const;
+};
+
 struct Model {
     std::vector<ModelPart> parts;
+
+    ModelBounds getBounds() const;
+
+    // Centre the model and scale its longest side to targetSize.
+    Mat4 getNormalizationMatrix(float targetSize = 2.0f) const;
 };
