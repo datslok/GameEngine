@@ -90,24 +90,10 @@ void Application::createScene(){
 
     const Model model = loadGltf("assets/models/Duck.glb");
 
-    // Make the model's longest side two world units.
-    const Mat4 normalization = model.getNormalizationMatrix(2.0f);
+    Transform placement;
+    placement.position = Vec3{0.0f, 0.0f, -6.0f};
 
-    for (const ModelPart& part : model.parts) {
-        MeshInstance object{part.mesh};
-
-        object.material = part.material;
-
-        // Preserve each part's placement within the complete model.
-        object.localTransform = normalization * part.transform;
-
-        object.transform.position = Vec3{0.0f, 0.0f, -6.0f};
-
-        object.initialRotation = object.transform.rotation;
-        object.rotationSpeed = Vec3{0.0f, 0.5f, 0.0f};
-
-        scene.add(object);
-    }
+    scene.addModel(model, placement, model.getNormalizationMatrix(2.0f), Vec3{0.0f, 0.5f, 0.0f});
 }
 
 /*

@@ -20,6 +20,7 @@ void testGltfAttributes();
 void testGltfTextures();
 void testGlbTextures();
 void testModelBounds();
+void testSceneModel();
 
 int main(){
     testPixelBuffer();
@@ -42,6 +43,7 @@ int main(){
     testGltfTextures();
     testGlbTextures();
     testModelBounds();
+    testSceneModel();
 
     std::cout << "All tests passed!\n";
     return 0;
