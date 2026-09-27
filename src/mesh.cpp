@@ -1,5 +1,8 @@
 #include "mesh.h"
 
+#include <cmath>
+#include <stdexcept>
+
 /*
 * Create a cube mesh with vertices, edges, and triangles so it can be represented and rendered as a complete 3D object.
 */
@@ -65,5 +68,61 @@ Mesh Mesh::cube() {
         second.uvs[1] = Vec2{1.0f, 1.0f};
         second.uvs[2] = Vec2{0.0f, 1.0f};
     }
+    return mesh;
+}
+
+Mesh Mesh::plane(float halfSize) {
+    if (!std::isfinite(halfSize) || halfSize <= 0.0f) {
+        throw std::invalid_argument(
+            "Plane half-size must be finite and positive"
+        );
+    }
+
+    Mesh mesh;
+
+    mesh.vertices = {
+        Vec4{-halfSize, 0.0f, -halfSize, 1.0f},
+        Vec4{-halfSize, 0.0f,  halfSize, 1.0f},
+        Vec4{ halfSize, 0.0f,  halfSize, 1.0f},
+        Vec4{ halfSize, 0.0f, -halfSize, 1.0f}
+    };
+
+    // Counter-clockwise when viewed from above.
+    Triangle first{};
+    first.first = 0;
+    first.second = 1;
+    first.third = 2;
+
+    Triangle second{};
+    second.first = 0;
+    second.second = 2;
+    second.third = 3;
+
+    for (std::size_t corner = 0; corner < 3; ++corner) {
+        first.normals[corner] = Vec3{0.0f, 1.0f, 0.0f};
+        second.normals[corner] = Vec3{0.0f, 1.0f, 0.0f};
+    }
+
+    first.uvs = {
+        Vec2{0.0f, 0.0f},
+        Vec2{0.0f, 1.0f},
+        Vec2{1.0f, 1.0f}
+    };
+
+    second.uvs = {
+        Vec2{0.0f, 0.0f},
+        Vec2{1.0f, 1.0f},
+        Vec2{1.0f, 0.0f}
+    };
+
+    mesh.triangles = {first, second};
+
+    mesh.edges = {
+        Edge{0, 1},
+        Edge{1, 2},
+        Edge{2, 3},
+        Edge{3, 0}
+    };
+
     return mesh;
 }

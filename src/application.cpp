@@ -89,12 +89,46 @@ void Application::createScene(){
     scene.add(third);
     scene.add(fourth);
 
+    // Ground
+    const auto groundMesh =
+        std::make_shared<Mesh>(Mesh::plane(20.0f));
+
+    MeshInstance ground{groundMesh};
+
+    ground.transform.position = Vec3{0.0f, 0.0f, -6.0f};
+    ground.material.colour = Pixel{75, 110, 75};
+
+    scene.add(ground);
+
+    // Duck
     const Model model = loadGltf("assets/models/Duck.glb");
 
-    Transform placement;
-    placement.position = Vec3{0.0f, 0.0f, -6.0f};
+    const Mat4 normalization =
+        model.getNormalizationMatrix(2.0f);
 
-    duck = scene.addModel(model, placement, model.getNormalizationMatrix(2.0f), Vec3{0.0f, 0.5f, 0.0f});
+    const ModelBounds bounds = model.getBounds();
+
+    // Normalization centres the model, so its bottom lies below zero.
+    const Vec4 normalizedBottom = normalization * Vec4{
+        bounds.minimum.x,
+        bounds.minimum.y,
+        bounds.minimum.z,
+        1.0f
+    };
+
+    Transform placement;
+    placement.position = Vec3{
+        0.0f,
+        -normalizedBottom.y,
+        -6.0f
+    };
+
+    duck = scene.addModel(
+        model,
+        placement,
+        normalization,
+        Vec3{0.0f, 0.0f, 0.0f}
+    );
 }
 
 /*
