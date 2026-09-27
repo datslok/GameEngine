@@ -15,6 +15,12 @@ void testTransform();
 void testScene();
 void testObjLoader();
 void testObjUvs();
+void testGltfLoader();
+void testGltfAttributes();
+void testGltfTextures();
+void testGlbTextures();
+void testModelBounds();
+void testSceneModel();
 
 int main(){
     testPixelBuffer();
@@ -32,6 +38,12 @@ int main(){
     testScene();
     testObjLoader();
     testObjUvs();
+    testGltfLoader();
+    testGltfAttributes();
+    testGltfTextures();
+    testGlbTextures();
+    testModelBounds();
+    testSceneModel();
 
     std::cout << "All tests passed!\n";
     return 0;

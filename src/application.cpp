@@ -2,6 +2,7 @@
 #include "mat4.h"
 #include "vec3.h"
 #include "obj_loader.h"
+#include "gltf_loader.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
@@ -86,6 +87,13 @@ void Application::createScene(){
     scene.add(second);
     scene.add(third);
     scene.add(fourth);
+
+    const Model model = loadGltf("assets/models/Duck.glb");
+
+    Transform placement;
+    placement.position = Vec3{0.0f, 0.0f, -6.0f};
+
+    duck = scene.addModel(model, placement, model.getNormalizationMatrix(2.0f), Vec3{0.0f, 0.5f, 0.0f});
 }
 
 /*
@@ -138,24 +146,45 @@ void Application::update(float deltaTime) {
         cameraController.update(camera, deltaTime);
     }
 
+    const auto animateRotation = [this](Transform& transform, const Vec3& initial, const Vec3& speed) {
+        // Leave manually controlled axes alone when their speed is zero.
+        if (speed.x != 0.0f) {
+            transform.rotation.x = animatedAngle(
+                initial.x, speed.x, elapsedSeconds
+            );
+        }
+
+        if (speed.y != 0.0f) {
+            transform.rotation.y = animatedAngle(
+                initial.y, speed.y, elapsedSeconds
+            );
+        }
+
+        if (speed.z != 0.0f) {
+            transform.rotation.z = animatedAngle(
+                initial.z, speed.z, elapsedSeconds
+            );
+        }
+    };
+
+    // Standalone meshes, such as the original cubes.
     for (MeshInstance& object : scene.getObjects()) {
-        object.transform.rotation = Vec3{
-            animatedAngle(
-                object.initialRotation.x,
-                object.rotationSpeed.x,
-                elapsedSeconds
-            ),
-            animatedAngle(
-                object.initialRotation.y,
-                object.rotationSpeed.y,
-                elapsedSeconds
-            ),
-            animatedAngle(
-                object.initialRotation.z,
-                object.rotationSpeed.z,
-                elapsedSeconds
-            )
-        };
+        if (!object.modelInstance) {
+            animateRotation(
+                object.transform,
+                object.initialRotation,
+                object.rotationSpeed
+            );
+        }
+    }
+
+    // Imported models: update their shared transform once.
+    for (const auto& instance : scene.getModelInstances()) {
+        animateRotation(
+            instance->transform,
+            instance->initialRotation,
+            instance->rotationSpeed
+        );
     }
 }
 
@@ -199,7 +228,7 @@ void Application::render() {
 
     for (const MeshInstance& object : scene.getObjects()) {
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
-        const Mat4 model = object.transform.getMatrix();
+        const Mat4 model = object.getModelMatrix();
 
         display.drawMesh(
             gpuMesh,
