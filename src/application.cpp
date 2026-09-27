@@ -88,7 +88,7 @@ void Application::createScene(){
     scene.add(third);
     scene.add(fourth);
 
-    const Model model = loadGltf("assets/models/textured_quad.glb");
+    const Model model = loadGltf("assets/models/Duck.glb");
 
     for (const ModelPart& part : model.parts) {
         MeshInstance object{part.mesh};
@@ -96,7 +96,11 @@ void Application::createScene(){
         object.material = part.material;
         object.localTransform = part.transform;
 
-        object.transform.position = Vec3{0.0f, 0.0f, -6.0f};
+        object.transform.position = Vec3{0.0f, -1.0f, -6.0f};
+        object.transform.scale = Vec3{1.5f, 1.5f, 1.5f};
+
+        object.initialRotation = object.transform.rotation;
+        object.rotationSpeed = Vec3{0.0f, 0.5f, 0.0f};
 
         scene.add(object);
     }
