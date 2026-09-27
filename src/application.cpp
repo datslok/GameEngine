@@ -447,18 +447,13 @@ void Application::updateDuckMovement(float deltaTime) {
 
     // Continue turning even after reaching the destination.
     if (duckTargetYaw) {
-        constexpr float fullTurn =
-            2.0f * std::numbers::pi_v<float>;
+        constexpr float fullTurn = 2.0f * std::numbers::pi_v<float>;
 
-        constexpr float turnSpeed =
-            2.0f * std::numbers::pi_v<float>;
+        constexpr float turnSpeed = 6.0f * std::numbers::pi_v<float>;
 
         const float currentYaw = duck->transform.rotation.y;
 
-        const float difference = std::remainder(
-            *duckTargetYaw - currentYaw,
-            fullTurn
-        );
+        const float difference = std::remainder(*duckTargetYaw - currentYaw, fullTurn);
 
         const float maximumTurn = turnSpeed * deltaTime;
 
