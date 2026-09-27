@@ -8,9 +8,11 @@
 #include "material.h"
 
 #include <string>
-#include <unordered_map>
+#include <map>
+#include <utility>
 #include <memory>
 #include <SDL3/SDL.h>
+#include <tuple>
 
 class GpuDisplay {
 public:
@@ -71,9 +73,20 @@ private:
 
     void setMouseCaptured(bool captured);
 
-    // Objects using the same path share one uploaded texture.
-    std::unordered_map<std::string, std::unique_ptr<GpuTexture>> textures;
-    std::unique_ptr<GpuTexture> whiteTexture;
+    // External images use their path.
+    // Embedded images use the identity of their shared byte buffer.
+    // Both also include the row-flipping setting.
+    using TextureKey = std::tuple<std::string, std::shared_ptr<const std::vector<std::uint8_t>>, bool>;
 
+    static TextureKey makeTextureKey(const Material& material) {
+        return TextureKey{
+            material.texturePath,
+            material.embeddedImage,
+            material.flipTextureVertically
+        };
+    }
+
+    std::map<TextureKey, std::unique_ptr<GpuTexture>> textures;
+    std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
 };

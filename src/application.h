@@ -6,6 +6,7 @@
 #include "gpu_mesh.h"
 #include "mesh.h"
 #include "scene.h"
+#include "model_instance.h"
 
 #include <cstdint>
 #include <memory>
@@ -42,4 +43,6 @@ private:
 
     double elapsedSeconds = 0.0;
     std::uint64_t targetFPS = 240;
+
+    std::shared_ptr<ModelInstance> duck;
 };

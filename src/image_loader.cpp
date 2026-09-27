@@ -28,12 +28,9 @@ namespace {
     }
 }
 
-ImageData loadImage(
-    const std::string& filename,
-    bool flipVertically
-) {
+static ImageData convertImage(SDL_Surface* loadedSurface, const std::string& filename, bool flipVertically) {
     std::unique_ptr<SDL_Surface, SurfaceDeleter> original{
-        IMG_Load(filename.c_str())
+        loadedSurface
     };
 
     if (!original) {
@@ -105,4 +102,44 @@ ImageData loadImage(
 
     // Both SDL surfaces are released automatically by unique_ptr.
     return image;
+}
+
+ImageData loadImage(
+    const std::string& filename,
+    bool flipVertically
+) {
+    return convertImage(
+        IMG_Load(filename.c_str()),
+        filename,
+        flipVertically
+    );
+}
+
+ImageData loadImageFromMemory(
+    std::span<const std::uint8_t> bytes,
+    bool flipVertically
+) {
+    if (bytes.empty()) {
+        throw std::invalid_argument(
+            "Cannot load an image from empty data"
+        );
+    }
+
+    SDL_IOStream* stream = SDL_IOFromConstMem(
+        bytes.data(),
+        bytes.size()
+    );
+
+    if (stream == nullptr) {
+        throw imageError(
+            "Could not open image memory",
+            "embedded image"
+        );
+    }
+
+    return convertImage(
+        IMG_Load_IO(stream, true),
+        "embedded image",
+        flipVertically
+    );
 }
