@@ -372,6 +372,7 @@ namespace {
 
     Material readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
         Material material;
+        material.flipTextureVertically = false;
 
         // No assigned material means the default white colour.
         if (source == nullptr) {

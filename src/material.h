@@ -9,4 +9,7 @@ struct Material {
 
     // Empty means plain colour, using the white fallback texture.
     std::string texturePath;
+    
+    // Existing meshes use flipped images; glTF uses unflipped images.
+    bool flipTextureVertically = true;
 };
