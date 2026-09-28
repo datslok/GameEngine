@@ -1,5 +1,6 @@
 #include "vec2.h"
 #include <cassert>
+#include <cmath>
 
 void testVec2() {
     Vec2 zero;

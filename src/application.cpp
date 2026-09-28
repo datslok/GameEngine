@@ -5,7 +5,6 @@
 #include "gltf_loader.h"
 #include "ray.h"
 
-#include <algorithm>
 #include <SDL3/SDL.h>
 #include <numbers>
 #include <memory>
@@ -102,34 +101,18 @@ void Application::createScene(){
 
     scene.add(ground);
 
-    // Duck
-    const Model model = loadGltf("assets/models/Duck.glb");
-
-    const Mat4 normalization =
-        model.getNormalizationMatrix(2.0f);
-
-    const ModelBounds bounds = model.getBounds();
-
-    // Normalization centres the model, so its bottom lies below zero.
-    const Vec4 normalizedBottom = normalization * Vec4{
-        bounds.minimum.x,
-        bounds.minimum.y,
-        bounds.minimum.z,
-        1.0f
+    // Change this configuration to use another compatible static model.
+    const CharacterConfig playerConfig{
+        .modelPath = "assets/models/Duck.glb",
+        .modelSize = 2.0f,
+        .movementSpeed = 6.0f,
+        .turnSpeed = 6.0f * std::numbers::pi_v<float>,
+        .modelForwardYaw = std::numbers::pi_v<float> / 2.0f
     };
 
-    Transform placement;
-    placement.position = Vec3{
-        0.0f,
-        -normalizedBottom.y,
-        -6.0f
-    };
-
-    duck = scene.addModel(
-        model,
-        placement,
-        normalization,
-        Vec3{0.0f, 0.0f, 0.0f}
+    const Model model = loadGltf(playerConfig.modelPath);
+    playerCharacter.emplace(
+        scene, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f}
     );
 
     const auto markerMesh =
@@ -191,12 +174,20 @@ void Application::run() {
 */
 void Application::update(float deltaTime) {
     // Pick using the camera pose before this frame's panning.
-    updateDuckMovement(deltaTime);
+    updatePlayerCommands();
+
+    // Simulation continues when the cursor is released or focus is lost.
+    if (playerCharacter) {
+        playerCharacter->update(deltaTime);
+        if (!playerCharacter->isMoving()) {
+            scene.getObjects().at(destinationMarkerIndex).visible = false;
+        }
+    }
 
     updateCameraControls(deltaTime);
 
-    // Follow the duck's updated position.
-    followDuckWithCamera();
+    // Follow the character's updated position.
+    followPlayerWithCamera();
 
     const auto animateRotation = [this](Transform& transform, const Vec3& initial, const Vec3& speed) {
         // Leave manually controlled axes alone when their speed is zero.
@@ -331,8 +322,9 @@ void Application::setControlMode(ControlMode mode) {
     }
 
     controlMode = mode;
-    duckMovement.stop();
-    duckTargetYaw.reset();
+    if (playerCharacter) {
+        playerCharacter->stop();
+    }
     scene.getObjects().at(destinationMarkerIndex).visible = false;
 
     display.setMouseLookEnabled(
@@ -409,8 +401,8 @@ void Application::updateMobaCamera(float deltaTime) {
     }
 }
 
-void Application::updateDuckMovement(float deltaTime) {
-    if (!duck) {
+void Application::updatePlayerCommands() {
+    if (!playerCharacter) {
         return;
     }
 
@@ -438,7 +430,7 @@ void Application::updateDuckMovement(float deltaTime) {
                     hit->z <= 14.0f;
 
                 if (insideGround) {
-                    duckMovement.setTarget(*hit);
+                    playerCharacter->moveTo(*hit);
 
                     MeshInstance& marker =
                         scene.getObjects().at(destinationMarkerIndex);
@@ -454,70 +446,11 @@ void Application::updateDuckMovement(float deltaTime) {
             }
         }
     }
-
-    // Continue an existing command regardless of cursor or focus.
-    const Vec3 previousPosition = duck->transform.position;
-
-    duckMovement.update(
-        duck->transform.position,
-        deltaTime
-    );
-
-    if (!duckMovement.isMoving()) {
-        scene.getObjects().at(destinationMarkerIndex).visible = false;
-    }
-
-    const Vec3 movement =
-        duck->transform.position - previousPosition;
-
-    // Update the desired heading whenever the duck moves.
-    if (movement.x != 0.0f || movement.z != 0.0f) {
-        const float heading = std::atan2(movement.x, movement.z);
-
-        constexpr float modelForwardYaw =
-            std::numbers::pi_v<float> / 2.0f;
-
-        duckTargetYaw = heading - modelForwardYaw;
-    }
-
-    // Continue turning even after reaching the destination.
-    if (duckTargetYaw) {
-        constexpr float fullTurn = 2.0f * std::numbers::pi_v<float>;
-
-        constexpr float turnSpeed = 6.0f * std::numbers::pi_v<float>;
-
-        const float currentYaw = duck->transform.rotation.y;
-
-        const float difference = std::remainder(*duckTargetYaw - currentYaw, fullTurn);
-
-        const float maximumTurn = turnSpeed * deltaTime;
-
-        if (std::abs(difference) <= maximumTurn) {
-            // Finish exactly at the desired heading.
-            duck->transform.rotation.y = std::remainder(
-                *duckTargetYaw,
-                fullTurn
-            );
-
-            duckTargetYaw.reset();
-        } else {
-            const float turn = std::clamp(
-                difference,
-                -maximumTurn,
-                maximumTurn
-            );
-
-            duck->transform.rotation.y = std::remainder(
-                currentYaw + turn,
-                fullTurn
-            );
-        }
-    }
 }
 
-void Application::followDuckWithCamera() {
-    if (controlMode == ControlMode::Moba && mobaCameraLocked && duck) {
-        const Vec3 target = duck->transform.position;
+void Application::followPlayerWithCamera() {
+    if (controlMode == ControlMode::Moba && mobaCameraLocked && playerCharacter) {
+        const Vec3 target = playerCharacter->getVisualCentre();
 
         camera.setPose(
             target + mobaCameraOffset,

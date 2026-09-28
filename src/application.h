@@ -6,9 +6,8 @@
 #include "gpu_mesh.h"
 #include "mesh.h"
 #include "scene.h"
-#include "model_instance.h"
+#include "character.h"
 #include "control_mode.h"
-#include "move_to_controller.h"
 
 #include <cstdint>
 #include <memory>
@@ -50,7 +49,7 @@ private:
     double elapsedSeconds = 0.0;
     std::uint64_t targetFPS = 240;
 
-    std::shared_ptr<ModelInstance> duck;
+    std::optional<Character> playerCharacter;
     void updateCameraControls(float deltaTime);
 
     ControlMode controlMode = ControlMode::FreeCamera;
@@ -60,12 +59,10 @@ private:
     bool mobaCameraLocked = false;
     float mobaPanSpeed = 9.0f;
 
-    // Relative to the duck's position.
+    // Relative to the character's visual centre.
     Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
-    MoveToController duckMovement{6.0f};
 
-    void updateDuckMovement(float deltaTime);
-    void followDuckWithCamera();
-    std::optional<float> duckTargetYaw;
+    void updatePlayerCommands();
+    void followPlayerWithCamera();
     std::size_t destinationMarkerIndex = 0;
 };

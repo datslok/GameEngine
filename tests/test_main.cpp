@@ -23,6 +23,7 @@ void testModelBounds();
 void testSceneModel();
 void testRay();
 void testMoveToController();
+void testCharacter();
 
 int main(){
     testPixelBuffer();
@@ -48,6 +49,7 @@ int main(){
     testSceneModel();
     testRay();
     testMoveToController();
+    testCharacter();
 
     std::cout << "All tests passed!\n";
     return 0;
