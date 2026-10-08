@@ -6,6 +6,7 @@
 #include "scene/asset_handles.h"
 #include "scene/material.h"
 #include "scene/indexed_mesh.h"
+#include "scene/lighting.h"
 
 #include <SDL3/SDL.h>
 #include <cstdint>
@@ -49,6 +50,9 @@ public:
 
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
+
+    // Send the frame's lights to the shader. Call between beginFrame() and endFrame(); beginFrame() starts with no lights.
+    void setLighting(const FrameLighting& lighting);
 
     void drawMesh(MeshHandle mesh, const Mat4& model, const Mat4& viewProjection, const Material& material);
 
