@@ -34,6 +34,7 @@ void testAssetManager();
 void testIndexedMesh();
 void testLighting();
 void testLightUniforms();
+void testMaterialUniforms();
 
 int main(){
     testPixelBuffer();
@@ -70,6 +71,7 @@ int main(){
     testIndexedMesh();
     testLighting();
     testLightUniforms();
+    testMaterialUniforms();
 
     std::cout << "All tests passed!\n";
     return 0;

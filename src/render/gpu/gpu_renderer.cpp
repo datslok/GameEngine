@@ -1,5 +1,6 @@
 #include "render/gpu/gpu_renderer.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/material_uniforms.h"
 
 #include <stdexcept>
 #include <string>
@@ -361,20 +362,20 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
 
     // A frame that never sets lighting reads "no lights" rather than whatever the slot held before.
-    setLighting(FrameLighting{});
+    setLighting(FrameLighting{}, Vec3{0.0f, 0.0f, 0.0f});
 
     return true;
 }
 
 /*
-* Pushed uniform data stays in effect for every later draw in the frame, so the lights are sent once, not per object.
+* Pushed uniform data stays in effect for every later draw in the frame, so the lights and camera position are sent once, not per object.
 */
-void GpuRenderer::setLighting(const FrameLighting& lighting) {
+void GpuRenderer::setLighting(const FrameLighting& lighting, const Vec3& cameraPosition) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("setLighting requires an active frame");
     }
 
-    const LightUniformData data = packLighting(lighting);
+    const LightUniformData data = packLighting(lighting, cameraPosition);
 
     SDL_PushGPUFragmentUniformData(commands, 1, &data, static_cast<Uint32>(sizeof(data)));
 }
@@ -430,15 +431,9 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mat4&
         static_cast<Uint32>(sizeof(matrixData))
     );
 
-    // Convert our byte colour channels to the shader's 0–1 range.
-    const float colourData[4] = {
-        static_cast<float>(material.colour.r) / 255.0f,
-        static_cast<float>(material.colour.g) / 255.0f,
-        static_cast<float>(material.colour.b) / 255.0f,
-        1.0f
-    };
+    const MaterialUniformData materialData = packMaterial(material);
 
-    SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
+    SDL_PushGPUFragmentUniformData(commands, 0, &materialData, static_cast<Uint32>(sizeof(materialData)));
 
     // No texture means plain colour: the shader multiplies the colour by white.
     const GpuTexture* selectedTexture = whiteTexture.get();

@@ -21,7 +21,7 @@ namespace {
         FrameLighting lighting;
         lighting.ambient = Vec3{0.2f, 0.2f, 0.2f};
 
-        const LightUniformData data = packLighting(lighting);
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(nearlyEqual(data.ambient, 0.2f, 0.2f, 0.2f, 0.0f));
         assert(data.counts[0] == 0 && data.counts[1] == 0 && data.counts[2] == 0 && data.counts[3] == 0);
@@ -32,7 +32,7 @@ namespace {
         FrameLighting lighting;
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, -2.0f, 0.0f}, Vec3{1.0f, 0.5f, 0.5f}, 2.0f});
 
-        const LightUniformData data = packLighting(lighting);
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[0] == 1);
         assert(nearlyEqual(data.directional[0].toLight, 0.0f, 1.0f, 0.0f, 0.0f));
@@ -45,7 +45,7 @@ namespace {
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, 1.0f});
         lighting.directionalLights.push_back(DirectionalLight{Vec3{1.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, 1.0f});
 
-        const LightUniformData data = packLighting(lighting);
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[0] == 1);
         assert(nearlyEqual(data.directional[0].toLight, -1.0f, 0.0f, 0.0f, 0.0f));
@@ -55,7 +55,7 @@ namespace {
         FrameLighting lighting;
         lighting.pointLights.push_back(PlacedPointLight{Vec3{1.0f, 2.0f, 3.0f}, PointLight{Vec3{1.0f, 1.0f, 1.0f}, 3.0f, 6.0f}});
 
-        const LightUniformData data = packLighting(lighting);
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[1] == 1);
         assert(nearlyEqual(data.points[0].positionRange, 1.0f, 2.0f, 3.0f, 6.0f));
@@ -68,9 +68,16 @@ namespace {
         lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 0.0f));
         lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, -1.0f));
 
-        const LightUniformData data = packLighting(lighting);
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[1] == 0);
+    }
+
+    // Specular highlights depend on where the viewer is, so the camera position travels with the lights.
+    void testCameraPositionIsPacked() {
+        const LightUniformData data = packLighting(FrameLighting{}, Vec3{1.0f, 2.0f, 3.0f});
+
+        assert(nearlyEqual(data.cameraPosition, 1.0f, 2.0f, 3.0f, 0.0f));
     }
 
     // Lights past the limits are dropped; the first ones collected win.
@@ -85,7 +92,7 @@ namespace {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, 5.0f));
         }
 
-        const LightUniformData data = packLighting(lighting);
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[0] == maxDirectionalLights);
         assert(data.counts[1] == maxPointLights);
@@ -99,5 +106,6 @@ void testLightUniforms() {
     testZeroDirectionIsSkipped();
     testPointLightIsPacked();
     testPointLightWithoutRangeIsSkipped();
+    testCameraPositionIsPacked();
     testCountsAreCapped();
 }
