@@ -31,6 +31,7 @@ void testEdgePan();
 void testDemoGame();
 void testCameraControllers();
 void testAssetManager();
+void testIndexedMesh();
 
 int main(){
     testPixelBuffer();
@@ -64,6 +65,7 @@ int main(){
     testDemoGame();
     testCameraControllers();
     testAssetManager();
+    testIndexedMesh();
 
     std::cout << "All tests passed!\n";
     return 0;

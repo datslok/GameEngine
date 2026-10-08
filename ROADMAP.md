@@ -100,7 +100,7 @@ Covers the input and "separate simulation and rendering" parts of the original s
 | 10. Engine architecture: scene management, entities and components, resource loading | Phase 3 |
 | 10. Engine architecture: debug tools | Debug drawing in phase 4; debug UI and profiler in phase 6 |
 
-## Phase 3: Engine architecture ← current
+## Phase 3: Engine architecture (done, Oct 8 2026)
 
 Untangle `Application` and the old `GpuDisplay` before adding more features, so everything after this has a clear place to go.
 
@@ -109,16 +109,17 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 - [x] `Game` interface (`game-interface`): `onInit`, `onInput`, `onFixedUpdate`, `onUpdate`; `Application` is the engine loop and the demo is `DemoGame`
 - [x] Camera split (`camera-split`): `Camera` is a lens (position, orientation, FOV, aspect) with matrices built on request; free-fly, first-person and MOBA are separate concrete controllers, with look angles stored as yaw/pitch
 - [x] Asset manager with handles (`asset-manager`): `MeshHandle` and `TextureHandle`, each file loaded once, GPU copies indexed like the handles, no per-frame path lookups
-- [ ] One canonical vertex format shared by the loaders and GPU upload; indexed meshes instead of three unshared vertices per triangle
+- [x] Indexed meshes (`indexed-meshes`): `Mesh` stays the import format; `buildIndexedMesh` produces the render format (`MeshVertex` position/normal/UV, the exact GPU layout, plus 32-bit indices), merging identical corners
 
 **Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window. âœ” (`tests/demo_game_test.cpp`; the remaining items finish the phase)
 
-## Phase 4: Rendering upgrades
+## Phase 4: Rendering upgrades ← current
 
 Finishes the old "shading and lighting" step and adds the tools the next phases need to see what they are doing.
 
 - [ ] Light data in a uniform buffer instead of hardcoded in the shader; several directional and point lights
 - [ ] Specular highlights (Blinn-Phong)
+- [ ] Optional smooth normals for models that have none (the teapot is flat shaded because its file has no normals)
 - [ ] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer
 - [ ] Linear filtering and mipmaps
 - [ ] Shadow mapping for the main directional light
