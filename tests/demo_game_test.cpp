@@ -2,6 +2,8 @@
 #include "gameplay/character.h"
 #include "math/transform.h"
 #include "scene/camera_ray.h"
+#include "scene/interpolation.h"
+#include "scene/light.h"
 #include "scene/model_renderer.h"
 
 #include <cassert>
@@ -84,6 +86,17 @@ void testDemoGame() {
 
     // On arrival the simulation hides the marker.
     assert(!world.get<ModelRenderer>(marker).visible);
+
+    // The torch follows the player, one unit above it, and interpolates like it.
+    const Entity torch = game.getPlayerTorch();
+    assert(world.isAlive(torch));
+    assert(world.has<PointLight>(torch));
+    assert(world.has<PreviousTransform>(torch));
+
+    const Vec3 torchPosition = world.get<Transform>(torch).position;
+    assert(nearlyEqual(torchPosition.x, end.x));
+    assert(nearlyEqual(torchPosition.y, end.y + 1.0f));
+    assert(nearlyEqual(torchPosition.z, end.z));
 
     // A tap does not start hold-to-steer: with the button up, later frames give no new command.
     Input later = mobaInput();
