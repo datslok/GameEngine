@@ -3,6 +3,7 @@
 #include "vec3.h"
 #include "obj_loader.h"
 #include "gltf_loader.h"
+#include "ray.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
@@ -89,12 +90,45 @@ void Application::createScene(){
     scene.add(third);
     scene.add(fourth);
 
-    const Model model = loadGltf("assets/models/Duck.glb");
+    // Ground
+    const auto groundMesh =
+        std::make_shared<Mesh>(Mesh::plane(20.0f));
 
-    Transform placement;
-    placement.position = Vec3{0.0f, 0.0f, -6.0f};
+    MeshInstance ground{groundMesh};
 
-    duck = scene.addModel(model, placement, model.getNormalizationMatrix(2.0f), Vec3{0.0f, 0.5f, 0.0f});
+    ground.transform.position = Vec3{0.0f, 0.0f, -6.0f};
+    ground.material.colour = Pixel{75, 110, 75};
+
+    scene.add(ground);
+
+    // Change this configuration to use another compatible static model.
+    const CharacterConfig playerConfig{
+        .modelPath = "assets/models/Duck.glb",
+        .modelSize = 2.0f,
+        .movementSpeed = 6.0f,
+        .turnSpeed = 6.0f * std::numbers::pi_v<float>,
+        .modelForwardYaw = std::numbers::pi_v<float> / 2.0f
+    };
+
+    const Model model = loadGltf(playerConfig.modelPath);
+    playerCharacter.emplace(
+        scene, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f}
+    );
+
+    const auto markerMesh =
+    std::make_shared<Mesh>(Mesh::plane(0.2f));
+
+    // Movement marker
+    MeshInstance marker{markerMesh};
+
+    marker.material.colour = Pixel{255, 220, 40};
+    marker.visible = false;
+
+    // Slightly above the ground to avoid overlapping surfaces.
+    marker.transform.position = Vec3{0.0f, 0.02f, 0.0f};
+
+    destinationMarkerIndex = scene.getObjects().size();
+    scene.add(marker);
 }
 
 /*
@@ -106,7 +140,7 @@ void Application::run() {
     while (true) {
         const Uint64 frameStart = SDL_GetTicksNS();
 
-        if (!display.processEvents()) {
+        if (!display.processEvents(input)) {
             break;
         }
 
@@ -139,7 +173,21 @@ void Application::run() {
 * Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
 */
 void Application::update(float deltaTime) {
+    // Pick using the camera pose before this frame's panning.
+    updatePlayerCommands();
+
+    // Simulation continues when the cursor is released or focus is lost.
+    if (playerCharacter) {
+        playerCharacter->update(deltaTime);
+        if (!playerCharacter->isMoving()) {
+            scene.getObjects().at(destinationMarkerIndex).visible = false;
+        }
+    }
+
     updateCameraControls(deltaTime);
+
+    // Follow the character's updated position.
+    followPlayerWithCamera();
 
     const auto animateRotation = [this](Transform& transform, const Vec3& initial, const Vec3& speed) {
         // Leave manually controlled axes alone when their speed is zero.
@@ -222,6 +270,10 @@ void Application::render() {
         camera.getViewMatrix();
 
     for (const MeshInstance& object : scene.getObjects()) {
+        if (!object.visible) {
+            continue;
+        }
+
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
         const Mat4 model = object.getModelMatrix();
 
@@ -270,10 +322,17 @@ void Application::setControlMode(ControlMode mode) {
     }
 
     controlMode = mode;
+    if (playerCharacter) {
+        playerCharacter->stop();
+    }
+    scene.getObjects().at(destinationMarkerIndex).visible = false;
 
     display.setMouseLookEnabled(
         mode != ControlMode::Moba
     );
+
+    // Motion from the previous mode must not rotate the new camera pose.
+    input.discardMouseMotion();
 }
 
 void Application::setDebugModeSwitching(bool enabled) {
@@ -286,11 +345,11 @@ void Application::updateCameraControls(float deltaTime) {
     }
 
     if (enableDebugModeSwitching) {
-        if (display.wasKeyPressed(SDL_SCANCODE_F1)) {
+        if (input.wasKeyPressed(SDL_SCANCODE_F1)) {
             setControlMode(ControlMode::FirstPerson);
-        } else if (display.wasKeyPressed(SDL_SCANCODE_F2)) {
+        } else if (input.wasKeyPressed(SDL_SCANCODE_F2)) {
             setControlMode(ControlMode::Moba);
-        } else if (display.wasKeyPressed(SDL_SCANCODE_F3)) {
+        } else if (input.wasKeyPressed(SDL_SCANCODE_F3)) {
             setControlMode(ControlMode::FreeCamera);
         }
     }
@@ -306,7 +365,7 @@ void Application::updateCameraControls(float deltaTime) {
             return;
         }
 
-        const Vec2 mouseDelta = display.getMouseDelta();
+        const Vec2 mouseDelta = input.getMouseDelta();
 
         cameraController.look(
             camera,
@@ -317,6 +376,7 @@ void Application::updateCameraControls(float deltaTime) {
 
     cameraController.update(
         camera,
+        input,
         deltaTime,
         controlMode
     );
@@ -324,21 +384,11 @@ void Application::updateCameraControls(float deltaTime) {
 
 void Application::updateMobaCamera(float deltaTime) {
     if (display.isCursorConfined() &&
-        display.wasKeyPressed(SDL_SCANCODE_SPACE)) {
+        input.wasKeyPressed(SDL_SCANCODE_SPACE)) {
         mobaCameraLocked = !mobaCameraLocked;
     }
 
     if (mobaCameraLocked) {
-        if (duck) {
-            const Vec3 target = duck->transform.position;
-
-            camera.setPose(
-                target + mobaCameraOffset,
-                target,
-                Vec3{0.0f, 1.0f, 0.0f}
-            );
-        }
-
         return;
     }
 
@@ -351,6 +401,65 @@ void Application::updateMobaCamera(float deltaTime) {
     if (movement.lengthSquared() > 0.0f) {
         camera.move(
             movement.normalized() * (mobaPanSpeed * deltaTime)
+        );
+    }
+}
+
+void Application::updatePlayerCommands() {
+    if (!playerCharacter) {
+        return;
+    }
+
+    // Only accept new commands while MOBA input is active.
+    if (controlMode == ControlMode::Moba &&
+        display.hasKeyboardFocus() &&
+        display.isCursorConfined()) {
+        const auto click = display.getGroundClick();
+
+        if (click) {
+            const Ray ray = makeCameraRay(
+                camera,
+                click->x,
+                click->y,
+                click->aspectRatio
+            );
+
+            const auto hit = intersectGround(ray, 0.0f);
+
+            if (hit) {
+                const bool insideGround =
+                    hit->x >= -20.0f &&
+                    hit->x <= 20.0f &&
+                    hit->z >= -26.0f &&
+                    hit->z <= 14.0f;
+
+                if (insideGround) {
+                    playerCharacter->moveTo(*hit);
+
+                    MeshInstance& marker =
+                        scene.getObjects().at(destinationMarkerIndex);
+
+                    marker.transform.position = Vec3{
+                        hit->x,
+                        0.02f,
+                        hit->z
+                    };
+
+                    marker.visible = true;
+                }
+            }
+        }
+    }
+}
+
+void Application::followPlayerWithCamera() {
+    if (controlMode == ControlMode::Moba && mobaCameraLocked && playerCharacter) {
+        const Vec3 target = playerCharacter->getVisualCentre();
+
+        camera.setPose(
+            target + mobaCameraOffset,
+            target,
+            Vec3{0.0f, 1.0f, 0.0f}
         );
     }
 }

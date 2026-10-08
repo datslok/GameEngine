@@ -20,6 +20,6 @@ struct MeshInstance {
     Material material;
     // Null for standalone meshes; shared by parts of an imported model.
     std::shared_ptr<ModelInstance> modelInstance;
-
     explicit MeshInstance(std::shared_ptr<const Mesh> mesh);
+    bool visible = true;
 };

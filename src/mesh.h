@@ -32,4 +32,6 @@ struct Mesh {
     std::vector<Triangle> triangles;
 
     static Mesh cube();
+    static Mesh plane(float halfSize = 20.0f);
 };
+

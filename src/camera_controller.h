@@ -2,13 +2,14 @@
 
 #include "camera.h"
 #include "control_mode.h"
+#include "input.h"
 
 // Controls camera movement and mouse-look sensitivity.
 class CameraController {
     public:
         explicit CameraController(float moveSpeed, float mouseSensitivity = 0.002f);
 
-        void update(Camera& camera, float deltaTime, ControlMode mode) const;
+        void update(Camera& camera, const Input& input, float deltaTime, ControlMode mode) const;
         void look(Camera& camera, float mouseDeltaX, float mouseDeltaY) const;
 
     private:
