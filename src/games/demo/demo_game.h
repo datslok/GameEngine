@@ -2,8 +2,10 @@
 
 #include "ecs/world.h"
 #include "engine/game.h"
-#include "gameplay/camera_controller.h"
-#include "gameplay/control_mode.h"
+#include "gameplay/camera/first_person_camera_controller.h"
+#include "gameplay/camera/free_fly_camera_controller.h"
+#include "gameplay/camera/moba_camera_controller.h"
+#include "games/demo/control_mode.h"
 #include "input/input.h"
 #include "scene/camera.h"
 
@@ -36,12 +38,15 @@ private:
     // Returns true when the mode changed, so this frame's mouse motion is not applied to the new camera pose.
     bool updateModeSwitching(World& world, const Input& input);
 
-    void updateCameraControls(const Input& input, float frameSeconds);
-    void updateMobaCamera(const Input& input, float frameSeconds);
-    void followPlayerWithCamera(const World& world, float alpha);
+    // Run the controller for the current mode.
+    void updateCamera(const World& world, const Input& input, float frameSeconds, float alpha);
 
     Camera camera;
-    CameraController cameraController;
+
+    // A real game would use just one of these. The demo keeps all three and switches with F1-F3.
+    FirstPersonCameraController firstPersonCamera;
+    MobaCameraController mobaCamera;
+    FreeFlyCameraController freeFlyCamera;
 
     ControlMode controlMode;
     bool enableDebugModeSwitching;
@@ -53,9 +58,6 @@ private:
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;
 
+    // Space toggles following the player in MOBA mode.
     bool mobaCameraLocked = false;
-    float mobaPanSpeed = 9.0f;
-
-    // Relative to the character's visual centre.
-    Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
 };

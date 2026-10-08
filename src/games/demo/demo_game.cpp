@@ -2,7 +2,6 @@
 #include "assets/gltf_loader.h"
 #include "assets/obj_loader.h"
 #include "gameplay/character.h"
-#include "gameplay/edge_pan.h"
 #include "gameplay/spinner.h"
 #include "math/transform.h"
 #include "scene/camera_ray.h"
@@ -25,8 +24,11 @@ DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
         0.1f,
         100.0f
     ),
-    // Movement speed, mouse sensitivity.
-    cameraController(3.0f, 0.001f),
+    // Movement speed in units per second, mouse sensitivity in radians per pixel.
+    firstPersonCamera(3.0f, 0.001f),
+    // Camera position relative to the point it looks at, then pan speed.
+    mobaCamera(Vec3{0.0f, 12.0f, 10.0f}, 9.0f),
+    freeFlyCamera(3.0f, 0.001f),
     controlMode(startMode),
     enableDebugModeSwitching(debugModeSwitching)
 {
@@ -150,10 +152,8 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
 
     // Motion from the previous mode must not rotate the new camera pose.
     if (!modeChanged) {
-        updateCameraControls(input, frameSeconds);
+        updateCamera(world, input, frameSeconds, alpha);
     }
-
-    followPlayerWithCamera(world, alpha);
 }
 
 Camera& DemoGame::getCamera() {
@@ -183,14 +183,11 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
             Vec3{0.0f, 1.0f, -6.0f},
             worldUp
         );
+        firstPersonCamera.takeOver(camera);
         break;
 
     case ControlMode::Moba:
-        camera.setPose(
-            Vec3{0.0f, 12.0f, 4.0f},
-            Vec3{0.0f, 0.0f, -6.0f},
-            worldUp
-        );
+        mobaCamera.centreOn(camera, Vec3{0.0f, 0.0f, -6.0f});
         break;
 
     case ControlMode::FreeCamera:
@@ -199,6 +196,7 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
             Vec3{0.0f, 0.0f, -5.0f},
             worldUp
         );
+        freeFlyCamera.takeOver(camera);
         break;
 
     default:
@@ -236,59 +234,33 @@ bool DemoGame::updateModeSwitching(World& world, const Input& input) {
     return false;
 }
 
-void DemoGame::updateCameraControls(const Input& input, float frameSeconds) {
-    if (!input.hasKeyboardFocus()) {
-        return;
+/*
+* Each mode hands the camera to its own controller. Toggles such as the MOBA lock are the demo's rules, so they stay here.
+*/
+void DemoGame::updateCamera(const World& world, const Input& input, float frameSeconds, float alpha) {
+    switch (controlMode) {
+    case ControlMode::FirstPerson:
+        firstPersonCamera.update(camera, input, frameSeconds);
+        break;
+
+    case ControlMode::FreeCamera:
+        freeFlyCamera.update(camera, input, frameSeconds);
+        break;
+
+    case ControlMode::Moba: {
+        if (input.isCursorConfined() && input.wasKeyPressed(Key::Space)) {
+            mobaCameraLocked = !mobaCameraLocked;
+        }
+
+        // Follow where the character is drawn, not where the latest tick put it, so the camera and the character move together smoothly.
+        std::optional<Vec3> followTarget;
+        if (mobaCameraLocked && world.isAlive(player)) {
+            followTarget = getCharacterVisualCentre(world, player, alpha);
+        }
+
+        mobaCamera.update(camera, input, frameSeconds, followTarget);
+        break;
     }
-
-    if (controlMode == ControlMode::Moba) {
-        updateMobaCamera(input, frameSeconds);
-        return;
-    }
-
-    // Escape pauses mouse-look controls until the next click.
-    if (!input.isMouseCaptured()) {
-        return;
-    }
-
-    const Vec2 mouseDelta = input.getMouseDelta();
-
-    cameraController.look(
-        camera,
-        mouseDelta.x,
-        mouseDelta.y
-    );
-
-    cameraController.update(
-        camera,
-        input,
-        frameSeconds,
-        controlMode
-    );
-}
-
-void DemoGame::updateMobaCamera(const Input& input, float frameSeconds) {
-    if (input.isCursorConfined() &&
-        input.wasKeyPressed(Key::Space)) {
-        mobaCameraLocked = !mobaCameraLocked;
-    }
-
-    if (mobaCameraLocked) {
-        return;
-    }
-
-    // Only pan while the MOBA cursor is confined to a focused window, so moving to another monitor does not scroll the map.
-    const bool panningActive = input.isCursorConfined() && input.hasKeyboardFocus();
-    const Vec2 edge = panningActive ? getEdgePanDirection(input) : Vec2{};
-
-    // Screen left/right maps to world X.
-    // Screen top/bottom maps to world -Z/+Z.
-    const Vec3 movement{edge.x, 0.0f, edge.y};
-
-    if (movement.lengthSquared() > 0.0f) {
-        camera.move(
-            movement.normalized() * (mobaPanSpeed * frameSeconds)
-        );
     }
 }
 
@@ -367,19 +339,4 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
         hit->z
     };
     world.get<ModelRenderer>(destinationMarker).visible = true;
-}
-
-/*
-* Follow where the character is drawn, not where the latest tick put it, so the camera and the character move together smoothly.
-*/
-void DemoGame::followPlayerWithCamera(const World& world, float alpha) {
-    if (controlMode == ControlMode::Moba && mobaCameraLocked && world.isAlive(player)) {
-        const Vec3 target = getCharacterVisualCentre(world, player, alpha);
-
-        camera.setPose(
-            target + mobaCameraOffset,
-            target,
-            Vec3{0.0f, 1.0f, 0.0f}
-        );
-    }
 }
