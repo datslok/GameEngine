@@ -4,28 +4,14 @@
 #include "assets/obj_loader.h"
 #include "assets/gltf_loader.h"
 #include "scene/camera_ray.h"
+#include "scene/interpolation.h"
+#include "scene/model_renderer.h"
+#include "gameplay/spinner.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
 #include <memory>
-#include <cmath>
 #include <stdexcept>
-
-namespace {
-    float animatedAngle(
-        float initialAngle,
-        float speed,
-        double elapsedSeconds
-    ) {
-        const double angle =
-            static_cast<double>(initialAngle) +
-            static_cast<double>(speed) * elapsedSeconds;
-
-        const double fullTurn = 2.0 * std::numbers::pi_v<double>;
-
-        return static_cast<float>(std::fmod(angle, fullTurn));
-    }
-}
 
 Application::Application(int width, int height):
     display("My Engine", width, height),
@@ -50,56 +36,57 @@ void Application::createScene(){
     const std::shared_ptr<const Mesh> pyramidMesh = std::make_shared<Mesh>(loadObj("assets/models/pyramid.obj"));
     const std::shared_ptr<const Mesh> teapotMesh = std::make_shared<Mesh>(loadObj("assets/models/teapot.obj"));
 
-    MeshInstance first{cubeMesh};
-    first.transform.position  = Vec3{-3.0f,  0.0f, -10.0f};
-    first.transform.rotation.x = 0.3f;
-    first.material.colour = Pixel{255, 255, 255};
+    // A spinning demo object: Transform + ModelRenderer + Spinner, plus PreviousTransform so it is drawn smoothly.
+    const auto spawnSpinner = [this](std::shared_ptr<const Mesh> mesh, const Material& material,
+                                     const Transform& transform, const Vec3& speed) {
+        const Entity entity = world.create();
+        world.add(entity, transform);
+        world.add(entity, PreviousTransform{transform});
+        world.add(entity, makeMeshRenderer(std::move(mesh), material));
+        world.add(entity, Spinner{transform.rotation, speed});
+    };
 
-    MeshInstance second{cubeMesh};
-    second.transform.position = Vec3{ 3.0f,  0.0f, -10.0f};
-    second.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
-    second.material.colour = Pixel{255, 255, 255};
+    Material textured;
+    textured.texturePath = "assets/textures/demo.png";
 
-    first.initialRotation = first.transform.rotation;
-    first.rotationSpeed = Vec3{2.0f, 2.0f, 0.0f};
+    Material green;
+    green.colour = Pixel{80, 200, 120};
 
-    second.initialRotation = second.transform.rotation;
-    second.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
+    Material gold;
+    gold.colour = Pixel{230, 180, 60};
 
-    MeshInstance third{pyramidMesh};
-    third.transform.position  = Vec3{ 0.0f,  3.0f, -10.0f};
-    third.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
-    third.material.colour = Pixel{80, 200, 120};
+    const Vec3 smallScale{0.7f, 0.7f, 0.7f};
 
-    third.initialRotation = third.transform.rotation;
-    third.rotationSpeed = Vec3{0.0f, 1.0f, 0.0f};
+    Transform first;
+    first.position = Vec3{-3.0f, 0.0f, -10.0f};
+    first.rotation.x = 0.3f;
+    spawnSpinner(cubeMesh, textured, first, Vec3{2.0f, 2.0f, 0.0f});
 
-    MeshInstance fourth{teapotMesh};
-    fourth.transform.position = Vec3{ 0.0f, -3.0f, -10.0f};
-    fourth.transform.scale = Vec3{0.7f, 0.7f, 0.7f};
-    fourth.material.colour = Pixel{230, 180, 60};
+    Transform second;
+    second.position = Vec3{3.0f, 0.0f, -10.0f};
+    second.scale = smallScale;
+    spawnSpinner(cubeMesh, textured, second, Vec3{0.0f, -1.0f, 0.0f});
 
-    fourth.initialRotation = fourth.transform.rotation;
-    fourth.rotationSpeed = Vec3{0.0f, -1.0f, 0.0f};
+    Transform third;
+    third.position = Vec3{0.0f, 3.0f, -10.0f};
+    third.scale = smallScale;
+    spawnSpinner(pyramidMesh, green, third, Vec3{0.0f, 1.0f, 0.0f});
 
-    first.material.texturePath = "assets/textures/demo.png";
-    second.material.texturePath = "assets/textures/demo.png";
+    Transform fourth;
+    fourth.position = Vec3{0.0f, -3.0f, -10.0f};
+    fourth.scale = smallScale;
+    spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    scene.add(first);
-    scene.add(second);
-    scene.add(third);
-    scene.add(fourth);
+    // Ground: it never moves, so it needs no PreviousTransform.
+    Material grass;
+    grass.colour = Pixel{75, 110, 75};
 
-    // Ground
-    const auto groundMesh =
-        std::make_shared<Mesh>(Mesh::plane(20.0f));
+    Transform groundPlacement;
+    groundPlacement.position = Vec3{0.0f, 0.0f, -6.0f};
 
-    MeshInstance ground{groundMesh};
-
-    ground.transform.position = Vec3{0.0f, 0.0f, -6.0f};
-    ground.material.colour = Pixel{75, 110, 75};
-
-    scene.add(ground);
+    const Entity ground = world.create();
+    world.add(ground, groundPlacement);
+    world.add(ground, makeMeshRenderer(std::make_shared<Mesh>(Mesh::plane(20.0f)), grass));
 
     // Change this configuration to use another compatible static model.
     const CharacterConfig playerConfig{
@@ -111,24 +98,22 @@ void Application::createScene(){
     };
 
     const Model model = loadGltf(playerConfig.modelPath);
-    playerCharacter.emplace(
-        scene, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f}
-    );
+    player = spawnCharacter(world, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
 
-    const auto markerMesh =
-    std::make_shared<Mesh>(Mesh::plane(0.2f));
+    // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
+    Material yellow;
+    yellow.colour = Pixel{255, 220, 40};
 
-    // Movement marker
-    MeshInstance marker{markerMesh};
-
-    marker.material.colour = Pixel{255, 220, 40};
-    marker.visible = false;
+    ModelRenderer markerRenderer = makeMeshRenderer(std::make_shared<Mesh>(Mesh::plane(0.2f)), yellow);
+    markerRenderer.visible = false;
 
     // Slightly above the ground to avoid overlapping surfaces.
-    marker.transform.position = Vec3{0.0f, 0.02f, 0.0f};
+    Transform markerPlacement;
+    markerPlacement.position = Vec3{0.0f, 0.02f, 0.0f};
 
-    destinationMarkerIndex = scene.getObjects().size();
-    scene.add(marker);
+    destinationMarker = world.create();
+    world.add(destinationMarker, markerPlacement);
+    world.add(destinationMarker, std::move(markerRenderer));
 }
 
 /*
@@ -188,75 +173,33 @@ void Application::run() {
 * Advance the game state by one fixed tick. Everything in here sees the same tickSeconds every time, so results do not depend on the frame rate.
 */
 void Application::simulate(float tickSeconds) {
-    // Rendering blends from these transforms to the ones this tick produces.
-    scene.savePreviousTransforms();
-
     ++simulationTicks;
     const double simulationSeconds =
         static_cast<double>(simulationTicks) * timestep.getTickSeconds();
 
+    // The systems, in a fixed order.
+    // Rendering blends from the transforms saved here to the ones this tick produces.
+    savePreviousTransforms(world);
+    updateCharacters(world, tickSeconds);
+    updateSpinners(world, simulationSeconds);
+
     // Simulation continues when the cursor is released or focus is lost.
-    if (playerCharacter) {
-        playerCharacter->update(tickSeconds);
-        if (!playerCharacter->isMoving()) {
-            scene.getObjects().at(destinationMarkerIndex).visible = false;
-        }
-    }
-
-    const auto animateRotation = [simulationSeconds](Transform& transform, const Vec3& initial, const Vec3& speed) {
-        // Leave manually controlled axes alone when their speed is zero.
-        if (speed.x != 0.0f) {
-            transform.rotation.x = animatedAngle(
-                initial.x, speed.x, simulationSeconds
-            );
-        }
-
-        if (speed.y != 0.0f) {
-            transform.rotation.y = animatedAngle(
-                initial.y, speed.y, simulationSeconds
-            );
-        }
-
-        if (speed.z != 0.0f) {
-            transform.rotation.z = animatedAngle(
-                initial.z, speed.z, simulationSeconds
-            );
-        }
-    };
-
-    // Standalone meshes, such as the original cubes.
-    for (MeshInstance& object : scene.getObjects()) {
-        if (!object.modelInstance) {
-            animateRotation(
-                object.transform,
-                object.initialRotation,
-                object.rotationSpeed
-            );
-        }
-    }
-
-    // Imported models: update their shared transform once.
-    for (const auto& instance : scene.getModelInstances()) {
-        animateRotation(
-            instance->transform,
-            instance->initialRotation,
-            instance->rotationSpeed
-        );
+    if (world.isAlive(player) && !world.get<CharacterMovement>(player).isMoving()) {
+        world.get<ModelRenderer>(destinationMarker).visible = false;
     }
 }
 
 void Application::uploadSceneMeshes() {
-    for (const MeshInstance& object : scene.getObjects()) {
-        if (!gpuMeshes.contains(object.mesh)) {
-            gpuMeshes.emplace(
-                object.mesh,
-                std::make_unique<GpuMesh>(
-                    display.getDevice(),
-                    *object.mesh
-                )
-            );
+    world.each<ModelRenderer>([this](Entity, ModelRenderer& renderer) {
+        for (const RenderPart& part : renderer.parts) {
+            if (!gpuMeshes.contains(part.mesh)) {
+                gpuMeshes.emplace(
+                    part.mesh,
+                    std::make_unique<GpuMesh>(display.getDevice(), *part.mesh)
+                );
+            }
         }
-    }
+    });
 }
 
 /*
@@ -265,9 +208,11 @@ void Application::uploadSceneMeshes() {
 void Application::render(float alpha) {
     // Upload any newly requested textures before starting the frame.
     // Already-cached textures require only a lookup.
-    for (const MeshInstance& object : scene.getObjects()) {
-        display.prepareMaterial(object.material);
-    }
+    world.each<ModelRenderer>([this](Entity, ModelRenderer& renderer) {
+        for (const RenderPart& part : renderer.parts) {
+            display.prepareMaterial(part.material);
+        }
+    });
 
     if (!display.beginFrame(0.0f, 0.0f, 0.0f)) {
         return;
@@ -286,21 +231,23 @@ void Application::render(float alpha) {
         camera.getProjectionMatrix() *
         camera.getViewMatrix();
 
-    for (const MeshInstance& object : scene.getObjects()) {
-        if (!object.visible) {
-            continue;
+    // Draw every entity that has something to draw and a place to draw it.
+    world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& renderer, Transform&) {
+        if (!renderer.visible) {
+            return;
         }
 
-        const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
-        const Mat4 model = object.getInterpolatedModelMatrix(alpha);
+        const Mat4 entityMatrix = getRenderTransform(world, entity, alpha).getMatrix();
 
-        display.drawMesh(
-            gpuMesh,
-            model,
-            viewProjection,
-            object.material
-        );
-    }
+        for (const RenderPart& part : renderer.parts) {
+            display.drawMesh(
+                *gpuMeshes.at(part.mesh),
+                entityMatrix * part.localTransform,
+                viewProjection,
+                part.material
+            );
+        }
+    });
 
     display.endFrame();
 }
@@ -339,10 +286,10 @@ void Application::setControlMode(ControlMode mode) {
     }
 
     controlMode = mode;
-    if (playerCharacter) {
-        playerCharacter->stop();
+    if (world.isAlive(player)) {
+        world.get<CharacterMovement>(player).stop();
     }
-    scene.getObjects().at(destinationMarkerIndex).visible = false;
+    world.get<ModelRenderer>(destinationMarker).visible = false;
 
     display.setMouseLookEnabled(
         mode != ControlMode::Moba
@@ -423,7 +370,7 @@ void Application::updateMobaCamera(float deltaTime) {
 }
 
 void Application::updatePlayerCommands() {
-    if (!playerCharacter) {
+    if (!world.isAlive(player)) {
         return;
     }
 
@@ -451,20 +398,15 @@ void Application::updatePlayerCommands() {
                     hit->z <= 14.0f;
 
                 if (insideGround) {
-                    playerCharacter->moveTo(*hit);
+                    world.get<CharacterMovement>(player).moveTo(*hit);
 
-                    MeshInstance& marker =
-                        scene.getObjects().at(destinationMarkerIndex);
-
-                    marker.transform.position = Vec3{
+                    // The marker has no PreviousTransform, so it jumps straight to the new spot.
+                    world.get<Transform>(destinationMarker).position = Vec3{
                         hit->x,
                         0.02f,
                         hit->z
                     };
-
-                    // Jump straight to the new spot instead of sliding there.
-                    marker.previousTransform = marker.transform;
-                    marker.visible = true;
+                    world.get<ModelRenderer>(destinationMarker).visible = true;
                 }
             }
         }
@@ -475,8 +417,8 @@ void Application::updatePlayerCommands() {
 * Follow where the character is drawn, not where the latest tick put it, so the camera and the character move together smoothly.
 */
 void Application::followPlayerWithCamera(float alpha) {
-    if (controlMode == ControlMode::Moba && mobaCameraLocked && playerCharacter) {
-        const Vec3 target = playerCharacter->getInterpolatedVisualCentre(alpha);
+    if (controlMode == ControlMode::Moba && mobaCameraLocked && world.isAlive(player)) {
+        const Vec3 target = getCharacterVisualCentre(world, player, alpha);
 
         camera.setPose(
             target + mobaCameraOffset,

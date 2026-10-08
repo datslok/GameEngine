@@ -1,5 +1,6 @@
 #include "assets/gltf_loader.h"
-#include "scene/mesh_instance.h"
+#include "math/transform.h"
+#include "scene/model_renderer.h"
 
 #include <cassert>
 #include <cmath>
@@ -58,14 +59,15 @@ void testGltfTextures() {
 
     assert(nearlyEqual(importedOrigin.y, 0.5f));
 
-    // Verify that scene placement also preserves that transform.
-    MeshInstance instance{part.mesh};
-    instance.localTransform = part.transform;
-    instance.transform.position = Vec3{0.0f, 0.0f, -6.0f};
-    instance.transform.scale = Vec3{2.0f, 2.0f, 2.0f};
+    // Verify that placing the model in the world also preserves that transform.
+    const ModelRenderer renderer = makeModelRenderer(model);
+
+    Transform placement;
+    placement.position = Vec3{0.0f, 0.0f, -6.0f};
+    placement.scale = Vec3{2.0f, 2.0f, 2.0f};
 
     const Vec4 worldOrigin =
-        instance.getModelMatrix() *
+        placement.getMatrix() * renderer.parts[0].localTransform *
         Vec4{0.0f, 0.0f, 0.0f, 1.0f};
 
     assert(nearlyEqual(worldOrigin.x, 0.0f));
