@@ -3,12 +3,15 @@
 #include <cstddef>
 
 /*
-* Reset edge-triggered keys and mouse motion so each frame only reports what happened since the previous one.
-* Held keys carry over because they stay down until a key-up event arrives.
+* Reset edge-triggered keys, buttons and mouse motion so each frame only reports what happened since the previous one.
+* Held keys and buttons carry over because they stay down until a release event arrives.
 */
 void Input::beginFrame() {
     pressedKeys.fill(false);
     releasedKeys.fill(false);
+    pressedButtons.fill(false);
+    releasedButtons.fill(false);
+    buttonPresses.clear();
     mouseDelta = Vec2{};
 }
 
@@ -39,6 +42,30 @@ void Input::releaseKey(Key key) {
 }
 
 /*
+* Buttons behave like keys, but each press also keeps the exact position and time it happened.
+*/
+void Input::pressMouseButton(const MouseButtonPress& press) {
+    if (!isValidButton(press.button)) {
+        return;
+    }
+
+    const std::size_t index = static_cast<std::size_t>(press.button);
+    heldButtons[index] = true;
+    pressedButtons[index] = true;
+    buttonPresses.push_back(press);
+}
+
+void Input::releaseMouseButton(MouseButton button) {
+    if (!isValidButton(button)) {
+        return;
+    }
+
+    const std::size_t index = static_cast<std::size_t>(button);
+    heldButtons[index] = false;
+    releasedButtons[index] = true;
+}
+
+/*
 * Sum every motion event so fast movement is not lost at low frame rates.
 */
 void Input::addMouseMotion(float deltaX, float deltaY) {
@@ -46,11 +73,21 @@ void Input::addMouseMotion(float deltaX, float deltaY) {
     mouseDelta.y += deltaY;
 }
 
+void Input::setCursor(const Vec2& position, bool insideWindow) {
+    cursorPosition = position;
+    cursorInWindow = insideWindow;
+}
+
+void Input::setWindowSize(const Vec2& size) {
+    windowSize = size;
+}
+
 /*
-* Clear held keys when key-up events can no longer be trusted to arrive, so keys do not stay stuck down.
+* Clear held keys and buttons when release events can no longer be trusted to arrive, so nothing stays stuck down.
 */
-void Input::releaseAllKeys() {
+void Input::releaseAll() {
     heldKeys.fill(false);
+    heldButtons.fill(false);
 }
 
 /*
@@ -81,6 +118,35 @@ bool Input::wasKeyReleased(Key key) const {
     return isValidKey(key) && releasedKeys[static_cast<std::size_t>(key)];
 }
 
+bool Input::isMouseButtonHeld(MouseButton button) const {
+    return isValidButton(button) && heldButtons[static_cast<std::size_t>(button)];
+}
+
+bool Input::wasMouseButtonPressed(MouseButton button) const {
+    return isValidButton(button) && pressedButtons[static_cast<std::size_t>(button)];
+}
+
+bool Input::wasMouseButtonReleased(MouseButton button) const {
+    return isValidButton(button) && releasedButtons[static_cast<std::size_t>(button)];
+}
+
+const std::vector<MouseButtonPress>& Input::getMouseButtonPresses() const {
+    return buttonPresses;
+}
+
+/*
+* Search from the end, because when a button is clicked twice in one frame the latest click is the one that counts.
+*/
+std::optional<MouseButtonPress> Input::getLastMouseButtonPress(MouseButton button) const {
+    for (auto press = buttonPresses.rbegin(); press != buttonPresses.rend(); ++press) {
+        if (press->button == button) {
+            return *press;
+        }
+    }
+
+    return std::nullopt;
+}
+
 /*
 * Return the total relative motion so mouse look can be applied once per frame.
 */
@@ -88,9 +154,25 @@ Vec2 Input::getMouseDelta() const {
     return mouseDelta;
 }
 
+Vec2 Input::getCursorPosition() const {
+    return cursorPosition;
+}
+
+bool Input::isCursorInWindow() const {
+    return cursorInWindow;
+}
+
+Vec2 Input::getWindowSize() const {
+    return windowSize;
+}
+
 /*
 * Guard array access against Key::Unknown and values cast from out-of-range integers.
 */
 bool Input::isValidKey(Key key) {
     return key > Key::Unknown && key < Key::Count;
+}
+
+bool Input::isValidButton(MouseButton button) {
+    return button < MouseButton::Count;
 }

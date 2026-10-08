@@ -2,7 +2,8 @@
 
 #include "scene/camera.h"
 #include "gameplay/camera_controller.h"
-#include "render/gpu/gpu_display.h"
+#include "platform/window.h"
+#include "render/gpu/gpu_renderer.h"
 #include "render/gpu/gpu_mesh.h"
 #include "scene/mesh.h"
 #include "ecs/world.h"
@@ -33,11 +34,12 @@ private:
     void createScene();
     void uploadSceneMeshes();
 
-    // Constructed first and destroyed last.
-    // The GPU device must outlive all uploaded meshes.
-    GpuDisplay display;
+    // Members are destroyed in reverse order: the window outlives the renderer that draws into it,
+    // and the renderer's GPU device outlives every uploaded mesh below.
+    Window window;
+    GpuRenderer renderer;
 
-    // Refreshed once per frame by display.processEvents().
+    // Refreshed once per frame by window.processEvents().
     Input input;
 
     Camera camera;
@@ -59,6 +61,7 @@ private:
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
 
+    // With mailbox presentation the loop is no longer held back by vsync, so this cap sets the real frame rate.
     std::uint64_t targetFPS = 240;
 
     // Entity{} means there is no player.
@@ -76,6 +79,10 @@ private:
     Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
 
     void updatePlayerCommands();
+
+    // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
+    bool groundSteeringActive = false;
+
     void followPlayerWithCamera(float alpha);
     Entity destinationMarker;
 };

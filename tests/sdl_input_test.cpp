@@ -62,6 +62,36 @@ void testSdlInput() {
     assert(!input.isKeyHeld(Key::W));
     assert(input.wasKeyReleased(Key::W));
 
+    // Mouse buttons map to engine buttons; side buttons are not named.
+    assert(mouseButtonFromSdl(SDL_BUTTON_LEFT) == MouseButton::Left);
+    assert(mouseButtonFromSdl(SDL_BUTTON_RIGHT) == MouseButton::Right);
+    assert(mouseButtonFromSdl(SDL_BUTTON_MIDDLE) == MouseButton::Middle);
+    assert(!mouseButtonFromSdl(SDL_BUTTON_X1));
+
+    // A button press keeps the event's exact position and timestamp.
+    input.beginFrame();
+    SDL_Event press{};
+    press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    press.button.button = SDL_BUTTON_RIGHT;
+    press.button.x = 812.0f;
+    press.button.y = 430.5f;
+    press.button.timestamp = 123456789;
+    applySdlEvent(input, press);
+
+    const auto recorded = input.getLastMouseButtonPress(MouseButton::Right);
+    assert(recorded);
+    assert(recorded->position.x == 812.0f);
+    assert(recorded->position.y == 430.5f);
+    assert(recorded->timestampNanoseconds == 123456789);
+    assert(input.isMouseButtonHeld(MouseButton::Right));
+
+    SDL_Event release{};
+    release.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    release.button.button = SDL_BUTTON_RIGHT;
+    applySdlEvent(input, release);
+    assert(!input.isMouseButtonHeld(MouseButton::Right));
+    assert(input.wasMouseButtonReleased(MouseButton::Right));
+
     // Mouse motion is forwarded and accumulated.
     input.beginFrame();
     applySdlEvent(input, motionEvent(3.0f, -1.0f));

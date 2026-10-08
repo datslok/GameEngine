@@ -102,10 +102,10 @@ Covers the input and "separate simulation and rendering" parts of the original s
 
 ## Phase 3: Engine architecture ← current
 
-Untangle `Application` and `GpuDisplay` before adding more features, so everything after this has a clear place to go.
+Untangle `Application` and the old `GpuDisplay` before adding more features, so everything after this has a clear place to go.
 
 - [x] Entity/component layer (`entity-component`): entities with generations, sparse-set component storage, `World::each` systems; `Transform`, `PreviousTransform`, `ModelRenderer`, `Spinner` and `CharacterMovement` components replace `Scene`, `MeshInstance` and `ModelInstance`
-- [ ] Split `GpuDisplay` into platform/window, input and GPU renderer; move ground clicks, steering and edge-pan cursor position into `Input`
+- [x] Split `GpuDisplay` (`platform-split`) into `Window`, `GpuRenderer` and a richer `Input` (mouse buttons with exact click position and timestamp, cursor, window size); ground clicks, steering and edge panning moved into game code
 - [ ] `Game` interface (`onInit`, `onFixedUpdate`, `onUpdate`, `onRender`); `Application` becomes only the platform loop
 - [ ] Camera split: `Camera` holds view and projection only; free-fly, FPS and top-down MOBA become separate controllers
 - [ ] Asset manager with handles (`MeshHandle`, `TextureHandle`) instead of shared pointers and path lookups every frame
@@ -124,7 +124,8 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [ ] Shadow mapping for the main directional light
 - [ ] Debug drawing: lines, boxes, spheres and capsules
 - [ ] Frustum culling
-- [ ] `release` build target (`-O2`) and a configurable present mode (vsync off or mailbox)
+- [ ] `release` build target (`-O2`)
+- [x] Low-latency presentation (`platform-split`): one frame in flight, configurable present mode, mailbox by default
 
 **Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box.
 

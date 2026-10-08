@@ -7,14 +7,17 @@
 #include "scene/interpolation.h"
 #include "scene/model_renderer.h"
 #include "gameplay/spinner.h"
+#include "gameplay/edge_pan.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 Application::Application(int width, int height):
-    display("My Engine", width, height),
+    window("My Engine", width, height),
+    renderer(window.getSdlWindow()),
     camera(
         Vec3{2.0f, 1.0f, 0.0f},
         Vec3{0.0f, 0.0f, -5.0f},
@@ -27,6 +30,9 @@ Application::Application(int width, int height):
     // Movement speed, mouse sensitivity.
     cameraController(3.0f, 0.001f)
 {
+    // Low latency without tearing. Falls back to vsync on GPUs without mailbox support.
+    renderer.setPresentMode(PresentMode::Mailbox);
+
     createScene();
     uploadSceneMeshes();
 }
@@ -127,7 +133,7 @@ void Application::run() {
     while (true) {
         const Uint64 frameStart = SDL_GetTicksNS();
 
-        if (!display.processEvents(input)) {
+        if (!window.processEvents(input)) {
             break;
         }
 
@@ -190,12 +196,12 @@ void Application::simulate(float tickSeconds) {
 }
 
 void Application::uploadSceneMeshes() {
-    world.each<ModelRenderer>([this](Entity, ModelRenderer& renderer) {
-        for (const RenderPart& part : renderer.parts) {
+    world.each<ModelRenderer>([this](Entity, ModelRenderer& modelRenderer) {
+        for (const RenderPart& part : modelRenderer.parts) {
             if (!gpuMeshes.contains(part.mesh)) {
                 gpuMeshes.emplace(
                     part.mesh,
-                    std::make_unique<GpuMesh>(display.getDevice(), *part.mesh)
+                    std::make_unique<GpuMesh>(renderer.getDevice(), *part.mesh)
                 );
             }
         }
@@ -208,18 +214,18 @@ void Application::uploadSceneMeshes() {
 void Application::render(float alpha) {
     // Upload any newly requested textures before starting the frame.
     // Already-cached textures require only a lookup.
-    world.each<ModelRenderer>([this](Entity, ModelRenderer& renderer) {
-        for (const RenderPart& part : renderer.parts) {
-            display.prepareMaterial(part.material);
+    world.each<ModelRenderer>([this](Entity, ModelRenderer& modelRenderer) {
+        for (const RenderPart& part : modelRenderer.parts) {
+            renderer.prepareMaterial(part.material);
         }
     });
 
-    if (!display.beginFrame(0.0f, 0.0f, 0.0f)) {
+    if (!renderer.beginFrame(0.0f, 0.0f, 0.0f)) {
         return;
     }
 
     // Use the actual dimensions of the frame acquired by beginFrame().
-    camera.setAspectRatio(display.getFrameAspectRatio());
+    camera.setAspectRatio(renderer.getFrameAspectRatio());
 
     // Convert our projection's depth range to the GPU depth range.
     Mat4 depthCorrection = Mat4::identity();
@@ -232,15 +238,15 @@ void Application::render(float alpha) {
         camera.getViewMatrix();
 
     // Draw every entity that has something to draw and a place to draw it.
-    world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& renderer, Transform&) {
-        if (!renderer.visible) {
+    world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
+        if (!modelRenderer.visible) {
             return;
         }
 
         const Mat4 entityMatrix = getRenderTransform(world, entity, alpha).getMatrix();
 
-        for (const RenderPart& part : renderer.parts) {
-            display.drawMesh(
+        for (const RenderPart& part : modelRenderer.parts) {
+            renderer.drawMesh(
                 *gpuMeshes.at(part.mesh),
                 entityMatrix * part.localTransform,
                 viewProjection,
@@ -249,7 +255,7 @@ void Application::render(float alpha) {
         }
     });
 
-    display.endFrame();
+    renderer.endFrame();
 }
 
 void Application::setControlMode(ControlMode mode) {
@@ -286,12 +292,13 @@ void Application::setControlMode(ControlMode mode) {
     }
 
     controlMode = mode;
+    groundSteeringActive = false;
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
 
-    display.setMouseLookEnabled(
+    window.setMouseLookEnabled(
         mode != ControlMode::Moba
     );
 
@@ -304,7 +311,7 @@ void Application::setDebugModeSwitching(bool enabled) {
 }
 
 void Application::updateCameraControls(float deltaTime) {
-    if (!display.hasKeyboardFocus()) {
+    if (!window.hasKeyboardFocus()) {
         return;
     }
 
@@ -325,7 +332,7 @@ void Application::updateCameraControls(float deltaTime) {
 
     if (controlMode != ControlMode::Moba) {
         // Escape pauses mouse-look controls until the next click.
-        if (!display.isMouseCaptured()) {
+        if (!window.isMouseCaptured()) {
             return;
         }
 
@@ -347,7 +354,7 @@ void Application::updateCameraControls(float deltaTime) {
 }
 
 void Application::updateMobaCamera(float deltaTime) {
-    if (display.isCursorConfined() &&
+    if (window.isCursorConfined() &&
         input.wasKeyPressed(Key::Space)) {
         mobaCameraLocked = !mobaCameraLocked;
     }
@@ -356,7 +363,9 @@ void Application::updateMobaCamera(float deltaTime) {
         return;
     }
 
-    const Vec2 edge = display.getEdgePanDirection();
+    // Only pan while the MOBA cursor is confined to a focused window, so moving to another monitor does not scroll the map.
+    const bool panningActive = window.isCursorConfined() && window.hasKeyboardFocus();
+    const Vec2 edge = panningActive ? getEdgePanDirection(input) : Vec2{};
 
     // Screen left/right maps to world X.
     // Screen top/bottom maps to world -Z/+Z.
@@ -369,48 +378,81 @@ void Application::updateMobaCamera(float deltaTime) {
     }
 }
 
+/*
+* Turn right-clicks into move commands. A click uses the exact position from its event; holding the button keeps steering towards the live cursor.
+*/
 void Application::updatePlayerCommands() {
-    if (!world.isAlive(player)) {
+    // Only accept new commands while MOBA input is active.
+    const bool commandsActive =
+        world.isAlive(player) &&
+        controlMode == ControlMode::Moba &&
+        window.hasKeyboardFocus() &&
+        window.isCursorConfined();
+
+    if (!commandsActive) {
+        groundSteeringActive = false;
         return;
     }
 
-    // Only accept new commands while MOBA input is active.
-    if (controlMode == ControlMode::Moba &&
-        display.hasKeyboardFocus() &&
-        display.isCursorConfined()) {
-        const auto click = display.getGroundClick();
+    std::optional<Vec2> target;
 
-        if (click) {
-            const Ray ray = makeCameraRay(
-                camera,
-                click->x,
-                click->y,
-                click->aspectRatio
-            );
+    if (const auto press = input.getLastMouseButtonPress(MouseButton::Right)) {
+        target = press->position;
 
-            const auto hit = intersectGround(ray, 0.0f);
-
-            if (hit) {
-                const bool insideGround =
-                    hit->x >= -20.0f &&
-                    hit->x <= 20.0f &&
-                    hit->z >= -26.0f &&
-                    hit->z <= 14.0f;
-
-                if (insideGround) {
-                    world.get<CharacterMovement>(player).moveTo(*hit);
-
-                    // The marker has no PreviousTransform, so it jumps straight to the new spot.
-                    world.get<Transform>(destinationMarker).position = Vec3{
-                        hit->x,
-                        0.02f,
-                        hit->z
-                    };
-                    world.get<ModelRenderer>(destinationMarker).visible = true;
-                }
-            }
+        // A tap that was pressed and released within one frame moves once but does not start steering.
+        groundSteeringActive = input.isMouseButtonHeld(MouseButton::Right);
+    } else if (groundSteeringActive) {
+        if (input.isMouseButtonHeld(MouseButton::Right) && input.isCursorInWindow()) {
+            target = input.getCursorPosition();
+        } else {
+            groundSteeringActive = false;
         }
     }
+
+    if (!target) {
+        return;
+    }
+
+    const Vec2 size = input.getWindowSize();
+
+    if (size.x <= 0.0f || size.y <= 0.0f ||
+        target->x < 0.0f || target->y < 0.0f ||
+        target->x >= size.x || target->y >= size.y) {
+        return;
+    }
+
+    const Ray ray = makeCameraRay(
+        camera,
+        target->x / size.x,
+        target->y / size.y,
+        size.x / size.y
+    );
+
+    const auto hit = intersectGround(ray, 0.0f);
+
+    if (!hit) {
+        return;
+    }
+
+    const bool insideGround =
+        hit->x >= -20.0f &&
+        hit->x <= 20.0f &&
+        hit->z >= -26.0f &&
+        hit->z <= 14.0f;
+
+    if (!insideGround) {
+        return;
+    }
+
+    world.get<CharacterMovement>(player).moveTo(*hit);
+
+    // The marker has no PreviousTransform, so it jumps straight to the new spot.
+    world.get<Transform>(destinationMarker).position = Vec3{
+        hit->x,
+        0.02f,
+        hit->z
+    };
+    world.get<ModelRenderer>(destinationMarker).visible = true;
 }
 
 /*
