@@ -1,4 +1,4 @@
-#include "pixelbuffer.h"
+#include "render/software/pixelbuffer.h"
 #include <cassert>
 
 void testPixelBuffer() {

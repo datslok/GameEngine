@@ -1,7 +1,7 @@
-#include "fixed_timestep.h"
-#include "scene.h"
-#include "transform.h"
-#include "vec4.h"
+#include "core/fixed_timestep.h"
+#include "scene/scene.h"
+#include "math/transform.h"
+#include "math/vec4.h"
 
 #include <cassert>
 #include <cmath>

@@ -1,4 +1,4 @@
-#include "obj_loader.h"
+#include "assets/obj_loader.h"
 
 #include <cassert>
 #include <sstream>

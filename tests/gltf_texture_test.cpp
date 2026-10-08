@@ -1,5 +1,5 @@
-#include "gltf_loader.h"
-#include "mesh_instance.h"
+#include "assets/gltf_loader.h"
+#include "scene/mesh_instance.h"
 
 #include <cassert>
 #include <cmath>

@@ -1,6 +1,6 @@
-#include "character.h"
-#include "gltf_loader.h"
-#include "scene.h"
+#include "gameplay/character.h"
+#include "assets/gltf_loader.h"
+#include "scene/scene.h"
 
 #include <algorithm>
 #include <cassert>
