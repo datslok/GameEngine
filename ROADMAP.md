@@ -104,7 +104,7 @@ Covers the input and "separate simulation and rendering" parts of the original s
 
 Untangle `Application` and `GpuDisplay` before adding more features, so everything after this has a clear place to go.
 
-- [ ] Entity/component layer: entities with transform (current and previous), renderable and spinner components; replace the demo fields on `MeshInstance`
+- [x] Entity/component layer (`entity-component`): entities with generations, sparse-set component storage, `World::each` systems; `Transform`, `PreviousTransform`, `ModelRenderer`, `Spinner` and `CharacterMovement` components replace `Scene`, `MeshInstance` and `ModelInstance`
 - [ ] Split `GpuDisplay` into platform/window, input and GPU renderer; move ground clicks, steering and edge-pan cursor position into `Input`
 - [ ] `Game` interface (`onInit`, `onFixedUpdate`, `onUpdate`, `onRender`); `Application` becomes only the platform loop
 - [ ] Camera split: `Camera` holds view and projection only; free-fly, FPS and top-down MOBA become separate controllers
@@ -186,6 +186,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 
 ## Phase 9: Later and optional
 
+- [ ] Parent/child entity hierarchy: attach entities to others (a weapon to a hand, a turret to a vehicle)
 - [ ] Full rigid-body dynamics: orientation, angular velocity, mass and inertia, collision response, stacking
 - [ ] Physically based materials (glTF metallic-roughness)
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)

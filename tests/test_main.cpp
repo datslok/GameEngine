@@ -12,7 +12,6 @@ void testDepthBuffer();
 void testTriangleDepth();
 void testShading();
 void testTransform();
-void testScene();
 void testObjLoader();
 void testObjUvs();
 void testGltfLoader();
@@ -20,13 +19,14 @@ void testGltfAttributes();
 void testGltfTextures();
 void testGlbTextures();
 void testModelBounds();
-void testSceneModel();
 void testRay();
 void testMoveToController();
 void testCharacter();
 void testInput();
 void testFixedTimestep();
 void testSdlInput();
+void testWorld();
+void testModelRenderer();
 
 int main(){
     testPixelBuffer();
@@ -41,7 +41,6 @@ int main(){
     testTriangleDepth();
     testShading();
     testTransform();
-    testScene();
     testObjLoader();
     testObjUvs();
     testGltfLoader();
@@ -49,13 +48,14 @@ int main(){
     testGltfTextures();
     testGlbTextures();
     testModelBounds();
-    testSceneModel();
     testRay();
     testMoveToController();
     testCharacter();
     testInput();
     testFixedTimestep();
     testSdlInput();
+    testWorld();
+    testModelRenderer();
 
     std::cout << "All tests passed!\n";
     return 0;
