@@ -88,7 +88,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     spawnSpinner(pyramidMesh, green, third, Vec3{0.0f, 1.0f, 0.0f});
 
     Transform fourth;
-    fourth.position = Vec3{0.0f, -3.0f, -10.0f};
+    // The teapot's origin is at its base, so y = 0 stands it on the grass. Set back so its spout clears the cubes as it spins.
+    fourth.position = Vec3{0.0f, 0.0f, -13.0f};
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
