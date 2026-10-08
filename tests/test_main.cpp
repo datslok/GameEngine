@@ -27,6 +27,7 @@ void testCharacter();
 void testInput();
 void testFixedTimestep();
 void testSdlInput();
+void testWorld();
 
 int main(){
     testPixelBuffer();
@@ -56,6 +57,7 @@ int main(){
     testInput();
     testFixedTimestep();
     testSdlInput();
+    testWorld();
 
     std::cout << "All tests passed!\n";
     return 0;
