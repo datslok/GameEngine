@@ -118,7 +118,7 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 Finishes the old "shading and lighting" step and adds the tools the next phases need to see what they are doing.
 
 - [x] Light data in a uniform buffer instead of hardcoded in the shader; several directional and point lights (`lights-uniform-buffer`)
-- [ ] Specular highlights (Blinn-Phong)
+- [x] Specular highlights (Blinn-Phong) (`specular-highlights`)
 - [ ] Optional smooth normals for models that have none (the teapot is flat shaded because its file has no normals)
 - [ ] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer
 - [ ] Linear filtering and mipmaps

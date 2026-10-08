@@ -112,9 +112,9 @@ void Application::render(float alpha) {
         return;
     }
 
-    renderer.setLighting(collectLighting(world, alpha));
-
     Camera& camera = game.getCamera();
+
+    renderer.setLighting(collectLighting(world, alpha), camera.getPosition());
 
     // Use the actual dimensions of the frame acquired by beginFrame().
     camera.setAspectRatio(renderer.getFrameAspectRatio());
