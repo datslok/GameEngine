@@ -28,6 +28,9 @@ public:
     const Vec3& getPosition() const;
     Vec3 getVisualCentre() const;
 
+    // The visual centre blended between the last two ticks, for cameras that follow the character.
+    Vec3 getInterpolatedVisualCentre(float alpha) const;
+
 private:
     std::shared_ptr<ModelInstance> modelInstance;
     MoveToController movement;

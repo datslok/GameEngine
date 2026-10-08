@@ -61,6 +61,14 @@ Vec3 Character::getVisualCentre() const {
     return getPosition() + Vec3{0.0f, visualCentreHeight, 0.0f};
 }
 
+Vec3 Character::getInterpolatedVisualCentre(float alpha) const {
+    const Transform rendered = interpolate(
+        modelInstance->previousTransform, modelInstance->transform, alpha
+    );
+
+    return rendered.position + Vec3{0.0f, visualCentreHeight, 0.0f};
+}
+
 void Character::update(float deltaTime) {
     const Vec3 previousPosition = getPosition();
     movement.update(modelInstance->transform.position, deltaTime);

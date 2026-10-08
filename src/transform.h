@@ -10,3 +10,7 @@ struct Transform {
 
     Mat4 getMatrix() const;
 };
+
+// Blend between two transforms, with alpha 0 giving from and 1 giving to.
+// Rotations take the shortest way around, so angles that wrap at 2 pi do not spin backwards.
+Transform interpolate(const Transform& from, const Transform& to, float alpha);

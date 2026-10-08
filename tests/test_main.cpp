@@ -25,6 +25,7 @@ void testRay();
 void testMoveToController();
 void testCharacter();
 void testInput();
+void testFixedTimestep();
 
 int main(){
     testPixelBuffer();
@@ -52,6 +53,7 @@ int main(){
     testMoveToController();
     testCharacter();
     testInput();
+    testFixedTimestep();
 
     std::cout << "All tests passed!\n";
     return 0;
