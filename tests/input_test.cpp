@@ -1,68 +1,45 @@
 #include "input.h"
 
-#include <SDL3/SDL.h>
 #include <cassert>
 
-namespace {
-    SDL_Event keyEvent(Uint32 type, SDL_Scancode key, bool repeat = false) {
-        SDL_Event event{};
-        event.type = type;
-        event.key.scancode = key;
-        event.key.down = type == SDL_EVENT_KEY_DOWN;
-        event.key.repeat = repeat;
-        return event;
-    }
-
-    SDL_Event motionEvent(float xrel, float yrel) {
-        SDL_Event event{};
-        event.type = SDL_EVENT_MOUSE_MOTION;
-        event.motion.xrel = xrel;
-        event.motion.yrel = yrel;
-        return event;
-    }
-}
-
+// No SDL here: Input is driven entirely by engine types.
 void testInput() {
     Input input;
 
     // Nothing is held or pressed initially.
-    assert(!input.isKeyHeld(SDL_SCANCODE_W));
-    assert(!input.wasKeyPressed(SDL_SCANCODE_W));
+    assert(!input.isKeyHeld(Key::W));
+    assert(!input.wasKeyPressed(Key::W));
 
     // A key-down marks the key as held and pressed.
     input.beginFrame();
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_W));
-    assert(input.isKeyHeld(SDL_SCANCODE_W));
-    assert(input.wasKeyPressed(SDL_SCANCODE_W));
-    assert(!input.wasKeyReleased(SDL_SCANCODE_W));
+    input.pressKey(Key::W);
+    assert(input.isKeyHeld(Key::W));
+    assert(input.wasKeyPressed(Key::W));
+    assert(!input.wasKeyReleased(Key::W));
 
     // On the next frame the key stays held but is no longer newly pressed.
     input.beginFrame();
-    assert(input.isKeyHeld(SDL_SCANCODE_W));
-    assert(!input.wasKeyPressed(SDL_SCANCODE_W));
-
-    // Key repeat does not count as a new press.
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_W, true));
-    assert(!input.wasKeyPressed(SDL_SCANCODE_W));
+    assert(input.isKeyHeld(Key::W));
+    assert(!input.wasKeyPressed(Key::W));
 
     // A key-up releases the key.
     input.beginFrame();
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W));
-    assert(!input.isKeyHeld(SDL_SCANCODE_W));
-    assert(input.wasKeyReleased(SDL_SCANCODE_W));
+    input.releaseKey(Key::W);
+    assert(!input.isKeyHeld(Key::W));
+    assert(input.wasKeyReleased(Key::W));
 
     // A tap within one frame is still seen as pressed and released.
     input.beginFrame();
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_SPACE));
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_SPACE));
-    assert(input.wasKeyPressed(SDL_SCANCODE_SPACE));
-    assert(input.wasKeyReleased(SDL_SCANCODE_SPACE));
-    assert(!input.isKeyHeld(SDL_SCANCODE_SPACE));
+    input.pressKey(Key::Space);
+    input.releaseKey(Key::Space);
+    assert(input.wasKeyPressed(Key::Space));
+    assert(input.wasKeyReleased(Key::Space));
+    assert(!input.isKeyHeld(Key::Space));
 
     // Mouse motion accumulates over the frame.
     input.beginFrame();
-    input.handleEvent(motionEvent(3.0f, -1.0f));
-    input.handleEvent(motionEvent(2.0f, 4.0f));
+    input.addMouseMotion(3.0f, -1.0f);
+    input.addMouseMotion(2.0f, 4.0f);
     assert(input.getMouseDelta().x == 5.0f);
     assert(input.getMouseDelta().y == 3.0f);
 
@@ -72,18 +49,19 @@ void testInput() {
     assert(input.getMouseDelta().y == 0.0f);
 
     // Motion resets at the start of each frame.
-    input.handleEvent(motionEvent(1.0f, 1.0f));
+    input.addMouseMotion(1.0f, 1.0f);
     input.beginFrame();
     assert(input.getMouseDelta().x == 0.0f);
     assert(input.getMouseDelta().y == 0.0f);
 
     // Releasing all keys clears held state.
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_A));
+    input.pressKey(Key::A);
     input.releaseAllKeys();
-    assert(!input.isKeyHeld(SDL_SCANCODE_A));
+    assert(!input.isKeyHeld(Key::A));
 
-    // Out-of-range scancodes are ignored.
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_UNKNOWN));
-    assert(!input.isKeyHeld(SDL_SCANCODE_UNKNOWN));
-    assert(!input.isKeyHeld(SDL_SCANCODE_COUNT));
+    // Unknown and out-of-range keys are ignored.
+    input.pressKey(Key::Unknown);
+    input.pressKey(Key::Count);
+    assert(!input.isKeyHeld(Key::Unknown));
+    assert(!input.isKeyHeld(Key::Count));
 }

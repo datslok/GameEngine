@@ -362,11 +362,11 @@ void Application::updateCameraControls(float deltaTime) {
     }
 
     if (enableDebugModeSwitching) {
-        if (input.wasKeyPressed(SDL_SCANCODE_F1)) {
+        if (input.wasKeyPressed(Key::F1)) {
             setControlMode(ControlMode::FirstPerson);
-        } else if (input.wasKeyPressed(SDL_SCANCODE_F2)) {
+        } else if (input.wasKeyPressed(Key::F2)) {
             setControlMode(ControlMode::Moba);
-        } else if (input.wasKeyPressed(SDL_SCANCODE_F3)) {
+        } else if (input.wasKeyPressed(Key::F3)) {
             setControlMode(ControlMode::FreeCamera);
         }
     }
@@ -401,7 +401,7 @@ void Application::updateCameraControls(float deltaTime) {
 
 void Application::updateMobaCamera(float deltaTime) {
     if (display.isCursorConfined() &&
-        input.wasKeyPressed(SDL_SCANCODE_SPACE)) {
+        input.wasKeyPressed(Key::Space)) {
         mobaCameraLocked = !mobaCameraLocked;
     }
 

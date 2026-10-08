@@ -1,5 +1,6 @@
 #include "gpu_display.h"
 #include "image_loader.h"
+#include "sdl_input.h"
 
 #include <stdexcept>
 #include <string>
@@ -336,13 +337,13 @@ bool GpuDisplay::processEvents(Input& input) {
         if (event.type == SDL_EVENT_KEY_DOWN &&
             event.key.windowID == windowID &&
             hasKeyboardFocus()) {
-            input.handleEvent(event);
+            applySdlEvent(input, event);
         }
 
         // Always forward releases so keys cannot get stuck down.
         if (event.type == SDL_EVENT_KEY_UP &&
             event.key.windowID == windowID) {
-            input.handleEvent(event);
+            applySdlEvent(input, event);
         }
 
         // Alt+Enter toggles fullscreen once per key press.
@@ -366,7 +367,7 @@ bool GpuDisplay::processEvents(Input& input) {
         if (event.type == SDL_EVENT_MOUSE_MOTION &&
             event.motion.windowID == windowID &&
             mouseCaptured) {
-            input.handleEvent(event);
+            applySdlEvent(input, event);
         }
 
         // Motion from before a capture change would make the camera jump.
