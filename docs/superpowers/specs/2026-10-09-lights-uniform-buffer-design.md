@@ -80,7 +80,7 @@ Limits: `maxDirectionalLights = 4`, `maxPointLights = 16`, shared by C++ and the
 
 - `radiance = colour * intensity` (alpha/w = 0).
 - Directional: `toLight = -normalize(direction)`. A direction of (near) zero length is skipped and does not use a slot.
-- Point: `positionRange = (position, range)`.
+- Point: `positionRange = (position, range)`. A point light with `range <= 0` is skipped (the shader divides by range).
 - `counts = (directional used, point used, 0, 0)`, capped at the limits.
 
 ### Renderer
