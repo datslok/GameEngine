@@ -2,7 +2,7 @@
 
 A from-scratch C++20 game engine. Long-term goal: support both **FPS** and **MOBA** style games by keeping the core genre-agnostic and putting genre-specific code (camera controllers, weapons, abilities, netcode style) in separate modules on top.
 
-The roadmap is in `ROADMAP.md`. Phases 0-2 (foundations, GPU rendering and assets, core loop and input) are done; phase 3 (engine architecture) is next.
+The roadmap is in `ROADMAP.md`. Phases 0-2 (foundations, GPU rendering and assets, core loop and input) are done; phase 3 (engine architecture) is in progress: the entity/component layer is done.
 
 ## Build and run
 
@@ -19,10 +19,10 @@ The roadmap is in `ROADMAP.md`. Phases 0-2 (foundations, GPU rendering and asset
 
 Code lives in layered folders under `src/`. Dependencies point downward only: a folder may include from folders below it, never above.
 
-- `core/` (`fixed_timestep`, `pixel`) and `math/` (vectors, `Mat4`, `Transform`, `Ray`): depend on nothing else.
+- `ecs/` (`Entity`, `ComponentStorage`, `World`), `core/` (`fixed_timestep`, `pixel`) and `math/` (vectors, `Mat4`, `Transform`, `Ray`): depend on nothing else.
 - `input/` (`Key`, `Input`): SDL-free, depends on `math/`.
-- `scene/` (`Scene`, meshes, models, materials, `Camera`, `camera_ray`) and `assets/` (loaders, cgltf).
-- `gameplay/` (`Character`, `MoveToController`, `CameraController`, `ControlMode`).
+- `scene/` (meshes, models, materials, `ModelRenderer`, `interpolation`, `Camera`, `camera_ray`) and `assets/` (loaders, cgltf).
+- `gameplay/` (`CharacterMovement`, `Spinner`, `MoveToController`, `CameraController`, `ControlMode`).
 - `platform/` (`sdl_input`), `render/gpu/` (`GpuDisplay`, `GpuMesh`, `GpuTexture`), `render/software/` (reference rasterizer).
 - `app/` (`Application`, `main`): may include everything.
 
@@ -32,15 +32,16 @@ Write includes from the `src` root with the folder: `#include "math/vec3.h"`, `#
 
 Live path: `main` -> `Application` -> `GpuDisplay`.
 
-- `Application` runs the main loop (fixed timestep, frame cap), owns the `Input`, `Camera`, `CameraController`, `Scene`, the player `Character`, and a map from shared `Mesh` to uploaded `GpuMesh`. `display` is declared first so the GPU device outlives all GPU resources.
+- `Application` runs the main loop (fixed timestep, frame cap), owns the `Input`, `Camera`, `CameraController`, the `World`, the `player` and `destinationMarker` entities, and a map from shared `Mesh` to uploaded `GpuMesh`. `display` is declared first so the GPU device outlives all GPU resources.
 - `GpuDisplay` uses SDL3's GPU API (SDL_GPU) with the Vulkan backend and SPIR-V shaders. It owns the window, device, pipeline, depth texture, texture cache, event polling, mouse capture, cursor confinement, MOBA edge-pan and right-click ground clicks (`GroundClick`, normalized window coordinates), and fullscreen (Alt+Enter).
 - `Input` is a once-per-frame snapshot with no SDL dependency: `isKeyHeld`, `wasKeyPressed`, `wasKeyReleased` take an engine `Key` (`key.h`, physical US-layout positions), plus accumulated `getMouseDelta`. It is filled through `pressKey`/`releaseKey`/`addMouseMotion`. `sdl_input` is the only SDL-to-engine translation (`keyFromScancode`, `applySdlEvent`, which also drops key repeat). `GpuDisplay::processEvents(input)` resets and fills it; window-level events (quit, focus, capture, Escape, Alt+Enter) stay in `GpuDisplay`. Mouse motion is only forwarded while the mouse is captured, and is discarded when capture or control mode changes. Game code reads keys from `Input` as `Key` values, never SDL scancodes or `SDL_GetKeyboardState`.
+- Entities and components (`ecs/`): an `Entity` is an index plus a generation (handles to destroyed entities go stale even after their slot is reused; `Entity{}` is never alive and means "none"). `World` creates/destroys entities and stores one `ComponentStorage<T>` (sparse set: packed `components`, owning `entities`, and a `sparse` index) per component type. Components are plain structs; systems are free functions run with `world.each<A, B>([](Entity, A&, B&) { ... })`, which walks the first type's packed array, so list the rarest component first. Inside `each`, do not add/remove components of the listed types or destroy entities.
+- Components today: `Transform` (`math/`), `PreviousTransform` and `ModelRenderer` (`scene/`), `Spinner` and `CharacterMovement` (`gameplay/`). `ModelRenderer` is a list of `RenderPart`s (mesh, material, `localTransform` with the model's normalization folded in) plus `visible`; a multi-part model is one entity. Build with `makeModelRenderer(model, normalization)` or `makeMeshRenderer(mesh, material)`.
 - Main loop: `FixedTimestep` (120 Hz, frame time clamped to 0.25 s) turns real frame time into a whole number of ticks plus an interpolation `alpha`. Each frame: read input and turn clicks into commands (`updatePlayerCommands`), run `simulate(tickSeconds)` zero or more times, update the camera per frame (`updateCameraControls`, `followPlayerWithCamera(alpha)`), then `render(alpha)`. Never read `Input` inside `simulate`; key/click edges are handled once per frame and reach the simulation as commands. Mouse look and camera movement are per frame, not per tick.
-- Interpolation: `MeshInstance` and `ModelInstance` hold `previousTransform`, saved by `Scene::savePreviousTransforms()` at the start of each tick. Rendering uses `getInterpolatedModelMatrix(alpha)`; `interpolate(Transform, Transform, alpha)` takes the shortest way around for angles. `Scene::add`/`addModel` start objects snapped (previous = current); anything teleported outside a tick must also snap, or it visibly slides (see the destination marker).
+- `simulate` runs the systems in a fixed order: `savePreviousTransforms`, `updateCharacters`, `updateSpinners`. Interpolation: only entities that move continuously get a `PreviousTransform`; `getRenderTransform(world, entity, alpha)` blends it with `Transform` (`interpolate` takes the shortest way around for angles), and entities without one are drawn at their `Transform`. Things that teleport (the destination marker) therefore have no `PreviousTransform`. Create moving entities with `PreviousTransform` equal to their starting `Transform`.
 - Control modes (`ControlMode`): F1 first-person, F2 MOBA, F3 free camera (debug switching, `setDebugModeSwitching`). MOBA mode uses a confined visible cursor, edge panning, Space to lock the camera on the player, and right-click (or hold) to move the player.
-- `Character` (configured by `CharacterConfig`) is a ground-moving model driven by a `MoveToController`; it turns towards its heading at `turnSpeed`. `math/ray` provides `Ray` and `intersectGround`; `scene/camera_ray` provides `makeCameraRay`. Together they turn mouse clicks into ground positions.
+- Characters: `spawnCharacter(world, model, config, position)` creates an entity with `Transform`, `PreviousTransform`, `ModelRenderer` and `CharacterMovement` (a `MoveToController` plus turning state; `moveTo`/`stop`/`isMoving`). `updateCharacters` moves them and turns them towards their heading at `turnSpeed`; `getCharacterVisualCentre(world, entity, alpha)` gives the interpolated camera target. `math/ray` provides `Ray` and `intersectGround`; `scene/camera_ray` provides `makeCameraRay`. Together they turn mouse clicks into ground positions.
 - `GpuMesh` / `GpuTexture` upload data to the GPU. `GpuMesh` expands every triangle into three unshared vertices and computes face normals when a corner has no normal.
-- `Scene` holds a `vector<MeshInstance>` plus `ModelInstance`s added with `Scene::addModel`. A `MeshInstance` has a shared `Mesh`, a `Transform`, a `Material` (colour + optional texture path or embedded image), a `visible` flag, demo animation fields (`initialRotation`, `rotationSpeed`), and an optional link to the `ModelInstance` whose transform it shares.
 - Loaders: `obj_loader` (quads/convex polygons, normals, UVs), `gltf_loader` (cgltf; returns a `Model` of `ModelPart`s with world transforms, base colour and base colour texture, external or embedded in `.glb`). glTF texture transforms are not supported.
 
 Software renderer (reference path, used only by tests): `Renderer`, `Display`, `PixelBuffer`, `DepthBuffer`, `rasterizer`, `clipper`, `shading`. It does flat shading only and ignores per-vertex normals and UVs.
@@ -70,7 +71,7 @@ Notes for upcoming work:
 
 - Never read `Input` inside `simulate`; key and click edges are handled once per frame and reach the simulation as commands.
 - `Application` still mixes the platform loop (SDL timing) with game logic. That split comes with the `Game` interface (phase 3).
-- The entity/component layer should absorb `previousTransform`, `initialRotation` and `rotationSpeed` from `MeshInstance`/`ModelInstance` (a spinner component).
+- Not built yet: parent/child entity hierarchies (attach a weapon to a hand). Listed in ROADMAP.md phase 9.
 
 ## Known small issues and ideas
 

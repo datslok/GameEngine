@@ -1,6 +1,8 @@
 #include "gameplay/character.h"
 #include "assets/gltf_loader.h"
-#include "scene/scene.h"
+#include "math/transform.h"
+#include "scene/interpolation.h"
+#include "scene/model_renderer.h"
 
 #include <algorithm>
 #include <cassert>
@@ -16,24 +18,35 @@ namespace {
         return std::abs(a - b) < 0.0001f;
     }
 
-    void assertGrounded(const Scene& scene, float height) {
+    // The lowest vertex of the drawn model must touch the given height.
+    void assertGrounded(const World& world, Entity character, float height) {
+        const Mat4 entityMatrix = world.get<Transform>(character).getMatrix();
         float bottom = std::numeric_limits<float>::infinity();
-        for (const MeshInstance& part : scene.getObjects()) {
+
+        for (const RenderPart& part : world.get<ModelRenderer>(character).parts) {
             for (const Vec4& vertex : part.mesh->vertices) {
-                bottom = std::min(bottom, (part.getModelMatrix() * vertex).y);
+                bottom = std::min(bottom, (entityMatrix * part.localTransform * vertex).y);
             }
         }
         assert(nearlyEqual(bottom, height));
     }
 
-    void assertFacing(const Scene& scene, float localForwardYaw,
+    void assertFacing(const World& world, Entity character, float localForwardYaw,
                       const Vec3& expected) {
-        const float yaw = scene.getModelInstances().front()->transform.rotation.y;
+        const float yaw = world.get<Transform>(character).rotation.y;
         const Vec4 forward = Mat4::rotationY(yaw) * Vec4{
             std::sin(localForwardYaw), 0.0f, std::cos(localForwardYaw), 0.0f
         };
         assert(nearlyEqual(forward.x, expected.x));
         assert(nearlyEqual(forward.z, expected.z));
+    }
+
+    const Vec3& position(const World& world, Entity character) {
+        return world.get<Transform>(character).position;
+    }
+
+    float yaw(const World& world, Entity character) {
+        return world.get<Transform>(character).rotation.y;
     }
 }
 
@@ -50,107 +63,110 @@ void testCharacter() {
     for (float forwardYaw : {0.0f, pi / 2.0f}) {
         for (const Vec3 direction : {Vec3{1, 0, 0}, Vec3{-1, 0, 0},
                                      Vec3{0, 0, 1}, Vec3{0, 0, -1}}) {
-            Scene scene;
+            World world;
             CharacterConfig config;
             config.modelForwardYaw = forwardYaw;
-            Character character{scene, cube, config, Vec3{0, 3, 0}};
+            const Entity character = spawnCharacter(world, cube, config, Vec3{0, 3, 0});
+            CharacterMovement& movement = world.get<CharacterMovement>(character);
 
-            assertGrounded(scene, 3.0f);
-            assert(nearlyEqual(character.getVisualCentre().y, 4.0f));
-            character.moveTo(direction * 12.0f);
-            character.update(0.5f);
-            assert(nearlyEqual(character.getPosition().x, direction.x * 3));
-            assert(nearlyEqual(character.getPosition().z, direction.z * 3));
-            assert(nearlyEqual(character.getPosition().y, 3.0f));
-            assert(character.isMoving());
-            assertFacing(scene, forwardYaw, direction);
-            assertGrounded(scene, 3.0f);
+            assertGrounded(world, character, 3.0f);
+            assert(nearlyEqual(getCharacterVisualCentre(world, character, 1.0f).y, 4.0f));
+            movement.moveTo(direction * 12.0f);
+            updateCharacters(world, 0.5f);
+            assert(nearlyEqual(position(world, character).x, direction.x * 3));
+            assert(nearlyEqual(position(world, character).z, direction.z * 3));
+            assert(nearlyEqual(position(world, character).y, 3.0f));
+            assert(movement.isMoving());
+            assertFacing(world, character, forwardYaw, direction);
+            assertGrounded(world, character, 3.0f);
 
-            character.update(10.0f);
-            assert(!character.isMoving());
-            assert(nearlyEqual(character.getPosition().x, direction.x * 12));
-            assert(nearlyEqual(character.getPosition().z, direction.z * 12));
+            updateCharacters(world, 10.0f);
+            assert(!movement.isMoving());
+            assert(nearlyEqual(position(world, character).x, direction.x * 12));
+            assert(nearlyEqual(position(world, character).z, direction.z * 12));
         }
     }
 
     // Arrival does not prematurely cancel a slow turn.
-    Scene scene;
+    World world;
     CharacterConfig slowTurn;
     slowTurn.turnSpeed = pi;
-    Character character{scene, cube, slowTurn, Vec3{0, 0, 0}};
-    character.moveTo(Vec3{0.01f, 0, 0});
-    character.update(0.01f);
-    assert(!character.isMoving());
-    assert(nearlyEqual(scene.getModelInstances()[0]->transform.rotation.y,
-                       pi * 0.01f));
-    character.update(1.0f);
-    assertFacing(scene, 0, Vec3{1, 0, 0});
+    const Entity character = spawnCharacter(world, cube, slowTurn, Vec3{0, 0, 0});
+    world.get<CharacterMovement>(character).moveTo(Vec3{0.01f, 0, 0});
+    updateCharacters(world, 0.01f);
+    assert(!world.get<CharacterMovement>(character).isMoving());
+    assert(nearlyEqual(yaw(world, character), pi * 0.01f));
+    updateCharacters(world, 1.0f);
+    assertFacing(world, character, 0, Vec3{1, 0, 0});
 
     // Turning crosses the +/-pi boundary by the shortest route.
-    scene.getModelInstances()[0]->transform.rotation.y = pi - 0.05f;
+    world.get<Transform>(character).rotation.y = pi - 0.05f;
     const float desiredYaw = -pi + 0.05f;
-    character.moveTo(character.getPosition() + Vec3{
+    world.get<CharacterMovement>(character).moveTo(position(world, character) + Vec3{
         std::sin(desiredYaw), 0, std::cos(desiredYaw)
     });
-    character.update(0.01f);
-    assert(nearlyEqual(scene.getModelInstances()[0]->transform.rotation.y,
-                       pi - 0.05f + pi * 0.01f));
+    updateCharacters(world, 0.01f);
+    assert(nearlyEqual(yaw(world, character), pi - 0.05f + pi * 0.01f));
 
     // Explicit stop cancels both travel and any remaining turn.
-    character.stop();
-    const Vec3 stoppedPosition = character.getPosition();
-    const float stoppedYaw = scene.getModelInstances()[0]->transform.rotation.y;
-    character.update(1.0f);
-    assert(!character.isMoving());
-    assert(nearlyEqual(character.getPosition().x, stoppedPosition.x));
-    assert(nearlyEqual(character.getPosition().z, stoppedPosition.z));
-    assert(nearlyEqual(scene.getModelInstances()[0]->transform.rotation.y, stoppedYaw));
+    world.get<CharacterMovement>(character).stop();
+    const Vec3 stoppedPosition = position(world, character);
+    const float stoppedYaw = yaw(world, character);
+    updateCharacters(world, 1.0f);
+    assert(!world.get<CharacterMovement>(character).isMoving());
+    assert(nearlyEqual(position(world, character).x, stoppedPosition.x));
+    assert(nearlyEqual(position(world, character).z, stoppedPosition.z));
+    assert(nearlyEqual(yaw(world, character), stoppedYaw));
 
     // Two characters can share a loaded asset without sharing movement state.
-    Character other{scene, cube, CharacterConfig{}, Vec3{10, 0, 0}};
-    other.moveTo(Vec3{16, 0, 0});
-    other.update(0.5f);
-    assert(nearlyEqual(other.getPosition().x, 13));
-    assert(nearlyEqual(character.getPosition().x, stoppedPosition.x));
-    assert(scene.getObjects()[0].mesh == scene.getObjects()[1].mesh);
+    const Entity other = spawnCharacter(world, cube, CharacterConfig{}, Vec3{10, 0, 0});
+    world.get<CharacterMovement>(other).moveTo(Vec3{16, 0, 0});
+    updateCharacters(world, 0.5f);
+    assert(nearlyEqual(position(world, other).x, 13));
+    assert(nearlyEqual(position(world, character).x, stoppedPosition.x));
+    assert(world.get<ModelRenderer>(character).parts[0].mesh ==
+           world.get<ModelRenderer>(other).parts[0].mesh);
+
+    // The camera target is blended between the last two ticks.
+    world.get<PreviousTransform>(other).transform.position.x = 12.0f;
+    assert(nearlyEqual(getCharacterVisualCentre(world, other, 0.5f).x, 12.5f));
 
     // Real duck: grounding preserves its old visible placement and camera aim.
     const Model duck = loadGltf("assets/models/Duck.glb");
-    Scene duckScene;
+    World duckWorld;
     CharacterConfig duckConfig;
     duckConfig.modelForwardYaw = pi / 2;
-    Character duckCharacter{duckScene, duck, duckConfig, Vec3{0, 0, -6}};
+    const Entity duckCharacter = spawnCharacter(duckWorld, duck, duckConfig, Vec3{0, 0, -6});
     const Mat4 normalization = duck.getNormalizationMatrix(2);
     const Vec3 minimum = duck.getBounds().minimum;
     const float oldHeight = -(normalization * Vec4{
         minimum.x, minimum.y, minimum.z, 1
     }).y;
-    assert(nearlyEqual(duckCharacter.getPosition().y, 0));
-    assert(nearlyEqual(duckCharacter.getVisualCentre().y, oldHeight));
-    assertGrounded(duckScene, 0);
-    duckCharacter.moveTo(Vec3{0, 0, 0});
-    duckCharacter.update(1);
-    assertFacing(duckScene, pi / 2, Vec3{0, 0, 1});
-    assertGrounded(duckScene, 0);
+    assert(nearlyEqual(position(duckWorld, duckCharacter).y, 0));
+    assert(nearlyEqual(getCharacterVisualCentre(duckWorld, duckCharacter, 1.0f).y, oldHeight));
+    assertGrounded(duckWorld, duckCharacter, 0);
+    duckWorld.get<CharacterMovement>(duckCharacter).moveTo(Vec3{0, 0, 0});
+    updateCharacters(duckWorld, 1);
+    assertFacing(duckWorld, duckCharacter, pi / 2, Vec3{0, 0, 1});
+    assertGrounded(duckWorld, duckCharacter, 0);
 
-    // Bad configuration must not leave a partial character in the scene.
+    // Bad configuration must not leave a partial character in the world.
     for (int field = 0; field < 5; ++field) {
-        Scene invalidScene;
+        World invalidWorld;
         CharacterConfig bad;
-        Vec3 position{0, 0, 0};
+        Vec3 start{0, 0, 0};
         if (field == 0) bad.movementSpeed = 0;
         if (field == 1) bad.turnSpeed = -1;
         if (field == 2) bad.modelSize = 0;
         if (field == 3) bad.modelForwardYaw = std::numeric_limits<float>::infinity();
-        if (field == 4) position.y = std::numeric_limits<float>::quiet_NaN();
+        if (field == 4) start.y = std::numeric_limits<float>::quiet_NaN();
         bool rejected = false;
         try {
-            Character invalid{invalidScene, cube, bad, position};
+            spawnCharacter(invalidWorld, cube, bad, start);
         } catch (const std::invalid_argument&) {
             rejected = true;
         }
         assert(rejected);
-        assert(invalidScene.getObjects().empty());
-        assert(invalidScene.getModelInstances().empty());
+        assert(invalidWorld.getEntityCount() == 0);
     }
 }
