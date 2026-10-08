@@ -289,16 +289,19 @@ SDL_GPUDevice* GpuDisplay::getDevice() const {
     return device;
 }
 
-bool GpuDisplay::processEvents() {
-    // Accumulate only the mouse motion received during this frame.
-    mouseDelta = Vec2{};
-    pressedKeys.fill(false);
+/*
+* Handle window-level events here and forward keyboard and mouse events to the input snapshot, so game code reads input from one place.
+*/
+bool GpuDisplay::processEvents(Input& input) {
+    input.beginFrame();
     groundClick.reset();
 
     const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
+        const bool wasMouseCaptured = mouseCaptured;
+
         if (event.type == SDL_EVENT_QUIT) {
             return false;
         }
@@ -312,7 +315,7 @@ bool GpuDisplay::processEvents() {
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
             event.window.windowID == windowID) {
             setMouseCaptured(false);
-            pressedKeys.fill(false);
+            input.releaseAllKeys();
             setCursorConfined(false);
             groundClick.reset();
             groundSteeringActive = false;
@@ -332,11 +335,14 @@ bool GpuDisplay::processEvents() {
 
         if (event.type == SDL_EVENT_KEY_DOWN &&
             event.key.windowID == windowID &&
-            !event.key.repeat &&
             hasKeyboardFocus()) {
-            pressedKeys.at(
-                static_cast<std::size_t>(event.key.scancode)
-            ) = true;
+            input.handleEvent(event);
+        }
+
+        // Always forward releases so keys cannot get stuck down.
+        if (event.type == SDL_EVENT_KEY_UP &&
+            event.key.windowID == windowID) {
+            input.handleEvent(event);
         }
 
         // Alt+Enter toggles fullscreen once per key press.
@@ -360,8 +366,12 @@ bool GpuDisplay::processEvents() {
         if (event.type == SDL_EVENT_MOUSE_MOTION &&
             event.motion.windowID == windowID &&
             mouseCaptured) {
-            mouseDelta.x += event.motion.xrel;
-            mouseDelta.y += event.motion.yrel;
+            input.handleEvent(event);
+        }
+
+        // Motion from before a capture change would make the camera jump.
+        if (mouseCaptured != wasMouseCaptured) {
+            input.discardMouseMotion();
         }
 
         // Only accept ground clicks while the visible cursor is confined.
@@ -414,17 +424,10 @@ void GpuDisplay::setMouseCaptured(bool captured) {
     }
 
     mouseCaptured = captured;
-
-    // Discard motion collected before capture changed.
-    mouseDelta = Vec2{};
 }
 
 bool GpuDisplay::isMouseCaptured() const {
     return mouseCaptured;
-}
-
-Vec2 GpuDisplay::getMouseDelta() const {
-    return mouseDelta;
 }
 
 bool GpuDisplay::beginFrame(float red, float green, float blue) {
@@ -702,16 +705,10 @@ void GpuDisplay::setMouseLookEnabled(bool enabled) {
 
     setMouseCaptured(enabled && focused);
     setCursorConfined(!enabled && focused);
-
-    mouseDelta = Vec2{};
 }
 
 bool GpuDisplay::hasKeyboardFocus() const {
     return SDL_GetKeyboardFocus() == window;
-}
-
-bool GpuDisplay::wasKeyPressed(SDL_Scancode key) const {
-    return pressedKeys.at(static_cast<std::size_t>(key));
 }
 
 void GpuDisplay::setCursorConfined(bool confined) {

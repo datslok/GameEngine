@@ -140,7 +140,7 @@ void Application::run() {
     while (true) {
         const Uint64 frameStart = SDL_GetTicksNS();
 
-        if (!display.processEvents()) {
+        if (!display.processEvents(input)) {
             break;
         }
 
@@ -330,6 +330,9 @@ void Application::setControlMode(ControlMode mode) {
     display.setMouseLookEnabled(
         mode != ControlMode::Moba
     );
+
+    // Motion from the previous mode must not rotate the new camera pose.
+    input.discardMouseMotion();
 }
 
 void Application::setDebugModeSwitching(bool enabled) {
@@ -342,11 +345,11 @@ void Application::updateCameraControls(float deltaTime) {
     }
 
     if (enableDebugModeSwitching) {
-        if (display.wasKeyPressed(SDL_SCANCODE_F1)) {
+        if (input.wasKeyPressed(SDL_SCANCODE_F1)) {
             setControlMode(ControlMode::FirstPerson);
-        } else if (display.wasKeyPressed(SDL_SCANCODE_F2)) {
+        } else if (input.wasKeyPressed(SDL_SCANCODE_F2)) {
             setControlMode(ControlMode::Moba);
-        } else if (display.wasKeyPressed(SDL_SCANCODE_F3)) {
+        } else if (input.wasKeyPressed(SDL_SCANCODE_F3)) {
             setControlMode(ControlMode::FreeCamera);
         }
     }
@@ -362,7 +365,7 @@ void Application::updateCameraControls(float deltaTime) {
             return;
         }
 
-        const Vec2 mouseDelta = display.getMouseDelta();
+        const Vec2 mouseDelta = input.getMouseDelta();
 
         cameraController.look(
             camera,
@@ -373,6 +376,7 @@ void Application::updateCameraControls(float deltaTime) {
 
     cameraController.update(
         camera,
+        input,
         deltaTime,
         controlMode
     );
@@ -380,7 +384,7 @@ void Application::updateCameraControls(float deltaTime) {
 
 void Application::updateMobaCamera(float deltaTime) {
     if (display.isCursorConfined() &&
-        display.wasKeyPressed(SDL_SCANCODE_SPACE)) {
+        input.wasKeyPressed(SDL_SCANCODE_SPACE)) {
         mobaCameraLocked = !mobaCameraLocked;
     }
 
