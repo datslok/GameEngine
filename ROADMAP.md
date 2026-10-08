@@ -123,6 +123,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [ ] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer
 - [ ] Linear filtering and mipmaps
 - [ ] Shadow mapping for the main directional light
+  - First give the renderer the whole frame: the engine builds a frame description (every `{mesh, matrix, material}` to draw, plus lights and camera) and calls one `render(frame)`, instead of calling `drawMesh` per object. Shadows need it (the scene is drawn twice), frustum culling needs it, and it is the basis for a later ray-tracing backend
 - [ ] Debug drawing: lines, boxes, spheres and capsules
 - [ ] Frustum culling
 - [ ] `release` build target (`-O2`)
@@ -192,6 +193,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] Parent/child entity hierarchy: attach entities to others (a weapon to a hand, a turret to a vehicle)
 - [ ] Full rigid-body dynamics: orientation, angular velocity, mass and inertia, collision response, stacking
 - [ ] Physically based materials (glTF metallic-roughness)
+- [ ] Hardware ray tracing (RTX-class GPUs): a new Vulkan backend built on the frame description from phase 4, with an acceleration structure per mesh built once at upload. SDL_GPU has no ray-tracing support, so SDL keeps the window while the backend talks to Vulkan directly. Start with ray-traced shadows or reflections over the rasterised image, and keep the rasterised path for GPUs without ray tracing. Physically based materials first
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
 - [ ] GPU instancing for many identical units
 - [ ] Multithreading: a job system for simulation and asset loading
