@@ -3,7 +3,7 @@
 #include "math/vec3.h"
 #include "assets/obj_loader.h"
 #include "assets/gltf_loader.h"
-#include "math/ray.h"
+#include "scene/camera_ray.h"
 
 #include <SDL3/SDL.h>
 #include <numbers>
