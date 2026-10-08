@@ -371,7 +371,7 @@ namespace {
             .generic_string();
     }
 
-    void readBaseColourTexture(const cgltf_texture_view& view, const std::filesystem::path& modelDirectory, Material& material) {
+    void readBaseColourTexture(const cgltf_texture_view& view, const std::filesystem::path& modelDirectory, MaterialSource& material) {
         if (view.texture == nullptr) {
             return;
         }
@@ -439,8 +439,8 @@ namespace {
             );
     }
 
-    Material readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
-        Material material;
+    MaterialSource readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
+        MaterialSource material;
         material.flipTextureVertically = false;
 
         // No assigned material means the default white colour.
@@ -494,7 +494,7 @@ namespace {
                 part.transform = transform;
                 part.material = readMaterial(primitive.material, modelDirectory);
 
-                if ((!part.material.texturePath.empty() || part.material.embeddedImage) && cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 0) == nullptr) {
+                if (part.material.hasTexture() && cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 0) == nullptr) {
                     throw std::runtime_error(
                         "Textured glTF primitive needs TEXCOORD_0"
                     );

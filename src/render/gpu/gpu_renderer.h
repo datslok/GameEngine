@@ -3,14 +3,14 @@
 #include "math/mat4.h"
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
+#include "scene/asset_handles.h"
 #include "scene/material.h"
+#include "scene/mesh.h"
 
 #include <SDL3/SDL.h>
 #include <cstdint>
-#include <map>
 #include <memory>
-#include <string>
-#include <tuple>
+#include <span>
 #include <vector>
 
 /*
@@ -42,11 +42,15 @@ public:
     // Background colour components range from 0.0f to 1.0f.
     bool beginFrame(float red, float green, float blue);
 
-    // Load a material's texture if it is not already cached.
-    // Call before beginFrame().
-    void prepareMaterial(const Material& material);
+    // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
+    // Call between frames, never between beginFrame() and endFrame().
+    void uploadMesh(const Mesh& mesh);
+    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels);
 
-    void drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material);
+    std::size_t getMeshCount() const;
+    std::size_t getTextureCount() const;
+
+    void drawMesh(MeshHandle mesh, const Mat4& model, const Mat4& viewProjection, const Material& material);
 
     // Finish and present the active frame.
     void endFrame();
@@ -80,20 +84,10 @@ private:
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
 
-    // External images use their path.
-    // Embedded images use the identity of their shared byte buffer.
-    // Both also include the row-flipping setting.
-    using TextureKey = std::tuple<std::string, std::shared_ptr<const std::vector<std::uint8_t>>, bool>;
+    // GPU copies, indexed exactly like MeshHandle and TextureHandle.
+    std::vector<std::unique_ptr<GpuMesh>> meshes;
+    std::vector<std::unique_ptr<GpuTexture>> textures;
 
-    static TextureKey makeTextureKey(const Material& material) {
-        return TextureKey{
-            material.texturePath,
-            material.embeddedImage,
-            material.flipTextureVertically
-        };
-    }
-
-    std::map<TextureKey, std::unique_ptr<GpuTexture>> textures;
     std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
 };

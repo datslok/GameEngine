@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "input/input.h"
 #include "scene/camera.h"
@@ -7,7 +8,7 @@
 /*
 * The boundary between the engine and one particular game.
 * The engine owns the loop, the window, the renderer and the World, and calls these hooks at fixed points in each frame. A game fills the World, decides what input means, and runs its systems.
-* A Game only sees World, Input and Camera, never SDL or the GPU, so it can also run headless (tests, a dedicated server).
+* A Game only sees World, Input, Camera and the AssetManager, never SDL or the GPU, so it can also run headless (tests, a dedicated server).
 *
 * Each frame the engine calls, in order:
 *   onInput        once, before the ticks: turn input into commands
@@ -19,8 +20,9 @@ class Game {
 public:
     virtual ~Game() = default;
 
-    // Called once before the first frame: create entities and load assets.
-    virtual void onInit(World& world) = 0;
+    // Called once before the first frame: load assets and create entities.
+    // The AssetManager belongs to the engine and lives as long as it; a game may keep a pointer to load more later.
+    virtual void onInit(World& world, AssetManager& assets) = 0;
 
     // Read this frame's input and turn it into commands for the simulation.
     virtual void onInput(World& world, const Input& input) = 0;
