@@ -2,7 +2,7 @@
 
 A from-scratch C++20 game engine. Long-term goal: support both **FPS** and **MOBA** style games by keeping the core genre-agnostic and putting genre-specific code (camera controllers, weapons, abilities, netcode style) in separate modules on top.
 
-The roadmap is in `external/plan.png`. Steps 1-6 are done, step 7 (shading/lighting) is partial, steps 8-10 (particle physics, rigid bodies, engine architecture) are not started.
+The roadmap is in `ROADMAP.md`. Phases 0-2 (foundations, GPU rendering and assets, core loop and input) are done; phase 3 (engine architecture) is next.
 
 ## Build and run
 
@@ -49,19 +49,15 @@ Software renderer (reference path, used only by tests): `Renderer`, `Display`, `
 - Do not compile with `-DNDEBUG`, because it turns every assert into a no-op.
 - Known issue: the glTF tests use a fixed temp directory and throw if it exists. A failed assert leaves it behind and breaks the next run (delete `game_engine_gltf_*` in the system temp folder).
 
-## Planned work (suggested order)
+## Planned work
 
-Done: `Input` snapshot class; `Scene::addModel` and glTF textures; ground raycasts and click-to-move; fixed-timestep simulation with render interpolation; engine `Key` enum.
+`ROADMAP.md` is the single source of truth for planned work, grouped into phases with milestones. Tick items off there (`- [x]`) as part of the feature branch that completes them, and keep this file's architecture section in sync.
 
-1. (Done, see above.)
-2. (Done: `Input` uses the engine `Key` enum; SDL translation lives in `sdl_input`.) Keep the simulation free of SDL and GPU types so it can run headless. `Application` still mixes the platform loop (SDL timing) with game logic; that split comes with the `Game` interface.
-3. Entity/component layer (roadmap step 10), pulled ahead of physics. Move `initialRotation`/`rotationSpeed` out of `MeshInstance` into a spinner component.
-4. Split `GpuDisplay` into platform/window, input, and GPU renderer. Move ground clicks, steering and edge-pan mouse position into `Input`.
-5. Asset manager with handles (`MeshHandle`, `TextureHandle`) instead of `shared_ptr<Mesh>` keys and path-string lookups every frame.
-6. Colliders (sphere/capsule/AABB), general raycasts against objects, mouse picking, kinematic character controller. Full rigid-body dynamics is lower priority.
-7. One canonical mesh/vertex format shared by loaders and GPU upload.
-8. Camera split: `Camera` holds view/projection only; the control modes (free-fly, FPS, top-down MOBA) become separate controllers. Mode logic currently lives in `Application` and `CameraController`.
-9. Later: `Game` interface (`onInit`/`onUpdate`/`onRender`), networking (authoritative server, snapshots, client prediction), FPS and MOBA demos, UI/text, audio, pathfinding.
+Notes for upcoming work:
+
+- Never read `Input` inside `simulate`; key and click edges are handled once per frame and reach the simulation as commands.
+- `Application` still mixes the platform loop (SDL timing) with game logic. That split comes with the `Game` interface (phase 3).
+- The entity/component layer should absorb `previousTransform`, `initialRotation` and `rotationSpeed` from `MeshInstance`/`ModelInstance` (a spinner component).
 
 ## Known small issues and ideas
 
