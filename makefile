@@ -3,7 +3,8 @@ SHELL := /bin/sh
 
 CXX := g++
 CXXFLAGS := -std=c++20 -Wall -Wextra -g
-CPPFLAGS := -Iinclude -Isrc
+# Includes are written from these roots, for example "math/vec3.h" and "cgltf/cgltf.h".
+CPPFLAGS := -Isrc -Iexternal
 LDLIBS := -lSDL3_image -lSDL3
 
 GLSLC := glslc
@@ -11,10 +12,13 @@ GLSLC := glslc
 TARGET := build/game.exe
 TEST_TARGET := build/tests.exe
 
-SOURCES := $(wildcard src/*.cpp)
-ENGINE_SOURCES := $(filter-out src/main.cpp,$(SOURCES))
+# Recursive wildcard: $(call rwildcard,dir,pattern) finds matching files in dir and all its subfolders.
+rwildcard = $(foreach entry,$(wildcard $(1:=/*)),$(call rwildcard,$(entry),$(2)) $(filter $(subst *,%,$(2)),$(entry)))
+
+SOURCES := $(strip $(call rwildcard,src,*.cpp))
+ENGINE_SOURCES := $(filter-out src/app/main.cpp,$(SOURCES))
 TEST_SOURCES := $(wildcard tests/*.cpp)
-HEADERS := $(wildcard src/*.h include/*.h tests/*.h)
+HEADERS := $(strip $(call rwildcard,src,*.h) $(wildcard tests/*.h))
 
 # Find shader source files and their compiled output names.
 SHADER_SOURCES := $(wildcard assets/shaders/*.vert assets/shaders/*.frag)

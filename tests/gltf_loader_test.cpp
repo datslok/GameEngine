@@ -1,4 +1,4 @@
-#include "gltf_loader.h"
+#include "assets/gltf_loader.h"
 
 #include <cassert>
 #include <filesystem>

@@ -1,4 +1,4 @@
-#include "ray.h"
+#include "scene/camera_ray.h"
 
 #include <cassert>
 #include <cmath>

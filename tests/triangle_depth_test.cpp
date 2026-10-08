@@ -1,6 +1,6 @@
-#include "rasterizer.h"
-#include "depthbuffer.h"
-#include "pixelbuffer.h"
+#include "render/software/rasterizer.h"
+#include "render/software/depthbuffer.h"
+#include "render/software/pixelbuffer.h"
 
 #include <cassert>
 #include <cmath>

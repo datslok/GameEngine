@@ -1,4 +1,4 @@
-#include "model.h"
+#include "scene/model.h"
 
 #include <cassert>
 #include <cmath>
