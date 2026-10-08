@@ -7,6 +7,22 @@
 void Scene::add(const MeshInstance& object)
 {
     objects.push_back(object);
+
+    // A new object has no earlier position to interpolate from.
+    objects.back().previousTransform = objects.back().transform;
+}
+
+/*
+* Called at the start of each simulation tick, so rendering can blend from these transforms to the ones the tick produces.
+*/
+void Scene::savePreviousTransforms() {
+    for (MeshInstance& object : objects) {
+        object.previousTransform = object.transform;
+    }
+
+    for (const auto& instance : modelInstances) {
+        instance->previousTransform = instance->transform;
+    }
 }
 
 std::vector<MeshInstance>& Scene::getObjects()
@@ -27,6 +43,7 @@ std::shared_ptr<ModelInstance> Scene::addModel(const Model& model, const Transfo
     auto instance = std::make_shared<ModelInstance>();
 
     instance->transform = placement;
+    instance->previousTransform = placement;
     instance->normalization = normalization;
     instance->initialRotation = placement.rotation;
     instance->rotationSpeed = rotationSpeed;

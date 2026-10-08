@@ -132,7 +132,9 @@ void Application::createScene(){
 }
 
 /*
-* Run the main loop continuously process input, update the scene, and render each frame.
+* Run the main loop. Each frame reads input once, runs zero or more fixed simulation ticks, then updates the camera and renders between the last two ticks.
+*
+* Input is only read here, once per frame, never inside a tick. Clicks become commands (such as moveTo) that the next tick picks up, so a frame that runs zero ticks cannot lose a press and a frame that runs two cannot apply it twice.
 */
 void Application::run() {
     Uint64 previousFrameStart = SDL_GetTicksNS();
@@ -149,10 +151,23 @@ void Application::run() {
             1'000'000'000.0;
 
         previousFrameStart = frameStart;
-        elapsedSeconds += deltaSeconds;
 
-        update(static_cast<float>(deltaSeconds));
-        render();
+        const int ticks = timestep.advance(deltaSeconds);
+
+        // Pick using the camera pose before this frame's panning.
+        updatePlayerCommands();
+
+        for (int tick = 0; tick < ticks; ++tick) {
+            simulate(static_cast<float>(timestep.getTickSeconds()));
+        }
+
+        // The camera is the player's view, not game state, so it updates every rendered frame.
+        // Mouse look in particular must not be limited to the tick rate.
+        const float alpha = timestep.getAlpha();
+        updateCameraControls(static_cast<float>(timestep.getFrameSeconds()));
+        followPlayerWithCamera(alpha);
+
+        render(alpha);
 
         // 0 means unlimited.
         if (targetFPS > 0) {
@@ -170,42 +185,41 @@ void Application::run() {
 }
 
 /*
-* Update the camera position based on user input and the frame time delta to provide consistent movement speed regardless of frame rate.
+* Advance the game state by one fixed tick. Everything in here sees the same tickSeconds every time, so results do not depend on the frame rate.
 */
-void Application::update(float deltaTime) {
-    // Pick using the camera pose before this frame's panning.
-    updatePlayerCommands();
+void Application::simulate(float tickSeconds) {
+    // Rendering blends from these transforms to the ones this tick produces.
+    scene.savePreviousTransforms();
+
+    ++simulationTicks;
+    const double simulationSeconds =
+        static_cast<double>(simulationTicks) * timestep.getTickSeconds();
 
     // Simulation continues when the cursor is released or focus is lost.
     if (playerCharacter) {
-        playerCharacter->update(deltaTime);
+        playerCharacter->update(tickSeconds);
         if (!playerCharacter->isMoving()) {
             scene.getObjects().at(destinationMarkerIndex).visible = false;
         }
     }
 
-    updateCameraControls(deltaTime);
-
-    // Follow the character's updated position.
-    followPlayerWithCamera();
-
-    const auto animateRotation = [this](Transform& transform, const Vec3& initial, const Vec3& speed) {
+    const auto animateRotation = [simulationSeconds](Transform& transform, const Vec3& initial, const Vec3& speed) {
         // Leave manually controlled axes alone when their speed is zero.
         if (speed.x != 0.0f) {
             transform.rotation.x = animatedAngle(
-                initial.x, speed.x, elapsedSeconds
+                initial.x, speed.x, simulationSeconds
             );
         }
 
         if (speed.y != 0.0f) {
             transform.rotation.y = animatedAngle(
-                initial.y, speed.y, elapsedSeconds
+                initial.y, speed.y, simulationSeconds
             );
         }
 
         if (speed.z != 0.0f) {
             transform.rotation.z = animatedAngle(
-                initial.z, speed.z, elapsedSeconds
+                initial.z, speed.z, simulationSeconds
             );
         }
     };
@@ -245,7 +259,10 @@ void Application::uploadSceneMeshes() {
     }
 }
 
-void Application::render() {
+/*
+* Draw the scene. alpha (0..1) is how far real time has moved past the last tick, and each object is drawn that far between its previous and current transform.
+*/
+void Application::render(float alpha) {
     // Upload any newly requested textures before starting the frame.
     // Already-cached textures require only a lookup.
     for (const MeshInstance& object : scene.getObjects()) {
@@ -275,7 +292,7 @@ void Application::render() {
         }
 
         const GpuMesh& gpuMesh = *gpuMeshes.at(object.mesh);
-        const Mat4 model = object.getModelMatrix();
+        const Mat4 model = object.getInterpolatedModelMatrix(alpha);
 
         display.drawMesh(
             gpuMesh,
@@ -445,6 +462,8 @@ void Application::updatePlayerCommands() {
                         hit->z
                     };
 
+                    // Jump straight to the new spot instead of sliding there.
+                    marker.previousTransform = marker.transform;
                     marker.visible = true;
                 }
             }
@@ -452,9 +471,12 @@ void Application::updatePlayerCommands() {
     }
 }
 
-void Application::followPlayerWithCamera() {
+/*
+* Follow where the character is drawn, not where the latest tick put it, so the camera and the character move together smoothly.
+*/
+void Application::followPlayerWithCamera(float alpha) {
     if (controlMode == ControlMode::Moba && mobaCameraLocked && playerCharacter) {
-        const Vec3 target = playerCharacter->getVisualCentre();
+        const Vec3 target = playerCharacter->getInterpolatedVisualCentre(alpha);
 
         camera.setPose(
             target + mobaCameraOffset,

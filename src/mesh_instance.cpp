@@ -21,3 +21,14 @@ Mat4 MeshInstance::getModelMatrix() const {
 
     return partMatrix;
 }
+
+Mat4 MeshInstance::getInterpolatedModelMatrix(float alpha) const {
+    const Mat4 partMatrix =
+        interpolate(previousTransform, transform, alpha).getMatrix() * localTransform;
+
+    if (modelInstance) {
+        return modelInstance->getInterpolatedMatrix(alpha) * partMatrix;
+    }
+
+    return partMatrix;
+}

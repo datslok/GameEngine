@@ -15,6 +15,9 @@ public:
     const std::vector<std::shared_ptr<ModelInstance>>&
     getModelInstances() const;
 
+    // Remember every transform before a simulation tick changes them.
+    void savePreviousTransforms();
+
 private:
     std::vector<MeshInstance> objects;
     std::vector<std::shared_ptr<ModelInstance>> modelInstances;
