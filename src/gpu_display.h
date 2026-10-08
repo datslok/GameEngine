@@ -6,6 +6,7 @@
 #include "vec2.h"
 #include "gpu_texture.h"
 #include "material.h"
+#include "input.h"
 
 #include <string>
 #include <map>
@@ -15,6 +16,14 @@
 #include <tuple>
 #include <array>
 #include <cstddef>
+#include <optional>
+
+struct GroundClick {
+    // Normalized window coordinates.
+    float x;
+    float y;
+    float aspectRatio;
+};
 
 class GpuDisplay {
 public:
@@ -25,9 +34,9 @@ public:
     GpuDisplay(const GpuDisplay&) = delete;
     GpuDisplay& operator=(const GpuDisplay&) = delete;
 
-    bool processEvents();
+    // Returns false when the application should quit.
+    bool processEvents(Input& input);
     bool isMouseCaptured() const;
-    Vec2 getMouseDelta() const;
 
     // Clear colour and depth once. Returns false if no frame is available.
     // Background colour components range from 0.0f to 1.0f.
@@ -51,9 +60,10 @@ public:
 
     void setMouseLookEnabled(bool enabled);
     bool hasKeyboardFocus() const;
-    bool wasKeyPressed(SDL_Scancode key) const;
     bool isCursorConfined() const;
     Vec2 getEdgePanDirection(float margin = 5.0f) const;
+
+    std::optional<GroundClick> getGroundClick() const;
 
 private:
     SDL_Window* window = nullptr;
@@ -77,7 +87,6 @@ private:
     SDL_GPURenderPass* pass = nullptr;
     
     bool mouseCaptured = false;
-    Vec2 mouseDelta{};
 
     void setMouseCaptured(bool captured);
 
@@ -98,7 +107,9 @@ private:
     std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
     bool mouseLookEnabled = true;
-    std::array<bool, SDL_SCANCODE_COUNT> pressedKeys{};
     void setCursorConfined(bool confined);
     bool cursorConfined = false;
+    std::optional<GroundClick> groundClick;
+    bool groundSteeringActive = false;
+    void updateGroundSteering();
 };
