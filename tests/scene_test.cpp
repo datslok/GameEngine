@@ -1,6 +1,6 @@
-#include "scene.h"
-#include "mesh.h"
-#include "mesh_instance.h"
+#include "scene/scene.h"
+#include "scene/mesh.h"
+#include "scene/mesh_instance.h"
 
 #include <cassert>
 #include <memory>

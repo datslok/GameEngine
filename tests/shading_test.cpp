@@ -1,4 +1,4 @@
-#include "shading.h"
+#include "render/software/shading.h"
 
 #include <cassert>
 

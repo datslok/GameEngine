@@ -1,4 +1,4 @@
-#include "sdl_input.h"
+#include "platform/sdl_input.h"
 
 #include <SDL3/SDL.h>
 #include <cassert>

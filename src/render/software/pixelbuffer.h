@@ -1,0 +1,25 @@
+#pragma once
+#include <cstddef>
+#include <vector>
+#include "core/pixel.h"
+
+/*
+* This class represents a 2D pixel buffer for storing and manipulating pixel data.
+* It provides a consistent interface for accessing and modifying pixel values.
+*/
+class PixelBuffer {
+    private:
+        std::size_t width;
+        std::size_t height;
+        std::vector<Pixel> pixels;
+
+    public:
+        PixelBuffer(std::size_t width, std::size_t height);
+        void print() const;
+        void setPixel(std::size_t x, std::size_t y, Pixel colour);
+        Pixel getPixel(std::size_t x, std::size_t y) const;
+        void clear(Pixel colour);
+        std::size_t getWidth() const;
+        std::size_t getHeight() const;
+        const Pixel* data() const;
+};

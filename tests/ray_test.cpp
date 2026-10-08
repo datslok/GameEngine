@@ -1,4 +1,4 @@
-#include "ray.h"
+#include "math/ray.h"
 
 #include <cassert>
 #include <cmath>

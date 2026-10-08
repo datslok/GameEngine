@@ -107,7 +107,17 @@ The game starts in free camera mode. F1-F3 switch modes at any time.
 ## Project layout
 
 ```
-src/            Engine and game source
+src/            Engine and game source, in layers (lower ones never include higher ones):
+  app/          Application and main
+  gameplay/     Character, movement and camera controllers
+  platform/     SDL input translation
+  render/gpu/   GPU renderer (SDL_GPU)
+  render/software/  Software rasterizer, kept as a tested reference
+  scene/        Scene, meshes, models, materials, camera
+  assets/       OBJ, glTF and image loaders
+  input/        Engine keys and the input snapshot (no SDL)
+  core/         Fixed timestep and small shared types
+  math/         Vectors, matrices, transforms, rays
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 assets/
   models/       OBJ and glTF test models
