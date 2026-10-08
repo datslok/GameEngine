@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
     (void)argv;
 
     try {
-        DemoGame game{ControlMode::FreeCamera, true};
+        DemoGame game{ControlMode::FirstPerson, true};
         Application application{"My Engine", 1920, 1080, game};
         application.run();
     }
