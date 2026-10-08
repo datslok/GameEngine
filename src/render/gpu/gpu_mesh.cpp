@@ -1,7 +1,6 @@
 #include "render/gpu/gpu_mesh.h"
 
-#include <algorithm>
-#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -16,135 +15,43 @@ namespace {
     }
 }
 
-GpuMesh::GpuMesh(SDL_GPUDevice* device, const Mesh& mesh):
+/*
+* The mesh is already in its final indexed form (see buildIndexedMesh), so this only checks it and copies it to GPU memory.
+*/
+GpuMesh::GpuMesh(SDL_GPUDevice* device, const IndexedMesh& mesh):
     device(device)
 {
     if (device == nullptr) {
         throw std::invalid_argument("GpuMesh requires a GPU device");
     }
 
-    if (mesh.vertices.empty() || mesh.triangles.empty()) {
+    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3 != 0) {
         throw std::invalid_argument(
-            "GpuMesh requires vertices and triangles"
+            "GpuMesh requires vertices and whole triangles of indices"
         );
     }
 
-    // Each triangle gets three separate GPU vertices.
-    // This lets neighbouring faces have different normals.
-    const std::size_t maxBytes =
-        std::numeric_limits<Uint32>::max();
+    // Upload sizes are 32-bit.
+    const std::size_t maxBytes = std::numeric_limits<Uint32>::max();
 
-    const std::size_t bytesPerTriangle =
-        3 * (sizeof(GpuVertex) + sizeof(Uint32));
-
-    if (mesh.triangles.size() > maxBytes / bytesPerTriangle) {
+    if (mesh.vertices.size() > maxBytes / sizeof(MeshVertex) ||
+        mesh.indices.size() > maxBytes / sizeof(Uint32) ||
+        mesh.vertices.size() * sizeof(MeshVertex) > maxBytes - mesh.indices.size() * sizeof(Uint32)) {
         throw std::overflow_error("Combined mesh upload is too large");
     }
 
-    // Validate positions before calculating normals.
-    for (const Vec4& position : mesh.vertices) {
-        if (!std::isfinite(position.x) ||
-            !std::isfinite(position.y) ||
-            !std::isfinite(position.z) ||
-            position.w != 1.0f) {
-            throw std::invalid_argument(
-                "GpuMesh requires finite XYZ positions with w = 1"
-            );
+    // An out-of-range index would make the GPU read past the vertex buffer.
+    for (const std::uint32_t index : mesh.indices) {
+        if (index >= mesh.vertices.size()) {
+            throw std::out_of_range("Mesh index references a missing vertex");
         }
     }
 
-    const std::size_t vertexCount = mesh.triangles.size() * 3;
-
-    std::vector<GpuVertex> vertices;
-    vertices.reserve(vertexCount);
-
-    std::vector<Uint32> indices;
-    indices.reserve(vertexCount);
-
-    for (const Triangle& triangle : mesh.triangles) {
-        if (triangle.first >= mesh.vertices.size() ||
-            triangle.second >= mesh.vertices.size() ||
-            triangle.third >= mesh.vertices.size()) {
-            throw std::out_of_range(
-                "Mesh triangle references a missing vertex"
-            );
-        }
-
-        const Vec4& first = mesh.vertices[triangle.first];
-        const Vec4& second = mesh.vertices[triangle.second];
-        const Vec4& third = mesh.vertices[triangle.third];
-
-        // Use double for the intermediate normal calculation.
-        const double edgeAX = static_cast<double>(second.x) - first.x;
-        const double edgeAY = static_cast<double>(second.y) - first.y;
-        const double edgeAZ = static_cast<double>(second.z) - first.z;
-
-        const double edgeBX = static_cast<double>(third.x) - first.x;
-        const double edgeBY = static_cast<double>(third.y) - first.y;
-        const double edgeBZ = static_cast<double>(third.z) - first.z;
-
-        // Cross product: a direction perpendicular to the triangle.
-        const double normalX = edgeAY * edgeBZ - edgeAZ * edgeBY;
-        const double normalY = edgeAZ * edgeBX - edgeAX * edgeBZ;
-        const double normalZ = edgeAX * edgeBY - edgeAY * edgeBX;
-
-        const double normalLength =
-            std::hypot(normalX, normalY, normalZ);
-
-        float nx = 0.0f;
-        float ny = 0.0f;
-        float nz = 0.0f;
-
-        // Degenerate triangles keep a zero normal.
-        if (normalLength > 0.0) {
-            nx = static_cast<float>(normalX / normalLength);
-            ny = static_cast<float>(normalY / normalLength);
-            nz = static_cast<float>(normalZ / normalLength);
-        }
-
-        const Uint32 firstIndex = static_cast<Uint32>(vertices.size());
-
-        const Vec3 faceNormal{nx, ny, nz};
-
-        const Vec3 firstNormal =
-            triangle.normals[0].value_or(faceNormal);
-
-        const Vec3 secondNormal =
-            triangle.normals[1].value_or(faceNormal);
-
-        const Vec3 thirdNormal =
-            triangle.normals[2].value_or(faceNormal);
-
-        // Missing UVs sample the white corner of our checkerboard.
-        const Vec2 firstUv = triangle.uvs[0].value_or(Vec2{});
-        const Vec2 secondUv = triangle.uvs[1].value_or(Vec2{});
-        const Vec2 thirdUv = triangle.uvs[2].value_or(Vec2{});
-
-        vertices.push_back(GpuVertex{
-            first.x, first.y, first.z,
-            firstNormal.x, firstNormal.y, firstNormal.z,
-            firstUv.x, firstUv.y
-        });
-
-        vertices.push_back(GpuVertex{
-            second.x, second.y, second.z,
-            secondNormal.x, secondNormal.y, secondNormal.z,
-            secondUv.x, secondUv.y
-        });
-
-        vertices.push_back(GpuVertex{
-            third.x, third.y, third.z,
-            thirdNormal.x, thirdNormal.y, thirdNormal.z,
-            thirdUv.x, thirdUv.y
-        });
-
-        indices.push_back(firstIndex);
-        indices.push_back(firstIndex + 1);
-        indices.push_back(firstIndex + 2);
-    }
+    const std::vector<MeshVertex>& vertices = mesh.vertices;
+    const std::vector<std::uint32_t>& indices = mesh.indices;
 
     const Uint32 vertexBytes = static_cast<Uint32>(
-        vertices.size() * sizeof(GpuVertex)
+        vertices.size() * sizeof(MeshVertex)
     );
 
     const Uint32 indexBytes = static_cast<Uint32>(
