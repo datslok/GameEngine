@@ -1,0 +1,109 @@
+#include "assets/asset_manager.h"
+#include "assets/obj_loader.h"
+
+#include <span>
+#include <stdexcept>
+
+MeshHandle AssetManager::addMesh(Mesh mesh) {
+    return addMesh(std::make_shared<const Mesh>(std::move(mesh)));
+}
+
+/*
+* Imported models share their meshes through pointers. Remembering each pointer means two ducks from one model share one handle and one GPU upload.
+*/
+MeshHandle AssetManager::addMesh(std::shared_ptr<const Mesh> mesh) {
+    if (!mesh) {
+        throw std::invalid_argument("Cannot add a null mesh");
+    }
+
+    if (const auto found = meshesByPointer.find(mesh.get()); found != meshesByPointer.end()) {
+        return found->second;
+    }
+
+    const MeshHandle handle{static_cast<std::uint32_t>(meshes.size())};
+    meshesByPointer.emplace(mesh.get(), handle);
+    meshes.push_back(std::move(mesh));
+
+    return handle;
+}
+
+MeshHandle AssetManager::loadMesh(const std::string& path) {
+    if (const auto found = meshesByPath.find(path); found != meshesByPath.end()) {
+        return found->second;
+    }
+
+    // Load before recording the path, so a failed load is not remembered.
+    const MeshHandle handle = addMesh(loadObj(path));
+    meshesByPath.emplace(path, handle);
+
+    return handle;
+}
+
+TextureHandle AssetManager::loadTexture(const std::string& path, bool flipVertically) {
+    const auto key = std::make_pair(path, flipVertically);
+
+    if (const auto found = texturesByPath.find(key); found != texturesByPath.end()) {
+        return found->second;
+    }
+
+    const TextureHandle handle = addTexture(loadImage(path, flipVertically));
+    texturesByPath.emplace(key, handle);
+
+    return handle;
+}
+
+TextureHandle AssetManager::loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically) {
+    if (!encodedImage) {
+        throw std::invalid_argument("Cannot load a texture from a null image buffer");
+    }
+
+    if (const auto found = texturesByBuffer.find(encodedImage.get()); found != texturesByBuffer.end()) {
+        return found->second;
+    }
+
+    const TextureHandle handle = addTexture(loadImageFromMemory(
+        std::span<const std::uint8_t>{encodedImage->data(), encodedImage->size()},
+        flipVertically
+    ));
+
+    texturesByBuffer.emplace(encodedImage.get(), handle);
+    keptBuffers.push_back(std::move(encodedImage));
+
+    return handle;
+}
+
+TextureHandle AssetManager::addTexture(ImageData image) {
+    if (image.width == 0 || image.height == 0 ||
+        image.pixels.size() != static_cast<std::size_t>(image.width) * image.height * 4) {
+        throw std::invalid_argument("Texture needs four bytes for each of its pixels");
+    }
+
+    const TextureHandle handle{static_cast<std::uint32_t>(textures.size())};
+    textures.push_back(std::move(image));
+
+    return handle;
+}
+
+const Mesh& AssetManager::getMesh(MeshHandle handle) const {
+    if (!handle.isValid() || handle.index >= meshes.size()) {
+        throw std::out_of_range("Unknown mesh handle");
+    }
+
+    return *meshes[handle.index];
+}
+
+const ImageData& AssetManager::getTexture(TextureHandle handle) const {
+    if (!handle.isValid() || handle.index >= textures.size()) {
+        throw std::out_of_range("Unknown texture handle");
+    }
+
+    return textures[handle.index];
+}
+
+std::size_t AssetManager::getMeshCount() const {
+    return meshes.size();
+}
+
+std::size_t AssetManager::getTextureCount() const {
+    return textures.size();
+}
