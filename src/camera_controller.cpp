@@ -55,29 +55,29 @@ void CameraController::update(
 
     Vec3 movement{};
 
-    if (input.isKeyHeld(SDL_SCANCODE_W)) {
+    if (input.isKeyHeld(Key::W)) {
         movement = movement + forward;
     }
 
-    if (input.isKeyHeld(SDL_SCANCODE_S)) {
+    if (input.isKeyHeld(Key::S)) {
         movement = movement - forward;
     }
 
-    if (input.isKeyHeld(SDL_SCANCODE_A)) {
+    if (input.isKeyHeld(Key::A)) {
         movement = movement - right;
     }
 
-    if (input.isKeyHeld(SDL_SCANCODE_D)) {
+    if (input.isKeyHeld(Key::D)) {
         movement = movement + right;
     }
 
     if (mode == ControlMode::FreeCamera) {
-        if (input.isKeyHeld(SDL_SCANCODE_SPACE)) {
+        if (input.isKeyHeld(Key::Space)) {
             movement = movement + camera.getUp();
         }
 
-        if (input.isKeyHeld(SDL_SCANCODE_LCTRL) ||
-            input.isKeyHeld(SDL_SCANCODE_RCTRL)) {
+        if (input.isKeyHeld(Key::LeftCtrl) ||
+            input.isKeyHeld(Key::RightCtrl)) {
             movement = movement - camera.getUp();
         }
     }
