@@ -1,2 +1,131 @@
 # GameEngine
-First attempt at a game engine
+
+A game engine written from scratch in C++20, as a learning project. The long-term goal is an engine that can run both an **FPS** and a **MOBA**: the core stays genre-agnostic, and genre-specific code (camera styles, weapons, abilities, netcode) sits on top.
+
+It started as a software rasterizer drawing pixels on the CPU and now renders on the GPU through SDL3's GPU API (Vulkan backend). See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next.
+
+## Features
+
+- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, textures, a directional light
+- Model loading: OBJ, and glTF/GLB with embedded or external textures
+- Fixed 120 Hz simulation with interpolated rendering, so movement is smooth at any frame rate
+- Event-based input with engine-owned key codes, no SDL types in game code
+- Three camera modes: first person, MOBA-style top-down with click-to-move, and a free debug camera
+- A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
+- Unit tests that run without a GPU or window
+
+## Requirements
+
+The project is developed on **Windows** with **MSYS2** (UCRT64 environment). You need:
+
+| Software | Used for |
+|---|---|
+| [MSYS2](https://www.msys2.org/) | Shell, `make` and package manager |
+| GCC with C++20 support | Compiler (`g++`) |
+| SDL3 and SDL3_image | Window, input, GPU API and image loading |
+| shaderc (`glslc`) | Compiling GLSL shaders to SPIR-V |
+| A GPU and driver with Vulkan support | Running the game (not needed for the tests) |
+
+[cgltf](https://github.com/jkuhlmann/cgltf) is included in `external/cgltf`, so it needs no install.
+
+## Install
+
+1. Install [MSYS2](https://www.msys2.org/) using its installer (the default location is `C:\msys64`).
+2. Open the **MSYS2 UCRT64** shell from the Start menu and install the packages:
+
+   ```sh
+   pacman -S --needed make \
+       mingw-w64-ucrt-x86_64-gcc \
+       mingw-w64-ucrt-x86_64-sdl3 \
+       mingw-w64-ucrt-x86_64-sdl3-image \
+       mingw-w64-ucrt-x86_64-shaderc
+   ```
+
+3. Clone the repository:
+
+   ```sh
+   git clone https://github.com/datslok/GameEngine.git
+   cd GameEngine
+   ```
+
+`glslc` from the Vulkan SDK also works if it is on your `PATH`.
+
+## Build and run
+
+Run these from the **repository root** in the UCRT64 shell. The game loads assets and shaders by relative paths (`assets/...`), so it must be started from there.
+
+| Command | What it does |
+|---|---|
+| `make` | Builds `build/game.exe` and compiles the shaders to `.spv` |
+| `make run` | Builds, then starts the game |
+| `make test` | Builds and runs the tests (`build/tests.exe`) |
+| `make clean` | Removes the executables and compiled shaders |
+
+New `.cpp` files in `src/` and `tests/` are picked up automatically.
+
+### Building from PowerShell or another terminal
+
+Outside the UCRT64 shell, put the MSYS2 tools first on your `PATH` for that session:
+
+```powershell
+$env:PATH = "C:\msys64\ucrt64\bin;C:\msys64\usr\bin;" + $env:PATH
+make run
+```
+
+The game also needs `C:\msys64\ucrt64\bin` on the `PATH` when you start it directly, because that is where `SDL3.dll` and the other runtime libraries live.
+
+## Controls
+
+The game starts in free camera mode. F1-F3 switch modes at any time.
+
+| Input | Action |
+|---|---|
+| **F1** | First-person mode |
+| **F2** | MOBA mode |
+| **F3** | Free camera mode |
+| **Alt+Enter** | Toggle fullscreen |
+| **Escape** | Release the mouse |
+
+**First person and free camera**
+
+| Input | Action |
+|---|---|
+| Left-click | Capture the mouse for mouse look |
+| Mouse | Look around |
+| W A S D | Move |
+| Space / Ctrl | Move up / down (free camera only) |
+
+**MOBA**
+
+| Input | Action |
+|---|---|
+| Left-click | Confine the cursor to the window |
+| Right-click (or hold) | Move the character to the cursor |
+| Cursor at the screen edge | Pan the camera |
+| Space | Lock or unlock the camera on the character |
+
+## Project layout
+
+```
+src/            Engine and game source
+tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
+assets/
+  models/       OBJ and glTF test models
+  shaders/      GLSL shaders (compiled to .spv by make)
+  textures/     Images
+external/cgltf  Vendored glTF loader
+build/          Build output (git-ignored)
+```
+
+## Troubleshooting
+
+- **The game cannot find a model, texture or shader:** start it from the repository root, or use `make run`.
+- **`SDL3.dll` was not found:** add `C:\msys64\ucrt64\bin` to your `PATH` (see above).
+- **The glTF tests fail with a "directory exists" error:** an earlier failed run left its temp folder behind. Delete the `game_engine_gltf_*` folders in your temp directory (`%TEMP%`) and run again.
+- **`make: command not found` in PowerShell:** `make` is part of MSYS2, not Windows. Use the UCRT64 shell or set the `PATH` as shown above.
+
+## Credits
+
+- [cgltf](https://github.com/jkuhlmann/cgltf) by Johannes Kuhlmann, for glTF parsing
+- [SDL3](https://www.libsdl.org/) and SDL3_image
+- The duck model is from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets)
