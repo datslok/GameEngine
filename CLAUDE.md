@@ -11,7 +11,7 @@ The roadmap is in `ROADMAP.md`. Phases 0-2 (foundations, GPU rendering and asset
 - `make test` builds and runs `build/tests.exe`.
 - The makefile uses wildcards for `src/*.cpp` and `tests/*.cpp`, so new files are picked up automatically. Headers and the makefile are tracked as dependencies.
 - Flags are `-std=c++20 -Wall -Wextra -g` with no optimisation (-O0). A release target with `-O2` is a planned improvement.
-- Dependencies: SDL3, SDL3_image, `glslc` (Vulkan SDK), and cgltf (vendored in `external/cgltf`).
+- Dependencies: SDL3, SDL3_image, `glslc` (MSYS2 `shaderc` package here; the Vulkan SDK's also works), and cgltf (vendored in `external/cgltf`).
 - `build/`, `*.exe` and `*.spv` are git-ignored.
 - Source files use CRLF line endings. Preserve them when editing.
 
