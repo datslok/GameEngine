@@ -74,6 +74,16 @@ make run
 
 The game also needs `C:\msys64\ucrt64\bin` on the `PATH` when you start it directly, because that is where `SDL3.dll` and the other runtime libraries live.
 
+## Sharing the demo
+
+To send the demo to someone without MSYS2, run:
+
+```sh
+python tools/package_demo.py
+```
+
+It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls. Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. It needs Python 3 (standard library only) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
+
 ## Controls
 
 The game starts in first-person mode. F1-F3 switch modes at any time.
