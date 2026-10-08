@@ -64,7 +64,35 @@ void applySdlEvent(Input& input, const SDL_Event& event) {
         return;
     }
 
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        if (const auto button = mouseButtonFromSdl(event.button.button)) {
+            // Keep the event's own position and time, which are exact, instead of sampling the cursor later.
+            input.pressMouseButton(MouseButtonPress{
+                *button,
+                Vec2{event.button.x, event.button.y},
+                event.button.timestamp
+            });
+        }
+        return;
+    }
+
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (const auto button = mouseButtonFromSdl(event.button.button)) {
+            input.releaseMouseButton(*button);
+        }
+        return;
+    }
+
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
         input.addMouseMotion(event.motion.xrel, event.motion.yrel);
+    }
+}
+
+std::optional<MouseButton> mouseButtonFromSdl(Uint8 button) {
+    switch (button) {
+    case SDL_BUTTON_LEFT:   return MouseButton::Left;
+    case SDL_BUTTON_RIGHT:  return MouseButton::Right;
+    case SDL_BUTTON_MIDDLE: return MouseButton::Middle;
+    default:                return std::nullopt;
     }
 }

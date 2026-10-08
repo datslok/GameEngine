@@ -1,6 +1,5 @@
-#include "render/gpu/gpu_display.h"
+#include "render/gpu/gpu_renderer.h"
 #include "assets/image_loader.h"
-#include "platform/sdl_input.h"
 
 #include <stdexcept>
 #include <string>
@@ -51,20 +50,14 @@ namespace {
     }
 }
 
-GpuDisplay::GpuDisplay(const char* title, int width, int height) {
-    if (width <= 0 || height <= 0) {
-        throw std::invalid_argument(
-            "Display dimensions must be positive"
-        );
+GpuRenderer::GpuRenderer(SDL_Window* window):
+    window(window)
+{
+    if (window == nullptr) {
+        throw std::invalid_argument("GpuRenderer requires a window");
     }
 
     try {
-        if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-            throw gpuError("SDL initialization failed");
-        }
-
-        videoInitialized = true;
-
         // Select Vulkan and the shader format we will use later.
         device = SDL_CreateGPUDevice(
             SDL_GPU_SHADERFORMAT_SPIRV,
@@ -74,12 +67,6 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
 
         if (device == nullptr) {
             throw gpuError("GPU device creation failed");
-        }
-
-        window = SDL_CreateWindow(title, width, height, 0);
-
-        if (window == nullptr) {
-            throw gpuError("Window creation failed");
         }
 
         // Connect this window to the GPU device.
@@ -97,7 +84,7 @@ GpuDisplay::GpuDisplay(const char* title, int width, int height) {
     }
 }
 
-void GpuDisplay::createPipeline() {
+void GpuRenderer::createPipeline() {
     SDL_GPUShader* vertexShader = nullptr;
     SDL_GPUShader* fragmentShader = nullptr;
 
@@ -199,11 +186,11 @@ void GpuDisplay::createPipeline() {
     SDL_ReleaseGPUShader(device, vertexShader);
 }
 
-GpuDisplay::~GpuDisplay() {
+GpuRenderer::~GpuRenderer() {
     cleanup();
 }
 
-void GpuDisplay::ensureDepthTexture(Uint32 width, Uint32 height) {
+void GpuRenderer::ensureDepthTexture(Uint32 width, Uint32 height) {
     if (depthTexture != nullptr &&
         depthWidth == width &&
         depthHeight == height) {
@@ -235,7 +222,7 @@ void GpuDisplay::ensureDepthTexture(Uint32 width, Uint32 height) {
     depthHeight = height;
 }
 
-void GpuDisplay::cleanup() noexcept {
+void GpuRenderer::cleanup() noexcept {
     if (device != nullptr) {
         // Finish any frame still open during shutdown.
         if (pass != nullptr) {
@@ -275,163 +262,14 @@ void GpuDisplay::cleanup() noexcept {
         device = nullptr;
     }
 
-    if (window != nullptr) {
-        SDL_DestroyWindow(window);
-        window = nullptr;
-    }
-
-    if (videoInitialized) {
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        videoInitialized = false;
-    }
+    // The window belongs to its owner, so it is released from the device above but never destroyed here.
 }
 
-SDL_GPUDevice* GpuDisplay::getDevice() const {
+SDL_GPUDevice* GpuRenderer::getDevice() const {
     return device;
 }
 
-/*
-* Handle window-level events here and forward keyboard and mouse events to the input snapshot, so game code reads input from one place.
-*/
-bool GpuDisplay::processEvents(Input& input) {
-    input.beginFrame();
-    groundClick.reset();
-
-    const SDL_WindowID windowID = SDL_GetWindowID(window);
-    SDL_Event event;
-
-    while (SDL_PollEvent(&event)) {
-        const bool wasMouseCaptured = mouseCaptured;
-
-        if (event.type == SDL_EVENT_QUIT) {
-            return false;
-        }
-
-        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-            event.window.windowID == windowID) {
-            return false;
-        }
-
-        // Release the mouse when switching to another window.
-        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
-            event.window.windowID == windowID) {
-            setMouseCaptured(false);
-            input.releaseAllKeys();
-            setCursorConfined(false);
-            groundClick.reset();
-            groundSteeringActive = false;
-        }
-
-        // Clicking resumes mouse look or confines the visible MOBA cursor.
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-            event.button.windowID == windowID &&
-            event.button.button == SDL_BUTTON_LEFT &&
-            hasKeyboardFocus()) {
-            if (mouseLookEnabled) {
-                setMouseCaptured(true);
-            } else {
-                setCursorConfined(true);
-            }
-        }
-
-        if (event.type == SDL_EVENT_KEY_DOWN &&
-            event.key.windowID == windowID &&
-            hasKeyboardFocus()) {
-            applySdlEvent(input, event);
-        }
-
-        // Always forward releases so keys cannot get stuck down.
-        if (event.type == SDL_EVENT_KEY_UP &&
-            event.key.windowID == windowID) {
-            applySdlEvent(input, event);
-        }
-
-        // Alt+Enter toggles fullscreen once per key press.
-        if (event.type == SDL_EVENT_KEY_DOWN &&
-            event.key.windowID == windowID &&
-            !event.key.repeat &&
-            event.key.scancode == SDL_SCANCODE_RETURN &&
-            (event.key.mod & SDL_KMOD_ALT) != 0) {
-            toggleFullscreen();
-        }
-
-        if (event.type == SDL_EVENT_KEY_DOWN &&
-            event.key.windowID == windowID &&
-            event.key.scancode == SDL_SCANCODE_ESCAPE) {
-            setMouseCaptured(false);
-            setCursorConfined(false);
-            groundClick.reset();
-            groundSteeringActive = false;
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_MOTION &&
-            event.motion.windowID == windowID &&
-            mouseCaptured) {
-            applySdlEvent(input, event);
-        }
-
-        // Motion from before a capture change would make the camera jump.
-        if (mouseCaptured != wasMouseCaptured) {
-            input.discardMouseMotion();
-        }
-
-        // Only accept ground clicks while the visible cursor is confined.
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-            event.button.windowID == windowID &&
-            event.button.button == SDL_BUTTON_RIGHT &&
-            !mouseLookEnabled &&
-            cursorConfined &&
-            hasKeyboardFocus()) {
-            int width = 0;
-            int height = 0;
-
-            if (!SDL_GetWindowSize(window, &width, &height)) {
-                throw gpuError("Could not get window size");
-            }
-
-            if (width > 0 && height > 0 &&
-                event.button.x >= 0.0f &&
-                event.button.y >= 0.0f &&
-                event.button.x < static_cast<float>(width) &&
-                event.button.y < static_cast<float>(height)) {
-                groundSteeringActive = true;
-                groundClick = GroundClick{
-                    event.button.x / static_cast<float>(width),
-                    event.button.y / static_cast<float>(height),
-                    static_cast<float>(width) / static_cast<float>(height)
-                };
-            }
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP &&
-            event.button.windowID == windowID &&
-            event.button.button == SDL_BUTTON_RIGHT) {
-            groundSteeringActive = false;
-        }
-    }
-
-    updateGroundSteering();
-
-    return true;
-}
-
-void GpuDisplay::setMouseCaptured(bool captured) {
-    if (mouseCaptured == captured) {
-        return;
-    }
-
-    if (!SDL_SetWindowRelativeMouseMode(window, captured)) {
-        throw gpuError("Could not change relative mouse mode");
-    }
-
-    mouseCaptured = captured;
-}
-
-bool GpuDisplay::isMouseCaptured() const {
-    return mouseCaptured;
-}
-
-bool GpuDisplay::beginFrame(float red, float green, float blue) {
+bool GpuRenderer::beginFrame(float red, float green, float blue) {
     if (commands != nullptr) {
         throw std::logic_error(
             "Finish the current frame before beginning another"
@@ -517,7 +355,7 @@ bool GpuDisplay::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material) {
+void GpuRenderer::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("drawMesh requires an active frame");
     }
@@ -588,7 +426,7 @@ void GpuDisplay::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& vi
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }
 
-void GpuDisplay::endFrame() {
+void GpuRenderer::endFrame() {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("endFrame requires an active frame");
     }
@@ -604,14 +442,14 @@ void GpuDisplay::endFrame() {
     }
 }
 
-void GpuDisplay::createWhiteTexture() {
+void GpuRenderer::createWhiteTexture() {
     const Uint8 whitePixel[4] = {255, 255, 255, 255};
 
     whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4}
     );
 }
 
-void GpuDisplay::prepareMaterial(const Material& material) {
+void GpuRenderer::prepareMaterial(const Material& material) {
     const bool hasFile = !material.texturePath.empty();
     const bool hasEmbedded = static_cast<bool>(
         material.embeddedImage
@@ -672,147 +510,11 @@ void GpuDisplay::prepareMaterial(const Material& material) {
     );
 }
 
-void GpuDisplay::toggleFullscreen() {
-    const bool fullscreen =
-        (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-
-    // Use the desktop resolution when entering borderless fullscreen.
-    if (!fullscreen) {
-        if (!SDL_SetWindowFullscreenMode(window, nullptr)) {
-            throw gpuError("Could not set borderless fullscreen mode");
-        }
-    }
-
-    if (!SDL_SetWindowFullscreen(window, !fullscreen)) {
-        throw gpuError("Could not toggle fullscreen");
-    }
-}
-
-float GpuDisplay::getFrameAspectRatio() const {
+float GpuRenderer::getFrameAspectRatio() const {
     if (depthWidth == 0 || depthHeight == 0) {
         throw std::logic_error("No frame dimensions are available");
     }
 
     return static_cast<float>(depthWidth) /
            static_cast<float>(depthHeight);
-}
-
-void GpuDisplay::setMouseLookEnabled(bool enabled) {
-    groundSteeringActive = false;
-    groundClick.reset();
-    mouseLookEnabled = enabled;
-
-    const bool focused = hasKeyboardFocus();
-
-    setMouseCaptured(enabled && focused);
-    setCursorConfined(!enabled && focused);
-}
-
-bool GpuDisplay::hasKeyboardFocus() const {
-    return SDL_GetKeyboardFocus() == window;
-}
-
-void GpuDisplay::setCursorConfined(bool confined) {
-    if (!SDL_SetWindowMouseGrab(window, confined)) {
-        throw gpuError("Could not change cursor confinement");
-    }
-    cursorConfined = confined;
-}
-
-bool GpuDisplay::isCursorConfined() const {
-    return cursorConfined;
-}
-
-Vec2 GpuDisplay::getEdgePanDirection(float margin) const {
-    if (!cursorConfined ||
-        !hasKeyboardFocus() ||
-        SDL_GetMouseFocus() != window) {
-        return Vec2{};
-    }
-
-    int width = 0;
-    int height = 0;
-
-    if (!SDL_GetWindowSize(window, &width, &height)) {
-        throw gpuError("Could not get window size");
-    }
-
-    if (width <= 0 || height <= 0) {
-        return Vec2{};
-    }
-
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-
-    SDL_GetMouseState(&mouseX, &mouseY);
-
-    Vec2 direction{};
-
-    if (mouseX < margin) {
-        direction.x = -1.0f;
-    } else if (mouseX >= static_cast<float>(width) - margin) {
-        direction.x = 1.0f;
-    }
-
-    if (mouseY < margin) {
-        direction.y = -1.0f;
-    } else if (mouseY >= static_cast<float>(height) - margin) {
-        direction.y = 1.0f;
-    }
-
-    return direction;
-}
-
-std::optional<GroundClick> GpuDisplay::getGroundClick() const {
-    return groundClick;
-}
-
-void GpuDisplay::updateGroundSteering() {
-    if (!groundSteeringActive) {
-        return;
-    }
-
-    if (mouseLookEnabled ||
-        !cursorConfined ||
-        !hasKeyboardFocus() ||
-        SDL_GetMouseFocus() != window) {
-        groundSteeringActive = false;
-        return;
-    }
-
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-
-    const SDL_MouseButtonFlags buttons =
-        SDL_GetMouseState(&mouseX, &mouseY);
-
-    if ((buttons & SDL_BUTTON_RMASK) == 0) {
-        groundSteeringActive = false;
-        return;
-    }
-
-    // Preserve an initial click recorded during this frame.
-    if (groundClick) {
-        return;
-    }
-
-    int width = 0;
-    int height = 0;
-
-    if (!SDL_GetWindowSize(window, &width, &height)) {
-        throw gpuError("Could not get window size");
-    }
-
-    if (width <= 0 || height <= 0 ||
-        mouseX < 0.0f || mouseY < 0.0f ||
-        mouseX >= static_cast<float>(width) ||
-        mouseY >= static_cast<float>(height)) {
-        return;
-    }
-
-    groundClick = GroundClick{
-        mouseX / static_cast<float>(width),
-        mouseY / static_cast<float>(height),
-        static_cast<float>(width) / static_cast<float>(height)
-    };
 }

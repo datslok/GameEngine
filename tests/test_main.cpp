@@ -27,6 +27,7 @@ void testFixedTimestep();
 void testSdlInput();
 void testWorld();
 void testModelRenderer();
+void testEdgePan();
 
 int main(){
     testPixelBuffer();
@@ -56,6 +57,7 @@ int main(){
     testSdlInput();
     testWorld();
     testModelRenderer();
+    testEdgePan();
 
     std::cout << "All tests passed!\n";
     return 0;
