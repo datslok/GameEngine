@@ -8,6 +8,7 @@
 #include "scene.h"
 #include "character.h"
 #include "control_mode.h"
+#include "input.h"
 
 #include <cstdint>
 #include <memory>
@@ -35,6 +36,9 @@ private:
     // Constructed first and destroyed last.
     // The GPU device must outlive all uploaded meshes.
     GpuDisplay display;
+
+    // Refreshed once per frame by display.processEvents().
+    Input input;
 
     Camera camera;
     CameraController cameraController;

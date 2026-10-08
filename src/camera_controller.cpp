@@ -1,7 +1,5 @@
 #include "camera_controller.h"
 
-#include <SDL3/SDL.h>
-
 /*
 * Set the movement speed in order to consistently control camera movement.
 */
@@ -17,13 +15,13 @@ CameraController::CameraController(float moveSpeed, float mouseSensitivity):
 */
 void CameraController::update(
     Camera& camera,
+    const Input& input,
     float deltaTime,
     ControlMode mode
 ) const {
     if (mode == ControlMode::Moba) {
         return;
     }
-    const bool* keys = SDL_GetKeyboardState(nullptr);
 
     Vec3 forward;
     Vec3 right;
@@ -57,29 +55,29 @@ void CameraController::update(
 
     Vec3 movement{};
 
-    if (keys[SDL_SCANCODE_W]) {
+    if (input.isKeyHeld(SDL_SCANCODE_W)) {
         movement = movement + forward;
     }
 
-    if (keys[SDL_SCANCODE_S]) {
+    if (input.isKeyHeld(SDL_SCANCODE_S)) {
         movement = movement - forward;
     }
 
-    if (keys[SDL_SCANCODE_A]) {
+    if (input.isKeyHeld(SDL_SCANCODE_A)) {
         movement = movement - right;
     }
 
-    if (keys[SDL_SCANCODE_D]) {
+    if (input.isKeyHeld(SDL_SCANCODE_D)) {
         movement = movement + right;
     }
 
     if (mode == ControlMode::FreeCamera) {
-        if (keys[SDL_SCANCODE_SPACE]) {
+        if (input.isKeyHeld(SDL_SCANCODE_SPACE)) {
             movement = movement + camera.getUp();
         }
 
-        if (keys[SDL_SCANCODE_LCTRL] ||
-            keys[SDL_SCANCODE_RCTRL]) {
+        if (input.isKeyHeld(SDL_SCANCODE_LCTRL) ||
+            input.isKeyHeld(SDL_SCANCODE_RCTRL)) {
             movement = movement - camera.getUp();
         }
     }
