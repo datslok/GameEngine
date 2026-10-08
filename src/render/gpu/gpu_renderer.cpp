@@ -75,6 +75,12 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         }
 
         windowClaimed = true;
+
+        // SDL lets the CPU queue two frames ahead of the GPU by default. Each queued frame was built from older input, so allow only one.
+        if (!SDL_SetGPUAllowedFramesInFlight(device, 1)) {
+            throw gpuError("Could not limit frames in flight");
+        }
+
         createPipeline();
         createWhiteTexture();
     }
@@ -508,6 +514,41 @@ void GpuRenderer::prepareMaterial(const Material& material) {
             }
         )
     );
+}
+
+/*
+* Not every GPU and driver supports every mode, so check first and fall back to Vsync, which SDL guarantees.
+*/
+PresentMode GpuRenderer::setPresentMode(PresentMode requested) {
+    if (commands != nullptr) {
+        throw std::logic_error("Change the present mode between frames");
+    }
+
+    const auto toSdl = [](PresentMode mode) {
+        switch (mode) {
+        case PresentMode::Mailbox:   return SDL_GPU_PRESENTMODE_MAILBOX;
+        case PresentMode::Immediate: return SDL_GPU_PRESENTMODE_IMMEDIATE;
+        case PresentMode::Vsync:     return SDL_GPU_PRESENTMODE_VSYNC;
+        }
+        return SDL_GPU_PRESENTMODE_VSYNC;
+    };
+
+    PresentMode chosen = requested;
+
+    if (!SDL_WindowSupportsGPUPresentMode(device, window, toSdl(chosen))) {
+        chosen = PresentMode::Vsync;
+    }
+
+    if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, toSdl(chosen))) {
+        throw gpuError("Could not set the present mode");
+    }
+
+    presentMode = chosen;
+    return presentMode;
+}
+
+PresentMode GpuRenderer::getPresentMode() const {
+    return presentMode;
 }
 
 float GpuRenderer::getFrameAspectRatio() const {

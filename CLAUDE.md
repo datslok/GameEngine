@@ -77,7 +77,7 @@ Notes for upcoming work:
 ## Known small issues and ideas
 
 - Add a `release` make target (`-O2`); move small vec/mat operators into headers so they can inline.
-- Swapchain present mode is not set (SDL defaults to vsync), so `targetFPS = 240` is effectively capped by the display. Use `SDL_SetGPUSwapchainParameters` for immediate/mailbox if low latency is wanted.
+- Latency: `GpuRenderer` allows one frame in flight, and `Application` requests `PresentMode::Mailbox` (falls back to vsync if unsupported), so `targetFPS = 240` is the real frame cap. `PresentMode::Immediate` is lower latency still but tears.
 - The vertex shader computes `transpose(inverse(mat3(model)))` per vertex. Compute the normal matrix once per object on the CPU.
 - GPU device is created with debug mode hardcoded on.
 - Texture sampler uses nearest filtering and no mipmaps.

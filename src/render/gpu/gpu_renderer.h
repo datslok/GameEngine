@@ -14,6 +14,18 @@
 #include <vector>
 
 /*
+* How finished frames reach the screen.
+* Vsync: each frame waits its turn for a screen refresh. No tearing, but queued frames add latency. Always supported.
+* Mailbox: no tearing, and a newer frame replaces one still waiting, so the screen shows the freshest frame. Low latency.
+* Immediate: frames are shown as soon as they are ready. Lowest latency, but the image can tear.
+*/
+enum class PresentMode {
+    Vsync,
+    Mailbox,
+    Immediate
+};
+
+/*
 * Draws meshes with SDL's GPU API (Vulkan backend) into a window it does not own.
 * The window must outlive the renderer, so declare the window first wherever both are members.
 */
@@ -41,6 +53,10 @@ public:
 
     SDL_GPUDevice* getDevice() const;
 
+    // Ask for a present mode. Falls back to Vsync when the GPU does not support it, and returns the mode now in use.
+    PresentMode setPresentMode(PresentMode requested);
+    PresentMode getPresentMode() const;
+
     // Read after beginFrame() returns true.
     float getFrameAspectRatio() const;
 
@@ -48,6 +64,7 @@ private:
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
     bool windowClaimed = false;
+    PresentMode presentMode = PresentMode::Vsync;
 
     void cleanup() noexcept;
 
