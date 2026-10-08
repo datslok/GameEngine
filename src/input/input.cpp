@@ -82,6 +82,12 @@ void Input::setWindowSize(const Vec2& size) {
     windowSize = size;
 }
 
+void Input::setWindowState(bool keyboardFocus, bool mouseCaptured, bool cursorConfined) {
+    this->keyboardFocus = keyboardFocus;
+    this->mouseCaptured = mouseCaptured;
+    this->cursorConfined = cursorConfined;
+}
+
 /*
 * Clear held keys and buttons when release events can no longer be trusted to arrive, so nothing stays stuck down.
 */
@@ -164,6 +170,18 @@ bool Input::isCursorInWindow() const {
 
 Vec2 Input::getWindowSize() const {
     return windowSize;
+}
+
+bool Input::hasKeyboardFocus() const {
+    return keyboardFocus;
+}
+
+bool Input::isMouseCaptured() const {
+    return mouseCaptured;
+}
+
+bool Input::isCursorConfined() const {
+    return cursorConfined;
 }
 
 /*

@@ -1,50 +1,52 @@
-#include "app/application.h"
-#include "math/mat4.h"
-#include "math/vec3.h"
-#include "assets/obj_loader.h"
+#include "games/demo/demo_game.h"
 #include "assets/gltf_loader.h"
+#include "assets/obj_loader.h"
+#include "gameplay/character.h"
+#include "gameplay/edge_pan.h"
+#include "gameplay/spinner.h"
+#include "math/transform.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/model_renderer.h"
-#include "gameplay/spinner.h"
-#include "gameplay/edge_pan.h"
 
-#include <SDL3/SDL.h>
-#include <numbers>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 
-Application::Application(int width, int height):
-    window("My Engine", width, height),
-    renderer(window.getSdlWindow()),
+DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
     camera(
         Vec3{2.0f, 1.0f, 0.0f},
         Vec3{0.0f, 0.0f, -5.0f},
         Vec3{0.0f, 1.0f, 0.0f},
         70.0f * std::numbers::pi_v<float> / 180.0f, // FoV
-        static_cast<float>(width) / static_cast<float>(height),
+        16.0f / 9.0f, // Replaced by the engine with the real frame's aspect ratio.
         0.1f,
         100.0f
     ),
     // Movement speed, mouse sensitivity.
-    cameraController(3.0f, 0.001f)
+    cameraController(3.0f, 0.001f),
+    controlMode(startMode),
+    enableDebugModeSwitching(debugModeSwitching)
 {
-    // Low latency without tearing. Falls back to vsync on GPUs without mailbox support.
-    renderer.setPresentMode(PresentMode::Mailbox);
-
-    createScene();
-    uploadSceneMeshes();
 }
 
-void Application::createScene(){
+void DemoGame::onInit(World& world) {
+    createScene(world);
+
+    // Start from the mode's predictable camera pose.
+    setControlMode(world, controlMode);
+}
+
+void DemoGame::createScene(World& world) {
     const std::shared_ptr<const Mesh> cubeMesh = std::make_shared<Mesh>(Mesh::cube());
     const std::shared_ptr<const Mesh> pyramidMesh = std::make_shared<Mesh>(loadObj("assets/models/pyramid.obj"));
     const std::shared_ptr<const Mesh> teapotMesh = std::make_shared<Mesh>(loadObj("assets/models/teapot.obj"));
 
     // A spinning demo object: Transform + ModelRenderer + Spinner, plus PreviousTransform so it is drawn smoothly.
-    const auto spawnSpinner = [this](std::shared_ptr<const Mesh> mesh, const Material& material,
-                                     const Transform& transform, const Vec3& speed) {
+    const auto spawnSpinner = [&world](std::shared_ptr<const Mesh> mesh, const Material& material,
+                                       const Transform& transform, const Vec3& speed) {
         const Entity entity = world.create();
         world.add(entity, transform);
         world.add(entity, PreviousTransform{transform});
@@ -122,70 +124,15 @@ void Application::createScene(){
     world.add(destinationMarker, std::move(markerRenderer));
 }
 
-/*
-* Run the main loop. Each frame reads input once, runs zero or more fixed simulation ticks, then updates the camera and renders between the last two ticks.
-*
-* Input is only read here, once per frame, never inside a tick. Clicks become commands (such as moveTo) that the next tick picks up, so a frame that runs zero ticks cannot lose a press and a frame that runs two cannot apply it twice.
-*/
-void Application::run() {
-    Uint64 previousFrameStart = SDL_GetTicksNS();
-
-    while (true) {
-        const Uint64 frameStart = SDL_GetTicksNS();
-
-        if (!window.processEvents(input)) {
-            break;
-        }
-
-        const double deltaSeconds =
-            static_cast<double>(frameStart - previousFrameStart) /
-            1'000'000'000.0;
-
-        previousFrameStart = frameStart;
-
-        const int ticks = timestep.advance(deltaSeconds);
-
-        // Pick using the camera pose before this frame's panning.
-        updatePlayerCommands();
-
-        for (int tick = 0; tick < ticks; ++tick) {
-            simulate(static_cast<float>(timestep.getTickSeconds()));
-        }
-
-        // The camera is the player's view, not game state, so it updates every rendered frame.
-        // Mouse look in particular must not be limited to the tick rate.
-        const float alpha = timestep.getAlpha();
-        updateCameraControls(static_cast<float>(timestep.getFrameSeconds()));
-        followPlayerWithCamera(alpha);
-
-        render(alpha);
-
-        // 0 means unlimited.
-        if (targetFPS > 0) {
-            const Uint64 frameDuration =
-                1'000'000'000ULL / targetFPS;
-
-            const Uint64 elapsed =
-                SDL_GetTicksNS() - frameStart;
-
-            if (elapsed < frameDuration) {
-                SDL_DelayNS(frameDuration - elapsed);
-            }
-        }
-    }
+void DemoGame::onInput(World& world, const Input& input) {
+    // Pick using the camera pose before this frame's panning.
+    updatePlayerCommands(world, input);
 }
 
 /*
-* Advance the game state by one fixed tick. Everything in here sees the same tickSeconds every time, so results do not depend on the frame rate.
+* The systems, in a fixed order. The engine has already saved previous transforms for interpolation.
 */
-void Application::simulate(float tickSeconds) {
-    ++simulationTicks;
-    const double simulationSeconds =
-        static_cast<double>(simulationTicks) * timestep.getTickSeconds();
-
-    // The systems, in a fixed order.
-    // Rendering blends from the transforms saved here to the ones this tick produces.
-    savePreviousTransforms(world);
+void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     updateCharacters(world, tickSeconds);
     updateSpinners(world, simulationSeconds);
 
@@ -195,70 +142,37 @@ void Application::simulate(float tickSeconds) {
     }
 }
 
-void Application::uploadSceneMeshes() {
-    world.each<ModelRenderer>([this](Entity, ModelRenderer& modelRenderer) {
-        for (const RenderPart& part : modelRenderer.parts) {
-            if (!gpuMeshes.contains(part.mesh)) {
-                gpuMeshes.emplace(
-                    part.mesh,
-                    std::make_unique<GpuMesh>(renderer.getDevice(), *part.mesh)
-                );
-            }
-        }
-    });
-}
-
 /*
-* Draw the scene. alpha (0..1) is how far real time has moved past the last tick, and each object is drawn that far between its previous and current transform.
+* The camera is the player's view, not game state, so it updates every rendered frame. Mouse look in particular must not be limited to the tick rate.
 */
-void Application::render(float alpha) {
-    // Upload any newly requested textures before starting the frame.
-    // Already-cached textures require only a lookup.
-    world.each<ModelRenderer>([this](Entity, ModelRenderer& modelRenderer) {
-        for (const RenderPart& part : modelRenderer.parts) {
-            renderer.prepareMaterial(part.material);
-        }
-    });
+void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, float alpha) {
+    const bool modeChanged = updateModeSwitching(world, input);
 
-    if (!renderer.beginFrame(0.0f, 0.0f, 0.0f)) {
-        return;
+    // Motion from the previous mode must not rotate the new camera pose.
+    if (!modeChanged) {
+        updateCameraControls(input, frameSeconds);
     }
 
-    // Use the actual dimensions of the frame acquired by beginFrame().
-    camera.setAspectRatio(renderer.getFrameAspectRatio());
-
-    // Convert our projection's depth range to the GPU depth range.
-    Mat4 depthCorrection = Mat4::identity();
-    depthCorrection.values[2][2] = 0.5f;
-    depthCorrection.values[2][3] = 0.5f;
-
-    const Mat4 viewProjection =
-        depthCorrection *
-        camera.getProjectionMatrix() *
-        camera.getViewMatrix();
-
-    // Draw every entity that has something to draw and a place to draw it.
-    world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
-        if (!modelRenderer.visible) {
-            return;
-        }
-
-        const Mat4 entityMatrix = getRenderTransform(world, entity, alpha).getMatrix();
-
-        for (const RenderPart& part : modelRenderer.parts) {
-            renderer.drawMesh(
-                *gpuMeshes.at(part.mesh),
-                entityMatrix * part.localTransform,
-                viewProjection,
-                part.material
-            );
-        }
-    });
-
-    renderer.endFrame();
+    followPlayerWithCamera(world, alpha);
 }
 
-void Application::setControlMode(ControlMode mode) {
+Camera& DemoGame::getCamera() {
+    return camera;
+}
+
+bool DemoGame::wantsMouseLook() const {
+    return controlMode != ControlMode::Moba;
+}
+
+Entity DemoGame::getPlayer() const {
+    return player;
+}
+
+Entity DemoGame::getDestinationMarker() const {
+    return destinationMarker;
+}
+
+void DemoGame::setControlMode(World& world, ControlMode mode) {
     const Vec3 worldUp{0.0f, 1.0f, 0.0f};
 
     // Each selection starts from a predictable test position.
@@ -297,64 +211,64 @@ void Application::setControlMode(ControlMode mode) {
         world.get<CharacterMovement>(player).stop();
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
-
-    window.setMouseLookEnabled(
-        mode != ControlMode::Moba
-    );
-
-    // Motion from the previous mode must not rotate the new camera pose.
-    input.discardMouseMotion();
 }
 
-void Application::setDebugModeSwitching(bool enabled) {
-    enableDebugModeSwitching = enabled;
-}
-
-void Application::updateCameraControls(float deltaTime) {
-    if (!window.hasKeyboardFocus()) {
-        return;
+bool DemoGame::updateModeSwitching(World& world, const Input& input) {
+    if (!enableDebugModeSwitching || !input.hasKeyboardFocus()) {
+        return false;
     }
 
-    if (enableDebugModeSwitching) {
-        if (input.wasKeyPressed(Key::F1)) {
-            setControlMode(ControlMode::FirstPerson);
-        } else if (input.wasKeyPressed(Key::F2)) {
-            setControlMode(ControlMode::Moba);
-        } else if (input.wasKeyPressed(Key::F3)) {
-            setControlMode(ControlMode::FreeCamera);
-        }
+    if (input.wasKeyPressed(Key::F1)) {
+        setControlMode(world, ControlMode::FirstPerson);
+        return true;
+    }
+
+    if (input.wasKeyPressed(Key::F2)) {
+        setControlMode(world, ControlMode::Moba);
+        return true;
+    }
+
+    if (input.wasKeyPressed(Key::F3)) {
+        setControlMode(world, ControlMode::FreeCamera);
+        return true;
+    }
+
+    return false;
+}
+
+void DemoGame::updateCameraControls(const Input& input, float frameSeconds) {
+    if (!input.hasKeyboardFocus()) {
+        return;
     }
 
     if (controlMode == ControlMode::Moba) {
-        updateMobaCamera(deltaTime);
+        updateMobaCamera(input, frameSeconds);
         return;
     }
 
-    if (controlMode != ControlMode::Moba) {
-        // Escape pauses mouse-look controls until the next click.
-        if (!window.isMouseCaptured()) {
-            return;
-        }
-
-        const Vec2 mouseDelta = input.getMouseDelta();
-
-        cameraController.look(
-            camera,
-            mouseDelta.x,
-            mouseDelta.y
-        );
+    // Escape pauses mouse-look controls until the next click.
+    if (!input.isMouseCaptured()) {
+        return;
     }
+
+    const Vec2 mouseDelta = input.getMouseDelta();
+
+    cameraController.look(
+        camera,
+        mouseDelta.x,
+        mouseDelta.y
+    );
 
     cameraController.update(
         camera,
         input,
-        deltaTime,
+        frameSeconds,
         controlMode
     );
 }
 
-void Application::updateMobaCamera(float deltaTime) {
-    if (window.isCursorConfined() &&
+void DemoGame::updateMobaCamera(const Input& input, float frameSeconds) {
+    if (input.isCursorConfined() &&
         input.wasKeyPressed(Key::Space)) {
         mobaCameraLocked = !mobaCameraLocked;
     }
@@ -364,7 +278,7 @@ void Application::updateMobaCamera(float deltaTime) {
     }
 
     // Only pan while the MOBA cursor is confined to a focused window, so moving to another monitor does not scroll the map.
-    const bool panningActive = window.isCursorConfined() && window.hasKeyboardFocus();
+    const bool panningActive = input.isCursorConfined() && input.hasKeyboardFocus();
     const Vec2 edge = panningActive ? getEdgePanDirection(input) : Vec2{};
 
     // Screen left/right maps to world X.
@@ -373,7 +287,7 @@ void Application::updateMobaCamera(float deltaTime) {
 
     if (movement.lengthSquared() > 0.0f) {
         camera.move(
-            movement.normalized() * (mobaPanSpeed * deltaTime)
+            movement.normalized() * (mobaPanSpeed * frameSeconds)
         );
     }
 }
@@ -381,13 +295,13 @@ void Application::updateMobaCamera(float deltaTime) {
 /*
 * Turn right-clicks into move commands. A click uses the exact position from its event; holding the button keeps steering towards the live cursor.
 */
-void Application::updatePlayerCommands() {
+void DemoGame::updatePlayerCommands(World& world, const Input& input) {
     // Only accept new commands while MOBA input is active.
     const bool commandsActive =
         world.isAlive(player) &&
         controlMode == ControlMode::Moba &&
-        window.hasKeyboardFocus() &&
-        window.isCursorConfined();
+        input.hasKeyboardFocus() &&
+        input.isCursorConfined();
 
     if (!commandsActive) {
         groundSteeringActive = false;
@@ -458,7 +372,7 @@ void Application::updatePlayerCommands() {
 /*
 * Follow where the character is drawn, not where the latest tick put it, so the camera and the character move together smoothly.
 */
-void Application::followPlayerWithCamera(float alpha) {
+void DemoGame::followPlayerWithCamera(const World& world, float alpha) {
     if (controlMode == ControlMode::Moba && mobaCameraLocked && world.isAlive(player)) {
         const Vec3 target = getCharacterVisualCentre(world, player, alpha);
 
