@@ -9,6 +9,7 @@
 #include "character.h"
 #include "control_mode.h"
 #include "input.h"
+#include "fixed_timestep.h"
 
 #include <cstdint>
 #include <memory>
@@ -28,8 +29,9 @@ public:
     void setDebugModeSwitching(bool enabled);
 
 private:
-    void update(float deltaTime);
-    void render();
+    // Advance the game state by exactly one fixed tick.
+    void simulate(float tickSeconds);
+    void render(float alpha);
     void createScene();
     void uploadSceneMeshes();
 
@@ -50,7 +52,15 @@ private:
         std::unique_ptr<GpuMesh>
     > gpuMeshes;
 
-    double elapsedSeconds = 0.0;
+    // The simulation always advances in steps of exactly 1/120 s.
+    // Frames longer than maxFrameSeconds are clamped, so a hitch slows the game down instead of piling up catch-up ticks.
+    static constexpr double simulationTicksPerSecond = 120.0;
+    static constexpr double maxFrameSeconds = 0.25;
+    FixedTimestep timestep{simulationTicksPerSecond, maxFrameSeconds};
+
+    // Counting ticks instead of adding up seconds keeps simulation time exact.
+    std::uint64_t simulationTicks = 0;
+
     std::uint64_t targetFPS = 240;
 
     std::optional<Character> playerCharacter;
@@ -67,6 +77,6 @@ private:
     Vec3 mobaCameraOffset{0.0f, 12.0f, 10.0f};
 
     void updatePlayerCommands();
-    void followPlayerWithCamera();
+    void followPlayerWithCamera(float alpha);
     std::size_t destinationMarkerIndex = 0;
 };
