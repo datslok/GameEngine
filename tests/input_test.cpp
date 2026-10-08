@@ -54,10 +54,60 @@ void testInput() {
     assert(input.getMouseDelta().x == 0.0f);
     assert(input.getMouseDelta().y == 0.0f);
 
-    // Releasing all keys clears held state.
+    // Releasing everything clears held keys and buttons.
     input.pressKey(Key::A);
-    input.releaseAllKeys();
+    input.pressMouseButton(MouseButtonPress{MouseButton::Left, Vec2{}, 0});
+    input.releaseAll();
     assert(!input.isKeyHeld(Key::A));
+    assert(!input.isMouseButtonHeld(MouseButton::Left));
+
+    // Mouse buttons behave like keys: held, pressed and released.
+    input.beginFrame();
+    input.pressMouseButton(MouseButtonPress{MouseButton::Right, Vec2{100.0f, 50.0f}, 1000});
+    assert(input.isMouseButtonHeld(MouseButton::Right));
+    assert(input.wasMouseButtonPressed(MouseButton::Right));
+    assert(!input.wasMouseButtonPressed(MouseButton::Left));
+
+    input.beginFrame();
+    assert(input.isMouseButtonHeld(MouseButton::Right));
+    assert(!input.wasMouseButtonPressed(MouseButton::Right));
+    assert(!input.getLastMouseButtonPress(MouseButton::Right));
+
+    input.releaseMouseButton(MouseButton::Right);
+    assert(!input.isMouseButtonHeld(MouseButton::Right));
+    assert(input.wasMouseButtonReleased(MouseButton::Right));
+
+    // Each press keeps its exact position and time, in order, and the latest press of a button wins.
+    input.beginFrame();
+    input.pressMouseButton(MouseButtonPress{MouseButton::Right, Vec2{10.0f, 20.0f}, 5000});
+    input.pressMouseButton(MouseButtonPress{MouseButton::Left, Vec2{1.0f, 2.0f}, 6000});
+    input.pressMouseButton(MouseButtonPress{MouseButton::Right, Vec2{30.0f, 40.0f}, 7000});
+
+    assert(input.getMouseButtonPresses().size() == 3);
+    assert(input.getMouseButtonPresses()[1].button == MouseButton::Left);
+
+    const auto lastRight = input.getLastMouseButtonPress(MouseButton::Right);
+    assert(lastRight);
+    assert(lastRight->position.x == 30.0f);
+    assert(lastRight->position.y == 40.0f);
+    assert(lastRight->timestampNanoseconds == 7000);
+    assert(!input.getLastMouseButtonPress(MouseButton::Middle));
+
+    // Presses are cleared at the start of the next frame.
+    input.beginFrame();
+    assert(input.getMouseButtonPresses().empty());
+
+    // Cursor position and window size are stored as given.
+    input.setCursor(Vec2{12.0f, 34.0f}, true);
+    input.setWindowSize(Vec2{800.0f, 600.0f});
+    assert(input.getCursorPosition().x == 12.0f);
+    assert(input.isCursorInWindow());
+    assert(input.getWindowSize().y == 600.0f);
+
+    // Out-of-range buttons are ignored.
+    input.pressMouseButton(MouseButtonPress{MouseButton::Count, Vec2{}, 0});
+    assert(!input.isMouseButtonHeld(MouseButton::Count));
+    assert(input.getMouseButtonPresses().empty());
 
     // Unknown and out-of-range keys are ignored.
     input.pressKey(Key::Unknown);
