@@ -21,7 +21,7 @@ Code lives in layered folders under `src/`. Dependencies point downward only: a 
 
 - `core/` (`fixed_timestep`, `pixel`) and `math/` (vectors, `Mat4`, `Transform`, `Ray`): depend on nothing else.
 - `input/` (`Key`, `Input`): SDL-free, depends on `math/`.
-- `scene/` (`Scene`, meshes, models, materials, `Camera`) and `assets/` (loaders, cgltf).
+- `scene/` (`Scene`, meshes, models, materials, `Camera`, `camera_ray`) and `assets/` (loaders, cgltf).
 - `gameplay/` (`Character`, `MoveToController`, `CameraController`, `ControlMode`).
 - `platform/` (`sdl_input`), `render/gpu/` (`GpuDisplay`, `GpuMesh`, `GpuTexture`), `render/software/` (reference rasterizer).
 - `app/` (`Application`, `main`): may include everything.
@@ -38,7 +38,7 @@ Live path: `main` -> `Application` -> `GpuDisplay`.
 - Main loop: `FixedTimestep` (120 Hz, frame time clamped to 0.25 s) turns real frame time into a whole number of ticks plus an interpolation `alpha`. Each frame: read input and turn clicks into commands (`updatePlayerCommands`), run `simulate(tickSeconds)` zero or more times, update the camera per frame (`updateCameraControls`, `followPlayerWithCamera(alpha)`), then `render(alpha)`. Never read `Input` inside `simulate`; key/click edges are handled once per frame and reach the simulation as commands. Mouse look and camera movement are per frame, not per tick.
 - Interpolation: `MeshInstance` and `ModelInstance` hold `previousTransform`, saved by `Scene::savePreviousTransforms()` at the start of each tick. Rendering uses `getInterpolatedModelMatrix(alpha)`; `interpolate(Transform, Transform, alpha)` takes the shortest way around for angles. `Scene::add`/`addModel` start objects snapped (previous = current); anything teleported outside a tick must also snap, or it visibly slides (see the destination marker).
 - Control modes (`ControlMode`): F1 first-person, F2 MOBA, F3 free camera (debug switching, `setDebugModeSwitching`). MOBA mode uses a confined visible cursor, edge panning, Space to lock the camera on the player, and right-click (or hold) to move the player.
-- `Character` (configured by `CharacterConfig`) is a ground-moving model driven by a `MoveToController`; it turns towards its heading at `turnSpeed`. `math/ray` provides `makeCameraRay` and `intersectGround` for turning mouse clicks into ground positions.
+- `Character` (configured by `CharacterConfig`) is a ground-moving model driven by a `MoveToController`; it turns towards its heading at `turnSpeed`. `math/ray` provides `Ray` and `intersectGround`; `scene/camera_ray` provides `makeCameraRay`. Together they turn mouse clicks into ground positions.
 - `GpuMesh` / `GpuTexture` upload data to the GPU. `GpuMesh` expands every triangle into three unshared vertices and computes face normals when a corner has no normal.
 - `Scene` holds a `vector<MeshInstance>` plus `ModelInstance`s added with `Scene::addModel`. A `MeshInstance` has a shared `Mesh`, a `Transform`, a `Material` (colour + optional texture path or embedded image), a `visible` flag, demo animation fields (`initialRotation`, `rotationSpeed`), and an optional link to the `ModelInstance` whose transform it shares.
 - Loaders: `obj_loader` (quads/convex polygons, normals, UVs), `gltf_loader` (cgltf; returns a `Model` of `ModelPart`s with world transforms, base colour and base colour texture, external or embedded in `.glb`). glTF texture transforms are not supported.
