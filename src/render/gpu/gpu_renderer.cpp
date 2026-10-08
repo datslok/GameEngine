@@ -1,5 +1,4 @@
 #include "render/gpu/gpu_renderer.h"
-#include "assets/image_loader.h"
 
 #include <stdexcept>
 #include <string>
@@ -243,7 +242,8 @@ void GpuRenderer::cleanup() noexcept {
         // Finish outstanding work before releasing resources.
         SDL_WaitForGPUIdle(device);
 
-        // Release all textures before destroying their GPU device.
+        // Release all meshes and textures before destroying their GPU device.
+        meshes.clear();
         textures.clear();
         whiteTexture.reset();
 
@@ -361,10 +361,17 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
         return true;
     }
 
-void GpuRenderer::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& viewProjection, const Material& material) {
+void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mat4& viewProjection, const Material& material) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("drawMesh requires an active frame");
     }
+
+    // Handles are indices into the same numbering the AssetManager uses, so finding the GPU copy is one array access.
+    if (!meshHandle.isValid() || meshHandle.index >= meshes.size()) {
+        throw std::out_of_range("drawMesh: mesh handle has not been uploaded");
+    }
+
+    const GpuMesh& mesh = *meshes[meshHandle.index];
 
     SDL_GPUBufferBinding vertexBinding{};
     vertexBinding.buffer = mesh.getVertexBuffer();
@@ -415,12 +422,15 @@ void GpuRenderer::drawMesh(const GpuMesh& mesh, const Mat4& model, const Mat4& v
 
     SDL_PushGPUFragmentUniformData(commands, 0, colourData, static_cast<Uint32>(sizeof(colourData)));
 
+    // No texture means plain colour: the shader multiplies the colour by white.
     const GpuTexture* selectedTexture = whiteTexture.get();
 
-    if (!material.texturePath.empty() || material.embeddedImage) {
-        selectedTexture = textures.at(
-            makeTextureKey(material)
-        ).get();
+    if (material.texture.isValid()) {
+        if (material.texture.index >= textures.size()) {
+            throw std::out_of_range("drawMesh: texture handle has not been uploaded");
+        }
+
+        selectedTexture = textures[material.texture.index].get();
     }
 
     SDL_GPUTextureSamplerBinding textureBinding{};
@@ -455,65 +465,32 @@ void GpuRenderer::createWhiteTexture() {
     );
 }
 
-void GpuRenderer::prepareMaterial(const Material& material) {
-    const bool hasFile = !material.texturePath.empty();
-    const bool hasEmbedded = static_cast<bool>(
-        material.embeddedImage
-    );
-
-    if (!hasFile && !hasEmbedded) {
-        return;
-    }
-
-    if (hasFile && hasEmbedded) {
-        throw std::invalid_argument(
-            "Material must use either a file or an embedded image"
-        );
-    }
-
-    const TextureKey key = makeTextureKey(material);
-
-    if (textures.contains(key)) {
-        return;
-    }
-
+/*
+* Uploads copy data with their own command buffer, so they must happen between frames.
+* Each upload is appended, so the GPU copy gets the same index as its handle in the AssetManager.
+*/
+void GpuRenderer::uploadMesh(const Mesh& mesh) {
     if (commands != nullptr) {
-        throw std::logic_error(
-            "Prepare new textures before beginning a frame"
-        );
+        throw std::logic_error("Upload meshes before beginning a frame");
     }
 
-    ImageData image;
+    meshes.push_back(std::make_unique<GpuMesh>(device, mesh));
+}
 
-    if (hasEmbedded) {
-        const auto& bytes = *material.embeddedImage;
-
-        image = loadImageFromMemory(
-            std::span<const std::uint8_t>{
-                bytes.data(),
-                bytes.size()
-            },
-            material.flipTextureVertically
-        );
-    } else {
-        image = loadImage(
-            material.texturePath,
-            material.flipTextureVertically
-        );
+void GpuRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels) {
+    if (commands != nullptr) {
+        throw std::logic_error("Upload textures before beginning a frame");
     }
 
-    textures.emplace(
-        key,
-        std::make_unique<GpuTexture>(
-            device,
-            image.width,
-            image.height,
-            std::span<const Uint8>{
-                image.pixels.data(),
-                image.pixels.size()
-            }
-        )
-    );
+    textures.push_back(std::make_unique<GpuTexture>(device, width, height, pixels));
+}
+
+std::size_t GpuRenderer::getMeshCount() const {
+    return meshes.size();
+}
+
+std::size_t GpuRenderer::getTextureCount() const {
+    return textures.size();
 }
 
 /*

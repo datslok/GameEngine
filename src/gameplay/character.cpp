@@ -25,7 +25,7 @@ bool CharacterMovement::isMoving() const {
 /*
 * Validate and build every component before creating the entity, so bad input cannot leave a half-built character in the world.
 */
-Entity spawnCharacter(World& world, const Model& model,
+Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
                       const CharacterConfig& config, const Vec3& groundPosition) {
     if (!std::isfinite(config.turnSpeed) || config.turnSpeed <= 0.0f) {
         throw std::invalid_argument("Character turn speed must be finite and positive");
@@ -57,7 +57,7 @@ Entity spawnCharacter(World& world, const Model& model,
         visualCentreHeight,
         std::nullopt
     };
-    ModelRenderer renderer = makeModelRenderer(model, groundedNormalization);
+    ModelRenderer renderer = assets.makeModelRenderer(model, groundedNormalization);
 
     Transform placement;
     placement.position = groundPosition;

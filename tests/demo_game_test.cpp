@@ -37,8 +37,9 @@ namespace {
 */
 void testDemoGame() {
     World world;
+    AssetManager assets;
     DemoGame game{ControlMode::Moba, false};
-    game.onInit(world);
+    game.onInit(world, assets);
 
     const Entity player = game.getPlayer();
     const Entity marker = game.getDestinationMarker();
@@ -47,6 +48,14 @@ void testDemoGame() {
     assert(world.isAlive(marker));
     assert(!game.wantsMouseLook());
     assert(!world.get<ModelRenderer>(marker).visible);
+
+    // Files are loaded once: the two cubes share a mesh, so there are fewer meshes than drawable parts.
+    std::size_t parts = 0;
+    world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
+        parts += renderer.parts.size();
+    });
+    assert(assets.getMeshCount() < parts);
+    assert(assets.getTextureCount() >= 1);
 
     const Vec3 start = world.get<Transform>(player).position;
 
@@ -92,6 +101,7 @@ void testDemoGame() {
     // The free camera mode asks the engine for mouse look.
     DemoGame freeCamera{ControlMode::FreeCamera, false};
     World otherWorld;
-    freeCamera.onInit(otherWorld);
+    AssetManager otherAssets;
+    freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
 }

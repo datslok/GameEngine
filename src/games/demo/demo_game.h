@@ -17,7 +17,7 @@ class DemoGame final : public Game {
 public:
     explicit DemoGame(ControlMode startMode = ControlMode::FreeCamera, bool debugModeSwitching = true);
 
-    void onInit(World& world) override;
+    void onInit(World& world, AssetManager& assets) override;
     void onInput(World& world, const Input& input) override;
     void onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) override;
     void onUpdate(World& world, const Input& input, float frameSeconds, float alpha) override;
@@ -29,7 +29,7 @@ public:
     Entity getDestinationMarker() const;
 
 private:
-    void createScene(World& world);
+    void createScene(World& world, AssetManager& assets);
     void setControlMode(World& world, ControlMode mode);
 
     // Turn right-clicks into move commands for the player.
