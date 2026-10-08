@@ -76,7 +76,7 @@ The game also needs `C:\msys64\ucrt64\bin` on the `PATH` when you start it direc
 
 ## Controls
 
-The game starts in free camera mode. F1-F3 switch modes at any time.
+The game starts in first-person mode. F1-F3 switch modes at any time.
 
 | Input | Action |
 |---|---|
