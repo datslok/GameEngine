@@ -1,5 +1,6 @@
 #include "engine/application.h"
 #include "math/mat4.h"
+#include "scene/indexed_mesh.h"
 #include "scene/interpolation.h"
 #include "scene/model_renderer.h"
 
@@ -89,7 +90,8 @@ void Application::applyMouseMode() {
 void Application::prepareNewResources() {
     while (renderer.getMeshCount() < assets.getMeshCount()) {
         const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
-        renderer.uploadMesh(assets.getMesh(next));
+        // Convert to the render format once, when the mesh first reaches the GPU.
+        renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next)));
     }
 
     while (renderer.getTextureCount() < assets.getTextureCount()) {
