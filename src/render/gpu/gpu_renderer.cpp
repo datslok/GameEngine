@@ -117,7 +117,7 @@ void GpuRenderer::createPipeline() {
 
         SDL_GPUVertexBufferDescription vertexDescription{};
         vertexDescription.slot = 0;
-        vertexDescription.pitch = static_cast<Uint32>(sizeof(GpuVertex));
+        vertexDescription.pitch = static_cast<Uint32>(sizeof(MeshVertex));
         vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
         SDL_GPUVertexAttribute attributes[3]{};
@@ -126,19 +126,19 @@ void GpuRenderer::createPipeline() {
         attributes[0].location = 0;
         attributes[0].buffer_slot = 0;
         attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-        attributes[0].offset = static_cast<Uint32>(offsetof(GpuVertex, x));
+        attributes[0].offset = static_cast<Uint32>(offsetof(MeshVertex, position));
 
         // Surface normal.
         attributes[1].location = 1;
         attributes[1].buffer_slot = 0;
         attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-        attributes[1].offset = static_cast<Uint32>(offsetof(GpuVertex, nx));
+        attributes[1].offset = static_cast<Uint32>(offsetof(MeshVertex, normal));
 
         // Texture coordinates: shader input location 2.
         attributes[2].location = 2;
         attributes[2].buffer_slot = 0;
         attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-        attributes[2].offset = static_cast<Uint32>(offsetof(GpuVertex, u));
+        attributes[2].offset = static_cast<Uint32>(offsetof(MeshVertex, uv));
 
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vertexShader;
@@ -469,7 +469,7 @@ void GpuRenderer::createWhiteTexture() {
 * Uploads copy data with their own command buffer, so they must happen between frames.
 * Each upload is appended, so the GPU copy gets the same index as its handle in the AssetManager.
 */
-void GpuRenderer::uploadMesh(const Mesh& mesh) {
+void GpuRenderer::uploadMesh(const IndexedMesh& mesh) {
     if (commands != nullptr) {
         throw std::logic_error("Upload meshes before beginning a frame");
     }

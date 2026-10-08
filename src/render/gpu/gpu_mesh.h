@@ -1,27 +1,16 @@
 #pragma once
 
-#include "scene/mesh.h"
+#include "scene/indexed_mesh.h"
 
 #include <SDL3/SDL.h>
 
-// Layout shared by mesh uploads and the graphics pipeline.
-struct GpuVertex {
-    float x;
-    float y;
-    float z;
-
-    float nx;
-    float ny;
-    float nz;
-
-    float u;
-    float v;
-};
-
+/*
+* A mesh uploaded to the GPU: a vertex buffer of MeshVertex and an index buffer with three indices per triangle.
+*/
 class GpuMesh {
 public:
     // Upload the mesh once during construction.
-    GpuMesh(SDL_GPUDevice* device, const Mesh& mesh);
+    GpuMesh(SDL_GPUDevice* device, const IndexedMesh& mesh);
     ~GpuMesh();
 
     // GPU buffers must have a single owner.

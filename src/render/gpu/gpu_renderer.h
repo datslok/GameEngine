@@ -5,7 +5,7 @@
 #include "render/gpu/gpu_texture.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
-#include "scene/mesh.h"
+#include "scene/indexed_mesh.h"
 
 #include <SDL3/SDL.h>
 #include <cstdint>
@@ -44,7 +44,7 @@ public:
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     // Call between frames, never between beginFrame() and endFrame().
-    void uploadMesh(const Mesh& mesh);
+    void uploadMesh(const IndexedMesh& mesh);
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels);
 
     std::size_t getMeshCount() const;
