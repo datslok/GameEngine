@@ -29,6 +29,7 @@ void testWorld();
 void testModelRenderer();
 void testEdgePan();
 void testDemoGame();
+void testCameraControllers();
 
 int main(){
     testPixelBuffer();
@@ -60,6 +61,7 @@ int main(){
     testModelRenderer();
     testEdgePan();
     testDemoGame();
+    testCameraControllers();
 
     std::cout << "All tests passed!\n";
     return 0;

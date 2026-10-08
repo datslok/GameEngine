@@ -1,12 +1,10 @@
 #include "scene/camera.h"
 
-#include <algorithm>
 #include <cmath>
-#include <numbers>
 #include <stdexcept>
 
 /*
-* Initialise the camera's position, direction, and projection so it can transform and view objects in the scene.
+* Initialise the camera's position, direction and lens. Building the matrices once here reuses their validation, so a bad camera fails immediately.
 */
 Camera::Camera(
     const Vec3& position,
@@ -20,116 +18,95 @@ Camera::Camera(
     position(position),
     forward((target - position).normalized()),
     up(up.normalized()),
-    projection(Mat4::perspective(
-        verticalFovRadians,
-        aspectRatio,
-        nearPlane,
-        farPlane
-    )){
-    // Reuse lookAt's checks for invalid camera directions.
+    verticalFov(verticalFovRadians),
+    aspectRatio(aspectRatio),
+    nearPlane(nearPlane),
+    farPlane(farPlane)
+{
     Mat4::lookAt(position, target, up);
+    Mat4::perspective(verticalFov, aspectRatio, nearPlane, farPlane);
 }
 
-/*
-* Move the camera by adding the given displacement to its current position, allowing it to move in any direction.
-*/
-void Camera::move(const Vec3& displacement){
-    position = position + displacement;
-}
-
-void Camera::rotate(float yawRadians, float pitchRadians) {
-    // Find the current elevation relative to the camera's fixed up axis.
-    const float verticalComponent =
-        std::clamp(forward.dot(up), -1.0f, 1.0f);
-
-    const float currentPitch = std::asin(verticalComponent);
-
-    // Stop just short of looking straight up or down.
-    const float pitchLimit =
-        89.0f * std::numbers::pi_v<float> / 180.0f;
-
-    const float newPitch = std::clamp(
-        currentPitch + pitchRadians,
-        -pitchLimit,
-        pitchLimit
-    );
-
-    // Remove the vertical component to get the horizontal heading.
-    const Vec3 horizontal =
-        (forward - up * verticalComponent).normalized();
-
-    // Rotate around the fixed up axis.
-    // The minus sign makes positive yaw turn toward the right.
-    const Vec3 newHorizontal =
-        horizontal * std::cos(yawRadians) -
-        up.cross(horizontal) * std::sin(yawRadians);
-
-    // Rebuild a unit direction using the new heading and elevation.
-    forward = (
-        newHorizontal * std::cos(newPitch) +
-        up * std::sin(newPitch)
-    ).normalized();
+Vec3 Camera::getPosition() const {
+    return position;
 }
 
 /*
 * Return the camera's forward direction so it can be used for movement and viewing.
 */
-Vec3 Camera::getForward() const{
+Vec3 Camera::getForward() const {
     return forward;
 }
 
 /*
 * Calculate the camera's right direction from its forward and up vectors.
 */
-Vec3 Camera::getRight() const{
+Vec3 Camera::getRight() const {
     return forward.cross(up).normalized();
 }
 
 /*
 * Return the camera's up direction to maintain a consistent orientation and prevent rolling.
 */
-Vec3 Camera::getUp() const{
+Vec3 Camera::getUp() const {
     return up;
 }
 
-/*
-* Create a view matrix to transform world coordinates into camera space.
-*/
-Mat4 Camera::getViewMatrix() const{
-    return Mat4::lookAt(position, position + forward, up);
+void Camera::setPosition(const Vec3& newPosition) {
+    position = newPosition;
 }
 
 /*
-* Return the projection matrix used to transform camera coordinates for rendering.
+* Validate with lookAt before changing anything, so a direction parallel to up cannot leave the camera unusable.
 */
-Mat4 Camera::getProjectionMatrix() const{
-    return projection;
-}
-
-void Camera::setAspectRatio(float aspectRatio) {
-    if (!std::isfinite(aspectRatio) || aspectRatio <= 0.0f) {
-        throw std::invalid_argument(
-            "Camera aspect ratio must be finite and positive"
-        );
-    }
-
-    // Adjust horizontal projection while preserving vertical FOV.
-    projection.values[0][0] =
-        projection.values[1][1] / aspectRatio;
+void Camera::setForward(const Vec3& direction) {
+    Mat4::lookAt(position, position + direction, up);
+    forward = direction.normalized();
 }
 
 void Camera::setPose(const Vec3& newPosition, const Vec3& target, const Vec3& upDirection) {
     // Validate before changing the camera.
     Mat4::lookAt(newPosition, target, upDirection);
 
-    const Vec3 newForward = (target - newPosition).normalized();
-    const Vec3 newUp = upDirection.normalized();
-
     position = newPosition;
-    forward = newForward;
-    up = newUp;
+    forward = (target - newPosition).normalized();
+    up = upDirection.normalized();
 }
 
-Vec3 Camera::getPosition() const {
-    return position;
+/*
+* Create a view matrix to transform world coordinates into camera space.
+*/
+Mat4 Camera::getViewMatrix() const {
+    return Mat4::lookAt(position, position + forward, up);
+}
+
+/*
+* Rebuilt from the lens parameters each time, so changing the field of view or aspect ratio is just changing a number.
+*/
+Mat4 Camera::getProjectionMatrix() const {
+    return Mat4::perspective(verticalFov, aspectRatio, nearPlane, farPlane);
+}
+
+float Camera::getAspectRatio() const {
+    return aspectRatio;
+}
+
+void Camera::setAspectRatio(float newAspectRatio) {
+    if (!std::isfinite(newAspectRatio) || newAspectRatio <= 0.0f) {
+        throw std::invalid_argument(
+            "Camera aspect ratio must be finite and positive"
+        );
+    }
+
+    aspectRatio = newAspectRatio;
+}
+
+float Camera::getVerticalFov() const {
+    return verticalFov;
+}
+
+void Camera::setVerticalFov(float verticalFovRadians) {
+    // Validate with the same rules as the projection matrix.
+    Mat4::perspective(verticalFovRadians, aspectRatio, nearPlane, farPlane);
+    verticalFov = verticalFovRadians;
 }
