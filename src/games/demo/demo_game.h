@@ -27,6 +27,7 @@ public:
     // For tests and debugging.
     Entity getPlayer() const;
     Entity getDestinationMarker() const;
+    Entity getPlayerTorch() const;
 
 private:
     void createScene(World& world, AssetManager& assets);
@@ -54,6 +55,9 @@ private:
     // Entity{} means "none" until onInit creates them.
     Entity player;
     Entity destinationMarker;
+
+    // A point light that follows the player. Copied into place each tick, because there are no parent/child entities yet.
+    Entity playerTorch;
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;

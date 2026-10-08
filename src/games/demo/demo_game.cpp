@@ -4,6 +4,7 @@
 #include "math/transform.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
+#include "scene/light.h"
 #include "scene/model_renderer.h"
 
 #include <memory>
@@ -11,6 +12,11 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+
+namespace {
+    // How far above the player's feet the torch hangs.
+    constexpr float torchHeight = 1.0f;
+}
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
     camera(
@@ -86,6 +92,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
+    // Lights. Together these reproduce the old hardcoded shader light: 0.2 ambient plus 0.8 diffuse from (-1, 2, 1).
+    world.add(world.create(), AmbientLight{Vec3{0.2f, 0.2f, 0.2f}});
+    world.add(world.create(), DirectionalLight{Vec3{1.0f, -2.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}, 0.8f});
+
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
     grass.colour = Pixel{75, 110, 75};
@@ -108,6 +118,15 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     const Model& model = assets.loadModel(playerConfig.modelPath);
     player = spawnCharacter(world, assets, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
+
+    // A warm torch above the player. It moves with the player, so it gets a PreviousTransform and interpolates like the duck.
+    Transform torchPlacement;
+    torchPlacement.position = world.get<Transform>(player).position + Vec3{0.0f, torchHeight, 0.0f};
+
+    playerTorch = world.create();
+    world.add(playerTorch, torchPlacement);
+    world.add(playerTorch, PreviousTransform{torchPlacement});
+    world.add(playerTorch, PointLight{Vec3{1.0f, 0.6f, 0.3f}, 3.0f, 6.0f});
 
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
@@ -135,6 +154,12 @@ void DemoGame::onInput(World& world, const Input& input) {
 */
 void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     updateCharacters(world, tickSeconds);
+
+    // Right after the player moves, so the torch is never a tick behind. A real hierarchy would replace this (ROADMAP phase 9).
+    if (world.isAlive(player)) {
+        world.get<Transform>(playerTorch).position = world.get<Transform>(player).position + Vec3{0.0f, torchHeight, 0.0f};
+    }
+
     updateSpinners(world, simulationSeconds);
 
     // Simulation continues when the cursor is released or focus is lost.
@@ -169,6 +194,10 @@ Entity DemoGame::getPlayer() const {
 
 Entity DemoGame::getDestinationMarker() const {
     return destinationMarker;
+}
+
+Entity DemoGame::getPlayerTorch() const {
+    return playerTorch;
 }
 
 void DemoGame::setControlMode(World& world, ControlMode mode) {
