@@ -1,6 +1,4 @@
 #include "games/demo/demo_game.h"
-#include "assets/gltf_loader.h"
-#include "assets/obj_loader.h"
 #include "gameplay/character.h"
 #include "gameplay/spinner.h"
 #include "math/transform.h"
@@ -34,30 +32,31 @@ DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
 {
 }
 
-void DemoGame::onInit(World& world) {
-    createScene(world);
+void DemoGame::onInit(World& world, AssetManager& assets) {
+    createScene(world, assets);
 
     // Start from the mode's predictable camera pose.
     setControlMode(world, controlMode);
 }
 
-void DemoGame::createScene(World& world) {
-    const std::shared_ptr<const Mesh> cubeMesh = std::make_shared<Mesh>(Mesh::cube());
-    const std::shared_ptr<const Mesh> pyramidMesh = std::make_shared<Mesh>(loadObj("assets/models/pyramid.obj"));
-    const std::shared_ptr<const Mesh> teapotMesh = std::make_shared<Mesh>(loadObj("assets/models/teapot.obj"));
+void DemoGame::createScene(World& world, AssetManager& assets) {
+    // Each file is loaded once; both cubes share one mesh handle and one texture handle.
+    const MeshHandle cubeMesh = assets.addMesh(Mesh::cube());
+    const MeshHandle pyramidMesh = assets.loadMesh("assets/models/pyramid.obj");
+    const MeshHandle teapotMesh = assets.loadMesh("assets/models/teapot.obj");
 
     // A spinning demo object: Transform + ModelRenderer + Spinner, plus PreviousTransform so it is drawn smoothly.
-    const auto spawnSpinner = [&world](std::shared_ptr<const Mesh> mesh, const Material& material,
+    const auto spawnSpinner = [&world](MeshHandle mesh, const Material& material,
                                        const Transform& transform, const Vec3& speed) {
         const Entity entity = world.create();
         world.add(entity, transform);
         world.add(entity, PreviousTransform{transform});
-        world.add(entity, makeMeshRenderer(std::move(mesh), material));
+        world.add(entity, makeMeshRenderer(mesh, material));
         world.add(entity, Spinner{transform.rotation, speed});
     };
 
     Material textured;
-    textured.texturePath = "assets/textures/demo.png";
+    textured.texture = assets.loadTexture("assets/textures/demo.png");
 
     Material green;
     green.colour = Pixel{80, 200, 120};
@@ -96,7 +95,7 @@ void DemoGame::createScene(World& world) {
 
     const Entity ground = world.create();
     world.add(ground, groundPlacement);
-    world.add(ground, makeMeshRenderer(std::make_shared<Mesh>(Mesh::plane(20.0f)), grass));
+    world.add(ground, makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass));
 
     // Change this configuration to use another compatible static model.
     const CharacterConfig playerConfig{
@@ -107,14 +106,14 @@ void DemoGame::createScene(World& world) {
         .modelForwardYaw = std::numbers::pi_v<float> / 2.0f
     };
 
-    const Model model = loadGltf(playerConfig.modelPath);
-    player = spawnCharacter(world, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
+    const Model& model = assets.loadModel(playerConfig.modelPath);
+    player = spawnCharacter(world, assets, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
 
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
     yellow.colour = Pixel{255, 220, 40};
 
-    ModelRenderer markerRenderer = makeMeshRenderer(std::make_shared<Mesh>(Mesh::plane(0.2f)), yellow);
+    ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
 
     // Slightly above the ground to avoid overlapping surfaces.

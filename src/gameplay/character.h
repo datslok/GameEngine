@@ -1,13 +1,12 @@
 #pragma once
 
+#include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "gameplay/character_config.h"
 #include "gameplay/move_to_controller.h"
 #include "math/vec3.h"
 
 #include <optional>
-
-struct Model;
 
 /*
 * Component: a ground-moving character that receives move commands from a player or AI and turns towards where it is heading.
@@ -33,7 +32,7 @@ struct CharacterMovement {
 * Create a character entity with Transform, PreviousTransform, ModelRenderer and CharacterMovement.
 * The entity's position is on the ground; the model is lifted so its lowest point touches it.
 */
-Entity spawnCharacter(World& world, const Model& model,
+Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
                       const CharacterConfig& config, const Vec3& groundPosition);
 
 // System: move and turn every character by one step.

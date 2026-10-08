@@ -19,12 +19,12 @@ namespace {
     }
 
     // The lowest vertex of the drawn model must touch the given height.
-    void assertGrounded(const World& world, Entity character, float height) {
+    void assertGrounded(const World& world, const AssetManager& assets, Entity character, float height) {
         const Mat4 entityMatrix = world.get<Transform>(character).getMatrix();
         float bottom = std::numeric_limits<float>::infinity();
 
         for (const RenderPart& part : world.get<ModelRenderer>(character).parts) {
-            for (const Vec4& vertex : part.mesh->vertices) {
+            for (const Vec4& vertex : assets.getMesh(part.mesh).vertices) {
                 bottom = std::min(bottom, (entityMatrix * part.localTransform * vertex).y);
             }
         }
@@ -51,6 +51,9 @@ namespace {
 }
 
 void testCharacter() {
+    // One manager for the whole test: characters made from the same model share its mesh handles.
+    AssetManager assets;
+
     Model cube;
     ModelPart part;
     part.mesh = std::make_shared<Mesh>(Mesh::cube());
@@ -66,10 +69,10 @@ void testCharacter() {
             World world;
             CharacterConfig config;
             config.modelForwardYaw = forwardYaw;
-            const Entity character = spawnCharacter(world, cube, config, Vec3{0, 3, 0});
+            const Entity character = spawnCharacter(world, assets, cube, config, Vec3{0, 3, 0});
             CharacterMovement& movement = world.get<CharacterMovement>(character);
 
-            assertGrounded(world, character, 3.0f);
+            assertGrounded(world, assets, character, 3.0f);
             assert(nearlyEqual(getCharacterVisualCentre(world, character, 1.0f).y, 4.0f));
             movement.moveTo(direction * 12.0f);
             updateCharacters(world, 0.5f);
@@ -78,7 +81,7 @@ void testCharacter() {
             assert(nearlyEqual(position(world, character).y, 3.0f));
             assert(movement.isMoving());
             assertFacing(world, character, forwardYaw, direction);
-            assertGrounded(world, character, 3.0f);
+            assertGrounded(world, assets, character, 3.0f);
 
             updateCharacters(world, 10.0f);
             assert(!movement.isMoving());
@@ -91,7 +94,7 @@ void testCharacter() {
     World world;
     CharacterConfig slowTurn;
     slowTurn.turnSpeed = pi;
-    const Entity character = spawnCharacter(world, cube, slowTurn, Vec3{0, 0, 0});
+    const Entity character = spawnCharacter(world, assets, cube, slowTurn, Vec3{0, 0, 0});
     world.get<CharacterMovement>(character).moveTo(Vec3{0.01f, 0, 0});
     updateCharacters(world, 0.01f);
     assert(!world.get<CharacterMovement>(character).isMoving());
@@ -119,7 +122,7 @@ void testCharacter() {
     assert(nearlyEqual(yaw(world, character), stoppedYaw));
 
     // Two characters can share a loaded asset without sharing movement state.
-    const Entity other = spawnCharacter(world, cube, CharacterConfig{}, Vec3{10, 0, 0});
+    const Entity other = spawnCharacter(world, assets, cube, CharacterConfig{}, Vec3{10, 0, 0});
     world.get<CharacterMovement>(other).moveTo(Vec3{16, 0, 0});
     updateCharacters(world, 0.5f);
     assert(nearlyEqual(position(world, other).x, 13));
@@ -136,7 +139,7 @@ void testCharacter() {
     World duckWorld;
     CharacterConfig duckConfig;
     duckConfig.modelForwardYaw = pi / 2;
-    const Entity duckCharacter = spawnCharacter(duckWorld, duck, duckConfig, Vec3{0, 0, -6});
+    const Entity duckCharacter = spawnCharacter(duckWorld, assets, duck, duckConfig, Vec3{0, 0, -6});
     const Mat4 normalization = duck.getNormalizationMatrix(2);
     const Vec3 minimum = duck.getBounds().minimum;
     const float oldHeight = -(normalization * Vec4{
@@ -144,11 +147,11 @@ void testCharacter() {
     }).y;
     assert(nearlyEqual(position(duckWorld, duckCharacter).y, 0));
     assert(nearlyEqual(getCharacterVisualCentre(duckWorld, duckCharacter, 1.0f).y, oldHeight));
-    assertGrounded(duckWorld, duckCharacter, 0);
+    assertGrounded(duckWorld, assets, duckCharacter, 0);
     duckWorld.get<CharacterMovement>(duckCharacter).moveTo(Vec3{0, 0, 0});
     updateCharacters(duckWorld, 1);
     assertFacing(duckWorld, duckCharacter, pi / 2, Vec3{0, 0, 1});
-    assertGrounded(duckWorld, duckCharacter, 0);
+    assertGrounded(duckWorld, assets, duckCharacter, 0);
 
     // Bad configuration must not leave a partial character in the world.
     for (int field = 0; field < 5; ++field) {
@@ -162,7 +165,7 @@ void testCharacter() {
         if (field == 4) start.y = std::numeric_limits<float>::quiet_NaN();
         bool rejected = false;
         try {
-            spawnCharacter(invalidWorld, cube, bad, start);
+            spawnCharacter(invalidWorld, assets, cube, bad, start);
         } catch (const std::invalid_argument&) {
             rejected = true;
         }

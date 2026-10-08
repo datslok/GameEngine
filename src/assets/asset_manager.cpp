@@ -1,4 +1,5 @@
 #include "assets/asset_manager.h"
+#include "assets/gltf_loader.h"
 #include "assets/obj_loader.h"
 
 #include <span>
@@ -82,6 +83,53 @@ TextureHandle AssetManager::addTexture(ImageData image) {
     textures.push_back(std::move(image));
 
     return handle;
+}
+
+const Model& AssetManager::loadModel(const std::string& path) {
+    if (const auto found = modelsByPath.find(path); found != modelsByPath.end()) {
+        return found->second;
+    }
+
+    return modelsByPath.emplace(path, loadGltf(path)).first->second;
+}
+
+Material AssetManager::makeMaterial(const MaterialSource& source) {
+    if (!source.texturePath.empty() && source.embeddedImage) {
+        throw std::invalid_argument("Material must use either a file or an embedded image");
+    }
+
+    Material material;
+    material.colour = source.colour;
+
+    if (!source.texturePath.empty()) {
+        material.texture = loadTexture(source.texturePath, source.flipTextureVertically);
+    } else if (source.embeddedImage) {
+        material.texture = loadTexture(source.embeddedImage, source.flipTextureVertically);
+    }
+
+    return material;
+}
+
+ModelRenderer AssetManager::makeModelRenderer(const Model& model, const Mat4& normalization) {
+    for (const ModelPart& part : model.parts) {
+        if (!part.mesh) {
+            throw std::invalid_argument("Cannot render a model part with a null mesh");
+        }
+    }
+
+    ModelRenderer renderer;
+    renderer.parts.reserve(model.parts.size());
+
+    for (const ModelPart& part : model.parts) {
+        // Folding the normalization in here means it is multiplied once, not for every part on every frame.
+        renderer.parts.push_back(RenderPart{
+            addMesh(part.mesh),
+            makeMaterial(part.material),
+            normalization * part.transform
+        });
+    }
+
+    return renderer;
 }
 
 const Mesh& AssetManager::getMesh(MeshHandle handle) const {
