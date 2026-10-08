@@ -108,7 +108,9 @@ The game starts in free camera mode. F1-F3 switch modes at any time.
 
 ```
 src/            Engine and game source, in layers (lower ones never include higher ones):
-  app/          Application and main
+  app/          main: picks a game and starts the engine
+  games/        Games built on the engine (games/demo is the current demo)
+  engine/       The main loop and the Game interface
   gameplay/     Character, movement and camera controllers
   platform/     SDL input translation
   render/gpu/   GPU renderer (SDL_GPU)
