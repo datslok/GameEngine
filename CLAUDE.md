@@ -19,9 +19,11 @@ The roadmap is in `external/plan.png`. Steps 1-6 are done, step 7 (shading/light
 
 Live path: `main` -> `Application` -> `GpuDisplay`.
 
-- `Application` runs the main loop (variable timestep, frame cap), owns the `Input`, `Camera`, `CameraController`, `Scene`, the player `Character`, and a map from shared `Mesh` to uploaded `GpuMesh`. `display` is declared first so the GPU device outlives all GPU resources.
+- `Application` runs the main loop (fixed timestep, frame cap), owns the `Input`, `Camera`, `CameraController`, `Scene`, the player `Character`, and a map from shared `Mesh` to uploaded `GpuMesh`. `display` is declared first so the GPU device outlives all GPU resources.
 - `GpuDisplay` uses SDL3's GPU API (SDL_GPU) with the Vulkan backend and SPIR-V shaders. It owns the window, device, pipeline, depth texture, texture cache, event polling, mouse capture, cursor confinement, MOBA edge-pan and right-click ground clicks (`GroundClick`, normalized window coordinates), and fullscreen (Alt+Enter).
 - `Input` is a once-per-frame snapshot built from SDL events: `isKeyHeld`, `wasKeyPressed`, `wasKeyReleased`, and accumulated `getMouseDelta`. `GpuDisplay::processEvents(input)` resets and fills it; window-level events (quit, focus, capture, Escape, Alt+Enter) stay in `GpuDisplay`. Mouse motion is only forwarded while the mouse is captured, and is discarded when capture or control mode changes. Game code reads keys from `Input`, never from `SDL_GetKeyboardState`.
+- Main loop: `FixedTimestep` (120 Hz, frame time clamped to 0.25 s) turns real frame time into a whole number of ticks plus an interpolation `alpha`. Each frame: read input and turn clicks into commands (`updatePlayerCommands`), run `simulate(tickSeconds)` zero or more times, update the camera per frame (`updateCameraControls`, `followPlayerWithCamera(alpha)`), then `render(alpha)`. Never read `Input` inside `simulate`; key/click edges are handled once per frame and reach the simulation as commands. Mouse look and camera movement are per frame, not per tick.
+- Interpolation: `MeshInstance` and `ModelInstance` hold `previousTransform`, saved by `Scene::savePreviousTransforms()` at the start of each tick. Rendering uses `getInterpolatedModelMatrix(alpha)`; `interpolate(Transform, Transform, alpha)` takes the shortest way around for angles. `Scene::add`/`addModel` start objects snapped (previous = current); anything teleported outside a tick must also snap, or it visibly slides (see the destination marker).
 - Control modes (`ControlMode`): F1 first-person, F2 MOBA, F3 free camera (debug switching, `setDebugModeSwitching`). MOBA mode uses a confined visible cursor, edge panning, Space to lock the camera on the player, and right-click (or hold) to move the player.
 - `Character` (configured by `CharacterConfig`) is a ground-moving model driven by a `MoveToController`; it turns towards its heading at `turnSpeed`. `ray` provides `makeCameraRay` and `intersectGround` for turning mouse clicks into ground positions.
 - `GpuMesh` / `GpuTexture` upload data to the GPU. `GpuMesh` expands every triangle into three unshared vertices and computes face normals when a corner has no normal.
@@ -49,9 +51,9 @@ Software renderer (reference path, used only by tests): `Renderer`, `Display`, `
 
 ## Planned work (suggested order)
 
-Done: `Input` snapshot class; `Scene::addModel` and glTF textures; ground raycasts and click-to-move.
+Done: `Input` snapshot class; `Scene::addModel` and glTF textures; ground raycasts and click-to-move; fixed-timestep simulation with render interpolation.
 
-1. Fixed-timestep simulation with render interpolation, and a clamp on delta time. Only one simulation tick per frame may consume `wasKeyPressed`/`wasKeyReleased` edges; apply mouse look per rendered frame, not per tick.
+1. (Done, see above.)
 2. Keep the simulation free of SDL and GPU types so it can run headless (for tests and a future dedicated server). `Input` still uses `SDL_Scancode`/`SDL_Event`; replace with an engine `Key` enum.
 3. Entity/component layer (roadmap step 10), pulled ahead of physics. Move `initialRotation`/`rotationSpeed` out of `MeshInstance` into a spinner component.
 4. Split `GpuDisplay` into platform/window, input, and GPU renderer. Move ground clicks, steering and edge-pan mouse position into `Input`.
