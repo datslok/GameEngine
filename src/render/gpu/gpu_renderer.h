@@ -2,41 +2,41 @@
 
 #include "math/mat4.h"
 #include "render/gpu/gpu_mesh.h"
-#include "core/pixel.h"
-#include "math/vec2.h"
 #include "render/gpu/gpu_texture.h"
 #include "scene/material.h"
-#include "input/input.h"
 
-#include <string>
-#include <map>
-#include <utility>
-#include <memory>
 #include <SDL3/SDL.h>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
 #include <tuple>
-#include <array>
-#include <cstddef>
-#include <optional>
+#include <vector>
 
-struct GroundClick {
-    // Normalized window coordinates.
-    float x;
-    float y;
-    float aspectRatio;
+/*
+* How finished frames reach the screen.
+* Vsync: each frame waits its turn for a screen refresh. No tearing, but queued frames add latency. Always supported.
+* Mailbox: no tearing, and a newer frame replaces one still waiting, so the screen shows the freshest frame. Low latency.
+* Immediate: frames are shown as soon as they are ready. Lowest latency, but the image can tear.
+*/
+enum class PresentMode {
+    Vsync,
+    Mailbox,
+    Immediate
 };
 
-class GpuDisplay {
+/*
+* Draws meshes with SDL's GPU API (Vulkan backend) into a window it does not own.
+* The window must outlive the renderer, so declare the window first wherever both are members.
+*/
+class GpuRenderer {
 public:
-    GpuDisplay(const char* title, int width, int height);
-    ~GpuDisplay();
+    explicit GpuRenderer(SDL_Window* window);
+    ~GpuRenderer();
 
     // GPU resources must have a single owner.
-    GpuDisplay(const GpuDisplay&) = delete;
-    GpuDisplay& operator=(const GpuDisplay&) = delete;
-
-    // Returns false when the application should quit.
-    bool processEvents(Input& input);
-    bool isMouseCaptured() const;
+    GpuRenderer(const GpuRenderer&) = delete;
+    GpuRenderer& operator=(const GpuRenderer&) = delete;
 
     // Clear colour and depth once. Returns false if no frame is available.
     // Background colour components range from 0.0f to 1.0f.
@@ -53,24 +53,18 @@ public:
 
     SDL_GPUDevice* getDevice() const;
 
-    void toggleFullscreen();
+    // Ask for a present mode. Falls back to Vsync when the GPU does not support it, and returns the mode now in use.
+    PresentMode setPresentMode(PresentMode requested);
+    PresentMode getPresentMode() const;
 
     // Read after beginFrame() returns true.
     float getFrameAspectRatio() const;
 
-    void setMouseLookEnabled(bool enabled);
-    bool hasKeyboardFocus() const;
-    bool isCursorConfined() const;
-    Vec2 getEdgePanDirection(float margin = 5.0f) const;
-
-    std::optional<GroundClick> getGroundClick() const;
-
 private:
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
-
-    bool videoInitialized = false;
     bool windowClaimed = false;
+    PresentMode presentMode = PresentMode::Vsync;
 
     void cleanup() noexcept;
 
@@ -85,10 +79,6 @@ private:
 
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
-    
-    bool mouseCaptured = false;
-
-    void setMouseCaptured(bool captured);
 
     // External images use their path.
     // Embedded images use the identity of their shared byte buffer.
@@ -106,10 +96,4 @@ private:
     std::map<TextureKey, std::unique_ptr<GpuTexture>> textures;
     std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
-    bool mouseLookEnabled = true;
-    void setCursorConfined(bool confined);
-    bool cursorConfined = false;
-    std::optional<GroundClick> groundClick;
-    bool groundSteeringActive = false;
-    void updateGroundSteering();
 };
