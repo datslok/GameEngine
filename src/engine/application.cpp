@@ -2,6 +2,7 @@
 #include "math/mat4.h"
 #include "scene/indexed_mesh.h"
 #include "scene/interpolation.h"
+#include "scene/lighting.h"
 #include "scene/model_renderer.h"
 
 #include <SDL3/SDL.h>
@@ -110,6 +111,8 @@ void Application::render(float alpha) {
     if (!renderer.beginFrame(0.0f, 0.0f, 0.0f)) {
         return;
     }
+
+    renderer.setLighting(collectLighting(world, alpha));
 
     Camera& camera = game.getCamera();
 

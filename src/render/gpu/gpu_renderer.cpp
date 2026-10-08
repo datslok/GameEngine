@@ -1,4 +1,5 @@
 #include "render/gpu/gpu_renderer.h"
+#include "render/gpu/light_uniforms.h"
 
 #include <stdexcept>
 #include <string>
@@ -106,7 +107,7 @@ void GpuRenderer::createPipeline() {
             device,
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
-            1,
+            2, // Material colour, then lights.
             1
         );
 
@@ -358,8 +359,25 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
     }
 
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
-        return true;
+
+    // A frame that never sets lighting reads "no lights" rather than whatever the slot held before.
+    setLighting(FrameLighting{});
+
+    return true;
+}
+
+/*
+* Pushed uniform data stays in effect for every later draw in the frame, so the lights are sent once, not per object.
+*/
+void GpuRenderer::setLighting(const FrameLighting& lighting) {
+    if (commands == nullptr || pass == nullptr) {
+        throw std::logic_error("setLighting requires an active frame");
     }
+
+    const LightUniformData data = packLighting(lighting);
+
+    SDL_PushGPUFragmentUniformData(commands, 1, &data, static_cast<Uint32>(sizeof(data)));
+}
 
 void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mat4& viewProjection, const Material& material) {
     if (commands == nullptr || pass == nullptr) {

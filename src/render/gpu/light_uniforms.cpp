@@ -1,0 +1,61 @@
+#include "render/gpu/light_uniforms.h"
+
+namespace {
+    void writeVector(float (&target)[4], const Vec3& value, float w) {
+        target[0] = value.x;
+        target[1] = value.y;
+        target[2] = value.z;
+        target[3] = w;
+    }
+}
+
+/*
+* Work that is the same for every pixel is done here once per frame: colour times intensity, and normalising and flipping the
+* direction (the shader's N dot L needs the direction towards the light).
+* A zero direction cannot be normalised, and a point light without a positive range would make the shader divide by zero, so both are skipped.
+* The first lights collected win when there are more than the shader has room for.
+*/
+LightUniformData packLighting(const FrameLighting& lighting) {
+    LightUniformData data{};
+
+    writeVector(data.ambient, lighting.ambient, 0.0f);
+
+    int directionalCount = 0;
+
+    for (const DirectionalLight& light : lighting.directionalLights) {
+        if (directionalCount == maxDirectionalLights) {
+            break;
+        }
+
+        if (light.direction.lengthSquared() < 1e-12f) {
+            continue;
+        }
+
+        DirectionalLightUniform& slot = data.directional[directionalCount];
+        writeVector(slot.toLight, light.direction.normalized() * -1.0f, 0.0f);
+        writeVector(slot.radiance, light.colour * light.intensity, 0.0f);
+        ++directionalCount;
+    }
+
+    int pointCount = 0;
+
+    for (const PlacedPointLight& placed : lighting.pointLights) {
+        if (pointCount == maxPointLights) {
+            break;
+        }
+
+        if (placed.light.range <= 0.0f) {
+            continue;
+        }
+
+        PointLightUniform& slot = data.points[pointCount];
+        writeVector(slot.positionRange, placed.position, placed.light.range);
+        writeVector(slot.radiance, placed.light.colour * placed.light.intensity, 0.0f);
+        ++pointCount;
+    }
+
+    data.counts[0] = directionalCount;
+    data.counts[1] = pointCount;
+
+    return data;
+}
