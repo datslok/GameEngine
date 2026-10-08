@@ -51,8 +51,9 @@ public:
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
 
-    // Send the frame's lights to the shader. Call between beginFrame() and endFrame(); beginFrame() starts with no lights.
-    void setLighting(const FrameLighting& lighting);
+    // Send the frame's lights and the camera position (for specular highlights) to the shader.
+    // Call between beginFrame() and endFrame(); beginFrame() starts with no lights.
+    void setLighting(const FrameLighting& lighting, const Vec3& cameraPosition);
 
     void drawMesh(MeshHandle mesh, const Mat4& model, const Mat4& viewProjection, const Material& material);
 

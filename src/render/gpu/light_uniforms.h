@@ -24,12 +24,13 @@ struct PointLightUniform {
 */
 struct LightUniformData {
     float ambient[4];
+    float cameraPosition[4]; // xyz: where the viewer is, for specular highlights
     std::int32_t counts[4]; // x: directional lights used, y: point lights used
     DirectionalLightUniform directional[maxDirectionalLights];
     PointLightUniform points[maxPointLights];
 };
 
-static_assert(sizeof(LightUniformData) == 672, "LightUniformData must match the shader's LightData block");
+static_assert(sizeof(LightUniformData) == 688, "LightUniformData must match the shader's LightData block");
 
-// Convert a frame's lights into the shader's layout, dropping lights past the limits or that cannot be drawn.
-LightUniformData packLighting(const FrameLighting& lighting);
+// Convert a frame's lights and the camera position into the shader's layout, dropping lights past the limits or that cannot be drawn.
+LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition);
