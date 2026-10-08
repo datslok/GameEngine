@@ -107,7 +107,7 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 - [x] Entity/component layer (`entity-component`): entities with generations, sparse-set component storage, `World::each` systems; `Transform`, `PreviousTransform`, `ModelRenderer`, `Spinner` and `CharacterMovement` components replace `Scene`, `MeshInstance` and `ModelInstance`
 - [x] Split `GpuDisplay` (`platform-split`) into `Window`, `GpuRenderer` and a richer `Input` (mouse buttons with exact click position and timestamp, cursor, window size); ground clicks, steering and edge panning moved into game code
 - [x] `Game` interface (`game-interface`): `onInit`, `onInput`, `onFixedUpdate`, `onUpdate`; `Application` is the engine loop and the demo is `DemoGame`
-- [ ] Camera split: `Camera` holds view and projection only; free-fly, FPS and top-down MOBA become separate controllers
+- [x] Camera split (`camera-split`): `Camera` is a lens (position, orientation, FOV, aspect) with matrices built on request; free-fly, first-person and MOBA are separate concrete controllers, with look angles stored as yaw/pitch
 - [ ] Asset manager with handles (`MeshHandle`, `TextureHandle`) instead of shared pointers and path lookups every frame
 - [ ] One canonical vertex format shared by the loaders and GPU upload; indexed meshes instead of three unshared vertices per triangle
 
@@ -149,6 +149,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 - [ ] Text rendering with a bitmap font
 - [ ] HUD: crosshair, health bars above units, ability cooldowns
 - [ ] Debug UI and in-game stats (frame time, tick time, entity count)
+- [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them
 - [ ] Audio with SDL3: play sounds, volume, simple 3D panning by distance and direction
 - [ ] Simple profiler: time each system per frame
 
