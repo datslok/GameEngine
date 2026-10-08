@@ -36,4 +36,4 @@ void main() {
             worldNormal = transformedNormal / normalLength;
         }
     }
-}
+}
