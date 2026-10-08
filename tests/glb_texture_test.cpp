@@ -1,5 +1,5 @@
-#include "gltf_loader.h"
-#include "image_loader.h"
+#include "assets/gltf_loader.h"
+#include "assets/image_loader.h"
 
 #include <cassert>
 #include <span>
