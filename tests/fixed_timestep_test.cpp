@@ -1,12 +1,10 @@
 #include "core/fixed_timestep.h"
-#include "scene/scene.h"
+#include "scene/interpolation.h"
 #include "math/transform.h"
-#include "math/vec4.h"
 
 #include <cassert>
 #include <cmath>
 #include <limits>
-#include <memory>
 #include <numbers>
 #include <stdexcept>
 
@@ -124,23 +122,29 @@ void testFixedTimestep() {
         assert(nearlyEqual(wrapped, 0.0));
     }
 
-    // Objects added to a scene start with no motion to interpolate.
+    // Entities with a PreviousTransform are drawn between the last two ticks.
     {
-        Scene scene;
-        MeshInstance object{std::make_shared<Mesh>(Mesh::cube())};
-        object.transform.position = Vec3{5.0f, 0.0f, 0.0f};
+        World world;
+        Transform start;
+        start.position = Vec3{5.0f, 0.0f, 0.0f};
 
-        scene.add(object);
-        assert(nearlyEqual(scene.getObjects().at(0).previousTransform.position.x, 5.0));
+        const Entity moving = world.create();
+        world.add(moving, start);
+        world.add(moving, PreviousTransform{start});
 
-        // After a tick moves it, previous holds the old position.
-        scene.savePreviousTransforms();
-        scene.getObjects().at(0).transform.position.x = 6.0f;
+        // A tick saves the old transform, then moves the entity.
+        savePreviousTransforms(world);
+        world.get<Transform>(moving).position.x = 6.0f;
 
-        const MeshInstance& moved = scene.getObjects().at(0);
-        assert(nearlyEqual(moved.previousTransform.position.x, 5.0));
+        assert(nearlyEqual(world.get<PreviousTransform>(moving).transform.position.x, 5.0));
+        assert(nearlyEqual(getRenderTransform(world, moving, 0.0f).position.x, 5.0));
+        assert(nearlyEqual(getRenderTransform(world, moving, 0.5f).position.x, 5.5));
+        assert(nearlyEqual(getRenderTransform(world, moving, 1.0f).position.x, 6.0));
 
-        const Vec4 halfway = moved.getInterpolatedModelMatrix(0.5f) * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
-        assert(nearlyEqual(halfway.x, 5.5));
+        // Without a PreviousTransform an entity is drawn exactly where it is, so teleports do not slide.
+        const Entity teleporting = world.create();
+        world.add(teleporting, start);
+        world.get<Transform>(teleporting).position.x = 20.0f;
+        assert(nearlyEqual(getRenderTransform(world, teleporting, 0.5f).position.x, 20.0));
     }
 }

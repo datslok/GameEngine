@@ -5,7 +5,7 @@
 #include "render/gpu/gpu_display.h"
 #include "render/gpu/gpu_mesh.h"
 #include "scene/mesh.h"
-#include "scene/scene.h"
+#include "ecs/world.h"
 #include "gameplay/character.h"
 #include "gameplay/control_mode.h"
 #include "input/input.h"
@@ -14,8 +14,6 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
-#include <optional>
-#include <cstddef>
 
 /*
 * Coordinates the main engine components to manage input, updates, rendering, and the applications main execution loop.
@@ -44,7 +42,7 @@ private:
 
     Camera camera;
     CameraController cameraController;
-    Scene scene;
+    World world;
 
     // Each shared CPU mesh maps to one uploaded GPU mesh.
     std::unordered_map<
@@ -63,7 +61,8 @@ private:
 
     std::uint64_t targetFPS = 240;
 
-    std::optional<Character> playerCharacter;
+    // Entity{} means there is no player.
+    Entity player;
     void updateCameraControls(float deltaTime);
 
     ControlMode controlMode = ControlMode::FreeCamera;
@@ -78,5 +77,5 @@ private:
 
     void updatePlayerCommands();
     void followPlayerWithCamera(float alpha);
-    std::size_t destinationMarkerIndex = 0;
+    Entity destinationMarker;
 };
