@@ -30,6 +30,7 @@ void testModelRenderer();
 void testEdgePan();
 void testDemoGame();
 void testCameraControllers();
+void testAssetManager();
 
 int main(){
     testPixelBuffer();
@@ -62,6 +63,7 @@ int main(){
     testEdgePan();
     testDemoGame();
     testCameraControllers();
+    testAssetManager();
 
     std::cout << "All tests passed!\n";
     return 0;
