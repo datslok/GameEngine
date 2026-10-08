@@ -4,6 +4,8 @@
 #include "scene/model_renderer.h"
 
 #include <SDL3/SDL.h>
+#include <cstdint>
+#include <span>
 
 Application::Application(const char* title, int width, int height, Game& game):
     window(title, width, height),
@@ -13,7 +15,7 @@ Application::Application(const char* title, int width, int height, Game& game):
     // Low latency without tearing. Falls back to vsync on GPUs without mailbox support.
     renderer.setPresentMode(PresentMode::Mailbox);
 
-    game.onInit(world);
+    game.onInit(world, assets);
 
     mouseLookEnabled = game.wantsMouseLook();
     window.setMouseLookEnabled(mouseLookEnabled);
@@ -81,21 +83,20 @@ void Application::applyMouseMode() {
 }
 
 /*
-* Games may spawn entities at any time, so check for new meshes and textures every frame. Uploads must happen before the frame begins; already-uploaded ones cost only a lookup.
+* Games may load assets at any time. Assets are only appended, so the new ones are exactly those past the renderer's count: no per-entity checks.
+* Uploads must happen before the frame begins.
 */
 void Application::prepareNewResources() {
-    world.each<ModelRenderer>([this](Entity, ModelRenderer& modelRenderer) {
-        for (const RenderPart& part : modelRenderer.parts) {
-            if (!gpuMeshes.contains(part.mesh)) {
-                gpuMeshes.emplace(
-                    part.mesh,
-                    std::make_unique<GpuMesh>(renderer.getDevice(), *part.mesh)
-                );
-            }
+    while (renderer.getMeshCount() < assets.getMeshCount()) {
+        const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
+        renderer.uploadMesh(assets.getMesh(next));
+    }
 
-            renderer.prepareMaterial(part.material);
-        }
-    });
+    while (renderer.getTextureCount() < assets.getTextureCount()) {
+        const TextureHandle next{static_cast<std::uint32_t>(renderer.getTextureCount())};
+        const ImageData& image = assets.getTexture(next);
+        renderer.uploadTexture(image.width, image.height, std::span<const Uint8>{image.pixels.data(), image.pixels.size()});
+    }
 }
 
 /*
@@ -133,7 +134,7 @@ void Application::render(float alpha) {
 
         for (const RenderPart& part : modelRenderer.parts) {
             renderer.drawMesh(
-                *gpuMeshes.at(part.mesh),
+                part.mesh,
                 entityMatrix * part.localTransform,
                 viewProjection,
                 part.material

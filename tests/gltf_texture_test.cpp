@@ -1,3 +1,4 @@
+#include "assets/asset_manager.h"
 #include "assets/gltf_loader.h"
 #include "math/transform.h"
 #include "scene/model_renderer.h"
@@ -60,7 +61,14 @@ void testGltfTextures() {
     assert(nearlyEqual(importedOrigin.y, 0.5f));
 
     // Verify that placing the model in the world also preserves that transform.
-    const ModelRenderer renderer = makeModelRenderer(model);
+    AssetManager assets;
+    const ModelRenderer renderer = assets.makeModelRenderer(model);
+
+    // The external texture is loaded once and referred to by handle, unflipped as glTF requires.
+    assert(renderer.parts[0].material.texture.isValid());
+    assert(assets.getTexture(renderer.parts[0].material.texture).pixels ==
+           assets.getTexture(assets.loadTexture(expectedTexture, false)).pixels);
+    assert(assets.getTextureCount() == 1);
 
     Transform placement;
     placement.position = Vec3{0.0f, 0.0f, -6.0f};

@@ -1,3 +1,4 @@
+#include "assets/asset_manager.h"
 #include "ecs/world.h"
 #include "math/transform.h"
 #include "scene/model_renderer.h"
@@ -5,7 +6,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
-#include <initializer_list>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -24,32 +26,49 @@ namespace {
         assert(nearlyEqual(origin.y, y));
         assert(nearlyEqual(origin.z, z));
     }
+
+    template <typename Function>
+    bool throws(Function function) {
+        try {
+            function();
+        } catch (const std::exception&) {
+            return true;
+        }
+        return false;
+    }
 }
 
 void testModelRenderer() {
-    auto mesh = std::make_shared<Mesh>();
+    auto mesh = std::make_shared<const Mesh>(Mesh::cube());
+
+    std::ifstream file{"assets/textures/demo.png", std::ios::binary};
+    assert(file);
+    const auto imageBytes = std::make_shared<const std::vector<std::uint8_t>>(
+        std::istreambuf_iterator<char>{file},
+        std::istreambuf_iterator<char>{}
+    );
 
     ModelPart first;
     first.mesh = mesh;
     first.transform = Mat4::translation(2.0f, 0.0f, 0.0f);
     first.material.colour = Pixel{10, 20, 30};
-    first.material.texturePath = "first.png";
+    first.material.texturePath = "assets/textures/demo.png";
     first.material.flipTextureVertically = false;
 
     ModelPart second;
     second.mesh = mesh;
     second.transform = Mat4::translation(-2.0f, 0.0f, 0.0f);
     second.material.colour = Pixel{40, 50, 60};
-    second.material.embeddedImage =
-        std::make_shared<const std::vector<std::uint8_t>>(
-            std::initializer_list<std::uint8_t>{1, 2, 3}
-        );
+    second.material.embeddedImage = imageBytes;
+    second.material.flipTextureVertically = false;
 
     Model model;
     model.parts = {first, second};
 
-    // Parts keep their mesh and material, and the normalization sits below each part's own transform.
-    const ModelRenderer renderer = makeModelRenderer(model, Mat4::scaling(0.5f, 0.5f, 0.5f));
+    AssetManager assets;
+
+    // Parts become handles, and the normalization sits below each part's own transform.
+    const ModelRenderer renderer = assets.makeModelRenderer(model, Mat4::scaling(0.5f, 0.5f, 0.5f));
 
     assert(renderer.parts.size() == 2);
     assert(renderer.visible);
@@ -57,15 +76,21 @@ void testModelRenderer() {
     const RenderPart& a = renderer.parts[0];
     const RenderPart& b = renderer.parts[1];
 
-    assert(a.mesh == mesh);
-    assert(b.mesh == mesh);
+    // Both parts share one mesh, so they share one handle.
+    assert(a.mesh.isValid());
+    assert(a.mesh == b.mesh);
+    assert(assets.getMeshCount() == 1);
+
     assert(a.material.colour.r == 10);
     assert(a.material.colour.g == 20);
     assert(a.material.colour.b == 30);
-    assert(a.material.texturePath == "first.png");
-    assert(!a.material.flipTextureVertically);
     assert(b.material.colour.r == 40);
-    assert(b.material.embeddedImage == second.material.embeddedImage);
+
+    // A file texture and an embedded copy of the same image are different sources, so two textures with the same pixels.
+    assert(a.material.texture.isValid());
+    assert(b.material.texture.isValid());
+    assert(!(a.material.texture == b.material.texture));
+    assert(assets.getTexture(a.material.texture).pixels == assets.getTexture(b.material.texture).pixels);
 
     // One entity Transform moves, rotates and scales every part together.
     Transform placement;
@@ -81,12 +106,12 @@ void testModelRenderer() {
     assertPartOrigin(placement, a, 3.0f, 2.0f, -6.0f);
     assertPartOrigin(placement, b, 3.0f, -2.0f, -6.0f);
 
-    // Two entities can show the same model with independent transforms.
+    // Two entities can show the same model with independent transforms and no extra assets.
     World world;
     const Entity left = world.create();
     const Entity right = world.create();
-    world.add(left, makeModelRenderer(model));
-    world.add(right, makeModelRenderer(model));
+    world.add(left, assets.makeModelRenderer(model));
+    world.add(right, assets.makeModelRenderer(model));
     world.add(left, Transform{});
     world.add(right, Transform{});
 
@@ -95,37 +120,43 @@ void testModelRenderer() {
     assertPartOrigin(world.get<Transform>(left), world.get<ModelRenderer>(left).parts[0], 2.0f, 0.0f, 0.0f);
     assertPartOrigin(world.get<Transform>(right), world.get<ModelRenderer>(right).parts[0], 12.0f, 0.0f, 0.0f);
     assert(world.get<ModelRenderer>(left).parts[0].mesh == world.get<ModelRenderer>(right).parts[0].mesh);
+    assert(assets.getMeshCount() == 1);
+    assert(assets.getTextureCount() == 2);
 
-    // A bad part is rejected before anything is built.
+    // A part without a mesh is rejected before anything is registered.
     Model invalid;
     invalid.parts.push_back(first);
     invalid.parts.push_back(ModelPart{});
 
-    bool rejected = false;
-    try {
-        makeModelRenderer(invalid);
-    } catch (const std::invalid_argument&) {
-        rejected = true;
-    }
-    assert(rejected);
+    AssetManager fresh;
+    assert(throws([&] { fresh.makeModelRenderer(invalid); }));
+    assert(fresh.getMeshCount() == 0);
+
+    // A material cannot name both a file and embedded bytes.
+    MaterialSource both;
+    both.texturePath = "assets/textures/demo.png";
+    both.embeddedImage = imageBytes;
+    assert(throws([&] { fresh.makeMaterial(both); }));
+
+    // A material without a texture keeps "no texture", which the renderer draws as plain colour.
+    MaterialSource plain;
+    plain.colour = Pixel{1, 2, 3};
+    const Material plainMaterial = fresh.makeMaterial(plain);
+    assert(!plainMaterial.texture.isValid());
+    assert(plainMaterial.colour.b == 3);
 
     // An empty model gives a renderer that draws nothing.
-    assert(makeModelRenderer(Model{}).parts.empty());
+    assert(fresh.makeModelRenderer(Model{}).parts.empty());
 
     // A single mesh becomes one part at the entity's origin.
     Material red;
     red.colour = Pixel{255, 0, 0};
-    const ModelRenderer single = makeMeshRenderer(mesh, red);
+    const MeshHandle cube = fresh.addMesh(Mesh::cube());
+    const ModelRenderer single = makeMeshRenderer(cube, red);
     assert(single.parts.size() == 1);
-    assert(single.parts[0].mesh == mesh);
+    assert(single.parts[0].mesh == cube);
     assert(single.parts[0].material.colour.r == 255);
     assertPartOrigin(Transform{}, single.parts[0], 0.0f, 0.0f, 0.0f);
 
-    rejected = false;
-    try {
-        makeMeshRenderer(nullptr);
-    } catch (const std::invalid_argument&) {
-        rejected = true;
-    }
-    assert(rejected);
+    assert(throws([&] { makeMeshRenderer(MeshHandle{}); }));
 }

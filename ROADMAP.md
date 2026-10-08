@@ -108,7 +108,7 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 - [x] Split `GpuDisplay` (`platform-split`) into `Window`, `GpuRenderer` and a richer `Input` (mouse buttons with exact click position and timestamp, cursor, window size); ground clicks, steering and edge panning moved into game code
 - [x] `Game` interface (`game-interface`): `onInit`, `onInput`, `onFixedUpdate`, `onUpdate`; `Application` is the engine loop and the demo is `DemoGame`
 - [x] Camera split (`camera-split`): `Camera` is a lens (position, orientation, FOV, aspect) with matrices built on request; free-fly, first-person and MOBA are separate concrete controllers, with look angles stored as yaw/pitch
-- [ ] Asset manager with handles (`MeshHandle`, `TextureHandle`) instead of shared pointers and path lookups every frame
+- [x] Asset manager with handles (`asset-manager`): `MeshHandle` and `TextureHandle`, each file loaded once, GPU copies indexed like the handles, no per-frame path lookups
 - [ ] One canonical vertex format shared by the loaders and GPU upload; indexed meshes instead of three unshared vertices per triangle
 
 **Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window. âœ” (`tests/demo_game_test.cpp`; the remaining items finish the phase)
