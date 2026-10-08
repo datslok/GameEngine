@@ -124,7 +124,8 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [ ] Shadow mapping for the main directional light
 - [ ] Debug drawing: lines, boxes, spheres and capsules
 - [ ] Frustum culling
-- [ ] `release` build target (`-O2`) and a configurable present mode (vsync off or mailbox)
+- [ ] `release` build target (`-O2`)
+- [x] Low-latency presentation (`platform-split`): one frame in flight, configurable present mode, mailbox by default
 
 **Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box.
 

@@ -61,6 +61,7 @@ private:
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
 
+    // With mailbox presentation the loop is no longer held back by vsync, so this cap sets the real frame rate.
     std::uint64_t targetFPS = 240;
 
     // Entity{} means there is no player.

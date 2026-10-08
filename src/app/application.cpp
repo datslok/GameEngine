@@ -30,6 +30,9 @@ Application::Application(int width, int height):
     // Movement speed, mouse sensitivity.
     cameraController(3.0f, 0.001f)
 {
+    // Low latency without tearing. Falls back to vsync on GPUs without mailbox support.
+    renderer.setPresentMode(PresentMode::Mailbox);
+
     createScene();
     uploadSceneMeshes();
 }
