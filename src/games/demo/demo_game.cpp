@@ -4,6 +4,7 @@
 #include "math/transform.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
+#include "scene/light.h"
 #include "scene/model_renderer.h"
 
 #include <memory>
@@ -85,6 +86,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.position = Vec3{0.0f, -3.0f, -10.0f};
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
+
+    // Lights. Together these reproduce the old hardcoded shader light: 0.2 ambient plus 0.8 diffuse from (-1, 2, 1).
+    world.add(world.create(), AmbientLight{Vec3{0.2f, 0.2f, 0.2f}});
+    world.add(world.create(), DirectionalLight{Vec3{1.0f, -2.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}, 0.8f});
 
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
