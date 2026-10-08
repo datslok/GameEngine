@@ -28,6 +28,7 @@ void testSdlInput();
 void testWorld();
 void testModelRenderer();
 void testEdgePan();
+void testDemoGame();
 
 int main(){
     testPixelBuffer();
@@ -58,6 +59,7 @@ int main(){
     testWorld();
     testModelRenderer();
     testEdgePan();
+    testDemoGame();
 
     std::cout << "All tests passed!\n";
     return 0;

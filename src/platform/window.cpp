@@ -166,6 +166,7 @@ void Window::recordCursor(Input& input) const {
     SDL_GetMouseState(&mouseX, &mouseY);
 
     input.setCursor(Vec2{mouseX, mouseY}, SDL_GetMouseFocus() == window);
+    input.setWindowState(hasKeyboardFocus(), mouseCaptured, cursorConfined);
 }
 
 void Window::setMouseCaptured(bool captured) {

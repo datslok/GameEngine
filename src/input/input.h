@@ -35,6 +35,9 @@ public:
     // The window's size in pixels, so game code can turn cursor positions into fractions of the window.
     void setWindowSize(const Vec2& size);
 
+    // How the window holds the keyboard and mouse this frame. Recorded as facts, so games never need the Window itself.
+    void setWindowState(bool keyboardFocus, bool mouseCaptured, bool cursorConfined);
+
     // Forget held keys and buttons, for example when the window loses focus and release events will not arrive.
     void releaseAll();
 
@@ -62,6 +65,14 @@ public:
     bool isCursorInWindow() const;
     Vec2 getWindowSize() const;
 
+    bool hasKeyboardFocus() const;
+
+    // The cursor is hidden and mouse motion drives the camera (first person, free camera).
+    bool isMouseCaptured() const;
+
+    // A visible cursor is kept inside the window (MOBA).
+    bool isCursorConfined() const;
+
 private:
     using KeyStates = std::array<bool, static_cast<std::size_t>(Key::Count)>;
     using ButtonStates = std::array<bool, static_cast<std::size_t>(MouseButton::Count)>;
@@ -82,4 +93,7 @@ private:
     Vec2 cursorPosition{};
     bool cursorInWindow = false;
     Vec2 windowSize{};
+    bool keyboardFocus = false;
+    bool mouseCaptured = false;
+    bool cursorConfined = false;
 };

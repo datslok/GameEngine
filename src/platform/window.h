@@ -37,7 +37,7 @@ private:
     void setMouseCaptured(bool captured);
     void setCursorConfined(bool confined);
 
-    // Write the cursor position and window size into Input once all events are handled.
+    // Write the cursor position, window size, focus and mouse state into Input once all events are handled.
     void recordCursor(Input& input) const;
 
     SDL_Window* window = nullptr;

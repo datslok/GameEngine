@@ -106,12 +106,12 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 
 - [x] Entity/component layer (`entity-component`): entities with generations, sparse-set component storage, `World::each` systems; `Transform`, `PreviousTransform`, `ModelRenderer`, `Spinner` and `CharacterMovement` components replace `Scene`, `MeshInstance` and `ModelInstance`
 - [x] Split `GpuDisplay` (`platform-split`) into `Window`, `GpuRenderer` and a richer `Input` (mouse buttons with exact click position and timestamp, cursor, window size); ground clicks, steering and edge panning moved into game code
-- [ ] `Game` interface (`onInit`, `onFixedUpdate`, `onUpdate`, `onRender`); `Application` becomes only the platform loop
+- [x] `Game` interface (`game-interface`): `onInit`, `onInput`, `onFixedUpdate`, `onUpdate`; `Application` is the engine loop and the demo is `DemoGame`
 - [ ] Camera split: `Camera` holds view and projection only; free-fly, FPS and top-down MOBA become separate controllers
 - [ ] Asset manager with handles (`MeshHandle`, `TextureHandle`) instead of shared pointers and path lookups every frame
 - [ ] One canonical vertex format shared by the loaders and GPU upload; indexed meshes instead of three unshared vertices per triangle
 
-**Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window.
+**Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window. âœ” (`tests/demo_game_test.cpp`; the remaining items finish the phase)
 
 ## Phase 4: Rendering upgrades
 
