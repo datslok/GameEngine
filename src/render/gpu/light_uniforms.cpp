@@ -15,10 +15,11 @@ namespace {
 * A zero direction cannot be normalised, and a point light without a positive range would make the shader divide by zero, so both are skipped.
 * The first lights collected win when there are more than the shader has room for.
 */
-LightUniformData packLighting(const FrameLighting& lighting) {
+LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition) {
     LightUniformData data{};
 
     writeVector(data.ambient, lighting.ambient, 0.0f);
+    writeVector(data.cameraPosition, cameraPosition, 0.0f);
 
     int directionalCount = 0;
 

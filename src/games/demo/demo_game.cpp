@@ -88,7 +88,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     spawnSpinner(pyramidMesh, green, third, Vec3{0.0f, 1.0f, 0.0f});
 
     Transform fourth;
-    fourth.position = Vec3{0.0f, -3.0f, -10.0f};
+    // The teapot's origin is at its base, so y = 0 stands it on the grass. Set back so its spout clears the cubes as it spins.
+    fourth.position = Vec3{0.0f, 0.0f, -13.0f};
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
@@ -99,6 +100,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
     grass.colour = Pixel{75, 110, 75};
+    grass.specularStrength = 0.0f; // Grass is matte.
 
     Transform groundPlacement;
     groundPlacement.position = Vec3{0.0f, 0.0f, -6.0f};
@@ -131,6 +133,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
     yellow.colour = Pixel{255, 220, 40};
+    yellow.specularStrength = 0.0f;
 
     ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
