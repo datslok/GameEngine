@@ -2,6 +2,7 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
+#include "scene/culling.h"
 
 #include <stdexcept>
 #include <string>
@@ -631,6 +632,8 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         return false;
     }
 
+    stats = RenderStats{};
+
     try {
         // Only now is the frame's size known, so the camera's lens is fitted to it here.
         Camera camera = frame.camera;
@@ -660,9 +663,16 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
         SDL_PushGPUFragmentUniformData(commands, 2, &shadows.uniforms, static_cast<Uint32>(sizeof(shadows.uniforms)));
 
-        for (const DrawItem& draw : frame.draws) {
+        // Only what the camera can see. Shadows chose their casters with each light's own view, above.
+        const std::vector<std::size_t> visible = visibleDraws(frame.draws, Frustum::fromClipMatrix(viewProjection, ClipDepth::ZeroToOne));
+
+        for (std::size_t index : visible) {
+            const DrawItem& draw = frame.draws[index];
             drawMesh(draw.mesh, draw.model, draw.material);
         }
+
+        stats.drawn = visible.size();
+        stats.culled = frame.draws.size() - visible.size();
 
         // Last, so they are drawn over the finished scene.
         if (!debugVertices.empty()) {
@@ -767,11 +777,13 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<M
 
         const Mat4& tileMatrix = tileMatrices[tile];
 
-        for (const DrawItem& draw : frame.draws) {
-            if (!draw.castsShadows) {
-                continue;
-            }
+        // The light's own view decides, not the camera's: things off screen can still throw shadows into view.
+        const std::vector<std::size_t> casters = shadowCasters(frame.draws, Frustum::fromClipMatrix(tileMatrix, ClipDepth::ZeroToOne));
+        stats.shadowDrawn += casters.size();
+        stats.shadowCulled += frame.draws.size() - casters.size();
 
+        for (std::size_t index : casters) {
+            const DrawItem& draw = frame.draws[index];
             const GpuMesh& mesh = bindMesh(draw.mesh);
 
             float transform[16]{};
@@ -970,6 +982,10 @@ PresentMode GpuRenderer::setPresentMode(PresentMode requested) {
 
     presentMode = chosen;
     return presentMode;
+}
+
+const RenderStats& GpuRenderer::getLastFrameStats() const {
+    return stats;
 }
 
 PresentMode GpuRenderer::getPresentMode() const {

@@ -1,5 +1,6 @@
 #include "engine/application.h"
 #include "engine/debug_views.h"
+#include "scene/culling.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
 
@@ -109,6 +110,9 @@ void Application::render(float alpha) {
 
     Camera& camera = game.getCamera();
     FrameDescription frame = buildFrame(world, camera, alpha);
+
+    // Spheres around each draw let the renderer skip what a view cannot see.
+    attachBoundingSpheres(frame.draws, boundsByMesh);
 
     // Debug shapes are gathered fresh every frame, so anything not added again disappears.
     debugDraw.clear();
