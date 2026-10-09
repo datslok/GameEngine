@@ -6,6 +6,10 @@ layout(location = 2) in vec3 worldPosition;
 
 layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 
+// The point light shadow atlas: six depth images (cube faces) in a 3x2 grid. A shadow sampler compares a depth we give it
+// with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
+layout(set = 2, binding = 1) uniform sampler2DShadow pointShadowAtlas;
+
 // Must match MaterialUniformData in render/gpu/material_uniforms.h.
 layout(std140, set = 3, binding = 0) uniform MaterialData {
     vec4 baseColour;
@@ -21,7 +25,7 @@ struct DirectionalLightData {
 
 struct PointLightData {
     vec4 positionRange; // xyz: world position, w: range
-    vec4 radiance;
+    vec4 radiance;      // rgb: colour times intensity, w: radius of the glowing source
 };
 
 struct SpotLightData {
@@ -34,10 +38,16 @@ struct SpotLightData {
 layout(std140, set = 3, binding = 1) uniform LightData {
     vec4 ambient;
     vec4 cameraPosition; // xyz: where the viewer is
-    ivec4 counts;        // x: directional lights used, y: point lights used, z: spotlights used
+    ivec4 counts;        // x: directional lights used, y: point lights used, z: spotlights used, w: shadowed point light or -1
     DirectionalLightData directional[4];
     PointLightData points[16];
     SpotLightData spots[4];
+};
+
+// Must match ShadowUniformData in render/gpu/point_shadow.h.
+layout(std140, set = 3, binding = 2) uniform ShadowData {
+    mat4 faceMatrices[6]; // each cube face's view-projection, the same ones the shadow pass drew with
+    vec4 shadowSettings;  // x: normal offset per unit of distance, y: atlas texel width, z: atlas texel height
 };
 
 layout(location = 0) out vec4 outputColour;
@@ -77,6 +87,55 @@ float distanceFalloff(float distance, float range, float sourceRadius) {
     return window * window / (distance * distance + sourceRadius * sourceRadius);
 }
 
+/*
+* The face whose camera sees this direction from the light: the axis of the largest component, in the order
+* +X, -X, +Y, -Y, +Z, -Z. Must match pointShadowFace in render/gpu/point_shadow.cpp.
+*/
+int pointShadowFace(vec3 fromLight) {
+    vec3 size = abs(fromLight);
+
+    if (size.x >= size.y && size.x >= size.z) {
+        return fromLight.x > 0.0 ? 0 : 1;
+    }
+
+    if (size.y >= size.z) {
+        return fromLight.y > 0.0 ? 2 : 3;
+    }
+
+    return fromLight.z > 0.0 ? 4 : 5;
+}
+
+/*
+* How much of the shadowed point light reaches this point: 1 lit, 0 blocked, in between at a shadow's soft edge.
+* The point is first nudged off its surface along the normal, by about a shadow texel, so a surface does not shadow itself
+* (shadow acne). Then it is projected exactly as the shadow pass drew the scene, and its depth is compared with what the
+* light saw there. Nine nearby comparisons are averaged (percentage-closer filtering) so edges are not jagged.
+*/
+float pointShadow(vec3 lightPosition, vec3 normal) {
+    float distanceToLight = length(worldPosition - lightPosition);
+    vec3 position = worldPosition + normal * shadowSettings.x * distanceToLight;
+
+    int face = pointShadowFace(position - lightPosition);
+    vec4 clip = faceMatrices[face] * vec4(position, 1.0);
+    vec3 projected = clip.xyz / clip.w;
+
+    // From -1..1 across the face to 0..1 within it (texture rows run top to bottom), then to the face's tile in the atlas.
+    vec2 withinFace = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
+    vec2 tile = vec2(face % 3, face / 3);
+    vec2 atlasUv = (tile + withinFace) / vec2(3.0, 2.0);
+
+    float lit = 0.0;
+
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            vec2 offset = vec2(x, y) * shadowSettings.yz;
+            lit += texture(pointShadowAtlas, vec3(atlasUv + offset, projected.z));
+        }
+    }
+
+    return lit / 9.0;
+}
+
 void main() {
     // Read the texture at this fragment's interpolated UV coordinate.
     vec4 albedo = texture(colourTexture, textureUv) * baseColour;
@@ -107,7 +166,13 @@ void main() {
                 continue;
             }
 
-            addLight(points[i].radiance.rgb * distanceFalloff(distance, range, 1.0), offset / distance, normal, toCamera, diffuse, specular);
+            vec3 radiance = points[i].radiance.rgb * distanceFalloff(distance, range, points[i].radiance.w);
+
+            if (i == counts.w) {
+                radiance *= pointShadow(points[i].positionRange.xyz, normal);
+            }
+
+            addLight(radiance, offset / distance, normal, toCamera, diffuse, specular);
         }
 
         for (int i = 0; i < counts.z; ++i) {

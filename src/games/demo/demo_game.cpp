@@ -19,11 +19,11 @@ namespace {
     constexpr float flashlightHeight = 1.2f;
     constexpr float flashlightTilt = 0.35f;
 
-    // The way the moonlight travels. The moon sphere is placed the opposite way, so the light comes from where you see the moon.
-    const Vec3 moonlightDirection{0.4f, -1.0f, -0.6f};
+    // Which way the moon is from where the free camera starts: up, to the left and behind.
+    const Vec3 towardsMoon{-0.4f, 1.0f, 0.6f};
 
-    // The moon is a place you can fly to: this far from where the free camera starts, towards the moonlight (inside the camera's
-    // far plane of 100). At the free camera's 3 units per second, reaching its surface takes about 20 seconds.
+    // The moon is a place you can fly to: this far from where the free camera starts (inside the camera's far plane of 100).
+    // At the free camera's 3 units per second, reaching its surface takes about 20 seconds.
     const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
     constexpr float moonDistance = 64.0f;
     constexpr float moonRadius = 4.0f;
@@ -106,12 +106,11 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
     // Night: a faint ambient light and a weak, cool moon, so the flashlight stands out.
-    // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
+    // Unlike ambient light, the moon shines from a place, so shapes keep a lit side and a dark side outside the beam, and cast shadows.
     // Light values are linear: the screen's sRGB encoding brightens dark values a lot, so night light is tiny in these units.
     world.add(world.create(), AmbientLight{Vec3{0.012f, 0.012f, 0.012f}});
-    world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.32f, 0.45f, 1.0f}, 0.06f});
 
-    // The moon itself: a glowing sphere in the direction the moonlight comes from, at a fixed place so you can fly to it.
+    // The moon itself: a glowing sphere at a fixed place, so you can fly to it, with the moonlight shining from inside it.
     Material moonGlow;
     moonGlow.colour = Pixel{0, 0, 0};
     moonGlow.specularStrength = 0.0f;
@@ -119,11 +118,24 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     Transform moonPlacement;
     moonPlacement.scale = Vec3{moonRadius, moonRadius, moonRadius};
-    moonPlacement.position = freeCameraStart - moonlightDirection.normalized() * moonDistance;
+    moonPlacement.position = freeCameraStart + towardsMoon.normalized() * moonDistance;
 
     moon = world.create();
     world.add(moon, moonPlacement);
-    world.add(moon, makeMeshRenderer(assets.addMesh(Mesh::sphere()), moonGlow));
+    // The sphere surrounds its own light, so it must not block it.
+    ModelRenderer moonRenderer = makeMeshRenderer(assets.addMesh(Mesh::sphere()), moonGlow);
+    moonRenderer.castsShadows = false;
+    world.add(moon, std::move(moonRenderer));
+
+    // About 67 units from the middle of the ground, so a large intensity is needed: light spreads over a sphere,
+    // dimming with distance squared. 290 gives about 0.06 there, a faint moonlight. The source is the size of the sphere.
+    PointLight moonlight;
+    moonlight.colour = Vec3{0.32f, 0.45f, 1.0f};
+    moonlight.intensity = 290.0f;
+    moonlight.range = 150.0f;
+    moonlight.sourceRadius = moonRadius;
+    moonlight.castsShadows = true;
+    world.add(moon, moonlight);
 
     // The flashlight. updateFlashlight places it every frame, at the camera or (in MOBA mode) in the duck's hands.
     flashlight = world.create();

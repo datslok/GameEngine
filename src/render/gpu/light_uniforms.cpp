@@ -42,6 +42,7 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
     }
 
     int pointCount = 0;
+    int shadowedPoint = -1;
 
     for (const PlacedPointLight& placed : lighting.pointLights) {
         if (pointCount == maxPointLights) {
@@ -54,7 +55,15 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
 
         PointLightUniform& slot = data.points[pointCount];
         writeVector(slot.positionRange, placed.position, placed.light.range);
-        writeVector(slot.radiance, placed.light.colour * placed.light.intensity, 0.0f);
+        // The falloff divides by distance^2 + radius^2, so a radius that is not positive falls back to 1.
+        const float sourceRadius = placed.light.sourceRadius > 0.0f ? placed.light.sourceRadius : 1.0f;
+        writeVector(slot.radiance, placed.light.colour * placed.light.intensity, sourceRadius);
+
+        // There is one shadow map, so the first shadow-casting light gets it.
+        if (placed.light.castsShadows && shadowedPoint < 0) {
+            shadowedPoint = pointCount;
+        }
+
         ++pointCount;
     }
 
@@ -89,6 +98,7 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
     data.counts[0] = directionalCount;
     data.counts[1] = pointCount;
     data.counts[2] = spotCount;
+    data.counts[3] = shadowedPoint;
 
     return data;
 }

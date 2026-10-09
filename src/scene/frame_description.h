@@ -14,6 +14,7 @@ struct DrawItem {
     MeshHandle mesh;
     Mat4 model = Mat4::identity();
     Material material;
+    bool castsShadows = true;
 };
 
 /*
