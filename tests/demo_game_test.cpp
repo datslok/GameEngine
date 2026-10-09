@@ -187,13 +187,20 @@ void testDemoGame() {
     assert(nearlyEqual(heldAt.x, cameraPosition.x) && nearlyEqual(heldAt.y, cameraPosition.y) && nearlyEqual(heldAt.z, cameraPosition.z));
     assert(otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized().dot(freeCamera.getCamera().getForward()) > 0.999f);
 
-    // The glowing moon sits exactly where the moonlight comes from, at a fixed distance from the camera,
-    // so like the real moon it never gets closer or changes direction as you move.
+    // The glowing moon is a fixed place you can fly to: in the direction the moonlight comes from,
+    // 64 units from where the free camera starts (about 20 seconds of flying at 3 units per second, minus its radius of 4).
     const Entity moonBall = freeCamera.getMoon();
     const Vec3 moonlight = collectLighting(otherWorld, 1.0f).directionalLights[0].direction.normalized();
-    const Vec3 expectedMoon = cameraPosition - moonlight * 80.0f;
+    const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
+    const Vec3 expectedMoon = freeCameraStart - moonlight * 64.0f;
     const Vec3 moonPosition = otherWorld.get<Transform>(moonBall).position;
     assert(nearlyEqual(moonPosition.x, expectedMoon.x) && nearlyEqual(moonPosition.y, expectedMoon.y) && nearlyEqual(moonPosition.z, expectedMoon.z));
+
+    // It stays put when the camera moves, so flying towards it gets you there.
+    freeCamera.getCamera().setPosition(Vec3{30.0f, 20.0f, -30.0f});
+    freeCamera.onUpdate(otherWorld, idle, 1.0f / 60.0f, 1.0f);
+    const Vec3 afterMoving = otherWorld.get<Transform>(moonBall).position;
+    assert(nearlyEqual(afterMoving.x, expectedMoon.x) && nearlyEqual(afterMoving.y, expectedMoon.y) && nearlyEqual(afterMoving.z, expectedMoon.z));
 
     const Material& moonMaterial = otherWorld.get<ModelRenderer>(moonBall).parts[0].material;
     assert(moonMaterial.emissive.z > 0.5f);
