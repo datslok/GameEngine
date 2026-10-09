@@ -99,8 +99,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    // Night: no sun, only a faint ambient light, so the flashlight and the duck's torch do the work.
+    // Night: a faint ambient light and a weak, cool moon, so the flashlight and the duck's torch still do most of the work.
+    // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
     world.add(world.create(), AmbientLight{Vec3{0.06f, 0.06f, 0.06f}});
+    world.add(world.create(), DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}, Vec3{0.6f, 0.7f, 1.0f}, 0.15f});
 
     // The flashlight. updateFlashlight places it every frame, at the camera or (in MOBA mode) in the duck's hands.
     flashlight = world.create();
