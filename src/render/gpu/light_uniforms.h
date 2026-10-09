@@ -16,7 +16,7 @@ struct DirectionalLightUniform {
 
 struct PointLightUniform {
     float positionRange[4]; // xyz: world position, w: range
-    float radiance[4];
+    float radiance[4];      // rgb: colour times intensity, w: radius of the glowing source, for the falloff
 };
 
 struct SpotLightUniform {
@@ -33,7 +33,7 @@ struct SpotLightUniform {
 struct LightUniformData {
     float ambient[4];
     float cameraPosition[4]; // xyz: where the viewer is, for specular highlights
-    std::int32_t counts[4]; // x: directional lights used, y: point lights used, z: spotlights used
+    std::int32_t counts[4]; // x: directional lights used, y: point lights used, z: spotlights used, w: shadowed point light's slot or -1
     DirectionalLightUniform directional[maxDirectionalLights];
     PointLightUniform points[maxPointLights];
     SpotLightUniform spots[maxSpotLights];

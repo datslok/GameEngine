@@ -19,6 +19,13 @@ struct PointLight {
     Vec3 colour{1.0f, 1.0f, 1.0f};
     float intensity = 1.0f;
     float range = 10.0f; // The light reaches exactly zero at this distance.
+
+    // The size of the glowing source, softening the light up close like SpotLight::sourceRadius. 1 is a small bulb.
+    float sourceRadius = 1.0f;
+
+    // Whether objects block this light. Costs six extra drawings of the scene per frame (one per cube face);
+    // only the first shadow-casting point light gets a shadow map.
+    bool castsShadows = false;
 };
 
 /*
