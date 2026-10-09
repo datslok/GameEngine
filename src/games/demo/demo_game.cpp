@@ -306,7 +306,7 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
 
         // From the MOBA camera's height the duck is small, so it glows to stay easy to find at night. Emitted light does not
         // light its surroundings. In the other modes it is lit like everything else.
-        const Vec3 glow = mode == ControlMode::Moba ? Vec3{0.17f, 0.10f, 0.013f} : Vec3{0.0f, 0.0f, 0.0f};
+        const Vec3 glow = mode == ControlMode::Moba ? Vec3{0.10f, 0.06f, 0.008f} : Vec3{0.0f, 0.0f, 0.0f};
 
         for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
             part.material.emissive = glow;
