@@ -25,6 +25,15 @@
 * Mailbox: no tearing, and a newer frame replaces one still waiting, so the screen shows the freshest frame. Low latency.
 * Immediate: frames are shown as soon as they are ready. Lowest latency, but the image can tear.
 */
+// What the last frame drew and what it skipped, counting each mesh once per view (each shadow tile is a view).
+// Shadow views also skip meshes that do not cast shadows.
+struct RenderStats {
+    std::size_t drawn = 0;
+    std::size_t culled = 0;
+    std::size_t shadowDrawn = 0;
+    std::size_t shadowCulled = 0;
+};
+
 enum class PresentMode {
     Vsync,
     Mailbox,
@@ -61,6 +70,8 @@ public:
     // Ask for a present mode. Falls back to Vsync when the GPU does not support it, and returns the mode now in use.
     PresentMode setPresentMode(PresentMode requested);
     PresentMode getPresentMode() const;
+
+    const RenderStats& getLastFrameStats() const;
 
     // The aspect ratio of the last frame render() drew. Read after it returns true.
     float getFrameAspectRatio() const;
@@ -102,6 +113,8 @@ private:
 
     // This frame's camera view and projection.
     Mat4 viewProjection = Mat4::identity();
+
+    RenderStats stats;
 
     // Shadows: the depth atlas (one tile per shadow view), a sampler that compares depths, and the depth-only pipeline that fills it.
     SDL_GPUTexture* shadowAtlas = nullptr;
