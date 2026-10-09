@@ -198,4 +198,5 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] GPU instancing for many identical units
 - [ ] Multithreading: a job system for simulation and asset loading
 - [ ] Level editor or scene file format
+- [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering). Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up. Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
 - [ ] Scripting for gameplay code
