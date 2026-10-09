@@ -11,10 +11,12 @@
 * Light priority: the shader has seats for a few lights of each kind and the shadow atlas for fewer still, so when a
 * scene has more, the ones that matter most for this frame's picture get them.
 * - A light whose range sphere is entirely outside the view cannot light a visible pixel, so it gets nothing.
-* - The rest are ranked by how brightly they light the focus point (where the action is), and the top ones are seated.
+* - The rest are ranked by priority (a game's own marking, higher always wins), then by how brightly they light the
+*   focus point (where the action is), and the top ones are seated.
 * - Of the seated point lights and spotlights that cast shadows, the top ones of each kind get shadows.
 * - Hysteresis: a light that had a seat (or a shadow) last frame counts incumbentAdvantage times as important, so a
 *   rival must be clearly brighter to take it, and two similar lights do not swap every frame as the focus moves.
+*   It only applies between lights of equal priority.
 */
 
 // How much more important a light counts for keeping what it had last frame. In distance terms a rival must be about

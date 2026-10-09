@@ -281,7 +281,109 @@ namespace {
     }
 }
 
+namespace {
+    // A light a game marks with a higher priority gets a seat before any lower one, however far from the focus it is.
+    void testHigherPriorityWinsASeat() {
+        FrameLighting lighting;
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxPointLights); ++i) {
+            lighting.pointLights.push_back(pointLight(focus, i + 1));
+        }
+
+        PlacedPointLight marked = pointLight(Vec3{0.0f, 0.0f, -60.0f}, 100, 0.1f);
+        marked.light.priority = 1;
+        lighting.pointLights.push_back(marked);
+
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+
+        assert(static_cast<int>(result.lighting.pointLights.size()) == maxPointLights);
+        assert(containsLight(result.lighting.pointLights, 100));
+    }
+
+    // The same for shadows: the marked light gets one, and the others share what is left.
+    void testHigherPriorityWinsAShadow() {
+        FrameLighting lighting;
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxShadowedPointLights); ++i) {
+            lighting.pointLights.push_back(pointLight(focus, i + 1));
+        }
+
+        PlacedPointLight marked = pointLight(Vec3{0.0f, 0.0f, -30.0f}, 100, 0.1f);
+        marked.light.priority = 2;
+        lighting.pointLights.push_back(marked);
+
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+
+        assert(isShadowed(result.lighting.pointLights, 100));
+        assert(countShadowed(result.lighting.pointLights) == maxShadowedPointLights);
+    }
+
+    // Last frame's advantage only decides between lights of equal priority: a marked newcomer takes its shadow at once.
+    void testPriorityBeatsLastFramesChoice() {
+        FrameLighting lighting;
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxShadowedPointLights); ++i) {
+            lighting.pointLights.push_back(pointLight(focus, i + 1));
+        }
+
+        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+
+        PlacedPointLight marked = pointLight(focus, 100, 0.5f);
+        marked.light.priority = 1;
+        lighting.pointLights.push_back(marked);
+
+        const PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history);
+        assert(isShadowed(after.lighting.pointLights, 100));
+    }
+
+    // Priority does not bring back a light that cannot reach anything on screen.
+    void testPriorityDoesNotOverrideTheView() {
+        FrameLighting lighting;
+        PlacedPointLight behind = pointLight(Vec3{0.0f, 0.0f, 10.0f}, 1);
+        behind.light.priority = 5;
+        lighting.pointLights.push_back(behind);
+
+        PlacedSpotLight spotBehind = spotLight(Vec3{0.0f, 0.0f, 10.0f}, 2);
+        spotBehind.light.priority = 5;
+        lighting.spotLights.push_back(spotBehind);
+
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        assert(result.lighting.pointLights.empty());
+        assert(result.lighting.spotLights.empty());
+    }
+
+    // Spotlights follow the same rule.
+    void testSpotLightPriority() {
+        FrameLighting lighting;
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxSpotLights); ++i) {
+            lighting.spotLights.push_back(spotLight(focus, i + 1));
+        }
+
+        PlacedSpotLight marked = spotLight(Vec3{0.0f, 0.0f, -40.0f}, 100);
+        marked.light.priority = 1;
+        lighting.spotLights.push_back(marked);
+
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+
+        assert(static_cast<int>(result.lighting.spotLights.size()) == maxSpotLights);
+        assert(result.lighting.spotLights[0].entity.index == 100); // most important first
+    }
+
+    // Lights default to the same priority, so ranking stays by brightness unless a game asks.
+    void testPriorityDefaultsToZero() {
+        assert(PointLight{}.priority == 0);
+        assert(SpotLight{}.priority == 0);
+    }
+}
+
 void testLightPriority() {
+    testHigherPriorityWinsASeat();
+    testHigherPriorityWinsAShadow();
+    testPriorityBeatsLastFramesChoice();
+    testPriorityDoesNotOverrideTheView();
+    testSpotLightPriority();
+    testPriorityDefaultsToZero();
     testImportanceFollowsBrightnessAtTheFocus();
     testNearestPointLightsGetTheSeats();
     testLightsOutOfViewAreSkipped();

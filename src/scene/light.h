@@ -26,9 +26,13 @@ struct PointLight {
     // The size of the glowing source, softening the light up close like SpotLight::sourceRadius. 1 is a small bulb.
     float sourceRadius = 1.0f;
 
-    // Whether objects block this light. Costs six extra drawings of the scene per frame (one per cube face);
-    // the first four shadow-casting point lights get shadow maps.
+    // Whether objects block this light. Costs six extra drawings of the scene per frame (one per cube face); when more
+    // lights want shadows than there is room for, the most important ones get them.
     bool castsShadows = true;
+
+    // When there are more lights than seats or shadows, a higher priority always wins over a lower one; brightness at
+    // the focus only decides between equals. For lights a game must never lose while they are in view.
+    int priority = 0;
 };
 
 /*
@@ -50,6 +54,9 @@ struct SpotLight {
 
     // Whether objects block this light. Costs one extra drawing of the scene per frame.
     bool castsShadows = true;
+
+    // A higher priority always wins a seat or a shadow over a lower one, like PointLight::priority.
+    int priority = 0;
 };
 
 // Component: light that reaches every surface equally, standing in for light bounced around the scene. Several add up.
