@@ -132,6 +132,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
   - [x] First give the renderer the whole frame (`frame-description`): the engine builds a frame description (every `{mesh, matrix, material}` to draw, plus lights and camera) and calls one `render(frame)`, instead of calling `drawMesh` per object. Shadows need it (the scene is drawn twice), frustum culling needs it, and it is the basis for a later ray-tracing backend
 - [ ] Debug drawing: lines, boxes, spheres and capsules
 - [ ] Frustum culling
+- [ ] Light priority: today the lights that get shadows (and the 16 point lights that get lit at all) are simply the first ones in component storage, which shuffles when components are removed. Rank them each frame by importance instead (brightness at the camera's focus, `intensity / (d^2 + r^2)` with the range window), skip lights whose range sphere is outside the view (reusing frustum culling's sphere test, so do this after it), and add hysteresis so a shadow does not flip between two similar lights every frame; optionally a manual priority for lights a game always wants shadowed
 - [x] Low-latency presentation (`platform-split`): one frame in flight, configurable present mode, mailbox by default
 
 **Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box.
