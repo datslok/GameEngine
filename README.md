@@ -2,12 +2,15 @@
 
 A game engine written from scratch in C++20, as a learning project. The long-term goal is an engine that can run both an **FPS** and a **MOBA**: the core stays genre-agnostic, and genre-specific code (camera styles, weapons, abilities, netcode) sits on top.
 
-It started as a software rasterizer drawing pixels on the CPU and now renders on the GPU through SDL3's GPU API (Vulkan backend). See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next.
+It started as a software rasterizer drawing pixels on the CPU and now renders on the GPU through SDL3's GPU API (Vulkan backend). See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
 
 ## Features
 
-- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, textures, a directional light
-- Model loading: OBJ, and glTF/GLB with embedded or external textures
+- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, textures, indexed meshes
+- Lighting: directional, point and ambient lights as components, diffuse plus Blinn-Phong specular highlights, per-material shininess
+- Model loading: OBJ, and glTF/GLB with embedded or external textures; optional smooth normals with a crease angle for models that have none
+- Entities and components: generational entity handles, sparse-set component storage, systems as plain functions
+- An asset manager that loads each file once and hands out typed handles
 - Fixed 120 Hz simulation with interpolated rendering, so movement is smooth at any frame rate
 - Event-based input with engine-owned key codes, no SDL types in game code
 - Three camera modes: first person, MOBA-style top-down with click-to-move, and a free debug camera
@@ -120,17 +123,19 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 src/            Engine and game source, in layers (lower ones never include higher ones):
   app/          main: picks a game and starts the engine
   games/        Games built on the engine (games/demo is the current demo)
-  engine/       The main loop and the Game interface
-  gameplay/     Character, movement and camera controllers
-  platform/     SDL input translation
-  render/gpu/   GPU renderer (SDL_GPU)
+  engine/       The main loop, the Game interface and fixed-tick updates
+  gameplay/     Character movement, spinners and camera controllers
+  platform/     The window and SDL input translation
+  render/gpu/   GPU renderer (SDL_GPU), and the packing of lights and materials for the shaders
   render/software/  Software rasterizer, kept as a tested reference
-  scene/        Scene, meshes, models, materials, camera
-  assets/       OBJ, glTF and image loaders
+  scene/        Meshes, models, materials, lights, the camera, render components and interpolation
+  assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
+  ecs/          Entities, component storage and the World
   core/         Fixed timestep and small shared types
   math/         Vectors, matrices, transforms, rays
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
+docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
 assets/
   models/       OBJ and glTF test models
   shaders/      GLSL shaders (compiled to .spv by make)
