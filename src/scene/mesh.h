@@ -33,6 +33,9 @@ struct Mesh {
 
     static Mesh cube();
     static Mesh plane(float halfSize = 20.0f);
+
+    // A unit sphere with smooth normals: segments around the equator, rings from pole to pole.
+    static Mesh sphere(int segments = 32, int rings = 16);
 };
 
 // The unit normal of the triangle first, second, third (counterclockwise seen from the front), or zero for a triangle with no area.

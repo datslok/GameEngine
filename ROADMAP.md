@@ -120,6 +120,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [x] Light data in a uniform buffer instead of hardcoded in the shader; several directional and point lights (`lights-uniform-buffer`)
 - [x] Specular highlights (Blinn-Phong) (`specular-highlights`)
 - [x] Spotlights (`spotlights`): cone with inner and outer angles, up to 4; the demo gets a night scene and an F-toggled flashlight (at the camera, or carried by the duck in MOBA mode)
+- [x] Emissive materials (`moonlight`): surfaces that glow with their own light; the demo gets a faint moonlight and a glowing moon sphere kept at a fixed distance from the camera, and its MOBA marker glows instead of using the temporary unlit flag
 - [x] Optional smooth normals for models that have none (`smooth-normals`): opt-in per load, angle-weighted, grouped by position, with a crease angle
 - [x] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer (`cpu-normal-matrix`)
 - [x] Linear filtering and mipmaps (`texture-filtering`): trilinear plus 16x anisotropic, mip chains generated on the GPU at upload
@@ -151,7 +152,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 
 - [ ] Skeletal animation from glTF skins: joints, skinning in the vertex shader, playing and blending clips
 - [ ] Text rendering with a bitmap font
-- [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after the 3D scene (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker into a HUD ring of constant pixel size, then delete the temporary `Material::unlit` flag and its shader branch
+- [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after the 3D scene (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker (an emissive plane for now) into a HUD ring of constant pixel size
 - [ ] Debug UI and in-game stats (frame time, tick time, entity count)
 - [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them
 - [ ] Audio with SDL3: play sounds, volume, simple 3D panning by distance and direction
@@ -197,6 +198,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] Physically based materials (glTF metallic-roughness)
 - [ ] Hardware ray tracing (RTX-class GPUs): a new Vulkan backend built on the frame description from phase 4, with an acceleration structure per mesh built once at upload. SDL_GPU has no ray-tracing support, so SDL keeps the window while the backend talks to Vulkan directly. Start with ray-traced shadows or reflections over the rasterised image, and keep the rasterised path for GPUs without ray tracing. Physically based materials first
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
+- [ ] Post-processing: render the scene to an off-screen texture first, then bloom (bright and emissive pixels blurred and added back, giving the moon and lamps a soft halo) and tone mapping (brightness above 1 rolled off smoothly instead of clipping to white)
 - [ ] GPU instancing for many identical units
 - [ ] Multithreading: a job system for simulation and asset loading
 - [ ] Level editor or scene file format

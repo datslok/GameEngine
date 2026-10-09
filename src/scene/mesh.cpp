@@ -1,6 +1,7 @@
 #include "scene/mesh.h"
 
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
 
 /*
@@ -123,6 +124,69 @@ Mesh Mesh::plane(float halfSize) {
         Edge{2, 3},
         Edge{3, 0}
     };
+
+    return mesh;
+}
+
+/*
+* A unit sphere as a latitude/longitude grid: a vertex at each pole and segments vertices on each of the rings - 1 circles between.
+* Rows near the poles would otherwise squash quads into slivers, so the band touching each pole is a fan of single triangles.
+* Each corner's normal is simply its position, because on a unit sphere the outward direction is the point itself.
+*/
+Mesh Mesh::sphere(int segments, int rings) {
+    if (segments < 3 || rings < 2) {
+        throw std::invalid_argument("A sphere needs at least 3 segments and 2 rings");
+    }
+
+    const float pi = std::numbers::pi_v<float>;
+    Mesh mesh;
+
+    mesh.vertices.push_back(Vec4{0.0f, 1.0f, 0.0f, 1.0f});
+
+    for (int ring = 1; ring < rings; ++ring) {
+        const float polarAngle = pi * static_cast<float>(ring) / static_cast<float>(rings);
+        const float circleRadius = std::sin(polarAngle);
+        const float height = std::cos(polarAngle);
+
+        for (int segment = 0; segment < segments; ++segment) {
+            const float around = 2.0f * pi * static_cast<float>(segment) / static_cast<float>(segments);
+            mesh.vertices.push_back(Vec4{circleRadius * std::sin(around), height, circleRadius * std::cos(around), 1.0f});
+        }
+    }
+
+    mesh.vertices.push_back(Vec4{0.0f, -1.0f, 0.0f, 1.0f});
+
+    const std::size_t northPole = 0;
+    const std::size_t southPole = mesh.vertices.size() - 1;
+
+    // Vertex index on a circle (1-based ring), wrapping around so the last segment joins the first.
+    const auto onRing = [segments](int ring, int segment) {
+        return static_cast<std::size_t>(1 + (ring - 1) * segments + segment % segments);
+    };
+
+    // Counterclockwise seen from outside, so face normals point away from the centre.
+    const auto addTriangle = [&mesh](std::size_t a, std::size_t b, std::size_t c) {
+        Triangle triangle{a, b, c};
+        const std::size_t corners[3] = {a, b, c};
+
+        for (std::size_t corner = 0; corner < 3; ++corner) {
+            const Vec4& position = mesh.vertices[corners[corner]];
+            triangle.normals[corner] = Vec3{position.x, position.y, position.z};
+        }
+
+        mesh.triangles.push_back(triangle);
+    };
+
+    for (int segment = 0; segment < segments; ++segment) {
+        addTriangle(northPole, onRing(1, segment), onRing(1, segment + 1));
+
+        for (int ring = 1; ring < rings - 1; ++ring) {
+            addTriangle(onRing(ring, segment), onRing(ring + 1, segment), onRing(ring + 1, segment + 1));
+            addTriangle(onRing(ring, segment), onRing(ring + 1, segment + 1), onRing(ring, segment + 1));
+        }
+
+        addTriangle(onRing(rings - 1, segment), southPole, onRing(rings - 1, segment + 1));
+    }
 
     return mesh;
 }

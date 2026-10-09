@@ -88,16 +88,13 @@ void testDemoGame() {
     // On arrival the simulation hides the marker.
     assert(!world.get<ModelRenderer>(marker).visible);
 
-    // The torch follows the player, one unit above it, and interpolates like it.
-    const Entity torch = game.getPlayerTorch();
-    assert(world.isAlive(torch));
-    assert(world.has<PointLight>(torch));
-    assert(world.has<PreviousTransform>(torch));
+    // The duck glows by itself instead of carrying a light: no point lights, and every part of it is emissive.
+    assert(collectLighting(world, 1.0f).pointLights.empty());
 
-    const Vec3 torchPosition = world.get<Transform>(torch).position;
-    assert(nearlyEqual(torchPosition.x, end.x));
-    assert(nearlyEqual(torchPosition.y, end.y + 1.0f));
-    assert(nearlyEqual(torchPosition.z, end.z));
+    for (const RenderPart& part : world.get<ModelRenderer>(player).parts) {
+        const Vec3& glow = part.material.emissive;
+        assert(glow.x > 0.0f && glow.y > 0.0f);
+    }
 
     // A tap does not start hold-to-steer: with the button up, later frames give no new command.
     Input later = mobaInput();
@@ -112,10 +109,15 @@ void testDemoGame() {
     game.onInput(world, unfocused);
     assert(!world.get<CharacterMovement>(player).isMoving());
 
-    // It is night: no sun, only a faint ambient light.
+    // It is night: a faint ambient light and a weak, cool moon shining down from above.
     const FrameLighting night = collectLighting(world, 1.0f);
-    assert(night.directionalLights.empty());
     assert(night.ambient.x < 0.1f);
+    assert(night.directionalLights.size() == 1);
+
+    const DirectionalLight& moon = night.directionalLights[0];
+    assert(moon.intensity > 0.0f && moon.intensity <= 0.2f);
+    assert(moon.colour.z > moon.colour.x);
+    assert(moon.direction.y < 0.0f);
 
     // In MOBA mode the duck carries the flashlight, pointing where it faces and tilted down at the ground.
     game.onUpdate(world, mobaInput(), 1.0f / 60.0f, 1.0f);
@@ -146,6 +148,35 @@ void testDemoGame() {
     freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
 
+    // The duck only glows in MOBA mode, where it is seen from far above and has to be easy to find.
+    const auto duckGlows = [](const World& duckWorld, Entity duck) {
+        for (const RenderPart& part : duckWorld.get<ModelRenderer>(duck).parts) {
+            if (part.material.emissive.lengthSquared() > 0.0f) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    assert(!duckGlows(otherWorld, freeCamera.getPlayer()));
+
+    // Switching out of MOBA mode turns the glow off, and back into it turns it on.
+    DemoGame switching{ControlMode::Moba, true};
+    World switchingWorld;
+    AssetManager switchingAssets;
+    switching.onInit(switchingWorld, switchingAssets);
+    assert(duckGlows(switchingWorld, switching.getPlayer()));
+
+    Input pressF3 = mobaInput();
+    pressF3.pressKey(Key::F3);
+    switching.onUpdate(switchingWorld, pressF3, 1.0f / 60.0f, 1.0f);
+    assert(!duckGlows(switchingWorld, switching.getPlayer()));
+
+    Input pressF2 = mobaInput();
+    pressF2.pressKey(Key::F2);
+    switching.onUpdate(switchingWorld, pressF2, 1.0f / 60.0f, 1.0f);
+    assert(duckGlows(switchingWorld, switching.getPlayer()));
+
     // Away from MOBA mode, the flashlight is held at the camera and points where it looks.
     Input idle;
     idle.beginFrame();
@@ -155,4 +186,15 @@ void testDemoGame() {
     const Vec3 cameraPosition = freeCamera.getCamera().getPosition();
     assert(nearlyEqual(heldAt.x, cameraPosition.x) && nearlyEqual(heldAt.y, cameraPosition.y) && nearlyEqual(heldAt.z, cameraPosition.z));
     assert(otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized().dot(freeCamera.getCamera().getForward()) > 0.999f);
+
+    // The glowing moon sits exactly where the moonlight comes from, at a fixed distance from the camera,
+    // so like the real moon it never gets closer or changes direction as you move.
+    const Entity moonBall = freeCamera.getMoon();
+    const Vec3 moonlight = collectLighting(otherWorld, 1.0f).directionalLights[0].direction.normalized();
+    const Vec3 expectedMoon = cameraPosition - moonlight * 80.0f;
+    const Vec3 moonPosition = otherWorld.get<Transform>(moonBall).position;
+    assert(nearlyEqual(moonPosition.x, expectedMoon.x) && nearlyEqual(moonPosition.y, expectedMoon.y) && nearlyEqual(moonPosition.z, expectedMoon.z));
+
+    const Material& moonMaterial = otherWorld.get<ModelRenderer>(moonBall).parts[0].material;
+    assert(moonMaterial.emissive.z > 0.5f);
 }

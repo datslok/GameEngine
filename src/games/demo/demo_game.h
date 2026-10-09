@@ -28,8 +28,8 @@ public:
     // For tests and debugging.
     Entity getPlayer() const;
     Entity getDestinationMarker() const;
-    Entity getPlayerTorch() const;
     Entity getFlashlight() const;
+    Entity getMoon() const;
 
 private:
     void createScene(World& world, AssetManager& assets);
@@ -58,9 +58,6 @@ private:
     Entity player;
     Entity destinationMarker;
 
-    // A point light that follows the player. Copied into place each tick, because there are no parent/child entities yet.
-    Entity playerTorch;
-
     // F toggles it. Held at the camera, or by the duck in MOBA mode.
     Entity flashlight;
     // A large source radius keeps it gentle up close; the higher intensity carries it further.
@@ -72,6 +69,10 @@ private:
     };
     void toggleFlashlight(World& world);
     void updateFlashlight(World& world, float alpha);
+
+    // A glowing sphere where the moonlight comes from, kept at a fixed distance from the camera like a real, distant moon.
+    Entity moon;
+    void updateMoon(World& world);
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;

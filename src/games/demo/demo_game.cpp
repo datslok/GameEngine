@@ -15,12 +15,16 @@
 #include <utility>
 
 namespace {
-    // How far above the player's feet the torch hangs.
-    constexpr float torchHeight = 1.0f;
-
     // Where the duck holds the flashlight in MOBA mode, and how far it tilts the beam down (radians, about 20 degrees).
     constexpr float flashlightHeight = 1.2f;
     constexpr float flashlightTilt = 0.35f;
+
+    // The way the moonlight travels. The moon sphere is placed the opposite way, so the light comes from where you see the moon.
+    const Vec3 moonlightDirection{0.4f, -1.0f, -0.6f};
+
+    // How far from the camera the moon is drawn (inside the camera's far plane of 100), and how big it is.
+    constexpr float moonDistance = 80.0f;
+    constexpr float moonRadius = 4.0f;
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
@@ -99,8 +103,23 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    // Night: no sun, only a faint ambient light, so the flashlight and the duck's torch do the work.
+    // Night: a faint ambient light and a weak, cool moon, so the flashlight and the glowing duck stand out.
+    // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
     world.add(world.create(), AmbientLight{Vec3{0.06f, 0.06f, 0.06f}});
+    world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.6f, 0.7f, 1.0f}, 0.15f});
+
+    // The moon itself: a glowing sphere where the moonlight comes from. updateMoon keeps it at a fixed distance from the camera.
+    Material moonGlow;
+    moonGlow.colour = Pixel{0, 0, 0};
+    moonGlow.specularStrength = 0.0f;
+    moonGlow.emissive = Vec3{0.85f, 0.9f, 1.0f};
+
+    Transform moonPlacement;
+    moonPlacement.scale = Vec3{moonRadius, moonRadius, moonRadius};
+
+    moon = world.create();
+    world.add(moon, moonPlacement);
+    world.add(moon, makeMeshRenderer(assets.addMesh(Mesh::sphere()), moonGlow));
 
     // The flashlight. updateFlashlight places it every frame, at the camera or (in MOBA mode) in the duck's hands.
     flashlight = world.create();
@@ -131,20 +150,12 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     const Model& model = assets.loadModel(playerConfig.modelPath);
     player = spawnCharacter(world, assets, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
 
-    // A warm torch above the player. It moves with the player, so it gets a PreviousTransform and interpolates like the duck.
-    Transform torchPlacement;
-    torchPlacement.position = world.get<Transform>(player).position + Vec3{0.0f, torchHeight, 0.0f};
-
-    playerTorch = world.create();
-    world.add(playerTorch, torchPlacement);
-    world.add(playerTorch, PreviousTransform{torchPlacement});
-    world.add(playerTorch, PointLight{Vec3{1.0f, 0.6f, 0.3f}, 3.0f, 6.0f});
-
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
-    yellow.colour = Pixel{255, 220, 40};
+    // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 6.
+    yellow.colour = Pixel{0, 0, 0};
     yellow.specularStrength = 0.0f;
-    yellow.unlit = true; // TEMPORARY: keeps its colour at night. Becomes a HUD ring in phase 6.
+    yellow.emissive = Vec3{1.0f, 0.86f, 0.16f};
 
     ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
@@ -184,6 +195,14 @@ void DemoGame::toggleFlashlight(World& world) {
 * In MOBA mode the duck holds it, so it uses the duck's drawn (interpolated) pose, keeping the beam in step with the model.
 * It needs no PreviousTransform: it is already placed exactly where things are drawn this frame.
 */
+/*
+* The real moon is so far away that walking shows no parallax: it stays in the same direction and the same size.
+* Keeping the sphere at a fixed offset from the camera every frame gives the same effect (the trick skyboxes use).
+*/
+void DemoGame::updateMoon(World& world) {
+    world.get<Transform>(moon).position = camera.getPosition() - moonlightDirection.normalized() * moonDistance;
+}
+
 void DemoGame::updateFlashlight(World& world, float alpha) {
     Vec3 position = camera.getPosition();
     Vec3 direction = camera.getForward();
@@ -207,12 +226,6 @@ void DemoGame::updateFlashlight(World& world, float alpha) {
 */
 void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     updateCharacters(world, tickSeconds);
-
-    // Right after the player moves, so the torch is never a tick behind. A real hierarchy would replace this (ROADMAP phase 9).
-    if (world.isAlive(player)) {
-        world.get<Transform>(playerTorch).position = world.get<Transform>(player).position + Vec3{0.0f, torchHeight, 0.0f};
-    }
-
     updateSpinners(world, simulationSeconds);
 
     // Simulation continues when the cursor is released or focus is lost.
@@ -233,6 +246,7 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
     }
 
     updateFlashlight(world, alpha);
+    updateMoon(world);
 }
 
 Camera& DemoGame::getCamera() {
@@ -251,12 +265,12 @@ Entity DemoGame::getDestinationMarker() const {
     return destinationMarker;
 }
 
-Entity DemoGame::getPlayerTorch() const {
-    return playerTorch;
-}
-
 Entity DemoGame::getFlashlight() const {
     return flashlight;
+}
+
+Entity DemoGame::getMoon() const {
+    return moon;
 }
 
 void DemoGame::setControlMode(World& world, ControlMode mode) {
@@ -294,6 +308,14 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
     groundSteeringActive = false;
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
+
+        // From the MOBA camera's height the duck is small, so it glows to stay easy to find at night. Emitted light does not
+        // light its surroundings. In the other modes it is lit like everything else.
+        const Vec3 glow = mode == ControlMode::Moba ? Vec3{0.45f, 0.35f, 0.12f} : Vec3{0.0f, 0.0f, 0.0f};
+
+        for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
+            part.material.emissive = glow;
+        }
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
 }
