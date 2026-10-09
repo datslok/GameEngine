@@ -170,7 +170,7 @@ It is **opt-in** per load (`MeshLoadOptions{.smoothNormals = true}`), because on
 Controllers in `gameplay/camera/` move it:
 
 - `FirstPersonCameraController`: mouse look plus walking on the ground plane.
-- `FreeFlyCameraController`: mouse look plus flying (Space and Ctrl for up and down).
+- `FreeFlyCameraController`: mouse look plus flying (Space and Ctrl for up and down). In both look controllers, holding Shift doubles the speed (running or fast flying).
 - `MobaCameraController`: a fixed angle that follows a target, or edge-pans while the cursor is confined.
 
 Look controllers store direction as **yaw and pitch** (spherical coordinates: yaw 0 looks along -Z, positive yaw turns right, pitch is clamped to 89 degrees so the view never flips over the pole).

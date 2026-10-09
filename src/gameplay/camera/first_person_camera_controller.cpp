@@ -29,7 +29,7 @@ void FirstPersonCameraController::update(Camera& camera, const Input& input, flo
 
     // Normalizing keeps diagonal movement from being faster.
     if (movement.lengthSquared() > 0.0f) {
-        camera.setPosition(camera.getPosition() + movement.normalized() * (moveSpeed * frameSeconds));
+        camera.setPosition(camera.getPosition() + movement.normalized() * (moveSpeed * getSpeedMultiplier(input) * frameSeconds));
     }
 }
 

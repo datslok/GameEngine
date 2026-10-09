@@ -40,6 +40,11 @@ void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPer
     );
 }
 
+float getSpeedMultiplier(const Input& input) {
+    const bool sprinting = input.isKeyHeld(Key::LeftShift) || input.isKeyHeld(Key::RightShift);
+    return sprinting ? sprintSpeedMultiplier : 1.0f;
+}
+
 Vec2 getMoveAxes(const Input& input) {
     Vec2 axes{};
 

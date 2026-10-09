@@ -5,7 +5,8 @@
 #include "scene/camera.h"
 
 /*
-* A debug or spectator camera: the mouse turns it, WASD moves along the view direction, Space and Ctrl move straight up and down.
+* A debug or spectator camera: the mouse turns it, WASD moves along the view direction, Space and Ctrl move straight up and down,
+* and holding Shift flies at double speed.
 * Pauses while the mouse is not captured (after Escape).
 */
 class FreeFlyCameraController {

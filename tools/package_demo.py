@@ -80,6 +80,7 @@ First person and free camera:
   Mouse       Look around
   W A S D     Move
   Space/Ctrl  Up / down (free camera only)
+  Shift       Run (first person) or fly faster (free camera)
 
 MOBA:
   Left-click              Keep the cursor inside the window
