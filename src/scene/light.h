@@ -26,6 +26,11 @@ struct PointLight {
     // The size of the glowing source, softening the light up close like SpotLight::sourceRadius. 1 is a small bulb.
     float sourceRadius = 1.0f;
 
+    // How big the part that really glows is (the bulb), which decides how soft its shadows are: the further a surface
+    // is behind the thing shadowing it, the wider the blurred edge. Separate from sourceRadius, which only shapes the
+    // falloff up close and is often tuned much larger than any real bulb. 0 gives the sharpest shadows.
+    float emitterRadius = 0.05f;
+
     // Whether objects block this light. Costs six extra drawings of the scene per frame (one per cube face); when more
     // lights want shadows than there is room for, the most important ones get them.
     bool castsShadows = true;
@@ -51,6 +56,9 @@ struct SpotLight {
     // The size of the glowing source. Falloff is intensity / (distance^2 + sourceRadius^2): a bigger source (a reflector,
     // a lit disc) is gentler up close and still falls off as inverse square far away. 1 matches a point light.
     float sourceRadius = 1.0f;
+
+    // How big the glowing opening really is, for the softness of its shadows, like PointLight::emitterRadius.
+    float emitterRadius = 0.025f;
 
     // Whether objects block this light. Costs one extra drawing of the scene per frame.
     bool castsShadows = true;

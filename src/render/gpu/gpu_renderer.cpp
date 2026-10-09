@@ -94,7 +94,7 @@ void GpuRenderer::createPipeline() {
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             3, // Material colour, lights, shadow data.
-            2, // Colour texture, shadow atlas.
+            3, // Colour texture, shadow atlas (compared), shadow atlas (raw depths).
             1  // Shadow tiles.
         );
 
@@ -226,6 +226,17 @@ void GpuRenderer::createShadowResources() {
 
     if (shadowSampler == nullptr) {
         throw gpuError("Shadow sampler creation failed");
+    }
+
+    // The same atlas read as raw depths, for the soft shadow blocker search: exact texels, no comparison.
+    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.enable_compare = false;
+
+    shadowDepthSampler = SDL_CreateGPUSampler(device, &samplerInfo);
+
+    if (shadowDepthSampler == nullptr) {
+        throw gpuError("Shadow depth sampler creation failed");
     }
 
     // Room for every tile there can be, so the buffers never need to grow; the upload copies only the tiles in use.
@@ -414,6 +425,11 @@ void GpuRenderer::cleanup() noexcept {
         if (shadowSampler != nullptr) {
             SDL_ReleaseGPUSampler(device, shadowSampler);
             shadowSampler = nullptr;
+        }
+
+        if (shadowDepthSampler != nullptr) {
+            SDL_ReleaseGPUSampler(device, shadowDepthSampler);
+            shadowDepthSampler = nullptr;
         }
 
         if (shadowAtlas != nullptr) {
@@ -793,14 +809,17 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
         selectedTexture = textures[material.texture.index].get();
     }
 
-    // Slot 0: the surface's colour texture. Slot 1: the shadow atlas, read with depth comparison.
-    SDL_GPUTextureSamplerBinding textureBindings[2]{};
+    // Slot 0: the surface's colour texture. Slot 1: the shadow atlas, read with depth comparison. Slot 2: the same atlas,
+    // read as raw depths.
+    SDL_GPUTextureSamplerBinding textureBindings[3]{};
     textureBindings[0].texture = selectedTexture->getTexture();
     textureBindings[0].sampler = selectedTexture->getSampler();
     textureBindings[1].texture = shadowAtlas;
     textureBindings[1].sampler = shadowSampler;
+    textureBindings[2].texture = shadowAtlas;
+    textureBindings[2].sampler = shadowDepthSampler;
 
-    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 2);
+    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 3);
 
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }
