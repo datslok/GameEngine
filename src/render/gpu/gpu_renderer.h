@@ -4,7 +4,7 @@
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
 #include "render/gpu/light_uniforms.h"
-#include "render/gpu/debug_line_vertices.h"
+#include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/shadow_map.h"
 #include "render/render_stats.h"
 #include "scene/asset_handles.h"
@@ -115,15 +115,8 @@ private:
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;
     void createShadowResources();
 
-    // Debug lines: a pipeline that draws a line list on top of everything, and a vertex buffer (with its upload buffer)
-    // that grows when a frame has more lines than it holds.
-    SDL_GPUGraphicsPipeline* debugLinePipeline = nullptr;
-    SDL_GPUBuffer* debugLineBuffer = nullptr;
-    SDL_GPUTransferBuffer* debugLineTransfer = nullptr;
-    Uint32 debugLineCapacity = 0; // in vertices
-    void createDebugLinePipeline();
-    void uploadDebugLines(const std::vector<DebugLineVertex>& vertices);
-    void drawDebugLines(const Mat4& transform, Uint32 firstVertex, Uint32 vertexCount);
+    // Debug lines, drawn over the finished scene.
+    std::unique_ptr<DebugLineRenderer> debugLines;
 
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
     std::vector<std::unique_ptr<GpuMesh>> meshes;
