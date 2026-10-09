@@ -38,6 +38,7 @@ void testMaterialUniforms();
 void testSmoothNormals();
 void testNormalMatrix();
 void testGpuDepthRange();
+void testMipLevels();
 
 int main(){
     testPixelBuffer();
@@ -78,6 +79,7 @@ int main(){
     testSmoothNormals();
     testNormalMatrix();
     testGpuDepthRange();
+    testMipLevels();
 
     std::cout << "All tests passed!\n";
     return 0;

@@ -1,4 +1,5 @@
 #include "render/gpu/gpu_texture.h"
+#include "render/gpu/mip_levels.h"
 
 #include <cstring>
 #include <limits>
@@ -45,6 +46,9 @@ GpuTexture::GpuTexture(
         );
     }
 
+    // The full chain, down to 1x1.
+    const Uint32 levelCount = mipLevelCount(width, height);
+
     SDL_GPUTransferBuffer* transfer = nullptr;
     SDL_GPUCommandBuffer* uploadCommands = nullptr;
 
@@ -52,11 +56,12 @@ GpuTexture::GpuTexture(
         SDL_GPUTextureCreateInfo textureInfo{};
         textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
         textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        // Generating mipmaps draws each smaller level from the one above, so the texture must also be a render target.
+        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
         textureInfo.width = width;
         textureInfo.height = height;
         textureInfo.layer_count_or_depth = 1;
-        textureInfo.num_levels = 1;
+        textureInfo.num_levels = levelCount;
         textureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
         texture = SDL_CreateGPUTexture(device, &textureInfo);
@@ -66,12 +71,23 @@ GpuTexture::GpuTexture(
         }
 
         SDL_GPUSamplerCreateInfo samplerInfo{};
-        samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
-        samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
-        samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+        // Linear filtering blends the four nearest texels, so close-up textures are smooth instead of blocky.
+        // Linear mipmap mode also blends the two nearest mip levels (trilinear), so there is no visible line where levels switch.
+        samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+        samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+        samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
         samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
         samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
         samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+
+        // Surfaces seen at a grazing angle (the ground) cover a long thin strip of texture per pixel;
+        // anisotropic filtering samples along the strip so they stay sharp instead of blurring.
+        samplerInfo.enable_anisotropy = true;
+        samplerInfo.max_anisotropy = 16.0f;
+
+        // Allow every mip level. The default maximum of 0 would lock sampling to the full-size level.
+        samplerInfo.min_lod = 0.0f;
+        samplerInfo.max_lod = static_cast<float>(levelCount - 1);
 
         sampler = SDL_CreateGPUSampler(device, &samplerInfo);
 
@@ -127,6 +143,11 @@ GpuTexture::GpuTexture(
         SDL_UploadToGPUTexture(copyPass, &source, &target, false);
         SDL_EndGPUCopyPass(copyPass);
 
+        // Each smaller level averages the one above, so distant surfaces read pre-filtered colours instead of shimmering.
+        if (levelCount > 1) {
+            SDL_GenerateMipmapsForGPUTexture(uploadCommands, texture);
+        }
+
         const bool submitted =
             SDL_SubmitGPUCommandBuffer(uploadCommands);
 
@@ -174,4 +195,4 @@ SDL_GPUTexture* GpuTexture::getTexture() const {
 
 SDL_GPUSampler* GpuTexture::getSampler() const {
     return sampler;
-}
+}
