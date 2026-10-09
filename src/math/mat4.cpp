@@ -278,7 +278,8 @@ Mat4 normalMatrix(const Mat4& model) {
 * Depth follows the same convention as perspective: -1 at the near plane and 1 at the far plane, the camera looking down -z.
 */
 Mat4 Mat4::orthographic(float left, float right, float bottom, float top, float nearPlane, float farPlane) {
-    if (!(right > left && top > bottom && farPlane > nearPlane)) {
+    // Flipped boxes are allowed (window pixels count down, so their top is 0 and their bottom the height); empty ones are not.
+    if (right == left || top == bottom || farPlane == nearPlane) {
         throw std::invalid_argument("Invalid orthographic parameters");
     }
 

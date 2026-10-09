@@ -49,8 +49,9 @@ public:
         (void)alpha;
     }
 
-    // True to have the engine draw a box around every mesh it draws (its bounds, through the same transform).
-    virtual bool wantsBoundingBoxes() const {
+    // True for the engine's debug view: a box around every mesh it draws (its bounds, through the same transform) and,
+    // in the top-left corner, how many meshes culling skipped last frame.
+    virtual bool wantsDebugView() const {
         return false;
     }
 };

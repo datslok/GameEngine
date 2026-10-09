@@ -99,7 +99,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **Alt+Enter** | Toggle fullscreen |
 | **Escape** | Release the mouse |
 | **F** | Toggle the flashlight (held in your right hand; in MOBA mode the duck carries it) |
-| **F4** | Debug view: bounding boxes around every mesh, a marker at each light, and the walk target in MOBA mode |
+| **F4** | Debug view: bounding boxes around every mesh, how many meshes culling skipped (top-left), a marker at each light, and the walk target in MOBA mode |
 
 **First person and free camera**
 

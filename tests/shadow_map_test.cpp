@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 
 namespace {
     bool nearlyEqual(float actual, float expected, float tolerance = 0.0001f) {
@@ -172,6 +173,26 @@ namespace {
 
         // No perspective: w stays 1, so size does not change with distance.
         assert(nearlyEqual(farCorner.w, 1.0f));
+
+        // A flipped box is fine: window pixels count down from the top, so bottom = height and top = 0 maps
+        // the top-left pixel to the top-left of the screen (-1, 1).
+        const Mat4 pixels = Mat4::orthographic(0.0f, 100.0f, 50.0f, 0.0f, -1.0f, 1.0f);
+        const Vec4 topLeft = pixels * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+        const Vec4 bottomRight = pixels * Vec4{100.0f, 50.0f, 0.0f, 1.0f};
+        assert(nearlyEqual(topLeft.x, -1.0f) && nearlyEqual(topLeft.y, 1.0f));
+        assert(nearlyEqual(bottomRight.x, 1.0f) && nearlyEqual(bottomRight.y, -1.0f));
+
+        // Only a box with no width, height or depth is rejected.
+        bool rejected = false;
+
+        try {
+            Mat4::orthographic(1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f);
+        }
+        catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+
+        assert(rejected);
     }
 }
 

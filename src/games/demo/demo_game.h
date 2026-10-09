@@ -25,7 +25,7 @@ public:
     Camera& getCamera() override;
     bool wantsMouseLook() const override;
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
-    bool wantsBoundingBoxes() const override;
+    bool wantsDebugView() const override;
 
     // For tests and debugging.
     Entity getPlayer() const;
@@ -78,7 +78,7 @@ private:
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;
 
-    // F4: show bounding boxes, light markers and the walk target.
+    // F4: show bounding boxes, the culling readout, light markers and the walk target.
     bool debugViewEnabled = false;
 
     // Space toggles following the player in MOBA mode.

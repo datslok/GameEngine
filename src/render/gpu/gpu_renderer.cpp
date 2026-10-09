@@ -489,7 +489,7 @@ void GpuRenderer::uploadDebugLines(const std::vector<DebugLineVertex>& vertices)
     SDL_EndGPUCopyPass(copyPass);
 }
 
-void GpuRenderer::drawDebugLines(Uint32 vertexCount) {
+void GpuRenderer::drawDebugLines(const Mat4& transform, Uint32 firstVertex, Uint32 vertexCount) {
     SDL_BindGPUGraphicsPipeline(pass, debugLinePipeline);
 
     SDL_GPUBufferBinding binding{};
@@ -497,10 +497,10 @@ void GpuRenderer::drawDebugLines(Uint32 vertexCount) {
     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
 
     float matrix[16]{};
-    writeColumnMajor(viewProjection, matrix);
+    writeColumnMajor(transform, matrix);
     SDL_PushGPUVertexUniformData(commands, 0, matrix, static_cast<Uint32>(sizeof(matrix)));
 
-    SDL_DrawGPUPrimitives(pass, vertexCount, 1, 0, 0);
+    SDL_DrawGPUPrimitives(pass, vertexCount, 1, firstVertex, 0);
 }
 
 GpuRenderer::~GpuRenderer() {
@@ -642,8 +642,11 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         const LightUniformData lights = packLighting(frame.lighting, camera.getPosition());
         const ShadowPlan shadows = planShadows(frame.lighting, camera);
 
-        // Copies must happen outside render passes, so the debug lines are uploaded first.
-        const std::vector<DebugLineVertex> debugVertices = buildDebugLineVertices(frame.debugLines);
+        // Copies must happen outside render passes, so the debug lines are uploaded first: world lines, then screen lines.
+        std::vector<DebugLineVertex> debugVertices = buildDebugLineVertices(frame.debugLines);
+        const Uint32 worldLineVertices = static_cast<Uint32>(debugVertices.size());
+        const std::vector<DebugLineVertex> screenVertices = buildDebugLineVertices(frame.debugScreenLines);
+        debugVertices.insert(debugVertices.end(), screenVertices.begin(), screenVertices.end());
 
         if (!debugVertices.empty()) {
             uploadDebugLines(debugVertices);
@@ -674,9 +677,15 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         stats.drawn = visible.size();
         stats.culled = frame.draws.size() - visible.size();
 
-        // Last, so they are drawn over the finished scene.
-        if (!debugVertices.empty()) {
-            drawDebugLines(static_cast<Uint32>(debugVertices.size()));
+        // Last, so they are drawn over the finished scene. World lines go through the camera; screen lines are already in
+        // window pixels, so a flat projection maps (0, 0) to the top-left corner and (width, height) to the bottom-right.
+        if (worldLineVertices > 0) {
+            drawDebugLines(viewProjection, 0, worldLineVertices);
+        }
+
+        if (!screenVertices.empty()) {
+            const Mat4 pixels = toGpuDepthRange(Mat4::orthographic(0.0f, static_cast<float>(depthWidth), static_cast<float>(depthHeight), 0.0f, -1.0f, 1.0f));
+            drawDebugLines(pixels, worldLineVertices, static_cast<Uint32>(screenVertices.size()));
         }
     }
     catch (...) {

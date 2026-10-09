@@ -44,6 +44,7 @@ void testFrameDescription();
 void testShadowMap();
 void testDebugDraw();
 void testCulling();
+void testDebugText();
 void testSphereMesh();
 
 int main(){
@@ -91,6 +92,7 @@ int main(){
     testShadowMap();
     testDebugDraw();
     testCulling();
+    testDebugText();
     testSphereMesh();
 
     std::cout << "All tests passed!\n";
