@@ -112,10 +112,15 @@ void testDemoGame() {
     game.onInput(world, unfocused);
     assert(!world.get<CharacterMovement>(player).isMoving());
 
-    // It is night: no sun, only a faint ambient light.
+    // It is night: a faint ambient light and a weak, cool moon shining down from above.
     const FrameLighting night = collectLighting(world, 1.0f);
-    assert(night.directionalLights.empty());
     assert(night.ambient.x < 0.1f);
+    assert(night.directionalLights.size() == 1);
+
+    const DirectionalLight& moon = night.directionalLights[0];
+    assert(moon.intensity > 0.0f && moon.intensity <= 0.2f);
+    assert(moon.colour.z > moon.colour.x);
+    assert(moon.direction.y < 0.0f);
 
     // In MOBA mode the duck carries the flashlight, pointing where it faces and tilted down at the ground.
     game.onUpdate(world, mobaInput(), 1.0f / 60.0f, 1.0f);
