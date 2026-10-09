@@ -312,20 +312,20 @@ namespace {
         assert(plan.tiles[0].size == largestShadowTileSize);
     }
 
-    // There is room for 16 shadowed point lights; the rest still light the scene, without shadows.
+    // Every one of the 64 point light seats in the shader can have a shadow; lights past the seats get neither.
     void testShadowedLightsAreCapped() {
         FrameLighting lighting;
 
-        for (int i = 0; i < 20; ++i) {
+        for (int i = 0; i < 70; ++i) {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true));
         }
 
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
-        assert(maxShadowedPointLights == 16 && maxShadowedSpotLights == 8);
-        assert(plan.tiles.size() == 96);
-        assert(plan.uniforms.pointTiles[3][3] == 90);
-        assert(plan.uniforms.pointTiles[4][0] == -1);
+        assert(maxShadowedPointLights == 64 && maxShadowedSpotLights == 8);
+        assert(plan.tiles.size() == 64 * 6);
+        assert(plan.uniforms.pointTiles[0][0] == 0);
+        assert(plan.uniforms.pointTiles[15][3] == 63 * 6);
         assertTilesFitTheAtlas(plan);
     }
 
@@ -372,6 +372,31 @@ namespace {
         // The most important point light keeps the size it asked for; the least important was shrunk.
         assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == largestShadowTileSize);
         assert(previousSize < largestShadowTileSize);
+    }
+
+    // The worst case: every shadowed light there can be, all asking for the largest tiles. Everything still fits, with
+    // the directional boxes at full size and every point light's faces down to the smallest.
+    void testEveryShadowFits() {
+        FrameLighting lighting;
+
+        for (int i = 0; i < maxShadowedDirectionalLights; ++i) {
+            lighting.directionalLights.push_back(DirectionalLight{});
+        }
+
+        for (int i = 0; i < maxShadowedSpotLights; ++i) {
+            lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 3.0f, 0.0f}, true, 50.0f));
+        }
+
+        for (int i = 0; i < maxShadowedPointLights; ++i) {
+            lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
+        }
+
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+
+        assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
+        assertTilesFitTheAtlas(plan);
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[3])].size == largestShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == smallestShadowTileSize);
     }
 
     // Small lights get small tiles, so sixteen lamps take a small corner of the atlas.
@@ -505,6 +530,7 @@ void testShadowMap() {
     testTilesAreHandedOut();
     testShadowedLightsAreCapped();
     testTilesShrinkToFit();
+    testEveryShadowFits();
     testSmallLightsGetSmallTiles();
     testNoShadowsWithoutLights();
     testShadowsAreFoundForAnySlot();
