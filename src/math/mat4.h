@@ -27,7 +27,7 @@ struct Mat4 {
     );
 
     // A box-shaped view with no perspective (parallel rays): the box from left..right, bottom..top, and -nearPlane..-farPlane
-    // along z maps to the -1..1 cube, with the same depth convention as perspective.
+    // along z maps to the -1..1 cube, with the same depth convention as perspective. Swapping bottom and top flips y.
     static Mat4 orthographic(float left, float right, float bottom, float top, float nearPlane, float farPlane);
 
     static Mat4 lookAt(
