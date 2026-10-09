@@ -145,29 +145,18 @@ void testDemoGame() {
     game.onInput(world, unfocused);
     assert(!world.get<CharacterMovement>(player).isMoving());
 
-    // It is night: a faint ambient light and a cool moon, which is a point light at the moon sphere that casts shadows.
+    // It is night: a faint ambient light and a weak, cool moon shining down from above, as a directional light (parallel
+    // rays, like the real moon) that casts shadows. No point light stands in for it any more.
     const FrameLighting night = collectLighting(world, 1.0f);
     assert(night.ambient.x < 0.1f);
-    assert(night.directionalLights.empty());
+    assert(night.directionalLights.size() == 1);
+    assert(night.pointLights.empty());
 
-    const PlacedPointLight* moonlight = nullptr;
-
-    for (const PlacedPointLight& placed : night.pointLights) {
-        if (placed.light.castsShadows) {
-            moonlight = &placed;
-        }
-    }
-
-    assert(moonlight != nullptr);
-    assert(moonlight->light.colour.z > moonlight->light.colour.x);
-    assert(nearlyEqual(moonlight->light.sourceRadius, 4.0f));
-
-    // Far away, so it needs a large intensity: at the middle of the ground it is about as bright as the old moonlight (0.06).
-    const Vec3 groundCentre{0.0f, 0.0f, -6.0f};
-    const float moonDistance = (moonlight->position - groundCentre).length();
-    assert(moonlight->light.range > moonDistance + 20.0f);
-    const float brightness = moonlight->light.intensity / (moonDistance * moonDistance + 16.0f);
-    assert(brightness > 0.03f && brightness < 0.12f);
+    const DirectionalLight& moonlight = night.directionalLights[0];
+    assert(moonlight.intensity > 0.0f && moonlight.intensity <= 0.2f);
+    assert(moonlight.colour.z > moonlight.colour.x);
+    assert(moonlight.direction.y < 0.0f);
+    assert(moonlight.castsShadows);
 
     // In MOBA mode the duck carries the flashlight, pointing where it faces and tilted down at the ground.
     game.onUpdate(world, mobaInput(), 1.0f / 60.0f, 1.0f);
@@ -223,13 +212,15 @@ void testDemoGame() {
 
     // The glowing moon is a fixed place you can fly to, high in the sky,
     // 64 units from where the free camera starts (about 20 seconds of flying at 3 units per second, minus its radius of 4).
-    // Its light shines from inside it.
+    // It sits where the moonlight comes from, opposite the way the light travels.
     const Entity moonBall = freeCamera.getMoon();
     const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
     const Vec3 expectedMoon = otherWorld.get<Transform>(moonBall).position;
     assert(nearlyEqual((expectedMoon - freeCameraStart).length(), 64.0f));
     assert(expectedMoon.y > 30.0f);
-    assert(otherWorld.has<PointLight>(moonBall));
+
+    const Vec3 moonlightDirection = collectLighting(otherWorld, 1.0f).directionalLights[0].direction.normalized();
+    assert((expectedMoon - freeCameraStart).normalized().dot(moonlightDirection) < -0.999f);
 
     // It stays put when the camera moves, so flying towards it gets you there.
     freeCamera.getCamera().setPosition(Vec3{30.0f, 20.0f, -30.0f});
