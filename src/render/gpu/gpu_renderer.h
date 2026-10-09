@@ -80,6 +80,10 @@ private:
     bool windowClaimed = false;
     PresentMode presentMode = PresentMode::Vsync;
 
+    // SDR_LINEAR when supported: the swapchain encodes the shader's linear output as sRGB.
+    SDL_GPUSwapchainComposition swapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
+    void useLinearSwapchain();
+
     void cleanup() noexcept;
 
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
