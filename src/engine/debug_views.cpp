@@ -32,7 +32,8 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled);
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled);
-    const std::string tiles = "SHADOW TILES " + std::to_string(stats.shadowTilesDrawn) + "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
+    const std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +
+                              "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
 
     debugText(debug, Vec2{margin, margin}, textHeight, camera, boundingBoxColour);
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +

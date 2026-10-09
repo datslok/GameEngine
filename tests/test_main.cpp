@@ -42,6 +42,7 @@ void testMipLevels();
 void testSrgb();
 void testFrameDescription();
 void testShadowMap();
+void testShadowAtlas();
 void testLightPriority();
 void testDebugDraw();
 void testCulling();
@@ -92,6 +93,7 @@ int main(){
     testSrgb();
     testFrameDescription();
     testShadowMap();
+    testShadowAtlas();
     testLightPriority();
     testDebugDraw();
     testCulling();

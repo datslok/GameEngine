@@ -10,8 +10,10 @@ struct RenderStats {
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 
-    // Shadow views drawn, and point light cube faces left out because they see nothing on screen.
+    // Shadow views drawn this frame, kept from an earlier frame because nothing in them changed (cached), and point
+    // light cube faces left out because they see nothing on screen. Shadow drawn/culled above count only drawn views.
     std::size_t shadowTilesDrawn = 0;
+    std::size_t shadowTilesCached = 0;
     std::size_t shadowTilesSkipped = 0;
 
     // Point lights in the frame, how many could reach what the camera sees, and how many got a seat in the shader and a shadow.
