@@ -1,4 +1,5 @@
 #include "engine/application.h"
+#include "engine/debug_views.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
 
@@ -90,6 +91,7 @@ void Application::prepareNewResources() {
         const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
         // Convert to the render format once, when the mesh first reaches the GPU.
         renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next)));
+        boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
     }
 
     while (renderer.getTextureCount() < assets.getTextureCount()) {
@@ -106,8 +108,19 @@ void Application::render(float alpha) {
     prepareNewResources();
 
     Camera& camera = game.getCamera();
+    FrameDescription frame = buildFrame(world, camera, alpha);
 
-    if (!renderer.render(buildFrame(world, camera, alpha))) {
+    // Debug shapes are gathered fresh every frame, so anything not added again disappears.
+    debugDraw.clear();
+
+    if (game.wantsBoundingBoxes()) {
+        drawBoundingBoxes(frame.draws, boundsByMesh, debugDraw);
+    }
+
+    game.onDebugDraw(world, debugDraw, alpha);
+    frame.debugLines = debugDraw.getLines();
+
+    if (!renderer.render(frame)) {
         return;
     }
 

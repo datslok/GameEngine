@@ -202,6 +202,42 @@ void DemoGame::onInput(World& world, const Input& input) {
     if (input.wasKeyPressed(Key::F)) {
         toggleFlashlight(world);
     }
+
+    if (input.wasKeyPressed(Key::F4)) {
+        debugViewEnabled = !debugViewEnabled;
+    }
+}
+
+bool DemoGame::wantsBoundingBoxes() const {
+    return debugViewEnabled;
+}
+
+/*
+* Lights are invisible except for what they light, so each gets a small sphere in its own colour, and a spotlight a line
+* along its beam. The walk target is the destination marker, which is shown exactly while the duck is walking to it.
+*/
+void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
+    if (!debugViewEnabled) {
+        return;
+    }
+
+    constexpr float markerRadius = 0.25f;
+    constexpr float beamLength = 2.0f;
+
+    world.each<PointLight, Transform>([&](Entity entity, const PointLight& light, const Transform&) {
+        debug.sphere(getRenderTransform(world, entity, alpha).position, markerRadius, light.colour);
+    });
+
+    world.each<SpotLight, Transform>([&](Entity entity, const SpotLight& light, const Transform&) {
+        const Vec3 position = getRenderTransform(world, entity, alpha).position;
+        debug.sphere(position, markerRadius, light.colour);
+        debug.line(position, position + light.direction.normalized() * beamLength, light.colour);
+    });
+
+    if (world.isAlive(player) && world.get<ModelRenderer>(destinationMarker).visible) {
+        const Vec3 from = getRenderTransform(world, player, alpha).position;
+        debug.line(from, world.get<Transform>(destinationMarker).position, Vec3{1.0f, 0.71f, 0.022f});
+    }
 }
 
 /*

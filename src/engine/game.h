@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "input/input.h"
 #include "scene/camera.h"
+#include "scene/debug_draw.h"
 
 /*
 * The boundary between the engine and one particular game.
@@ -14,6 +15,7 @@
 *   onInput        once, before the ticks: turn input into commands
 *   onFixedUpdate  zero or more times: one fixed simulation tick each
 *   onUpdate       once, after the ticks: camera and anything that follows interpolated positions
+*   onDebugDraw    once: optional wireframe shapes for this frame
 * then draws the World from getCamera().
 */
 class Game {
@@ -38,6 +40,19 @@ public:
 
     // True for a hidden, captured mouse that drives the camera; false for a visible cursor kept in the window.
     virtual bool wantsMouseLook() const = 0;
+
+    // Debug drawing, optional. Called every frame after onUpdate: add wireframe shapes to see what the game knows but
+    // does not show (paths, colliders, targets). They are drawn over everything for this frame only.
+    virtual void onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
+        (void)world;
+        (void)debug;
+        (void)alpha;
+    }
+
+    // True to have the engine draw a box around every mesh it draws (its bounds, through the same transform).
+    virtual bool wantsBoundingBoxes() const {
+        return false;
+    }
 };
 
 /*

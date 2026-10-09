@@ -113,3 +113,21 @@ Mat4 Model::getNormalizationMatrix(float targetSize) const {
         Mat4::scaling(scale, scale, scale) *
         Mat4::translation(-centre.x, -centre.y, -centre.z);
 }
+/*
+* Every vertex counts, used by a triangle or not, which matches what the renderer uploads.
+*/
+ModelBounds meshBounds(const Mesh& mesh) {
+    if (mesh.vertices.empty()) {
+        return ModelBounds{};
+    }
+
+    const Vec4& first = mesh.vertices.front();
+    ModelBounds bounds{Vec3{first.x, first.y, first.z}, Vec3{first.x, first.y, first.z}};
+
+    for (const Vec4& vertex : mesh.vertices) {
+        bounds.minimum = Vec3{std::min(bounds.minimum.x, vertex.x), std::min(bounds.minimum.y, vertex.y), std::min(bounds.minimum.z, vertex.z)};
+        bounds.maximum = Vec3{std::max(bounds.maximum.x, vertex.x), std::max(bounds.maximum.y, vertex.y), std::max(bounds.maximum.z, vertex.z)};
+    }
+
+    return bounds;
+}
