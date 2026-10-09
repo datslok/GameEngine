@@ -1,9 +1,6 @@
 #include "engine/application.h"
-#include "math/mat4.h"
+#include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
-#include "scene/interpolation.h"
-#include "scene/lighting.h"
-#include "scene/model_renderer.h"
 
 #include <SDL3/SDL.h>
 #include <cstdint>
@@ -108,34 +105,13 @@ void Application::prepareNewResources() {
 void Application::render(float alpha) {
     prepareNewResources();
 
-    if (!renderer.beginFrame(0.0f, 0.0f, 0.0f)) {
+    Camera& camera = game.getCamera();
+
+    if (!renderer.render(buildFrame(world, camera, alpha))) {
         return;
     }
 
-    Camera& camera = game.getCamera();
-
-    // Use the actual dimensions of the frame acquired by beginFrame().
+    // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
+    // so turning clicks into rays (makeCameraRay) matches what is on screen.
     camera.setAspectRatio(renderer.getFrameAspectRatio());
-
-    renderer.setCamera(camera);
-    renderer.setLighting(collectLighting(world, alpha));
-
-    // Draw every entity that has something to draw and a place to draw it.
-    world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
-        if (!modelRenderer.visible) {
-            return;
-        }
-
-        const Mat4 entityMatrix = getRenderTransform(world, entity, alpha).getMatrix();
-
-        for (const RenderPart& part : modelRenderer.parts) {
-            renderer.drawMesh(
-                part.mesh,
-                entityMatrix * part.localTransform,
-                part.material
-            );
-        }
-    });
-
-    renderer.endFrame();
 }

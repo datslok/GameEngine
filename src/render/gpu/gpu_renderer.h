@@ -6,6 +6,7 @@
 #include "render/gpu/light_uniforms.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
+#include "scene/frame_description.h"
 #include "scene/material.h"
 #include "scene/indexed_mesh.h"
 #include "scene/lighting.h"
@@ -41,29 +42,17 @@ public:
     GpuRenderer(const GpuRenderer&) = delete;
     GpuRenderer& operator=(const GpuRenderer&) = delete;
 
-    // Clear colour and depth once. Returns false if no frame is available.
-    // Background colour components range from 0.0f to 1.0f.
-    bool beginFrame(float red, float green, float blue);
+    // Draw and present one whole frame. The frame's camera gets the acquired frame's aspect ratio (the caller's camera is not changed).
+    // Returns false if no frame was available (a minimized window), in which case nothing was drawn.
+    bool render(const FrameDescription& frame);
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
-    // Call between frames, never between beginFrame() and endFrame().
     void uploadMesh(const IndexedMesh& mesh);
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels);
 
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
 
-    // Set the frame's camera: its view and projection (converted to the GPU's depth range here) and its position for specular highlights.
-    // Call between beginFrame() and endFrame(), before drawing.
-    void setCamera(const Camera& camera);
-
-    // Send the frame's lights to the shader. Call between beginFrame() and endFrame(); beginFrame() starts with no lights.
-    void setLighting(const FrameLighting& lighting);
-
-    void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
-
-    // Finish and present the active frame.
-    void endFrame();
 
     SDL_GPUDevice* getDevice() const;
 
@@ -71,7 +60,7 @@ public:
     PresentMode setPresentMode(PresentMode requested);
     PresentMode getPresentMode() const;
 
-    // Read after beginFrame() returns true.
+    // The aspect ratio of the last frame render() drew. Read after it returns true.
     float getFrameAspectRatio() const;
 
 private:
@@ -85,6 +74,21 @@ private:
     void useLinearSwapchain();
 
     void cleanup() noexcept;
+
+    // The steps of render(), in order.
+    // Clear colour and depth once. Returns false if no frame is available. Colour components range from 0.0f to 1.0f.
+    bool beginFrame(float red, float green, float blue);
+
+    // Set the frame's camera: its view and projection (converted to the GPU's depth range here) and its position for specular highlights.
+    void setCamera(const Camera& camera);
+
+    // Send the frame's lights to the shader. beginFrame() starts with no lights.
+    void setLighting(const FrameLighting& lighting);
+
+    void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
+
+    // Finish and present the active frame.
+    void endFrame();
 
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
     void createPipeline();
