@@ -88,16 +88,13 @@ void testDemoGame() {
     // On arrival the simulation hides the marker.
     assert(!world.get<ModelRenderer>(marker).visible);
 
-    // The torch follows the player, one unit above it, and interpolates like it.
-    const Entity torch = game.getPlayerTorch();
-    assert(world.isAlive(torch));
-    assert(world.has<PointLight>(torch));
-    assert(world.has<PreviousTransform>(torch));
+    // The duck glows by itself instead of carrying a light: no point lights, and every part of it is emissive.
+    assert(collectLighting(world, 1.0f).pointLights.empty());
 
-    const Vec3 torchPosition = world.get<Transform>(torch).position;
-    assert(nearlyEqual(torchPosition.x, end.x));
-    assert(nearlyEqual(torchPosition.y, end.y + 1.0f));
-    assert(nearlyEqual(torchPosition.z, end.z));
+    for (const RenderPart& part : world.get<ModelRenderer>(player).parts) {
+        const Vec3& glow = part.material.emissive;
+        assert(glow.x > 0.0f && glow.y > 0.0f);
+    }
 
     // A tap does not start hold-to-steer: with the button up, later frames give no new command.
     Input later = mobaInput();

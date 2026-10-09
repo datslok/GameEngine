@@ -106,7 +106,7 @@ Instead of a class hierarchy (`Player : Character : GameObject`), the engine use
 - **Components** are plain data structs attached to entities: `Transform`, `ModelRenderer`, `PointLight`, `CharacterMovement`...
 - **Systems** are plain functions that run over every entity with a given set of components.
 
-A torch that follows the player is an entity with a `Transform` and a `PointLight`. A spinning cube is `Transform` + `ModelRenderer` + `Spinner`. New kinds of object come from new *combinations*, not new classes.
+The flashlight is an entity with a `Transform` and a `SpotLight`. A spinning cube is `Transform` + `ModelRenderer` + `Spinner`. New kinds of object come from new *combinations*, not new classes.
 
 ### Entities that go stale safely
 
@@ -257,7 +257,7 @@ The physics view: a normal is not an arrow like a position, it describes an **ar
 
 Light colours are 0..1 tints with a separate, unbounded `intensity`, keeping "what tint" apart from "how bright". Material colours are different: they are reflectances, the fraction of light a surface bounces back, so 0..255 fits them.
 
-Each frame, `collectLighting` gathers lights from the `World` (point light positions interpolated like meshes, so a carried torch does not jitter), and `packLighting` turns them into the shader's layout. The shader handles up to **4 directional, 16 point and 4 spotlights**; extra lights are dropped.
+Each frame, `collectLighting` gathers lights from the `World` (point light positions interpolated like meshes, so a light carried by something moving does not jitter), and `packLighting` turns them into the shader's layout. The shader handles up to **4 directional, 16 point and 4 spotlights**; extra lights are dropped.
 
 ### Diffuse: Lambert's cosine law
 
@@ -292,7 +292,7 @@ Inside the inner angle it is at full brightness (the bright core), beyond the ou
 
 The comparison uses cosines rather than angles (a bigger cosine means closer to the axis), so the shader needs no `acos` per pixel; the two cosines are computed once on the CPU. The cone multiplies the same distance falloff as a point light. A spotlight also has a **source radius** `r`: its falloff is `intensity / (d² + r²)` instead of `/ (d² + 1)`. Close to a large source (a reflector, a lit disc) light arrives from its whole area rather than one point, so there is no inverse-square spike; far away (d much larger than r) it is ordinary inverse square again. The demo's flashlight uses r = 4.5, so it is gentle up close but still reaches across the scene.
 
-A light that follows the camera, like the demo's flashlight, is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason a carried torch does.
+A light that follows the camera, like the demo's flashlight, is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason moving lights are interpolated.
 
 ### Specular: Blinn-Phong highlights
 
@@ -306,7 +306,7 @@ High `shininess` (128) means most facets line up with `N`: a small, sharp highli
 
 ### Emissive: surfaces that glow
 
-Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon and its MOBA marker).
+Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon, its MOBA marker, and the duck, which glows a warm yellow on top of its lit texture).
 
 Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
 

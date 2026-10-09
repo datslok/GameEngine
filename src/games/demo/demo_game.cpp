@@ -15,9 +15,6 @@
 #include <utility>
 
 namespace {
-    // How far above the player's feet the torch hangs.
-    constexpr float torchHeight = 1.0f;
-
     // Where the duck holds the flashlight in MOBA mode, and how far it tilts the beam down (radians, about 20 degrees).
     constexpr float flashlightHeight = 1.2f;
     constexpr float flashlightTilt = 0.35f;
@@ -106,7 +103,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    // Night: a faint ambient light and a weak, cool moon, so the flashlight and the duck's torch still do most of the work.
+    // Night: a faint ambient light and a weak, cool moon, so the flashlight and the glowing duck stand out.
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
     world.add(world.create(), AmbientLight{Vec3{0.06f, 0.06f, 0.06f}});
     world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.6f, 0.7f, 1.0f}, 0.15f});
@@ -153,14 +150,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     const Model& model = assets.loadModel(playerConfig.modelPath);
     player = spawnCharacter(world, assets, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
 
-    // A warm torch above the player. It moves with the player, so it gets a PreviousTransform and interpolates like the duck.
-    Transform torchPlacement;
-    torchPlacement.position = world.get<Transform>(player).position + Vec3{0.0f, torchHeight, 0.0f};
-
-    playerTorch = world.create();
-    world.add(playerTorch, torchPlacement);
-    world.add(playerTorch, PreviousTransform{torchPlacement});
-    world.add(playerTorch, PointLight{Vec3{1.0f, 0.6f, 0.3f}, 3.0f, 6.0f});
+    // The duck glows a warm yellow, so it is easy to find at night. Emitted light does not light its surroundings.
+    for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
+        part.material.emissive = Vec3{0.45f, 0.35f, 0.12f};
+    }
 
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
@@ -238,12 +231,6 @@ void DemoGame::updateFlashlight(World& world, float alpha) {
 */
 void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     updateCharacters(world, tickSeconds);
-
-    // Right after the player moves, so the torch is never a tick behind. A real hierarchy would replace this (ROADMAP phase 9).
-    if (world.isAlive(player)) {
-        world.get<Transform>(playerTorch).position = world.get<Transform>(player).position + Vec3{0.0f, torchHeight, 0.0f};
-    }
-
     updateSpinners(world, simulationSeconds);
 
     // Simulation continues when the cursor is released or focus is lost.
@@ -281,10 +268,6 @@ Entity DemoGame::getPlayer() const {
 
 Entity DemoGame::getDestinationMarker() const {
     return destinationMarker;
-}
-
-Entity DemoGame::getPlayerTorch() const {
-    return playerTorch;
 }
 
 Entity DemoGame::getFlashlight() const {
