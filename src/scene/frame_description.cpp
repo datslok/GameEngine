@@ -8,7 +8,7 @@
 * placed by the entity's interpolated transform times the part's local transform.
 */
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha) {
-    FrameDescription frame{camera, collectLighting(world, alpha), {}, {}};
+    FrameDescription frame{camera, collectLighting(world, alpha), {}, {}, {}};
 
     world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
         if (!modelRenderer.visible) {

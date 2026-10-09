@@ -46,13 +46,13 @@ namespace {
 
         DebugDraw debug;
         game.onDebugDraw(world, debug, 1.0f);
-        assert(!game.wantsBoundingBoxes());
+        assert(!game.wantsDebugView());
         assert(debug.getLines().empty());
 
         Input pressF4 = mobaInput();
         pressF4.pressKey(Key::F4);
         game.onInput(world, pressF4);
-        assert(game.wantsBoundingBoxes());
+        assert(game.wantsDebugView());
 
         game.onDebugDraw(world, debug, 1.0f);
         const std::size_t withLights = debug.getLines().size();
@@ -69,7 +69,7 @@ namespace {
         assert(walking.getLines().size() == withLights + 1);
 
         game.onInput(world, pressF4);
-        assert(!game.wantsBoundingBoxes());
+        assert(!game.wantsDebugView());
 
         DebugDraw off;
         game.onDebugDraw(world, off, 1.0f);
