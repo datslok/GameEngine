@@ -2,7 +2,7 @@
 
 A game engine written from scratch in C++20, as a learning project. The long-term goal is an engine that can run both an **FPS** and a **MOBA**: the core stays genre-agnostic, and genre-specific code (camera styles, weapons, abilities, netcode) sits on top.
 
-It started as a software rasterizer drawing pixels on the CPU and now renders on the GPU through SDL3's GPU API (Vulkan backend). See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
+It began life as a software rasterizer drawing pixels on the CPU and now renders on the GPU through SDL3's GPU API (Vulkan backend). See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
 
 ## Features
 
