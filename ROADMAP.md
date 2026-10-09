@@ -145,9 +145,10 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
     - Lights just switched on or come into view appear at full strength (nothing showed them before); lights leaving the view go at once
     - Needs: `frameSeconds` in `FrameDescription`, strengths in `LightHistory`, and a shadow strength per slot in the shader (light strength is multiplied into the radiance on the CPU)
     - Comes before caching because it changes how slots are handed over
-  - [ ] 3. Give back tiles for cube faces that see nothing
-    - A face whose view pyramid does not overlap the camera's view cannot shadow a visible pixel, so it gets no tile and no draw. Lamps at the edge of the screen typically need 2 to 4 faces instead of 6
-    - Needs: a conservative pyramid-against-frustum test, and a tile number per face instead of "six in a row" (the table goes into the storage buffer)
+  - [x] 3. Give back tiles for cube faces that see nothing (`shadow-face-culling`)
+    - A face whose view pyramid does not overlap the camera's view cannot shadow a visible pixel, so it gets no tile and no draw
+    - `Frustum::mayIntersect`: the corners of each view against the other's sides, both ways round (conservative). A left-out face keeps its place in the tile list with an empty rectangle, so the shader's `firstTile + face` lookup is unchanged, and it counts as lit
+    - In the demo's lamp field it mostly skips the face that points back towards the camera (about 16 of 96 faces); the F4 readout counts tiles drawn and skipped
     - Frees atlas room and draw time for caching to build on
   - [ ] 4. Shadow caching (the biggest item)
     - Tiles stay where they are between frames and are redrawn only when the light moves, the tile changes, or something that casts shadows moves inside its view

@@ -26,6 +26,12 @@ namespace {
     Camera makeTestCamera(const Vec3& position) {
         return Camera{position, position + Vec3{0.0f, -0.5f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f};
     }
+
+    // High above the test lights (spread along x from 0 to 19) looking straight down, far enough out that every cube
+    // face of every light overlaps its view, so no face is left out.
+    Camera makeOverviewCamera() {
+        return Camera{Vec3{10.0f, 60.0f, 0.0f}, Vec3{10.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 1.5f, 1.5f, 0.1f, 200.0f};
+    }
 }
 
 namespace {
@@ -216,11 +222,18 @@ namespace {
     }
 
     // Every tile lies inside the atlas, none overlaps another, and the shader is told the same rectangles in atlas coordinates.
+    // Tiles left out (size 0) take no room and tell the shader an empty rectangle.
     void assertTilesFitTheAtlas(const ShadowPlan& plan) {
         assert(plan.tileData.size() == plan.tiles.size());
 
         for (std::size_t i = 0; i < plan.tiles.size(); ++i) {
             const ShadowTile& tile = plan.tiles[i];
+
+            if (tile.size == 0) {
+                assert(plan.tileData[i].rect[2] == 0.0f && plan.tileData[i].rect[3] == 0.0f);
+                continue;
+            }
+
             assert(tile.x + tile.size <= shadowAtlasWidth && tile.y + tile.size <= shadowAtlasHeight);
             assert(tile.size == 256 || tile.size == 512 || tile.size == 1024);
 
@@ -268,7 +281,7 @@ namespace {
         lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true));
         lighting.directionalLights.push_back(DirectionalLight{});
 
-        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(plan.uniforms.directionalTiles[0] == 0);
         assert(plan.uniforms.spotTiles[0][0] == 1);
@@ -307,7 +320,7 @@ namespace {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true));
         }
 
-        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(maxShadowedPointLights == 16 && maxShadowedSpotLights == 8);
         assert(plan.tiles.size() == 96);
@@ -333,7 +346,7 @@ namespace {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
         }
 
-        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(plan.tiles.size() == 4 + 8 + 96);
         assertTilesFitTheAtlas(plan);
@@ -369,7 +382,7 @@ namespace {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 5.0f));
         }
 
-        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(plan.tiles.size() == 96);
         assertTilesFitTheAtlas(plan);
@@ -381,7 +394,7 @@ namespace {
 
     // With nothing casting shadows there is nothing to draw and every slot says "none".
     void testNoShadowsWithoutLights() {
-        const ShadowPlan plan = planShadows(FrameLighting{}, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(FrameLighting{}, makeOverviewCamera());
 
         assert(plan.tiles.empty());
         assert(plan.uniforms.spotTiles[1][3] == -1 && plan.uniforms.directionalTiles[3] == -1 && plan.uniforms.pointTiles[15][3] == -1);
@@ -399,7 +412,7 @@ namespace {
             lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 3.0f, 0.0f}, i != 0));
         }
 
-        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         // Spot slot 0 casts none; slots 1 to 7 take one tile each.
         assert(plan.uniforms.spotTiles[0][0] == -1);
@@ -413,6 +426,48 @@ namespace {
 }
 
 namespace {
+    Camera makeForwardCamera() {
+        return Camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f};
+    }
+
+    // A lamp in the middle of the view: every face sees part of it, so all six get tiles.
+    void testFacesInViewGetTiles() {
+        FrameLighting lighting;
+        lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, -10.0f}, true, 8.0f));
+
+        const ShadowPlan plan = planShadows(lighting, makeForwardCamera());
+
+        assert(plan.tiles.size() == 6);
+
+        for (const ShadowTile& tile : plan.tiles) {
+            assert(tile.size > 0);
+        }
+    }
+
+    // A lamp behind the camera whose light reaches forwards into view: only the face looking forwards (-Z) can shadow
+    // anything on screen. The other five get no room in the atlas and nothing is drawn into them, but keep their places
+    // in the tile list, so the shader still finds a face at its first tile plus the face number.
+    void testFacesOutOfViewAreLeftOut() {
+        FrameLighting lighting;
+        lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 5.0f}, true, 8.0f));
+
+        const ShadowPlan plan = planShadows(lighting, makeForwardCamera());
+
+        assert(plan.uniforms.pointTiles[0][0] == 0);
+        assert(plan.tiles.size() == 6);
+        assertTilesFitTheAtlas(plan);
+
+        for (int face = 0; face < 5; ++face) {
+            assert(plan.tiles[static_cast<std::size_t>(face)].size == 0);
+        }
+
+        assert(plan.tiles[5].size > 0);
+
+        // The shader takes the light's normal offset from its first tile, so a left-out face still carries it.
+        assert(plan.tileData[0].offset[0] > 0.0f);
+        assert(plan.tileData[0].offset[0] == plan.tileData[5].offset[0]);
+    }
+
     // A shadow fading in or out reaches the shader as a strength per light slot: 1 full, 0 none.
     void testShadowStrengthIsPassed() {
         FrameLighting lighting;
@@ -425,7 +480,7 @@ namespace {
         spot.shadowFade = 0.7f;
         lighting.spotLights.push_back(spot);
 
-        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][0], 0.3f));
         assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][1], 0.0f));
@@ -434,6 +489,8 @@ namespace {
 }
 
 void testShadowMap() {
+    testFacesInViewGetTiles();
+    testFacesOutOfViewAreLeftOut();
     testShadowStrengthIsPassed();
     testFaceFollowsTheLargestAxis();
     testEachFaceLooksAlongItsAxis();

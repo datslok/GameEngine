@@ -1,8 +1,10 @@
 #include "render/gpu/shadow_map.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/light_uniforms.h"
+#include "math/frustum.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numeric>
 #include <stdexcept>
@@ -64,14 +66,32 @@ namespace {
         Point
     };
 
-    // One light's claim on the atlas: tileCount squares of one size, and where they were placed.
+    // One light's claim on the atlas: tileCount squares of one size, and where they were placed. For a point light,
+    // facesInView says which of its six faces get one of them.
     struct ShadowRequest {
         ShadowKind kind;
         std::size_t slot;
         int tileCount;
         std::uint32_t size;
         std::vector<ShadowTile> tiles;
+        std::array<bool, 6> facesInView{};
     };
+
+    /*
+    * A cube face can only shadow a pixel on screen if its view overlaps the camera's. Tested with the face's widest
+    * version (the margin around a face grows as its tile shrinks), so a point the shader could look up in it is never
+    * left out.
+    */
+    std::array<bool, 6> pointFacesInView(const Vec3& lightPosition, float range, const Frustum& cameraView) {
+        std::array<bool, 6> inView{};
+
+        for (int face = 0; face < 6; ++face) {
+            const Mat4 widest = pointShadowFaceMatrix(lightPosition, face, range, smallestShadowTileSize);
+            inView[static_cast<std::size_t>(face)] = Frustum::fromClipMatrix(widest, ClipDepth::ZeroToOne).mayIntersect(cameraView);
+        }
+
+        return inView;
+    }
 
     /*
     * While the requests need more room than the atlas has, halve the tiles of the least important light that can still
@@ -264,7 +284,8 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera) {
 
 /*
 * Each shadow-casting light, up to the limit for its kind and in the shader's slot order, asks for tiles sized by its
-* reach; a light whose castsShadows is off keeps its slot but gets none. If the atlas would overflow, the least
+* reach; a light whose castsShadows is off keeps its slot but gets none, and a point light's faces that cannot be seen
+* get none (see pointFacesInView). If the atlas would overflow, the least
 * important lights' tiles shrink. Tiles are then placed largest first (so they pack without gaps), but numbered in
 * request order, so the numbering does not depend on sizes.
 */
@@ -298,13 +319,17 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
         }
     }
 
+    const Frustum cameraView = Frustum::fromClipMatrix(camera.getProjectionMatrix() * camera.getViewMatrix(), ClipDepth::NegativeOneToOne);
     int shadowedPoints = 0;
 
     for (std::size_t slot = 0; slot < selected.pointLights.size() && shadowedPoints < maxShadowedPointLights; ++slot) {
-        const PointLight& light = selected.pointLights[slot].light;
+        const PlacedPointLight& placed = selected.pointLights[slot];
 
-        if (light.castsShadows) {
-            requests.push_back(ShadowRequest{ShadowKind::Point, slot, 6, shadowTileSizeFor(1.0f, light.range), {}});
+        if (placed.light.castsShadows) {
+            ShadowRequest request{ShadowKind::Point, slot, 0, shadowTileSizeFor(1.0f, placed.light.range), {}};
+            request.facesInView = pointFacesInView(placed.position, placed.light.range, cameraView);
+            request.tileCount = static_cast<int>(std::count(request.facesInView.begin(), request.facesInView.end(), true));
+            requests.push_back(request);
             ++shadowedPoints;
         }
     }
@@ -349,9 +374,16 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
             plan.uniforms.pointTiles[request.slot / 4][request.slot % 4] = firstTile;
             plan.uniforms.pointShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
 
+            // Faces out of view keep their place in the list, so the shader still finds face f at firstTile + f, but get
+            // an empty square: nothing is drawn into it, and the shader counts it as lit.
+            std::size_t placedFaces = 0;
+
             for (int face = 0; face < 6; ++face) {
-                addTile(plan, request.tiles[static_cast<std::size_t>(face)],
-                        pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
+                const ShadowTile tile = request.facesInView[static_cast<std::size_t>(face)]
+                    ? request.tiles[placedFaces++]
+                    : ShadowTile{Mat4::identity(), 0, 0, 0};
+
+                addTile(plan, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
                         perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size), 0.0f);
             }
         }

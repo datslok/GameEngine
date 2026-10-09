@@ -136,6 +136,11 @@ vec3 offsetForShadow(int tile, vec3 normal, float distanceToLight) {
 * Points outside the tile's view (beyond a directional light's shadow box) count as lit.
 */
 float shadowFromTile(int tile, vec3 position) {
+    // A cube face the camera cannot see got no square in the atlas (an empty rectangle).
+    if (shadowTiles[tile].rect.z <= 0.0) {
+        return 1.0;
+    }
+
     vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
     vec3 projected = clip.xyz / clip.w;
 
