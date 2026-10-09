@@ -5,6 +5,7 @@
 #include "scene/frame_description.h"
 #include "scene/model.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <numbers>
@@ -53,6 +54,52 @@ namespace {
         const Frustum frustum = Frustum::fromClipMatrix(moved, ClipDepth::NegativeOneToOne);
         assert(frustum.intersectsSphere(Vec3{100.0f, 0.0f, -5.0f}, 0.0f));
         assert(!frustum.intersectsSphere(Vec3{0.0f, 0.0f, -5.0f}, 0.0f));
+    }
+
+    bool hasCorner(const std::array<Vec3, 8>& corners, const Vec3& expected) {
+        for (const Vec3& corner : corners) {
+            if (std::abs(corner.x - expected.x) < 0.001f && std::abs(corner.y - expected.y) < 0.001f &&
+                std::abs(corner.z - expected.z) < 0.001f) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The eight corners are where three sides meet: the near square 1 unit away and the far square 10 units away.
+    void testFrustumCorners() {
+        const std::array<Vec3, 8> corners = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne).corners();
+
+        for (float x : {-1.0f, 1.0f}) {
+            for (float y : {-1.0f, 1.0f}) {
+                assert(hasCorner(corners, Vec3{x, y, -1.0f}));
+                assert(hasCorner(corners, Vec3{x * 10.0f, y * 10.0f, -10.0f}));
+            }
+        }
+    }
+
+    // Two views can only overlap if neither lies wholly outside one side of the other.
+    void testFrustumsMayIntersect() {
+        const Frustum camera = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne);
+        assert(camera.mayIntersect(camera));
+
+        // The same view moved far to the side.
+        const Frustum aside = Frustum::fromClipMatrix(testProjection() * Mat4::translation(-100.0f, 0.0f, 0.0f), ClipDepth::NegativeOneToOne);
+        assert(!camera.mayIntersect(aside) && !aside.mayIntersect(camera));
+
+        // A view behind the camera looking further back.
+        const Mat4 lookingBack = Mat4::lookAt(Vec3{0.0f, 0.0f, 2.0f}, Vec3{0.0f, 0.0f, 5.0f}, Vec3{0.0f, 1.0f, 0.0f});
+        const Frustum behind = Frustum::fromClipMatrix(testProjection() * lookingBack, ClipDepth::NegativeOneToOne);
+        assert(!camera.mayIntersect(behind) && !behind.mayIntersect(camera));
+
+        // A view from in front looking back at the camera crosses its view.
+        const Mat4 facing = Mat4::lookAt(Vec3{0.0f, 0.0f, -12.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f});
+        const Frustum opposite = Frustum::fromClipMatrix(testProjection() * facing, ClipDepth::NegativeOneToOne);
+        assert(camera.mayIntersect(opposite) && opposite.mayIntersect(camera));
+
+        // One wholly inside the other.
+        const Frustum narrow = Frustum::fromClipMatrix(Mat4::perspective(0.2f, 1.0f, 2.0f, 5.0f), ClipDepth::NegativeOneToOne);
+        assert(camera.mayIntersect(narrow) && narrow.mayIntersect(camera));
     }
 
     // A box's bounding sphere: its centre moved by the model matrix, its half-diagonal grown by the largest scale.
@@ -120,6 +167,8 @@ namespace {
 
 void testCulling() {
     testFrustumFromMatrix();
+    testFrustumCorners();
+    testFrustumsMayIntersect();
     testBoundingSphere();
     testDrawsGetSpheres();
     testCameraSkipsWhatItCannotSee();

@@ -106,6 +106,15 @@ namespace {
         drawRenderStats(manyLights, lights);
         assert(lights.getScreenLines().size() != debug.getScreenLines().size());
         assert(allInside(lights, 0.0f, 0.0f, 600.0f, 100.0f));
+
+        // A fourth line counts the shadow tiles drawn and the cube faces skipped.
+        RenderStats someSkipped = stats;
+        someSkipped.shadowTilesDrawn = 38;
+        someSkipped.shadowTilesSkipped = 58;
+        DebugDraw tiles;
+        drawRenderStats(someSkipped, tiles);
+        assert(tiles.getScreenLines().size() != debug.getScreenLines().size());
+        assert(allInside(tiles, 0.0f, 0.0f, 600.0f, 100.0f));
     }
 }
 
