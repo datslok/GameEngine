@@ -273,7 +273,7 @@ The physics view: a normal is not an arrow like a position, it describes an **ar
 ### Lights are components
 
 - `DirectionalLight`: a light so far away its rays are parallel, like the sun. It stores the direction its light travels and needs no `Transform`.
-- `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash, the demo's moon). It has a `range` where it fades to exactly zero and a `sourceRadius`.
+- `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash). It has a `range` where it fades to exactly zero and a `sourceRadius`.
 
 Every light except ambient has a `castsShadows` flag, on by default.
 - `SpotLight`: a point light that shines in a cone, like a flashlight. It stores the direction of its beam and two cone angles.
@@ -332,7 +332,7 @@ High `shininess` (128) means most facets line up with `N`: a small, sharp highli
 
 Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon and its MOBA marker).
 
-Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `PointLight` placed inside the sphere. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
+Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
 
 ### The whole sum
 
@@ -364,7 +364,7 @@ Three practical problems, and their fixes:
 
 - **Shadow acne.** Each texel of the shadow map stores one depth for a whole patch of surface. Tested against itself, a sloped surface comes out half in front of and half behind its own stored depth, in stripes. The fix is a small **bias**: the shadow pass pushes depths a little away from the light, more on steep slopes, and the lookup nudges each point off its surface along its normal by about one texel (more for points far from the light, where texels cover more ground).
 - **Jagged edges.** A shadow map has a finite resolution, so a plain in/out test draws staircase edges. The sampler does the comparison itself and blends the results of the four nearest texels, and the shader averages nine such lookups in a 3x3 grid (**percentage-closer filtering**, PCF): at an edge, the fraction of samples that are lit becomes a smooth gradient.
-- **Resolution.** Each tile is 1024 pixels across. The moon is 64 units away and a cube face spans 90 degrees, so one texel covers about 0.13 units of ground there (a cube is 2 units across): its shadows are soft-edged. Most of the moon's six faces see only empty sky, so giving those tiles back to make the others bigger is a planned improvement.
+- **Resolution.** Each tile is 1024 pixels across. How much ground one texel covers depends on the view: the moon's box is 30 units wide, so about 0.03 units (a cube is 2 units across), sharp. A point light far from the scene is much worse: when the demo's moon was briefly a point light 64 units away, its 90 degree cube faces spread one texel over about 0.13 units, and most faces only saw empty sky. Fitting point light views to where the scene actually is, and giving unused faces back, is a planned improvement.
 
 Real shadows from a large source are soft, because near an edge only part of the source is hidden (the **penumbra**, like the edge of the shadow in a solar eclipse), and the further the shadow falls from its caster, the softer it gets. The light's `sourceRadius` will drive that later (percentage-closer soft shadows).
 
@@ -372,7 +372,7 @@ Real shadows from a large source are soft, because near an edge only part of the
 
 The real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sky object that should behave like that is kept at a fixed offset from the camera every frame, so its direction and size never change; that is the trick skyboxes use. Its light would be a `DirectionalLight`, with the same direction everywhere.
 
-The demo deliberately does the opposite: its moon is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds, and the moonlight is a `PointLight` inside it. As you move, the moon shifts and grows like any nearby object, the light really comes from where you see it, and shadows point away from it. The price is that it behaves like a big lamp, not the real moon: the light weakens across the scene with distance (about 25% from the near to the far side of the ground), so it needs an intensity of 290 to give a faint 0.06 at the middle of the ground.
+The demo deliberately does the opposite for the sphere: it is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds. As you move, it shifts and grows like any nearby object, while the moonlight, a `DirectionalLight`, keeps the same direction everywhere, so up close the sphere is no longer exactly where the light seems to come from. (For a while the moonlight was a `PointLight` inside the sphere, which made the light really come from it, but a lamp 64 units away dims across the scene, needs a huge intensity, and gets blurry shadows.)
 
 ---
 
