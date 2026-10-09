@@ -159,10 +159,11 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
     - [x] Shadow cap raised from 16 to 64 point lights (`more-point-shadows`), as many as the shader's seats: the atlas still fits everything at the smallest tile size. `LightLimits` lets a caller cap shadows below the seats (the tests do, to keep shadow-only handovers covered). The shader now skips a light, and its 9 shadow lookups, for pixels beyond its range. All lamps in view in the demo cast shadows
     - [ ] Later: a redraw budget (at most N tiles drawn per frame, most important first, far lights refreshed less often), so switching on many lights at once or turning quickly does not cost one long frame
     - [ ] Later: cache static and moving casters separately (keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame), so one spinning object no longer forces whole tiles to redraw
-  - [ ] 5. Soft shadows (PCSS)
-    - The shader first searches the shadow map near the point to estimate how far away the blocker is, then widens its blur by `sourceRadius * (receiver - blocker) / blocker`: the penumbra geometry of a solar eclipse
-    - Needs: the atlas bound a second time with a plain (non-comparison) sampler for the blocker search, and more texture reads per pixel
-    - Independent shader work, so last; by then caching has paid for the extra cost
+  - [x] 5. Soft shadows (PCSS, `soft-shadows`)
+    - The shader first searches the shadow map near the point to estimate how far away the blocker is, then widens its blur by `emitterRadius * (receiver - blocker) / blocker`: the penumbra geometry of a solar eclipse
+    - A new `emitterRadius` on point lights (0.05) and spotlights (0.025; first 0.1 and 0.05, which looked too soft) instead of `sourceRadius`, which was tuned as a falloff softener far bigger than any real bulb (4.5 on the demo flashlight)
+    - The atlas is bound a second time with a plain sampler for the blocker search; 16 + 16 Poisson-disc samples, rotated per pixel; receiver plane depth bias so wide filters do not shadow sloped surfaces; filter 1 to 12 texels, kept inside the tile
+    - Directional lights keep the 3x3 filter: a real sun or moon's penumbra is smaller than a texel of the 30-unit box
 - [x] Faster builds (`faster-builds`): a one-line change took about 76 s (27 s for the game, 49 s for the tests); now about 2 s, a clean build of everything about 10 s
   - [x] Compile each `.cpp` to its own object file in `build/obj/`, and only link at the end, so a change recompiles only what it touches
   - [x] Let GCC record which headers each file uses (`-MMD -MP`), so a header change recompiles exactly the files that include it

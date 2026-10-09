@@ -132,6 +132,15 @@ namespace {
         return ShadowTileKey{static_cast<std::uint32_t>(request.kind), request.entity, number * 6 + static_cast<std::uint32_t>(face)};
     }
 
+    // What soft shadows need to know about the perspective tile just added (see ShadowTileData::lens). The far plane is
+    // the one squarePerspective really used.
+    void setLens(ShadowPlan& plan, float halfWidth, float farPlane, std::uint32_t tileSize) {
+        float* lens = plan.tileData.back().lens;
+        lens[0] = shadowNearPlane;
+        lens[1] = std::max(farPlane, 2.0f * shadowNearPlane);
+        lens[2] = 2.0f * halfWidth / static_cast<float>(tileSize);
+    }
+
     void addTile(ShadowPlan& plan, ShadowTile tile, const Mat4& matrix, float offsetPerDistance, float fixedOffset) {
         tile.matrix = matrix;
         plan.tiles.push_back(tile);
@@ -345,14 +354,19 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             const PlacedSpotLight& placed = selected.spotLights[request.slot];
             plan.uniforms.spotTiles[request.slot / 4][request.slot % 4] = firstTile;
             plan.uniforms.spotShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
+            plan.uniforms.spotEmitterRadii[request.slot / 4][request.slot % 4] = placed.light.emitterRadius;
+
+            const float halfWidth = withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size);
             addTile(plan, request.tiles[0],
                     spotShadowMatrix(placed.position, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
-                    perspectiveOffset(withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size), request.size), 0.0f);
+                    perspectiveOffset(halfWidth, request.size), 0.0f);
+            setLens(plan, halfWidth, placed.light.range, request.size);
         }
         else {
             const PlacedPointLight& placed = selected.pointLights[request.slot];
             plan.uniforms.pointTiles[request.slot / 4][request.slot % 4] = firstTile;
             plan.uniforms.pointShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
+            plan.uniforms.pointEmitterRadii[request.slot / 4][request.slot % 4] = placed.light.emitterRadius;
 
             // Faces out of view keep their place in the list, so the shader still finds face f at firstTile + f, but get
             // an empty square: nothing is drawn into it, and the shader counts it as lit.
@@ -365,6 +379,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
                 addTile(plan, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
                         perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size), 0.0f);
+                setLens(plan, withEdgeMargin(1.0f, request.size), placed.light.range, request.size);
             }
         }
     }

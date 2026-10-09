@@ -10,6 +10,10 @@ layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 // with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
 layout(set = 2, binding = 1) uniform sampler2DShadow shadowAtlas;
 
+// The same atlas read as plain numbers, the stored depths themselves, which soft shadows need to find how far away the
+// things blocking a light are (a comparison only says whether something is in the way).
+layout(set = 2, binding = 2) uniform sampler2D shadowDepths;
+
 // Must match MaterialUniformData in render/gpu/material_uniforms.h.
 layout(std140, set = 3, binding = 0) uniform MaterialData {
     vec4 baseColour;
@@ -45,14 +49,15 @@ layout(std140, set = 3, binding = 1) uniform LightData {
 };
 
 // Must match ShadowTileData in render/gpu/shadow_map.h. Over a hundred tiles do not fit in a uniform block (the shader
-// can read only 4 KB of one), so they are in a storage buffer: set 2, after the two samplers.
+// can read only 4 KB of one), so they are in a storage buffer: set 2, after the three samplers.
 struct ShadowTileData {
     mat4 matrix; // the tile's view-projection, the same one the shadow pass drew with
     vec4 offset; // normal offset against acne: x per unit of distance from the light, y fixed
     vec4 rect;   // where the tile is in the atlas, 0..1: xy corner, zw size
+    vec4 lens;   // perspective tiles only (else zeros): x near, y far plane, z world size of a texel per unit of distance
 };
 
-layout(std430, set = 2, binding = 2) readonly buffer ShadowTiles {
+layout(std430, set = 2, binding = 3) readonly buffer ShadowTiles {
     ShadowTileData shadowTiles[];
 };
 
@@ -64,9 +69,19 @@ layout(std140, set = 3, binding = 2) uniform ShadowData {
     vec4 atlasTexel;       // xy: one texel's size in atlas coordinates
     vec4 pointShadowStrengths[16]; // how strong point light i's shadow is, 0..1, at [i / 4][i % 4] (fades between lights)
     vec4 spotShadowStrengths[2];
+    vec4 pointEmitterRadii[16];    // the size of point light i's glowing part, at [i / 4][i % 4], for soft shadows
+    vec4 spotEmitterRadii[2];
 };
 
 layout(location = 0) out vec4 outputColour;
+
+// How the surface position changes from this pixel to the next one right and down. Soft shadows use it to follow the
+// surface's slope across their wide filter. Set at the start of main, where every pixel of a 2x2 block runs together
+// (screen-space derivatives are only defined there, not inside the per-light loops some pixels leave early).
+vec3 positionStepRight;
+vec3 positionStepDown;
+
+float interleavedGradientNoise(vec2 pixel);
 
 /*
 * One light's contribution, already scaled by distance falloff (and the cone, for spotlights).
@@ -163,10 +178,124 @@ float shadowFromTile(int tile, vec3 position) {
     return lit / 9.0;
 }
 
+// Soft shadows: the arithmetic mirrors render/gpu/soft_shadow.cpp, which tests it. Widths are in texels of the tile.
+const float minShadowFilterTexels = 1.0;
+const float maxShadowFilterTexels = 12.0;
+const float maxBlockerSearchTexels = 12.0;
+
+// Sixteen points spread over a unit disc with no two close together (a Poisson disc): even coverage from few samples.
+const vec2 poissonDisc[16] = vec2[](
+    vec2(-0.94201624, -0.39906216), vec2(0.94558609, -0.76890725), vec2(-0.09418410, -0.92938870), vec2(0.34495938, 0.29387760),
+    vec2(-0.91588581, 0.45771432), vec2(-0.81544232, -0.87912464), vec2(-0.38277543, 0.27676845), vec2(0.97484398, 0.75648379),
+    vec2(0.44323325, -0.97511554), vec2(0.53742981, -0.47373420), vec2(-0.26496911, -0.41893023), vec2(0.79197514, 0.19090188),
+    vec2(-0.24188840, 0.99706507), vec2(-0.81409955, 0.91437590), vec2(0.19984126, 0.78641367), vec2(0.14383161, -0.14100790)
+);
+
+float linearShadowDepth(float depth, float nearPlane, float farPlane) {
+    return farPlane * nearPlane / (farPlane - depth * (farPlane - nearPlane));
+}
+
+float blockerSearchTexels(float emitterRadius, float receiverDepth, float nearPlane, float texelPerUnit) {
+    float widthPerDistance = emitterRadius * (receiverDepth - nearPlane) / (nearPlane * receiverDepth);
+    return clamp(widthPerDistance / texelPerUnit, minShadowFilterTexels, maxBlockerSearchTexels);
+}
+
+float penumbraTexels(float emitterRadius, float receiverDepth, float blockerDepth, float texelPerUnit) {
+    float worldWidth = emitterRadius * max(receiverDepth - blockerDepth, 0.0) / blockerDepth;
+    return clamp(worldWidth / (receiverDepth * texelPerUnit), minShadowFilterTexels, maxShadowFilterTexels);
+}
+
+// Where a world point lands in the atlas (xy) and its stored-depth value (z), for one tile.
+vec3 atlasPoint(int tile, vec3 position) {
+    vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
+    vec3 projected = clip.xyz / clip.w;
+    vec2 withinTile = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
+    return vec3(shadowTiles[tile].rect.xy + withinTile * shadowTiles[tile].rect.zw, projected.z);
+}
+
+/*
+* Percentage-closer soft shadows (PCSS) for a perspective tile: how much of a glowing area of radius emitterRadius the
+* point sees. Directional boxes, and lights without an emitter size, use the plain 3x3 filter.
+* 1. Blocker search: look around the point for stored depths nearer the light than it, and average their distances.
+* 2. Penumbra: from that, how wide the soft edge is here (wider the further the point is behind the blocker).
+* 3. Filter: average sixteen depth comparisons spread over that width.
+* A wide filter on a sloping surface would compare the surface with itself further along, where it is nearer to or
+* further from the light, and shadow itself. So each sample compares against the surface's own plane at that spot
+* (receiver plane depth bias), worked out from how the point moves in the tile from one screen pixel to the next.
+* The sample pattern is turned by a different angle in every pixel, which trades banding for fine grain.
+*/
+float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
+    if (shadowTiles[tile].rect.z <= 0.0) {
+        return 1.0;
+    }
+
+    vec4 lens = shadowTiles[tile].lens;
+
+    if (lens.y <= 0.0 || emitterRadius <= 0.0) {
+        return shadowFromTile(tile, position);
+    }
+
+    vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
+    vec3 projected = clip.xyz / clip.w;
+
+    if (clip.w <= 0.0 || any(greaterThan(abs(projected.xy), vec2(1.0))) || projected.z < 0.0 || projected.z > 1.0) {
+        return 1.0;
+    }
+
+    vec3 here = atlasPoint(tile, position);
+
+    // The surface's plane in the tile: stored-depth change per step in atlas coordinates, from two neighbouring pixels.
+    vec3 towardsRight = atlasPoint(tile, position + positionStepRight) - here;
+    vec3 towardsDown = atlasPoint(tile, position + positionStepDown) - here;
+    mat2 atlasSteps = mat2(towardsRight.xy, towardsDown.xy);
+    vec2 depthSlope = vec2(0.0);
+
+    if (abs(determinant(atlasSteps)) > 1e-14) {
+        depthSlope = inverse(transpose(atlasSteps)) * vec2(towardsRight.z, towardsDown.z);
+    }
+
+    // Samples stay a texel inside the tile, so they never read a neighbouring light's tile.
+    vec2 lowest = shadowTiles[tile].rect.xy + atlasTexel.xy;
+    vec2 highest = shadowTiles[tile].rect.xy + shadowTiles[tile].rect.zw - atlasTexel.xy;
+
+    float angle = 6.2831853 * interleavedGradientNoise(gl_FragCoord.xy);
+    mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
+
+    float receiverDistance = linearShadowDepth(here.z, lens.x, lens.y);
+    float searchRadius = blockerSearchTexels(emitterRadius, receiverDistance, lens.x, lens.z);
+    float blockerDistances = 0.0;
+    float blockers = 0.0;
+
+    for (int i = 0; i < 16; ++i) {
+        vec2 uv = clamp(here.xy + turn * poissonDisc[i] * searchRadius * atlasTexel.xy, lowest, highest);
+        float stored = textureLod(shadowDepths, uv, 0.0).r;
+
+        if (stored < here.z + dot(depthSlope, uv - here.xy)) {
+            blockerDistances += linearShadowDepth(stored, lens.x, lens.y);
+            blockers += 1.0;
+        }
+    }
+
+    // Nothing in the way of any part of the emitter.
+    if (blockers == 0.0) {
+        return 1.0;
+    }
+
+    float filterRadius = penumbraTexels(emitterRadius, receiverDistance, blockerDistances / blockers, lens.z);
+    float lit = 0.0;
+
+    for (int i = 0; i < 16; ++i) {
+        vec2 uv = clamp(here.xy + turn * poissonDisc[i] * filterRadius * atlasTexel.xy, lowest, highest);
+        lit += texture(shadowAtlas, vec3(uv, here.z + dot(depthSlope, uv - here.xy)));
+    }
+
+    return lit / 16.0;
+}
+
 // A point light has six tiles in a row, one per cube face; the face is picked from the direction to the point.
-float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal) {
+float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emitterRadius) {
     vec3 position = offsetForShadow(firstTile, normal, length(worldPosition - lightPosition));
-    return shadowFromTile(firstTile + pointShadowFace(position - lightPosition), position);
+    return softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, emitterRadius);
 }
 
 // The sRGB curve, as in core/srgb.cpp.
@@ -196,6 +325,9 @@ vec3 ditherForEightBits(vec3 linear) {
 }
 
 void main() {
+    positionStepRight = dFdx(worldPosition);
+    positionStepDown = dFdy(worldPosition);
+
     // Read the texture at this fragment's interpolated UV coordinate.
     vec4 albedo = texture(colourTexture, textureUv) * baseColour;
 
@@ -238,7 +370,7 @@ void main() {
             int firstTile = pointTiles[i / 4][i % 4];
 
             if (firstTile >= 0) {
-                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, normal), pointShadowStrengths[i / 4][i % 4]);
+                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, normal, pointEmitterRadii[i / 4][i % 4]), pointShadowStrengths[i / 4][i % 4]);
             }
 
             addLight(radiance, offset / distance, normal, toCamera, diffuse, specular);
@@ -267,7 +399,7 @@ void main() {
             int tile = spotTiles[i / 4][i % 4];
 
             if (tile >= 0) {
-                radiance *= mix(1.0, shadowFromTile(tile, offsetForShadow(tile, normal, distance)), spotShadowStrengths[i / 4][i % 4]);
+                radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, normal, distance), spotEmitterRadii[i / 4][i % 4]), spotShadowStrengths[i / 4][i % 4]);
             }
             addLight(radiance, toLight, normal, toCamera, diffuse, specular);
         }

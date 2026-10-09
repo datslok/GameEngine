@@ -118,6 +118,7 @@ private:
     // Shadows: the depth atlas (one tile per shadow view), a sampler that compares depths, and the depth-only pipeline that fills it.
     SDL_GPUTexture* shadowAtlas = nullptr;
     SDL_GPUSampler* shadowSampler = nullptr;
+    SDL_GPUSampler* shadowDepthSampler = nullptr; // the atlas as raw depths, for soft shadows
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;
 
     // Shadow caching: the atlas is kept between frames. Lights keep their squares (the layout), a tile is redrawn only
