@@ -10,12 +10,21 @@
 
 #include <vector>
 
+// A sphere around something, in world space. A negative radius means the size is unknown.
+struct BoundingSphere {
+    Vec3 centre{0.0f, 0.0f, 0.0f};
+    float radius = -1.0f;
+};
+
 // One mesh to draw: which mesh, where (its full model matrix), and how it looks.
 struct DrawItem {
     MeshHandle mesh;
     Mat4 model = Mat4::identity();
     Material material;
     bool castsShadows = true;
+
+    // Filled in by the engine from the mesh's bounds (attachBoundingSpheres), so views can skip what they cannot see.
+    BoundingSphere bounds;
 };
 
 /*
