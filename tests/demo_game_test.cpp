@@ -159,15 +159,23 @@ void testDemoGame() {
     freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
 
-    // Away from MOBA mode, the flashlight is held at the camera and points where it looks.
+    // Away from MOBA mode, the flashlight is held in the right hand, a little to the right of and below the eye, and aimed
+    // at the middle of the view. Being off to the side, its shadows show beside things instead of hiding behind them.
     Input idle;
     idle.beginFrame();
     freeCamera.onUpdate(otherWorld, idle, 1.0f / 60.0f, 1.0f);
     const Entity cameraFlashlight = freeCamera.getFlashlight();
     const Vec3 heldAt = otherWorld.get<Transform>(cameraFlashlight).position;
-    const Vec3 cameraPosition = freeCamera.getCamera().getPosition();
-    assert(nearlyEqual(heldAt.x, cameraPosition.x) && nearlyEqual(heldAt.y, cameraPosition.y) && nearlyEqual(heldAt.z, cameraPosition.z));
-    assert(otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized().dot(freeCamera.getCamera().getForward()) > 0.999f);
+    const Camera& view = freeCamera.getCamera();
+    const Vec3 fromEye = heldAt - view.getPosition();
+    assert(fromEye.dot(view.getRight()) > 0.2f && fromEye.dot(view.getRight()) < 0.6f);
+    assert(fromEye.dot(view.getUp()) < -0.1f && fromEye.dot(view.getUp()) > -0.5f);
+
+    // The beam passes through the point straight ahead of the eye, where the crosshair would be.
+    const Vec3 beamDirection = otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized();
+    const Vec3 aimPoint = view.getPosition() + view.getForward() * 8.0f;
+    const Vec3 towardsAim = (aimPoint - heldAt).normalized();
+    assert(beamDirection.dot(towardsAim) > 0.9999f);
 
     // The glowing moon is a fixed place you can fly to, high in the sky,
     // 64 units from where the free camera starts (about 20 seconds of flying at 3 units per second, minus its radius of 4).
