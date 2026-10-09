@@ -35,3 +35,6 @@ struct Mesh {
     static Mesh plane(float halfSize = 20.0f);
 };
 
+// The unit normal of the triangle first, second, third (counterclockwise seen from the front), or zero for a triangle with no area.
+Vec3 faceNormal(const Vec4& first, const Vec4& second, const Vec4& third);
+

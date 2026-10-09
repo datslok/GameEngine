@@ -11,9 +11,20 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <numbers>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
+
+// How to prepare a mesh file. The defaults leave the file exactly as it is.
+struct MeshLoadOptions {
+    // Fill in smooth normals for corners the file gives none. Off by default: only the game knows whether a shape is meant to be faceted.
+    bool smoothNormals = false;
+
+    // Faces meeting at more than this angle (radians) keep a sharp edge when smoothing.
+    float creaseAngle = 60.0f * std::numbers::pi_v<float> / 180.0f;
+};
 
 /*
 * Owns every loaded mesh and texture on the CPU side and hands out handles to them.
@@ -28,8 +39,8 @@ public:
     // Register a mesh that is already shared, such as one from an imported model. The same pointer always gives the same handle.
     MeshHandle addMesh(std::shared_ptr<const Mesh> mesh);
 
-    // Load an OBJ file, or return the handle from the first time it was loaded.
-    MeshHandle loadMesh(const std::string& path);
+    // Load an OBJ file, or return the handle from the first time it was loaded with the same options.
+    MeshHandle loadMesh(const std::string& path, MeshLoadOptions options = {});
 
     // Load an image file, or return the handle from the first time it was loaded with the same flip setting.
     // Rows are flipped by default to match bottom-left UV coordinates (OBJ); glTF textures use flipVertically = false.
@@ -66,7 +77,8 @@ private:
     // std::map never moves its elements, so references returned by loadModel stay valid.
     std::map<std::string, Model> modelsByPath;
 
-    std::map<std::string, MeshHandle> meshesByPath;
+    // Keyed by path, whether smoothed, and crease angle (0 when not smoothed, since it is unused then).
+    std::map<std::tuple<std::string, bool, float>, MeshHandle> meshesByPath;
     std::map<const Mesh*, MeshHandle> meshesByPointer;
     std::map<std::pair<std::string, bool>, TextureHandle> texturesByPath;
 

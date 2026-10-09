@@ -56,10 +56,20 @@ void testAssetManager() {
     assert(assets.getMeshCount() == 4);
     assert(!assets.getMesh(pyramid).triangles.empty());
 
+    // Smoothing is opt-in and part of the cache key: the same file loaded smooth is a different mesh.
+    const MeshHandle smoothPyramid = assets.loadMesh("assets/models/pyramid.obj", MeshLoadOptions{.smoothNormals = true});
+    assert(smoothPyramid != pyramid);
+    assert(assets.loadMesh("assets/models/pyramid.obj", MeshLoadOptions{.smoothNormals = true}) == smoothPyramid);
+    assert(assets.getMeshCount() == 5);
+
+    // The pyramid file has no normals: the plain load leaves them to the face, the smooth load fills them in.
+    assert(!assets.getMesh(pyramid).triangles[0].normals[0].has_value());
+    assert(assets.getMesh(smoothPyramid).triangles[0].normals[0].has_value());
+
     // A failed load is not remembered, so it fails again instead of returning a bad handle.
     assert(throws([&] { assets.loadMesh("assets/models/missing.obj"); }));
     assert(throws([&] { assets.loadMesh("assets/models/missing.obj"); }));
-    assert(assets.getMeshCount() == 4);
+    assert(assets.getMeshCount() == 5);
 
     // Textures are cached by path and flip setting, because a flipped image has different pixels.
     const TextureHandle demo = assets.loadTexture("assets/textures/demo.png");

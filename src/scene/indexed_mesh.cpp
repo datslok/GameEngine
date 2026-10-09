@@ -43,35 +43,6 @@ namespace {
             return hash;
         }
     };
-
-    /*
-    * The face normal from the cross product of two edges. Doubles keep long thin triangles accurate; a degenerate triangle keeps a zero normal.
-    */
-    Vec3 faceNormal(const Vec4& first, const Vec4& second, const Vec4& third) {
-        const double edgeAX = static_cast<double>(second.x) - first.x;
-        const double edgeAY = static_cast<double>(second.y) - first.y;
-        const double edgeAZ = static_cast<double>(second.z) - first.z;
-
-        const double edgeBX = static_cast<double>(third.x) - first.x;
-        const double edgeBY = static_cast<double>(third.y) - first.y;
-        const double edgeBZ = static_cast<double>(third.z) - first.z;
-
-        const double normalX = edgeAY * edgeBZ - edgeAZ * edgeBY;
-        const double normalY = edgeAZ * edgeBX - edgeAX * edgeBZ;
-        const double normalZ = edgeAX * edgeBY - edgeAY * edgeBX;
-
-        const double length = std::hypot(normalX, normalY, normalZ);
-
-        if (length <= 0.0) {
-            return Vec3{0.0f, 0.0f, 0.0f};
-        }
-
-        return Vec3{
-            static_cast<float>(normalX / length),
-            static_cast<float>(normalY / length),
-            static_cast<float>(normalZ / length)
-        };
-    }
 }
 
 IndexedMesh buildIndexedMesh(const Mesh& mesh) {
