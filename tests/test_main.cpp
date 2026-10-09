@@ -43,6 +43,7 @@ void testSrgb();
 void testFrameDescription();
 void testShadowMap();
 void testShadowAtlas();
+void testSoftShadow();
 void testLightPriority();
 void testDebugDraw();
 void testCulling();
@@ -94,6 +95,7 @@ int main(){
     testFrameDescription();
     testShadowMap();
     testShadowAtlas();
+    testSoftShadow();
     testLightPriority();
     testDebugDraw();
     testCulling();

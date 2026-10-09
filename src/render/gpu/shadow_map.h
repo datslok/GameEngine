@@ -75,9 +75,13 @@ struct ShadowUniformData {
     // How strong each light slot's shadow is, 0..1, while shadows fade between lights (0 for a slot without one).
     float pointShadowStrengths[16][4];
     float spotShadowStrengths[2][4];
+
+    // Each shadowed light's emitterRadius, which sizes its soft shadows.
+    float pointEmitterRadii[16][4];
+    float spotEmitterRadii[2][4];
 };
 
-static_assert(sizeof(ShadowUniformData) == 608,"ShadowUniformData must match the shader's ShadowData block");
+static_assert(sizeof(ShadowUniformData) == 896, "ShadowUniformData must match the shader's ShadowData block");
 static_assert(sizeof(ShadowUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
 
 /*
@@ -88,9 +92,13 @@ struct ShadowTileData {
     float matrix[16]; // column-major view-projection, the same one the shadow pass drew with
     float offset[4];  // normal offset against acne: x per unit of distance from the light, y fixed
     float rect[4];    // where the tile is in the atlas, 0..1: xy corner, zw size
+
+    // For soft shadows, perspective views only (zeros for a directional box): x near and y far plane, to turn stored
+    // depths back into distances, and z the world size of one texel per unit of distance from the light.
+    float lens[4];
 };
 
-static_assert(sizeof(ShadowTileData) == 96, "ShadowTileData must match the shader's ShadowTileData struct");
+static_assert(sizeof(ShadowTileData) == 112, "ShadowTileData must match the shader's ShadowTileData struct");
 
 // One shadow view: its view-projection, and the square of the atlas it is drawn into (pixels, top-left corner). Size 0
 // means no square: a point light's cube face that sees nothing on screen, which is not drawn and which the shader counts as lit.
