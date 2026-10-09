@@ -113,3 +113,13 @@ Vec3 getCharacterVisualCentre(const World& world, Entity character, float alpha)
 
     return rendered.position + Vec3{0.0f, height, 0.0f};
 }
+
+/*
+* The model's own forward axis is at modelForwardYaw from +Z, and the entity's yaw turns it further, so the facing is the
+* sum of the two. Using the drawn (interpolated) yaw keeps anything aimed along it, like a carried flashlight, in step with the model.
+*/
+Vec3 getCharacterFacing(const World& world, Entity character, float alpha) {
+    const float yaw = getRenderTransform(world, character, alpha).rotation.y + world.get<CharacterMovement>(character).modelForwardYaw;
+
+    return Vec3{std::sin(yaw), 0.0f, std::cos(yaw)};
+}

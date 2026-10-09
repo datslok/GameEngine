@@ -6,7 +6,7 @@
 /*
 * Collect lights once per frame, so the renderer can send them to the GPU in one go.
 * Point light positions are interpolated exactly like meshes, so a light carried by a moving object does not jitter against it.
-* A point light without a Transform has no position, so it is skipped.
+* A point light or spotlight without a Transform has no position, so it is skipped.
 */
 FrameLighting collectLighting(World& world, float alpha) {
     FrameLighting lighting;
@@ -21,6 +21,10 @@ FrameLighting collectLighting(World& world, float alpha) {
 
     world.each<PointLight, Transform>([&](Entity entity, PointLight& light, Transform&) {
         lighting.pointLights.push_back(PlacedPointLight{getRenderTransform(world, entity, alpha).position, light});
+    });
+
+    world.each<SpotLight, Transform>([&](Entity entity, SpotLight& light, Transform&) {
+        lighting.spotLights.push_back(PlacedSpotLight{getRenderTransform(world, entity, alpha).position, light});
     });
 
     return lighting;

@@ -1,5 +1,8 @@
 #include "render/gpu/light_uniforms.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace {
     void writeVector(float (&target)[4], const Vec3& value, float w) {
         target[0] = value.x;
@@ -55,8 +58,37 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
         ++pointCount;
     }
 
+    int spotCount = 0;
+
+    for (const PlacedSpotLight& placed : lighting.spotLights) {
+        if (spotCount == maxSpotLights) {
+            break;
+        }
+
+        const SpotLight& light = placed.light;
+
+        if (light.range <= 0.0f || light.direction.lengthSquared() < 1e-12f) {
+            continue;
+        }
+
+        // The shader compares cosines (bigger cosine = closer to the axis), so it needs no acos per pixel.
+        // An inner cone wider than the outer one would make the soft edge run backwards, so it is clamped.
+        const float cosOuter = std::cos(light.outerAngle);
+        const float cosInner = std::cos(std::min(light.innerAngle, light.outerAngle));
+
+        SpotLightUniform& slot = data.spots[spotCount];
+        writeVector(slot.positionRange, placed.position, light.range);
+        writeVector(slot.directionCosOuter, light.direction.normalized(), cosOuter);
+        writeVector(slot.radianceCosInner, light.colour * light.intensity, cosInner);
+
+        // The falloff divides by distance^2 + radius^2, so a radius that is not positive would allow a division by zero at the light.
+        slot.sourceRadius[0] = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;
+        ++spotCount;
+    }
+
     data.counts[0] = directionalCount;
     data.counts[1] = pointCount;
+    data.counts[2] = spotCount;
 
     return data;
 }
