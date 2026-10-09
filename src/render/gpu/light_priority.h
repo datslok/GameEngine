@@ -3,6 +3,8 @@
 #include "ecs/entity.h"
 #include "math/frustum.h"
 #include "math/vec3.h"
+#include "render/gpu/light_uniforms.h"
+#include "render/gpu/shadow_map.h"
 #include "scene/lighting.h"
 
 #include <vector>
@@ -62,7 +64,16 @@ struct PrioritizedLighting {
 */
 float lightImportance(const Vec3& lightPosition, const Vec3& colour, float intensity, float sourceRadius, const Vec3& focus);
 
+// How many lights of each kind get a seat in the shader, and how many of those a shadow. The defaults are the engine's
+// limits; shadows may be capped below the seats (then lights can lose their shadow but keep shining), never above.
+struct LightLimits {
+    int pointSeats = maxPointLights;
+    int spotSeats = maxSpotLights;
+    int shadowedPoints = maxShadowedPointLights;
+    int shadowedSpots = maxShadowedSpotLights;
+};
+
 // Choose this frame's lights. view is the camera's frustum; previous is the history this function returned last frame;
 // elapsedSeconds is the time since then, which moves the fades along.
 PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
-                                     float elapsedSeconds);
+                                     float elapsedSeconds, const LightLimits& limits = LightLimits{});

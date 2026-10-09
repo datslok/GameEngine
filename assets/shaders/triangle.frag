@@ -228,7 +228,8 @@ void main() {
             float range = points[i].positionRange.w;
             float distance = length(offset);
 
-            if (distance <= 0.0) {
+            // Beyond its range a light gives exactly nothing, so skip it before the costly part, its shadow lookups.
+            if (distance <= 0.0 || distance >= range) {
                 continue;
             }
 
@@ -247,7 +248,7 @@ void main() {
             vec3 offset = spots[i].positionRange.xyz - worldPosition;
             float distance = length(offset);
 
-            if (distance <= 0.0) {
+            if (distance <= 0.0 || distance >= spots[i].positionRange.w) {
                 continue;
             }
 
