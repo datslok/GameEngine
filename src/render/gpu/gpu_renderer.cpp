@@ -87,6 +87,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         useLinearSwapchain();
 
         createPipeline();
+        createShadowResources();
         createWhiteTexture();
     }
     catch (...) {
@@ -130,8 +131,8 @@ void GpuRenderer::createPipeline() {
             device,
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
-            2, // Material colour, then lights.
-            1
+            3, // Material colour, lights, shadow data.
+            2  // Colour texture, shadow atlas.
         );
 
         SDL_GPUColorTargetDescription colourTarget{};
@@ -215,6 +216,121 @@ void GpuRenderer::createPipeline() {
     SDL_ReleaseGPUShader(device, vertexShader);
 }
 
+/*
+* The atlas holds every shadow view, one per tile (8 across, 4 down). It is both drawn into (as a depth
+* target) and read (as a texture). The sampler compares instead of returning depth: linear filtering then blends the
+* four nearest comparisons, which already softens edges a little before the shader's 3x3 average.
+* The pipeline draws depth only, from positions alone. Both sides of triangles are drawn, so open meshes (a plane) still
+* cast shadows, and a small slope-scaled bias pushes depths away from the light on surfaces seen at a grazing angle,
+* where shadow acne is worst.
+*/
+void GpuRenderer::createShadowResources() {
+    const SDL_GPUTextureUsageFlags atlasUsage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    if (!SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTURETYPE_2D, atlasUsage)) {
+        throw std::runtime_error("This GPU cannot sample a 32-bit depth texture, which shadows need");
+    }
+
+    SDL_GPUTextureCreateInfo atlasInfo{};
+    atlasInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    atlasInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    atlasInfo.usage = atlasUsage;
+    atlasInfo.width = shadowTileSize * shadowAtlasColumns;
+    atlasInfo.height = shadowTileSize * shadowAtlasRows;
+    atlasInfo.layer_count_or_depth = 1;
+    atlasInfo.num_levels = 1;
+    atlasInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    shadowAtlas = SDL_CreateGPUTexture(device, &atlasInfo);
+
+    if (shadowAtlas == nullptr) {
+        throw gpuError("Shadow atlas creation failed");
+    }
+
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    // Lit when our depth is no further from the light than the nearest surface it saw.
+    samplerInfo.enable_compare = true;
+    samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+
+    shadowSampler = SDL_CreateGPUSampler(device, &samplerInfo);
+
+    if (shadowSampler == nullptr) {
+        throw gpuError("Shadow sampler creation failed");
+    }
+
+    SDL_GPUShader* vertexShader = nullptr;
+    SDL_GPUShader* fragmentShader = nullptr;
+
+    try {
+        vertexShader = loadShader(device, "assets/shaders/shadow.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+        fragmentShader = loadShader(device, "assets/shaders/shadow.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
+
+        SDL_GPUVertexBufferDescription vertexDescription{};
+        vertexDescription.slot = 0;
+        vertexDescription.pitch = static_cast<Uint32>(sizeof(MeshVertex));
+        vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+        SDL_GPUVertexAttribute position{};
+        position.location = 0;
+        position.buffer_slot = 0;
+        position.format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+        position.offset = static_cast<Uint32>(offsetof(MeshVertex, position));
+
+        SDL_GPUGraphicsPipelineCreateInfo info{};
+        info.vertex_shader = vertexShader;
+        info.fragment_shader = fragmentShader;
+        info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+
+        info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+        info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+        info.rasterizer_state.enable_depth_bias = true;
+        info.rasterizer_state.depth_bias_constant_factor = 1.0f;
+        info.rasterizer_state.depth_bias_slope_factor = 1.5f;
+
+        info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+        info.vertex_input_state.num_vertex_buffers = 1;
+        info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
+        info.vertex_input_state.num_vertex_attributes = 1;
+        info.vertex_input_state.vertex_attributes = &position;
+
+        info.target_info.num_color_targets = 0;
+        info.target_info.has_depth_stencil_target = true;
+        info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+
+        info.depth_stencil_state.enable_depth_test = true;
+        info.depth_stencil_state.enable_depth_write = true;
+        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+
+        shadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+
+        if (shadowPipeline == nullptr) {
+            throw gpuError("Shadow pipeline creation failed");
+        }
+    }
+    catch (...) {
+        if (fragmentShader != nullptr) {
+            SDL_ReleaseGPUShader(device, fragmentShader);
+        }
+
+        if (vertexShader != nullptr) {
+            SDL_ReleaseGPUShader(device, vertexShader);
+        }
+
+        throw;
+    }
+
+    SDL_ReleaseGPUShader(device, fragmentShader);
+    SDL_ReleaseGPUShader(device, vertexShader);
+}
+
 GpuRenderer::~GpuRenderer() {
     cleanup();
 }
@@ -283,6 +399,21 @@ void GpuRenderer::cleanup() noexcept {
             pipeline = nullptr;
         }
 
+        if (shadowPipeline != nullptr) {
+            SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
+            shadowPipeline = nullptr;
+        }
+
+        if (shadowSampler != nullptr) {
+            SDL_ReleaseGPUSampler(device, shadowSampler);
+            shadowSampler = nullptr;
+        }
+
+        if (shadowAtlas != nullptr) {
+            SDL_ReleaseGPUTexture(device, shadowAtlas);
+            shadowAtlas = nullptr;
+        }
+
         if (windowClaimed) {
             SDL_ReleaseWindowFromGPUDevice(device, window);
             windowClaimed = false;
@@ -299,35 +430,71 @@ SDL_GPUDevice* GpuRenderer::getDevice() const {
     return device;
 }
 
+namespace {
+    // Shaders expect column-major matrices; Mat4 is row-major.
+    void writeColumnMajor(const Mat4& matrix, float* target) {
+        for (int row = 0; row < 4; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                target[column * 4 + row] = matrix.values[row][column];
+            }
+        }
+    }
+}
+
 /*
-* The whole frame arrives at once, so the renderer decides how to draw it. Today that is one pass in the frame's order;
-* shadow mapping will add a pass from the light first, and culling will skip draws the camera cannot see.
+* The whole frame arrives at once, so the renderer decides how to draw it: first the shadow-casting light's view of the
+* scene into the shadow atlas, then the camera's view, which reads that atlas. Culling will later skip draws the camera cannot see.
+* If anything fails part-way, the frame is still submitted (a swapchain image was acquired), then the error is passed on.
 */
 bool GpuRenderer::render(const FrameDescription& frame) {
-    if (!beginFrame(0.0f, 0.0f, 0.0f)) {
+    SDL_GPUTexture* swapchainTexture = acquireFrame();
+
+    if (swapchainTexture == nullptr) {
         return false;
     }
 
-    // Only now is the frame's size known, so the camera's lens is fitted to it here.
-    Camera camera = frame.camera;
-    camera.setAspectRatio(getFrameAspectRatio());
+    try {
+        // Only now is the frame's size known, so the camera's lens is fitted to it here.
+        Camera camera = frame.camera;
+        camera.setAspectRatio(getFrameAspectRatio());
 
-    setCamera(camera);
-    setLighting(frame.lighting);
+        const LightUniformData lights = packLighting(frame.lighting, camera.getPosition());
+        const ShadowPlan shadows = planShadows(frame.lighting, camera);
 
-    for (const DrawItem& draw : frame.draws) {
-        drawMesh(draw.mesh, draw.model, draw.material);
+        if (!shadows.tileMatrices.empty()) {
+            drawShadows(frame, shadows.tileMatrices);
+        }
+
+        beginMainPass(swapchainTexture);
+
+        // The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
+        // View and projection are combined once per frame, not once per object.
+        viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
+
+        // Pushed uniform data stays in effect for every later draw, so the lights and shadow data are sent once per frame.
+        SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
+        SDL_PushGPUFragmentUniformData(commands, 2, &shadows.uniforms, static_cast<Uint32>(sizeof(shadows.uniforms)));
+
+        for (const DrawItem& draw : frame.draws) {
+            drawMesh(draw.mesh, draw.model, draw.material);
+        }
+    }
+    catch (...) {
+        abandonFrame();
+        throw;
     }
 
     endFrame();
     return true;
 }
 
-bool GpuRenderer::beginFrame(float red, float green, float blue) {
+/*
+* Starts the frame's command buffer and gets the image that will become the next displayed frame.
+* Returns null, with nothing left open, when there is no image (a minimized window).
+*/
+SDL_GPUTexture* GpuRenderer::acquireFrame() {
     if (commands != nullptr) {
-        throw std::logic_error(
-            "Finish the current frame before beginning another"
-        );
+        throw std::logic_error("Finish the current frame before beginning another");
     }
 
     commands = SDL_AcquireGPUCommandBuffer(device);
@@ -336,20 +503,12 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
         throw gpuError("GPU command buffer acquisition failed");
     }
 
-    // Get the image that will become the next displayed frame.
     SDL_GPUTexture* swapchainTexture = nullptr;
     Uint32 frameWidth = 0;
     Uint32 frameHeight = 0;
 
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(
-            commands,
-            window,
-            &swapchainTexture,
-            &frameWidth,
-            &frameHeight)) {
-
-        const std::runtime_error error =
-            gpuError("Swapchain acquisition failed");
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, window, &swapchainTexture, &frameWidth, &frameHeight)) {
+        const std::runtime_error error = gpuError("Swapchain acquisition failed");
 
         SDL_CancelGPUCommandBuffer(commands);
         commands = nullptr;
@@ -366,22 +525,84 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
         }
 
         SDL_Delay(10);
-        return false;
+        return nullptr;
     }
 
     try {
         ensureDepthTexture(frameWidth, frameHeight);
     }
     catch (...) {
-        // A swapchain image has been acquired, so submit rather than cancel.
-        SDL_SubmitGPUCommandBuffer(commands);
-        commands = nullptr;
+        abandonFrame();
         throw;
     }
 
+    return swapchainTexture;
+}
+
+/*
+* The shadow maps: the scene drawn once per shadow view (six for each point light, one for each spotlight or directional
+* light), each into its own tile of the atlas (the viewport picks the tile). Only depth is kept, so each texel holds how
+* far the nearest surface is from the light in that direction. Meshes that do not cast shadows are left out.
+*/
+void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<Mat4>& tileMatrices) {
+    SDL_GPUDepthStencilTargetInfo depthTarget{};
+    depthTarget.texture = shadowAtlas;
+    depthTarget.clear_depth = 1.0f;
+    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    depthTarget.store_op = SDL_GPU_STOREOP_STORE; // The main pass reads it.
+    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.cycle = true;
+
+    pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depthTarget);
+
+    if (pass == nullptr) {
+        throw gpuError("Shadow pass creation failed");
+    }
+
+    SDL_BindGPUGraphicsPipeline(pass, shadowPipeline);
+
+    const float tileSize = static_cast<float>(shadowTileSize);
+
+    for (std::size_t tile = 0; tile < tileMatrices.size(); ++tile) {
+        // Geometry outside a view is clipped before it is drawn, so it never spills into the neighbouring tiles.
+        SDL_GPUViewport viewport{};
+        viewport.x = static_cast<float>(tile % shadowAtlasColumns) * tileSize;
+        viewport.y = static_cast<float>(tile / shadowAtlasColumns) * tileSize;
+        viewport.w = tileSize;
+        viewport.h = tileSize;
+        viewport.min_depth = 0.0f;
+        viewport.max_depth = 1.0f;
+        SDL_SetGPUViewport(pass, &viewport);
+
+        const Mat4& tileMatrix = tileMatrices[tile];
+
+        for (const DrawItem& draw : frame.draws) {
+            if (!draw.castsShadows) {
+                continue;
+            }
+
+            const GpuMesh& mesh = bindMesh(draw.mesh);
+
+            float transform[16]{};
+            writeColumnMajor(tileMatrix * draw.model, transform);
+            SDL_PushGPUVertexUniformData(commands, 0, transform, static_cast<Uint32>(sizeof(transform)));
+
+            SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
+        }
+    }
+
+    SDL_EndGPURenderPass(pass);
+    pass = nullptr;
+}
+
+/*
+* Clears colour and depth, then starts the pass that draws the camera's view into the swapchain image.
+*/
+void GpuRenderer::beginMainPass(SDL_GPUTexture* swapchainTexture) {
     SDL_GPUColorTargetInfo target{};
     target.texture = swapchainTexture;
-    target.clear_color = SDL_FColor{red, green, blue, 1.0f};
+    target.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
     target.load_op = SDL_GPU_LOADOP_CLEAR;
     target.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -397,86 +618,35 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
     pass = SDL_BeginGPURenderPass(commands, &target, 1, &depthTarget);
 
     if (pass == nullptr) {
-        const std::runtime_error error =
-            gpuError("GPU render pass creation failed");
-
-        SDL_SubmitGPUCommandBuffer(commands);
-        commands = nullptr;
-        throw error;
+        throw gpuError("GPU render pass creation failed");
     }
 
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
-
-    // A frame that never sets its camera or lighting gets a neutral camera and no lights, rather than whatever the last frame left.
-    viewProjection = Mat4::identity();
-    cameraPosition = Vec3{0.0f, 0.0f, 0.0f};
-    setLighting(FrameLighting{});
-
-    return true;
 }
 
 /*
-* The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
-* View and projection are combined once per frame, not once per object.
+* Handles are indices into the same numbering the AssetManager uses, so finding the GPU copy is one array access.
 */
-void GpuRenderer::setCamera(const Camera& camera) {
-    if (commands == nullptr || pass == nullptr) {
-        throw std::logic_error("setCamera requires an active frame");
-    }
-
-    viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
-    cameraPosition = camera.getPosition();
-
-    lightData.cameraPosition[0] = cameraPosition.x;
-    lightData.cameraPosition[1] = cameraPosition.y;
-    lightData.cameraPosition[2] = cameraPosition.z;
-    lightData.cameraPosition[3] = 0.0f;
-    pushLightData();
-}
-
-void GpuRenderer::setLighting(const FrameLighting& lighting) {
-    if (commands == nullptr || pass == nullptr) {
-        throw std::logic_error("setLighting requires an active frame");
-    }
-
-    lightData = packLighting(lighting, cameraPosition);
-    pushLightData();
-}
-
-/*
-* Pushed uniform data stays in effect for every later draw in the frame, so the lights and camera position are sent once, not per object.
-*/
-void GpuRenderer::pushLightData() {
-    SDL_PushGPUFragmentUniformData(commands, 1, &lightData, static_cast<Uint32>(sizeof(lightData)));
-}
-
-void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Material& material) {
-    if (commands == nullptr || pass == nullptr) {
-        throw std::logic_error("drawMesh requires an active frame");
-    }
-
-    // Handles are indices into the same numbering the AssetManager uses, so finding the GPU copy is one array access.
+const GpuMesh& GpuRenderer::bindMesh(MeshHandle meshHandle) {
     if (!meshHandle.isValid() || meshHandle.index >= meshes.size()) {
-        throw std::out_of_range("drawMesh: mesh handle has not been uploaded");
+        throw std::out_of_range("Mesh handle has not been uploaded");
     }
 
     const GpuMesh& mesh = *meshes[meshHandle.index];
 
     SDL_GPUBufferBinding vertexBinding{};
     vertexBinding.buffer = mesh.getVertexBuffer();
-    vertexBinding.offset = 0;
-
     SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
 
     SDL_GPUBufferBinding indexBinding{};
     indexBinding.buffer = mesh.getIndexBuffer();
-    indexBinding.offset = 0;
+    SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-    SDL_BindGPUIndexBuffer(
-        pass,
-        &indexBinding,
-        SDL_GPU_INDEXELEMENTSIZE_32BIT
-    );
+    return mesh;
+}
+
+void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Material& material) {
+    const GpuMesh& mesh = bindMesh(meshHandle);
 
     const Mat4 transform = viewProjection * model;
 
@@ -486,26 +656,11 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
     // The shader expects three consecutive column-major matrices:
     // the complete transform, the model matrix, and the normal matrix.
     float matrixData[48]{};
+    writeColumnMajor(transform, matrixData);
+    writeColumnMajor(model, matrixData + 16);
+    writeColumnMajor(normals, matrixData + 32);
 
-    for (int row = 0; row < 4; ++row) {
-        for (int column = 0; column < 4; ++column) {
-            matrixData[column * 4 + row] =
-                transform.values[row][column];
-
-            matrixData[16 + column * 4 + row] =
-                model.values[row][column];
-
-            matrixData[32 + column * 4 + row] =
-                normals.values[row][column];
-        }
-    }
-
-    SDL_PushGPUVertexUniformData(
-        commands,
-        0,
-        matrixData,
-        static_cast<Uint32>(sizeof(matrixData))
-    );
+    SDL_PushGPUVertexUniformData(commands, 0, matrixData, static_cast<Uint32>(sizeof(matrixData)));
 
     const MaterialUniformData materialData = packMaterial(material);
 
@@ -522,20 +677,19 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
         selectedTexture = textures[material.texture.index].get();
     }
 
-    SDL_GPUTextureSamplerBinding textureBinding{};
-    textureBinding.texture = selectedTexture->getTexture();
-    textureBinding.sampler = selectedTexture->getSampler();
+    // Slot 0: the surface's colour texture. Slot 1: the shadow atlas, read with depth comparison.
+    SDL_GPUTextureSamplerBinding textureBindings[2]{};
+    textureBindings[0].texture = selectedTexture->getTexture();
+    textureBindings[0].sampler = selectedTexture->getSampler();
+    textureBindings[1].texture = shadowAtlas;
+    textureBindings[1].sampler = shadowSampler;
 
-    SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
+    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 2);
 
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }
 
 void GpuRenderer::endFrame() {
-    if (commands == nullptr || pass == nullptr) {
-        throw std::logic_error("endFrame requires an active frame");
-    }
-
     SDL_EndGPURenderPass(pass);
     pass = nullptr;
 
@@ -544,6 +698,21 @@ void GpuRenderer::endFrame() {
 
     if (!submitted) {
         throw gpuError("GPU submission failed");
+    }
+}
+
+/*
+* After an error mid-frame: close whatever is open and submit, because an acquired swapchain image must be submitted, not cancelled.
+*/
+void GpuRenderer::abandonFrame() noexcept {
+    if (pass != nullptr) {
+        SDL_EndGPURenderPass(pass);
+        pass = nullptr;
+    }
+
+    if (commands != nullptr) {
+        SDL_SubmitGPUCommandBuffer(commands);
+        commands = nullptr;
     }
 }
 

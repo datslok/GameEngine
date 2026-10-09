@@ -18,7 +18,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha) {
         const Mat4 entityMatrix = getRenderTransform(world, entity, alpha).getMatrix();
 
         for (const RenderPart& part : modelRenderer.parts) {
-            frame.draws.push_back(DrawItem{part.mesh, entityMatrix * part.localTransform, part.material});
+            frame.draws.push_back(DrawItem{part.mesh, entityMatrix * part.localTransform, part.material, modelRenderer.castsShadows});
         }
     });
 

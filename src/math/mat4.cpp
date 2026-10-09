@@ -272,3 +272,25 @@ Mat4 normalMatrix(const Mat4& model) {
     result.values[3][3] = 1.0f;
     return result;
 }
+
+/*
+* Scales and shifts the box onto the -1..1 cube, with no division by depth, so things keep their size at any distance.
+* Depth follows the same convention as perspective: -1 at the near plane and 1 at the far plane, the camera looking down -z.
+*/
+Mat4 Mat4::orthographic(float left, float right, float bottom, float top, float nearPlane, float farPlane) {
+    if (!(right > left && top > bottom && farPlane > nearPlane)) {
+        throw std::invalid_argument("Invalid orthographic parameters");
+    }
+
+    Mat4 result;
+
+    result.values[0][0] = 2.0f / (right - left);
+    result.values[0][3] = -(right + left) / (right - left);
+    result.values[1][1] = 2.0f / (top - bottom);
+    result.values[1][3] = -(top + bottom) / (top - bottom);
+    result.values[2][2] = -2.0f / (farPlane - nearPlane);
+    result.values[2][3] = -(farPlane + nearPlane) / (farPlane - nearPlane);
+    result.values[3][3] = 1.0f;
+
+    return result;
+}

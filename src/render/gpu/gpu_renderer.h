@@ -4,6 +4,7 @@
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/shadow_map.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/frame_description.h"
@@ -76,19 +77,15 @@ private:
     void cleanup() noexcept;
 
     // The steps of render(), in order.
-    // Clear colour and depth once. Returns false if no frame is available. Colour components range from 0.0f to 1.0f.
-    bool beginFrame(float red, float green, float blue);
-
-    // Set the frame's camera: its view and projection (converted to the GPU's depth range here) and its position for specular highlights.
-    void setCamera(const Camera& camera);
-
-    // Send the frame's lights to the shader. beginFrame() starts with no lights.
-    void setLighting(const FrameLighting& lighting);
-
+    SDL_GPUTexture* acquireFrame();
+    void drawShadows(const FrameDescription& frame, const std::vector<Mat4>& tileMatrices);
+    void beginMainPass(SDL_GPUTexture* swapchainTexture);
     void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
-
-    // Finish and present the active frame.
     void endFrame();
+    void abandonFrame() noexcept;
+
+    // Bind a mesh's vertex and index buffers to the current pass.
+    const GpuMesh& bindMesh(MeshHandle mesh);
 
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
     void createPipeline();
@@ -102,12 +99,14 @@ private:
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
 
-    // This frame's camera and light block. The camera position lives in the light block, so setCamera and setLighting
-    // each change their part and push the whole block again.
+    // This frame's camera view and projection.
     Mat4 viewProjection = Mat4::identity();
-    Vec3 cameraPosition{0.0f, 0.0f, 0.0f};
-    LightUniformData lightData{};
-    void pushLightData();
+
+    // Shadows: the depth atlas (one tile per shadow view), a sampler that compares depths, and the depth-only pipeline that fills it.
+    SDL_GPUTexture* shadowAtlas = nullptr;
+    SDL_GPUSampler* shadowSampler = nullptr;
+    SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;
+    void createShadowResources();
 
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
     std::vector<std::unique_ptr<GpuMesh>> meshes;

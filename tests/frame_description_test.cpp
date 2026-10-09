@@ -107,7 +107,33 @@ namespace {
     }
 }
 
+namespace {
+    // A model can opt out of casting shadows (the moon sphere surrounds its own light); the draw carries the choice to the renderer.
+    void testShadowCastingIsCarried() {
+        World world;
+
+        const Entity caster = world.create();
+        world.add(caster, Transform{});
+        world.add(caster, makeMeshRenderer(MeshHandle{0}));
+
+        const Entity glow = world.create();
+        world.add(glow, Transform{});
+        ModelRenderer glowRenderer = makeMeshRenderer(MeshHandle{1});
+        glowRenderer.castsShadows = false;
+        world.add(glow, glowRenderer);
+
+        const FrameDescription frame = buildFrame(world, makeTestCamera(), 0.0f);
+
+        assert(frame.draws.size() == 2);
+
+        for (const DrawItem& draw : frame.draws) {
+            assert(draw.castsShadows == (draw.mesh == MeshHandle{0}));
+        }
+    }
+}
+
 void testFrameDescription() {
+    testShadowCastingIsCarried();
     testCameraIsCopied();
     testLightingIsCollected();
     testEachPartIsOneDraw();

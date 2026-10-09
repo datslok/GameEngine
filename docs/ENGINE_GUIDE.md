@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to texture filtering (lights including spotlights, emissive materials and the sky moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps).
+**Covers:** phases 0 to 3, and phase 4 up to shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour, the frame description, shadow mapping).
 
 ---
 
@@ -195,24 +195,27 @@ Convention: `Mat4` is row-major (`values[row][column]`) and multiplies column ve
 
 The renderer uses **SDL_GPU**, SDL3's portable GPU API, with the Vulkan backend. Shaders are written in GLSL and compiled to SPIR-V by `make`.
 
-### Each frame
+### Each frame: describe it, then hand it over
+
+The engine first writes the whole frame down as plain data, a `FrameDescription`, and then gives it to the renderer in one call:
 
 ```
-renderer.beginFrame()                 acquire the next screen image, clear colour and depth
-renderer.setCamera(camera)            view-projection and camera position, once per frame
-renderer.setLighting(lights)          every light, once per frame
-for each visible part:
-    renderer.drawMesh(mesh, model, material)
-renderer.endFrame()                   submit and present
+frame = buildFrame(world, camera, alpha)   a copy of the camera, every light, and one DrawItem
+                                           {mesh, model matrix, material, castsShadows} per visible model part
+renderer.render(frame)                     the renderer decides how to draw it
 ```
 
-The engine collects what to draw from the `World` (`ModelRenderer` + `Transform`, interpolated by `alpha`) and the lights (`collectLighting`).
+`buildFrame` reads the `World` (`ModelRenderer` + `Transform`, interpolated by `alpha`, and the lights through `collectLighting`). It contains no GPU code, so tests can check exactly what would be drawn.
+
+Why not just let the engine call "draw this mesh" for each object, as it used to? Because some techniques need to see the whole scene before drawing any of it. Shadows draw the scene twice, first from the light and then from the camera; culling skips what the camera cannot see; a ray tracer needs every object up front. A list of everything to draw allows all of these, while a stream of "draw this now" calls allows none. Inside, `render` acquires the next screen image, draws the shadow map if a light casts shadows, draws the camera's view, and presents.
+
+The renderer works on its own copy of the camera, because only it knows the size of the image it got from the window, and so the aspect ratio. Afterwards the engine copies that ratio into the game's camera too, so turning mouse clicks into rays matches what is on screen.
 
 ### Uniforms and why their layout is strict
 
 Data that is the same for every vertex or pixel of a draw, such as matrices, material and lights, goes to shaders as **uniforms**. In SDL_GPU you *push* bytes into a numbered slot, and the shader reads them as a struct. Pushed data stays in effect for the rest of the frame, so lights and the camera are pushed once, and per-object data per draw.
 
-The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 944 bytes; `MaterialUniformData`, 32 bytes). If anyone changes one side, the build fails.
+The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 944 bytes; `MaterialUniformData`, 48 bytes; `ShadowUniformData`, 2672 bytes). If anyone changes one side, the build fails.
 
 Matrices are transposed when pushed, because GLSL stores them column by column.
 
@@ -231,6 +234,19 @@ Two refinements:
 - **Anisotropic filtering** (up to 16x) helps surfaces seen at a grazing angle, like the ground stretching away. There one screen pixel covers a long thin strip of texture, and a single mip level would blur it; several samples along the strip keep it sharp.
 
 The levels are generated on the GPU when a texture is uploaded. `mipLevelCount(width, height)` gives the length of the chain: the original plus one level per halving of the long side.
+
+### Gamma: storing light the way eyes see it
+
+Our eyes respond to light roughly logarithmically, like ears to sound: doubling the light does not look twice as bright. So image files do not store amounts of light. They store **sRGB** values, roughly `light^(1/2.2)`, which spends more of the 256 levels on dark tones, where we notice small steps. A stored 128 is only about 22% of white's light, not 50%.
+
+Lighting maths (adding lights, scaling by angle, averaging texels for mipmaps) is only correct on amounts of light, like adding intensities rather than decibels. So:
+
+- Textures are created with an `_SRGB` format: the GPU converts each texel to linear light as it reads it, and mipmaps are averaged in linear light.
+- Material colours are sRGB bytes too (what a colour picker gives), and `packMaterial` converts them with `srgbByteToLinear` (`core/srgb`).
+- Light colours, intensities and emissive colours are already linear.
+- The swapchain (the screen images) is sRGB as well, so the GPU converts the shader's linear result back as it writes each pixel.
+
+A consequence when tuning: linear numbers for dim light look tiny. The demo's night ambient of 0.012 shows as about 0.11 of full brightness on screen, because the sRGB curve lifts dark values. Before this was done, the maths happened on sRGB values directly, which made light falloff and soft edges look too dark and too sudden.
 
 ### Depth range
 
@@ -251,7 +267,9 @@ The physics view: a normal is not an arrow like a position, it describes an **ar
 ### Lights are components
 
 - `DirectionalLight`: a light so far away its rays are parallel, like the sun. It stores the direction its light travels and needs no `Transform`.
-- `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash). It has a `range` where it fades to exactly zero.
+- `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash, the demo's moon). It has a `range` where it fades to exactly zero and a `sourceRadius`.
+
+Every light except ambient has a `castsShadows` flag, on by default.
 - `SpotLight`: a point light that shines in a cone, like a flashlight. It stores the direction of its beam and two cone angles.
 - `AmbientLight`: a flat fill that stands in for light bounced around the scene. Several add up.
 
@@ -274,10 +292,10 @@ where `N` is the surface normal and `L` the direction towards the light (both un
 Real light from a point falls off as 1/d², because the same energy spreads over a sphere of area 4πd². Two practical changes:
 
 ```
-falloff = window² / (d² + 1),   window = clamp(1 - (d / range)⁴, 0, 1)
+falloff = window² / (d² + r²),   window = clamp(1 - (d / range)⁴, 0, 1)
 ```
 
-- The `+1` keeps it finite when the light is right at the surface (a real bulb is not a mathematical point either).
+- `r` is the light's `sourceRadius` (1 by default). It keeps the light finite right at the surface: a real bulb is not a mathematical point, and close to a large source the light arrives from its whole area. Far away (d much larger than r) it is ordinary inverse square.
 - Pure 1/d² never reaches zero, so every light would have to be computed for every pixel. The window brings it smoothly to exactly zero at `range`, with zero slope, so there is no visible edge.
 
 ### Spotlights: a cone with a soft edge
@@ -290,9 +308,9 @@ cone = smoothstep(cos(outerAngle), cos(innerAngle), dot(-L, beamDirection))
 
 Inside the inner angle it is at full brightness (the bright core), beyond the outer angle it gives nothing, and in between it fades smoothly (the penumbra). A real flashlight has that soft edge because its bulb is not a perfect point: different parts of the bulb light slightly different cones, and their overlap blurs the boundary. A hard cutoff would look like a stencil.
 
-The comparison uses cosines rather than angles (a bigger cosine means closer to the axis), so the shader needs no `acos` per pixel; the two cosines are computed once on the CPU. The cone multiplies the same distance falloff as a point light. A spotlight also has a **source radius** `r`: its falloff is `intensity / (d² + r²)` instead of `/ (d² + 1)`. Close to a large source (a reflector, a lit disc) light arrives from its whole area rather than one point, so there is no inverse-square spike; far away (d much larger than r) it is ordinary inverse square again. The demo's flashlight uses r = 4.5, so it is gentle up close but still reaches across the scene.
+The comparison uses cosines rather than angles (a bigger cosine means closer to the axis), so the shader needs no `acos` per pixel; the two cosines are computed once on the CPU. The cone multiplies the same distance falloff as a point light, including the source radius. The demo's flashlight uses r = 4.5, so it is gentle up close but still reaches across the scene.
 
-A light that follows the camera, like the demo's flashlight, is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason moving lights are interpolated.
+The demo's flashlight is held in the right hand, a little to the side of and below the eye, and aimed at the middle of the view. If it sat exactly at the eye, every shadow it casts would hide straight behind the thing casting it, out of sight. A light that follows the camera is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason moving lights are interpolated.
 
 ### Specular: Blinn-Phong highlights
 
@@ -308,7 +326,7 @@ High `shininess` (128) means most facets line up with `N`: a small, sharp highli
 
 Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon and its MOBA marker).
 
-Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
+Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `PointLight` placed inside the sphere. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
 
 ### The whole sum
 
@@ -318,13 +336,37 @@ colour = albedo * (ambient + Σ diffuse) + Σ specular + emissive
 
 Light adds up linearly, like superposing intensities, so every light simply adds its share. `albedo` is the surface colour: the texture times the material colour. A surface with no usable normal gets ambient and emissive light only.
 
-Totals above 1 clip to white for now. Handling that gracefully (tone mapping) and gamma-correct colour are later topics.
+Totals above 1 clip to white for now. Handling that gracefully (tone mapping) is a later topic. The whole sum happens in linear light (see gamma, above).
+
+### Shadows: a depth photo from the light
+
+A point is in shadow when something sits between it and the light. Testing that directly for every pixel against every triangle is ray tracing. **Shadow mapping** gets the answer from one extra drawing of the scene instead:
+
+1. Put a camera at the light and draw the scene keeping only depth. The result, the **shadow map**, records for every direction how far the nearest surface is from the light. It is like a photo taken with a rangefinder.
+2. While drawing the camera's view, project each pixel's point into that photo and compare: if the photo saw something nearer to the light in that direction, something is in the way, so this light does not reach the point.
+
+Each kind of light needs a different camera:
+
+- A **spotlight** gets one perspective camera looking down its beam, just wide enough for its cone.
+- A **point light** shines every way, so one photo is not enough: it takes six, one per face of a cube around the light, each a square 90 degree perspective camera looking along +X, -X, +Y, -Y, +Z or -Z. A direction belongs to the face of its largest component (`pointShadowFace`).
+- A **directional light** (the sun) has parallel rays, so its camera has no perspective: it is a box (an **orthographic** projection), like photographing with light that never spreads. The sun lights the whole world, but a shadow map has finite resolution, so the box only covers the 30 units in front of the camera, and stretches 50 units back towards the sun so tall things outside the view still cast into it. As the camera moves, the box would slide by fractions of a texel and every shadow edge would crawl and shimmer; snapping its centre to whole texels (measured across the light's direction) makes it jump a texel at a time, so edges stay put.
+
+All these views share one depth texture, an **atlas** of 32 square tiles of 1024 pixels (8 across, 4 down, 128 MB), because this SDL version cannot draw into one layer of a texture array. `planShadows` hands out tiles each frame: six per point light, then one per spotlight, then one per directional light, up to four lights of each kind (4 x 6 + 4 + 4 = 32). Lights beyond that still give light, just without shadows. The shadow pass draws the scene once per tile, all in one render pass, moving the viewport to each tile. Perspective views are made slightly wider than needed, so the samples around a point near a tile's edge stay on that tile. Models with `castsShadows = false` are left out of the shadow pass (the moon sphere, which surrounds its own light, would otherwise block everything), and the duck holds its flashlight out in front of it for the same reason.
+
+The cost grows with every shadowed light: each tile is one more drawing of every shadow-casting mesh, so a shadowed point light costs six. That is why real games shadow only the lights that matter most, and why the cap exists.
+Three practical problems, and their fixes:
+
+- **Shadow acne.** Each texel of the shadow map stores one depth for a whole patch of surface. Tested against itself, a sloped surface comes out half in front of and half behind its own stored depth, in stripes. The fix is a small **bias**: the shadow pass pushes depths a little away from the light, more on steep slopes, and the lookup nudges each point off its surface along its normal by about one texel (more for points far from the light, where texels cover more ground).
+- **Jagged edges.** A shadow map has a finite resolution, so a plain in/out test draws staircase edges. The sampler does the comparison itself and blends the results of the four nearest texels, and the shader averages nine such lookups in a 3x3 grid (**percentage-closer filtering**, PCF): at an edge, the fraction of samples that are lit becomes a smooth gradient.
+- **Resolution.** Each tile is 1024 pixels across. The moon is 64 units away and a cube face spans 90 degrees, so one texel covers about 0.13 units of ground there (a cube is 2 units across): its shadows are soft-edged. Most of the moon's six faces see only empty sky, so giving those tiles back to make the others bigger is a planned improvement.
+
+Real shadows from a large source are soft, because near an edge only part of the source is hidden (the **penumbra**, like the edge of the shadow in a solar eclipse), and the further the shadow falls from its caster, the softer it gets. The light's `sourceRadius` will drive that later (percentage-closer soft shadows).
 
 ### Objects in the sky
 
-The demo's moon sphere sits in the direction the moonlight comes from, opposite the light's direction. The real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sky object that should behave like that is kept at a fixed offset from the camera every frame, so its direction and size never change; that is the trick skyboxes use.
+The real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sky object that should behave like that is kept at a fixed offset from the camera every frame, so its direction and size never change; that is the trick skyboxes use. Its light would be a `DirectionalLight`, with the same direction everywhere.
 
-The demo deliberately does the opposite: its moon is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds. The price is parallax: as you move, it shifts and grows like any nearby object, and up close its direction no longer matches the moonlight exactly (a directional light has the same direction everywhere).
+The demo deliberately does the opposite: its moon is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds, and the moonlight is a `PointLight` inside it. As you move, the moon shifts and grows like any nearby object, the light really comes from where you see it, and shadows point away from it. The price is that it behaves like a big lamp, not the real moon: the light weakens across the scene with distance (about 25% from the near to the far side of the ground), so it needs an intensity of 290 to give a faint 0.06 at the middle of the ground.
 
 ---
 

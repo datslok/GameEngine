@@ -59,7 +59,7 @@ namespace {
 
         assert(data.counts[1] == 1);
         assert(nearlyEqual(data.points[0].positionRange, 1.0f, 2.0f, 3.0f, 6.0f));
-        assert(nearlyEqual(data.points[0].radiance, 3.0f, 3.0f, 3.0f, 0.0f));
+        assert(nearlyEqual(data.points[0].radiance, 3.0f, 3.0f, 3.0f, 1.0f)); // w: source radius, 1 by default
     }
 
     // The shader divides by range, so a light without a positive range would turn pixels into NaN.
@@ -175,7 +175,28 @@ namespace {
     }
 }
 
+namespace {
+    // A point light's source radius softens it up close, like a spotlight's; one that is not positive falls back to 1.
+    void testPointLightSourceRadiusIsPacked() {
+        FrameLighting lighting;
+
+        PlacedPointLight moon = pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 100.0f);
+        moon.light.sourceRadius = 4.0f;
+        lighting.pointLights.push_back(moon);
+
+        PlacedPointLight broken = moon;
+        broken.light.sourceRadius = -2.0f;
+        lighting.pointLights.push_back(broken);
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(nearlyEqual(data.points[0].radiance[3], 4.0f));
+        assert(nearlyEqual(data.points[1].radiance[3], 1.0f));
+    }
+}
+
 void testLightUniforms() {
+    testPointLightSourceRadiusIsPacked();
     testSpotLightSourceRadiusIsPacked();
     testSpotLightIsPacked();
     testSpotLightWithoutDirectionOrRangeIsSkipped();
