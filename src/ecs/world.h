@@ -112,6 +112,17 @@ public:
         }
     }
 
+    /*
+    * The read-only version, for code that only looks: the function gets const components.
+    * It reuses the walk above; casting away const is safe because nothing is changed through it.
+    */
+    template <typename First, typename... Rest, typename Function>
+    void each(Function&& function) const {
+        const_cast<World*>(this)->each<First, Rest...>([&](Entity entity, const First& first, const Rest&... rest) {
+            function(entity, first, rest...);
+        });
+    }
+
 private:
     struct Slot {
         std::uint32_t generation = 1;

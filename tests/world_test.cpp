@@ -173,5 +173,13 @@ void testWorld() {
         assert(readOnly.has<Position>(entity));
         assert(readOnly.get<Position>(entity).x == 4.0f);
         assert(readOnly.tryGet<Velocity>(entity) == nullptr);
+
+        // Systems that only look (debug drawing, rendering) can walk a const World and get const components.
+        world.add(world.create(), Position{6.0f});
+        float sum = 0.0f;
+        readOnly.each<Position>([&](Entity, const Position& position) {
+            sum += position.x;
+        });
+        assert(sum == 10.0f);
     }
 }

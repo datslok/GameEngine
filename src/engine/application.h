@@ -9,6 +9,7 @@
 #include "render/gpu/gpu_renderer.h"
 
 #include <cstdint>
+#include <vector>
 
 /*
 * The engine: runs the main loop for one Game, and owns everything that is the same for every game (window, renderer, input, World, fixed timestep).
@@ -44,6 +45,12 @@ private:
 
     // CPU copies of every mesh and texture. The renderer keeps GPU copies with the same numbering.
     AssetManager assets;
+
+    // Each uploaded mesh's bounds, indexed like MeshHandle, for the bounding box view.
+    std::vector<ModelBounds> boundsByMesh;
+
+    // This frame's wireframe shapes, cleared every frame.
+    DebugDraw debugDraw;
 
     // The simulation always advances in steps of exactly 1/120 s.
     // Frames longer than maxFrameSeconds are clamped, so a hitch slows the game down instead of piling up catch-up ticks.
