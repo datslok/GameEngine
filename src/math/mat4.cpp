@@ -231,3 +231,44 @@ Mat4 Mat4::lookAt(
 
     return result;
 }
+
+/*
+* Normals describe surfaces, and surfaces stretch differently from lines: scale x by 2 and a slope gets shallower, so its normal
+* must tip the other way. The inverse transpose does that. It equals the cofactor matrix divided by the determinant.
+* Normals are normalised later, so only the determinant's sign matters: a mirrored object (negative determinant) would
+* otherwise get inward normals and be lit from behind.
+*/
+Mat4 normalMatrix(const Mat4& model) {
+    const auto& m = model.values;
+    Mat4 result;
+
+    // Each cofactor from the 2x2 minor that skips its row and column; taking rows and columns cyclically gives the sign.
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            const int row1 = (row + 1) % 3;
+            const int row2 = (row + 2) % 3;
+            const int column1 = (column + 1) % 3;
+            const int column2 = (column + 2) % 3;
+
+            result.values[row][column] = m[row1][column1] * m[row2][column2] - m[row1][column2] * m[row2][column1];
+        }
+    }
+
+    const float determinant =
+        m[0][0] * result.values[0][0] + m[0][1] * result.values[0][1] + m[0][2] * result.values[0][2];
+
+    if (determinant == 0.0f) {
+        return Mat4{};
+    }
+
+    const float sign = determinant > 0.0f ? 1.0f : -1.0f;
+
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            result.values[row][column] *= sign;
+        }
+    }
+
+    result.values[3][3] = 1.0f;
+    return result;
+}
