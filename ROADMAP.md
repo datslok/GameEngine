@@ -113,7 +113,7 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 
 **Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window. ✔ (`tests/demo_game_test.cpp`; the remaining items finish the phase)
 
-## Phase 4: Rendering upgrades ← current
+## Phase 4: Rendering upgrades (done, Oct 8-9 2026)
 
 Finishes the old "shading and lighting" step and adds the tools the next phases need to see what they are doing.
 
@@ -133,8 +133,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [x] Dithering (`dithering`): the main shader adds up to half an 8-bit step of per-pixel noise (interleaved gradient noise) in sRGB before output, so slow dark fades (the flashlight's pool at night) no longer show rings; mirrored and tested in `core/dither`
 - [x] Frustum culling (`frustum-culling`): six planes from any view-projection (`math/frustum`), a bounding sphere per draw from its mesh's bounds, the camera's view culls the main pass and each shadow tile culls with its own light view (never the camera's, so off-screen things still cast shadows); `RenderStats` counts drawn and skipped meshes
 - [x] Light priority (`light-priority`): seats in the shader and shadows go to the lights that matter most instead of the first ones in component storage (which shuffles when components are removed). Lights whose range sphere is outside the view are skipped; the rest are ranked by brightness at a focus point the game names (the camera, or the MOBA camera's ground point), `intensity / (d^2 + r^2)` without the range window so far lights do not tie at zero; last frame's seats and shadows count 1.25 times as much (hysteresis), so similar lights do not swap every frame. Seats raised to 64 point and 8 spotlights. The demo gets a field of 42 lamps with pillars (L) and a light count line in the F4 readout
-  - [ ] Later (with hundreds of lights): clustered shading, so each pixel only loops over the lights that reach its part of the view instead of every seated light
-- [ ] Light and shadow follow-ups, in this order (each is tested in the game before the next starts)
+- [x] Light and shadow follow-ups, in this order (each is tested in the game before the next starts)
   - [x] 1. Manual priority (`light-manual-priority`)
     - `int priority = 0` on `PointLight` and `SpotLight`. A higher priority always wins a seat and a shadow over a lower one; importance and hysteresis decide only between equals
     - A game marks a boss's aura or a story lamp, and it is never dropped while in view
@@ -157,8 +156,6 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
     - The atlas is loaded instead of cleared; a redrawn tile is first reset by a "draw depth 1" triangle (`shadow_clear.vert`); with nothing to redraw there is no shadow pass
     - In the demo's lamp field, standing still, about 49 of 82 tiles are cached; the rest see the spinning objects, the flashlight or the moon box. The F4 readout counts tiles drawn, cached and skipped
     - [x] Shadow cap raised from 16 to 64 point lights (`more-point-shadows`), as many as the shader's seats: the atlas still fits everything at the smallest tile size. `LightLimits` lets a caller cap shadows below the seats (the tests do, to keep shadow-only handovers covered). The shader now skips a light, and its 9 shadow lookups, for pixels beyond its range. All lamps in view in the demo cast shadows
-    - [ ] Later: a redraw budget (at most N tiles drawn per frame, most important first, far lights refreshed less often), so switching on many lights at once or turning quickly does not cost one long frame
-    - [ ] Later: cache static and moving casters separately (keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame), so one spinning object no longer forces whole tiles to redraw
   - [x] 5. Soft shadows (PCSS, `soft-shadows`)
     - The shader first searches the shadow map near the point to estimate how far away the blocker is, then widens its blur by `emitterRadius * (receiver - blocker) / blocker`: the penumbra geometry of a solar eclipse
     - A new `emitterRadius` on point lights (0.05) and spotlights (0.025; first 0.1 and 0.05, which looked too soft) instead of `sourceRadius`, which was tuned as a falloff softener far bigger than any real bulb (4.5 on the demo flashlight)
@@ -171,9 +168,9 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
   - [x] The game and the tests share the engine's object files, so the engine compiles once instead of twice
 - [x] Low-latency presentation (`platform-split`): one frame in flight, configurable present mode, mailbox by default
 
-**Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box.
+**Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box. ✔ (bounding boxes; colliders join the F4 view in phase 5)
 
-## Phase 5: Collision and movement
+## Phase 5: Collision and movement ← current
 
 What both genres actually need from physics: knowing what you hit and moving a character through a level without passing through walls.
 
@@ -235,6 +232,9 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] Parent/child entity hierarchy: attach entities to others (a weapon to a hand, a turret to a vehicle)
 - [ ] Full rigid-body dynamics: orientation, angular velocity, mass and inertia, collision response, stacking
 - [ ] Physically based materials (glTF metallic-roughness)
+- [ ] Clustered shading (once there are hundreds of lights): each pixel loops only over the lights that reach its part of the view, instead of every seated light
+- [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
+- [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw
 - [ ] Hardware ray tracing (RTX-class GPUs): a new Vulkan backend built on the frame description from phase 4, with an acceleration structure per mesh built once at upload. SDL_GPU has no ray-tracing support, so SDL keeps the window while the backend talks to Vulkan directly. Start with ray-traced shadows or reflections over the rasterised image, and keep the rasterised path for GPUs without ray tracing. Physically based materials first
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
 - [ ] Post-processing: render the scene to an off-screen texture first, then bloom (bright and emissive pixels blurred and added back, giving the moon and lamps a soft halo) and tone mapping (brightness above 1 rolled off smoothly instead of clipping to white). The dither then moves from `triangle.frag` into this final pass, the one that writes the 8-bit screen image; the off-screen image is high precision and needs none

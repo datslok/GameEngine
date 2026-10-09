@@ -2,7 +2,7 @@
 
 A from-scratch C++20 game engine. Long-term goal: support both **FPS** and **MOBA** style games by keeping the core genre-agnostic and putting genre-specific code (camera controllers, weapons, abilities, netcode style) in separate modules on top.
 
-The roadmap is in `ROADMAP.md`. Phases 0-3 (foundations, GPU rendering and assets, core loop and input, engine architecture) are done; phase 4 (rendering upgrades) is current, with only optional shadow improvements left.
+The roadmap is in `ROADMAP.md`. Phases 0-4 (foundations, GPU rendering and assets, core loop and input, engine architecture, rendering upgrades) are done; phase 5 (collision and movement) is next. Optional rendering ideas (clustered shading, a shadow redraw budget, separate still/moving shadow caches) wait in phase 9.
 
 ## Build and run
 
