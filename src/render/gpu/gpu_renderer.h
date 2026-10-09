@@ -3,7 +3,9 @@
 #include "math/mat4.h"
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
+#include "render/gpu/light_uniforms.h"
 #include "scene/asset_handles.h"
+#include "scene/camera.h"
 #include "scene/material.h"
 #include "scene/indexed_mesh.h"
 #include "scene/lighting.h"
@@ -51,11 +53,14 @@ public:
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
 
-    // Send the frame's lights and the camera position (for specular highlights) to the shader.
-    // Call between beginFrame() and endFrame(); beginFrame() starts with no lights.
-    void setLighting(const FrameLighting& lighting, const Vec3& cameraPosition);
+    // Set the frame's camera: its view and projection (converted to the GPU's depth range here) and its position for specular highlights.
+    // Call between beginFrame() and endFrame(), before drawing.
+    void setCamera(const Camera& camera);
 
-    void drawMesh(MeshHandle mesh, const Mat4& model, const Mat4& viewProjection, const Material& material);
+    // Send the frame's lights to the shader. Call between beginFrame() and endFrame(); beginFrame() starts with no lights.
+    void setLighting(const FrameLighting& lighting);
+
+    void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
 
     // Finish and present the active frame.
     void endFrame();
@@ -88,6 +93,13 @@ private:
 
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
+
+    // This frame's camera and light block. The camera position lives in the light block, so setCamera and setLighting
+    // each change their part and push the whole block again.
+    Mat4 viewProjection = Mat4::identity();
+    Vec3 cameraPosition{0.0f, 0.0f, 0.0f};
+    LightUniformData lightData{};
+    void pushLightData();
 
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
     std::vector<std::unique_ptr<GpuMesh>> meshes;

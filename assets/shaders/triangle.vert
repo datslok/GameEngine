@@ -11,6 +11,7 @@ layout(location = 2) out vec3 worldPosition;
 layout(std140, set = 1, binding = 0) uniform TransformData {
     mat4 transform;
     mat4 model;
+    mat4 normalMatrix; // Inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if the object is squashed flat).
 };
 
 void main() {
@@ -22,18 +23,9 @@ void main() {
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;
 
-    mat3 modelLinear = mat3(model);
-    worldNormal = vec3(0.0);
+    // The normal matrix keeps normals perpendicular to the surface under non-uniform scaling.
+    vec3 transformedNormal = mat3(normalMatrix) * normal;
+    float normalLength = length(transformedNormal);
 
-    // Transform normals correctly under non-uniform scaling.
-    if (determinant(modelLinear) != 0.0) {
-        mat3 normalMatrix = transpose(inverse(modelLinear));
-        vec3 transformedNormal = normalMatrix * normal;
-
-        float normalLength = length(transformedNormal);
-
-        if (normalLength > 0.0) {
-            worldNormal = transformedNormal / normalLength;
-        }
-    }
+    worldNormal = normalLength > 0.0 ? transformedNormal / normalLength : vec3(0.0);
 }
