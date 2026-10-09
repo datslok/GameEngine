@@ -65,14 +65,168 @@ namespace {
         return order;
     }
 
+
+    // A fade that starts this frame begins at least this far in, so a holder always shows as one in the history, even
+    // in a frame that took no time.
+    constexpr float smallestFade = 0.001f;
+
+    // Entity{} belongs to no one, so a light without an entity is never found: it is new every frame.
+    const LightFade* findHeld(const std::vector<LightFade>& held, const Entity& entity) {
+        if (entity == Entity{}) {
+            return nullptr;
+        }
+
+        for (const LightFade& fade : held) {
+            if (fade.entity == entity) {
+                return &fade;
+            }
+        }
+
+        return nullptr;
+    }
+
+    bool wasInView(const LightHistory& previous, const Entity& entity) {
+        return entity != Entity{} && std::find(previous.inView.begin(), previous.inView.end(), entity) != previous.inView.end();
+    }
+
+    std::vector<Entity> holdersOf(const std::vector<LightFade>& held, bool shadowsOnly) {
+        std::vector<Entity> entities;
+
+        for (const LightFade& fade : held) {
+            if (!shadowsOnly || fade.shadow > 0.0f) {
+                entities.push_back(fade.entity);
+            }
+        }
+
+        return entities;
+    }
+
+    // A light holding a seat this frame: which candidate, how far into its seat and its shadow, and how bright it was last frame.
+    struct Holder {
+        std::size_t candidate;
+        float light;
+        float shadow;
+        float lightLastFrame;
+        bool holdsShadow;
+    };
+
     /*
-    * The seated lights of one kind, most important first, out of those the shader can draw and whose range sphere reaches
-    * into view. Their entities are added to seatedEntities for next frame, and candidateCount says how many competed.
+    * Seats for one kind of light, out of those the shader can draw and whose range sphere reaches into view.
+    * - The most important (priority, then brightness, with last frame's holders favoured) are wanted.
+    * - Last frame's holders keep their seat: a wanted one fades in (or stays full), an unwanted one fades out and gives
+    *   the seat up only when it reaches zero.
+    * - Wanted newcomers take the seats left, most important first: they fade in if they were on screen last frame
+    *   (unlit, waiting), and start full if they were not (nothing showed them, so nothing can pop).
+    * Lights that left the view are simply not candidates, so their seats are free at once.
     */
     template <typename Placed>
-    std::vector<Placed> chooseSeats(const std::vector<Placed>& lights, const Vec3& focus, const Frustum& view,
-                                    const std::vector<Entity>& previouslySeated, int seats, std::vector<Entity>& seatedEntities,
-                                    std::size_t& candidateCount) {
+    std::vector<Holder> holdSeats(const std::vector<Placed>& candidates, const std::vector<Contender>& contenders,
+                                  const LightHistory& previous, const std::vector<LightFade>& previouslyHeld, int seats, float fadeStep) {
+        const std::vector<std::size_t> wantedOrder = chooseMostImportant(contenders, holdersOf(previouslyHeld, false), seats);
+        std::vector<bool> wanted(candidates.size(), false);
+
+        for (std::size_t index : wantedOrder) {
+            wanted[index] = true;
+        }
+
+        std::vector<Holder> holders;
+
+        for (std::size_t i = 0; i < candidates.size(); ++i) {
+            if (const LightFade* before = findHeld(previouslyHeld, candidates[i].entity)) {
+                const float light = wanted[i] ? std::min(1.0f, before->light + fadeStep) : before->light - fadeStep;
+
+                if (wanted[i] || light > 0.0f) {
+                    holders.push_back(Holder{i, std::max(light, 0.0f), before->shadow, before->light, false});
+                }
+            }
+        }
+
+        for (std::size_t index : wantedOrder) {
+            if (static_cast<int>(holders.size()) >= seats) {
+                break;
+            }
+
+            if (findHeld(previouslyHeld, candidates[index].entity) != nullptr) {
+                continue;
+            }
+
+            const float light = wasInView(previous, candidates[index].entity) ? std::clamp(fadeStep, smallestFade, 1.0f) : 1.0f;
+            holders.push_back(Holder{index, light, 0.0f, 0.0f, false});
+        }
+
+        return holders;
+    }
+
+    /*
+    * Shadows among the seated lights that cast them, handed over the same way: last frame's shadow holders fade in if
+    * still wanted and out if not, keeping their tile until they reach zero; wanted newcomers take the tiles left. A new
+    * shadow on a light that was already shining fades in; on a light that was not, it starts full, since the light itself
+    * is only now appearing.
+    */
+    template <typename Placed>
+    void holdShadows(std::vector<Holder>& holders, const std::vector<Placed>& candidates, const Vec3& focus,
+                     const std::vector<LightFade>& previouslyHeld, int shadows, float fadeStep) {
+        std::vector<std::size_t> casters;
+        std::vector<Contender> contenders;
+
+        for (std::size_t h = 0; h < holders.size(); ++h) {
+            if (candidates[holders[h].candidate].light.castsShadows) {
+                casters.push_back(h);
+                contenders.push_back(contenderFor(candidates[holders[h].candidate], focus));
+            }
+            else {
+                holders[h].shadow = 0.0f;
+            }
+        }
+
+        const std::vector<std::size_t> wantedOrder = chooseMostImportant(contenders, holdersOf(previouslyHeld, true), shadows);
+        std::vector<bool> wanted(casters.size(), false);
+
+        for (std::size_t index : wantedOrder) {
+            wanted[index] = true;
+        }
+
+        int held = 0;
+
+        for (std::size_t c = 0; c < casters.size(); ++c) {
+            Holder& holder = holders[casters[c]];
+
+            if (holder.shadow <= 0.0f) {
+                continue;
+            }
+
+            const float shadow = wanted[c] ? std::min(1.0f, holder.shadow + fadeStep) : holder.shadow - fadeStep;
+            holder.holdsShadow = wanted[c] || shadow > 0.0f;
+            holder.shadow = holder.holdsShadow ? std::max(shadow, smallestFade) : 0.0f;
+            held += holder.holdsShadow ? 1 : 0;
+        }
+
+        for (std::size_t c : wantedOrder) {
+            Holder& holder = holders[casters[c]];
+
+            if (held >= shadows) {
+                break;
+            }
+
+            if (holder.holdsShadow) {
+                continue;
+            }
+
+            holder.holdsShadow = true;
+            holder.shadow = holder.lightLastFrame > 0.0f ? std::clamp(fadeStep, smallestFade, 1.0f) : 1.0f;
+            ++held;
+        }
+    }
+
+    /*
+    * The seated lights of one kind with their fades, and their entries for next frame's history. candidateCount says
+    * how many competed.
+    */
+    template <typename Placed>
+    std::vector<Placed> chooseLights(const std::vector<Placed>& lights, const Vec3& focus, const Frustum& view,
+                                     const LightHistory& previous, const std::vector<LightFade>& previouslyHeld,
+                                     int seats, int shadows, float fadeStep, LightHistory& history,
+                                     std::vector<LightFade>& held, std::size_t& candidateCount) {
         std::vector<Placed> candidates;
         std::vector<Contender> contenders;
 
@@ -80,53 +234,33 @@ namespace {
             if (canBeDrawn(placed) && view.intersectsSphere(placed.position, placed.light.range)) {
                 candidates.push_back(placed);
                 contenders.push_back(contenderFor(placed, focus));
+
+                if (placed.entity != Entity{}) {
+                    history.inView.push_back(placed.entity);
+                }
             }
         }
 
         candidateCount = candidates.size();
+
+        std::vector<Holder> holders = holdSeats(candidates, contenders, previous, previouslyHeld, seats, fadeStep);
+        holdShadows(holders, candidates, focus, previouslyHeld, shadows, fadeStep);
+
         std::vector<Placed> seated;
 
-        for (std::size_t index : chooseMostImportant(contenders, previouslySeated, seats)) {
-            seated.push_back(candidates[index]);
+        for (const Holder& holder : holders) {
+            Placed placed = candidates[holder.candidate];
+            placed.fade = holder.light;
+            placed.shadowFade = holder.holdsShadow ? holder.shadow : 0.0f;
+            placed.light.castsShadows = holder.holdsShadow;
+            seated.push_back(placed);
 
-            if (candidates[index].entity != Entity{}) {
-                seatedEntities.push_back(candidates[index].entity);
+            if (placed.entity != Entity{}) {
+                held.push_back(LightFade{placed.entity, std::max(holder.light, smallestFade), placed.shadowFade});
             }
         }
 
         return seated;
-    }
-
-    /*
-    * Of the seated lights that cast shadows, the most important keep castsShadows; the others are switched off for
-    * this frame, so shadow planning gives tiles to exactly the chosen ones.
-    */
-    template <typename Placed>
-    void chooseShadowedLights(std::vector<Placed>& seated, const Vec3& focus, const std::vector<Entity>& previouslyShadowed,
-                              int shadows, std::vector<Entity>& shadowedEntities) {
-        std::vector<std::size_t> casterSlots;
-        std::vector<Contender> contenders;
-
-        for (std::size_t slot = 0; slot < seated.size(); ++slot) {
-            if (seated[slot].light.castsShadows) {
-                casterSlots.push_back(slot);
-                contenders.push_back(contenderFor(seated[slot], focus));
-            }
-        }
-
-        std::vector<bool> getsShadow(seated.size(), false);
-
-        for (std::size_t caster : chooseMostImportant(contenders, previouslyShadowed, shadows)) {
-            getsShadow[casterSlots[caster]] = true;
-
-            if (contenders[caster].entity != Entity{}) {
-                shadowedEntities.push_back(contenders[caster].entity);
-            }
-        }
-
-        for (std::size_t slot = 0; slot < seated.size(); ++slot) {
-            seated[slot].light.castsShadows = getsShadow[slot];
-        }
     }
 }
 
@@ -143,7 +277,8 @@ float lightImportance(const Vec3& lightPosition, const Vec3& colour, float inten
 * Directional lights light everything equally and have no position, so they are ranked by brightness alone and need no
 * history: their brightness does not change as the camera moves.
 */
-PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous) {
+PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
+                                     float elapsedSeconds) {
     PrioritizedLighting result;
     result.lighting.ambient = lighting.ambient;
 
@@ -162,16 +297,16 @@ PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& 
         directional.resize(static_cast<std::size_t>(maxDirectionalLights));
     }
 
-    result.lighting.pointLights = chooseSeats(lighting.pointLights, focus, view, previous.litPoints, maxPointLights,
-                                              result.history.litPoints, result.pointLightsInView);
-    chooseShadowedLights(result.lighting.pointLights, focus, previous.shadowedPoints, maxShadowedPointLights,
-                         result.history.shadowedPoints);
+    const float fadeStep = std::max(elapsedSeconds, 0.0f) / lightFadeSeconds;
+
+    result.lighting.pointLights = chooseLights(lighting.pointLights, focus, view, previous, previous.points, maxPointLights,
+                                               maxShadowedPointLights, fadeStep, result.history, result.history.points,
+                                               result.pointLightsInView);
 
     std::size_t spotLightsInView = 0;
-    result.lighting.spotLights = chooseSeats(lighting.spotLights, focus, view, previous.litSpots, maxSpotLights,
-                                             result.history.litSpots, spotLightsInView);
-    chooseShadowedLights(result.lighting.spotLights, focus, previous.shadowedSpots, maxShadowedSpotLights,
-                         result.history.shadowedSpots);
+    result.lighting.spotLights = chooseLights(lighting.spotLights, focus, view, previous, previous.spots, maxSpotLights,
+                                              maxShadowedSpotLights, fadeStep, result.history, result.history.spots,
+                                              spotLightsInView);
 
     return result;
 }

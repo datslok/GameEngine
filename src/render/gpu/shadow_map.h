@@ -70,9 +70,13 @@ struct ShadowUniformData {
     std::int32_t spotTiles[2][4];   // tile of spotlight i at [i / 4][i % 4]
     std::int32_t directionalTiles[4];
     float atlasTexel[4];            // xy: one texel's size in atlas coordinates
+
+    // How strong each light slot's shadow is, 0..1, while shadows fade between lights (0 for a slot without one).
+    float pointShadowStrengths[16][4];
+    float spotShadowStrengths[2][4];
 };
 
-static_assert(sizeof(ShadowUniformData) == 320, "ShadowUniformData must match the shader's ShadowData block");
+static_assert(sizeof(ShadowUniformData) == 608,"ShadowUniformData must match the shader's ShadowData block");
 static_assert(sizeof(ShadowUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
 
 /*
