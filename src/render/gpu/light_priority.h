@@ -17,22 +17,36 @@
 * - Hysteresis: a light that had a seat (or a shadow) last frame counts incumbentAdvantage times as important, so a
 *   rival must be clearly brighter to take it, and two similar lights do not swap every frame as the focus moves.
 *   It only applies between lights of equal priority.
+* - Fading: when a seat or a shadow changes hands, the light losing it fades out over lightFadeSeconds while it still
+*   holds it, and only then does the winner fade in, so the limits always hold and nothing pops. A light that was not
+*   on screen last frame (just switched on, or just come into view) starts at full strength instead: nothing showed
+*   it before, so there is nothing to blend from. A light that leaves the view is dropped at once, for the same reason.
 */
 
 // How much more important a light counts for keeping what it had last frame. In distance terms a rival must be about
 // 11% closer (sqrt(1.25) = 1.118) to take a seat or a shadow from an equally bright light.
 inline constexpr float incumbentAdvantage = 1.25f;
 
-// Who had which seat and shadow last frame. Lights are recognised by their entity.
-struct LightHistory {
-    std::vector<Entity> litPoints;
-    std::vector<Entity> shadowedPoints;
-    std::vector<Entity> litSpots;
-    std::vector<Entity> shadowedSpots;
+// How long a light or its shadow takes to fade fully in or out during a handover.
+inline constexpr float lightFadeSeconds = 0.25f;
+
+// A light holding a seat, and how far it is into the seat and into a shadow (0..1; shadow 0 = none).
+struct LightFade {
+    Entity entity;
+    float light = 0.0f;
+    float shadow = 0.0f;
 };
 
-// The lights to draw this frame (within the shader's limits; castsShadows is on only for lights that get a shadow), and
-// the history to pass to the next frame.
+// What last frame decided, recognising lights by their entity: who was on screen (could be drawn and reached into
+// view), and who held seats and shadows, and how far faded.
+struct LightHistory {
+    std::vector<Entity> inView;
+    std::vector<LightFade> points;
+    std::vector<LightFade> spots;
+};
+
+// The lights to draw this frame (within the shader's limits; castsShadows is on only for lights that hold a shadow,
+// fade and shadowFade say how far in they are), and the history to pass to the next frame.
 struct PrioritizedLighting {
     FrameLighting lighting;
     LightHistory history;
@@ -48,5 +62,7 @@ struct PrioritizedLighting {
 */
 float lightImportance(const Vec3& lightPosition, const Vec3& colour, float intensity, float sourceRadius, const Vec3& focus);
 
-// Choose this frame's lights. view is the camera's frustum; previous is the history this function returned last frame.
-PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous);
+// Choose this frame's lights. view is the camera's frustum; previous is the history this function returned last frame;
+// elapsedSeconds is the time since then, which moves the fades along.
+PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
+                                     float elapsedSeconds);

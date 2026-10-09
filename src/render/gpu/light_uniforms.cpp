@@ -90,7 +90,8 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
 
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive falls back to 1.
         const float sourceRadius = placed.light.sourceRadius > 0.0f ? placed.light.sourceRadius : 1.0f;
-        writeVector(slot.radiance, placed.light.colour * placed.light.intensity, sourceRadius);
+        // A light fading in or out of its seat is dimmed here, so the shader needs no field for it.
+        writeVector(slot.radiance, placed.light.colour * (placed.light.intensity * placed.fade), sourceRadius);
     }
 
     for (std::size_t i = 0; i < selected.spotLights.size(); ++i) {
@@ -104,7 +105,7 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
         SpotLightUniform& slot = data.spots[i];
         writeVector(slot.positionRange, selected.spotLights[i].position, light.range);
         writeVector(slot.directionCosOuter, light.direction.normalized(), cosOuter);
-        writeVector(slot.radianceCosInner, light.colour * light.intensity, cosInner);
+        writeVector(slot.radianceCosInner, light.colour * (light.intensity * selected.spotLights[i].fade), cosInner);
 
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive would allow a division by zero at the light.
         slot.sourceRadius[0] = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;

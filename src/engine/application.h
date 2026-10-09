@@ -23,7 +23,7 @@ public:
 
 private:
     // Draw the World from the game's camera, between the last two ticks.
-    void render(float alpha);
+    void render(float alpha, float frameSeconds);
 
     // Upload meshes and textures the AssetManager gained since the last frame, before the frame begins.
     void prepareNewResources();

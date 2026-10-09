@@ -339,6 +339,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
         else if (request.kind == ShadowKind::Spot) {
             const PlacedSpotLight& placed = selected.spotLights[request.slot];
             plan.uniforms.spotTiles[request.slot / 4][request.slot % 4] = firstTile;
+            plan.uniforms.spotShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
             addTile(plan, request.tiles[0],
                     spotShadowMatrix(placed.position, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
                     perspectiveOffset(withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size), request.size), 0.0f);
@@ -346,6 +347,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
         else {
             const PlacedPointLight& placed = selected.pointLights[request.slot];
             plan.uniforms.pointTiles[request.slot / 4][request.slot % 4] = firstTile;
+            plan.uniforms.pointShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
 
             for (int face = 0; face < 6; ++face) {
                 addTile(plan, request.tiles[static_cast<std::size_t>(face)],
