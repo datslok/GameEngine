@@ -217,7 +217,7 @@ void GpuRenderer::createPipeline() {
 }
 
 /*
-* The atlas holds the six faces of one point light's shadow map, 3 across and 2 down. It is both drawn into (as a depth
+* The atlas holds every shadow view, one per tile (8 across, 4 down). It is both drawn into (as a depth
 * target) and read (as a texture). The sampler compares instead of returning depth: linear filtering then blends the
 * four nearest comparisons, which already softens edges a little before the shader's 3x3 average.
 * The pipeline draws depth only, from positions alone. Both sides of triangles are drawn, so open meshes (a plane) still
@@ -235,8 +235,8 @@ void GpuRenderer::createShadowResources() {
     atlasInfo.type = SDL_GPU_TEXTURETYPE_2D;
     atlasInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     atlasInfo.usage = atlasUsage;
-    atlasInfo.width = pointShadowFaceSize * pointShadowAtlasColumns;
-    atlasInfo.height = pointShadowFaceSize * pointShadowAtlasRows;
+    atlasInfo.width = shadowTileSize * shadowAtlasColumns;
+    atlasInfo.height = shadowTileSize * shadowAtlasRows;
     atlasInfo.layer_count_or_depth = 1;
     atlasInfo.num_levels = 1;
     atlasInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -459,10 +459,10 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         camera.setAspectRatio(getFrameAspectRatio());
 
         const LightUniformData lights = packLighting(frame.lighting, camera.getPosition());
-        const ShadowUniformData shadow = packPointShadow(lights);
+        const ShadowPlan shadows = planShadows(frame.lighting, camera);
 
-        if (lights.counts[3] >= 0) {
-            drawPointShadows(frame, lights.points[lights.counts[3]].positionRange);
+        if (!shadows.tileMatrices.empty()) {
+            drawShadows(frame, shadows.tileMatrices);
         }
 
         beginMainPass(swapchainTexture);
@@ -473,7 +473,7 @@ bool GpuRenderer::render(const FrameDescription& frame) {
 
         // Pushed uniform data stays in effect for every later draw, so the lights and shadow data are sent once per frame.
         SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
-        SDL_PushGPUFragmentUniformData(commands, 2, &shadow, static_cast<Uint32>(sizeof(shadow)));
+        SDL_PushGPUFragmentUniformData(commands, 2, &shadows.uniforms, static_cast<Uint32>(sizeof(shadows.uniforms)));
 
         for (const DrawItem& draw : frame.draws) {
             drawMesh(draw.mesh, draw.model, draw.material);
@@ -540,11 +540,11 @@ SDL_GPUTexture* GpuRenderer::acquireFrame() {
 }
 
 /*
-* The shadow map: the scene drawn from the light six times, once per cube face, each into its own tile of the atlas
-* (the viewport picks the tile). Only depth is kept, so each texel holds how far the nearest surface is from the light
-* in that direction. Meshes that do not cast shadows are left out.
+* The shadow maps: the scene drawn once per shadow view (six for each point light, one for each spotlight or directional
+* light), each into its own tile of the atlas (the viewport picks the tile). Only depth is kept, so each texel holds how
+* far the nearest surface is from the light in that direction. Meshes that do not cast shadows are left out.
 */
-void GpuRenderer::drawPointShadows(const FrameDescription& frame, const float (&positionRange)[4]) {
+void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<Mat4>& tileMatrices) {
     SDL_GPUDepthStencilTargetInfo depthTarget{};
     depthTarget.texture = shadowAtlas;
     depthTarget.clear_depth = 1.0f;
@@ -562,21 +562,20 @@ void GpuRenderer::drawPointShadows(const FrameDescription& frame, const float (&
 
     SDL_BindGPUGraphicsPipeline(pass, shadowPipeline);
 
-    const Vec3 lightPosition{positionRange[0], positionRange[1], positionRange[2]};
-    const float faceSize = static_cast<float>(pointShadowFaceSize);
+    const float tileSize = static_cast<float>(shadowTileSize);
 
-    for (int face = 0; face < 6; ++face) {
-        // Geometry outside a face's view is clipped before it is drawn, so it never spills into the neighbouring tiles.
+    for (std::size_t tile = 0; tile < tileMatrices.size(); ++tile) {
+        // Geometry outside a view is clipped before it is drawn, so it never spills into the neighbouring tiles.
         SDL_GPUViewport viewport{};
-        viewport.x = static_cast<float>(face % pointShadowAtlasColumns) * faceSize;
-        viewport.y = static_cast<float>(face / pointShadowAtlasColumns) * faceSize;
-        viewport.w = faceSize;
-        viewport.h = faceSize;
+        viewport.x = static_cast<float>(tile % shadowAtlasColumns) * tileSize;
+        viewport.y = static_cast<float>(tile / shadowAtlasColumns) * tileSize;
+        viewport.w = tileSize;
+        viewport.h = tileSize;
         viewport.min_depth = 0.0f;
         viewport.max_depth = 1.0f;
         SDL_SetGPUViewport(pass, &viewport);
 
-        const Mat4 faceMatrix = pointShadowFaceMatrix(lightPosition, face, positionRange[3]);
+        const Mat4& tileMatrix = tileMatrices[tile];
 
         for (const DrawItem& draw : frame.draws) {
             if (!draw.castsShadows) {
@@ -586,7 +585,7 @@ void GpuRenderer::drawPointShadows(const FrameDescription& frame, const float (&
             const GpuMesh& mesh = bindMesh(draw.mesh);
 
             float transform[16]{};
-            writeColumnMajor(faceMatrix * draw.model, transform);
+            writeColumnMajor(tileMatrix * draw.model, transform);
             SDL_PushGPUVertexUniformData(commands, 0, transform, static_cast<Uint32>(sizeof(transform)));
 
             SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);

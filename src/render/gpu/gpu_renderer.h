@@ -4,7 +4,7 @@
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
 #include "render/gpu/light_uniforms.h"
-#include "render/gpu/point_shadow.h"
+#include "render/gpu/shadow_map.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/frame_description.h"
@@ -78,7 +78,7 @@ private:
 
     // The steps of render(), in order.
     SDL_GPUTexture* acquireFrame();
-    void drawPointShadows(const FrameDescription& frame, const float (&positionRange)[4]);
+    void drawShadows(const FrameDescription& frame, const std::vector<Mat4>& tileMatrices);
     void beginMainPass(SDL_GPUTexture* swapchainTexture);
     void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
     void endFrame();
@@ -102,7 +102,7 @@ private:
     // This frame's camera view and projection.
     Mat4 viewProjection = Mat4::identity();
 
-    // Point light shadows: the depth atlas (six cube faces), a sampler that compares depths, and the depth-only pipeline that fills it.
+    // Shadows: the depth atlas (one tile per shadow view), a sampler that compares depths, and the depth-only pipeline that fills it.
     SDL_GPUTexture* shadowAtlas = nullptr;
     SDL_GPUSampler* shadowSampler = nullptr;
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;

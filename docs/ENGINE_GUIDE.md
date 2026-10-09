@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to point light shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour, the frame description, shadow mapping).
+**Covers:** phases 0 to 3, and phase 4 up to shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour, the frame description, shadow mapping).
 
 ---
 
@@ -215,7 +215,7 @@ The renderer works on its own copy of the camera, because only it knows the size
 
 Data that is the same for every vertex or pixel of a draw, such as matrices, material and lights, goes to shaders as **uniforms**. In SDL_GPU you *push* bytes into a numbered slot, and the shader reads them as a struct. Pushed data stays in effect for the rest of the frame, so lights and the camera are pushed once, and per-object data per draw.
 
-The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 944 bytes; `MaterialUniformData`, 48 bytes; `ShadowUniformData`, 400 bytes). If anyone changes one side, the build fails.
+The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 944 bytes; `MaterialUniformData`, 48 bytes; `ShadowUniformData`, 2672 bytes). If anyone changes one side, the build fails.
 
 Matrices are transposed when pushed, because GLSL stores them column by column.
 
@@ -267,7 +267,9 @@ The physics view: a normal is not an arrow like a position, it describes an **ar
 ### Lights are components
 
 - `DirectionalLight`: a light so far away its rays are parallel, like the sun. It stores the direction its light travels and needs no `Transform`.
-- `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash, the demo's moon). It has a `range` where it fades to exactly zero, a `sourceRadius` and a `castsShadows` flag.
+- `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash, the demo's moon). It has a `range` where it fades to exactly zero and a `sourceRadius`.
+
+Every light except ambient has a `castsShadows` flag, on by default.
 - `SpotLight`: a point light that shines in a cone, like a flashlight. It stores the direction of its beam and two cone angles.
 - `AmbientLight`: a flat fill that stands in for light bounced around the scene. Several add up.
 
@@ -343,15 +345,22 @@ A point is in shadow when something sits between it and the light. Testing that 
 1. Put a camera at the light and draw the scene keeping only depth. The result, the **shadow map**, records for every direction how far the nearest surface is from the light. It is like a photo taken with a rangefinder.
 2. While drawing the camera's view, project each pixel's point into that photo and compare: if the photo saw something nearer to the light in that direction, something is in the way, so this light does not reach the point.
 
-A point light shines every way, so one photo is not enough: it takes six, one per face of a cube around the light, each a square 90 degree perspective camera looking along +X, -X, +Y, -Y, +Z or -Z. A direction belongs to the face of its largest component (`pointShadowFace`). This SDL version cannot draw into one layer of a texture array, so the six faces share one depth texture, an **atlas** of 3x2 tiles; the shadow pass draws the scene six times in one render pass, moving the viewport to each tile. The faces are made slightly wider than 90 degrees, so the samples around a point near a face's edge stay on that face. Each frame the first point light with `castsShadows` gets the shadow map; models with `castsShadows = false` are left out of it (the moon sphere, which surrounds its own light, would otherwise block everything).
+Each kind of light needs a different camera:
 
+- A **spotlight** gets one perspective camera looking down its beam, just wide enough for its cone.
+- A **point light** shines every way, so one photo is not enough: it takes six, one per face of a cube around the light, each a square 90 degree perspective camera looking along +X, -X, +Y, -Y, +Z or -Z. A direction belongs to the face of its largest component (`pointShadowFace`).
+- A **directional light** (the sun) has parallel rays, so its camera has no perspective: it is a box (an **orthographic** projection), like photographing with light that never spreads. The sun lights the whole world, but a shadow map has finite resolution, so the box only covers the 30 units in front of the camera, and stretches 50 units back towards the sun so tall things outside the view still cast into it. As the camera moves, the box would slide by fractions of a texel and every shadow edge would crawl and shimmer; snapping its centre to whole texels (measured across the light's direction) makes it jump a texel at a time, so edges stay put.
+
+All these views share one depth texture, an **atlas** of 32 square tiles of 1024 pixels (8 across, 4 down, 128 MB), because this SDL version cannot draw into one layer of a texture array. `planShadows` hands out tiles each frame: six per point light, then one per spotlight, then one per directional light, up to four lights of each kind (4 x 6 + 4 + 4 = 32). Lights beyond that still give light, just without shadows. The shadow pass draws the scene once per tile, all in one render pass, moving the viewport to each tile. Perspective views are made slightly wider than needed, so the samples around a point near a tile's edge stay on that tile. Models with `castsShadows = false` are left out of the shadow pass (the moon sphere, which surrounds its own light, would otherwise block everything), and the duck holds its flashlight out in front of it for the same reason.
+
+The cost grows with every shadowed light: each tile is one more drawing of every shadow-casting mesh, so a shadowed point light costs six. That is why real games shadow only the lights that matter most, and why the cap exists.
 Three practical problems, and their fixes:
 
 - **Shadow acne.** Each texel of the shadow map stores one depth for a whole patch of surface. Tested against itself, a sloped surface comes out half in front of and half behind its own stored depth, in stripes. The fix is a small **bias**: the shadow pass pushes depths a little away from the light, more on steep slopes, and the lookup nudges each point off its surface along its normal by about one texel (more for points far from the light, where texels cover more ground).
 - **Jagged edges.** A shadow map has a finite resolution, so a plain in/out test draws staircase edges. The sampler does the comparison itself and blends the results of the four nearest texels, and the shader averages nine such lookups in a 3x3 grid (**percentage-closer filtering**, PCF): at an edge, the fraction of samples that are lit becomes a smooth gradient.
-- **Resolution.** Each face is 2048 pixels across (the atlas takes 96 MB of GPU memory). The moon is 64 units away, where one texel covers about 0.06 units of ground (a cube is 2 units across). Shadow edges are slightly soft from PCF, not from the moon's size.
+- **Resolution.** Each tile is 1024 pixels across. The moon is 64 units away and a cube face spans 90 degrees, so one texel covers about 0.13 units of ground there (a cube is 2 units across): its shadows are soft-edged. Most of the moon's six faces see only empty sky, so giving those tiles back to make the others bigger is a planned improvement.
 
-Real shadows from a large source are soft, because near an edge only part of the source is hidden (the **penumbra**, like the edge of the shadow in a solar eclipse), and the further the shadow falls from its caster, the softer it gets. The light's `sourceRadius` will drive that later (percentage-closer soft shadows). Spotlights and directional lights can cast shadows with the same machinery and a single view each: a perspective camera for a spot, a box-shaped (orthographic) one for the sun.
+Real shadows from a large source are soft, because near an edge only part of the source is hidden (the **penumbra**, like the edge of the shadow in a solar eclipse), and the further the shadow falls from its caster, the softer it gets. The light's `sourceRadius` will drive that later (percentage-closer soft shadows).
 
 ### Objects in the sky
 

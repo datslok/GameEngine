@@ -24,10 +24,7 @@ namespace {
         const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(nearlyEqual(data.ambient, 0.2f, 0.2f, 0.2f, 0.0f));
-        assert(data.counts[0] == 0 && data.counts[1] == 0 && data.counts[2] == 0);
-
-        // No point light casts a shadow.
-        assert(data.counts[3] == -1);
+        assert(data.counts[0] == 0 && data.counts[1] == 0 && data.counts[2] == 0 && data.counts[3] == 0);
     }
 
     // The shader wants the direction towards the light, normalised, and colour already multiplied by intensity.
@@ -195,38 +192,11 @@ namespace {
 
         assert(nearlyEqual(data.points[0].radiance[3], 4.0f));
         assert(nearlyEqual(data.points[1].radiance[3], 1.0f));
-        assert(!PointLight{}.castsShadows);
-    }
-
-    // The first packed point light that casts shadows gets the shadow map. Its slot is counted after skipped lights,
-    // because the shader indexes the packed array.
-    void testShadowedPointLightSlot() {
-        FrameLighting lighting;
-        lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 5.0f));
-
-        PlacedPointLight skipped = pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 0.0f);
-        skipped.light.castsShadows = true;
-        lighting.pointLights.push_back(skipped);
-
-        PlacedPointLight first = pointLightAt(Vec3{1.0f, 0.0f, 0.0f}, 5.0f);
-        first.light.castsShadows = true;
-        lighting.pointLights.push_back(first);
-
-        PlacedPointLight second = pointLightAt(Vec3{2.0f, 0.0f, 0.0f}, 5.0f);
-        second.light.castsShadows = true;
-        lighting.pointLights.push_back(second);
-
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
-
-        assert(data.counts[1] == 3);
-        assert(data.counts[3] == 1);
-        assert(nearlyEqual(data.points[1].positionRange[0], 1.0f));
     }
 }
 
 void testLightUniforms() {
     testPointLightSourceRadiusIsPacked();
-    testShadowedPointLightSlot();
     testSpotLightSourceRadiusIsPacked();
     testSpotLightIsPacked();
     testSpotLightWithoutDirectionOrRangeIsSkipped();

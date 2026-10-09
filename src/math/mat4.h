@@ -26,6 +26,10 @@ struct Mat4 {
         float farPlane
     );
 
+    // A box-shaped view with no perspective (parallel rays): the box from left..right, bottom..top, and -nearPlane..-farPlane
+    // along z maps to the -1..1 cube, with the same depth convention as perspective.
+    static Mat4 orthographic(float left, float right, float bottom, float top, float nearPlane, float farPlane);
+
     static Mat4 lookAt(
     const Vec3& eye,
     const Vec3& target,
