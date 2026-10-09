@@ -91,7 +91,8 @@ struct ShadowTileData {
 
 static_assert(sizeof(ShadowTileData) == 96, "ShadowTileData must match the shader's ShadowTileData struct");
 
-// One shadow view: its view-projection, and the square of the atlas it is drawn into (pixels, top-left corner).
+// One shadow view: its view-projection, and the square of the atlas it is drawn into (pixels, top-left corner). Size 0
+// means no square: a point light's cube face that sees nothing on screen, which is not drawn and which the shader counts as lit.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;
