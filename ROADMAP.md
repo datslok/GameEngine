@@ -120,7 +120,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [x] Light data in a uniform buffer instead of hardcoded in the shader; several directional and point lights (`lights-uniform-buffer`)
 - [x] Specular highlights (Blinn-Phong) (`specular-highlights`)
 - [x] Optional smooth normals for models that have none (`smooth-normals`): opt-in per load, angle-weighted, grouped by position, with a crease angle
-- [ ] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer
+- [x] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer (`cpu-normal-matrix`)
 - [ ] Linear filtering and mipmaps
 - [ ] Shadow mapping for the main directional light
   - First give the renderer the whole frame: the engine builds a frame description (every `{mesh, matrix, material}` to draw, plus lights and camera) and calls one `render(frame)`, instead of calling `drawMesh` per object. Shadows need it (the scene is drawn twice), frustum culling needs it, and it is the basis for a later ray-tracing backend

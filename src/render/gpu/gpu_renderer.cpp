@@ -1,4 +1,5 @@
 #include "render/gpu/gpu_renderer.h"
+#include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
 
@@ -361,26 +362,50 @@ bool GpuRenderer::beginFrame(float red, float green, float blue) {
 
     SDL_BindGPUGraphicsPipeline(pass, pipeline);
 
-    // A frame that never sets lighting reads "no lights" rather than whatever the slot held before.
-    setLighting(FrameLighting{}, Vec3{0.0f, 0.0f, 0.0f});
+    // A frame that never sets its camera or lighting gets a neutral camera and no lights, rather than whatever the last frame left.
+    viewProjection = Mat4::identity();
+    cameraPosition = Vec3{0.0f, 0.0f, 0.0f};
+    setLighting(FrameLighting{});
 
     return true;
 }
 
 /*
-* Pushed uniform data stays in effect for every later draw in the frame, so the lights and camera position are sent once, not per object.
+* The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
+* View and projection are combined once per frame, not once per object.
 */
-void GpuRenderer::setLighting(const FrameLighting& lighting, const Vec3& cameraPosition) {
+void GpuRenderer::setCamera(const Camera& camera) {
+    if (commands == nullptr || pass == nullptr) {
+        throw std::logic_error("setCamera requires an active frame");
+    }
+
+    viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
+    cameraPosition = camera.getPosition();
+
+    lightData.cameraPosition[0] = cameraPosition.x;
+    lightData.cameraPosition[1] = cameraPosition.y;
+    lightData.cameraPosition[2] = cameraPosition.z;
+    lightData.cameraPosition[3] = 0.0f;
+    pushLightData();
+}
+
+void GpuRenderer::setLighting(const FrameLighting& lighting) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("setLighting requires an active frame");
     }
 
-    const LightUniformData data = packLighting(lighting, cameraPosition);
-
-    SDL_PushGPUFragmentUniformData(commands, 1, &data, static_cast<Uint32>(sizeof(data)));
+    lightData = packLighting(lighting, cameraPosition);
+    pushLightData();
 }
 
-void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mat4& viewProjection, const Material& material) {
+/*
+* Pushed uniform data stays in effect for every later draw in the frame, so the lights and camera position are sent once, not per object.
+*/
+void GpuRenderer::pushLightData() {
+    SDL_PushGPUFragmentUniformData(commands, 1, &lightData, static_cast<Uint32>(sizeof(lightData)));
+}
+
+void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Material& material) {
     if (commands == nullptr || pass == nullptr) {
         throw std::logic_error("drawMesh requires an active frame");
     }
@@ -410,9 +435,12 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mat4&
 
     const Mat4 transform = viewProjection * model;
 
-    // The shader expects two consecutive column-major matrices:
-    // the complete transform, followed by the model matrix.
-    float matrixData[32]{};
+    // Once per object here rather than once per vertex in the shader.
+    const Mat4 normals = normalMatrix(model);
+
+    // The shader expects three consecutive column-major matrices:
+    // the complete transform, the model matrix, and the normal matrix.
+    float matrixData[48]{};
 
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
@@ -421,6 +449,9 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mat4&
 
             matrixData[16 + column * 4 + row] =
                 model.values[row][column];
+
+            matrixData[32 + column * 4 + row] =
+                normals.values[row][column];
         }
     }
 

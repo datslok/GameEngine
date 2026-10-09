@@ -36,6 +36,8 @@ void testLighting();
 void testLightUniforms();
 void testMaterialUniforms();
 void testSmoothNormals();
+void testNormalMatrix();
+void testGpuDepthRange();
 
 int main(){
     testPixelBuffer();
@@ -74,6 +76,8 @@ int main(){
     testLightUniforms();
     testMaterialUniforms();
     testSmoothNormals();
+    testNormalMatrix();
+    testGpuDepthRange();
 
     std::cout << "All tests passed!\n";
     return 0;

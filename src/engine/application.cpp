@@ -114,20 +114,11 @@ void Application::render(float alpha) {
 
     Camera& camera = game.getCamera();
 
-    renderer.setLighting(collectLighting(world, alpha), camera.getPosition());
-
     // Use the actual dimensions of the frame acquired by beginFrame().
     camera.setAspectRatio(renderer.getFrameAspectRatio());
 
-    // Convert our projection's depth range to the GPU depth range.
-    Mat4 depthCorrection = Mat4::identity();
-    depthCorrection.values[2][2] = 0.5f;
-    depthCorrection.values[2][3] = 0.5f;
-
-    const Mat4 viewProjection =
-        depthCorrection *
-        camera.getProjectionMatrix() *
-        camera.getViewMatrix();
+    renderer.setCamera(camera);
+    renderer.setLighting(collectLighting(world, alpha));
 
     // Draw every entity that has something to draw and a place to draw it.
     world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
@@ -141,7 +132,6 @@ void Application::render(float alpha) {
             renderer.drawMesh(
                 part.mesh,
                 entityMatrix * part.localTransform,
-                viewProjection,
                 part.material
             );
         }
