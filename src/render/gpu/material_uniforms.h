@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/uniform_limits.h"
 #include "scene/material.h"
 
 /*
@@ -12,6 +13,7 @@ struct MaterialUniformData {
 };
 
 static_assert(sizeof(MaterialUniformData) == 48, "MaterialUniformData must match the shader's MaterialData block");
+static_assert(sizeof(MaterialUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
 
 // Convert a material into the shader's layout.
 MaterialUniformData packMaterial(const Material& material);

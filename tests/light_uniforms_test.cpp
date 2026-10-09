@@ -88,15 +88,16 @@ namespace {
             lighting.directionalLights.push_back(DirectionalLight{});
         }
 
-        for (int i = 0; i < 20; ++i) {
+        for (int i = 0; i < 70; ++i) {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, 5.0f));
         }
 
         const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
+        assert(maxPointLights == 64);
         assert(data.counts[0] == maxDirectionalLights);
         assert(data.counts[1] == maxPointLights);
-        assert(nearlyEqual(data.points[maxPointLights - 1].positionRange, 15.0f, 0.0f, 0.0f, 5.0f));
+        assert(nearlyEqual(data.points[maxPointLights - 1].positionRange, 63.0f, 0.0f, 0.0f, 5.0f));
     }
 }
 
@@ -143,14 +144,15 @@ namespace {
     void testSpotLightsAreCapped() {
         FrameLighting lighting;
 
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 10; ++i) {
             lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.2f, 0.4f));
         }
 
         const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
+        assert(maxSpotLights == 8);
         assert(data.counts[2] == maxSpotLights);
-        assert(nearlyEqual(data.spots[maxSpotLights - 1].positionRange, 3.0f, 0.0f, 0.0f, 20.0f));
+        assert(nearlyEqual(data.spots[maxSpotLights - 1].positionRange, 7.0f, 0.0f, 0.0f, 20.0f));
     }
 }
 

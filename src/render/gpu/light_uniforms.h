@@ -1,13 +1,16 @@
 #pragma once
 
+#include "render/gpu/uniform_limits.h"
 #include "scene/lighting.h"
 
 #include <cstdint>
 
 // The most lights the shader can use. Must match the array sizes in triangle.frag.
 inline constexpr int maxDirectionalLights = 4;
-inline constexpr int maxPointLights = 16;
-inline constexpr int maxSpotLights = 4;
+// Each pixel loops over every light it gets, but a light out of range costs only a distance check, so dozens are cheap.
+// Hundreds would need clustered shading (each pixel only looks at the lights that reach its part of the view).
+inline constexpr int maxPointLights = 64;
+inline constexpr int maxSpotLights = 8;
 
 struct DirectionalLightUniform {
     float toLight[4];  // xyz: unit direction towards the light
@@ -39,7 +42,13 @@ struct LightUniformData {
     SpotLightUniform spots[maxSpotLights];
 };
 
-static_assert(sizeof(LightUniformData) == 944, "LightUniformData must match the shader's LightData block");
+static_assert(sizeof(LightUniformData) == 2736, "LightUniformData must match the shader's LightData block");
+static_assert(sizeof(LightUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
+
+// Whether the shader can use a light at all: a zero direction cannot be normalised, and the falloff divides by the range.
+bool canBeDrawn(const DirectionalLight& light);
+bool canBeDrawn(const PlacedPointLight& placed);
+bool canBeDrawn(const PlacedSpotLight& placed);
 
 // The lights the shader really gets: those that can be drawn, up to its limits, in order. Their positions in these lists
 // are their slots in the shader, which shadow planning relies on too.

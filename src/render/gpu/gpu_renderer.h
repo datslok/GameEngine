@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
+#include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/shadow_map.h"
@@ -83,7 +84,8 @@ private:
 
     // The steps of render(), in order.
     SDL_GPUTexture* acquireFrame();
-    void drawShadows(const FrameDescription& frame, const std::vector<Mat4>& tileMatrices);
+    void uploadShadowTiles(const std::vector<ShadowTileData>& tileData);
+    void drawShadows(const FrameDescription& frame, const std::vector<ShadowTile>& tiles);
     void beginMainPass(SDL_GPUTexture* swapchainTexture);
     void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
     void endFrame();
@@ -109,10 +111,17 @@ private:
 
     RenderStats stats;
 
+    // Which lights had seats and shadows last frame, so similar lights do not swap them every frame.
+    LightHistory lightHistory;
+
     // Shadows: the depth atlas (one tile per shadow view), a sampler that compares depths, and the depth-only pipeline that fills it.
     SDL_GPUTexture* shadowAtlas = nullptr;
     SDL_GPUSampler* shadowSampler = nullptr;
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;
+
+    // Each tile's matrix, normal offset and place in the atlas, for the main shader (too big for a uniform block).
+    SDL_GPUBuffer* shadowTileBuffer = nullptr;
+    SDL_GPUTransferBuffer* shadowTileTransfer = nullptr;
     void createShadowResources();
 
     // Debug lines, drawn over the finished scene.

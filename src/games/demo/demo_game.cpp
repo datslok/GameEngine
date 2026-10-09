@@ -37,6 +37,29 @@ namespace {
     const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
     constexpr float moonDistance = 64.0f;
     constexpr float moonRadius = 4.0f;
+
+    // The lamp field (L): a grid of 6 x 7 = 42 lamps, 5 units apart, centred on the ground and offset half a step so no
+    // lamp lands in the spinning objects, on the duck or in the free camera's face. 42 is well past the shader's 16 point
+    // light seats and 4 shadows.
+    constexpr int lampColumns = 6;
+    constexpr int lampRows = 7;
+    constexpr float lampSpacing = 5.0f;
+    const Vec3 firstLampBase{-12.5f, 0.0f, -22.5f};
+
+    // Lanterns floating at about waist height, bright enough to light a pool a few units across.
+    constexpr float lampHeight = 1.0f;
+    constexpr float lampIntensity = 1.5f;
+    constexpr float lampRange = 5.0f;
+    constexpr float lampSourceRadius = 0.5f;
+    constexpr float bulbRadius = 0.12f;
+
+    // A pillar beside each lamp, taller than the lamp, so a shadowed lamp throws a long streak away from it.
+    constexpr float pillarDistance = 0.8f;
+    constexpr float pillarHalfHeight = 0.7f;
+    constexpr float pillarHalfWidth = 0.15f;
+
+    // Each pillar is turned a golden angle (about 137.5 degrees) further than the last, so the shadows point every which way.
+    constexpr float goldenAngle = 2.39996f;
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
@@ -67,8 +90,9 @@ void DemoGame::onInit(World& world, AssetManager& assets) {
 }
 
 void DemoGame::createScene(World& world, AssetManager& assets) {
-    // Each file is loaded once; both cubes share one mesh handle and one texture handle.
-    const MeshHandle cubeMesh = assets.addMesh(Mesh::cube());
+    // Each file is loaded once; both cubes share one mesh handle and one texture handle (the lamps reuse the cube and sphere).
+    cubeMesh = assets.addMesh(Mesh::cube());
+    sphereMesh = assets.addMesh(Mesh::sphere());
     const MeshHandle pyramidMesh = assets.loadMesh("assets/models/pyramid.obj");
     // The teapot file has no normals; it is a curved surface, so smooth them. The pyramid's flat faces are meant to look flat.
     const MeshHandle teapotMesh = assets.loadMesh("assets/models/teapot.obj", MeshLoadOptions{.smoothNormals = true});
@@ -135,7 +159,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     moon = world.create();
     world.add(moon, moonPlacement);
     // It stands for the moonlight's source, so it must not block that light (its shadow box reaches back towards the moon).
-    ModelRenderer moonRenderer = makeMeshRenderer(assets.addMesh(Mesh::sphere()), moonGlow);
+    ModelRenderer moonRenderer = makeMeshRenderer(sphereMesh, moonGlow);
     moonRenderer.castsShadows = false;
     world.add(moon, std::move(moonRenderer));
 
@@ -195,6 +219,10 @@ void DemoGame::onInput(World& world, const Input& input) {
         toggleFlashlight(world);
     }
 
+    if (input.wasKeyPressed(Key::L)) {
+        toggleLamps(world);
+    }
+
     if (input.wasKeyPressed(Key::F4)) {
         debugViewEnabled = !debugViewEnabled;
     }
@@ -241,6 +269,74 @@ void DemoGame::toggleFlashlight(World& world) {
     }
     else {
         world.add(flashlight, flashlightBeam);
+    }
+}
+
+/*
+* The lamps are whole entities, created and destroyed together, so off means truly gone: no seats, no draws.
+* Four colours in turn make it easy to see which lamps are lit: an unseated lamp's bulb still glows (it is emissive),
+* but the ground around it stays dark. Lamps and pillars never move, so they need no PreviousTransform.
+*/
+void DemoGame::toggleLamps(World& world) {
+    if (!lampEntities.empty()) {
+        for (const Entity entity : lampEntities) {
+            world.destroy(entity);
+        }
+
+        lampEntities.clear();
+        return;
+    }
+
+    const Vec3 colours[] = {
+        Vec3{1.0f, 0.55f, 0.2f},  // warm orange
+        Vec3{0.25f, 0.85f, 1.0f}, // cyan
+        Vec3{1.0f, 0.3f, 0.7f},   // pink
+        Vec3{0.55f, 1.0f, 0.3f}   // lime
+    };
+
+    Material stone;
+    stone.colour = Pixel{120, 120, 130};
+    stone.specularStrength = 0.05f;
+
+    int index = 0;
+
+    for (int row = 0; row < lampRows; ++row) {
+        for (int column = 0; column < lampColumns; ++column) {
+            const Vec3 base = firstLampBase + Vec3{lampSpacing * static_cast<float>(column), 0.0f, lampSpacing * static_cast<float>(row)};
+            const Vec3& colour = colours[index % 4];
+
+            // The bulb glows in the light's colour and must not block the light inside it.
+            Material glow;
+            glow.colour = Pixel{0, 0, 0};
+            glow.specularStrength = 0.0f;
+            glow.emissive = colour;
+
+            ModelRenderer bulb = makeMeshRenderer(sphereMesh, glow);
+            bulb.castsShadows = false;
+
+            Transform lampPlacement;
+            lampPlacement.position = base + Vec3{0.0f, lampHeight, 0.0f};
+            lampPlacement.scale = Vec3{bulbRadius, bulbRadius, bulbRadius};
+
+            const Entity lamp = world.create();
+            world.add(lamp, lampPlacement);
+            world.add(lamp, std::move(bulb));
+            world.add(lamp, PointLight{.colour = colour, .intensity = lampIntensity, .range = lampRange, .sourceRadius = lampSourceRadius});
+            lampEntities.push_back(lamp);
+
+            const float angle = goldenAngle * static_cast<float>(index);
+
+            Transform pillarPlacement;
+            pillarPlacement.position = base + Vec3{std::cos(angle) * pillarDistance, pillarHalfHeight, std::sin(angle) * pillarDistance};
+            pillarPlacement.scale = Vec3{pillarHalfWidth, pillarHalfHeight, pillarHalfWidth};
+
+            const Entity pillar = world.create();
+            world.add(pillar, pillarPlacement);
+            world.add(pillar, makeMeshRenderer(cubeMesh, stone));
+            lampEntities.push_back(pillar);
+
+            ++index;
+        }
     }
 }
 
@@ -301,6 +397,18 @@ Camera& DemoGame::getCamera() {
 
 bool DemoGame::wantsMouseLook() const {
     return controlMode != ControlMode::Moba;
+}
+
+/*
+* The MOBA camera floats about 16 units from the ground it shows, beyond the reach of a torch-sized light, so lights are
+* ranked by their brightness at the ground point in the middle of the screen. The other modes see from among the lights.
+*/
+Vec3 DemoGame::getLightFocus() {
+    if (controlMode == ControlMode::Moba) {
+        return mobaCamera.getLookPoint(camera);
+    }
+
+    return camera.getPosition();
 }
 
 Entity DemoGame::getPlayer() const {

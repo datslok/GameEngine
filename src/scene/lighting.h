@@ -6,16 +6,19 @@
 
 #include <vector>
 
-// A point light together with where it is this frame.
+// A point light together with where it is this frame, and whose it is, so the renderer can recognise it next frame
+// (Entity{} for a light that belongs to no entity).
 struct PlacedPointLight {
     Vec3 position;
     PointLight light;
+    Entity entity{};
 };
 
-// A spotlight together with where it is this frame.
+// A spotlight together with where it is this frame, and whose it is.
 struct PlacedSpotLight {
     Vec3 position;
     SpotLight light;
+    Entity entity{};
 };
 
 // Every light the renderer needs for one frame, with no GPU types.
