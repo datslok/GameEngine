@@ -108,8 +108,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Night: a faint ambient light and a weak, cool moon, so the flashlight and the glowing duck stand out.
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
     // Light values are linear: the screen's sRGB encoding brightens dark values a lot, so night light is tiny in these units.
-    world.add(world.create(), AmbientLight{Vec3{0.0046f, 0.0046f, 0.0046f}});
-    world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.32f, 0.45f, 1.0f}, 0.02f});
+    world.add(world.create(), AmbientLight{Vec3{0.012f, 0.012f, 0.012f}});
+    world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.32f, 0.45f, 1.0f}, 0.06f});
 
     // The moon itself: a glowing sphere in the direction the moonlight comes from, at a fixed place so you can fly to it.
     Material moonGlow;
