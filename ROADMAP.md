@@ -132,7 +132,6 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
   - [x] First give the renderer the whole frame (`frame-description`): the engine builds a frame description (every `{mesh, matrix, material}` to draw, plus lights and camera) and calls one `render(frame)`, instead of calling `drawMesh` per object. Shadows need it (the scene is drawn twice), frustum culling needs it, and it is the basis for a later ray-tracing backend
 - [ ] Debug drawing: lines, boxes, spheres and capsules
 - [ ] Frustum culling
-- [ ] `release` build target (`-O2`)
 - [x] Low-latency presentation (`platform-split`): one frame in flight, configurable present mode, mailbox by default
 
 **Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box.
@@ -208,3 +207,4 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] Level editor or scene file format
 - [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering). Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up. Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
 - [ ] Scripting for gameplay code
+- [ ] `release` build target (`-O2`), with small vec/mat operators moved into headers so they can inline. Deferred indefinitely: only worth doing once the frame rate drops below the 240 FPS cap

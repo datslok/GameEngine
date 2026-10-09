@@ -10,7 +10,7 @@ The roadmap is in `ROADMAP.md`. Phases 0-3 (foundations, GPU rendering and asset
 - `make run` builds and runs the game. Run it from the repo root: asset and shader paths are relative (`assets/...`).
 - `make test` builds and runs `build/tests.exe`.
 - The makefile finds `src/**/*.cpp` recursively (`rwildcard`) and `tests/*.cpp`, so new files are picked up automatically. Headers and the makefile are tracked as dependencies. Include roots are `-Isrc -Iexternal`.
-- Flags are `-std=c++20 -Wall -Wextra -g` with no optimisation (-O0). A release target with `-O2` is a planned improvement.
+- Flags are `-std=c++20 -Wall -Wextra -g` with no optimisation (-O0). A release target with `-O2` is deferred indefinitely (ROADMAP phase 9), until the frame rate drops below the cap.
 - Dependencies: SDL3, SDL3_image, `glslc` (MSYS2 `shaderc` package here; the Vulkan SDK's also works), and cgltf (vendored in `external/cgltf`).
 - `build/`, `*.exe` and `*.spv` are git-ignored.
 - `python tools/package_demo.py` builds and packages `build/GameEngineDemo.zip` for a PC without MSYS2: stripped exe, DLLs found by following import tables with MSYS2 `objdump`, plus the SDL3_image decoder DLLs for the image formats the assets use (they are loaded at runtime, so import tables do not show them), all of `assets/` except shader sources, and a README. It fails if any imported DLL is neither packaged nor part of Windows.
@@ -86,6 +86,5 @@ Notes for upcoming work:
 
 ## Known small issues and ideas
 
-- Add a `release` make target (`-O2`); move small vec/mat operators into headers so they can inline.
 - Latency: `GpuRenderer` allows one frame in flight, and `Application` requests `PresentMode::Mailbox` (falls back to vsync if unsupported), so `targetFPS = 240` is the real frame cap. `PresentMode::Immediate` is lower latency still but tears.
 - GPU device is created with debug mode hardcoded on.
