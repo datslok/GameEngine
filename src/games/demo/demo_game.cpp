@@ -150,11 +150,6 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     const Model& model = assets.loadModel(playerConfig.modelPath);
     player = spawnCharacter(world, assets, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
 
-    // The duck glows a warm yellow, so it is easy to find at night. Emitted light does not light its surroundings.
-    for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
-        part.material.emissive = Vec3{0.45f, 0.35f, 0.12f};
-    }
-
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
     // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 6.
@@ -313,6 +308,14 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
     groundSteeringActive = false;
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
+
+        // From the MOBA camera's height the duck is small, so it glows to stay easy to find at night. Emitted light does not
+        // light its surroundings. In the other modes it is lit like everything else.
+        const Vec3 glow = mode == ControlMode::Moba ? Vec3{0.45f, 0.35f, 0.12f} : Vec3{0.0f, 0.0f, 0.0f};
+
+        for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
+            part.material.emissive = glow;
+        }
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
 }
