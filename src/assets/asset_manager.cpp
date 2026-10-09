@@ -1,6 +1,7 @@
 #include "assets/asset_manager.h"
 #include "assets/gltf_loader.h"
 #include "assets/obj_loader.h"
+#include "scene/smooth_normals.h"
 
 #include <span>
 #include <stdexcept>
@@ -28,14 +29,25 @@ MeshHandle AssetManager::addMesh(std::shared_ptr<const Mesh> mesh) {
     return handle;
 }
 
-MeshHandle AssetManager::loadMesh(const std::string& path) {
-    if (const auto found = meshesByPath.find(path); found != meshesByPath.end()) {
+/*
+* The options are part of the cache key, so the same file loaded flat and smooth gives two meshes.
+*/
+MeshHandle AssetManager::loadMesh(const std::string& path, MeshLoadOptions options) {
+    const auto key = std::make_tuple(path, options.smoothNormals, options.smoothNormals ? options.creaseAngle : 0.0f);
+
+    if (const auto found = meshesByPath.find(key); found != meshesByPath.end()) {
         return found->second;
     }
 
     // Load before recording the path, so a failed load is not remembered.
-    const MeshHandle handle = addMesh(loadObj(path));
-    meshesByPath.emplace(path, handle);
+    Mesh mesh = loadObj(path);
+
+    if (options.smoothNormals) {
+        generateSmoothNormals(mesh, options.creaseAngle);
+    }
+
+    const MeshHandle handle = addMesh(std::move(mesh));
+    meshesByPath.emplace(key, handle);
 
     return handle;
 }

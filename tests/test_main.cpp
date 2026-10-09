@@ -35,6 +35,7 @@ void testIndexedMesh();
 void testLighting();
 void testLightUniforms();
 void testMaterialUniforms();
+void testSmoothNormals();
 
 int main(){
     testPixelBuffer();
@@ -72,6 +73,7 @@ int main(){
     testLighting();
     testLightUniforms();
     testMaterialUniforms();
+    testSmoothNormals();
 
     std::cout << "All tests passed!\n";
     return 0;
