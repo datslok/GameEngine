@@ -31,7 +31,7 @@ inline constexpr std::uint32_t smallestShadowTileSize = 256;
 inline constexpr float shadowTexelTarget = 0.04f;
 
 // The most shadowed lights of each kind; the rest still give light, without shadows.
-inline constexpr int maxShadowedPointLights = 16;      // 6 tiles each
+inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; as many as the shader has seats, now that cached tiles cost little
 inline constexpr int maxShadowedSpotLights = 8;        // 1 tile each
 inline constexpr int maxShadowedDirectionalLights = 4; // 1 tile each, always the largest size
 inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights;

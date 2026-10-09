@@ -156,7 +156,9 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
     - `ShadowTileMemory` (`render/gpu/shadow_cache`): what was last drawn into each square (matrix plus a hash of the casters' meshes and model matrices); drawing a square forgets anything it overlaps
     - The atlas is loaded instead of cleared; a redrawn tile is first reset by a "draw depth 1" triangle (`shadow_clear.vert`); with nothing to redraw there is no shadow pass
     - In the demo's lamp field, standing still, about 49 of 82 tiles are cached; the rest see the spinning objects, the flashlight or the moon box. The F4 readout counts tiles drawn, cached and skipped
-    - Possible next step: raise the shadow cap again, now that static lights cost almost nothing
+    - [x] Shadow cap raised from 16 to 64 point lights (`more-point-shadows`), as many as the shader's seats: the atlas still fits everything at the smallest tile size. `LightLimits` lets a caller cap shadows below the seats (the tests do, to keep shadow-only handovers covered). The shader now skips a light, and its 9 shadow lookups, for pixels beyond its range. All lamps in view in the demo cast shadows
+    - [ ] Later: a redraw budget (at most N tiles drawn per frame, most important first, far lights refreshed less often), so switching on many lights at once or turning quickly does not cost one long frame
+    - [ ] Later: cache static and moving casters separately (keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame), so one spinning object no longer forces whole tiles to redraw
   - [ ] 5. Soft shadows (PCSS)
     - The shader first searches the shadow map near the point to estimate how far away the blocker is, then widens its blur by `sourceRadius * (receiver - blocker) / blocker`: the penumbra geometry of a solar eclipse
     - Needs: the atlas bound a second time with a plain (non-comparison) sampler for the blocker search, and more texture reads per pixel

@@ -278,7 +278,7 @@ float lightImportance(const Vec3& lightPosition, const Vec3& colour, float inten
 * history: their brightness does not change as the camera moves.
 */
 PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
-                                     float elapsedSeconds) {
+                                     float elapsedSeconds, const LightLimits& limits) {
     PrioritizedLighting result;
     result.lighting.ambient = lighting.ambient;
 
@@ -299,13 +299,13 @@ PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& 
 
     const float fadeStep = std::max(elapsedSeconds, 0.0f) / lightFadeSeconds;
 
-    result.lighting.pointLights = chooseLights(lighting.pointLights, focus, view, previous, previous.points, maxPointLights,
-                                               maxShadowedPointLights, fadeStep, result.history, result.history.points,
+    result.lighting.pointLights = chooseLights(lighting.pointLights, focus, view, previous, previous.points, limits.pointSeats,
+                                               limits.shadowedPoints, fadeStep, result.history, result.history.points,
                                                result.pointLightsInView);
 
     std::size_t spotLightsInView = 0;
-    result.lighting.spotLights = chooseLights(lighting.spotLights, focus, view, previous, previous.spots, maxSpotLights,
-                                              maxShadowedSpotLights, fadeStep, result.history, result.history.spots,
+    result.lighting.spotLights = chooseLights(lighting.spotLights, focus, view, previous, previous.spots, limits.spotSeats,
+                                              limits.shadowedSpots, fadeStep, result.history, result.history.spots,
                                               spotLightsInView);
 
     return result;
