@@ -9,7 +9,7 @@ The roadmap is in `ROADMAP.md`. Phases 0-3 (foundations, GPU rendering and asset
 - `make` builds `build/game.exe` and compiles shaders (`glslc` -> `.spv`).
 - `make run` builds and runs the game. Run it from the repo root: asset and shader paths are relative (`assets/...`).
 - `make test` builds and runs `build/tests.exe`.
-- The makefile finds `src/**/*.cpp` recursively (`rwildcard`) and `tests/*.cpp`, so new files are picked up automatically. Headers and the makefile are tracked as dependencies. Include roots are `-Isrc -Iexternal`.
+- The makefile finds `src/**/*.cpp` recursively (`rwildcard`) and `tests/*.cpp`, so new files are picked up automatically. Each source compiles to its own object in `build/obj/` (mirroring the source folders), and the game and tests link the same engine objects. Header dependencies come from GCC's `-MMD -MP` `.d` files, so a header change rebuilds exactly the files that include it; changing the makefile rebuilds everything. It builds in parallel on every core (`MAKEFLAGS += -j$(nproc) --output-sync=target`; override with `make JOBS=1`). A one-file change rebuilds in about 2 s (it was about 76 s when everything compiled in one `g++` call). Include roots are `-Isrc -Iexternal`.
 - Flags are `-std=c++20 -Wall -Wextra -g` with no optimisation (-O0). A release target with `-O2` is deferred indefinitely (ROADMAP phase 9), until the frame rate drops below the cap.
 - Dependencies: SDL3, SDL3_image, `glslc` (MSYS2 `shaderc` package here; the Vulkan SDK's also works), and cgltf (vendored in `external/cgltf`).
 - `build/`, `*.exe` and `*.spv` are git-ignored.

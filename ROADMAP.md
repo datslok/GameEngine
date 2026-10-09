@@ -128,17 +128,42 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [x] Shadow mapping
   - [x] Shadows from every light (`shadow-mapping`): one depth atlas; point lights take six tiles (cube faces), spotlights one perspective view, directional lights one texel-snapped orthographic box around the camera; normal offset plus slope bias, 3x3 PCF; `castsShadows` on lights and models (default on). The demo's moon was a shadow-casting point light inside the moon sphere for a while, then went back to a directional light (sharper shadows)
   - [x] Tiles sized by the light's reach (`light-priority`): 256, 512 or 1024 pixels for about 0.04 units per texel, the least important shrinking first when the atlas is full, packed as a quadtree; room for 16 shadowed point lights and 8 spotlights
-  - [ ] Give tiles back when a cube face sees nothing on screen, so shadowed point lights cost less
-  - [ ] Shadow caching: keep a light's tiles from the last frame and redraw them only when something that casts shadows moves inside its view (static lamps beside static walls then cost almost nothing), so more lights can afford shadows
-  - [x] Fading handovers (`light-fading`): a light losing its seat or shadow fades out over 0.25 s while keeping it, then the winner fades in, so the limits always hold and handovers do not pop; lights just switched on or come into view appear at full strength, lights leaving the view go at once
-  - [ ] Soft shadows sized by the light's `sourceRadius` (PCSS)
   - [x] First give the renderer the whole frame (`frame-description`): the engine builds a frame description (every `{mesh, matrix, material}` to draw, plus lights and camera) and calls one `render(frame)`, instead of calling `drawMesh` per object. Shadows need it (the scene is drawn twice), frustum culling needs it, and it is the basis for a later ray-tracing backend
 - [x] Debug drawing (`debug-drawing`): lines, boxes, spheres and capsules drawn on top of the scene; games add shapes in `onDebugDraw`, and the engine draws every mesh's bounding box when the game asks (demo: F4, with light markers and the walk target). Colliders join the view once phase 5 adds them
 - [x] Dithering (`dithering`): the main shader adds up to half an 8-bit step of per-pixel noise (interleaved gradient noise) in sRGB before output, so slow dark fades (the flashlight's pool at night) no longer show rings; mirrored and tested in `core/dither`
 - [x] Frustum culling (`frustum-culling`): six planes from any view-projection (`math/frustum`), a bounding sphere per draw from its mesh's bounds, the camera's view culls the main pass and each shadow tile culls with its own light view (never the camera's, so off-screen things still cast shadows); `RenderStats` counts drawn and skipped meshes
 - [x] Light priority (`light-priority`): seats in the shader and shadows go to the lights that matter most instead of the first ones in component storage (which shuffles when components are removed). Lights whose range sphere is outside the view are skipped; the rest are ranked by brightness at a focus point the game names (the camera, or the MOBA camera's ground point), `intensity / (d^2 + r^2)` without the range window so far lights do not tie at zero; last frame's seats and shadows count 1.25 times as much (hysteresis), so similar lights do not swap every frame. Seats raised to 64 point and 8 spotlights. The demo gets a field of 42 lamps with pillars (L) and a light count line in the F4 readout
-  - [x] Manual priority (`light-manual-priority`): an int on point lights and spotlights; a higher priority always wins a seat and a shadow, while brightness and hysteresis decide between equals
   - [ ] Later (with hundreds of lights): clustered shading, so each pixel only loops over the lights that reach its part of the view instead of every seated light
+- [ ] Light and shadow follow-ups, in this order (each is tested in the game before the next starts)
+  - [x] 1. Manual priority (`light-manual-priority`)
+    - `int priority = 0` on `PointLight` and `SpotLight`. A higher priority always wins a seat and a shadow over a lower one; importance and hysteresis decide only between equals
+    - A game marks a boss's aura or a story lamp, and it is never dropped while in view
+    - Changes only the ranking function, plus tests
+  - [x] 2. Fading handovers (`light-fading`)
+    - Each seated light has a strength between 0 and 1 for its light and another for its shadow. Strengths ramp over 0.25 s, and the shader scales by them
+    - A light losing its seat or shadow keeps it while fading out, so the caps count fading lights too; the winner fades in afterwards
+    - Lights just switched on or come into view appear at full strength (nothing showed them before); lights leaving the view go at once
+    - Needs: `frameSeconds` in `FrameDescription`, strengths in `LightHistory`, and a shadow strength per slot in the shader (light strength is multiplied into the radiance on the CPU)
+    - Comes before caching because it changes how slots are handed over
+  - [ ] 3. Give back tiles for cube faces that see nothing
+    - A face whose view pyramid does not overlap the camera's view cannot shadow a visible pixel, so it gets no tile and no draw. Lamps at the edge of the screen typically need 2 to 4 faces instead of 6
+    - Needs: a conservative pyramid-against-frustum test, and a tile number per face instead of "six in a row" (the table goes into the storage buffer)
+    - Frees atlas room and draw time for caching to build on
+  - [ ] 4. Shadow caching (the biggest item)
+    - Tiles stay where they are between frames and are redrawn only when the light moves, the tile changes, or something that casts shadows moves inside its view
+    - Needs: an atlas allocator that keeps tiles across frames and frees them, instead of re-packing every frame
+    - Needs: the atlas loaded instead of cleared, with stale tiles cleared one by one by a small "draw depth 1" pass, since SDL cannot clear part of a texture
+    - Needs: a way to tell which casters moved, by comparing each draw's matrix with last frame's
+    - Payoff: a static lamp field costs almost nothing per frame, so the shadow cap could go up again
+  - [ ] 5. Soft shadows (PCSS)
+    - The shader first searches the shadow map near the point to estimate how far away the blocker is, then widens its blur by `sourceRadius * (receiver - blocker) / blocker`: the penumbra geometry of a solar eclipse
+    - Needs: the atlas bound a second time with a plain (non-comparison) sampler for the blocker search, and more texture reads per pixel
+    - Independent shader work, so last; by then caching has paid for the extra cost
+- [x] Faster builds (`faster-builds`): a one-line change took about 76 s (27 s for the game, 49 s for the tests); now about 2 s, a clean build of everything about 10 s
+  - [x] Compile each `.cpp` to its own object file in `build/obj/`, and only link at the end, so a change recompiles only what it touches
+  - [x] Let GCC record which headers each file uses (`-MMD -MP`), so a header change recompiles exactly the files that include it
+  - [x] Build in parallel on every core (`-j`), with output kept in order per file
+  - [x] The game and the tests share the engine's object files, so the engine compiles once instead of twice
 - [x] Low-latency presentation (`platform-split`): one frame in flight, configurable present mode, mailbox by default
 
 **Milestone:** a lit scene with shadows, and a toggle that draws every collider and bounding box.
