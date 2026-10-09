@@ -4,6 +4,7 @@
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
+#include "scene/debug_draw.h"
 #include "scene/lighting.h"
 #include "scene/material.h"
 
@@ -26,6 +27,9 @@ struct FrameDescription {
     Camera camera;
     FrameLighting lighting;
     std::vector<DrawItem> draws;
+
+    // Wireframe shapes drawn over the scene (see DebugDraw).
+    std::vector<DebugLine> debugLines;
 };
 
 // Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks.

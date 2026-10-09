@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour, the frame description, shadow mapping).
+**Covers:** phases 0 to 3, and phase 4 up to shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour, the frame description, shadow mapping, debug drawing).
 
 ---
 
@@ -247,6 +247,12 @@ Lighting maths (adding lights, scaling by angle, averaging texels for mipmaps) i
 - The swapchain (the screen images) is sRGB as well, so the GPU converts the shader's linear result back as it writes each pixel.
 
 A consequence when tuning: linear numbers for dim light look tiny. The demo's night ambient of 0.012 shows as about 0.11 of full brightness on screen, because the sRGB curve lifts dark values. Before this was done, the maths happened on sRGB values directly, which made light falloff and soft edges look too dark and too sudden.
+
+### Debug drawing
+
+Much of what the engine knows is invisible: bounding boxes, light positions, where a character is walking, and later colliders and paths. **Debug drawing** shows it as wireframe lines over the scene. Anything can add shapes to a `DebugDraw` (lines, boxes, spheres drawn as three circles, capsules), and it is emptied every frame, so a shape stays only as long as something keeps adding it. That style is called **immediate mode**: instead of creating a "debug box object" and remembering to delete it, you just say "draw a box here" every frame you want it.
+
+The lines are drawn last, unlit, and ignore depth, so they show through walls. That is the point: a collider inside a wall or a light behind a hill is exactly what you want to see when debugging. Games add their own shapes in `onDebugDraw`; the engine itself can draw a box around every mesh (it knows each mesh's bounds), which the demo switches on with F4.
 
 ### Depth range
 
