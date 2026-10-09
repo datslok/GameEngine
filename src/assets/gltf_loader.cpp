@@ -1,6 +1,7 @@
 #include "assets/gltf_loader.h"
 
 #include "cgltf/cgltf.h"
+#include "core/srgb.h"
 
 #include <memory>
 #include <stdexcept>
@@ -281,6 +282,7 @@ namespace {
         return result;
     }
 
+    // glTF colour factors are linear light, but material colours are sRGB bytes like textures, so encode them.
     std::uint8_t colourChannelToByte(float value) {
         if (!std::isfinite(value) ||
             value < 0.0f ||
@@ -290,9 +292,7 @@ namespace {
             );
         }
 
-        return static_cast<std::uint8_t>(
-            std::lround(value * 255.0f)
-        );
+        return linearToSrgbByte(value);
     }
 
     std::string readTexturePath(

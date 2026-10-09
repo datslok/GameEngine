@@ -39,6 +39,7 @@ void testSmoothNormals();
 void testNormalMatrix();
 void testGpuDepthRange();
 void testMipLevels();
+void testSrgb();
 void testSphereMesh();
 
 int main(){
@@ -81,6 +82,7 @@ int main(){
     testNormalMatrix();
     testGpuDepthRange();
     testMipLevels();
+    testSrgb();
     testSphereMesh();
 
     std::cout << "All tests passed!\n";
