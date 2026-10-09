@@ -110,6 +110,7 @@ void Application::render(float alpha) {
 
     Camera& camera = game.getCamera();
     FrameDescription frame = buildFrame(world, camera, alpha);
+    frame.lightFocus = game.getLightFocus();
 
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);

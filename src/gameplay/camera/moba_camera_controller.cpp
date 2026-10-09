@@ -13,6 +13,13 @@ void MobaCameraController::centreOn(Camera& camera, const Vec3& point) const {
 }
 
 /*
+* The camera only ever moves by whole offsets from a point and pans without turning, so the point is always one offset away.
+*/
+Vec3 MobaCameraController::getLookPoint(const Camera& camera) const {
+    return camera.getPosition() - offset;
+}
+
+/*
 * Panning moves the camera without turning it, so the viewing angle set by the offset never changes.
 */
 void MobaCameraController::update(Camera& camera, const Input& input, float frameSeconds,

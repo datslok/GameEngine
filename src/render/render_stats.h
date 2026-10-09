@@ -9,4 +9,10 @@ struct RenderStats {
     std::size_t culled = 0;
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
+
+    // Point lights in the frame, how many could reach what the camera sees, and how many got a seat in the shader and a shadow.
+    std::size_t pointLights = 0;
+    std::size_t pointLightsInView = 0;
+    std::size_t pointLightsLit = 0;
+    std::size_t pointLightsShadowed = 0;
 };

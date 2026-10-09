@@ -36,6 +36,9 @@ namespace {
         assert(nearlyEqual(frame.camera.getPosition().z, 5.0f));
         assert(nearlyEqual(frame.camera.getAspectRatio(), 1.5f));
         assert(frame.draws.empty());
+
+        // Lights are ranked by their brightness at the camera unless the game names a better point.
+        assert(nearlyEqual(frame.lightFocus.z, 5.0f) && nearlyEqual(frame.lightFocus.y, 1.0f));
     }
 
     // The frame's lights are the World's lights, gathered the same way collectLighting does.
