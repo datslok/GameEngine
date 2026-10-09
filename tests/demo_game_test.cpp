@@ -75,6 +75,43 @@ namespace {
         game.onDebugDraw(world, off, 1.0f);
         assert(off.getLines().empty());
     }
+
+    std::size_t countPointLights(World& world) {
+        std::size_t count = 0;
+        world.each<PointLight>([&](Entity, PointLight&) {
+            ++count;
+        });
+        return count;
+    }
+
+    // L fills the ground with far more lamps than can have shadows, to show light priority at work, and removes them
+    // again, entities and all.
+    void testLampsToggle() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+
+        const std::size_t entitiesBefore = world.getEntityCount();
+        assert(countPointLights(world) == 0);
+
+        Input pressL = mobaInput();
+        pressL.pressKey(Key::L);
+        game.onInput(world, pressL);
+        assert(countPointLights(world) > 2 * 16); // twice the 16 shadowed point lights
+
+        // Every lamp is drawn too: a glowing bulb that does not block its own light.
+        std::size_t bulbs = 0;
+        world.each<PointLight, ModelRenderer>([&](Entity, PointLight&, ModelRenderer& renderer) {
+            assert(!renderer.castsShadows);
+            ++bulbs;
+        });
+        assert(bulbs == countPointLights(world));
+
+        game.onInput(world, pressL);
+        assert(countPointLights(world) == 0);
+        assert(world.getEntityCount() == entitiesBefore);
+    }
 }
 
 /*
@@ -82,6 +119,7 @@ namespace {
 */
 void testDemoGame() {
     testDebugViewToggles();
+    testLampsToggle();
 
     World world;
     AssetManager assets;

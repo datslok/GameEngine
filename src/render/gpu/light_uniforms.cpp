@@ -12,9 +12,21 @@ namespace {
     }
 }
 
+bool canBeDrawn(const DirectionalLight& light) {
+    return light.direction.lengthSquared() >= 1e-12f;
+}
+
+bool canBeDrawn(const PlacedPointLight& placed) {
+    return placed.light.range > 0.0f;
+}
+
+bool canBeDrawn(const PlacedSpotLight& placed) {
+    return placed.light.range > 0.0f && placed.light.direction.lengthSquared() >= 1e-12f;
+}
+
 /*
-* A zero direction cannot be normalised, and a light without a positive range would make the shader divide by zero, so
-* those are skipped. The first lights collected win when there are more than the shader has room for.
+* Lights the shader cannot use are skipped, and the first lights in the lists win when there are more than it has room for.
+* The renderer ranks the lists first (prioritizeLights), so by the time they arrive here they fit and this keeps their order.
 */
 FrameLighting selectDrawableLights(const FrameLighting& lighting) {
     FrameLighting selected;
@@ -25,7 +37,7 @@ FrameLighting selectDrawableLights(const FrameLighting& lighting) {
             break;
         }
 
-        if (light.direction.lengthSquared() >= 1e-12f) {
+        if (canBeDrawn(light)) {
             selected.directionalLights.push_back(light);
         }
     }
@@ -35,7 +47,7 @@ FrameLighting selectDrawableLights(const FrameLighting& lighting) {
             break;
         }
 
-        if (placed.light.range > 0.0f) {
+        if (canBeDrawn(placed)) {
             selected.pointLights.push_back(placed);
         }
     }
@@ -45,7 +57,7 @@ FrameLighting selectDrawableLights(const FrameLighting& lighting) {
             break;
         }
 
-        if (placed.light.range > 0.0f && placed.light.direction.lengthSquared() >= 1e-12f) {
+        if (canBeDrawn(placed)) {
             selected.spotLights.push_back(placed);
         }
     }

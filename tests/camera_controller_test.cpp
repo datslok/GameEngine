@@ -245,6 +245,9 @@ void testCameraControllers() {
         assert(nearlyEqual(camera.getPosition(), target + offset + Vec3{-4.5f, 0.0f, 0.0f}));
         assert(nearlyEqual(camera.getForward(), facing));
 
+        // The point on the ground it looks at moved with it (lights are ranked by their brightness there).
+        assert(nearlyEqual(controller.getLookPoint(camera), target + Vec3{-4.5f, 0.0f, 0.0f}));
+
         // No panning when the cursor is not confined to the window.
         const Vec3 before = camera.getPosition();
         input.setWindowState(true, false, false);

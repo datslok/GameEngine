@@ -20,11 +20,11 @@ FrameLighting collectLighting(World& world, float alpha) {
     });
 
     world.each<PointLight, Transform>([&](Entity entity, PointLight& light, Transform&) {
-        lighting.pointLights.push_back(PlacedPointLight{getRenderTransform(world, entity, alpha).position, light});
+        lighting.pointLights.push_back(PlacedPointLight{getRenderTransform(world, entity, alpha).position, light, entity});
     });
 
     world.each<SpotLight, Transform>([&](Entity entity, SpotLight& light, Transform&) {
-        lighting.spotLights.push_back(PlacedSpotLight{getRenderTransform(world, entity, alpha).position, light});
+        lighting.spotLights.push_back(PlacedSpotLight{getRenderTransform(world, entity, alpha).position, light, entity});
     });
 
     return lighting;

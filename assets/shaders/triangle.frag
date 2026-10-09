@@ -6,7 +6,7 @@ layout(location = 2) in vec3 worldPosition;
 
 layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 
-// The shadow atlas: every light's depth images in an 8x4 grid of tiles. A shadow sampler compares a depth we give it
+// The shadow atlas: every light's depth images in square tiles of 256 to 1024 texels, packed into one texture. A shadow sampler compares a depth we give it
 // with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
 layout(set = 2, binding = 1) uniform sampler2DShadow shadowAtlas;
 
@@ -40,16 +40,26 @@ layout(std140, set = 3, binding = 1) uniform LightData {
     vec4 cameraPosition; // xyz: where the viewer is
     ivec4 counts;        // x: directional lights used, y: point lights used, z: spotlights used
     DirectionalLightData directional[4];
-    PointLightData points[16];
-    SpotLightData spots[4];
+    PointLightData points[64];
+    SpotLightData spots[8];
+};
+
+// Must match ShadowTileData in render/gpu/shadow_map.h. Over a hundred tiles do not fit in a uniform block (the shader
+// can read only 4 KB of one), so they are in a storage buffer: set 2, after the two samplers.
+struct ShadowTileData {
+    mat4 matrix; // the tile's view-projection, the same one the shadow pass drew with
+    vec4 offset; // normal offset against acne: x per unit of distance from the light, y fixed
+    vec4 rect;   // where the tile is in the atlas, 0..1: xy corner, zw size
+};
+
+layout(std430, set = 2, binding = 2) readonly buffer ShadowTiles {
+    ShadowTileData shadowTiles[];
 };
 
 // Must match ShadowUniformData in render/gpu/shadow_map.h. Tile numbers are -1 for a light without a shadow.
 layout(std140, set = 3, binding = 2) uniform ShadowData {
-    mat4 tileMatrices[32]; // each tile's view-projection, the same ones the shadow pass drew with
-    vec4 tileOffsets[32];  // normal offset against acne: x per unit of distance from the light, y fixed
-    ivec4 pointTiles[4];   // first of six tiles for point light i at [i / 4][i % 4]
-    ivec4 spotTiles;
+    ivec4 pointTiles[16];  // first of six tiles for point light i at [i / 4][i % 4]
+    ivec4 spotTiles[2];    // tile for spotlight i at [i / 4][i % 4]
     ivec4 directionalTiles;
     vec4 atlasTexel;       // xy: one texel's size in atlas coordinates
 };
@@ -114,7 +124,7 @@ int pointShadowFace(vec3 fromLight) {
 * Texels cover more of the world further from a light in a perspective view, hence the part that grows with distance.
 */
 vec3 offsetForShadow(int tile, vec3 normal, float distanceToLight) {
-    return worldPosition + normal * (tileOffsets[tile].x * distanceToLight + tileOffsets[tile].y);
+    return worldPosition + normal * (shadowTiles[tile].offset.x * distanceToLight + shadowTiles[tile].offset.y);
 }
 
 /*
@@ -124,7 +134,7 @@ vec3 offsetForShadow(int tile, vec3 normal, float distanceToLight) {
 * Points outside the tile's view (beyond a directional light's shadow box) count as lit.
 */
 float shadowFromTile(int tile, vec3 position) {
-    vec4 clip = tileMatrices[tile] * vec4(position, 1.0);
+    vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
     vec3 projected = clip.xyz / clip.w;
 
     if (clip.w <= 0.0 || any(greaterThan(abs(projected.xy), vec2(1.0))) || projected.z < 0.0 || projected.z > 1.0) {
@@ -133,8 +143,7 @@ float shadowFromTile(int tile, vec3 position) {
 
     // From -1..1 across the tile to 0..1 within it (texture rows run top to bottom), then to the tile's place in the atlas.
     vec2 withinTile = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
-    vec2 tileCorner = vec2(tile % 8, tile / 8);
-    vec2 atlasUv = (tileCorner + withinTile) / vec2(8.0, 4.0);
+    vec2 atlasUv = shadowTiles[tile].rect.xy + withinTile * shadowTiles[tile].rect.zw;
 
     float lit = 0.0;
 
@@ -247,7 +256,7 @@ void main() {
             }
 
             vec3 radiance = spots[i].radianceCosInner.rgb * distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius.x) * cone;
-            int tile = spotTiles[i];
+            int tile = spotTiles[i / 4][i % 4];
 
             if (tile >= 0) {
                 radiance *= shadowFromTile(tile, offsetForShadow(tile, normal, distance));

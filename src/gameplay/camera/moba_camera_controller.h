@@ -18,6 +18,9 @@ public:
     // Place the camera so it looks at a point.
     void centreOn(Camera& camera, const Vec3& point) const;
 
+    // The point the camera looks at (on the ground, when centred on ground points), the reverse of centreOn.
+    Vec3 getLookPoint(const Camera& camera) const;
+
     void update(Camera& camera, const Input& input, float frameSeconds,
                 const std::optional<Vec3>& followTarget) const;
 

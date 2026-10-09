@@ -94,7 +94,8 @@ void GpuRenderer::createPipeline() {
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             3, // Material colour, lights, shadow data.
-            2  // Colour texture, shadow atlas.
+            2, // Colour texture, shadow atlas.
+            1  // Shadow tiles.
         );
 
         SDL_GPUColorTargetDescription colourTarget{};
@@ -179,12 +180,13 @@ void GpuRenderer::createPipeline() {
 }
 
 /*
-* The atlas holds every shadow view, one per tile (8 across, 4 down). It is both drawn into (as a depth
+* The atlas holds every shadow view, one per tile (packed each frame by planShadows). It is both drawn into (as a depth
 * target) and read (as a texture). The sampler compares instead of returning depth: linear filtering then blends the
 * four nearest comparisons, which already softens edges a little before the shader's 3x3 average.
 * The pipeline draws depth only, from positions alone. Both sides of triangles are drawn, so open meshes (a plane) still
-* cast shadows, and a small slope-scaled bias pushes depths away from the light on surfaces seen at a grazing angle,
-* where shadow acne is worst.
+* cast shadows. There is no hardware depth bias: its slope-scaled part grows without limit on surfaces the light sees
+* edge-on (a pillar's side seen from a lamp above it), and pushed whole pillars behind the ground, detaching their
+* shadows. The shader's normal offset, measured in texels of each tile, handles acne instead.
 */
 void GpuRenderer::createShadowResources() {
     const SDL_GPUTextureUsageFlags atlasUsage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
@@ -197,8 +199,8 @@ void GpuRenderer::createShadowResources() {
     atlasInfo.type = SDL_GPU_TEXTURETYPE_2D;
     atlasInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     atlasInfo.usage = atlasUsage;
-    atlasInfo.width = shadowTileSize * shadowAtlasColumns;
-    atlasInfo.height = shadowTileSize * shadowAtlasRows;
+    atlasInfo.width = shadowAtlasWidth;
+    atlasInfo.height = shadowAtlasHeight;
     atlasInfo.layer_count_or_depth = 1;
     atlasInfo.num_levels = 1;
     atlasInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -224,6 +226,27 @@ void GpuRenderer::createShadowResources() {
 
     if (shadowSampler == nullptr) {
         throw gpuError("Shadow sampler creation failed");
+    }
+
+    // Room for every tile there can be, so the buffers never need to grow; the upload copies only the tiles in use.
+    SDL_GPUBufferCreateInfo tileBufferInfo{};
+    tileBufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+    tileBufferInfo.size = static_cast<Uint32>(maxShadowTiles * sizeof(ShadowTileData));
+
+    shadowTileBuffer = SDL_CreateGPUBuffer(device, &tileBufferInfo);
+
+    if (shadowTileBuffer == nullptr) {
+        throw gpuError("Shadow tile buffer creation failed");
+    }
+
+    SDL_GPUTransferBufferCreateInfo tileTransferInfo{};
+    tileTransferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tileTransferInfo.size = tileBufferInfo.size;
+
+    shadowTileTransfer = SDL_CreateGPUTransferBuffer(device, &tileTransferInfo);
+
+    if (shadowTileTransfer == nullptr) {
+        throw gpuError("Shadow tile transfer buffer creation failed");
     }
 
     SDL_GPUShader* vertexShader = nullptr;
@@ -252,9 +275,6 @@ void GpuRenderer::createShadowResources() {
         info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
         info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
         info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
-        info.rasterizer_state.enable_depth_bias = true;
-        info.rasterizer_state.depth_bias_constant_factor = 1.0f;
-        info.rasterizer_state.depth_bias_slope_factor = 1.5f;
 
         info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
@@ -377,6 +397,16 @@ void GpuRenderer::cleanup() noexcept {
             shadowAtlas = nullptr;
         }
 
+        if (shadowTileBuffer != nullptr) {
+            SDL_ReleaseGPUBuffer(device, shadowTileBuffer);
+            shadowTileBuffer = nullptr;
+        }
+
+        if (shadowTileTransfer != nullptr) {
+            SDL_ReleaseGPUTransferBuffer(device, shadowTileTransfer);
+            shadowTileTransfer = nullptr;
+        }
+
         if (windowClaimed) {
             SDL_ReleaseWindowFromGPUDevice(device, window);
             windowClaimed = false;
@@ -413,28 +443,42 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         Camera camera = frame.camera;
         camera.setAspectRatio(getFrameAspectRatio());
 
-        const LightUniformData lights = packLighting(frame.lighting, camera.getPosition());
-        const ShadowPlan shadows = planShadows(frame.lighting, camera);
+        // The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
+        // View and projection are combined once per frame, not once per object.
+        viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
+        const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::ZeroToOne);
+
+        // When there are more lights than seats, the ones that matter most here get them, remembering last frame's choice.
+        const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory);
+        lightHistory = prioritized.history;
+
+        stats.pointLights = frame.lighting.pointLights.size();
+        stats.pointLightsInView = prioritized.pointLightsInView;
+        stats.pointLightsLit = prioritized.lighting.pointLights.size();
+        stats.pointLightsShadowed = static_cast<std::size_t>(std::count_if(
+            prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
+            [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
+
+        const LightUniformData lights = packLighting(prioritized.lighting, camera.getPosition());
+        const ShadowPlan shadows = planShadows(prioritized.lighting, camera);
 
         // Copies must happen outside render passes, so the debug lines are uploaded first.
         debugLines->upload(commands, frame.debugLines, frame.debugScreenLines);
+        uploadShadowTiles(shadows.tileData);
 
-        if (!shadows.tileMatrices.empty()) {
-            drawShadows(frame, shadows.tileMatrices);
+        if (!shadows.tiles.empty()) {
+            drawShadows(frame, shadows.tiles);
         }
 
         beginMainPass(swapchainTexture);
 
-        // The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
-        // View and projection are combined once per frame, not once per object.
-        viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
-
         // Pushed uniform data stays in effect for every later draw, so the lights and shadow data are sent once per frame.
         SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
         SDL_PushGPUFragmentUniformData(commands, 2, &shadows.uniforms, static_cast<Uint32>(sizeof(shadows.uniforms)));
+        SDL_BindGPUFragmentStorageBuffers(pass, 0, &shadowTileBuffer, 1);
 
         // Only what the camera can see. Shadows chose their casters with each light's own view, above.
-        const std::vector<std::size_t> visible = visibleDraws(frame.draws, Frustum::fromClipMatrix(viewProjection, ClipDepth::ZeroToOne));
+        const std::vector<std::size_t> visible = visibleDraws(frame.draws, cameraFrustum);
 
         for (std::size_t index : visible) {
             const DrawItem& draw = frame.draws[index];
@@ -508,11 +552,48 @@ SDL_GPUTexture* GpuRenderer::acquireFrame() {
 }
 
 /*
+* The tiles' matrices and atlas rectangles go to a storage buffer, since there are too many for a uniform block.
+* Copies must happen outside render passes, so this runs before the shadow pass. Cycling lets the GPU keep reading
+* last frame's copy while this frame's is written.
+*/
+void GpuRenderer::uploadShadowTiles(const std::vector<ShadowTileData>& tileData) {
+    if (tileData.empty()) {
+        return;
+    }
+
+    const Uint32 byteCount = static_cast<Uint32>(tileData.size() * sizeof(ShadowTileData));
+    void* destination = SDL_MapGPUTransferBuffer(device, shadowTileTransfer, true);
+
+    if (destination == nullptr) {
+        throw gpuError("Shadow tile transfer buffer mapping failed");
+    }
+
+    std::memcpy(destination, tileData.data(), byteCount);
+    SDL_UnmapGPUTransferBuffer(device, shadowTileTransfer);
+
+    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commands);
+
+    if (copyPass == nullptr) {
+        throw gpuError("Shadow tile copy pass creation failed");
+    }
+
+    SDL_GPUTransferBufferLocation source{};
+    source.transfer_buffer = shadowTileTransfer;
+
+    SDL_GPUBufferRegion target{};
+    target.buffer = shadowTileBuffer;
+    target.size = byteCount;
+
+    SDL_UploadToGPUBuffer(copyPass, &source, &target, true);
+    SDL_EndGPUCopyPass(copyPass);
+}
+
+/*
 * The shadow maps: the scene drawn once per shadow view (six for each point light, one for each spotlight or directional
 * light), each into its own tile of the atlas (the viewport picks the tile). Only depth is kept, so each texel holds how
 * far the nearest surface is from the light in that direction. Meshes that do not cast shadows are left out.
 */
-void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<Mat4>& tileMatrices) {
+void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<ShadowTile>& tiles) {
     SDL_GPUDepthStencilTargetInfo depthTarget{};
     depthTarget.texture = shadowAtlas;
     depthTarget.clear_depth = 1.0f;
@@ -530,20 +611,18 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<M
 
     SDL_BindGPUGraphicsPipeline(pass, shadowPipeline);
 
-    const float tileSize = static_cast<float>(shadowTileSize);
-
-    for (std::size_t tile = 0; tile < tileMatrices.size(); ++tile) {
+    for (const ShadowTile& tile : tiles) {
         // Geometry outside a view is clipped before it is drawn, so it never spills into the neighbouring tiles.
         SDL_GPUViewport viewport{};
-        viewport.x = static_cast<float>(tile % shadowAtlasColumns) * tileSize;
-        viewport.y = static_cast<float>(tile / shadowAtlasColumns) * tileSize;
-        viewport.w = tileSize;
-        viewport.h = tileSize;
+        viewport.x = static_cast<float>(tile.x);
+        viewport.y = static_cast<float>(tile.y);
+        viewport.w = static_cast<float>(tile.size);
+        viewport.h = static_cast<float>(tile.size);
         viewport.min_depth = 0.0f;
         viewport.max_depth = 1.0f;
         SDL_SetGPUViewport(pass, &viewport);
 
-        const Mat4& tileMatrix = tileMatrices[tile];
+        const Mat4& tileMatrix = tile.matrix;
 
         // The light's own view decides, not the camera's: things off screen can still throw shadows into view.
         const std::vector<std::size_t> casters = shadowCasters(frame.draws, Frustum::fromClipMatrix(tileMatrix, ClipDepth::ZeroToOne));
