@@ -6,6 +6,7 @@
 #include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/debug_line_renderer.h"
+#include "render/gpu/shadow_cache.h"
 #include "render/gpu/shadow_map.h"
 #include "render/render_stats.h"
 #include "scene/asset_handles.h"
@@ -118,6 +119,12 @@ private:
     SDL_GPUTexture* shadowAtlas = nullptr;
     SDL_GPUSampler* shadowSampler = nullptr;
     SDL_GPUGraphicsPipeline* shadowPipeline = nullptr;
+
+    // Shadow caching: the atlas is kept between frames. Lights keep their squares (the layout), a tile is redrawn only
+    // when its view or the casters in it changed (the memory), and a redrawn tile is first reset to the far depth.
+    ShadowAtlasLayout shadowLayout;
+    ShadowTileMemory shadowMemory;
+    SDL_GPUGraphicsPipeline* shadowClearPipeline = nullptr;
 
     // Each tile's matrix, normal offset and place in the atlas, for the main shader (too big for a uniform block).
     SDL_GPUBuffer* shadowTileBuffer = nullptr;
