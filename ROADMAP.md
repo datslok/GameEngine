@@ -111,7 +111,7 @@ Untangle `Application` and the old `GpuDisplay` before adding more features, so 
 - [x] Asset manager with handles (`asset-manager`): `MeshHandle` and `TextureHandle`, each file loaded once, GPU copies indexed like the handles, no per-frame path lookups
 - [x] Indexed meshes (`indexed-meshes`): `Mesh` stays the import format; `buildIndexedMesh` produces the render format (`MeshVertex` position/normal/UV, the exact GPU layout, plus 32-bit indices), merging identical corners
 
-**Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window. âœ” (`tests/demo_game_test.cpp`; the remaining items finish the phase)
+**Milestone:** the current demo runs as a `Game`, and a test runs its simulation for 1000 ticks with no window. ✔ (`tests/demo_game_test.cpp`; the remaining items finish the phase)
 
 ## Phase 4: Rendering upgrades ← current
 
