@@ -322,7 +322,9 @@ Totals above 1 clip to white for now. Handling that gracefully (tone mapping) an
 
 ### Objects in the sky
 
-The demo's moon sphere sits exactly where the moonlight comes from, opposite the light's direction. But the real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sphere at a fixed place would drift and grow as you approached it. So the demo moves the moon every frame to a fixed offset from the camera (80 units along the direction towards the moon, inside the camera's far plane). Its direction and size never change, which is the same trick skyboxes use.
+The demo's moon sphere sits in the direction the moonlight comes from, opposite the light's direction. The real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sky object that should behave like that is kept at a fixed offset from the camera every frame, so its direction and size never change; that is the trick skyboxes use.
+
+The demo deliberately does the opposite: its moon is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds. The price is parallax: as you move, it shifts and grows like any nearby object, and up close its direction no longer matches the moonlight exactly (a directional light has the same direction everywhere).
 
 ---
 
