@@ -84,6 +84,13 @@ void testCameraControllers() {
         rising.update(level, space, 0.5f);
         assert(nearlyEqual(level.getPosition(), Vec3{0.0f, 1.0f, 0.0f}));
 
+        // Shift flies at double speed, in every direction including up.
+        Input fastRise = capturedInput();
+        fastRise.pressKey(Key::Space);
+        fastRise.pressKey(Key::LeftShift);
+        rising.update(level, fastRise, 0.5f);
+        assert(nearlyEqual(level.getPosition(), Vec3{0.0f, 3.0f, 0.0f}));
+
         // After Escape (mouse not captured) the camera neither turns nor moves.
         Input released = capturedInput();
         released.setWindowState(true, false, false);
@@ -116,6 +123,22 @@ void testCameraControllers() {
         const Vec3 moved = camera.getPosition() - start;
         assert(nearlyEqual(moved.x, 3.0f / std::sqrt(2.0f)));
         assert(nearlyEqual(moved.z, -3.0f / std::sqrt(2.0f)));
+
+        // Holding Shift runs at double speed; either Shift key works.
+        Camera runner = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        FirstPersonCameraController running{3.0f, 0.001f};
+        running.takeOver(runner);
+        Input run = capturedInput();
+        run.pressKey(Key::W);
+        run.pressKey(Key::LeftShift);
+        running.update(runner, run, 1.0f);
+        assert(nearlyEqual(runner.getPosition(), Vec3{0.0f, 1.0f, -6.0f}));
+
+        Input runRight = capturedInput();
+        runRight.pressKey(Key::W);
+        runRight.pressKey(Key::RightShift);
+        running.update(runner, runRight, 1.0f);
+        assert(nearlyEqual(runner.getPosition(), Vec3{0.0f, 1.0f, -12.0f}));
 
         // Mouse motion turns the camera and changes the walking direction.
         Input turn = capturedInput();

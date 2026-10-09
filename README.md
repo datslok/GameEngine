@@ -108,6 +108,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | Mouse | Look around |
 | W A S D | Move |
 | Space / Ctrl | Move up / down (free camera only) |
+| Shift (hold) | Run in first person, fly twice as fast in free camera |
 
 **MOBA**
 
