@@ -199,6 +199,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] Hardware ray tracing (RTX-class GPUs): a new Vulkan backend built on the frame description from phase 4, with an acceleration structure per mesh built once at upload. SDL_GPU has no ray-tracing support, so SDL keeps the window while the backend talks to Vulkan directly. Start with ray-traced shadows or reflections over the rasterised image, and keep the rasterised path for GPUs without ray tracing. Physically based materials first
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
 - [ ] Post-processing: render the scene to an off-screen texture first, then bloom (bright and emissive pixels blurred and added back, giving the moon and lamps a soft halo) and tone mapping (brightness above 1 rolled off smoothly instead of clipping to white)
+  - Once tone mapping exists, consider physical light units plus a camera exposure for all lights. Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers), with the exposure step mapping the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen. Until then, the demo keeps the moon sphere's glow and the moonlight as separate artistic dials, because the renderer clips at 1.0
 - [ ] GPU instancing for many identical units
 - [ ] Multithreading: a job system for simulation and asset loading
 - [ ] Level editor or scene file format
