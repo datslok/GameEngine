@@ -22,8 +22,10 @@ namespace {
     // The way the moonlight travels. The moon sphere is placed the opposite way, so the light comes from where you see the moon.
     const Vec3 moonlightDirection{0.4f, -1.0f, -0.6f};
 
-    // How far from the camera the moon is drawn (inside the camera's far plane of 100), and how big it is.
-    constexpr float moonDistance = 80.0f;
+    // The moon is a place you can fly to: this far from where the free camera starts, towards the moonlight (inside the camera's
+    // far plane of 100). At the free camera's 3 units per second, reaching its surface takes about 20 seconds.
+    const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
+    constexpr float moonDistance = 64.0f;
     constexpr float moonRadius = 4.0f;
 }
 
@@ -108,7 +110,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(world.create(), AmbientLight{Vec3{0.06f, 0.06f, 0.06f}});
     world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.6f, 0.7f, 1.0f}, 0.15f});
 
-    // The moon itself: a glowing sphere where the moonlight comes from. updateMoon keeps it at a fixed distance from the camera.
+    // The moon itself: a glowing sphere in the direction the moonlight comes from, at a fixed place so you can fly to it.
     Material moonGlow;
     moonGlow.colour = Pixel{0, 0, 0};
     moonGlow.specularStrength = 0.0f;
@@ -116,6 +118,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     Transform moonPlacement;
     moonPlacement.scale = Vec3{moonRadius, moonRadius, moonRadius};
+    moonPlacement.position = freeCameraStart - moonlightDirection.normalized() * moonDistance;
 
     moon = world.create();
     world.add(moon, moonPlacement);
@@ -195,14 +198,6 @@ void DemoGame::toggleFlashlight(World& world) {
 * In MOBA mode the duck holds it, so it uses the duck's drawn (interpolated) pose, keeping the beam in step with the model.
 * It needs no PreviousTransform: it is already placed exactly where things are drawn this frame.
 */
-/*
-* The real moon is so far away that walking shows no parallax: it stays in the same direction and the same size.
-* Keeping the sphere at a fixed offset from the camera every frame gives the same effect (the trick skyboxes use).
-*/
-void DemoGame::updateMoon(World& world) {
-    world.get<Transform>(moon).position = camera.getPosition() - moonlightDirection.normalized() * moonDistance;
-}
-
 void DemoGame::updateFlashlight(World& world, float alpha) {
     Vec3 position = camera.getPosition();
     Vec3 direction = camera.getForward();
@@ -246,7 +241,6 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
     }
 
     updateFlashlight(world, alpha);
-    updateMoon(world);
 }
 
 Camera& DemoGame::getCamera() {
@@ -293,7 +287,7 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
 
     case ControlMode::FreeCamera:
         camera.setPose(
-            Vec3{2.0f, 1.0f, 0.0f},
+            freeCameraStart,
             Vec3{0.0f, 0.0f, -5.0f},
             worldUp
         );
