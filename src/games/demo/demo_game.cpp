@@ -23,6 +23,12 @@ namespace {
     // does not block its own light now that every light casts shadows.
     constexpr float flashlightReach = 1.2f;
 
+    // Away from MOBA mode the flashlight is in the right hand: this far right of and below the eye, aimed at the point this
+    // far straight ahead. Being off to the side, it throws shadows you can see beside things, not hidden behind them.
+    constexpr float flashlightHandRight = 0.4f;
+    constexpr float flashlightHandDown = 0.3f;
+    constexpr float flashlightAimDistance = 8.0f;
+
     // Which way the moon is from where the free camera starts: up, to the left and behind.
     const Vec3 towardsMoon{-0.4f, 1.0f, 0.6f};
 
@@ -212,12 +218,13 @@ void DemoGame::toggleFlashlight(World& world) {
 
 /*
 * Runs every frame, after the camera moves, because the camera moves per frame: updating per tick would make the beam lag behind mouse look.
+* Normally it is held in the right hand and aimed at the middle of the view.
 * In MOBA mode the duck holds it, so it uses the duck's drawn (interpolated) pose, keeping the beam in step with the model.
 * It needs no PreviousTransform: it is already placed exactly where things are drawn this frame.
 */
 void DemoGame::updateFlashlight(World& world, float alpha) {
-    Vec3 position = camera.getPosition();
-    Vec3 direction = camera.getForward();
+    Vec3 position = camera.getPosition() + camera.getRight() * flashlightHandRight - camera.getUp() * flashlightHandDown;
+    Vec3 direction = camera.getPosition() + camera.getForward() * flashlightAimDistance - position;
 
     if (controlMode == ControlMode::Moba && world.isAlive(player)) {
         // Held above the ground, out in front, and tilted down so the beam lands a few steps ahead.
