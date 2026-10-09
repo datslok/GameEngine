@@ -21,14 +21,14 @@ namespace {
         assert(nearlyEqual(material.shininess, 32.0f));
     }
 
-    // Byte colour channels become the shader's 0..1 range, with full opacity.
+    // Byte colours are sRGB like image files, so the shader gets them decoded to linear light, with full opacity.
     void testColourIsConverted() {
         Material material;
         material.colour = Pixel{255, 128, 0};
 
         const MaterialUniformData data = packMaterial(material);
 
-        assert(nearlyEqual(data.baseColour, 1.0f, 128.0f / 255.0f, 0.0f, 1.0f));
+        assert(nearlyEqual(data.baseColour, 1.0f, 0.2158f, 0.0f, 1.0f));
     }
 
     void testDefaultSpecularIsPacked() {

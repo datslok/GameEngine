@@ -55,7 +55,9 @@ GpuTexture::GpuTexture(
     try {
         SDL_GPUTextureCreateInfo textureInfo{};
         textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-        textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        // Image files store sRGB. An _SRGB format makes the GPU decode texels to linear light when sampling (and when averaging mip levels),
+        // so lighting maths is done on real amounts of light. Non-colour data such as normal maps will need plain UNORM.
+        textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
         // Generating mipmaps draws each smaller level from the one above, so the texture must also be a render target.
         textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
         textureInfo.width = width;

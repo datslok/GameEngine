@@ -83,6 +83,9 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
             throw gpuError("Could not limit frames in flight");
         }
 
+        // Before the pipeline, which is built for the swapchain's format.
+        useLinearSwapchain();
+
         createPipeline();
         createWhiteTexture();
     }
@@ -90,6 +93,24 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         cleanup();
         throw;
     }
+}
+
+/*
+* The shader does its lighting in linear light. An sRGB swapchain (SDR_LINEAR) encodes each pixel as it is written,
+* so the screen gets the gamma-encoded values it expects, and blending happens in linear light too.
+* Without one, linear values would be shown as they are and mid-tones would look far too dark, so warn loudly.
+*/
+void GpuRenderer::useLinearSwapchain() {
+    if (!SDL_WindowSupportsGPUSwapchainComposition(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR)) {
+        SDL_Log("sRGB swapchain not supported: colours will look too dark");
+        return;
+    }
+
+    if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR, SDL_GPU_PRESENTMODE_VSYNC)) {
+        throw gpuError("Could not switch to an sRGB swapchain");
+    }
+
+    swapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR;
 }
 
 void GpuRenderer::createPipeline() {
@@ -560,7 +581,7 @@ PresentMode GpuRenderer::setPresentMode(PresentMode requested) {
         chosen = PresentMode::Vsync;
     }
 
-    if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, toSdl(chosen))) {
+    if (!SDL_SetGPUSwapchainParameters(device, window, swapchainComposition, toSdl(chosen))) {
         throw gpuError("Could not set the present mode");
     }
 

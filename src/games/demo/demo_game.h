@@ -62,7 +62,7 @@ private:
     Entity flashlight;
     // A large source radius keeps it gentle up close; the higher intensity carries it further.
     SpotLight flashlightBeam{
-        .colour = Vec3{1.0f, 0.95f, 0.85f},
+        .colour = Vec3{1.0f, 0.89f, 0.69f},
         .intensity = 12.0f,
         .range = 50.0f,
         .sourceRadius = 4.5f

@@ -15,7 +15,7 @@
 * The AssetManager loads the texture once and turns this into a Material with a TextureHandle.
 */
 struct MaterialSource {
-    Pixel colour{255, 255, 255};
+    Pixel colour{255, 255, 255}; // sRGB
 
     // A texture can come from a file or embedded image bytes.
     // If both are empty, the part uses plain colour.

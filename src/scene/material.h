@@ -10,7 +10,7 @@
 * Files describe materials with MaterialSource (scene/model.h); the AssetManager turns those into this.
 */
 struct Material {
-    Pixel colour{255, 255, 255};
+    Pixel colour{255, 255, 255}; // sRGB, like image files and colour pickers; decoded to linear light for shading.
     TextureHandle texture;
 
     // Most surfaces are slightly shiny. Set the strength to 0 for a matte surface.
