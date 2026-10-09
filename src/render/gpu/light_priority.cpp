@@ -19,21 +19,42 @@ namespace {
         return entity != Entity{} && std::find(incumbents.begin(), incumbents.end(), entity) != incumbents.end();
     }
 
-    /*
-    * Indices of up to count lights, most important first, with last frame's choices counting incumbentAdvantage times
-    * as much. The sort is stable, so equally important lights keep the order they were collected in.
-    */
-    std::vector<std::size_t> chooseMostImportant(const std::vector<float>& importance, const std::vector<Entity>& entities,
-                                                 const std::vector<Entity>& incumbents, int count) {
-        std::vector<float> standing(importance.size());
+    // What decides one light's place in a ranking.
+    struct Contender {
+        int priority;
+        float importance;
+        Entity entity;
+    };
 
-        for (std::size_t i = 0; i < importance.size(); ++i) {
-            standing[i] = wasChosen(entities[i], incumbents) ? importance[i] * incumbentAdvantage : importance[i];
+    template <typename Placed>
+    Contender contenderFor(const Placed& placed, const Vec3& focus) {
+        return Contender{
+            placed.light.priority,
+            lightImportance(placed.position, placed.light.colour, placed.light.intensity, placed.light.sourceRadius, focus),
+            placed.entity
+        };
+    }
+
+    /*
+    * Indices of up to count lights, most important first. Priority comes first: a higher one always wins. Between equal
+    * priorities, last frame's choices count incumbentAdvantage times as much. The sort is stable, so equally important
+    * lights keep the order they were collected in.
+    */
+    std::vector<std::size_t> chooseMostImportant(const std::vector<Contender>& contenders, const std::vector<Entity>& incumbents, int count) {
+        std::vector<float> standing(contenders.size());
+
+        for (std::size_t i = 0; i < contenders.size(); ++i) {
+            const Contender& contender = contenders[i];
+            standing[i] = wasChosen(contender.entity, incumbents) ? contender.importance * incumbentAdvantage : contender.importance;
         }
 
-        std::vector<std::size_t> order(importance.size());
+        std::vector<std::size_t> order(contenders.size());
         std::iota(order.begin(), order.end(), std::size_t{0});
         std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+            if (contenders[a].priority != contenders[b].priority) {
+                return contenders[a].priority > contenders[b].priority;
+            }
+
             return standing[a] > standing[b];
         });
 
@@ -42,11 +63,6 @@ namespace {
         }
 
         return order;
-    }
-
-    template <typename Placed>
-    float importanceAtFocus(const Placed& placed, const Vec3& focus) {
-        return lightImportance(placed.position, placed.light.colour, placed.light.intensity, placed.light.sourceRadius, focus);
     }
 
     /*
@@ -58,21 +74,19 @@ namespace {
                                     const std::vector<Entity>& previouslySeated, int seats, std::vector<Entity>& seatedEntities,
                                     std::size_t& candidateCount) {
         std::vector<Placed> candidates;
-        std::vector<float> importance;
-        std::vector<Entity> entities;
+        std::vector<Contender> contenders;
 
         for (const Placed& placed : lights) {
             if (canBeDrawn(placed) && view.intersectsSphere(placed.position, placed.light.range)) {
                 candidates.push_back(placed);
-                importance.push_back(importanceAtFocus(placed, focus));
-                entities.push_back(placed.entity);
+                contenders.push_back(contenderFor(placed, focus));
             }
         }
 
         candidateCount = candidates.size();
         std::vector<Placed> seated;
 
-        for (std::size_t index : chooseMostImportant(importance, entities, previouslySeated, seats)) {
+        for (std::size_t index : chooseMostImportant(contenders, previouslySeated, seats)) {
             seated.push_back(candidates[index]);
 
             if (candidates[index].entity != Entity{}) {
@@ -91,24 +105,22 @@ namespace {
     void chooseShadowedLights(std::vector<Placed>& seated, const Vec3& focus, const std::vector<Entity>& previouslyShadowed,
                               int shadows, std::vector<Entity>& shadowedEntities) {
         std::vector<std::size_t> casterSlots;
-        std::vector<float> importance;
-        std::vector<Entity> entities;
+        std::vector<Contender> contenders;
 
         for (std::size_t slot = 0; slot < seated.size(); ++slot) {
             if (seated[slot].light.castsShadows) {
                 casterSlots.push_back(slot);
-                importance.push_back(importanceAtFocus(seated[slot], focus));
-                entities.push_back(seated[slot].entity);
+                contenders.push_back(contenderFor(seated[slot], focus));
             }
         }
 
         std::vector<bool> getsShadow(seated.size(), false);
 
-        for (std::size_t caster : chooseMostImportant(importance, entities, previouslyShadowed, shadows)) {
+        for (std::size_t caster : chooseMostImportant(contenders, previouslyShadowed, shadows)) {
             getsShadow[casterSlots[caster]] = true;
 
-            if (entities[caster] != Entity{}) {
-                shadowedEntities.push_back(entities[caster]);
+            if (contenders[caster].entity != Entity{}) {
+                shadowedEntities.push_back(contenders[caster].entity);
             }
         }
 
