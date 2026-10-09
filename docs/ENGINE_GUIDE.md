@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour, the frame description, shadow mapping, debug drawing, frustum culling).
+**Covers:** phases 0 to 3, and phase 4 up to shadows (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling).
 
 ---
 
@@ -263,6 +263,12 @@ Much of what the engine knows is invisible: bounding boxes, light positions, whe
 The lines are drawn last, unlit, and ignore depth, so they show through walls. That is the point: a collider inside a wall or a light behind a hill is exactly what you want to see when debugging. Games add their own shapes in `onDebugDraw`; the engine itself can draw a box around every mesh (it knows each mesh's bounds) and how many meshes culling skipped last frame, which the demo switches on with F4.
 
 That readout is text, and the engine has no font yet. Debug text is drawn with lines too, in a **stroke font**: each character is a few straight strokes on a 4 by 6 grid, like a plotter or an old vector arcade game. These lines are placed in window pixels instead of the world, and drawn with a flat projection where (0, 0) is the top-left corner.
+
+### Dithering: noise against banding
+
+Even with gamma, the screen has only 256 levels per channel. A slow, dark fade, such as the flashlight's pool on the ground at night, changes by less than one level over many pixels, so whole patches round to the same level and then jump together: visible rings, or **banding**. It is quantisation, like measuring a gentle slope with a ruler marked only in whole centimetres.
+
+**Dithering** adds a little noise before the rounding, up to half a level either way and different for every pixel. Near a boundary, some pixels then round up and some down, in proportion to where the true value lies between the two levels, and the eye averages them back to the in-between brightness (the same idea as halftone printing, or dither in audio mastering). The noise is sized in the screen's own steps, so the shader encodes to sRGB, adds it, and decodes again. It comes from a formula on the pixel's position (**interleaved gradient noise**), which spreads values evenly over every small patch, so the grain is fine and even. A value exactly on a level never moves, so flat colours stay clean, and on average nothing gets brighter or darker; `core/dither` tests both.
 
 ### Depth range
 
