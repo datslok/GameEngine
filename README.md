@@ -6,7 +6,7 @@ It started as a software rasterizer drawing pixels on the CPU and now renders on
 
 ## Features
 
-- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, textures, indexed meshes
+- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering
 - Lighting: directional, point and ambient lights as components, diffuse plus Blinn-Phong specular highlights, per-material shininess
 - Model loading: OBJ, and glTF/GLB with embedded or external textures; optional smooth normals with a crease angle for models that have none
 - Entities and components: generational entity handles, sparse-set component storage, systems as plain functions
