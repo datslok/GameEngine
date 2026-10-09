@@ -147,6 +147,80 @@ void testCameraControllers() {
         assert(nearlyEqual(controller.getAngles().yaw, pi / 2.0f));
     }
 
+    // First person jumps with Space: up to the jump height, back down to the eye height it started at, and no jumping in mid-air.
+    {
+        Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        FirstPersonCameraController controller{3.0f, 0.001f, 1.2f, 20.0f};
+        controller.takeOver(camera);
+        assert(!controller.isAirborne());
+
+        Input jump = capturedInput();
+        jump.pressKey(Key::Space);
+        controller.update(camera, jump, 0.01f);
+        assert(controller.isAirborne());
+        assert(camera.getPosition().y > 1.0f);
+
+        // Fall back in small frames, tracking the highest point and the time in the air.
+        const Input idle = capturedInput();
+        float highest = camera.getPosition().y;
+        float airTime = 0.01f;
+
+        while (controller.isAirborne() && airTime < 5.0f) {
+            controller.update(camera, idle, 0.01f);
+            highest = std::fmax(highest, camera.getPosition().y);
+            airTime += 0.01f;
+        }
+
+        // Peak at the jump height above the eyes, land exactly at eye height. Up and down takes 2 * speed / gravity,
+        // where speed = sqrt(2 * gravity * height): sqrt(48) / 10, about 0.69 s.
+        assert(std::abs(highest - 2.2f) < 0.01f);
+        assert(nearlyEqual(camera.getPosition().y, 1.0f));
+        assert(std::abs(airTime - std::sqrt(48.0f) / 10.0f) < 0.02f);
+
+        // Pressing Space again in mid-air does nothing: the second press lands at the same time as no press.
+        Camera single = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        Camera doubled = single;
+        FirstPersonCameraController singleJump{3.0f, 0.001f, 1.2f, 20.0f};
+        FirstPersonCameraController doubleJump{3.0f, 0.001f, 1.2f, 20.0f};
+        singleJump.takeOver(single);
+        doubleJump.takeOver(doubled);
+        singleJump.update(single, jump, 0.2f);
+        doubleJump.update(doubled, jump, 0.2f);
+        singleJump.update(single, idle, 0.1f);
+        doubleJump.update(doubled, jump, 0.1f);
+        assert(nearlyEqual(single.getPosition().y, doubled.getPosition().y));
+    }
+
+    // The jump follows the same parabola however the frames are cut: one long frame lands where many short ones do.
+    {
+        Camera longFrames = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        Camera shortFrames = longFrames;
+        FirstPersonCameraController slow{3.0f, 0.001f, 1.2f, 20.0f};
+        FirstPersonCameraController fast{3.0f, 0.001f, 1.2f, 20.0f};
+        slow.takeOver(longFrames);
+        fast.takeOver(shortFrames);
+
+        Input jump = capturedInput();
+        jump.pressKey(Key::Space);
+        const Input idle = capturedInput();
+
+        slow.update(longFrames, jump, 0.3f);
+        fast.update(shortFrames, jump, 0.01f);
+
+        for (int frame = 1; frame < 30; ++frame) {
+            fast.update(shortFrames, idle, 0.01f);
+        }
+
+        assert(nearlyEqual(longFrames.getPosition().y, shortFrames.getPosition().y));
+
+        // Walking while in the air still moves you across the ground.
+        Input forward = capturedInput();
+        forward.pressKey(Key::W);
+        const float zBefore = shortFrames.getPosition().z;
+        fast.update(shortFrames, forward, 0.1f);
+        assert(shortFrames.getPosition().z < zBefore);
+    }
+
     // The MOBA camera follows a target at its fixed offset, or pans at the window edges.
     {
         const Vec3 offset{0.0f, 12.0f, 10.0f};

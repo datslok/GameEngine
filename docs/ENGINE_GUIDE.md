@@ -169,7 +169,7 @@ It is **opt-in** per load (`MeshLoadOptions{.smoothNormals = true}`), because on
 
 Controllers in `gameplay/camera/` move it:
 
-- `FirstPersonCameraController`: mouse look plus walking on the ground plane.
+- `FirstPersonCameraController`: mouse look plus walking on the ground plane, and a jump (Space). The jump is projectile motion: launched at `sqrt(2 g h)` to peak at height `h`, then updated with the exact solution for constant gravity, `y += v t - g t^2 / 2`, rather than small Euler steps, so the arc is the same parabola whatever the frame rate. It lands back at the eye height it started from; with no collision yet, that height stands in for the ground.
 - `FreeFlyCameraController`: mouse look plus flying (Space and Ctrl for up and down). In both look controllers, holding Shift doubles the speed (running or fast flying).
 - `MobaCameraController`: a fixed angle that follows a target, or edge-pans while the cursor is confined.
 
