@@ -74,6 +74,11 @@ Software renderer (reference path, used only by tests): `Renderer`, `Display`, `
 
 `ROADMAP.md` is the single source of truth for planned work, grouped into phases with milestones. Tick items off there (`- [x]`) as part of the feature branch that completes them, and keep this file's architecture section in sync.
 
+Documentation habits (part of the work, not optional):
+
+- **Every feature branch:** update `README.md` where it changed (the Features list, project layout, controls).
+- **End of each phase, or after a large feature:** update `docs/ENGINE_GUIDE.md`, the human guide to how the engine works and why. It is for a reader learning the engine (a hobby coder with a physics background): explain concepts and reasons, use physics analogies, define jargon. Organise it by topic, describe the engine as it is now (not a dated log), and update the "Covers" line at the top.
+
 Notes for upcoming work:
 
 - Never read `Input` inside `simulate`; key and click edges are handled once per frame and reach the simulation as commands.
