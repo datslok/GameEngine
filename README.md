@@ -59,10 +59,10 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 
 | Command | What it does |
 |---|---|
-| `make` | Builds `build/game.exe` and compiles the shaders to `.spv` |
+| `make` | Builds `build/game.exe` and compiles the shaders to `.spv`. Only changed files are recompiled, in parallel on every core |
 | `make run` | Builds, then starts the game |
 | `make test` | Builds and runs the tests (`build/tests.exe`) |
-| `make clean` | Removes the executables and compiled shaders |
+| `make clean` | Removes the compiled objects, executables and shaders |
 
 New `.cpp` files in `src/` and `tests/` are picked up automatically.
 
