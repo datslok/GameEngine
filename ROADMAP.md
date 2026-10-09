@@ -146,7 +146,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 - [ ] Mouse picking: click a unit or object, not only the ground
 - [ ] Broad phase: uniform grid, so tests only check nearby objects
 - [ ] Static level collision against triangle meshes
-- [ ] Kinematic character controller: capsule, sliding along walls, stepping up stairs, ground snapping, gravity and jumping
+- [ ] Kinematic character controller: capsule, sliding along walls, stepping up stairs, ground snapping, gravity and jumping (first person has a camera-only placeholder jump until then, `fps-jump`)
 - [ ] Particle physics: forces, gravity, semi-implicit Euler integration, bouncing off level geometry (projectiles, grenades)
 
 **Milestone:** walk around a small level in first person with walls, stairs and jumping, and throw a grenade that bounces.

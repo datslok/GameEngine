@@ -80,7 +80,8 @@ The demo starts in first-person mode. Click in the window to capture the mouse.
 First person and free camera:
   Mouse       Look around
   W A S D     Move
-  Space/Ctrl  Up / down (free camera only)
+  Space       Jump (first person)
+  Space/Ctrl  Up / down (free camera)
   Shift       Run (first person) or fly faster (free camera)
 
 MOBA:
