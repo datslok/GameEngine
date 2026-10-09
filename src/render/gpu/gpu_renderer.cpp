@@ -299,6 +299,30 @@ SDL_GPUDevice* GpuRenderer::getDevice() const {
     return device;
 }
 
+/*
+* The whole frame arrives at once, so the renderer decides how to draw it. Today that is one pass in the frame's order;
+* shadow mapping will add a pass from the light first, and culling will skip draws the camera cannot see.
+*/
+bool GpuRenderer::render(const FrameDescription& frame) {
+    if (!beginFrame(0.0f, 0.0f, 0.0f)) {
+        return false;
+    }
+
+    // Only now is the frame's size known, so the camera's lens is fitted to it here.
+    Camera camera = frame.camera;
+    camera.setAspectRatio(getFrameAspectRatio());
+
+    setCamera(camera);
+    setLighting(frame.lighting);
+
+    for (const DrawItem& draw : frame.draws) {
+        drawMesh(draw.mesh, draw.model, draw.material);
+    }
+
+    endFrame();
+    return true;
+}
+
 bool GpuRenderer::beginFrame(float red, float green, float blue) {
     if (commands != nullptr) {
         throw std::logic_error(
