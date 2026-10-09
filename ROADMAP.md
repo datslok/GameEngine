@@ -151,7 +151,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 
 - [ ] Skeletal animation from glTF skins: joints, skinning in the vertex shader, playing and blending clips
 - [ ] Text rendering with a bitmap font
-- [ ] HUD: crosshair, health bars above units, ability cooldowns
+- [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after the 3D scene (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker into a HUD ring of constant pixel size, then delete the temporary `Material::unlit` flag and its shader branch
 - [ ] Debug UI and in-game stats (frame time, tick time, entity count)
 - [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them
 - [ ] Audio with SDL3: play sounds, volume, simple 3D panning by distance and direction

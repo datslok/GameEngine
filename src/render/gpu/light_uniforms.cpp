@@ -80,6 +80,9 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
         writeVector(slot.positionRange, placed.position, light.range);
         writeVector(slot.directionCosOuter, light.direction.normalized(), cosOuter);
         writeVector(slot.radianceCosInner, light.colour * light.intensity, cosInner);
+
+        // The falloff divides by distance^2 + radius^2, so a radius that is not positive would allow a division by zero at the light.
+        slot.sourceRadius[0] = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;
         ++spotCount;
     }
 

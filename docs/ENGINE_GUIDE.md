@@ -212,7 +212,7 @@ The engine collects what to draw from the `World` (`ModelRenderer` + `Transform`
 
 Data that is the same for every vertex or pixel of a draw, such as matrices, material and lights, goes to shaders as **uniforms**. In SDL_GPU you *push* bytes into a numbered slot, and the shader reads them as a struct. Pushed data stays in effect for the rest of the frame, so lights and the camera are pushed once, and per-object data per draw.
 
-The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 880 bytes; `MaterialUniformData`, 32 bytes). If anyone changes one side, the build fails.
+The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 944 bytes; `MaterialUniformData`, 32 bytes). If anyone changes one side, the build fails.
 
 Matrices are transposed when pushed, because GLSL stores them column by column.
 
@@ -290,7 +290,7 @@ cone = smoothstep(cos(outerAngle), cos(innerAngle), dot(-L, beamDirection))
 
 Inside the inner angle it is at full brightness (the bright core), beyond the outer angle it gives nothing, and in between it fades smoothly (the penumbra). A real flashlight has that soft edge because its bulb is not a perfect point: different parts of the bulb light slightly different cones, and their overlap blurs the boundary. A hard cutoff would look like a stencil.
 
-The comparison uses cosines rather than angles (a bigger cosine means closer to the axis), so the shader needs no `acos` per pixel; the two cosines are computed once on the CPU. The cone multiplies the same distance falloff as a point light.
+The comparison uses cosines rather than angles (a bigger cosine means closer to the axis), so the shader needs no `acos` per pixel; the two cosines are computed once on the CPU. The cone multiplies the same distance falloff as a point light. A spotlight also has a **source radius** `r`: its falloff is `intensity / (d² + r²)` instead of `/ (d² + 1)`. Close to a large source (a reflector, a lit disc) light arrives from its whole area rather than one point, so there is no inverse-square spike; far away (d much larger than r) it is ordinary inverse square again. The demo's flashlight uses r = 3, so it is gentle up close but still reaches across the scene.
 
 A light that follows the camera, like the demo's flashlight, is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason a carried torch does.
 

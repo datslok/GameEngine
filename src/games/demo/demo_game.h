@@ -63,7 +63,13 @@ private:
 
     // F toggles it. Held at the camera, or by the duck in MOBA mode.
     Entity flashlight;
-    SpotLight flashlightBeam{Vec3{1.0f, 0.95f, 0.85f}, 8.0f, 30.0f};
+    // A large source radius keeps it gentle up close; the higher intensity carries it further.
+    SpotLight flashlightBeam{
+        .colour = Vec3{1.0f, 0.95f, 0.85f},
+        .intensity = 12.0f,
+        .range = 50.0f,
+        .sourceRadius = 3.0f
+    };
     void toggleFlashlight(World& world);
     void updateFlashlight(World& world, float alpha);
 

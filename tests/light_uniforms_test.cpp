@@ -154,7 +154,29 @@ namespace {
     }
 }
 
+namespace {
+    // A larger source softens the light up close; a radius that is not positive falls back to 1 so the falloff never divides by zero.
+    void testSpotLightSourceRadiusIsPacked() {
+        FrameLighting lighting;
+
+        PlacedSpotLight wide = spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.2f, 0.4f);
+        wide.light.sourceRadius = 3.0f;
+        lighting.spotLights.push_back(wide);
+
+        PlacedSpotLight broken = wide;
+        broken.light.sourceRadius = 0.0f;
+        lighting.spotLights.push_back(broken);
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(nearlyEqual(data.spots[0].sourceRadius[0], 3.0f));
+        assert(nearlyEqual(data.spots[1].sourceRadius[0], 1.0f));
+        assert(nearlyEqual(SpotLight{}.sourceRadius, 1.0f));
+    }
+}
+
 void testLightUniforms() {
+    testSpotLightSourceRadiusIsPacked();
     testSpotLightIsPacked();
     testSpotLightWithoutDirectionOrRangeIsSkipped();
     testSpotLightInnerConeIsClamped();

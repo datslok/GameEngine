@@ -7,7 +7,7 @@
 */
 struct MaterialUniformData {
     float baseColour[4]; // rgba, 0..1
-    float specular[4];   // x: strength, y: shininess
+    float specular[4];   // x: strength, y: shininess, z: 1 for an unlit material (temporary, see Material::unlit)
 };
 
 static_assert(sizeof(MaterialUniformData) == 32, "MaterialUniformData must match the shader's MaterialData block");

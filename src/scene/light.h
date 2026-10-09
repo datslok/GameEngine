@@ -33,6 +33,10 @@ struct SpotLight {
     Vec3 direction{0.0f, 0.0f, -1.0f}; // The way the beam points. It does not need to be normalised.
     float innerAngle = 0.26f;          // About 15 degrees.
     float outerAngle = 0.44f;          // About 25 degrees.
+
+    // The size of the glowing source. Falloff is intensity / (distance^2 + sourceRadius^2): a bigger source (a reflector,
+    // a lit disc) is gentler up close and still falls off as inverse square far away. 1 matches a point light.
+    float sourceRadius = 1.0f;
 };
 
 // Component: light that reaches every surface equally, standing in for light bounced around the scene. Several add up.
