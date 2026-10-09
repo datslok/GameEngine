@@ -49,7 +49,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Each file is loaded once; both cubes share one mesh handle and one texture handle.
     const MeshHandle cubeMesh = assets.addMesh(Mesh::cube());
     const MeshHandle pyramidMesh = assets.loadMesh("assets/models/pyramid.obj");
-    const MeshHandle teapotMesh = assets.loadMesh("assets/models/teapot.obj");
+    // The teapot file has no normals; it is a curved surface, so smooth them. The pyramid's flat faces are meant to look flat.
+    const MeshHandle teapotMesh = assets.loadMesh("assets/models/teapot.obj", MeshLoadOptions{.smoothNormals = true});
 
     // A spinning demo object: Transform + ModelRenderer + Spinner, plus PreviousTransform so it is drawn smoothly.
     const auto spawnSpinner = [&world](MeshHandle mesh, const Material& material,
