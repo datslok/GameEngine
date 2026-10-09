@@ -197,7 +197,28 @@ namespace {
     }
 }
 
+namespace {
+    // A light fading in or out of its seat has its brightness scaled on the CPU, so the shader needs no extra field.
+    void testFadeScalesRadiance() {
+        FrameLighting lighting;
+        PlacedPointLight point = pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 5.0f);
+        point.fade = 0.25f;
+        lighting.pointLights.push_back(point);
+
+        PlacedSpotLight spot = spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.2f, 0.4f);
+        spot.fade = 0.5f;
+        lighting.spotLights.push_back(spot);
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(nearlyEqual(data.points[0].radiance[0], 0.25f));
+        assert(nearlyEqual(data.spots[0].radianceCosInner[0], 1.0f)); // colour 1 x intensity 2 x fade 0.5
+        assert(PlacedPointLight{}.fade == 1.0f && PlacedSpotLight{}.shadowFade == 1.0f);
+    }
+}
+
 void testLightUniforms() {
+    testFadeScalesRadiance();
     testPointLightSourceRadiusIsPacked();
     testSpotLightSourceRadiusIsPacked();
     testSpotLightIsPacked();

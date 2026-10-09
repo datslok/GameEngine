@@ -62,6 +62,8 @@ layout(std140, set = 3, binding = 2) uniform ShadowData {
     ivec4 spotTiles[2];    // tile for spotlight i at [i / 4][i % 4]
     ivec4 directionalTiles;
     vec4 atlasTexel;       // xy: one texel's size in atlas coordinates
+    vec4 pointShadowStrengths[16]; // how strong point light i's shadow is, 0..1, at [i / 4][i % 4] (fades between lights)
+    vec4 spotShadowStrengths[2];
 };
 
 layout(location = 0) out vec4 outputColour;
@@ -230,7 +232,7 @@ void main() {
             int firstTile = pointTiles[i / 4][i % 4];
 
             if (firstTile >= 0) {
-                radiance *= pointLightShadow(firstTile, points[i].positionRange.xyz, normal);
+                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, normal), pointShadowStrengths[i / 4][i % 4]);
             }
 
             addLight(radiance, offset / distance, normal, toCamera, diffuse, specular);
@@ -259,7 +261,7 @@ void main() {
             int tile = spotTiles[i / 4][i % 4];
 
             if (tile >= 0) {
-                radiance *= shadowFromTile(tile, offsetForShadow(tile, normal, distance));
+                radiance *= mix(1.0, shadowFromTile(tile, offsetForShadow(tile, normal, distance)), spotShadowStrengths[i / 4][i % 4]);
             }
             addLight(radiance, toLight, normal, toCamera, diffuse, specular);
         }

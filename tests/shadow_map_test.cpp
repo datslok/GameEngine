@@ -412,7 +412,29 @@ namespace {
     }
 }
 
+namespace {
+    // A shadow fading in or out reaches the shader as a strength per light slot: 1 full, 0 none.
+    void testShadowStrengthIsPassed() {
+        FrameLighting lighting;
+        PlacedPointLight point = pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, true);
+        point.shadowFade = 0.3f;
+        lighting.pointLights.push_back(point);
+        lighting.pointLights.push_back(pointLightAt(Vec3{1.0f, 0.0f, 0.0f}, false));
+
+        PlacedSpotLight spot = spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true);
+        spot.shadowFade = 0.7f;
+        lighting.spotLights.push_back(spot);
+
+        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{0.0f, 2.0f, 5.0f}));
+
+        assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][0], 0.3f));
+        assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][1], 0.0f));
+        assert(nearlyEqual(plan.uniforms.spotShadowStrengths[0][0], 0.7f));
+    }
+}
+
 void testShadowMap() {
+    testShadowStrengthIsPassed();
     testFaceFollowsTheLargestAxis();
     testEachFaceLooksAlongItsAxis();
     testEveryDirectionLandsInsideItsFace();

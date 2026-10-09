@@ -41,6 +41,9 @@ struct FrameDescription {
     // The camera's position unless the game names a better point (a MOBA camera floats far above the ground it shows).
     Vec3 lightFocus{0.0f, 0.0f, 0.0f};
 
+    // Real time since the last frame, for things the renderer animates itself (lights fading between seats).
+    float frameSeconds = 0.0f;
+
     // Wireframe shapes drawn over the scene (see DebugDraw), and lines on the screen itself in window pixels (overlays, text).
     std::vector<DebugLine> debugLines;
     std::vector<DebugLine> debugScreenLines;

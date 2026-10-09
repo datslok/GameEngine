@@ -18,6 +18,15 @@ namespace {
 
     const Vec3 focus{0.0f, 0.0f, -10.0f};
 
+    // One frame at 60 frames per second.
+    constexpr float frame = 1.0f / 60.0f;
+
+    std::size_t countHeldShadows(const std::vector<LightFade>& held) {
+        return static_cast<std::size_t>(std::count_if(held.begin(), held.end(), [](const LightFade& fade) {
+            return fade.shadow > 0.0f;
+        }));
+    }
+
     PlacedPointLight pointLight(const Vec3& position, std::uint32_t entityIndex, float intensity = 1.0f) {
         PlacedPointLight placed{position, PointLight{}, Entity{entityIndex, 1}};
         placed.light.intensity = intensity;
@@ -79,7 +88,7 @@ namespace {
             lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, -10.0f - static_cast<float>(lightCount - i)}, i + 1));
         }
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(static_cast<int>(result.lighting.pointLights.size()) == maxPointLights);
 
@@ -88,7 +97,7 @@ namespace {
         }
 
         assert(containsLight(result.lighting.pointLights, lightCount));
-        assert(result.history.litPoints.size() == static_cast<std::size_t>(maxPointLights));
+        assert(result.history.points.size() == static_cast<std::size_t>(maxPointLights));
     }
 
     // A light whose whole range sphere is outside the view cannot light anything on screen, so it takes no seat,
@@ -99,7 +108,7 @@ namespace {
         lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, 3.0f}, 2));   // behind, but its range reaches into view
         lighting.spotLights.push_back(spotLight(Vec3{0.0f, 0.0f, 10.0f}, 3));
 
-        const PrioritizedLighting result = prioritizeLights(lighting, Vec3{0.0f, 0.0f, 8.0f}, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, Vec3{0.0f, 0.0f, 8.0f}, makeTestView(), LightHistory{}, frame);
 
         assert(result.lighting.pointLights.size() == 1);
         assert(result.lighting.pointLights[0].entity.index == 2);
@@ -117,7 +126,7 @@ namespace {
         lighting.pointLights.push_back(noRange);
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, 0.0f, 0.0f}});
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(result.lighting.pointLights.empty());
         assert(result.lighting.directionalLights.empty());
@@ -134,7 +143,7 @@ namespace {
 
         lighting.pointLights[0].light.castsShadows = false; // the nearest one asked for no shadows
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(result.lighting.pointLights.size() == lightCount);
         assert(countShadowed(result.lighting.pointLights) == maxShadowedPointLights);
@@ -144,7 +153,7 @@ namespace {
             assert(isShadowed(result.lighting.pointLights, i));
         }
 
-        assert(result.history.shadowedPoints.size() == static_cast<std::size_t>(maxShadowedPointLights));
+        assert(countHeldShadows(result.history.points) == static_cast<std::size_t>(maxShadowedPointLights));
 
         // Shadow planning then gives tiles to exactly those.
         const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, focus, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f};
@@ -167,24 +176,30 @@ namespace {
         }
 
         first.pointLights.push_back(pointLight(focus, rival, 0.5f));
-        const PrioritizedLighting before = prioritizeLights(first, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting before = prioritizeLights(first, focus, makeTestView(), LightHistory{}, frame);
         assert(!isShadowed(before.lighting.pointLights, rival));
 
         // The rival becomes a little brighter than the shadowed ones (all at the focus).
         FrameLighting slightly = first;
         slightly.pointLights.back().light.intensity = 1.1f;
-        const PrioritizedLighting kept = prioritizeLights(slightly, focus, makeTestView(), before.history);
+        const PrioritizedLighting kept = prioritizeLights(slightly, focus, makeTestView(), before.history, frame);
         assert(isShadowed(kept.lighting.pointLights, 1));
         assert(!isShadowed(kept.lighting.pointLights, rival));
 
         // Without last frame's history it would have won.
-        const PrioritizedLighting fresh = prioritizeLights(slightly, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting fresh = prioritizeLights(slightly, focus, makeTestView(), LightHistory{}, frame);
         assert(isShadowed(fresh.lighting.pointLights, rival));
 
-        // Clearly brighter takes the shadow.
+        // Clearly brighter takes the shadow, once the one it displaces has faded out.
         FrameLighting clearly = first;
         clearly.pointLights.back().light.intensity = 2.0f;
-        const PrioritizedLighting taken = prioritizeLights(clearly, focus, makeTestView(), before.history);
+        PrioritizedLighting taken = prioritizeLights(clearly, focus, makeTestView(), before.history, frame);
+
+        for (int step = 0; step < 60; ++step) {
+            taken = prioritizeLights(clearly, focus, makeTestView(), taken.history, frame);
+            assert(countShadowed(taken.lighting.pointLights) <= maxShadowedPointLights);
+        }
+
         assert(isShadowed(taken.lighting.pointLights, rival));
         assert(countShadowed(taken.lighting.pointLights) == maxShadowedPointLights);
     }
@@ -200,11 +215,11 @@ namespace {
         }
 
         lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, -10.0f}, newcomer, 0.5f));
-        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
         assert(!containsLight(before.lighting.pointLights, newcomer));
 
         lighting.pointLights.back().light.intensity = 1.1f;
-        const PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history);
+        const PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame);
         assert(!containsLight(after.lighting.pointLights, newcomer));
     }
 
@@ -222,9 +237,9 @@ namespace {
         lighting.pointLights.push_back(anonymous);
 
         LightHistory history;
-        history.shadowedPoints.push_back(Entity{});
+        history.points.push_back(LightFade{Entity{}, 1.0f, 1.0f});
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), history);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), history, frame);
 
         for (const PlacedPointLight& placed : result.lighting.pointLights) {
             assert(placed.light.castsShadows == (placed.entity != Entity{}));
@@ -240,7 +255,7 @@ namespace {
             lighting.spotLights.push_back(spotLight(Vec3{0.0f, 0.0f, -10.0f - 1.5f * static_cast<float>(i)}, i + 1));
         }
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(static_cast<int>(result.lighting.spotLights.size()) == maxSpotLights);
 
@@ -249,8 +264,8 @@ namespace {
             assert(placed.light.castsShadows);
         }
 
-        assert(result.history.litSpots.size() == static_cast<std::size_t>(maxSpotLights));
-        assert(result.history.shadowedSpots.size() == static_cast<std::size_t>(maxSpotLights));
+        assert(result.history.spots.size() == static_cast<std::size_t>(maxSpotLights));
+        assert(countHeldShadows(result.history.spots) == static_cast<std::size_t>(maxSpotLights));
     }
 
     // Directional lights have no position, so the brightest ones win.
@@ -261,7 +276,7 @@ namespace {
             lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, static_cast<float>(i)});
         }
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(static_cast<int>(result.lighting.directionalLights.size()) == maxDirectionalLights);
 
@@ -275,7 +290,7 @@ namespace {
         FrameLighting lighting;
         lighting.ambient = Vec3{0.1f, 0.2f, 0.3f};
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(result.lighting.ambient.x == 0.1f && result.lighting.ambient.y == 0.2f && result.lighting.ambient.z == 0.3f);
     }
@@ -294,7 +309,7 @@ namespace {
         marked.light.priority = 1;
         lighting.pointLights.push_back(marked);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(static_cast<int>(result.lighting.pointLights.size()) == maxPointLights);
         assert(containsLight(result.lighting.pointLights, 100));
@@ -312,7 +327,7 @@ namespace {
         marked.light.priority = 2;
         lighting.pointLights.push_back(marked);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(isShadowed(result.lighting.pointLights, 100));
         assert(countShadowed(result.lighting.pointLights) == maxShadowedPointLights);
@@ -326,13 +341,19 @@ namespace {
             lighting.pointLights.push_back(pointLight(focus, i + 1));
         }
 
-        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         PlacedPointLight marked = pointLight(focus, 100, 0.5f);
         marked.light.priority = 1;
         lighting.pointLights.push_back(marked);
 
-        const PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history);
+        // It gets the shadow as soon as one of the others has faded out, within one fade.
+        PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame);
+
+        for (float elapsed = frame; elapsed < lightFadeSeconds + 5.0f * frame; elapsed += frame) {
+            after = prioritizeLights(lighting, focus, makeTestView(), after.history, frame);
+        }
+
         assert(isShadowed(after.lighting.pointLights, 100));
     }
 
@@ -347,7 +368,7 @@ namespace {
         spotBehind.light.priority = 5;
         lighting.spotLights.push_back(spotBehind);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
         assert(result.lighting.pointLights.empty());
         assert(result.lighting.spotLights.empty());
     }
@@ -364,7 +385,7 @@ namespace {
         marked.light.priority = 1;
         lighting.spotLights.push_back(marked);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{});
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
 
         assert(static_cast<int>(result.lighting.spotLights.size()) == maxSpotLights);
         assert(result.lighting.spotLights[0].entity.index == 100); // most important first
@@ -377,7 +398,162 @@ namespace {
     }
 }
 
+namespace {
+    const PlacedPointLight* findLight(const std::vector<PlacedPointLight>& lights, std::uint32_t entityIndex) {
+        for (const PlacedPointLight& placed : lights) {
+            if (placed.entity.index == entityIndex) {
+                return &placed;
+            }
+        }
+
+        return nullptr;
+    }
+
+    // A light that was not on screen last frame (just switched on, or just come into view) starts at full strength,
+    // shadow included: nothing showed it before, so nothing can pop.
+    void testNewLightsStartAtFullStrength() {
+        FrameLighting lighting;
+        lighting.pointLights.push_back(pointLight(focus, 1));
+        lighting.spotLights.push_back(spotLight(focus, 2));
+
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+
+        assert(result.lighting.pointLights[0].fade == 1.0f && result.lighting.pointLights[0].shadowFade == 1.0f);
+        assert(result.lighting.spotLights[0].fade == 1.0f && result.lighting.spotLights[0].shadowFade == 1.0f);
+    }
+
+    // When a clearly brighter rival takes a shadow, the displaced light's shadow fades out over lightFadeSeconds while
+    // it keeps its tile, and only then does the rival's fade in, so the cap is never exceeded.
+    void testShadowHandoverFades() {
+        FrameLighting lighting;
+        const std::uint32_t rival = maxShadowedPointLights + 1;
+        const std::uint32_t displaced = maxShadowedPointLights; // equal importance: the last collected loses
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxShadowedPointLights); ++i) {
+            lighting.pointLights.push_back(pointLight(focus, i + 1));
+        }
+
+        lighting.pointLights.push_back(pointLight(focus, rival, 0.5f));
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+
+        lighting.pointLights.back().light.intensity = 2.0f;
+        const float step = 0.1f;
+
+        // 0.1 s: the displaced shadow is at 0.6 and the rival still waits.
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, step);
+        assert(isShadowed(result.lighting.pointLights, displaced));
+        assert(std::abs(findLight(result.lighting.pointLights, displaced)->shadowFade - 0.6f) < 1e-4f);
+        assert(!isShadowed(result.lighting.pointLights, rival));
+
+        // 0.2 s: still fading. Its light stays at full: it keeps its seat, only the shadow moves.
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, step);
+        assert(isShadowed(result.lighting.pointLights, displaced));
+        assert(findLight(result.lighting.pointLights, displaced)->fade == 1.0f);
+
+        // 0.3 s: the shadow is gone and the rival's starts fading in (its light was already shining).
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, step);
+        assert(!isShadowed(result.lighting.pointLights, displaced));
+        assert(isShadowed(result.lighting.pointLights, rival));
+        assert(std::abs(findLight(result.lighting.pointLights, rival)->shadowFade - 0.4f) < 1e-4f);
+        assert(countShadowed(result.lighting.pointLights) == maxShadowedPointLights);
+
+        // 0.5 s: fully in.
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, step);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, step);
+        assert(findLight(result.lighting.pointLights, rival)->shadowFade == 1.0f);
+    }
+
+    // Seats hand over the same way: the displaced light dims to nothing before the newcomer fades in.
+    void testSeatHandoverFades() {
+        FrameLighting lighting;
+        const std::uint32_t newcomer = maxPointLights + 1;
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxPointLights); ++i) {
+            lighting.pointLights.push_back(pointLight(focus, i + 1));
+        }
+
+        lighting.pointLights.push_back(pointLight(focus, newcomer, 0.5f));
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        assert(findLight(result.lighting.pointLights, newcomer) == nullptr);
+
+        lighting.pointLights.back().light.intensity = 2.0f;
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
+        assert(static_cast<int>(result.lighting.pointLights.size()) == maxPointLights);
+        assert(findLight(result.lighting.pointLights, newcomer) == nullptr);
+        assert(std::abs(findLight(result.lighting.pointLights, maxPointLights)->fade - 0.6f) < 1e-4f);
+
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
+        assert(findLight(result.lighting.pointLights, maxPointLights) == nullptr);
+        assert(std::abs(findLight(result.lighting.pointLights, newcomer)->fade - 0.4f) < 1e-4f);
+        assert(static_cast<int>(result.lighting.pointLights.size()) == maxPointLights);
+    }
+
+    // A light that leaves the view goes at once (it lights nothing on screen), and a light waiting for a seat takes it,
+    // fading in, since it was in view and unlit until now.
+    void testLeavingTheViewFreesASeatAtOnce() {
+        FrameLighting lighting;
+        const std::uint32_t waiting = maxPointLights + 1;
+
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxPointLights); ++i) {
+            lighting.pointLights.push_back(pointLight(focus, i + 1));
+        }
+
+        lighting.pointLights.push_back(pointLight(focus, waiting, 0.5f));
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+
+        lighting.pointLights[0].position = Vec3{0.0f, 0.0f, 50.0f}; // behind the camera
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
+
+        assert(findLight(result.lighting.pointLights, 1) == nullptr);
+        assert(std::abs(findLight(result.lighting.pointLights, waiting)->fade - 0.4f) < 1e-4f);
+    }
+
+    // A light coming into view with a free seat appears at full strength: last frame nothing on screen showed it.
+    void testEnteringTheViewStartsFull() {
+        FrameLighting lighting;
+        lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, 50.0f}, 1));
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        assert(result.lighting.pointLights.empty());
+
+        lighting.pointLights[0].position = focus;
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, frame);
+        assert(result.lighting.pointLights[0].fade == 1.0f);
+        assert(result.lighting.pointLights[0].shadowFade == 1.0f);
+    }
+
+    // A fade takes the same time however the frames are cut up.
+    void testFadeTimeDoesNotDependOnFrameRate() {
+        const auto fadeAfter = [](int frames, float seconds) {
+            FrameLighting lighting;
+
+            for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(maxShadowedPointLights); ++i) {
+                lighting.pointLights.push_back(pointLight(focus, i + 1));
+            }
+
+            lighting.pointLights.push_back(pointLight(focus, 100, 0.5f));
+            PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+            lighting.pointLights.back().light.intensity = 2.0f;
+
+            for (int i = 0; i < frames; ++i) {
+                result = prioritizeLights(lighting, focus, makeTestView(), result.history, seconds / static_cast<float>(frames));
+            }
+
+            return findLight(result.lighting.pointLights, maxShadowedPointLights)->shadowFade;
+        };
+
+        assert(std::abs(fadeAfter(1, 0.15f) - fadeAfter(9, 0.15f)) < 1e-4f);
+        assert(std::abs(fadeAfter(1, 0.15f) - 0.4f) < 1e-4f);
+    }
+}
+
 void testLightPriority() {
+    testNewLightsStartAtFullStrength();
+    testShadowHandoverFades();
+    testSeatHandoverFades();
+    testLeavingTheViewFreesASeatAtOnce();
+    testEnteringTheViewStartsFull();
+    testFadeTimeDoesNotDependOnFrameRate();
     testHigherPriorityWinsASeat();
     testHigherPriorityWinsAShadow();
     testPriorityBeatsLastFramesChoice();

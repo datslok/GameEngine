@@ -449,7 +449,7 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::ZeroToOne);
 
         // When there are more lights than seats, the ones that matter most here get them, remembering last frame's choice.
-        const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory);
+        const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory, frame.frameSeconds);
         lightHistory = prioritized.history;
 
         stats.pointLights = frame.lighting.pointLights.size();
