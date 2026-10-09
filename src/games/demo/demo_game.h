@@ -68,7 +68,7 @@ private:
         .colour = Vec3{1.0f, 0.95f, 0.85f},
         .intensity = 12.0f,
         .range = 50.0f,
-        .sourceRadius = 3.0f
+        .sourceRadius = 4.5f
     };
     void toggleFlashlight(World& world);
     void updateFlashlight(World& world, float alpha);
