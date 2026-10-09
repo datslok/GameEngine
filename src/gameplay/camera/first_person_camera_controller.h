@@ -6,6 +6,7 @@
 
 /*
 * A first-person camera: the mouse turns it, and WASD walks on the ground plane, so looking up or down never changes height.
+* Holding Shift runs at double speed.
 * For now it moves the camera itself. Once there is a character controller (phase 5) it will follow a body with collision instead.
 * Pauses while the mouse is not captured (after Escape).
 */

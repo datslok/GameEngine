@@ -30,3 +30,9 @@ void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPer
 
 // WASD as axes: x is strafe (+1 right), y is forward (+1 forward). Not normalized.
 Vec2 getMoveAxes(const Input& input);
+
+// Holding either Shift key runs (first person) or flies fast (free camera) at this multiple of the normal speed.
+inline constexpr float sprintSpeedMultiplier = 2.0f;
+
+// The factor to scale movement speed by this frame: sprintSpeedMultiplier while Shift is held, otherwise 1.
+float getSpeedMultiplier(const Input& input);
