@@ -30,6 +30,7 @@ public:
     Entity getDestinationMarker() const;
     Entity getPlayerTorch() const;
     Entity getFlashlight() const;
+    Entity getMoon() const;
 
 private:
     void createScene(World& world, AssetManager& assets);
@@ -72,6 +73,10 @@ private:
     };
     void toggleFlashlight(World& world);
     void updateFlashlight(World& world, float alpha);
+
+    // A glowing sphere where the moonlight comes from, kept at a fixed distance from the camera like a real, distant moon.
+    Entity moon;
+    void updateMoon(World& world);
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;

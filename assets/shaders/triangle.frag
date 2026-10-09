@@ -9,7 +9,8 @@ layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 // Must match MaterialUniformData in render/gpu/material_uniforms.h.
 layout(std140, set = 3, binding = 0) uniform MaterialData {
     vec4 baseColour;
-    vec4 specularParameters; // x: strength, y: shininess, z: 1 for an unlit material (temporary, see Material::unlit)
+    vec4 specularParameters; // x: strength, y: shininess
+    vec4 emissive;           // rgb: light the surface gives off itself
 };
 
 // Must match the sizes and layout of LightUniformData in render/gpu/light_uniforms.h.
@@ -80,12 +81,6 @@ void main() {
     // Read the texture at this fragment's interpolated UV coordinate.
     vec4 albedo = texture(colourTexture, textureUv) * baseColour;
 
-    // TEMPORARY: an unlit material shows its colour as is (the demo's MOBA marker, until it becomes a HUD element).
-    if (specularParameters.z > 0.5) {
-        outputColour = albedo;
-        return;
-    }
-
     // Light adds up: each light adds its share to these sums.
     vec3 diffuse = vec3(0.0);
     vec3 specular = vec3(0.0);
@@ -139,6 +134,6 @@ void main() {
         }
     }
 
-    // The surface colour tints scattered light; the highlight keeps the light's own colour.
-    outputColour = vec4(albedo.rgb * (ambient.rgb + diffuse) + specular, albedo.a);
+    // The surface colour tints scattered light; the highlight keeps the light's own colour; emitted light is added as is.
+    outputColour = vec4(albedo.rgb * (ambient.rgb + diffuse) + specular + emissive.rgb, albedo.a);
 }

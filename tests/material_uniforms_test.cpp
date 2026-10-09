@@ -49,19 +49,27 @@ namespace {
 }
 
 namespace {
-    // Lit by default; an unlit material tells the shader to skip lighting and show its colour as is.
-    void testUnlitFlagIsPacked() {
-        assert(!Material{}.unlit);
-        assert(nearlyEqual(packMaterial(Material{}).specular[2], 0.0f));
+    // Surfaces do not glow unless asked to: the default emissive colour is black.
+    void testDefaultMaterialDoesNotGlow() {
+        const MaterialUniformData data = packMaterial(Material{});
 
-        Material marker;
-        marker.unlit = true;
-        assert(nearlyEqual(packMaterial(marker).specular[2], 1.0f));
+        assert(nearlyEqual(data.emissive, 0.0f, 0.0f, 0.0f, 0.0f));
+    }
+
+    // Emitted light is added as is, whatever lights the scene has, so a glowing moon or marker keeps its colour at night.
+    void testEmissiveIsPacked() {
+        Material moon;
+        moon.emissive = Vec3{0.85f, 0.9f, 1.0f};
+
+        const MaterialUniformData data = packMaterial(moon);
+
+        assert(nearlyEqual(data.emissive, 0.85f, 0.9f, 1.0f, 0.0f));
     }
 }
 
 void testMaterialUniforms() {
-    testUnlitFlagIsPacked();
+    testDefaultMaterialDoesNotGlow();
+    testEmissiveIsPacked();
     testDefaultMaterialIsSlightlyShiny();
     testColourIsConverted();
     testDefaultSpecularIsPacked();
