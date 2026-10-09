@@ -32,3 +32,7 @@ struct Mat4 {
     const Vec3& up
     );
 };
+
+// The matrix that transforms normals for this model matrix: the inverse transpose of its 3x3 part, in the top-left with [3][3] = 1.
+// Zero when the model matrix squashes space flat.
+Mat4 normalMatrix(const Mat4& model);
