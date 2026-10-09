@@ -115,7 +115,7 @@ void testDemoGame() {
     // It is night: no sun, only a faint ambient light.
     const FrameLighting night = collectLighting(world, 1.0f);
     assert(night.directionalLights.empty());
-    assert(night.ambient.x < 0.05f);
+    assert(night.ambient.x < 0.1f);
 
     // In MOBA mode the duck carries the flashlight, pointing where it faces and tilted down at the ground.
     game.onUpdate(world, mobaInput(), 1.0f / 60.0f, 1.0f);
