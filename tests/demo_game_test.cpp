@@ -160,4 +160,15 @@ void testDemoGame() {
     const Vec3 cameraPosition = freeCamera.getCamera().getPosition();
     assert(nearlyEqual(heldAt.x, cameraPosition.x) && nearlyEqual(heldAt.y, cameraPosition.y) && nearlyEqual(heldAt.z, cameraPosition.z));
     assert(otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized().dot(freeCamera.getCamera().getForward()) > 0.999f);
+
+    // The glowing moon sits exactly where the moonlight comes from, at a fixed distance from the camera,
+    // so like the real moon it never gets closer or changes direction as you move.
+    const Entity moonBall = freeCamera.getMoon();
+    const Vec3 moonlight = collectLighting(otherWorld, 1.0f).directionalLights[0].direction.normalized();
+    const Vec3 expectedMoon = cameraPosition - moonlight * 80.0f;
+    const Vec3 moonPosition = otherWorld.get<Transform>(moonBall).position;
+    assert(nearlyEqual(moonPosition.x, expectedMoon.x) && nearlyEqual(moonPosition.y, expectedMoon.y) && nearlyEqual(moonPosition.z, expectedMoon.z));
+
+    const Material& moonMaterial = otherWorld.get<ModelRenderer>(moonBall).parts[0].material;
+    assert(moonMaterial.emissive.z > 0.5f);
 }

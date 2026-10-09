@@ -1,10 +1,11 @@
 #pragma once
 
 #include "core/pixel.h"
+#include "math/vec3.h"
 #include "scene/asset_handles.h"
 
 /*
-* How the renderer colours a part: a base colour multiplied by a texture, plus a specular highlight.
+* How the renderer colours a part: a base colour multiplied by a texture, plus a specular highlight, plus any light it emits.
 * No texture handle means plain colour (the renderer uses a white texture).
 * Files describe materials with MaterialSource (scene/model.h); the AssetManager turns those into this.
 */
@@ -16,7 +17,7 @@ struct Material {
     float specularStrength = 0.25f;
     float shininess = 32.0f; // Higher means a smaller, sharper highlight.
 
-    // TEMPORARY: show the colour as is, ignoring all lights. Only the demo's MOBA destination marker uses it, so it stays
-    // visible at night. Remove it when the HUD exists and the marker becomes a HUD element (ROADMAP phase 6).
-    bool unlit = false;
+    // Light the surface gives off itself (0..1 per channel, or more for very bright), added whatever lights the scene has.
+    // Black means it does not glow. A glowing object with a black colour shows only its emitted light, so it never changes with lighting.
+    Vec3 emissive{0.0f, 0.0f, 0.0f};
 };

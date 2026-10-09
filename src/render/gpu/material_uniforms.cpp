@@ -13,7 +13,10 @@ MaterialUniformData packMaterial(const Material& material) {
 
     data.specular[0] = material.specularStrength;
     data.specular[1] = material.shininess;
-    data.specular[2] = material.unlit ? 1.0f : 0.0f;
+
+    data.emissive[0] = material.emissive.x;
+    data.emissive[1] = material.emissive.y;
+    data.emissive[2] = material.emissive.z;
 
     return data;
 }

@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to texture filtering (lights including spotlights, specular highlights, smooth normals, normal matrix and depth range, mipmaps).
+**Covers:** phases 0 to 3, and phase 4 up to texture filtering (lights including spotlights, emissive materials and the sky moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps).
 
 ---
 
@@ -304,15 +304,25 @@ specular = lightRadiance * specularStrength * max(0, N · H)^shininess
 
 High `shininess` (128) means most facets line up with `N`: a small, sharp highlight, like polished plastic. Low (8) is broad and dim. The highlight keeps the light's colour; it is not tinted by the surface colour, which is why highlights on red plastic are white. Materials default to slightly shiny (`specularStrength` 0.25, `shininess` 32); matte surfaces like grass set the strength to 0.
 
+### Emissive: surfaces that glow
+
+Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon and its MOBA marker).
+
+Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
+
 ### The whole sum
 
 ```
-colour = albedo * (ambient + Σ diffuse) + Σ specular
+colour = albedo * (ambient + Σ diffuse) + Σ specular + emissive
 ```
 
-Light adds up linearly, like superposing intensities, so every light simply adds its share. `albedo` is the surface colour: the texture times the material colour. A surface with no usable normal gets ambient light only.
+Light adds up linearly, like superposing intensities, so every light simply adds its share. `albedo` is the surface colour: the texture times the material colour. A surface with no usable normal gets ambient and emissive light only.
 
 Totals above 1 clip to white for now. Handling that gracefully (tone mapping) and gamma-correct colour are later topics.
+
+### Objects in the sky
+
+The demo's moon sphere sits exactly where the moonlight comes from, opposite the light's direction. But the real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sphere at a fixed place would drift and grow as you approached it. So the demo moves the moon every frame to a fixed offset from the camera (80 units along the direction towards the moon, inside the camera's far plane). Its direction and size never change, which is the same trick skyboxes use.
 
 ---
 
