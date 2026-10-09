@@ -122,6 +122,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 - [x] Optional smooth normals for models that have none (`smooth-normals`): opt-in per load, angle-weighted, grouped by position, with a crease angle
 - [x] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer (`cpu-normal-matrix`)
 - [x] Linear filtering and mipmaps (`texture-filtering`): trilinear plus 16x anisotropic, mip chains generated on the GPU at upload
+- [ ] Gamma-correct colour: image files store sRGB (gamma-encoded) values, but textures are created as `UNORM`, so lighting, blending and mipmap averaging treat them as linear light and come out slightly too dark. Use `R8G8B8A8_UNORM_SRGB` textures and an sRGB swapchain so all maths happens in linear light; data that is not colour (future normal maps) stays `UNORM`. Material and light colours will need retuning, since the whole scene will look brighter
 - [ ] Shadow mapping for the main directional light
   - First give the renderer the whole frame: the engine builds a frame description (every `{mesh, matrix, material}` to draw, plus lights and camera) and calls one `render(frame)`, instead of calling `drawMesh` per object. Shadows need it (the scene is drawn twice), frustum culling needs it, and it is the basis for a later ray-tracing backend
 - [ ] Debug drawing: lines, boxes, spheres and capsules
