@@ -306,7 +306,7 @@ High `shininess` (128) means most facets line up with `N`: a small, sharp highli
 
 ### Emissive: surfaces that glow
 
-Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon, its MOBA marker, and the duck, which glows a warm yellow on top of its lit texture).
+Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon, its MOBA marker, and in MOBA mode the duck, which glows a warm yellow on top of its lit texture so it is easy to find from far above).
 
 Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
 
