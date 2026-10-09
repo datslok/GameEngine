@@ -74,6 +74,7 @@ The demo starts in first-person mode. Click in the window to capture the mouse.
   F3          Free camera mode
   Alt+Enter   Toggle fullscreen
   Escape      Release the mouse
+  F           Toggle the flashlight (in MOBA mode the duck carries it)
 
 First person and free camera:
   Mouse       Look around
