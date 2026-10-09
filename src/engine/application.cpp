@@ -57,7 +57,7 @@ void Application::run() {
         game.onUpdate(world, input, static_cast<float>(timestep.getFrameSeconds()), alpha);
 
         applyMouseMode();
-        render(alpha);
+        render(alpha, static_cast<float>(timestep.getFrameSeconds()));
 
         // 0 means unlimited.
         if (targetFPS > 0) {
@@ -105,12 +105,13 @@ void Application::prepareNewResources() {
 /*
 * Draw the scene. alpha (0..1) is how far real time has moved past the last tick, and each object is drawn that far between its previous and current transform.
 */
-void Application::render(float alpha) {
+void Application::render(float alpha, float frameSeconds) {
     prepareNewResources();
 
     Camera& camera = game.getCamera();
     FrameDescription frame = buildFrame(world, camera, alpha);
     frame.lightFocus = game.getLightFocus();
+    frame.frameSeconds = frameSeconds;
 
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);
