@@ -612,6 +612,14 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<S
     SDL_BindGPUGraphicsPipeline(pass, shadowPipeline);
 
     for (const ShadowTile& tile : tiles) {
+        // A cube face that sees nothing on screen has no square in the atlas.
+        if (tile.size == 0) {
+            ++stats.shadowTilesSkipped;
+            continue;
+        }
+
+        ++stats.shadowTilesDrawn;
+
         // Geometry outside a view is clipped before it is drawn, so it never spills into the neighbouring tiles.
         SDL_GPUViewport viewport{};
         viewport.x = static_cast<float>(tile.x);

@@ -21,9 +21,9 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Mod
 }
 
 /*
-* Three lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
-* shadow tile counts each mesh once), and the point lights: all of them, those that reach into view, and those that got
-* a seat in the shader and a shadow.
+* Four lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
+* shadow tile counts each mesh once), the point lights (all of them, those that reach into view, and those that got
+* a seat in the shader and a shadow), and the shadow tiles drawn and point light cube faces skipped as unseen.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     constexpr float margin = 16.0f;
@@ -32,6 +32,7 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled);
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled);
+    const std::string tiles = "SHADOW TILES " + std::to_string(stats.shadowTilesDrawn) + "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
 
     debugText(debug, Vec2{margin, margin}, textHeight, camera, boundingBoxColour);
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +
@@ -39,4 +40,5 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
     debugText(debug, Vec2{margin, margin + lineSpacing}, textHeight, shadows, boundingBoxColour);
     debugText(debug, Vec2{margin, margin + 2.0f * lineSpacing}, textHeight, lights, boundingBoxColour);
+    debugText(debug, Vec2{margin, margin + 3.0f * lineSpacing}, textHeight, tiles, boundingBoxColour);
 }
