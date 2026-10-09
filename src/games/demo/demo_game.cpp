@@ -105,16 +105,17 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    // Night: a faint ambient light and a weak, cool moon, so the flashlight and the glowing duck stand out.
+    // Night: a faint ambient light and a weak, cool moon, so the flashlight stands out.
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
-    world.add(world.create(), AmbientLight{Vec3{0.06f, 0.06f, 0.06f}});
-    world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.6f, 0.7f, 1.0f}, 0.15f});
+    // Light values are linear: the screen's sRGB encoding brightens dark values a lot, so night light is tiny in these units.
+    world.add(world.create(), AmbientLight{Vec3{0.012f, 0.012f, 0.012f}});
+    world.add(world.create(), DirectionalLight{moonlightDirection, Vec3{0.32f, 0.45f, 1.0f}, 0.06f});
 
     // The moon itself: a glowing sphere in the direction the moonlight comes from, at a fixed place so you can fly to it.
     Material moonGlow;
     moonGlow.colour = Pixel{0, 0, 0};
     moonGlow.specularStrength = 0.0f;
-    moonGlow.emissive = Vec3{0.85f, 0.9f, 1.0f};
+    moonGlow.emissive = Vec3{0.69f, 0.79f, 1.0f};
 
     Transform moonPlacement;
     moonPlacement.scale = Vec3{moonRadius, moonRadius, moonRadius};
@@ -158,7 +159,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 6.
     yellow.colour = Pixel{0, 0, 0};
     yellow.specularStrength = 0.0f;
-    yellow.emissive = Vec3{1.0f, 0.86f, 0.16f};
+    yellow.emissive = Vec3{1.0f, 0.71f, 0.022f};
 
     ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
@@ -302,14 +303,6 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
     groundSteeringActive = false;
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
-
-        // From the MOBA camera's height the duck is small, so it glows to stay easy to find at night. Emitted light does not
-        // light its surroundings. In the other modes it is lit like everything else.
-        const Vec3 glow = mode == ControlMode::Moba ? Vec3{0.45f, 0.35f, 0.12f} : Vec3{0.0f, 0.0f, 0.0f};
-
-        for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
-            part.material.emissive = glow;
-        }
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
 }

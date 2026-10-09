@@ -6,7 +6,7 @@ It started as a software rasterizer drawing pixels on the CPU and now renders on
 
 ## Features
 
-- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering
+- GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering, gamma-correct (linear-light) colour with sRGB textures and swapchain
 - Lighting: directional, point, spot and ambient lights as components, diffuse plus Blinn-Phong specular highlights, per-material shininess, emissive (glowing) materials
 - Model loading: OBJ, and glTF/GLB with embedded or external textures; optional smooth normals with a crease angle for models that have none
 - Entities and components: generational entity handles, sparse-set component storage, systems as plain functions
@@ -134,7 +134,7 @@ src/            Engine and game source, in layers (lower ones never include high
   assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
-  core/         Fixed timestep and small shared types
+  core/         Fixed timestep, sRGB conversions and small shared types
   math/         Vectors, matrices, transforms, rays
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
