@@ -40,3 +40,6 @@ void updateCharacters(World& world, float deltaTime);
 
 // The character's visual centre where it is drawn, blended between the last two ticks.
 Vec3 getCharacterVisualCentre(const World& world, Entity character, float alpha);
+
+// The unit direction the character faces where it is drawn (on the ground plane), blended between the last two ticks.
+Vec3 getCharacterFacing(const World& world, Entity character, float alpha);

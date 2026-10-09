@@ -7,7 +7,7 @@ It started as a software rasterizer drawing pixels on the CPU and now renders on
 ## Features
 
 - GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: depth testing, indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering
-- Lighting: directional, point and ambient lights as components, diffuse plus Blinn-Phong specular highlights, per-material shininess
+- Lighting: directional, point, spot and ambient lights as components, diffuse plus Blinn-Phong specular highlights, per-material shininess
 - Model loading: OBJ, and glTF/GLB with embedded or external textures; optional smooth normals with a crease angle for models that have none
 - Entities and components: generational entity handles, sparse-set component storage, systems as plain functions
 - An asset manager that loads each file once and hands out typed handles
@@ -98,6 +98,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **F3** | Free camera mode |
 | **Alt+Enter** | Toggle fullscreen |
 | **Escape** | Release the mouse |
+| **F** | Toggle the flashlight (held at the camera; in MOBA mode the duck carries it) |
 
 **First person and free camera**
 

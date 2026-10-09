@@ -73,7 +73,38 @@ namespace {
     }
 }
 
+namespace {
+    // Spotlights are placed like point lights, and keep their beam settings.
+    void testSpotLightIsCollectedWithItsPosition() {
+        World world;
+        const Entity flashlight = world.create();
+
+        Transform current;
+        current.position = Vec3{0.0f, 4.0f, 0.0f};
+        Transform previous;
+        previous.position = Vec3{0.0f, 0.0f, 0.0f};
+
+        world.add(flashlight, current);
+        world.add(flashlight, PreviousTransform{previous});
+        world.add(flashlight, SpotLight{Vec3{1.0f, 1.0f, 1.0f}, 2.0f, 20.0f, Vec3{0.0f, 0.0f, -1.0f}, 0.2f, 0.4f});
+
+        // A spotlight with nowhere to be is skipped.
+        world.add(world.create(), SpotLight{});
+
+        const FrameLighting lighting = collectLighting(world, 0.5f);
+
+        assert(lighting.spotLights.size() == 1);
+        const PlacedSpotLight& placed = lighting.spotLights[0];
+        assert(nearlyEqual(placed.position, Vec3{0.0f, 2.0f, 0.0f}));
+        assert(nearlyEqual(placed.light.direction, Vec3{0.0f, 0.0f, -1.0f}));
+        assert(nearlyEqual(placed.light.range, 20.0f));
+        assert(nearlyEqual(placed.light.innerAngle, 0.2f));
+        assert(nearlyEqual(placed.light.outerAngle, 0.4f));
+    }
+}
+
 void testLighting() {
+    testSpotLightIsCollectedWithItsPosition();
     testEmptyWorldHasNoLight();
     testAmbientLightsAddUp();
     testDirectionalLightsAreCopied();
