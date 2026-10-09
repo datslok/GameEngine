@@ -130,7 +130,7 @@ src/            Engine and game source, in layers (lower ones never include high
   platform/     The window and SDL input translation
   render/gpu/   GPU renderer (SDL_GPU), and the packing of lights and materials for the shaders
   render/software/  Software rasterizer, kept as a tested reference
-  scene/        Meshes, models, materials, lights, the camera, render components and interpolation
+  scene/        Meshes, models, materials, lights, the camera, render components, interpolation and the frame description
   assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
