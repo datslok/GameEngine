@@ -48,7 +48,20 @@ namespace {
     }
 }
 
+namespace {
+    // Lit by default; an unlit material tells the shader to skip lighting and show its colour as is.
+    void testUnlitFlagIsPacked() {
+        assert(!Material{}.unlit);
+        assert(nearlyEqual(packMaterial(Material{}).specular[2], 0.0f));
+
+        Material marker;
+        marker.unlit = true;
+        assert(nearlyEqual(packMaterial(marker).specular[2], 1.0f));
+    }
+}
+
 void testMaterialUniforms() {
+    testUnlitFlagIsPacked();
     testDefaultMaterialIsSlightlyShiny();
     testColourIsConverted();
     testDefaultSpecularIsPacked();

@@ -23,6 +23,7 @@ struct SpotLightUniform {
     float positionRange[4];     // xyz: world position, w: range
     float directionCosOuter[4]; // xyz: unit beam direction, w: cosine of the outer cone angle
     float radianceCosInner[4];  // rgb: colour times intensity, w: cosine of the inner cone angle
+    float sourceRadius[4];      // x: radius of the glowing source, for the falloff
 };
 
 /*
@@ -38,7 +39,7 @@ struct LightUniformData {
     SpotLightUniform spots[maxSpotLights];
 };
 
-static_assert(sizeof(LightUniformData) == 880, "LightUniformData must match the shader's LightData block");
+static_assert(sizeof(LightUniformData) == 944, "LightUniformData must match the shader's LightData block");
 
 // Convert a frame's lights and the camera position into the shader's layout, dropping lights past the limits or that cannot be drawn.
 LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition);

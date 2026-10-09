@@ -144,6 +144,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     Material yellow;
     yellow.colour = Pixel{255, 220, 40};
     yellow.specularStrength = 0.0f;
+    yellow.unlit = true; // TEMPORARY: keeps its colour at night. Becomes a HUD ring in phase 6.
 
     ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
