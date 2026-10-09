@@ -4,6 +4,7 @@
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
+#include "scene/lighting.h"
 #include "scene/model_renderer.h"
 
 #include <cassert>
@@ -111,10 +112,47 @@ void testDemoGame() {
     game.onInput(world, unfocused);
     assert(!world.get<CharacterMovement>(player).isMoving());
 
+    // It is night: no sun, only a faint ambient light.
+    const FrameLighting night = collectLighting(world, 1.0f);
+    assert(night.directionalLights.empty());
+    assert(night.ambient.x < 0.05f);
+
+    // In MOBA mode the duck carries the flashlight, pointing where it faces and tilted down at the ground.
+    game.onUpdate(world, mobaInput(), 1.0f / 60.0f, 1.0f);
+    const Entity flashlight = game.getFlashlight();
+    assert(world.has<SpotLight>(flashlight));
+
+    const Vec3 duckFacing = getCharacterFacing(world, player, 1.0f);
+    const Vec3 beam = world.get<SpotLight>(flashlight).direction.normalized();
+    const Vec3 flashlightPosition = world.get<Transform>(flashlight).position;
+    assert(nearlyEqual(flashlightPosition.x, end.x) && nearlyEqual(flashlightPosition.z, end.z));
+    assert(flashlightPosition.y > end.y);
+    assert(beam.y < 0.0f);
+    const Vec3 beamAcrossGround = Vec3{beam.x, 0.0f, beam.z}.normalized();
+    assert(beamAcrossGround.dot(duckFacing) > 0.999f);
+
+    // F switches the flashlight off and on again.
+    Input pressF = mobaInput();
+    pressF.pressKey(Key::F);
+    game.onInput(world, pressF);
+    assert(!world.has<SpotLight>(flashlight));
+    game.onInput(world, pressF);
+    assert(world.has<SpotLight>(flashlight));
+
     // The free camera mode asks the engine for mouse look.
     DemoGame freeCamera{ControlMode::FreeCamera, false};
     World otherWorld;
     AssetManager otherAssets;
     freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
+
+    // Away from MOBA mode, the flashlight is held at the camera and points where it looks.
+    Input idle;
+    idle.beginFrame();
+    freeCamera.onUpdate(otherWorld, idle, 1.0f / 60.0f, 1.0f);
+    const Entity cameraFlashlight = freeCamera.getFlashlight();
+    const Vec3 heldAt = otherWorld.get<Transform>(cameraFlashlight).position;
+    const Vec3 cameraPosition = freeCamera.getCamera().getPosition();
+    assert(nearlyEqual(heldAt.x, cameraPosition.x) && nearlyEqual(heldAt.y, cameraPosition.y) && nearlyEqual(heldAt.z, cameraPosition.z));
+    assert(otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized().dot(freeCamera.getCamera().getForward()) > 0.999f);
 }

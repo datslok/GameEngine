@@ -119,6 +119,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 
 - [x] Light data in a uniform buffer instead of hardcoded in the shader; several directional and point lights (`lights-uniform-buffer`)
 - [x] Specular highlights (Blinn-Phong) (`specular-highlights`)
+- [x] Spotlights (`spotlights`): cone with inner and outer angles, up to 4; the demo gets a night scene and an F-toggled flashlight (at the camera, or carried by the duck in MOBA mode)
 - [x] Optional smooth normals for models that have none (`smooth-normals`): opt-in per load, angle-weighted, grouped by position, with a crease angle
 - [x] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer (`cpu-normal-matrix`)
 - [x] Linear filtering and mipmaps (`texture-filtering`): trilinear plus 16x anisotropic, mip chains generated on the GPU at upload

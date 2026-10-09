@@ -100,7 +100,65 @@ namespace {
     }
 }
 
+namespace {
+    PlacedSpotLight spotLightAt(Vec3 position, Vec3 direction, float range, float innerAngle, float outerAngle) {
+        return PlacedSpotLight{position, SpotLight{Vec3{1.0f, 0.5f, 0.5f}, 2.0f, range, direction, innerAngle, outerAngle}};
+    }
+
+    // The shader compares cosines, so the cone angles arrive as cosines, computed once here instead of per pixel.
+    void testSpotLightIsPacked() {
+        FrameLighting lighting;
+        lighting.spotLights.push_back(spotLightAt(Vec3{1.0f, 2.0f, 3.0f}, Vec3{0.0f, 0.0f, -4.0f}, 20.0f, 0.2f, 0.4f));
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(data.counts[2] == 1);
+        assert(nearlyEqual(data.spots[0].positionRange, 1.0f, 2.0f, 3.0f, 20.0f));
+        assert(nearlyEqual(data.spots[0].directionCosOuter, 0.0f, 0.0f, -1.0f, std::cos(0.4f)));
+        assert(nearlyEqual(data.spots[0].radianceCosInner, 2.0f, 1.0f, 1.0f, std::cos(0.2f)));
+    }
+
+    // A beam needs a direction and a reach, like the other lights.
+    void testSpotLightWithoutDirectionOrRangeIsSkipped() {
+        FrameLighting lighting;
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, 20.0f, 0.2f, 0.4f));
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 0.0f, 0.2f, 0.4f));
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(data.counts[2] == 0);
+    }
+
+    // An inner cone wider than the outer one would make the smooth edge run backwards, so it is clamped to the outer cone.
+    void testSpotLightInnerConeIsClamped() {
+        FrameLighting lighting;
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.6f, 0.3f));
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(nearlyEqual(data.spots[0].radianceCosInner[3], std::cos(0.3f)));
+        assert(nearlyEqual(data.spots[0].directionCosOuter[3], std::cos(0.3f)));
+    }
+
+    void testSpotLightsAreCapped() {
+        FrameLighting lighting;
+
+        for (int i = 0; i < 6; ++i) {
+            lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.2f, 0.4f));
+        }
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(data.counts[2] == maxSpotLights);
+        assert(nearlyEqual(data.spots[maxSpotLights - 1].positionRange, 3.0f, 0.0f, 0.0f, 20.0f));
+    }
+}
+
 void testLightUniforms() {
+    testSpotLightIsPacked();
+    testSpotLightWithoutDirectionOrRangeIsSkipped();
+    testSpotLightInnerConeIsClamped();
+    testSpotLightsAreCapped();
     testAmbientAndEmptyCounts();
     testDirectionalLightIsFlippedAndPremultiplied();
     testZeroDirectionIsSkipped();

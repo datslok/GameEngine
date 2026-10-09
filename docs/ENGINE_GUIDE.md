@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to texture filtering (lights, specular highlights, smooth normals, normal matrix and depth range, mipmaps).
+**Covers:** phases 0 to 3, and phase 4 up to texture filtering (lights including spotlights, specular highlights, smooth normals, normal matrix and depth range, mipmaps).
 
 ---
 
@@ -212,7 +212,7 @@ The engine collects what to draw from the `World` (`ModelRenderer` + `Transform`
 
 Data that is the same for every vertex or pixel of a draw, such as matrices, material and lights, goes to shaders as **uniforms**. In SDL_GPU you *push* bytes into a numbered slot, and the shader reads them as a struct. Pushed data stays in effect for the rest of the frame, so lights and the camera are pushed once, and per-object data per draw.
 
-The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 688 bytes; `MaterialUniformData`, 32 bytes). If anyone changes one side, the build fails.
+The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 880 bytes; `MaterialUniformData`, 32 bytes). If anyone changes one side, the build fails.
 
 Matrices are transposed when pushed, because GLSL stores them column by column.
 
@@ -252,11 +252,12 @@ The physics view: a normal is not an arrow like a position, it describes an **ar
 
 - `DirectionalLight`: a light so far away its rays are parallel, like the sun. It stores the direction its light travels and needs no `Transform`.
 - `PointLight`: shines in every direction from its entity's `Transform` (a torch, a muzzle flash). It has a `range` where it fades to exactly zero.
+- `SpotLight`: a point light that shines in a cone, like a flashlight. It stores the direction of its beam and two cone angles.
 - `AmbientLight`: a flat fill that stands in for light bounced around the scene. Several add up.
 
 Light colours are 0..1 tints with a separate, unbounded `intensity`, keeping "what tint" apart from "how bright". Material colours are different: they are reflectances, the fraction of light a surface bounces back, so 0..255 fits them.
 
-Each frame, `collectLighting` gathers lights from the `World` (point light positions interpolated like meshes, so a carried torch does not jitter), and `packLighting` turns them into the shader's layout. The shader handles up to **4 directional and 16 point lights**; extra lights are dropped.
+Each frame, `collectLighting` gathers lights from the `World` (point light positions interpolated like meshes, so a carried torch does not jitter), and `packLighting` turns them into the shader's layout. The shader handles up to **4 directional, 16 point and 4 spotlights**; extra lights are dropped.
 
 ### Diffuse: Lambert's cosine law
 
@@ -278,6 +279,20 @@ falloff = window² / (d² + 1),   window = clamp(1 - (d / range)⁴, 0, 1)
 
 - The `+1` keeps it finite when the light is right at the surface (a real bulb is not a mathematical point either).
 - Pure 1/d² never reaches zero, so every light would have to be computed for every pixel. The window brings it smoothly to exactly zero at `range`, with zero slope, so there is no visible edge.
+
+### Spotlights: a cone with a soft edge
+
+A spotlight is a point light whose brightness also depends on the angle between its beam's axis and the direction to the surface:
+
+```
+cone = smoothstep(cos(outerAngle), cos(innerAngle), dot(-L, beamDirection))
+```
+
+Inside the inner angle it is at full brightness (the bright core), beyond the outer angle it gives nothing, and in between it fades smoothly (the penumbra). A real flashlight has that soft edge because its bulb is not a perfect point: different parts of the bulb light slightly different cones, and their overlap blurs the boundary. A hard cutoff would look like a stencil.
+
+The comparison uses cosines rather than angles (a bigger cosine means closer to the axis), so the shader needs no `acos` per pixel; the two cosines are computed once on the CPU. The cone multiplies the same distance falloff as a point light.
+
+A light that follows the camera, like the demo's flashlight, is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason a carried torch does.
 
 ### Specular: Blinn-Phong highlights
 
