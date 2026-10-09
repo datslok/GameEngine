@@ -12,6 +12,9 @@ struct DirectionalLight {
     Vec3 direction{0.0f, -1.0f, 0.0f}; // The way the light travels. It does not need to be normalised.
     Vec3 colour{1.0f, 1.0f, 1.0f};
     float intensity = 1.0f;
+
+    // Whether objects block this light. Its shadow covers directionalShadowDistance in front of the camera.
+    bool castsShadows = true;
 };
 
 // Component: a light that shines in every direction from its entity's Transform position and fades out with distance.
@@ -24,8 +27,8 @@ struct PointLight {
     float sourceRadius = 1.0f;
 
     // Whether objects block this light. Costs six extra drawings of the scene per frame (one per cube face);
-    // only the first shadow-casting point light gets a shadow map.
-    bool castsShadows = false;
+    // the first four shadow-casting point lights get shadow maps.
+    bool castsShadows = true;
 };
 
 /*
@@ -44,6 +47,9 @@ struct SpotLight {
     // The size of the glowing source. Falloff is intensity / (distance^2 + sourceRadius^2): a bigger source (a reflector,
     // a lit disc) is gentler up close and still falls off as inverse square far away. 1 matches a point light.
     float sourceRadius = 1.0f;
+
+    // Whether objects block this light. Costs one extra drawing of the scene per frame.
+    bool castsShadows = true;
 };
 
 // Component: light that reaches every surface equally, standing in for light bounced around the scene. Several add up.

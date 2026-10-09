@@ -19,6 +19,10 @@ namespace {
     constexpr float flashlightHeight = 1.2f;
     constexpr float flashlightTilt = 0.35f;
 
+    // How far in front of the duck's centre the flashlight is held: past its body (the model is 2 units long), so the duck
+    // does not block its own light now that every light casts shadows.
+    constexpr float flashlightReach = 1.2f;
+
     // Which way the moon is from where the free camera starts: up, to the left and behind.
     const Vec3 towardsMoon{-0.4f, 1.0f, 0.6f};
 
@@ -216,9 +220,9 @@ void DemoGame::updateFlashlight(World& world, float alpha) {
     Vec3 direction = camera.getForward();
 
     if (controlMode == ControlMode::Moba && world.isAlive(player)) {
-        // Held above the ground and tilted down so the beam lands a few steps ahead.
+        // Held above the ground, out in front, and tilted down so the beam lands a few steps ahead.
         const Vec3 facing = getCharacterFacing(world, player, alpha);
-        position = getRenderTransform(world, player, alpha).position + Vec3{0.0f, flashlightHeight, 0.0f};
+        position = getRenderTransform(world, player, alpha).position + Vec3{0.0f, flashlightHeight, 0.0f} + facing * flashlightReach;
         direction = facing * std::cos(flashlightTilt) - Vec3{0.0f, std::sin(flashlightTilt), 0.0f};
     }
 

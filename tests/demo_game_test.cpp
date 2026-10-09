@@ -133,7 +133,12 @@ void testDemoGame() {
     const Vec3 duckFacing = getCharacterFacing(world, player, 1.0f);
     const Vec3 beam = world.get<SpotLight>(flashlight).direction.normalized();
     const Vec3 flashlightPosition = world.get<Transform>(flashlight).position;
-    assert(nearlyEqual(flashlightPosition.x, end.x) && nearlyEqual(flashlightPosition.z, end.z));
+    // Held out in front of the duck, beyond its body (the model is 2 units long), so the duck does not block its own light.
+    const Vec3 heldOut = flashlightPosition - end;
+    const float reach = Vec3(heldOut.x, 0.0f, heldOut.z).length();
+    assert(reach > 1.0f && reach < 1.5f);
+    const Vec3 heldOutAcrossGround{heldOut.x, 0.0f, heldOut.z};
+    assert(heldOutAcrossGround.normalized().dot(duckFacing) > 0.999f);
     assert(flashlightPosition.y > end.y);
     assert(beam.y < 0.0f);
     const Vec3 beamAcrossGround = Vec3{beam.x, 0.0f, beam.z}.normalized();

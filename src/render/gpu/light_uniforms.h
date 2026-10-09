@@ -33,13 +33,17 @@ struct SpotLightUniform {
 struct LightUniformData {
     float ambient[4];
     float cameraPosition[4]; // xyz: where the viewer is, for specular highlights
-    std::int32_t counts[4]; // x: directional lights used, y: point lights used, z: spotlights used, w: shadowed point light's slot or -1
+    std::int32_t counts[4]; // x: directional lights used, y: point lights used, z: spotlights used
     DirectionalLightUniform directional[maxDirectionalLights];
     PointLightUniform points[maxPointLights];
     SpotLightUniform spots[maxSpotLights];
 };
 
 static_assert(sizeof(LightUniformData) == 944, "LightUniformData must match the shader's LightData block");
+
+// The lights the shader really gets: those that can be drawn, up to its limits, in order. Their positions in these lists
+// are their slots in the shader, which shadow planning relies on too.
+FrameLighting selectDrawableLights(const FrameLighting& lighting);
 
 // Convert a frame's lights and the camera position into the shader's layout, dropping lights past the limits or that cannot be drawn.
 LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition);
