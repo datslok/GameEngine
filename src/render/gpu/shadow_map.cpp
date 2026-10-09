@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <numeric>
 #include <stdexcept>
 
 namespace {
@@ -75,6 +74,7 @@ namespace {
         std::uint32_t size;
         std::vector<ShadowTile> tiles;
         std::array<bool, 6> facesInView{};
+        Entity entity{};
     };
 
     /*
@@ -122,51 +122,15 @@ namespace {
     }
 
     /*
-    * Places squares in the atlas, which starts as a grid of the largest tiles. A request takes the smallest free square
-    * that fits, splitting a bigger one into four quarters as often as needed (a quadtree). Squares must be asked for
-    * largest first: then the quarters of a split square are always used up before another is split, so nothing is
-    * wasted and everything fits whenever the total area does.
+    * The name a tile keeps from frame to frame, so it keeps its square: the light's entity and the face. Lights are
+    * reordered between frames as their importance changes, so the slot is only used for lights without an entity
+    * (directional lights, and lights made by hand in tests).
     */
-    class AtlasPacker {
-    public:
-        AtlasPacker() {
-            for (std::uint32_t y = 0; y < shadowAtlasHeight; y += largestShadowTileSize) {
-                for (std::uint32_t x = 0; x < shadowAtlasWidth; x += largestShadowTileSize) {
-                    freeSquares.push_back(ShadowTile{Mat4::identity(), x, y, largestShadowTileSize});
-                }
-            }
-        }
-
-        ShadowTile place(std::uint32_t size) {
-            std::size_t best = freeSquares.size();
-
-            for (std::size_t i = 0; i < freeSquares.size(); ++i) {
-                if (freeSquares[i].size >= size && (best == freeSquares.size() || freeSquares[i].size < freeSquares[best].size)) {
-                    best = i;
-                }
-            }
-
-            if (best == freeSquares.size()) {
-                throw std::logic_error("Shadow atlas is full");
-            }
-
-            ShadowTile square = freeSquares[best];
-            freeSquares.erase(freeSquares.begin() + static_cast<std::ptrdiff_t>(best));
-
-            // Keep the top-left quarter and free the other three, until the square is the size asked for.
-            while (square.size > size) {
-                square.size /= 2;
-                freeSquares.push_back(ShadowTile{Mat4::identity(), square.x + square.size, square.y, square.size});
-                freeSquares.push_back(ShadowTile{Mat4::identity(), square.x, square.y + square.size, square.size});
-                freeSquares.push_back(ShadowTile{Mat4::identity(), square.x + square.size, square.y + square.size, square.size});
-            }
-
-            return square;
-        }
-
-    private:
-        std::vector<ShadowTile> freeSquares;
-    };
+    ShadowTileKey tileKey(const ShadowRequest& request, int face) {
+        const bool hasEntity = !(request.entity == Entity{});
+        const std::uint32_t number = hasEntity ? 0 : static_cast<std::uint32_t>(request.slot);
+        return ShadowTileKey{static_cast<std::uint32_t>(request.kind), request.entity, number * 6 + static_cast<std::uint32_t>(face)};
+    }
 
     void addTile(ShadowPlan& plan, ShadowTile tile, const Mat4& matrix, float offsetPerDistance, float fixedOffset) {
         tile.matrix = matrix;
@@ -285,11 +249,16 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera) {
 /*
 * Each shadow-casting light, up to the limit for its kind and in the shader's slot order, asks for tiles sized by its
 * reach; a light whose castsShadows is off keeps its slot but gets none, and a point light's faces that cannot be seen
-* get none (see pointFacesInView). If the atlas would overflow, the least
-* important lights' tiles shrink. Tiles are then placed largest first (so they pack without gaps), but numbered in
-* request order, so the numbering does not depend on sizes.
+* get none (see pointFacesInView). If the atlas would overflow, the least important lights' tiles shrink. The layout then
+* gives each tile a square, the same one as last frame when it can (see ShadowAtlasLayout). Tiles are numbered in
+* request order, so the numbering does not depend on sizes or places.
 */
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
+    ShadowAtlasLayout freshLayout;
+    return planShadows(lighting, camera, freshLayout);
+}
+
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout) {
     const FrameLighting selected = selectDrawableLights(lighting);
     ShadowPlan plan{};
 
@@ -314,7 +283,9 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
         const SpotLight& light = selected.spotLights[slot].light;
 
         if (light.castsShadows) {
-            requests.push_back(ShadowRequest{ShadowKind::Spot, slot, 1, shadowTileSizeFor(spotHalfWidth(light.outerAngle), light.range), {}});
+            ShadowRequest request{ShadowKind::Spot, slot, 1, shadowTileSizeFor(spotHalfWidth(light.outerAngle), light.range), {}};
+            request.entity = selected.spotLights[slot].entity;
+            requests.push_back(request);
             ++shadowedSpots;
         }
     }
@@ -329,6 +300,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
             ShadowRequest request{ShadowKind::Point, slot, 0, shadowTileSizeFor(1.0f, placed.light.range), {}};
             request.facesInView = pointFacesInView(placed.position, placed.light.range, cameraView);
             request.tileCount = static_cast<int>(std::count(request.facesInView.begin(), request.facesInView.end(), true));
+            request.entity = placed.entity;
             requests.push_back(request);
             ++shadowedPoints;
         }
@@ -336,18 +308,26 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
 
     shrinkToFit(requests);
 
-    // Place the biggest first; ties keep request order.
-    std::vector<std::size_t> placingOrder(requests.size());
-    std::iota(placingOrder.begin(), placingOrder.end(), std::size_t{0});
-    std::stable_sort(placingOrder.begin(), placingOrder.end(), [&](std::size_t a, std::size_t b) {
-        return requests[a].size > requests[b].size;
-    });
+    // Every tile asks the layout for a square by its lasting name, so it gets last frame's square back when it can.
+    std::vector<ShadowSquareRequest> squareRequests;
 
-    AtlasPacker packer;
+    for (const ShadowRequest& request : requests) {
+        for (int face = 0; face < 6; ++face) {
+            const bool wanted = request.kind == ShadowKind::Point ? request.facesInView[static_cast<std::size_t>(face)] : face == 0;
 
-    for (std::size_t index : placingOrder) {
-        for (int tile = 0; tile < requests[index].tileCount; ++tile) {
-            requests[index].tiles.push_back(packer.place(requests[index].size));
+            if (wanted) {
+                squareRequests.push_back(ShadowSquareRequest{tileKey(request, face), request.size});
+            }
+        }
+    }
+
+    const std::vector<AtlasSquare> squares = layout.place(squareRequests);
+    std::size_t nextSquare = 0;
+
+    for (ShadowRequest& request : requests) {
+        for (int tile = 0; tile < request.tileCount; ++tile) {
+            const AtlasSquare& square = squares[nextSquare++];
+            request.tiles.push_back(ShadowTile{Mat4::identity(), square.x, square.y, square.size});
         }
     }
 

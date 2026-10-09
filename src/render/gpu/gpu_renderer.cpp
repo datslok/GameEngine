@@ -251,6 +251,7 @@ void GpuRenderer::createShadowResources() {
 
     SDL_GPUShader* vertexShader = nullptr;
     SDL_GPUShader* fragmentShader = nullptr;
+    SDL_GPUShader* clearVertexShader = nullptr;
 
     try {
         vertexShader = loadShader(device, "assets/shaders/shadow.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
@@ -296,8 +297,25 @@ void GpuRenderer::createShadowResources() {
         if (shadowPipeline == nullptr) {
             throw gpuError("Shadow pipeline creation failed");
         }
+
+        // The tile reset: one triangle made in the shader (no vertex input), and a depth test that always passes, so it
+        // overwrites the whole tile with the far depth.
+        clearVertexShader = loadShader(device, "assets/shaders/shadow_clear.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+        info.vertex_shader = clearVertexShader;
+        info.vertex_input_state = SDL_GPUVertexInputState{};
+        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+
+        shadowClearPipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+
+        if (shadowClearPipeline == nullptr) {
+            throw gpuError("Shadow tile reset pipeline creation failed");
+        }
     }
     catch (...) {
+        if (clearVertexShader != nullptr) {
+            SDL_ReleaseGPUShader(device, clearVertexShader);
+        }
+
         if (fragmentShader != nullptr) {
             SDL_ReleaseGPUShader(device, fragmentShader);
         }
@@ -309,6 +327,7 @@ void GpuRenderer::createShadowResources() {
         throw;
     }
 
+    SDL_ReleaseGPUShader(device, clearVertexShader);
     SDL_ReleaseGPUShader(device, fragmentShader);
     SDL_ReleaseGPUShader(device, vertexShader);
 }
@@ -387,6 +406,11 @@ void GpuRenderer::cleanup() noexcept {
             shadowPipeline = nullptr;
         }
 
+        if (shadowClearPipeline != nullptr) {
+            SDL_ReleaseGPUGraphicsPipeline(device, shadowClearPipeline);
+            shadowClearPipeline = nullptr;
+        }
+
         if (shadowSampler != nullptr) {
             SDL_ReleaseGPUSampler(device, shadowSampler);
             shadowSampler = nullptr;
@@ -460,7 +484,7 @@ bool GpuRenderer::render(const FrameDescription& frame) {
             [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
         const LightUniformData lights = packLighting(prioritized.lighting, camera.getPosition());
-        const ShadowPlan shadows = planShadows(prioritized.lighting, camera);
+        const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout);
 
         // Copies must happen outside render passes, so the debug lines are uploaded first.
         debugLines->upload(commands, frame.debugLines, frame.debugScreenLines);
@@ -492,6 +516,8 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         debugLines->draw(commands, pass, viewProjection, depthWidth, depthHeight);
     }
     catch (...) {
+        // The shadow pass may have stopped part-way, so no cached tile can be trusted.
+        shadowMemory.forgetAll();
         abandonFrame();
         throw;
     }
@@ -589,27 +615,23 @@ void GpuRenderer::uploadShadowTiles(const std::vector<ShadowTileData>& tileData)
 }
 
 /*
-* The shadow maps: the scene drawn once per shadow view (six for each point light, one for each spotlight or directional
-* light), each into its own tile of the atlas (the viewport picks the tile). Only depth is kept, so each texel holds how
-* far the nearest surface is from the light in that direction. Meshes that do not cast shadows are left out.
+* The shadow maps: the scene drawn once per shadow view (up to six for each point light, one for each spotlight or
+* directional light), each into its own tile of the atlas (the viewport picks the tile). Only depth is kept, so each texel
+* holds how far the nearest surface is from the light in that direction. Meshes that do not cast shadows are left out.
+*
+* The atlas keeps its contents between frames, so a tile whose view and casters are the same as when it was last drawn
+* is left alone (shadow caching): a lamp standing beside still pillars costs nothing after its first frame. A tile that
+* must be drawn again is first reset to the far depth, since only its square is being redrawn. When nothing changed,
+* there is no shadow pass at all.
 */
 void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<ShadowTile>& tiles) {
-    SDL_GPUDepthStencilTargetInfo depthTarget{};
-    depthTarget.texture = shadowAtlas;
-    depthTarget.clear_depth = 1.0f;
-    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-    depthTarget.store_op = SDL_GPU_STOREOP_STORE; // The main pass reads it.
-    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-    depthTarget.cycle = true;
+    struct TileToDraw {
+        const ShadowTile* tile;
+        std::vector<std::size_t> casters;
+        std::uint64_t signature;
+    };
 
-    pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depthTarget);
-
-    if (pass == nullptr) {
-        throw gpuError("Shadow pass creation failed");
-    }
-
-    SDL_BindGPUGraphicsPipeline(pass, shadowPipeline);
+    std::vector<TileToDraw> toDraw;
 
     for (const ShadowTile& tile : tiles) {
         // A cube face that sees nothing on screen has no square in the atlas.
@@ -618,6 +640,40 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<S
             continue;
         }
 
+        // The light's own view decides, not the camera's: things off screen can still throw shadows into view.
+        std::vector<std::size_t> casters = shadowCasters(frame.draws, Frustum::fromClipMatrix(tile.matrix, ClipDepth::ZeroToOne));
+        const std::uint64_t signature = shadowCasterSignature(frame.draws, casters);
+
+        if (shadowMemory.isCurrent(tile, signature)) {
+            ++stats.shadowTilesCached;
+            continue;
+        }
+
+        toDraw.push_back(TileToDraw{&tile, std::move(casters), signature});
+    }
+
+    if (toDraw.empty()) {
+        return;
+    }
+
+    // Load, not clear: the tiles not drawn this frame must keep their images. No cycling either, since a fresh copy of
+    // the texture would start empty.
+    SDL_GPUDepthStencilTargetInfo depthTarget{};
+    depthTarget.texture = shadowAtlas;
+    depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+    depthTarget.store_op = SDL_GPU_STOREOP_STORE; // The main pass reads it.
+    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.cycle = false;
+
+    pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depthTarget);
+
+    if (pass == nullptr) {
+        throw gpuError("Shadow pass creation failed");
+    }
+
+    for (const TileToDraw& drawing : toDraw) {
+        const ShadowTile& tile = *drawing.tile;
         ++stats.shadowTilesDrawn;
 
         // Geometry outside a view is clipped before it is drawn, so it never spills into the neighbouring tiles.
@@ -630,23 +686,26 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<S
         viewport.max_depth = 1.0f;
         SDL_SetGPUViewport(pass, &viewport);
 
-        const Mat4& tileMatrix = tile.matrix;
+        // Reset the tile, then draw its casters.
+        SDL_BindGPUGraphicsPipeline(pass, shadowClearPipeline);
+        SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+        SDL_BindGPUGraphicsPipeline(pass, shadowPipeline);
 
-        // The light's own view decides, not the camera's: things off screen can still throw shadows into view.
-        const std::vector<std::size_t> casters = shadowCasters(frame.draws, Frustum::fromClipMatrix(tileMatrix, ClipDepth::ZeroToOne));
-        stats.shadowDrawn += casters.size();
-        stats.shadowCulled += frame.draws.size() - casters.size();
+        stats.shadowDrawn += drawing.casters.size();
+        stats.shadowCulled += frame.draws.size() - drawing.casters.size();
 
-        for (std::size_t index : casters) {
+        for (std::size_t index : drawing.casters) {
             const DrawItem& draw = frame.draws[index];
             const GpuMesh& mesh = bindMesh(draw.mesh);
 
             float transform[16]{};
-            writeColumnMajor(tileMatrix * draw.model, transform);
+            writeColumnMajor(tile.matrix * draw.model, transform);
             SDL_PushGPUVertexUniformData(commands, 0, transform, static_cast<Uint32>(sizeof(transform)));
 
             SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
         }
+
+        shadowMemory.remember(tile, drawing.signature);
     }
 
     SDL_EndGPURenderPass(pass);

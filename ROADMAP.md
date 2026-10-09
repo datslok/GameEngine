@@ -150,12 +150,13 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
     - `Frustum::mayIntersect`: the corners of each view against the other's sides, both ways round (conservative). A left-out face keeps its place in the tile list with an empty rectangle, so the shader's `firstTile + face` lookup is unchanged, and it counts as lit
     - In the demo's lamp field it mostly skips the face that points back towards the camera (about 16 of 96 faces); the F4 readout counts tiles drawn and skipped
     - Frees atlas room and draw time for caching to build on
-  - [ ] 4. Shadow caching (the biggest item)
+  - [x] 4. Shadow caching (`shadow-caching`)
     - Tiles stay where they are between frames and are redrawn only when the light moves, the tile changes, or something that casts shadows moves inside its view
-    - Needs: an atlas allocator that keeps tiles across frames and frees them, instead of re-packing every frame
-    - Needs: the atlas loaded instead of cleared, with stale tiles cleared one by one by a small "draw depth 1" pass, since SDL cannot clear part of a texture
-    - Needs: a way to tell which casters moved, by comparing each draw's matrix with last frame's
-    - Payoff: a static lamp field costs almost nothing per frame, so the shadow cap could go up again
+    - `ShadowAtlasLayout` (`render/gpu/shadow_atlas`): each tile keeps its square while its light (by entity) and face ask for the same size; a buddy allocator merges freed quarters back; if scattered free space cannot fit a new tile, everything is repacked once
+    - `ShadowTileMemory` (`render/gpu/shadow_cache`): what was last drawn into each square (matrix plus a hash of the casters' meshes and model matrices); drawing a square forgets anything it overlaps
+    - The atlas is loaded instead of cleared; a redrawn tile is first reset by a "draw depth 1" triangle (`shadow_clear.vert`); with nothing to redraw there is no shadow pass
+    - In the demo's lamp field, standing still, about 49 of 82 tiles are cached; the rest see the spinning objects, the flashlight or the moon box. The F4 readout counts tiles drawn, cached and skipped
+    - Possible next step: raise the shadow cap again, now that static lights cost almost nothing
   - [ ] 5. Soft shadows (PCSS)
     - The shader first searches the shadow map near the point to estimate how far away the blocker is, then widens its blur by `sourceRadius * (receiver - blocker) / blocker`: the penumbra geometry of a solar eclipse
     - Needs: the atlas bound a second time with a plain (non-comparison) sampler for the blocker search, and more texture reads per pixel

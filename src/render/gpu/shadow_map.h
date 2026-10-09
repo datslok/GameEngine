@@ -2,6 +2,7 @@
 
 #include "math/mat4.h"
 #include "math/vec3.h"
+#include "render/gpu/shadow_atlas.h"
 #include "render/gpu/uniform_limits.h"
 #include "scene/camera.h"
 #include "scene/lighting.h"
@@ -109,5 +110,9 @@ struct ShadowPlan {
 };
 
 // Hand out atlas tiles to the shadow-casting lights, in the same slots packLighting gives the shader. Tiles are numbered
-// directional lights first, then spotlights, then six per point light, each in slot order.
+// directional lights first, then spotlights, then six per point light, each in slot order. The layout lasts from frame
+// to frame, so lights keep their squares of the atlas and what was drawn into them can be kept.
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout);
+
+// The same, packed into an empty atlas (for one-off plans and tests).
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera);

@@ -111,6 +111,7 @@ namespace {
         RenderStats someSkipped = stats;
         someSkipped.shadowTilesDrawn = 38;
         someSkipped.shadowTilesSkipped = 58;
+        someSkipped.shadowTilesCached = 999;
         DebugDraw tiles;
         drawRenderStats(someSkipped, tiles);
         assert(tiles.getScreenLines().size() != debug.getScreenLines().size());
