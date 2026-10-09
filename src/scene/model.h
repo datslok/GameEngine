@@ -48,6 +48,9 @@ struct ModelBounds {
     Vec3 size() const;
 };
 
+// The smallest axis-aligned box around a mesh's vertices, in its own coordinates. Empty meshes give a zero box at the origin.
+ModelBounds meshBounds(const Mesh& mesh);
+
 struct Model {
     std::vector<ModelPart> parts;
 

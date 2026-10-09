@@ -42,6 +42,7 @@ void testMipLevels();
 void testSrgb();
 void testFrameDescription();
 void testShadowMap();
+void testDebugDraw();
 void testSphereMesh();
 
 int main(){
@@ -87,6 +88,7 @@ int main(){
     testSrgb();
     testFrameDescription();
     testShadowMap();
+    testDebugDraw();
     testSphereMesh();
 
     std::cout << "All tests passed!\n";

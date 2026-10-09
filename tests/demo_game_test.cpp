@@ -35,10 +35,54 @@ namespace {
     }
 }
 
+namespace {
+    // F4 switches the debug view: the engine's bounding boxes, plus the game's own shapes (a marker at each light, and
+    // in MOBA mode a line to where the duck is walking). Off, nothing extra is drawn.
+    void testDebugViewToggles() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+
+        DebugDraw debug;
+        game.onDebugDraw(world, debug, 1.0f);
+        assert(!game.wantsBoundingBoxes());
+        assert(debug.getLines().empty());
+
+        Input pressF4 = mobaInput();
+        pressF4.pressKey(Key::F4);
+        game.onInput(world, pressF4);
+        assert(game.wantsBoundingBoxes());
+
+        game.onDebugDraw(world, debug, 1.0f);
+        const std::size_t withLights = debug.getLines().size();
+        assert(withLights > 0);
+
+        // Once the duck is told to walk, a line shows where to.
+        Input click = mobaInput();
+        click.pressMouseButton(MouseButtonPress{MouseButton::Right, Vec2{400.0f, 450.0f}, 0});
+        game.onInput(world, click);
+        assert(world.get<CharacterMovement>(game.getPlayer()).isMoving());
+
+        DebugDraw walking;
+        game.onDebugDraw(world, walking, 1.0f);
+        assert(walking.getLines().size() == withLights + 1);
+
+        game.onInput(world, pressF4);
+        assert(!game.wantsBoundingBoxes());
+
+        DebugDraw off;
+        game.onDebugDraw(world, off, 1.0f);
+        assert(off.getLines().empty());
+    }
+}
+
 /*
 * The phase 3 milestone: the whole demo simulation runs without a window or GPU, driven only by World, Input and fixed ticks.
 */
 void testDemoGame() {
+    testDebugViewToggles();
+
     World world;
     AssetManager assets;
     DemoGame game{ControlMode::Moba, false};
