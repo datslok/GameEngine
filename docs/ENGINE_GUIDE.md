@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 3, and phase 4 up to the CPU normal matrix (lights, specular highlights, smooth normals, depth range).
+**Covers:** phases 0 to 3, and phase 4 up to texture filtering (lights, specular highlights, smooth normals, normal matrix and depth range, mipmaps).
 
 ---
 
@@ -215,6 +215,22 @@ Data that is the same for every vertex or pixel of a draw, such as matrices, mat
 The shader reads those bytes with **std140** layout rules, and C++ does not know them. The classic trap: a `vec3` takes 16 bytes in std140, not 12. To make mismatches impossible, every block uses only 4-component vectors, and each is mirrored by a C++ struct with a `static_assert` on its size (`LightUniformData`, 688 bytes; `MaterialUniformData`, 32 bytes). If anyone changes one side, the build fails.
 
 Matrices are transposed when pushed, because GLSL stores them column by column.
+
+### Texture filtering and mipmaps
+
+A texture is sampled once per screen pixel, and that is a sampling problem in the signal-processing sense:
+
+- **Up close**, one texel covers many screen pixels. Taking the nearest texel shows hard-edged blocks, so the sampler uses **linear filtering**: it blends the four surrounding texels by distance.
+- **Far away**, one screen pixel covers many texels. Taking just one of them is sampling below the Nyquist limit: fine detail folds back as shimmer and moiré, and changes every time the camera moves.
+
+The cure for aliasing is to low-pass filter before sampling. A **mipmap** does that in advance: alongside the texture, the GPU stores copies at half size, quarter size and so on down to 1x1, each texel the average of a 2x2 block from the level above (only a third more memory in total). When drawing, the GPU estimates how many texels fall in one screen pixel and reads the level where that is about one. The name is from the Latin *multum in parvo*, "much in a small space".
+
+Two refinements:
+
+- **Trilinear filtering** blends the two nearest levels, so there is no visible line where one level hands over to the next.
+- **Anisotropic filtering** (up to 16x) helps surfaces seen at a grazing angle, like the ground stretching away. There one screen pixel covers a long thin strip of texture, and a single mip level would blur it; several samples along the strip keep it sharp.
+
+The levels are generated on the GPU when a texture is uploaded. `mipLevelCount(width, height)` gives the length of the chain: the original plus one level per halving of the long side.
 
 ### Depth range
 
