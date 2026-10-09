@@ -28,7 +28,6 @@ public:
     // For tests and debugging.
     Entity getPlayer() const;
     Entity getDestinationMarker() const;
-    Entity getPlayerTorch() const;
     Entity getFlashlight() const;
     Entity getMoon() const;
 
@@ -58,9 +57,6 @@ private:
     // Entity{} means "none" until onInit creates them.
     Entity player;
     Entity destinationMarker;
-
-    // A point light that follows the player. Copied into place each tick, because there are no parent/child entities yet.
-    Entity playerTorch;
 
     // F toggles it. Held at the camera, or by the duck in MOBA mode.
     Entity flashlight;
