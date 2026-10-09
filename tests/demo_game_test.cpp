@@ -101,15 +101,29 @@ void testDemoGame() {
     game.onInput(world, unfocused);
     assert(!world.get<CharacterMovement>(player).isMoving());
 
-    // It is night: a faint ambient light and a weak, cool moon shining down from above.
+    // It is night: a faint ambient light and a cool moon, which is a point light at the moon sphere that casts shadows.
     const FrameLighting night = collectLighting(world, 1.0f);
     assert(night.ambient.x < 0.1f);
-    assert(night.directionalLights.size() == 1);
+    assert(night.directionalLights.empty());
 
-    const DirectionalLight& moon = night.directionalLights[0];
-    assert(moon.intensity > 0.0f && moon.intensity <= 0.2f);
-    assert(moon.colour.z > moon.colour.x);
-    assert(moon.direction.y < 0.0f);
+    const PlacedPointLight* moonlight = nullptr;
+
+    for (const PlacedPointLight& placed : night.pointLights) {
+        if (placed.light.castsShadows) {
+            moonlight = &placed;
+        }
+    }
+
+    assert(moonlight != nullptr);
+    assert(moonlight->light.colour.z > moonlight->light.colour.x);
+    assert(nearlyEqual(moonlight->light.sourceRadius, 4.0f));
+
+    // Far away, so it needs a large intensity: at the middle of the ground it is about as bright as the old moonlight (0.06).
+    const Vec3 groundCentre{0.0f, 0.0f, -6.0f};
+    const float moonDistance = (moonlight->position - groundCentre).length();
+    assert(moonlight->light.range > moonDistance + 20.0f);
+    const float brightness = moonlight->light.intensity / (moonDistance * moonDistance + 16.0f);
+    assert(brightness > 0.03f && brightness < 0.12f);
 
     // In MOBA mode the duck carries the flashlight, pointing where it faces and tilted down at the ground.
     game.onUpdate(world, mobaInput(), 1.0f / 60.0f, 1.0f);
@@ -119,7 +133,12 @@ void testDemoGame() {
     const Vec3 duckFacing = getCharacterFacing(world, player, 1.0f);
     const Vec3 beam = world.get<SpotLight>(flashlight).direction.normalized();
     const Vec3 flashlightPosition = world.get<Transform>(flashlight).position;
-    assert(nearlyEqual(flashlightPosition.x, end.x) && nearlyEqual(flashlightPosition.z, end.z));
+    // Held out in front of the duck, beyond its body (the model is 2 units long), so the duck does not block its own light.
+    const Vec3 heldOut = flashlightPosition - end;
+    const float reach = Vec3(heldOut.x, 0.0f, heldOut.z).length();
+    assert(reach > 1.0f && reach < 1.5f);
+    const Vec3 heldOutAcrossGround{heldOut.x, 0.0f, heldOut.z};
+    assert(heldOutAcrossGround.normalized().dot(duckFacing) > 0.999f);
     assert(flashlightPosition.y > end.y);
     assert(beam.y < 0.0f);
     const Vec3 beamAcrossGround = Vec3{beam.x, 0.0f, beam.z}.normalized();
@@ -140,24 +159,33 @@ void testDemoGame() {
     freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
 
-    // Away from MOBA mode, the flashlight is held at the camera and points where it looks.
+    // Away from MOBA mode, the flashlight is held in the right hand, a little to the right of and below the eye, and aimed
+    // at the middle of the view. Being off to the side, its shadows show beside things instead of hiding behind them.
     Input idle;
     idle.beginFrame();
     freeCamera.onUpdate(otherWorld, idle, 1.0f / 60.0f, 1.0f);
     const Entity cameraFlashlight = freeCamera.getFlashlight();
     const Vec3 heldAt = otherWorld.get<Transform>(cameraFlashlight).position;
-    const Vec3 cameraPosition = freeCamera.getCamera().getPosition();
-    assert(nearlyEqual(heldAt.x, cameraPosition.x) && nearlyEqual(heldAt.y, cameraPosition.y) && nearlyEqual(heldAt.z, cameraPosition.z));
-    assert(otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized().dot(freeCamera.getCamera().getForward()) > 0.999f);
+    const Camera& view = freeCamera.getCamera();
+    const Vec3 fromEye = heldAt - view.getPosition();
+    assert(fromEye.dot(view.getRight()) > 0.2f && fromEye.dot(view.getRight()) < 0.6f);
+    assert(fromEye.dot(view.getUp()) < -0.1f && fromEye.dot(view.getUp()) > -0.5f);
 
-    // The glowing moon is a fixed place you can fly to: in the direction the moonlight comes from,
+    // The beam passes through the point straight ahead of the eye, where the crosshair would be.
+    const Vec3 beamDirection = otherWorld.get<SpotLight>(cameraFlashlight).direction.normalized();
+    const Vec3 aimPoint = view.getPosition() + view.getForward() * 8.0f;
+    const Vec3 towardsAim = (aimPoint - heldAt).normalized();
+    assert(beamDirection.dot(towardsAim) > 0.9999f);
+
+    // The glowing moon is a fixed place you can fly to, high in the sky,
     // 64 units from where the free camera starts (about 20 seconds of flying at 3 units per second, minus its radius of 4).
+    // Its light shines from inside it.
     const Entity moonBall = freeCamera.getMoon();
-    const Vec3 moonlight = collectLighting(otherWorld, 1.0f).directionalLights[0].direction.normalized();
     const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
-    const Vec3 expectedMoon = freeCameraStart - moonlight * 64.0f;
-    const Vec3 moonPosition = otherWorld.get<Transform>(moonBall).position;
-    assert(nearlyEqual(moonPosition.x, expectedMoon.x) && nearlyEqual(moonPosition.y, expectedMoon.y) && nearlyEqual(moonPosition.z, expectedMoon.z));
+    const Vec3 expectedMoon = otherWorld.get<Transform>(moonBall).position;
+    assert(nearlyEqual((expectedMoon - freeCameraStart).length(), 64.0f));
+    assert(expectedMoon.y > 30.0f);
+    assert(otherWorld.has<PointLight>(moonBall));
 
     // It stays put when the camera moves, so flying towards it gets you there.
     freeCamera.getCamera().setPosition(Vec3{30.0f, 20.0f, -30.0f});
@@ -167,4 +195,7 @@ void testDemoGame() {
 
     const Material& moonMaterial = otherWorld.get<ModelRenderer>(moonBall).parts[0].material;
     assert(moonMaterial.emissive.z > 0.5f);
+
+    // The sphere surrounds its own light, so it must not block it.
+    assert(!otherWorld.get<ModelRenderer>(moonBall).castsShadows);
 }

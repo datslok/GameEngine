@@ -23,6 +23,9 @@ struct RenderPart {
 struct ModelRenderer {
     std::vector<RenderPart> parts;
     bool visible = true;
+
+    // Whether it blocks light from shadow-casting lights. Off for things that surround their own light, like a glowing lamp shade.
+    bool castsShadows = true;
 };
 
 // Build a renderer with a single mesh.

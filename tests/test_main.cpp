@@ -41,6 +41,7 @@ void testGpuDepthRange();
 void testMipLevels();
 void testSrgb();
 void testFrameDescription();
+void testShadowMap();
 void testSphereMesh();
 
 int main(){
@@ -85,6 +86,7 @@ int main(){
     testMipLevels();
     testSrgb();
     testFrameDescription();
+    testShadowMap();
     testSphereMesh();
 
     std::cout << "All tests passed!\n";
