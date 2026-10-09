@@ -154,7 +154,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 ## Phase 6: Animation, UI and audio
 
 - [ ] Skeletal animation from glTF skins: joints, skinning in the vertex shader, playing and blending clips
-- [ ] Text rendering with a bitmap font
+- [ ] Text rendering with a bitmap font (debug overlays already have a stroke font, `debugText`, good for numbers but not for real UI)
 - [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after the 3D scene (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker (an emissive plane for now) into a HUD ring of constant pixel size
 - [ ] Debug UI and in-game stats (frame time, tick time, entity count)
 - [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them

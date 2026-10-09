@@ -6,6 +6,7 @@
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/debug_line_vertices.h"
 #include "render/gpu/shadow_map.h"
+#include "render/render_stats.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/frame_description.h"
@@ -25,14 +26,6 @@
 * Mailbox: no tearing, and a newer frame replaces one still waiting, so the screen shows the freshest frame. Low latency.
 * Immediate: frames are shown as soon as they are ready. Lowest latency, but the image can tear.
 */
-// What the last frame drew and what it skipped, counting each mesh once per view (each shadow tile is a view).
-// Shadow views also skip meshes that do not cast shadows.
-struct RenderStats {
-    std::size_t drawn = 0;
-    std::size_t culled = 0;
-    std::size_t shadowDrawn = 0;
-    std::size_t shadowCulled = 0;
-};
 
 enum class PresentMode {
     Vsync,
@@ -130,7 +123,7 @@ private:
     Uint32 debugLineCapacity = 0; // in vertices
     void createDebugLinePipeline();
     void uploadDebugLines(const std::vector<DebugLineVertex>& vertices);
-    void drawDebugLines(Uint32 vertexCount);
+    void drawDebugLines(const Mat4& transform, Uint32 firstVertex, Uint32 vertexCount);
 
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
     std::vector<std::unique_ptr<GpuMesh>> meshes;

@@ -200,7 +200,7 @@ void DemoGame::onInput(World& world, const Input& input) {
     }
 }
 
-bool DemoGame::wantsBoundingBoxes() const {
+bool DemoGame::wantsDebugView() const {
     return debugViewEnabled;
 }
 

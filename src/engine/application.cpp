@@ -117,12 +117,16 @@ void Application::render(float alpha) {
     // Debug shapes are gathered fresh every frame, so anything not added again disappears.
     debugDraw.clear();
 
-    if (game.wantsBoundingBoxes()) {
+    if (game.wantsDebugView()) {
         drawBoundingBoxes(frame.draws, boundsByMesh, debugDraw);
+
+        // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
+        drawRenderStats(renderer.getLastFrameStats(), debugDraw);
     }
 
     game.onDebugDraw(world, debugDraw, alpha);
     frame.debugLines = debugDraw.getLines();
+    frame.debugScreenLines = debugDraw.getScreenLines();
 
     if (!renderer.render(frame)) {
         return;

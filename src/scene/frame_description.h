@@ -37,8 +37,9 @@ struct FrameDescription {
     FrameLighting lighting;
     std::vector<DrawItem> draws;
 
-    // Wireframe shapes drawn over the scene (see DebugDraw).
+    // Wireframe shapes drawn over the scene (see DebugDraw), and lines on the screen itself in window pixels (overlays, text).
     std::vector<DebugLine> debugLines;
+    std::vector<DebugLine> debugScreenLines;
 };
 
 // Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks.

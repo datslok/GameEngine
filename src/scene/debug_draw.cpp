@@ -91,8 +91,17 @@ void DebugDraw::capsule(const Vec3& a, const Vec3& b, float radius, const Vec3& 
     arc(a, front, up, radius, pi, pi, colour, halfSegments);
 }
 
+void DebugDraw::screenLine(const Vec2& from, const Vec2& to, const Vec3& colour) {
+    screenLines.push_back(DebugLine{Vec3{from.x, from.y, 0.0f}, Vec3{to.x, to.y, 0.0f}, colour});
+}
+
 void DebugDraw::clear() {
     lines.clear();
+    screenLines.clear();
+}
+
+const std::vector<DebugLine>& DebugDraw::getScreenLines() const {
+    return screenLines;
 }
 
 const std::vector<DebugLine>& DebugDraw::getLines() const {
