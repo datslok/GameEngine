@@ -102,6 +102,19 @@ void testCharacter() {
     updateCharacters(world, 1.0f);
     assertFacing(world, character, 0, Vec3{1, 0, 0});
 
+    // The facing direction where the character is drawn: what a flashlight it carries points along.
+    const Vec3 facing = getCharacterFacing(world, character, 1.0f);
+    assert(nearlyEqual(facing.x, 1.0f) && nearlyEqual(facing.y, 0.0f) && nearlyEqual(facing.z, 0.0f));
+
+    // Halfway through a tick that turned it from +Z to +X, it is drawn facing between the two.
+    Transform turnStart = world.get<Transform>(character);
+    turnStart.rotation.y = 0.0f;
+    world.get<PreviousTransform>(character).transform = turnStart;
+    world.get<Transform>(character).rotation.y = pi / 2.0f;
+    const Vec3 halfway = getCharacterFacing(world, character, 0.5f);
+    assert(nearlyEqual(halfway.x, std::sin(pi / 4.0f)) && nearlyEqual(halfway.z, std::cos(pi / 4.0f)));
+    world.get<PreviousTransform>(character).transform = world.get<Transform>(character);
+
     // Turning crosses the +/-pi boundary by the shortest route.
     world.get<Transform>(character).rotation.y = pi - 0.05f;
     const float desiredYaw = -pi + 0.05f;

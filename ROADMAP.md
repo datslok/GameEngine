@@ -119,6 +119,7 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 
 - [x] Light data in a uniform buffer instead of hardcoded in the shader; several directional and point lights (`lights-uniform-buffer`)
 - [x] Specular highlights (Blinn-Phong) (`specular-highlights`)
+- [x] Spotlights (`spotlights`): cone with inner and outer angles, up to 4; the demo gets a night scene and an F-toggled flashlight (at the camera, or carried by the duck in MOBA mode)
 - [x] Optional smooth normals for models that have none (`smooth-normals`): opt-in per load, angle-weighted, grouped by position, with a crease angle
 - [x] Normal matrix computed once per object on the CPU; move the depth range correction into the renderer (`cpu-normal-matrix`)
 - [x] Linear filtering and mipmaps (`texture-filtering`): trilinear plus 16x anisotropic, mip chains generated on the GPU at upload
@@ -150,7 +151,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 
 - [ ] Skeletal animation from glTF skins: joints, skinning in the vertex shader, playing and blending clips
 - [ ] Text rendering with a bitmap font
-- [ ] HUD: crosshair, health bars above units, ability cooldowns
+- [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after the 3D scene (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker into a HUD ring of constant pixel size, then delete the temporary `Material::unlit` flag and its shader branch
 - [ ] Debug UI and in-game stats (frame time, tick time, entity count)
 - [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them
 - [ ] Audio with SDL3: play sounds, volume, simple 3D panning by distance and direction

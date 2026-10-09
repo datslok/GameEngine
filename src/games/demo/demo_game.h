@@ -8,6 +8,7 @@
 #include "games/demo/control_mode.h"
 #include "input/input.h"
 #include "scene/camera.h"
+#include "scene/light.h"
 
 /*
 * The demo scene: spinning objects, a ground plane and a duck you can steer by clicking.
@@ -28,6 +29,7 @@ public:
     Entity getPlayer() const;
     Entity getDestinationMarker() const;
     Entity getPlayerTorch() const;
+    Entity getFlashlight() const;
 
 private:
     void createScene(World& world, AssetManager& assets);
@@ -58,6 +60,18 @@ private:
 
     // A point light that follows the player. Copied into place each tick, because there are no parent/child entities yet.
     Entity playerTorch;
+
+    // F toggles it. Held at the camera, or by the duck in MOBA mode.
+    Entity flashlight;
+    // A large source radius keeps it gentle up close; the higher intensity carries it further.
+    SpotLight flashlightBeam{
+        .colour = Vec3{1.0f, 0.95f, 0.85f},
+        .intensity = 12.0f,
+        .range = 50.0f,
+        .sourceRadius = 4.5f
+    };
+    void toggleFlashlight(World& world);
+    void updateFlashlight(World& world, float alpha);
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;

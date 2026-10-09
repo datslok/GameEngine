@@ -7,6 +7,7 @@
 #include "scene/light.h"
 #include "scene/model_renderer.h"
 
+#include <cmath>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -16,6 +17,10 @@
 namespace {
     // How far above the player's feet the torch hangs.
     constexpr float torchHeight = 1.0f;
+
+    // Where the duck holds the flashlight in MOBA mode, and how far it tilts the beam down (radians, about 20 degrees).
+    constexpr float flashlightHeight = 1.2f;
+    constexpr float flashlightTilt = 0.35f;
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
@@ -94,9 +99,13 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    // Lights. Together these reproduce the old hardcoded shader light: 0.2 ambient plus 0.8 diffuse from (-1, 2, 1).
-    world.add(world.create(), AmbientLight{Vec3{0.2f, 0.2f, 0.2f}});
-    world.add(world.create(), DirectionalLight{Vec3{1.0f, -2.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}, 0.8f});
+    // Night: no sun, only a faint ambient light, so the flashlight and the duck's torch do the work.
+    world.add(world.create(), AmbientLight{Vec3{0.06f, 0.06f, 0.06f}});
+
+    // The flashlight. updateFlashlight places it every frame, at the camera or (in MOBA mode) in the duck's hands.
+    flashlight = world.create();
+    world.add(flashlight, Transform{});
+    world.add(flashlight, flashlightBeam);
 
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
@@ -135,6 +144,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     Material yellow;
     yellow.colour = Pixel{255, 220, 40};
     yellow.specularStrength = 0.0f;
+    yellow.unlit = true; // TEMPORARY: keeps its colour at night. Becomes a HUD ring in phase 6.
 
     ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
@@ -151,6 +161,45 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 void DemoGame::onInput(World& world, const Input& input) {
     // Pick using the camera pose before this frame's panning.
     updatePlayerCommands(world, input);
+
+    if (input.wasKeyPressed(Key::F)) {
+        toggleFlashlight(world);
+    }
+}
+
+/*
+* Switching off removes the light rather than dimming it to zero, so the renderer does not spend a slot on it.
+*/
+void DemoGame::toggleFlashlight(World& world) {
+    if (world.has<SpotLight>(flashlight)) {
+        world.remove<SpotLight>(flashlight);
+    }
+    else {
+        world.add(flashlight, flashlightBeam);
+    }
+}
+
+/*
+* Runs every frame, after the camera moves, because the camera moves per frame: updating per tick would make the beam lag behind mouse look.
+* In MOBA mode the duck holds it, so it uses the duck's drawn (interpolated) pose, keeping the beam in step with the model.
+* It needs no PreviousTransform: it is already placed exactly where things are drawn this frame.
+*/
+void DemoGame::updateFlashlight(World& world, float alpha) {
+    Vec3 position = camera.getPosition();
+    Vec3 direction = camera.getForward();
+
+    if (controlMode == ControlMode::Moba && world.isAlive(player)) {
+        // Held above the ground and tilted down so the beam lands a few steps ahead.
+        const Vec3 facing = getCharacterFacing(world, player, alpha);
+        position = getRenderTransform(world, player, alpha).position + Vec3{0.0f, flashlightHeight, 0.0f};
+        direction = facing * std::cos(flashlightTilt) - Vec3{0.0f, std::sin(flashlightTilt), 0.0f};
+    }
+
+    world.get<Transform>(flashlight).position = position;
+
+    if (SpotLight* beam = world.tryGet<SpotLight>(flashlight)) {
+        beam->direction = direction;
+    }
 }
 
 /*
@@ -182,6 +231,8 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
     if (!modeChanged) {
         updateCamera(world, input, frameSeconds, alpha);
     }
+
+    updateFlashlight(world, alpha);
 }
 
 Camera& DemoGame::getCamera() {
@@ -202,6 +253,10 @@ Entity DemoGame::getDestinationMarker() const {
 
 Entity DemoGame::getPlayerTorch() const {
     return playerTorch;
+}
+
+Entity DemoGame::getFlashlight() const {
+    return flashlight;
 }
 
 void DemoGame::setControlMode(World& world, ControlMode mode) {
