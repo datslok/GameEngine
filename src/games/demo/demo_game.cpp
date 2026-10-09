@@ -105,7 +105,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     fourth.scale = smallScale;
     spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
 
-    // Night: a faint ambient light and a weak, cool moon, so the flashlight and the glowing duck stand out.
+    // Night: a faint ambient light and a weak, cool moon, so the flashlight stands out.
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam.
     // Light values are linear: the screen's sRGB encoding brightens dark values a lot, so night light is tiny in these units.
     world.add(world.create(), AmbientLight{Vec3{0.012f, 0.012f, 0.012f}});
@@ -303,14 +303,6 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
     groundSteeringActive = false;
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
-
-        // From the MOBA camera's height the duck is small, so it glows to stay easy to find at night. Emitted light does not
-        // light its surroundings. In the other modes it is lit like everything else.
-        const Vec3 glow = mode == ControlMode::Moba ? Vec3{0.10f, 0.06f, 0.008f} : Vec3{0.0f, 0.0f, 0.0f};
-
-        for (RenderPart& part : world.get<ModelRenderer>(player).parts) {
-            part.material.emissive = glow;
-        }
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
 }

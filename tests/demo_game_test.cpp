@@ -88,14 +88,6 @@ void testDemoGame() {
     // On arrival the simulation hides the marker.
     assert(!world.get<ModelRenderer>(marker).visible);
 
-    // The duck glows by itself instead of carrying a light: no point lights, and every part of it is emissive.
-    assert(collectLighting(world, 1.0f).pointLights.empty());
-
-    for (const RenderPart& part : world.get<ModelRenderer>(player).parts) {
-        const Vec3& glow = part.material.emissive;
-        assert(glow.x > 0.0f && glow.y > 0.0f);
-    }
-
     // A tap does not start hold-to-steer: with the button up, later frames give no new command.
     Input later = mobaInput();
     later.setCursor(Vec2{100.0f, 100.0f}, true);
@@ -147,35 +139,6 @@ void testDemoGame() {
     AssetManager otherAssets;
     freeCamera.onInit(otherWorld, otherAssets);
     assert(freeCamera.wantsMouseLook());
-
-    // The duck only glows in MOBA mode, where it is seen from far above and has to be easy to find.
-    const auto duckGlows = [](const World& duckWorld, Entity duck) {
-        for (const RenderPart& part : duckWorld.get<ModelRenderer>(duck).parts) {
-            if (part.material.emissive.lengthSquared() > 0.0f) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    assert(!duckGlows(otherWorld, freeCamera.getPlayer()));
-
-    // Switching out of MOBA mode turns the glow off, and back into it turns it on.
-    DemoGame switching{ControlMode::Moba, true};
-    World switchingWorld;
-    AssetManager switchingAssets;
-    switching.onInit(switchingWorld, switchingAssets);
-    assert(duckGlows(switchingWorld, switching.getPlayer()));
-
-    Input pressF3 = mobaInput();
-    pressF3.pressKey(Key::F3);
-    switching.onUpdate(switchingWorld, pressF3, 1.0f / 60.0f, 1.0f);
-    assert(!duckGlows(switchingWorld, switching.getPlayer()));
-
-    Input pressF2 = mobaInput();
-    pressF2.pressKey(Key::F2);
-    switching.onUpdate(switchingWorld, pressF2, 1.0f / 60.0f, 1.0f);
-    assert(duckGlows(switchingWorld, switching.getPlayer()));
 
     // Away from MOBA mode, the flashlight is held at the camera and points where it looks.
     Input idle;
