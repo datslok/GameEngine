@@ -19,7 +19,8 @@ SDL_GPUShader* loadShader(
     const char* filename,
     SDL_GPUShaderStage stage,
     Uint32 uniformBufferCount,
-    Uint32 samplerCount
+    Uint32 samplerCount,
+    Uint32 storageBufferCount
 ) {
     std::size_t codeSize = 0;
     void* code = SDL_LoadFile(filename, &codeSize);
@@ -36,6 +37,7 @@ SDL_GPUShader* loadShader(
     info.stage = stage;
     info.num_uniform_buffers = uniformBufferCount;
     info.num_samplers = samplerCount;
+    info.num_storage_buffers = storageBufferCount;
 
     SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
 

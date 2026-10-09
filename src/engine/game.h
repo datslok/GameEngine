@@ -41,6 +41,12 @@ public:
     // True for a hidden, captured mouse that drives the camera; false for a visible cursor kept in the window.
     virtual bool wantsMouseLook() const = 0;
 
+    // Where the action is, for choosing lights: when there are more than the renderer can use, the brightest ones at this
+    // point win. The camera's position suits a first-person view; a camera high above the ground should name the point it looks at.
+    virtual Vec3 getLightFocus() {
+        return getCamera().getPosition();
+    }
+
     // Debug drawing, optional. Called every frame after onUpdate: add wireframe shapes to see what the game knows but
     // does not show (paths, colliders, targets). They are drawn over everything for this frame only.
     virtual void onDebugDraw(const World& world, DebugDraw& debug, float alpha) {

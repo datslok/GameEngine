@@ -70,6 +70,9 @@ namespace {
         assert(lighting.pointLights.size() == 1);
         assert(nearlyEqual(lighting.pointLights[0].position, Vec3{0.5f, 0.0f, 0.0f}));
         assert(nearlyEqual(lighting.pointLights[0].light.range, 5.0f));
+
+        // The entity travels with the light, so the renderer can recognise it next frame.
+        assert(lighting.pointLights[0].entity == torch);
     }
 }
 
@@ -96,6 +99,7 @@ namespace {
         assert(lighting.spotLights.size() == 1);
         const PlacedSpotLight& placed = lighting.spotLights[0];
         assert(nearlyEqual(placed.position, Vec3{0.0f, 2.0f, 0.0f}));
+        assert(placed.entity == flashlight);
         assert(nearlyEqual(placed.light.direction, Vec3{0.0f, 0.0f, -1.0f}));
         assert(nearlyEqual(placed.light.range, 20.0f));
         assert(nearlyEqual(placed.light.innerAngle, 0.2f));

@@ -7,8 +7,11 @@
 #include "gameplay/camera/moba_camera_controller.h"
 #include "games/demo/control_mode.h"
 #include "input/input.h"
+#include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/light.h"
+
+#include <vector>
 
 /*
 * The demo scene: spinning objects, a ground plane and a duck you can steer by clicking.
@@ -24,6 +27,7 @@ public:
     void onUpdate(World& world, const Input& input, float frameSeconds, float alpha) override;
     Camera& getCamera() override;
     bool wantsMouseLook() const override;
+    Vec3 getLightFocus() override;
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
     bool wantsDebugView() const override;
 
@@ -74,6 +78,13 @@ private:
 
     // A glowing sphere in the direction the moonlight comes from, at a fixed place you can fly to in free camera mode.
     Entity moon;
+
+    // L toggles a field of coloured lamps, far more point lights than the shader has seats for, to show light priority:
+    // each lamp has a pillar beside it, which throws a shadow only while its lamp has one.
+    std::vector<Entity> lampEntities;
+    MeshHandle sphereMesh;
+    MeshHandle cubeMesh;
+    void toggleLamps(World& world);
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;

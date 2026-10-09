@@ -95,6 +95,17 @@ namespace {
         DebugDraw other;
         drawRenderStats(moreCulled, other);
         assert(other.getScreenLines().size() != debug.getScreenLines().size());
+
+        // A third line tells how many point lights there are, how many could be seen, and how many got light and shadow.
+        RenderStats manyLights = stats;
+        manyLights.pointLights = 42;
+        manyLights.pointLightsInView = 20;
+        manyLights.pointLightsLit = 16;
+        manyLights.pointLightsShadowed = 4;
+        DebugDraw lights;
+        drawRenderStats(manyLights, lights);
+        assert(lights.getScreenLines().size() != debug.getScreenLines().size());
+        assert(allInside(lights, 0.0f, 0.0f, 600.0f, 100.0f));
     }
 }
 
