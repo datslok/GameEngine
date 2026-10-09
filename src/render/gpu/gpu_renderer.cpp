@@ -1,5 +1,7 @@
 #include "render/gpu/gpu_renderer.h"
+#include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/gpu_helpers.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
 #include "scene/culling.h"
@@ -10,59 +12,6 @@
 #include <cstddef>
 #include <cstring>
 #include <vector>
-
-namespace {
-    // Shaders expect column-major matrices; Mat4 is row-major.
-    void writeColumnMajor(const Mat4& matrix, float* target) {
-        for (int row = 0; row < 4; ++row) {
-            for (int column = 0; column < 4; ++column) {
-                target[column * 4 + row] = matrix.values[row][column];
-            }
-        }
-    }
-
-    std::runtime_error gpuError(const char* message) {
-        return std::runtime_error(
-            std::string{message} + ": " + SDL_GetError()
-        );
-    }
-    SDL_GPUShader* loadShader(
-        SDL_GPUDevice* device,
-        const char* filename,
-        SDL_GPUShaderStage stage,
-        Uint32 uniformBufferCount,
-        Uint32 samplerCount
-    ) {
-        std::size_t codeSize = 0;
-        void* code = SDL_LoadFile(filename, &codeSize);
-
-        if (code == nullptr) {
-            throw gpuError(filename);
-        }
-
-        SDL_GPUShaderCreateInfo info{};
-        info.code = static_cast<const Uint8*>(code);
-        info.code_size = codeSize;
-        info.entrypoint = "main";
-        info.format = SDL_GPU_SHADERFORMAT_SPIRV;
-        info.stage = stage;
-        info.num_uniform_buffers = uniformBufferCount;
-        info.num_samplers = samplerCount;
-
-        SDL_GPUShader* shader = SDL_CreateGPUShader(device, &info);
-
-        if (shader == nullptr) {
-            const std::runtime_error error =
-                gpuError("Shader creation failed");
-
-            SDL_free(code);
-            throw error;
-        }
-
-        SDL_free(code);
-        return shader;
-    }
-}
 
 GpuRenderer::GpuRenderer(SDL_Window* window):
     window(window)
@@ -100,7 +49,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
 
         createPipeline();
         createShadowResources();
-        createDebugLinePipeline();
+        debugLines = std::make_unique<DebugLineRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
         createWhiteTexture();
     }
     catch (...) {
@@ -344,165 +293,6 @@ void GpuRenderer::createShadowResources() {
     SDL_ReleaseGPUShader(device, vertexShader);
 }
 
-/*
-* Debug lines are drawn as a line list (every two vertices one line), unlit, into the same colour and depth targets as the
-* scene but ignoring depth, so they show through walls: they are for seeing what is hidden.
-*/
-void GpuRenderer::createDebugLinePipeline() {
-    SDL_GPUShader* vertexShader = nullptr;
-    SDL_GPUShader* fragmentShader = nullptr;
-
-    try {
-        vertexShader = loadShader(device, "assets/shaders/debug_line.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
-        fragmentShader = loadShader(device, "assets/shaders/debug_line.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0);
-
-        SDL_GPUColorTargetDescription colourTarget{};
-        colourTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
-
-        SDL_GPUVertexBufferDescription vertexDescription{};
-        vertexDescription.slot = 0;
-        vertexDescription.pitch = static_cast<Uint32>(sizeof(DebugLineVertex));
-        vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
-
-        SDL_GPUVertexAttribute attributes[2]{};
-        attributes[0].location = 0;
-        attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-        attributes[0].offset = static_cast<Uint32>(offsetof(DebugLineVertex, position));
-        attributes[1].location = 1;
-        attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-        attributes[1].offset = static_cast<Uint32>(offsetof(DebugLineVertex, colour));
-
-        SDL_GPUGraphicsPipelineCreateInfo info{};
-        info.vertex_shader = vertexShader;
-        info.fragment_shader = fragmentShader;
-        info.primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST;
-        info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-        info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
-
-        info.vertex_input_state.num_vertex_buffers = 1;
-        info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
-        info.vertex_input_state.num_vertex_attributes = 2;
-        info.vertex_input_state.vertex_attributes = attributes;
-
-        info.target_info.num_color_targets = 1;
-        info.target_info.color_target_descriptions = &colourTarget;
-        info.target_info.has_depth_stencil_target = true;
-        info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-        info.depth_stencil_state.enable_depth_test = false;
-        info.depth_stencil_state.enable_depth_write = false;
-
-        debugLinePipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
-
-        if (debugLinePipeline == nullptr) {
-            throw gpuError("Debug line pipeline creation failed");
-        }
-    }
-    catch (...) {
-        if (fragmentShader != nullptr) {
-            SDL_ReleaseGPUShader(device, fragmentShader);
-        }
-
-        if (vertexShader != nullptr) {
-            SDL_ReleaseGPUShader(device, vertexShader);
-        }
-
-        throw;
-    }
-
-    SDL_ReleaseGPUShader(device, fragmentShader);
-    SDL_ReleaseGPUShader(device, vertexShader);
-}
-
-/*
-* The line count changes every frame, so the buffer is reused and only grows, doubling so a slowly growing count does not
-* reallocate every frame. Cycling lets the GPU keep reading last frame's copy while this frame's is written.
-*/
-void GpuRenderer::uploadDebugLines(const std::vector<DebugLineVertex>& vertices) {
-    const Uint32 vertexCount = static_cast<Uint32>(vertices.size());
-
-    if (vertexCount > debugLineCapacity) {
-        const Uint32 capacity = std::max({vertexCount, debugLineCapacity * 2, Uint32{1024}});
-
-        SDL_GPUBufferCreateInfo bufferInfo{};
-        bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-        bufferInfo.size = capacity * static_cast<Uint32>(sizeof(DebugLineVertex));
-
-        SDL_GPUTransferBufferCreateInfo transferInfo{};
-        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        transferInfo.size = bufferInfo.size;
-
-        SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(device, &bufferInfo);
-        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
-
-        if (buffer == nullptr || transfer == nullptr) {
-            const std::runtime_error error = gpuError("Debug line buffer creation failed");
-
-            if (buffer != nullptr) {
-                SDL_ReleaseGPUBuffer(device, buffer);
-            }
-
-            if (transfer != nullptr) {
-                SDL_ReleaseGPUTransferBuffer(device, transfer);
-            }
-
-            throw error;
-        }
-
-        if (debugLineBuffer != nullptr) {
-            SDL_ReleaseGPUBuffer(device, debugLineBuffer);
-        }
-
-        if (debugLineTransfer != nullptr) {
-            SDL_ReleaseGPUTransferBuffer(device, debugLineTransfer);
-        }
-
-        debugLineBuffer = buffer;
-        debugLineTransfer = transfer;
-        debugLineCapacity = capacity;
-    }
-
-    const Uint32 byteCount = vertexCount * static_cast<Uint32>(sizeof(DebugLineVertex));
-    void* destination = SDL_MapGPUTransferBuffer(device, debugLineTransfer, true);
-
-    if (destination == nullptr) {
-        throw gpuError("Debug line transfer buffer mapping failed");
-    }
-
-    std::memcpy(destination, vertices.data(), byteCount);
-    SDL_UnmapGPUTransferBuffer(device, debugLineTransfer);
-
-    SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commands);
-
-    if (copyPass == nullptr) {
-        throw gpuError("Debug line copy pass creation failed");
-    }
-
-    SDL_GPUTransferBufferLocation source{};
-    source.transfer_buffer = debugLineTransfer;
-
-    SDL_GPUBufferRegion target{};
-    target.buffer = debugLineBuffer;
-    target.size = byteCount;
-
-    SDL_UploadToGPUBuffer(copyPass, &source, &target, true);
-    SDL_EndGPUCopyPass(copyPass);
-}
-
-void GpuRenderer::drawDebugLines(const Mat4& transform, Uint32 firstVertex, Uint32 vertexCount) {
-    SDL_BindGPUGraphicsPipeline(pass, debugLinePipeline);
-
-    SDL_GPUBufferBinding binding{};
-    binding.buffer = debugLineBuffer;
-    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-
-    float matrix[16]{};
-    writeColumnMajor(transform, matrix);
-    SDL_PushGPUVertexUniformData(commands, 0, matrix, static_cast<Uint32>(sizeof(matrix)));
-
-    SDL_DrawGPUPrimitives(pass, vertexCount, 1, firstVertex, 0);
-}
-
 GpuRenderer::~GpuRenderer() {
     cleanup();
 }
@@ -558,6 +348,7 @@ void GpuRenderer::cleanup() noexcept {
         meshes.clear();
         textures.clear();
         whiteTexture.reset();
+        debugLines.reset();
 
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -570,23 +361,6 @@ void GpuRenderer::cleanup() noexcept {
             SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
             pipeline = nullptr;
         }
-
-        if (debugLinePipeline != nullptr) {
-            SDL_ReleaseGPUGraphicsPipeline(device, debugLinePipeline);
-            debugLinePipeline = nullptr;
-        }
-
-        if (debugLineBuffer != nullptr) {
-            SDL_ReleaseGPUBuffer(device, debugLineBuffer);
-            debugLineBuffer = nullptr;
-        }
-
-        if (debugLineTransfer != nullptr) {
-            SDL_ReleaseGPUTransferBuffer(device, debugLineTransfer);
-            debugLineTransfer = nullptr;
-        }
-
-        debugLineCapacity = 0;
 
         if (shadowPipeline != nullptr) {
             SDL_ReleaseGPUGraphicsPipeline(device, shadowPipeline);
@@ -642,15 +416,8 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         const LightUniformData lights = packLighting(frame.lighting, camera.getPosition());
         const ShadowPlan shadows = planShadows(frame.lighting, camera);
 
-        // Copies must happen outside render passes, so the debug lines are uploaded first: world lines, then screen lines.
-        std::vector<DebugLineVertex> debugVertices = buildDebugLineVertices(frame.debugLines);
-        const Uint32 worldLineVertices = static_cast<Uint32>(debugVertices.size());
-        const std::vector<DebugLineVertex> screenVertices = buildDebugLineVertices(frame.debugScreenLines);
-        debugVertices.insert(debugVertices.end(), screenVertices.begin(), screenVertices.end());
-
-        if (!debugVertices.empty()) {
-            uploadDebugLines(debugVertices);
-        }
+        // Copies must happen outside render passes, so the debug lines are uploaded first.
+        debugLines->upload(commands, frame.debugLines, frame.debugScreenLines);
 
         if (!shadows.tileMatrices.empty()) {
             drawShadows(frame, shadows.tileMatrices);
@@ -677,16 +444,8 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         stats.drawn = visible.size();
         stats.culled = frame.draws.size() - visible.size();
 
-        // Last, so they are drawn over the finished scene. World lines go through the camera; screen lines are already in
-        // window pixels, so a flat projection maps (0, 0) to the top-left corner and (width, height) to the bottom-right.
-        if (worldLineVertices > 0) {
-            drawDebugLines(viewProjection, 0, worldLineVertices);
-        }
-
-        if (!screenVertices.empty()) {
-            const Mat4 pixels = toGpuDepthRange(Mat4::orthographic(0.0f, static_cast<float>(depthWidth), static_cast<float>(depthHeight), 0.0f, -1.0f, 1.0f));
-            drawDebugLines(pixels, worldLineVertices, static_cast<Uint32>(screenVertices.size()));
-        }
+        // Last, so they are drawn over the finished scene.
+        debugLines->draw(commands, pass, viewProjection, depthWidth, depthHeight);
     }
     catch (...) {
         abandonFrame();
