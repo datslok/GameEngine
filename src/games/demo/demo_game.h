@@ -80,7 +80,7 @@ private:
     Entity moon;
 
     // L toggles a field of coloured lamps, far more point lights than the shader has seats for, to show light priority:
-    // each lamp has a pillar beside it, which throws a shadow only while its lamp has one.
+    // each lamp flies round a pillar like a firefly, and the pillar throws a moving shadow only while its lamp has one.
     std::vector<Entity> lampEntities;
     MeshHandle sphereMesh;
     MeshHandle cubeMesh;
@@ -94,4 +94,7 @@ private:
 
     // Space toggles following the player in MOBA mode.
     bool mobaCameraLocked = false;
+
+    // The simulation time of the latest tick, so things created between ticks (the lamps) can start mid-flight.
+    double latestSimulationSeconds = 0.0;
 };

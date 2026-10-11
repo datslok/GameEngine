@@ -99,7 +99,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **Alt+Enter** | Toggle fullscreen |
 | **Escape** | Release the mouse |
 | **F** | Toggle the flashlight (held in your right hand; in MOBA mode the duck carries it) |
-| **L** | Toggle a field of 42 coloured lamps, each with a pillar beside it: more lamps than can have shadows, to show light priority (the 16 lamps that matter most make their pillars cast shadows) |
+| **L** | Toggle a field of 42 coloured lamps that fly round their pillars like fireflies, so the pillars' shadows sweep round: a stress test for light priority and shadows (every shadow tile is redrawn each frame while its light moves) |
 | **F4** | Debug view: bounding boxes around every mesh, how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
 
 **First person and free camera**
@@ -129,7 +129,7 @@ src/            Engine and game source, in layers (lower ones never include high
   app/          main: picks a game and starts the engine
   games/        Games built on the engine (games/demo is the current demo)
   engine/       The main loop, the Game interface and fixed-tick updates
-  gameplay/     Character movement, spinners and camera controllers
+  gameplay/     Character movement, spinners, fireflies and camera controllers
   platform/     The window and SDL input translation
   render/gpu/   GPU renderer (SDL_GPU), and the packing of lights and materials for the shaders
   render/software/  Software rasterizer, kept as a tested reference

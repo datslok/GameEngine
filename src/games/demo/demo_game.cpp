@@ -1,5 +1,6 @@
 #include "games/demo/demo_game.h"
 #include "gameplay/character.h"
+#include "gameplay/firefly.h"
 #include "gameplay/spinner.h"
 #include "math/transform.h"
 #include "scene/camera_ray.h"
@@ -47,7 +48,6 @@ namespace {
     const Vec3 firstLampBase{-12.5f, 0.0f, -22.5f};
 
     // Lanterns floating at about waist height, bright enough to light a pool a few units across.
-    constexpr float lampHeight = 1.0f;
     constexpr float lampIntensity = 1.5f;
     constexpr float lampRange = 5.0f;
     constexpr float lampSourceRadius = 0.5f;
@@ -60,6 +60,16 @@ namespace {
 
     // Each pillar is turned a golden angle (about 137.5 degrees) further than the last, so the shadows point every which way.
     constexpr float goldenAngle = 2.39996f;
+
+    // Each lamp flies round its pillar like a firefly, so the pillar's shadow sweeps round like a sundial's. It keeps at
+    // least 0.55 from the pillar's middle (the pillar's corners are 0.21 out, the bulb 0.12 across) and stays below its
+    // top (1.4), so the shadow is always a long streak. Speeds differ from lamp to lamp and alternate direction.
+    constexpr float lampOrbitRadius = 0.75f;
+    constexpr float lampOrbitWobble = 0.2f;
+    constexpr float lampHeight = 1.0f;
+    constexpr float lampHeightWobble = 0.35f;
+    constexpr float lampSlowestOrbit = 0.35f;
+    constexpr float lampOrbitSpread = 0.4f;
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
@@ -275,7 +285,8 @@ void DemoGame::toggleFlashlight(World& world) {
 /*
 * The lamps are whole entities, created and destroyed together, so off means truly gone: no seats, no draws.
 * Four colours in turn make it easy to see which lamps are lit: an unseated lamp's bulb still glows (it is emissive),
-* but the ground around it stays dark. Lamps and pillars never move, so they need no PreviousTransform.
+* but the ground around it stays dark. Each lamp flies round its pillar (a Firefly), so it has a PreviousTransform and is
+* placed where its flight puts it right now, or the first tick would make it jump. The pillars never move.
 */
 void DemoGame::toggleLamps(World& world) {
     if (!lampEntities.empty()) {
@@ -314,20 +325,35 @@ void DemoGame::toggleLamps(World& world) {
             ModelRenderer bulb = makeMeshRenderer(sphereMesh, glow);
             bulb.castsShadows = false;
 
+            const float angle = goldenAngle * static_cast<float>(index);
+            const Vec3 pillarFoot = base + Vec3{std::cos(angle) * pillarDistance, 0.0f, std::sin(angle) * pillarDistance};
+
+            // The golden angle again, for the starting point and the wobbles, so neighbours fly out of step.
+            const float speed = lampSlowestOrbit + lampOrbitSpread * static_cast<float>(index % 5) / 4.0f;
+            const Firefly flight{
+                .centre = pillarFoot,
+                .orbitRadius = lampOrbitRadius,
+                .radiusWobble = lampOrbitWobble,
+                .height = lampHeight,
+                .heightWobble = lampHeightWobble,
+                .orbitSpeed = index % 2 == 0 ? speed : -speed,
+                .phase = angle
+            };
+
             Transform lampPlacement;
-            lampPlacement.position = base + Vec3{0.0f, lampHeight, 0.0f};
+            lampPlacement.position = fireflyPosition(flight, latestSimulationSeconds);
             lampPlacement.scale = Vec3{bulbRadius, bulbRadius, bulbRadius};
 
             const Entity lamp = world.create();
             world.add(lamp, lampPlacement);
+            world.add(lamp, PreviousTransform{lampPlacement});
+            world.add(lamp, flight);
             world.add(lamp, std::move(bulb));
             world.add(lamp, PointLight{.colour = colour, .intensity = lampIntensity, .range = lampRange, .sourceRadius = lampSourceRadius});
             lampEntities.push_back(lamp);
 
-            const float angle = goldenAngle * static_cast<float>(index);
-
             Transform pillarPlacement;
-            pillarPlacement.position = base + Vec3{std::cos(angle) * pillarDistance, pillarHalfHeight, std::sin(angle) * pillarDistance};
+            pillarPlacement.position = pillarFoot + Vec3{0.0f, pillarHalfHeight, 0.0f};
             pillarPlacement.scale = Vec3{pillarHalfWidth, pillarHalfHeight, pillarHalfWidth};
 
             const Entity pillar = world.create();
@@ -368,8 +394,11 @@ void DemoGame::updateFlashlight(World& world, float alpha) {
 * The systems, in a fixed order. The engine has already saved previous transforms for interpolation.
 */
 void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
+    latestSimulationSeconds = simulationSeconds;
+
     updateCharacters(world, tickSeconds);
     updateSpinners(world, simulationSeconds);
+    updateFireflies(world, simulationSeconds);
 
     // Simulation continues when the cursor is released or focus is lost.
     if (world.isAlive(player) && !world.get<CharacterMovement>(player).isMoving()) {

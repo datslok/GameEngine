@@ -50,6 +50,7 @@ void testCulling();
 void testDebugText();
 void testDither();
 void testSphereMesh();
+void testFirefly();
 
 int main(){
     testPixelBuffer();
@@ -102,6 +103,7 @@ int main(){
     testDebugText();
     testDither();
     testSphereMesh();
+    testFirefly();
 
     std::cout << "All tests passed!\n";
     return 0;
