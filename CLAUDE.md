@@ -13,7 +13,7 @@ The roadmap is in `ROADMAP.md`. Phases 0-4 (foundations, GPU rendering and asset
 - Flags are `-std=c++20 -Wall -Wextra -g` with no optimisation (-O0). A release target with `-O2` is deferred indefinitely (ROADMAP phase 9), until the frame rate drops below the cap.
 - Dependencies: SDL3, SDL3_image, `glslc` (MSYS2 `shaderc` package here; the Vulkan SDK's also works), and cgltf (vendored in `external/cgltf`).
 - `build/`, `*.exe` and `*.spv` are git-ignored.
-- `python tools/package_demo.py` builds and packages `build/GameEngineDemo.zip` for a PC without MSYS2: stripped exe, DLLs found by following import tables with MSYS2 `objdump`, plus the SDL3_image decoder DLLs for the image formats the assets use (they are loaded at runtime, so import tables do not show them), all of `assets/` except shader sources, and a README. It fails if any imported DLL is neither packaged nor part of Windows.
+- `python tools/package_demo.py` builds and packages `build/GameEngineDemo.zip` for a PC without MSYS2: stripped exe, DLLs found by following import tables with MSYS2 `objdump`, plus the SDL3_image decoder DLLs for the image formats the assets use (they are loaded at runtime, so import tables do not show them), all of `assets/` except shader sources, and a README whose controls are generated from `README.md`'s `## Controls` section (`readme_controls`), so keep that section current and the zip follows. It fails if any imported DLL is neither packaged nor part of Windows.
 - Source files use CRLF line endings. Preserve them when editing.
 
 ## Source layout
