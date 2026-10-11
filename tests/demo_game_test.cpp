@@ -1,5 +1,6 @@
 #include "games/demo/demo_game.h"
 #include "gameplay/character.h"
+#include "gameplay/firefly.h"
 #include "math/transform.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
@@ -112,6 +113,45 @@ namespace {
         assert(countPointLights(world) == 0);
         assert(world.getEntityCount() == entitiesBefore);
     }
+
+    // The lamps fly round their pillars like fireflies, so the shadows sweep. Switched on part way through the game, each
+    // starts exactly where its flight puts it at that moment, so the first tick does not make it jump.
+    void testLampsFly() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+
+        int ticks = 0;
+        runTicks(game, world, 500, ticks);
+
+        Input pressL = mobaInput();
+        pressL.pressKey(Key::L);
+        game.onInput(world, pressL);
+
+        const double now = ticks * static_cast<double>(tickSeconds);
+        std::size_t flying = 0;
+        world.each<Firefly, PointLight>([&](Entity entity, Firefly& firefly, PointLight&) {
+            assert(world.has<PreviousTransform>(entity));
+            const Vec3 expected = fireflyPosition(firefly, now);
+            const Vec3 position = world.get<Transform>(entity).position;
+            assert(nearlyEqual(position.x, expected.x) && nearlyEqual(position.y, expected.y) && nearlyEqual(position.z, expected.z));
+            ++flying;
+        });
+        assert(flying == countPointLights(world));
+
+        const Entity someLamp = [&] {
+            Entity found;
+            world.each<Firefly>([&](Entity entity, Firefly&) {
+                found = entity;
+            });
+            return found;
+        }();
+        const Vec3 before = world.get<Transform>(someLamp).position;
+
+        runTicks(game, world, 120, ticks);
+        assert((world.get<Transform>(someLamp).position - before).length() > 0.1f);
+    }
 }
 
 /*
@@ -120,6 +160,7 @@ namespace {
 void testDemoGame() {
     testDebugViewToggles();
     testLampsToggle();
+    testLampsFly();
 
     World world;
     AssetManager assets;
