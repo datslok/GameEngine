@@ -1,6 +1,6 @@
 # Roadmap
 
-A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**. The core stays genre-agnostic; genre code (camera styles, weapons, abilities, netcode tuning) lives in modules on top.
+A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**, and eventually a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic). The core stays genre-agnostic; genre code (camera styles, weapons, abilities, netcode tuning, cloth and sewing) lives in modules on top.
 
 Each phase ends with a **milestone**: something you can run and see. A phase is done when its milestone works and has tests where it makes sense.
 
@@ -180,7 +180,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 - [ ] Broad phase: uniform grid, so tests only check nearby objects
 - [ ] Static level collision against triangle meshes
 - [ ] Kinematic character controller: capsule, sliding along walls, stepping up stairs, ground snapping, gravity and jumping (first person has a camera-only placeholder jump until then, `fps-jump`)
-- [ ] Particle physics: forces, gravity, semi-implicit Euler integration, bouncing off level geometry (projectiles, grenades)
+- [ ] Particle physics: forces, gravity, semi-implicit Euler integration, bouncing off level geometry (projectiles, grenades). Keep the particle store plain (positions, previous positions, inverse masses) so phase 10's cloth can reuse it for its vertices
 
 **Milestone:** walk around a small level in first person with walls, stairs and jumping, and throw a grenade that bounces.
 
@@ -245,3 +245,30 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 - [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering). Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up. Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
 - [ ] Scripting for gameplay code
 - [ ] `release` build target (`-O2`), with small vec/mat operators moved into headers so they can inline. Deferred indefinitely: only worth doing once the frame rate drops below the 240 FPS cap
+
+## Phase 10: Cloth and a dressmaking game
+
+A third kind of game: cut fabric panels, sew them into garments and see them hang and move on a body. Builds on phase 5's particles and collision, phase 6's skinned characters, and phase 9's physically based materials and multithreading. Cloth code lives in its own module on top of the core, like the FPS and MOBA code.
+
+**Simulation**
+- [ ] Dynamic meshes: a GPU upload path for meshes whose vertices change every frame, with normals recomputed each time (today a mesh is uploaded once and never changes)
+- [ ] XPBD solver (extended position-based dynamics): particles integrated with gravity, then constraints project their positions back towards valid states. Each constraint has a compliance (inverse stiffness), so nearly unstretchable fabric stays stable at the 120 Hz tick, where stiff springs would need a tiny timestep
+- [ ] Cloth constraints: stretch (edge lengths), bending (angle between neighbouring triangles), pinning (fixed points, for testing and for hangers)
+- [ ] Collision with bodies: capsules first, then a signed distance field around a mannequin; friction between cloth and body
+- [ ] Self-collision, so folds and layers never pass through each other, using a broad phase like phase 5's grid
+- [ ] Fabric properties: different stiffness along the threads (warp and weft) than across them (the bias), bending stiffness (silk vs denim), mass per area, friction; a few presets
+
+**Garments**
+- [ ] Sewing patterns: 2D panel outlines triangulated into cloth meshes, with UVs from the flat layout
+- [ ] Seams: constraints that pull matching panel edges together until they join, starting from panels placed around the body
+- [ ] Dressing an animated character: the cloth collides with the skinned body as it moves
+
+**Rendering**
+- [ ] Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
+- [ ] Normal maps for weave detail (needs plain `UNORM` textures, not sRGB)
+
+**Game**
+- [ ] Pattern editor: draw and edit panel outlines, choose which edges are sewn together
+- [ ] Fabric choice, colours and prints per panel
+
+**Milestone:** a sheet pinned at two corners drapes over a sphere; then a simple skirt sewn from two panels hangs on a mannequin and swings as it turns.
