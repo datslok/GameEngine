@@ -85,7 +85,7 @@ To send the demo to someone without MSYS2, run:
 python tools/package_demo.py
 ```
 
-It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls. Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. It needs Python 3 (standard library only) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
+It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. It needs Python 3 (standard library only) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
 
 ## Controls
 

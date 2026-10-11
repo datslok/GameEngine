@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import zipfile
 from pathlib import Path
 
@@ -67,33 +68,66 @@ support (any reasonably recent NVIDIA, AMD or Intel GPU with up-to-date drivers)
 
 Controls
 --------
-The demo starts in first-person mode. Click in the window to capture the mouse.
+{controls}"""
 
-  F1          First-person mode
-  F2          MOBA mode
-  F3          Free camera mode
-  Alt+Enter   Toggle fullscreen
-  Escape      Release the mouse
-  F           Toggle the flashlight (in MOBA mode the duck carries it)
-  F4          Debug view: bounding boxes, culling counts, light markers, walk target
-
-First person and free camera:
-  Mouse       Look around
-  W A S D     Move
-  Space       Jump (first person)
-  Space/Ctrl  Up / down (free camera)
-  Shift       Run (first person) or fly faster (free camera)
-
-MOBA:
-  Left-click              Keep the cursor inside the window
-  Right-click (or hold)   Move the duck
-  Cursor at screen edge   Pan the camera
-  Space                   Lock the camera on the duck
-"""
+# The zip's README is plain text read in Notepad, so lines are wrapped to this width.
+README_WIDTH = 78
 
 
 class PackagingError(Exception):
     pass
+
+
+def readme_controls(readme: str) -> str:
+    """
+    The controls, taken from the "## Controls" section of the repo's README.md, so the zip's README can
+    never fall behind it. Markdown becomes plain text: **bold** lines become headings, and each table
+    becomes two columns with long actions wrapped under themselves.
+    """
+    match = re.search(r"^## Controls\n(.*?)(?=^## |\Z)", readme, re.MULTILINE | re.DOTALL)
+    if not match:
+        raise PackagingError('README.md has no "## Controls" section to copy into the zip')
+
+    output = []
+    table = []
+    headed = False
+
+    def flush_table():
+        if not table:
+            return
+        key_width = max(len(key) for key, _ in table) + 2
+        for key, action in table:
+            output.append(textwrap.fill(
+                action,
+                width=README_WIDTH,
+                initial_indent="  " + key.ljust(key_width),
+                subsequent_indent=" " * (key_width + 2),
+            ))
+        table.clear()
+
+    for line in match.group(1).strip().split("\n"):
+        line = line.strip()
+        if line.startswith("|"):
+            cells = [cell.strip().replace("**", "") for cell in line.strip("|").split("|")]
+            # Skip the header row and the |---|---| line under it.
+            if cells[0] == "Input" or set(cells[0]) <= {"-"}:
+                continue
+            table.append((cells[0], cells[1]))
+            continue
+
+        flush_table()
+        is_heading = line.startswith("**") and line.endswith("**")
+        if is_heading:
+            output.append(line.strip("*") + ":")
+        elif line:
+            output.append(textwrap.fill(line.replace("**", ""), width=README_WIDTH))
+        elif not headed:
+            # A heading sits straight on top of its table, without Markdown's blank line between.
+            output.append("")
+        headed = is_heading
+
+    flush_table()
+    return "\n".join(output) + "\n"
 
 
 def msys_environment(msys_root: Path) -> dict:
@@ -296,7 +330,9 @@ def main() -> int:
         loaded_at_runtime = path in decoders
         print(f"  {path.name}{'  (loaded at runtime by SDL3_image)' if loaded_at_runtime else ''}")
 
-    (stage / "README.txt").write_text(README_TEXT.format(exe_name=exe.name).replace("\n", "\r\n"), encoding="utf-8", newline="")
+    controls = readme_controls((REPO_ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n"))
+    readme = README_TEXT.format(exe_name=exe.name, controls=controls)
+    (stage / "README.txt").write_text(readme.replace("\n", "\r\n"), encoding="utf-8", newline="")
 
     print("Checking every DLL resolves inside the package or Windows...")
     verify(stage, objdump, environment)
