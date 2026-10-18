@@ -37,9 +37,10 @@ The project is developed on **Windows** with **MSYS2** (UCRT64 environment). You
 ## Install
 
 1. Install [MSYS2](https://www.msys2.org/) using its installer (the default location is `C:\msys64`).
-2. Open the **MSYS2 UCRT64** shell from the Start menu and install the packages:
+2. Open the **MSYS2 UCRT64** shell from the Start menu, update MSYS2 (run this twice: the first run updates the core and closes the shell, so reopen it), and install the packages:
 
    ```sh
+   pacman -Syu --noconfirm
    pacman -S --needed make \
        mingw-w64-ucrt-x86_64-gcc \
        mingw-w64-ucrt-x86_64-sdl3 \
@@ -91,7 +92,7 @@ To send the demo to someone without MSYS2, run:
 python tools/package_demo.py
 ```
 
-It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. It needs Python 3 (standard library only) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
+It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
 
 ## Controls
 
@@ -105,7 +106,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **Alt+Enter** | Toggle fullscreen |
 | **Escape** | Release the mouse |
 | **F** | Toggle the flashlight (held in your right hand; in MOBA mode the duck carries it) |
-| **L** | Toggle a field of 42 coloured lamps that fly round their pillars like fireflies, so the pillars' shadows sweep round: a stress test for light priority and shadows (every shadow tile is redrawn each frame while its light moves) |
+| **L** | Toggle a field of 100 coloured lamps (more than the shader's 64 point light seats, so light priority has to choose) that fly round their pillars like fireflies, so the pillars' shadows sweep round: a stress test for light priority and shadows (every shadow tile is redrawn each frame while its light moves) |
 | **K** | Toggle the four floodlights over the obstacle course (on at the start): shadow-casting spotlights on poles whose crossing beams fill in each other's shadows, like stadium lights |
 | **F4** | Debug view: timings in pale green (frame, work without the frame cap's sleep, one tick, the camera update, building the scene and rendering, which includes waiting for the GPU, as average/worst milliseconds; then each simulation system's average cost per tick), bounding boxes around every mesh, collider wireframes in orange, how many colliders the hover ray tested out of all of them (the broad phase at work), the level triangle under the cursor with its normal and how many level triangles that ray tested, the duck's ground normal, slope and movement substeps, how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
 
@@ -142,7 +143,7 @@ src/            Engine and game source, in layers (lower ones never include high
   engine/       The main loop, the Game interface and fixed-tick updates
   gameplay/     Character movement, spinners, fireflies, grenades and camera controllers
   platform/     The window and SDL input translation
-  render/gpu/   GPU renderer (SDL_GPU), and the packing of lights and materials for the shaders
+  render/gpu/   GPU renderer (SDL_GPU): shadow atlas and caching, soft shadows, light priority, debug lines, and the packing of lights and materials for the shaders
   render/software/  Software rasterizer, kept as a tested reference
   scene/        Meshes, models, materials, lights, the camera, render components, interpolation and the frame description
   assets/       The asset manager, and OBJ, glTF and image loaders
@@ -154,6 +155,8 @@ src/            Engine and game source, in layers (lower ones never include high
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
                 ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
+                RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
+tools/          package_demo.py (the shareable zip), make_glb_demo.py
 assets/
   models/       OBJ and glTF test models
   shaders/      GLSL shaders (compiled to .spv by make)

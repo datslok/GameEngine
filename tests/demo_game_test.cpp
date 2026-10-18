@@ -7,6 +7,7 @@
 #include "math/transform.h"
 #include "physics/character_controller.h"
 #include "physics/collider.h"
+#include "render/gpu/light_uniforms.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
@@ -386,7 +387,7 @@ namespace {
         return count;
     }
 
-    // L fills the ground with far more lamps than can have shadows, to show light priority at work, and removes them
+    // L fills the ground with more lamps than the shader has seats, to show light priority at work, and removes them
     // again, entities and all.
     void testLampsToggle() {
         World world;
@@ -400,7 +401,8 @@ namespace {
         Input pressL = mobaInput();
         pressL.pressKey(Key::L);
         game.onInput(world, pressL);
-        assert(countPointLights(world) > 2 * 16); // twice the 16 shadowed point lights
+        assert(countPointLights(world) == 100);
+        assert(countPointLights(world) > static_cast<std::size_t>(maxPointLights)); // more than the seats, so some must wait
 
         // Every lamp is drawn too: a glowing bulb that does not block its own light.
         std::size_t bulbs = 0;

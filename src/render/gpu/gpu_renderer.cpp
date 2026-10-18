@@ -466,7 +466,7 @@ SDL_GPUDevice* GpuRenderer::getDevice() const {
 
 /*
 * The whole frame arrives at once, so the renderer decides how to draw it: first the shadow-casting light's view of the
-* scene into the shadow atlas, then the camera's view, which reads that atlas. Culling will later skip draws the camera cannot see.
+* scene into the shadow atlas, then the camera's view, which reads that atlas. Each view draws only what its frustum can see (culling).
 * If anything fails part-way, the frame is still submitted (a swapchain image was acquired), then the error is passed on.
 */
 bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& settings) {

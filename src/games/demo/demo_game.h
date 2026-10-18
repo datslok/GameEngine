@@ -145,7 +145,7 @@ private:
     // A glowing sphere in the direction the moonlight comes from, at a fixed place you can fly to in free camera mode.
     Entity moon;
 
-    // L toggles a field of coloured lamps, far more point lights than the shader has seats for, to show light priority:
+    // L toggles a field of 100 coloured lamps, more point lights than the shader has seats for, to show light priority:
     // each lamp flies round a pillar like a firefly, and the pillar throws a moving shadow only while its lamp has one.
     std::vector<Entity> lampEntities;
     MeshHandle sphereMesh;

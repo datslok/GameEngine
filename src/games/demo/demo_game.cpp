@@ -59,13 +59,15 @@ namespace {
     // A MOBA unit's ground acceleration: high enough to reach full speed (and stop) within a tick.
     constexpr float mobaUnitAcceleration = 1000.0f;
 
-    // The lamp field (L): a grid of 6 x 7 = 42 lamps, 5 units apart, centred on the ground and offset half a step so no
-    // lamp lands in the spinning objects, on the duck or in the free camera's face. 42 is well past the shader's 16 point
-    // light seats and 4 shadows.
-    constexpr int lampColumns = 6;
-    constexpr int lampRows = 7;
-    constexpr float lampSpacing = 5.0f;
-    const Vec3 firstLampBase{-12.5f, 0.0f, -22.5f};
+    // The lamp field (L): a grid of 10 x 11 places, 3.5 units apart, covering the ground up to the obstacle course, minus
+    // the 10 places in a keep-clear box around the spinning objects, the duck and the first-person start: 100 lamps, well
+    // past the shader's 64 point light seats, so light priority has to choose (and fade seats and shadows between lamps).
+    constexpr int lampColumns = 10;
+    constexpr int lampRows = 11;
+    constexpr float lampSpacing = 3.5f;
+    const Vec3 firstLampBase{-19.25f, 0.0f, -24.25f};
+    const Vec2 lampKeepClearMinimum{-4.5f, -14.5f}; // x and z on the ground
+    const Vec2 lampKeepClearMaximum{4.5f, 1.5f};
 
     // Lanterns floating at about waist height, bright enough to light a pool a few units across.
     constexpr float lampIntensity = 1.5f;
@@ -516,6 +518,11 @@ void DemoGame::toggleLamps(World& world) {
     for (int row = 0; row < lampRows; ++row) {
         for (int column = 0; column < lampColumns; ++column) {
             const Vec3 base = firstLampBase + Vec3{lampSpacing * static_cast<float>(column), 0.0f, lampSpacing * static_cast<float>(row)};
+            const bool inKeepClear = base.x >= lampKeepClearMinimum.x && base.x <= lampKeepClearMaximum.x &&
+                                     base.z >= lampKeepClearMinimum.y && base.z <= lampKeepClearMaximum.y;
+            if (inKeepClear) {
+                continue;
+            }
             const Vec3& colour = colours[index % 4];
 
             // The bulb glows in the light's colour and must not block the light inside it.
