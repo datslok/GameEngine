@@ -11,7 +11,7 @@ layout(location = 2) in vec3 worldPosition;
 
 layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 
-// The shadow atlas: every light's depth images in square tiles of 256 to 1024 texels, packed into one texture. A shadow sampler compares a depth we give it
+// The shadow atlas: every light's depth images in square tiles of 256 to 2048 texels, packed into one texture. A shadow sampler compares a depth we give it
 // with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
 layout(set = 2, binding = 1) uniform sampler2DShadow shadowAtlas;
 

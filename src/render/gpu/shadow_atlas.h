@@ -21,8 +21,8 @@ struct AtlasSquare {
 };
 
 /*
-* Hands out power-of-two squares from 256 to 1024 pixels (a "buddy" allocator on a quadtree). The atlas starts as a grid
-* of 1024 squares; a request takes the smallest free square that fits, splitting a bigger one into quarters as needed.
+* Hands out power-of-two squares from 256 to 2048 pixels (a "buddy" allocator on a quadtree). The atlas starts as a grid
+* of 2048 squares; a request takes the smallest free square that fits, splitting a bigger one into quarters as needed.
 * A released square joins its three siblings again once all four are free, so the atlas does not crumble into pieces.
 */
 class ShadowAtlasAllocator {
