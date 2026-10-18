@@ -89,6 +89,7 @@ Notes for upcoming work:
 
 - Never read `Input` inside `simulate`; key and click edges are handled once per frame and reach the simulation as commands.
 - Not built yet: parent/child entity hierarchies (attach a weapon to a hand). Listed in ROADMAP.md phase 8, alongside skeletal animation.
+- Before building phase 6's global illumination, read `docs/ILLUMINATION.md`: research notes on the two DDGI papers (2019 and its 2021 production follow-up) and their reference code, with the exact formulas, defaults, where text and code disagree, and what each means for this engine. Add to it when reading further sources.
 
 ## Known small issues and ideas
 

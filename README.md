@@ -148,6 +148,7 @@ src/            Engine and game source, in layers (lower ones never include high
   math/         Vectors, matrices, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
+                ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
 assets/
   models/       OBJ and glTF test models
   shaders/      GLSL shaders (compiled to .spv by make)
