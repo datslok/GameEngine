@@ -410,6 +410,22 @@ bool DemoGame::wantsDebugView() const {
     return debugViewEnabled;
 }
 
+// Read every frame (the cameras) or at each throw (the grenade), so changes show at once.
+void DemoGame::visitSettings(SettingsVisitor& visitor) {
+    visitor.group("First person camera", [&] {
+        visit(firstPersonCamera.getSettings(), visitor);
+    });
+    visitor.group("MOBA camera", [&] {
+        visit(mobaCamera.getSettings(), visitor);
+    });
+    visitor.group("Free camera", [&] {
+        visit(freeFlyCamera.getSettings(), visitor);
+    });
+    visitor.group("Grenade", [&] {
+        visit(grenadeSettings, visitor);
+    });
+}
+
 /*
 * Lights are invisible except for what they light, so each gets a small sphere in its own colour, and a spotlight a line
 * along its beam. The walk target is the destination marker, which is shown exactly while the duck is walking to it.

@@ -1,10 +1,18 @@
 #include "platform/window.h"
 #include "platform/sdl_input.h"
 
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_sdl3.h"
+
 #include <stdexcept>
 #include <string>
 
 namespace {
+    // ImGui's SDL backend is running (the debug UI has started), so it can take events.
+    bool debugUiStarted() {
+        return ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr;
+    }
+
     std::runtime_error platformError(const char* message) {
         return std::runtime_error(
             std::string{message} + ": " + SDL_GetError()
@@ -61,15 +69,24 @@ SDL_Window* Window::getSdlWindow() const {
 /*
 * Handle window-level events here and forward keyboard and mouse events to the input snapshot, so game code reads input from one place.
 * Presses only count while the window has focus, but releases are always forwarded so nothing can get stuck down.
+* The debug UI sees every event first (it needs releases too, or its keys would stick), and takes the presses it uses:
+* what it wants is decided once per frame, when it is built, so it is the same for all of this frame's events.
 */
 bool Window::processEvents(Input& input) {
     input.beginFrame();
 
     const SDL_WindowID windowID = SDL_GetWindowID(window);
     SDL_Event event;
+    const bool uiStarted = debugUiStarted();
+    const bool uiTakesMouse = uiStarted && debugUiOpen && ImGui::GetIO().WantCaptureMouse;
+    const bool uiTakesKeyboard = uiStarted && debugUiOpen && ImGui::GetIO().WantCaptureKeyboard;
 
     while (SDL_PollEvent(&event)) {
         const bool wasMouseCaptured = mouseCaptured;
+
+        if (uiStarted) {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+        }
 
         if (event.type == SDL_EVENT_QUIT) {
             return false;
@@ -92,7 +109,8 @@ bool Window::processEvents(Input& input) {
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
             event.button.windowID == windowID &&
             event.button.button == SDL_BUTTON_LEFT &&
-            hasKeyboardFocus()) {
+            hasKeyboardFocus() &&
+            !uiTakesMouse) {
             if (mouseLookEnabled) {
                 setMouseCaptured(true);
             } else {
@@ -100,9 +118,11 @@ bool Window::processEvents(Input& input) {
             }
         }
 
+        const bool takenByUi = (event.type == SDL_EVENT_KEY_DOWN && uiTakesKeyboard) || (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && uiTakesMouse);
+
         if ((event.type == SDL_EVENT_KEY_DOWN && event.key.windowID == windowID) ||
             (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.windowID == windowID)) {
-            if (hasKeyboardFocus()) {
+            if (hasKeyboardFocus() && !takenByUi) {
                 applySdlEvent(input, event);
             }
         }
@@ -199,6 +219,10 @@ void Window::toggleFullscreen() {
     if (!SDL_SetWindowFullscreen(window, !fullscreen)) {
         throw platformError("Could not toggle fullscreen");
     }
+}
+
+void Window::setDebugUiOpen(bool open) {
+    debugUiOpen = open;
 }
 
 void Window::setMouseLookEnabled(bool enabled) {

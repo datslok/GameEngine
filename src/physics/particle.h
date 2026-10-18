@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "math/vec3.h"
 #include "physics/static_level.h"
@@ -16,6 +17,9 @@ struct ParticleSettings {
     float restingSpeed = 1.0f;  // arriving slower than this into a surface does not bounce, so bouncing dies out and it rests
     int maxBounces = 4;         // surfaces met in one tick; a ball wedged in a corner stops for the rest of the tick
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(ParticleSettings& settings, SettingsVisitor& visitor);
 
 /*
 * Component: a particle. Its Transform's position is the ball's centre. velocity is its state; settings may be changed at

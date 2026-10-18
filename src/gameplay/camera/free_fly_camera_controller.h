@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "gameplay/camera/look_controls.h"
 #include "input/input.h"
 #include "scene/camera.h"
@@ -8,6 +9,9 @@ struct FreeFlyCameraSettings {
     LookSettings look;
     float moveSpeed = 3.0f; // units per second
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(FreeFlyCameraSettings& settings, SettingsVisitor& visitor);
 
 /*
 * A debug or spectator camera: the mouse turns it, WASD moves along the view direction, Space and Ctrl move straight up and down,

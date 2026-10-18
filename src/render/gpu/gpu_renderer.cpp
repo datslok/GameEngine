@@ -9,6 +9,8 @@
 #include "render/gpu/tone_map_uniforms.h"
 #include "scene/culling.h"
 
+#include "imgui/imgui_impl_sdlgpu3.h"
+
 #include <stdexcept>
 #include <string>
 #include <algorithm>
@@ -461,7 +463,7 @@ void GpuRenderer::createToneMapResources() {
 }
 
 /*
-* The two pipelines that draw into the swapchain image, the tone mapping pass and the debug lines, are built for its
+* The pipelines that draw into the swapchain image (the tone mapping pass, the debug lines and the overlay) are built for its
 * format, which changes when HDR output is switched on or off (8-bit sRGB or 16-bit float). Any old ones are released
 * first; the caller makes sure the GPU no longer uses them.
 */
@@ -472,6 +474,7 @@ void GpuRenderer::createScreenPipelines() {
     }
 
     debugLines.reset();
+    overlay.reset();
 
     SDL_GPUShader* vertexShader = nullptr;
     SDL_GPUShader* fragmentShader = nullptr;
@@ -516,6 +519,7 @@ void GpuRenderer::createScreenPipelines() {
     SDL_ReleaseGPUShader(device, vertexShader);
 
     debugLines = std::make_unique<DebugLineRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
+    overlay = std::make_unique<OverlayRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
 }
 
 GpuRenderer::~GpuRenderer() {
@@ -593,6 +597,7 @@ void GpuRenderer::cleanup() noexcept {
         textures.clear();
         whiteTexture.reset();
     brdfTable.reset();
+        overlay.reset();
         debugLines.reset();
         bloom.reset();
 
@@ -674,13 +679,42 @@ SDL_GPUDevice* GpuRenderer::getDevice() const {
     return device;
 }
 
+/*
+* ImGui's backend draws into the overlay image, whose format never changes, so switching HDR on or off does not touch it.
+*/
+void GpuRenderer::startDebugUi() {
+    if (debugUiStarted) {
+        return;
+    }
+
+    ImGui_ImplSDLGPU3_InitInfo info{};
+    info.Device = device;
+    info.ColorTargetFormat = overlayFormat;
+
+    if (!ImGui_ImplSDLGPU3_Init(&info)) {
+        throw gpuError("Debug UI renderer start-up failed");
+    }
+
+    debugUiStarted = true;
+}
+
+void GpuRenderer::stopDebugUi() {
+    if (!debugUiStarted) {
+        return;
+    }
+
+    SDL_WaitForGPUIdle(device);
+    ImGui_ImplSDLGPU3_Shutdown();
+    debugUiStarted = false;
+}
+
 
 /*
 * The whole frame arrives at once, so the renderer decides how to draw it: first the shadow-casting light's view of the
 * scene into the shadow atlas, then the camera's view, which reads that atlas. Each view draws only what its frustum can see (culling).
 * If anything fails part-way, the frame is still submitted (a swapchain image was acquired), then the error is passed on.
 */
-bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& settings) {
+bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui) {
     // Before acquiring an image, since switching HDR on or off replaces the swapchain.
     updateDisplayOutput(settings.display);
 
@@ -724,6 +758,11 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
         debugLines->upload(commands, frame.debugLines, frame.debugScreenLines, displayOutput.whiteLevel);
         uploadShadowTiles(shadows.tileData);
 
+        // The UI goes into its own image now, while no pass is open (its backend copies its buffers first).
+        if (ui != nullptr) {
+            overlay->drawUi(commands, ui, frameWidth, frameHeight);
+        }
+
         if (!shadows.tiles.empty()) {
             drawShadows(frame, shadows.tiles);
         }
@@ -756,6 +795,11 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
 
         // Last, so they are drawn over the finished image, in exactly their own colours.
         debugLines->draw(commands, pass, viewProjection, frameWidth, frameHeight);
+
+        // The UI over everything, the debug lines included, so its windows stay readable.
+        if (ui != nullptr) {
+            overlay->composite(commands, pass, displayOutput.whiteLevel);
+        }
     }
     catch (...) {
         // The shadow pass may have stopped part-way, so no cached tile can be trusted.

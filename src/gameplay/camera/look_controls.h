@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "input/input.h"
 #include "math/angles.h"
 #include "math/vec2.h"
@@ -21,6 +22,9 @@ struct LookSettings {
     float radiansPerPixel = 0.001f; // mouse sensitivity
     float sprintMultiplier = 2.0f;  // movement speed multiple while either Shift key is held (run, or fly fast)
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(LookSettings& settings, SettingsVisitor& visitor);
 
 // Stop just short of straight up or down, where yaw would become meaningless.
 inline constexpr float maxPitchRadians = radiansFromDegrees(89.0f);

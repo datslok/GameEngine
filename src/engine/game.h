@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/asset_manager.h"
+#include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "input/input.h"
 #include "scene/camera.h"
@@ -59,6 +60,12 @@ public:
     // in the top-left corner, how many meshes culling skipped last frame.
     virtual bool wantsDebugView() const {
         return false;
+    }
+
+    // The game's own tunable values (its settings structs' visit()), optional: the debug UI shows them under "Game" and
+    // the settings file saves and loads them with the engine's. Visiting must not change anything by itself.
+    virtual void visitSettings(SettingsVisitor& visitor) {
+        (void)visitor;
     }
 };
 

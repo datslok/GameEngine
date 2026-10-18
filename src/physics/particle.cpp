@@ -161,3 +161,12 @@ void moveParticles(World& world, const StaticLevel& level, float seconds) {
         moveParticle(particle, transform.position, level, seconds);
     });
 }
+
+void visit(ParticleSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Radius", settings.radius, {.min = 0.001f, .sliderMin = 0.01f, .sliderMax = 1.0f, .unit = "m"});
+    visitor.field("Gravity", settings.gravity, {.sliderMin = 0.0f, .sliderMax = 30.0f, .unit = "m/s^2"});
+    visitor.field("Restitution", settings.restitution, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Friction", settings.friction, {.min = 0.0f, .sliderMax = 2.0f});
+    visitor.field("Resting speed", settings.restingSpeed, {.min = 0.0f, .sliderMax = 5.0f, .unit = "m/s"});
+    visitor.field("Max bounces", settings.maxBounces, {.min = 1, .sliderMax = 16});
+}

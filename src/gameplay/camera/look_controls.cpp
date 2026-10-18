@@ -77,3 +77,8 @@ Vec2 getMoveAxes(const Input& input) {
 
     return axes;
 }
+
+void visit(LookSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Sensitivity", settings.radiansPerPixel, {.min = 0.0f, .sliderMax = 0.005f, .unit = "rad/pixel"});
+    visitor.field("Sprint multiplier", settings.sprintMultiplier, {.min = 0.0f, .sliderMax = 4.0f});
+}

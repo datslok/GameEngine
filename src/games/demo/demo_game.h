@@ -56,6 +56,7 @@ public:
     Vec3 getLightFocus() override;
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
     bool wantsDebugView() const override;
+    void visitSettings(SettingsVisitor& visitor) override;
 
     // For tests and debugging.
     Entity getPlayer() const;

@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 void validateBloom(const BloomSettings& settings) {
-    if (!(settings.strength >= 0.0f && settings.strength <= 1.0f)) {
+    if (!(settings.strength >= 0.0f && settings.strength <= maxBloomStrength)) {
         throw std::invalid_argument("Bloom strength must be between 0 and 1");
     }
 
@@ -250,4 +250,16 @@ BloomPassUniformData packBloomPass(BloomLevelSize source, BloomLevelSize target,
         },
         {option, 0.0f, 0.0f, 0.0f}
     };
+}
+
+/*
+* The radius has no upper limit (a wider halo is a matter of taste), but below a twentieth of a texel the tent's taps
+* fall on the same texel and the radius stops meaning anything.
+*/
+void visit(BloomSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Enabled", settings.enabled);
+    visitor.field("Strength", settings.strength, {.min = 0.0f, .max = maxBloomStrength, .sliderMax = 0.2f});
+    visitor.field("Radius", settings.radius, {.min = 0.05f, .sliderMin = 0.25f, .sliderMax = 3.0f, .unit = "texels"});
+    visitor.field("Firefly reduction", settings.fireflyReduction);
+    visitor.field("Max levels", settings.maxLevels, {.min = 1, .max = BLOOM_LEVEL_LIMIT});
 }

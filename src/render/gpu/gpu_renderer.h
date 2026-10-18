@@ -8,6 +8,7 @@
 #include "render/gpu/render_settings.h"
 #include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/display_output.h"
+#include "render/gpu/overlay_renderer.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_mapping.h"
 #include "render/render_stats.h"
@@ -53,8 +54,9 @@ public:
 
     // Draw and present one whole frame. The frame's camera gets the acquired frame's aspect ratio (the caller's camera is not changed).
     // The settings are read fresh each frame, so changes show at once.
+    // ui is the debug UI's finished frame (ImGui::GetDrawData()), drawn over everything; null for none.
     // Returns false if no frame was available (a minimized window), in which case nothing was drawn.
-    bool render(const FrameDescription& frame, const RenderSettings& settings);
+    bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr);
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear).
@@ -66,6 +68,11 @@ public:
 
 
     SDL_GPUDevice* getDevice() const;
+
+    // The debug UI's drawing (ImGui's SDL_GPU backend), into the overlay image. Start it once an ImGui context exists,
+    // and stop it before that context is destroyed; stopping waits for the GPU to finish with the UI's buffers.
+    void startDebugUi();
+    void stopDebugUi();
 
     // Ask for a present mode. Falls back to Vsync when the GPU does not support it, and returns the mode now in use.
     PresentMode setPresentMode(PresentMode requested);
@@ -168,6 +175,10 @@ private:
 
     // Debug lines, drawn over the tone mapped screen image.
     std::unique_ptr<DebugLineRenderer> debugLines;
+
+    // The debug UI, drawn into its own image and laid over everything last.
+    std::unique_ptr<OverlayRenderer> overlay;
+    bool debugUiStarted = false;
 
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
     std::vector<std::unique_ptr<GpuMesh>> meshes;

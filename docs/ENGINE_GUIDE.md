@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 5 and phase 6's physically based materials, quaternions, reversed-Z and camera-relative rendering (quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
+**Covers:** phases 0 to 5 and phase 6's physically based materials, quaternions, reversed-Z and camera-relative rendering and the debug UI (quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps, the debug UI and settings file (visitors, presets, the overlay), gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
 
 ---
 
@@ -285,6 +285,31 @@ Much of what the engine knows is invisible: bounding boxes, light positions, whe
 The lines are drawn last, unlit, and ignore depth, so they show through walls. That is the point: a collider inside a wall or a light behind a hill is exactly what you want to see when debugging. Games add their own shapes in `onDebugDraw`; the engine itself can draw a box around every mesh (it knows each mesh's bounds) and how many meshes culling skipped last frame, which the demo switches on with F4.
 
 That readout is text, and the engine has no font yet. Debug text is drawn with lines too, in a **stroke font**: each character is a few straight strokes on a 4 by 6 grid, like a plotter or an old vector arcade game. These lines are placed in window pixels instead of the world, and drawn with a flat projection where (0, 0) is the top-left corner.
+
+### The debug UI: one description, many uses
+
+Every number someone might tune (bloom strength, exposure, how many lights get shadows, mouse sensitivity) lives in a settings struct next to the system that reads it. Changing one used to mean editing the code and recompiling. Pressing F5 now opens a window with a slider, checkbox or list for each one, and the change shows on the next frame.
+
+The interesting part is that no setting has any UI code of its own. Each settings struct has one `visit()` function that lists its fields once, the way a physicist writes down a quantity: a name, the value, the range that makes physical sense and the unit. For example, "bloom strength, between 0 and 1, useful up to 0.2". A **visitor** is anything that walks that list and does one job with each entry. The engine has several:
+
+- the **UI visitor** draws a slider for each number, a checkbox for each switch and a list for each choice;
+- the **saving visitor** writes each value as text, and the **loading visitor** reads text back into the fields;
+- the **checking visitor**, used by the tests, confirms every default lies inside its stated range.
+
+So the description is written once and every use is derived from it. Adding a field to `visit()` gives it a slider, a place in the settings file and a test, with nothing else to remember. This is the **visitor pattern**: the walk over the data is written once, and new operations are added as new visitors.
+
+Each number carries two ranges. The **hard limits** say what is meaningful at all (a share of light cannot be above 1), and loading a hand-edited file clamps to them. The **slider range** is the useful part, which can be much narrower, so the slider is not fiddly. A few settings are read only once, at start-up (the simulation rate, the graphics card's validation mode). The UI shows those greyed out rather than pretending a change takes effect.
+
+**Save** writes only the values that differ from the defaults to `settings.cfg`, and the engine loads that file at every start before anything reads the settings. Saving only the differences matters: if a default is improved later, everyone who never touched that setting gets the improvement, and deleting a line from the file returns that setting to its default. The **quality preset** (Low, Medium, High) is a shortcut that sets the costly settings together. High is the engine's own tuning, and the lower ones give up shadow detail and the widest bloom first. Settings that are a matter of taste, like exposure, are never changed by a preset.
+
+The UI itself comes from Dear ImGui, a widely used library for tools. It is **immediate mode**, like debug drawing: every frame the code simply says "a slider for this value here", and ImGui reports whether the slider moved. There are no UI objects to create, keep in sync or delete, which is why one visitor can draw the whole window.
+
+The UI is drawn into an image of its own, then laid over the finished frame last. Two reasons:
+
+- **HDR.** On an HDR screen the frame is in scRGB, where 1 means a dim 80 nits. ImGui's colours drawn there directly would come out dim and wrong. As a separate layer, its colours are decoded from sRGB and scaled to the screen's white level, so the window looks as it would on the desktop.
+- **Premultiplied alpha.** Drawn onto a transparent image, each pixel ends up holding colour times coverage, plus the coverage itself. The final blend is then a single formula, `ui + screen * (1 - coverage)`, like a sheet of tinted glass that lets through the share of light it does not block.
+
+The HUD (phase 9) will go the same way. As with tone mapping and bloom, the blend's maths is mirrored on the CPU and tested.
 
 ### Dithering: noise against banding
 

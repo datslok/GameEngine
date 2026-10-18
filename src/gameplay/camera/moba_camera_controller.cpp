@@ -45,3 +45,13 @@ void MobaCameraController::update(Camera& camera, const Input& input, float fram
 MobaCameraSettings& MobaCameraController::getSettings() {
     return settings;
 }
+
+void visit(MobaCameraSettings& settings, SettingsVisitor& visitor) {
+    visitor.group("Offset", [&] {
+        visitor.field("X", settings.offset.x, {.sliderMin = -30.0f, .sliderMax = 30.0f, .unit = "m"});
+        visitor.field("Y", settings.offset.y, {.sliderMin = -30.0f, .sliderMax = 30.0f, .unit = "m"});
+        visitor.field("Z", settings.offset.z, {.sliderMin = -30.0f, .sliderMax = 30.0f, .unit = "m"});
+    });
+    visitor.field("Pan speed", settings.panSpeed, {.min = 0.0f, .sliderMax = 40.0f, .unit = "m/s"});
+    visitor.field("Edge margin", settings.edgeMarginPixels, {.min = 0.0f, .sliderMax = 50.0f, .unit = "pixels"});
+}

@@ -36,3 +36,10 @@ DisplayOutput chooseDisplayOutput(const DisplaySettings& settings, const Display
     output.whiteLevel = white;
     return output;
 }
+
+// 10,000 nits is the most any HDR signal can describe (the PQ curve's top), so nothing brighter means anything.
+void visit(DisplaySettings& settings, SettingsVisitor& visitor) {
+    visitor.field("HDR output", settings.hdrOutput);
+    visitor.field("Paper white", settings.paperWhiteNits, {.min = 0.0f, .max = 10000.0f, .sliderMax = 500.0f, .unit = "nits (0: Windows)"});
+    visitor.field("Peak", settings.peakNits, {.min = 0.0f, .max = 10000.0f, .sliderMax = 2000.0f, .unit = "nits (0: monitor)"});
+}

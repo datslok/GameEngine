@@ -41,3 +41,11 @@ void updateGrenades(World& world, float seconds) {
         }
     });
 }
+
+void visit(GrenadeSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Throw speed", settings.throwSpeed, {.min = 0.0f, .sliderMax = 50.0f, .unit = "m/s"});
+    visitor.field("Lifetime", settings.lifetimeSeconds, {.min = 0.0f, .sliderMax = 20.0f, .unit = "s"});
+    visitor.group("Particle", [&] {
+        visit(settings.particle, visitor);
+    });
+}

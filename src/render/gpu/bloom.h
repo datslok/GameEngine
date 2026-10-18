@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "math/vec3.h"
 #include "render/gpu/bloom_shared.h"
 #include "render/gpu/uniform_limits.h"
@@ -24,10 +25,13 @@
 * the CPU, so tests can check the maths without a GPU.
 */
 
+// The largest share of the light bloom may scatter: all of it.
+inline constexpr float maxBloomStrength = 1.0f;
+
 struct BloomSettings {
     bool enabled = true;
 
-    // The share of the light that scatters, 0..1. Small: a real lens scatters a few percent.
+    // The share of the light that scatters, 0..maxBloomStrength. Small: a real lens scatters a few percent.
     float strength = 0.04f;
 
     // How far apart the upsample's tent reads, in texels of the smaller level. 1 is the tent as designed; more spreads
@@ -43,6 +47,9 @@ struct BloomSettings {
     // doubles the halo's reach.
     std::uint32_t maxLevels = 6;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(BloomSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a strength outside 0..1, a radius that is not positive, or a level count outside
 // 1..BLOOM_LEVEL_LIMIT.

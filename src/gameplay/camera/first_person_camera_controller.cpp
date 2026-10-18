@@ -27,3 +27,9 @@ const ViewAngles& FirstPersonCameraController::getAngles() const {
 FirstPersonCameraSettings& FirstPersonCameraController::getSettings() {
     return settings;
 }
+
+void visit(FirstPersonCameraSettings& settings, SettingsVisitor& visitor) {
+    visitor.group("Look", [&] {
+        visit(settings.look, visitor);
+    });
+}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "math/vec3.h"
 #include "physics/particle.h"
@@ -13,6 +14,9 @@ struct GrenadeSettings {
     float lifetimeSeconds = 5.0f;  // removed after this long (there is no explosion yet)
     ParticleSettings particle;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(GrenadeSettings& settings, SettingsVisitor& visitor);
 
 // Component: a grenade, counting down to its removal.
 struct Grenade {

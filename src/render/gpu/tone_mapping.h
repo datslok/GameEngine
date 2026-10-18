@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "math/vec3.h"
 #include "render/gpu/tone_mapping_shared.h"
 
@@ -27,6 +28,9 @@ struct ToneMappingSettings {
     // bright in its shadows and mid-tones (AgX shows 0.006 as 0.005 and 0.5 as 0.52), while highlights still roll off.
     float exposure = 1.5f;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(ToneMappingSettings& settings, SettingsVisitor& visitor);
 
 // The brightest an ordinary (SDR) screen shows: its white. An HDR screen goes several times past it.
 inline constexpr float sdrPeakBrightness = 1.0f;

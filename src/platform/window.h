@@ -28,6 +28,10 @@ public:
     // Mouse look hides and captures the cursor; otherwise a visible cursor is confined to the window (MOBA).
     void setMouseLookEnabled(bool enabled);
 
+    // While the debug UI is open, clicks and key presses it uses (the mouse over one of its windows, typing into a field)
+    // do not reach Input, so tuning a slider does not also throw a grenade. Events always reach the UI once it has started.
+    void setDebugUiOpen(bool open);
+
     bool isMouseCaptured() const;
     bool isCursorConfined() const;
     bool hasKeyboardFocus() const;
@@ -44,6 +48,7 @@ private:
     bool videoInitialized = false;
 
     bool mouseLookEnabled = true;
+    bool debugUiOpen = false;
     bool mouseCaptured = false;
     bool cursorConfined = false;
 };

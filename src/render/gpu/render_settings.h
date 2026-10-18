@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
@@ -18,3 +19,6 @@ struct RenderSettings {
     ToneMappingSettings toneMapping;
     DisplaySettings display;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(RenderSettings& settings, SettingsVisitor& visitor);
