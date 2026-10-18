@@ -9,11 +9,11 @@
 #include <vector>
 
 // The sphere around a mesh's bounding box, placed and scaled by its model matrix.
-BoundingSphere boundingSphere(const ModelBounds& localBounds, const Mat4& model);
+BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model);
 
 // Give each draw the sphere around its mesh, from bounds indexed like MeshHandle. Draws whose mesh has no known bounds keep
 // a negative radius, which means "unknown, never cull".
-void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<ModelBounds>& boundsByMesh);
+void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>& boundsByMesh);
 
 // The draws the camera can see (by index, in order).
 std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const Frustum& cameraFrustum);

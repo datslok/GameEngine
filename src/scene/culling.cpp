@@ -6,7 +6,7 @@
 * The box's centre goes through the model matrix; its half-diagonal is stretched by the largest of the matrix's three
 * axis lengths, so the sphere still covers the box however the object is rotated or unevenly scaled.
 */
-BoundingSphere boundingSphere(const ModelBounds& localBounds, const Mat4& model) {
+BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model) {
     const Vec3 localCentre = localBounds.centre();
     const Vec4 centre = model * Vec4{localCentre.x, localCentre.y, localCentre.z, 1.0f};
 
@@ -22,7 +22,7 @@ BoundingSphere boundingSphere(const ModelBounds& localBounds, const Mat4& model)
     return BoundingSphere{Vec3{centre.x, centre.y, centre.z}, localRadius * largestScale};
 }
 
-void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<ModelBounds>& boundsByMesh) {
+void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>& boundsByMesh) {
     for (DrawItem& draw : draws) {
         if (draw.mesh.isValid() && draw.mesh.index < boundsByMesh.size()) {
             draw.bounds = boundingSphere(boundsByMesh[draw.mesh.index], draw.model);

@@ -13,7 +13,7 @@ void DebugDraw::line(const Vec3& from, const Vec3& to, const Vec3& colour) {
 * Corner i takes the maximum on each axis whose bit is set (x: 1, y: 2, z: 4). Two corners share an edge when they differ
 * in exactly one bit, so each corner connects to the corners with one more bit set: 12 edges, each drawn once.
 */
-void DebugDraw::box(const ModelBounds& bounds, const Mat4& transform, const Vec3& colour) {
+void DebugDraw::box(const Aabb& bounds, const Mat4& transform, const Vec3& colour) {
     Vec3 corners[8];
 
     for (int i = 0; i < 8; ++i) {

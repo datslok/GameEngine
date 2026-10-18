@@ -15,6 +15,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Event-based input with engine-owned key codes, no SDL types in game code
 - Three camera modes: first person, MOBA-style top-down with click-to-move, and a free debug camera
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
+- Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, camera speeds and mouse sensitivity) lives in a settings struct owned by its system, ready for a debug UI, and numbers the shaders share with C++ are written once
 - Unit tests that run without a GPU or window
 
@@ -139,7 +140,8 @@ src/            Engine and game source, in layers (lower ones never include high
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
   core/         Fixed timestep, sRGB conversions and small shared types
-  math/         Vectors, matrices, transforms, rays
+  physics/      Collision shapes and overlap tests
+  math/         Vectors, matrices, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
 assets/

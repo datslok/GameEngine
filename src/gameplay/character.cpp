@@ -41,7 +41,7 @@ Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
     }
 
     const Mat4 normalization = model.getNormalizationMatrix(config.modelSize);
-    const ModelBounds bounds = model.getBounds();
+    const Aabb bounds = model.getBounds();
     const Vec4 bottom = normalization * Vec4{
         bounds.minimum.x, bounds.minimum.y, bounds.minimum.z, 1.0f
     };

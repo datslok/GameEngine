@@ -25,7 +25,7 @@ public:
     void line(const Vec3& from, const Vec3& to, const Vec3& colour);
 
     // The 12 edges of a box: the axis-aligned bounds, then the transform (so it can follow a rotated, scaled object).
-    void box(const ModelBounds& bounds, const Mat4& transform, const Vec3& colour);
+    void box(const Aabb& bounds, const Mat4& transform, const Vec3& colour);
 
     // Three circles, around the x, y and z axes, each made of `segments` lines.
     void sphere(const Vec3& centre, float radius, const Vec3& colour, int segments = 24);

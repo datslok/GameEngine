@@ -2,23 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 #include <stdexcept>
 
-Vec3 ModelBounds::centre() const {
-    return Vec3{
-        std::midpoint(minimum.x, maximum.x),
-        std::midpoint(minimum.y, maximum.y),
-        std::midpoint(minimum.z, maximum.z)
-    };
-}
-
-Vec3 ModelBounds::size() const {
-    return maximum - minimum;
-}
-
-ModelBounds Model::getBounds() const {
-    ModelBounds bounds{};
+Aabb Model::getBounds() const {
+    Aabb bounds{};
     bool foundVertex = false;
 
     for (const ModelPart& part : parts) {
@@ -75,7 +62,7 @@ Mat4 Model::getNormalizationMatrix(float targetSize) const {
         );
     }
 
-    const ModelBounds bounds = getBounds();
+    const Aabb bounds = getBounds();
     const Vec3 dimensions = bounds.size();
 
     if (!std::isfinite(dimensions.x) ||
@@ -116,13 +103,13 @@ Mat4 Model::getNormalizationMatrix(float targetSize) const {
 /*
 * Every vertex counts, used by a triangle or not, which matches what the renderer uploads.
 */
-ModelBounds meshBounds(const Mesh& mesh) {
+Aabb meshBounds(const Mesh& mesh) {
     if (mesh.vertices.empty()) {
-        return ModelBounds{};
+        return Aabb{};
     }
 
     const Vec4& first = mesh.vertices.front();
-    ModelBounds bounds{Vec3{first.x, first.y, first.z}, Vec3{first.x, first.y, first.z}};
+    Aabb bounds{Vec3{first.x, first.y, first.z}, Vec3{first.x, first.y, first.z}};
 
     for (const Vec4& vertex : mesh.vertices) {
         bounds.minimum = Vec3{std::min(bounds.minimum.x, vertex.x), std::min(bounds.minimum.y, vertex.y), std::min(bounds.minimum.z, vertex.z)};

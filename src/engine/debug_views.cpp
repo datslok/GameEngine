@@ -10,7 +10,7 @@ namespace {
 /*
 * Each part is drawn as its own mesh, so each gets its own box: a model made of several meshes shows several boxes.
 */
-void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<ModelBounds>& meshBounds, DebugDraw& debug) {
+void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug) {
     for (const DrawItem& draw : draws) {
         if (!draw.mesh.isValid() || draw.mesh.index >= meshBounds.size()) {
             continue;
