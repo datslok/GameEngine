@@ -7,72 +7,52 @@ namespace {
     bool nearlyEqual(float actual, float expected) {
         return std::abs(actual - expected) < 0.00001f;
     }
+
+    void assertVector(const Vec3& actual, const Vec3& expected) {
+        assert(nearlyEqual(actual.x, expected.x));
+        assert(nearlyEqual(actual.y, expected.y));
+        assert(nearlyEqual(actual.z, expected.z));
+    }
 }
 
+/*
+* The move-to controller only decides the velocity that heads for the target; something else (the character controller)
+* moves the character with it.
+*/
 void testMoveToController() {
     MoveToController movement{2.0f};
-
-    Vec3 position{0.0f, 1.0f, 0.0f};
+    const Vec3 start{0.0f, 1.0f, 0.0f};
 
     assert(!movement.isMoving());
+    assertVector(movement.desiredVelocity(start, 1.0f), Vec3{});
 
-    // A 3-4-5 triangle: two units of movement in one second.
+    // A 3-4-5 triangle: full speed (2) along the ground towards the target, whatever the height difference.
     movement.setTarget(Vec3{3.0f, 0.0f, 4.0f});
-    movement.update(position, 1.0f);
-
-    assert(nearlyEqual(position.x, 1.2f));
-    assert(nearlyEqual(position.y, 1.0f));
-    assert(nearlyEqual(position.z, 1.6f));
+    assertVector(movement.desiredVelocity(start, 1.0f), Vec3{1.2f, 0.0f, 1.6f});
     assert(movement.isMoving());
 
-    // A large step must stop at the target without overshooting.
-    movement.update(position, 10.0f);
+    // A step longer than the remaining distance asks only for what lands exactly on the target.
+    assertVector(movement.desiredVelocity(start, 10.0f), Vec3{0.3f, 0.0f, 0.4f});
 
-    assert(nearlyEqual(position.x, 3.0f));
-    assert(nearlyEqual(position.y, 1.0f));
-    assert(nearlyEqual(position.z, 4.0f));
+    // Arrival: still moving until the character is (as good as) there, then stopped.
+    movement.updateArrival(Vec3{2.9f, 1.0f, 3.9f});
+    assert(movement.isMoving());
+    movement.updateArrival(Vec3{3.0f, 7.0f, 4.0f});
     assert(!movement.isMoving());
+    assertVector(movement.desiredVelocity(Vec3{3.0f, 7.0f, 4.0f}, 1.0f), Vec3{});
 
     // A new command replaces the old destination.
-    position = Vec3{0.0f, 1.0f, 0.0f};
-
     movement.setTarget(Vec3{10.0f, 0.0f, 0.0f});
     movement.setTarget(Vec3{0.0f, 0.0f, -10.0f});
-    movement.update(position, 1.0f);
-
-    assert(nearlyEqual(position.x, 0.0f));
-    assert(nearlyEqual(position.z, -2.0f));
+    assertVector(movement.desiredVelocity(start, 1.0f), Vec3{0.0f, 0.0f, -2.0f});
 
     movement.stop();
-    movement.update(position, 1.0f);
-
-    assert(nearlyEqual(position.z, -2.0f));
-
-    // Splitting the same elapsed time should give the same result.
-    MoveToController wholeStep{2.0f};
-    MoveToController splitStep{2.0f};
-
-    Vec3 a{0.0f, 1.0f, 0.0f};
-    Vec3 b = a;
-
-    const Vec3 destination{10.0f, 0.0f, 10.0f};
-
-    wholeStep.setTarget(destination);
-    splitStep.setTarget(destination);
-
-    wholeStep.update(a, 1.0f);
-
-    for (int step = 0; step < 4; ++step) {
-        splitStep.update(b, 0.25f);
-    }
-
-    assert(nearlyEqual(a.x, b.x));
-    assert(nearlyEqual(a.y, b.y));
-    assert(nearlyEqual(a.z, b.z));
-
-    // Already at the destination: no division by zero.
-    movement.setTarget(position);
-    movement.update(position, 0.0f);
-
     assert(!movement.isMoving());
+    assertVector(movement.desiredVelocity(start, 1.0f), Vec3{});
+
+    // Already at the destination, or no time to move in: no division by zero.
+    movement.setTarget(start);
+    assertVector(movement.desiredVelocity(start, 1.0f), Vec3{});
+    movement.setTarget(Vec3{5.0f, 0.0f, 0.0f});
+    assertVector(movement.desiredVelocity(start, 0.0f), Vec3{});
 }

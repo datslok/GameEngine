@@ -1,6 +1,7 @@
 #include "gameplay/character.h"
 #include "math/angles.h"
 #include "math/transform.h"
+#include "physics/character_controller.h"
 #include "physics/collider.h"
 #include "scene/interpolation.h"
 #include "scene/model.h"
@@ -29,6 +30,10 @@ bool CharacterMovement::isMoving() const {
 */
 Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
                       const CharacterConfig& config, const Vec3& groundPosition) {
+    const CharacterControllerSettings& body = config.controller;
+    if (!std::isfinite(body.radius) || body.radius <= 0.0f || !std::isfinite(body.height) || body.height < 2.0f * body.radius) {
+        throw std::invalid_argument("A character's capsule needs a positive radius and a height of at least two radii");
+    }
     if (!std::isfinite(config.turnSpeed) || config.turnSpeed <= 0.0f) {
         throw std::invalid_argument("Character turn speed must be finite and positive");
     }
@@ -84,17 +89,25 @@ Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
     world.add(entity, std::move(renderer));
     world.add(entity, std::move(movement));
     world.add(entity, collider);
+    CharacterController controller;
+    controller.settings = config.controller;
+    world.add(entity, controller);
 
     return entity;
 }
 
 /*
-* Step towards the destination, then turn towards the direction actually travelled, at most turnSpeed radians per second.
+* The move command becomes a wished velocity, the character controller moves the character through the level with it
+* (walls stop it, stairs and ramps lift it), and then it turns towards the direction it actually travelled, at most
+* turnSpeed radians per second. Every character has a controller (spawnCharacter adds one).
 */
-void updateCharacters(World& world, float deltaTime) {
-    world.each<CharacterMovement, Transform>([deltaTime](Entity, CharacterMovement& character, Transform& transform) {
+void updateCharacters(World& world, const StaticLevel& level, float deltaTime) {
+    world.each<CharacterMovement, Transform>([&](Entity entity, CharacterMovement& character, Transform& transform) {
         const Vec3 previousPosition = transform.position;
-        character.movement.update(transform.position, deltaTime);
+        CharacterController& controller = world.get<CharacterController>(entity);
+        controller.wishVelocity = character.movement.desiredVelocity(transform.position, deltaTime);
+        moveCharacter(controller, transform.position, level, deltaTime);
+        character.movement.updateArrival(transform.position);
 
         const Vec3 displacement = transform.position - previousPosition;
         if (displacement.x != 0.0f || displacement.z != 0.0f) {

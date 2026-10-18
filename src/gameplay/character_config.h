@@ -1,5 +1,7 @@
 #pragma once
 
+#include "physics/character_controller.h"
+
 #include <numbers>
 #include <string>
 
@@ -13,4 +15,7 @@ struct CharacterConfig {
     // Model's forward direction measured from +Z towards +X.
     // +Z-facing models use 0; the +X-facing duck uses pi / 2.
     float modelForwardYaw = 0.0f;
+
+    // How the character moves through the level: its capsule, slopes, steps, gravity and accelerations.
+    CharacterControllerSettings controller;
 };

@@ -1,7 +1,9 @@
 #include "gameplay/character.h"
 #include "assets/gltf_loader.h"
 #include "math/transform.h"
+#include "physics/character_controller.h"
 #include "physics/collider.h"
+#include "scene/collision_mesh.h"
 #include "scene/interpolation.h"
 #include "scene/model_renderer.h"
 
@@ -50,11 +52,22 @@ namespace {
     float yaw(const World& world, Entity character) {
         return world.get<Transform>(character).rotation.y;
     }
+
+    // A level that is one wide, flat floor with its top at the given height.
+    StaticLevel floorAt(float height) {
+        StaticLevel level;
+        level.add(collisionMesh(Mesh::cube(), Mat4::translation(0.0f, height - 1.0f, 0.0f) * Mat4::scaling(100.0f, 1.0f, 100.0f)));
+        return level;
+    }
 }
 
 void testCharacter() {
     // One manager for the whole test: characters made from the same model share its mesh handles.
     AssetManager assets;
+
+    // Characters walk on the level: a floor whose top is at height 0, and one at height 3.
+    const StaticLevel floor = floorAt(0.0f);
+    const StaticLevel raisedFloor = floorAt(3.0f);
 
     Model cube;
     ModelPart part;
@@ -77,7 +90,7 @@ void testCharacter() {
             assertGrounded(world, assets, character, 3.0f);
             assert(nearlyEqual(getCharacterVisualCentre(world, character, 1.0f).y, 4.0f));
             movement.moveTo(direction * 12.0f);
-            updateCharacters(world, 0.5f);
+            updateCharacters(world, raisedFloor, 0.5f);
             assert(nearlyEqual(position(world, character).x, direction.x * 3));
             assert(nearlyEqual(position(world, character).z, direction.z * 3));
             assert(nearlyEqual(position(world, character).y, 3.0f));
@@ -85,7 +98,7 @@ void testCharacter() {
             assertFacing(world, character, forwardYaw, direction);
             assertGrounded(world, assets, character, 3.0f);
 
-            updateCharacters(world, 10.0f);
+            updateCharacters(world, raisedFloor, 10.0f);
             assert(!movement.isMoving());
             assert(nearlyEqual(position(world, character).x, direction.x * 12));
             assert(nearlyEqual(position(world, character).z, direction.z * 12));
@@ -98,10 +111,10 @@ void testCharacter() {
     slowTurn.turnSpeed = pi;
     const Entity character = spawnCharacter(world, assets, cube, slowTurn, Vec3{0, 0, 0});
     world.get<CharacterMovement>(character).moveTo(Vec3{0.01f, 0, 0});
-    updateCharacters(world, 0.01f);
+    updateCharacters(world, floor, 0.01f);
     assert(!world.get<CharacterMovement>(character).isMoving());
     assert(nearlyEqual(yaw(world, character), pi * 0.01f));
-    updateCharacters(world, 1.0f);
+    updateCharacters(world, floor, 1.0f);
     assertFacing(world, character, 0, Vec3{1, 0, 0});
 
     // The facing direction where the character is drawn: what a flashlight it carries points along.
@@ -123,14 +136,14 @@ void testCharacter() {
     world.get<CharacterMovement>(character).moveTo(position(world, character) + Vec3{
         std::sin(desiredYaw), 0, std::cos(desiredYaw)
     });
-    updateCharacters(world, 0.01f);
+    updateCharacters(world, floor, 0.01f);
     assert(nearlyEqual(yaw(world, character), pi - 0.05f + pi * 0.01f));
 
     // Explicit stop cancels both travel and any remaining turn.
     world.get<CharacterMovement>(character).stop();
     const Vec3 stoppedPosition = position(world, character);
     const float stoppedYaw = yaw(world, character);
-    updateCharacters(world, 1.0f);
+    updateCharacters(world, floor, 1.0f);
     assert(!world.get<CharacterMovement>(character).isMoving());
     assert(nearlyEqual(position(world, character).x, stoppedPosition.x));
     assert(nearlyEqual(position(world, character).z, stoppedPosition.z));
@@ -139,7 +152,7 @@ void testCharacter() {
     // Two characters can share a loaded asset without sharing movement state.
     const Entity other = spawnCharacter(world, assets, cube, CharacterConfig{}, Vec3{10, 0, 0});
     world.get<CharacterMovement>(other).moveTo(Vec3{16, 0, 0});
-    updateCharacters(world, 0.5f);
+    updateCharacters(world, floor, 0.5f);
     assert(nearlyEqual(position(world, other).x, 13));
     assert(nearlyEqual(position(world, character).x, stoppedPosition.x));
     assert(world.get<ModelRenderer>(character).parts[0].mesh ==
@@ -164,7 +177,7 @@ void testCharacter() {
     assert(nearlyEqual(getCharacterVisualCentre(duckWorld, duckCharacter, 1.0f).y, oldHeight));
     assertGrounded(duckWorld, assets, duckCharacter, 0);
     duckWorld.get<CharacterMovement>(duckCharacter).moveTo(Vec3{0, 0, 0});
-    updateCharacters(duckWorld, 1);
+    updateCharacters(duckWorld, floor, 1);
     assertFacing(duckWorld, duckCharacter, pi / 2, Vec3{0, 0, 1});
     assertGrounded(duckWorld, assets, duckCharacter, 0);
 
@@ -200,4 +213,8 @@ void testCharacter() {
     assert(nearlyEqual(capsule.a.x, 0.0f) && nearlyEqual(capsule.a.y, 0.5f) && nearlyEqual(capsule.a.z, 0.0f));
     assert(nearlyEqual(capsule.b.x, 0.0f) && nearlyEqual(capsule.b.y, 1.5f) && nearlyEqual(capsule.b.z, 0.0f));
     assert(collider.detail == nullptr);
+
+    // And a character controller with the configuration's settings, which moves it through the level.
+    assert(colliderWorld.has<CharacterController>(fitted));
+    assert(colliderWorld.get<CharacterController>(fitted).settings.radius == CharacterConfig{}.controller.radius);
 }

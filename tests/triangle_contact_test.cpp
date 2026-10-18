@@ -52,6 +52,12 @@ void testTriangleContact() {
     assertVector(edge->normal, Vec3{0.0f, 0.3f, 0.3f}.normalized());
     assert(nearlyEqual(edge->depth, 0.5f - std::sqrt(0.18f)));
 
+    // Each contact also carries the triangle's own face normal, turned to the capsule's side: on the face it is the push
+    // direction, past an edge it is not (which is how a ledge's edge is told from a slope's face).
+    assertVector(onFloor->faceNormal, Vec3{0.0f, 1.0f, 0.0f});
+    assertVector(edge->faceNormal, Vec3{0.0f, 1.0f, 0.0f});
+    assertVector(onWallReversed->faceNormal, Vec3{-1.0f, 0.0f, 0.0f});
+
     // A core that goes right through the floor: no direction from the triangle to the core, so the face normal on the side
     // of the core's middle is used. The depth is how far it must move along that normal to come free: its deepest end is
     // 0.3 behind the plane, plus the radius.
@@ -64,6 +70,7 @@ void testTriangleContact() {
     const auto pushedDown = contact(mostlyBelow, floorA, floorB, floorC);
     assertVector(pushedDown->normal, Vec3{0.0f, -1.0f, 0.0f});
     assert(nearlyEqual(pushedDown->depth, 0.8f));
+    assertVector(pushedDown->faceNormal, Vec3{0.0f, -1.0f, 0.0f});
 
     // A sphere is a capsule whose ends meet.
     const auto ball = contact(Sphere{Vec3{0.0f, 0.3f, 0.0f}, 0.5f}, floorA, floorB, floorC);

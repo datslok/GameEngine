@@ -15,6 +15,10 @@ struct Contact {
     Vec3 normal;
     float depth = 0.0f;
     std::uint32_t triangle = 0;
+
+    // The surface's own unit normal, turned to the shape's side. Equal to normal when the shape presses on the face; different
+    // when it presses on an edge or a corner, which tells a ledge's edge from a slope.
+    Vec3 faceNormal;
 };
 
 /*

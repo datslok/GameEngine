@@ -10,5 +10,10 @@ constexpr float radiansFromDegrees(float degrees) {
     return degrees * std::numbers::pi_v<float> / 180.0f;
 }
 
+// Radians to degrees, for showing angles to people (the slope in the debug readout).
+constexpr float degreesFromRadians(float radians) {
+    return radians * 180.0f / std::numbers::pi_v<float>;
+}
+
 // The same direction as an angle in -pi..pi. Applied to a difference of two angles, it gives the shortest turn between them.
 float wrapAngle(float radians);

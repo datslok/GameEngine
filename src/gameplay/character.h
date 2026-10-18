@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "gameplay/character_config.h"
 #include "gameplay/move_to_controller.h"
+#include "physics/static_level.h"
 #include "math/vec3.h"
 
 #include <optional>
@@ -35,8 +36,9 @@ struct CharacterMovement {
 Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
                       const CharacterConfig& config, const Vec3& groundPosition);
 
-// System: move and turn every character by one step.
-void updateCharacters(World& world, float deltaTime);
+// System: for every character, turn its move command into a wished velocity, move it through the level with its character
+// controller, and turn it towards where it went.
+void updateCharacters(World& world, const StaticLevel& level, float deltaTime);
 
 // The character's visual centre where it is drawn, blended between the last two ticks.
 Vec3 getCharacterVisualCentre(const World& world, Entity character, float alpha);
