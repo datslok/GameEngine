@@ -92,7 +92,7 @@ To send the demo to someone without MSYS2, run:
 python tools/package_demo.py
 ```
 
-It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
+It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. To share it anonymously, add `--anonymous`: it makes `build/Demo.zip` with a neutral name, a README with only short control names (nothing that matches this repo's text), every zip entry dated 1 January 1980 and the exe's build time zeroed. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
 
 ## Controls
 
