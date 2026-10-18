@@ -66,6 +66,9 @@ void testStaticLevel();
 void testCharacterController();
 void testAngles();
 void testFirstPersonBody();
+void testSphereCast();
+void testParticle();
+void testGrenade();
 
 int main(){
     testPixelBuffer();
@@ -134,6 +137,9 @@ int main(){
     testCharacterController();
     testAngles();
     testFirstPersonBody();
+    testSphereCast();
+    testParticle();
+    testGrenade();
 
     std::cout << "All tests passed!\n";
     return 0;

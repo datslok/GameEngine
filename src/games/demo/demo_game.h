@@ -6,6 +6,7 @@
 #include "gameplay/camera/free_fly_camera_controller.h"
 #include "gameplay/camera/moba_camera_controller.h"
 #include "games/demo/control_mode.h"
+#include "gameplay/grenade.h"
 #include "input/input.h"
 #include "math/ray.h"
 #include "physics/collider.h"
@@ -156,6 +157,10 @@ private:
     // K switches the floodlights over the obstacle course (on at the start).
     std::vector<Entity> floodlights;
     void toggleFloodlights(World& world);
+
+    // G throws a grenade in first person: a small dark ball that flies, bounces round the level and is gone after a while.
+    GrenadeSettings grenadeSettings;
+    ModelRenderer grenadeLooks;
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;

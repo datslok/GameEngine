@@ -2,6 +2,7 @@
 #include "math/transform.h"
 #include "scene/collision_mesh.h"
 #include "scene/interpolation.h"
+#include "test_levels.h"
 
 #include <cassert>
 #include <cmath>
@@ -10,22 +11,6 @@
 namespace {
     constexpr float tick = 1.0f / 120.0f;
     constexpr float pi = std::numbers::pi_v<float>;
-
-    bool near(float actual, float expected, float tolerance) {
-        return std::abs(actual - expected) <= tolerance;
-    }
-
-    TriangleMesh block(const Vec3& minimum, const Vec3& maximum) {
-        const Vec3 centre = (minimum + maximum) * 0.5f;
-        const Vec3 half = (maximum - minimum) * 0.5f;
-        return collisionMesh(Mesh::cube(), Mat4::translation(centre.x, centre.y, centre.z) * Mat4::scaling(half.x, half.y, half.z));
-    }
-
-    StaticLevel flatLevel() {
-        StaticLevel level;
-        level.add(block(Vec3{-50.0f, -1.0f, -50.0f}, Vec3{50.0f, 0.0f, 50.0f}));
-        return level;
-    }
 
     // WASD as axes, like getMoveAxes: x is +1 for right (D), y is +1 for forward (W).
     Vec3 wish(float right, float forward, float yaw = 0.0f, bool crouching = false, bool sprinting = false) {

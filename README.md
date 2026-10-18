@@ -15,7 +15,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Event-based input with engine-owned key codes, no SDL types in game code
 - Three camera modes: first person (a body that walks, jumps, crouches and sprints through the level with Overwatch-like movement), MOBA-style top-down with click-to-move, and a free debug camera
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
-- Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them; static level collision: the level's triangles in their own grid, built once, with raycasts and capsule contacts (how deep, and which way out); a kinematic character controller tuned to feel like Overwatch: walls slide, steps and ramps are climbed, the ground is followed down, gravity has air drag up to a terminal speed, and jumps and air steering use Overwatch's measured numbers
+- Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them; static level collision: the level's triangles in their own grid, built once, with raycasts and capsule contacts (how deep, and which way out); a kinematic character controller tuned to feel like Overwatch: walls slide, steps and ramps are climbed, the ground is followed down, gravity has air drag up to a terminal speed, and jumps and air steering use Overwatch's measured numbers; sphere sweeps (the first touch of a moving ball, so nothing fast can pass through a wall) and particles: balls that fly on exact parabolas, bounce with restitution and Coulomb friction, slide to a stop and rest without jitter (the demo throws them as grenades)
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, camera speeds and mouse sensitivity) lives in a settings struct owned by its system, ready for a debug UI, and numbers the shaders share with C++ are written once
 - Unit tests that run without a GPU or window
 
@@ -113,6 +113,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | Mouse | Look around |
 | W A S D | Move: in first person you walk through the level at Overwatch's speeds (5.5 m/s, 90% backwards), climbing steps and ramps and stopped by walls |
 | Space | Jump (first person; a fresh press each time) |
+| G | Throw a grenade (first person): it flies along your view, bounces off floors, walls and steps, slides to a stop and is gone after 5 seconds |
 | Ctrl (hold) | Crouch in first person (3 m/s, stays crouched under low ceilings); move down in free camera |
 | Space / Ctrl | Move up / down (free camera only) |
 | Shift (hold) | Sprint in first person (1.5 times), fly twice as fast in free camera |
@@ -135,7 +136,7 @@ src/            Engine and game source, in layers (lower ones never include high
   app/          main: picks a game and starts the engine
   games/        Games built on the engine (games/demo is the current demo)
   engine/       The main loop, the Game interface and fixed-tick updates
-  gameplay/     Character movement, spinners, fireflies and camera controllers
+  gameplay/     Character movement, spinners, fireflies, grenades and camera controllers
   platform/     The window and SDL input translation
   render/gpu/   GPU renderer (SDL_GPU), and the packing of lights and materials for the shaders
   render/software/  Software rasterizer, kept as a tested reference
@@ -144,7 +145,7 @@ src/            Engine and game source, in layers (lower ones never include high
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
   core/         Fixed timestep, sRGB conversions and small shared types
-  physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision and the character controller
+  physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision, sphere sweeps, particles and the character controller
   math/         Vectors, matrices, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it

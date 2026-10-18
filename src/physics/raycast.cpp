@@ -1,6 +1,7 @@
 #include "physics/raycast.h"
 
 #include "math/closest_points.h"
+#include "physics/triangle_contact.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +10,10 @@
 namespace {
     // Below this a direction, a triangle's determinant or a ray's sideways motion counts as zero.
     constexpr float tiny = 1e-12f;
+
+    // A sphere touching a surface and moving this close to parallel to it (the sine of its angle to the surface)
+    // is sliding along it, not into it, so rounding cannot stop a ball rolling on a floor.
+    constexpr float glancing = 1e-5f;
 
     /*
     * Work with a unit direction, so every t below is a distance in world units, whatever length the caller's direction had.
@@ -250,6 +255,53 @@ std::optional<RayHit> raycastTriangle(const Ray& ray, const Vec3& a, const Vec3&
         return std::nullopt;
     }
     return hitTriangle(ray.origin, *direction, a, b, c, maxDistance);
+}
+
+/*
+* A sphere touches the triangle exactly when its centre is within radius of it: inside the triangle "grown" by the radius
+* (its Minkowski sum with a ball). That grown shape is a slab between two copies of the triangle pushed radius out along
+* the normal, with a capsule round each edge, so the first touch is the nearest hit of the centre's path against those
+* five pieces, all of which raycasts already handle. Each piece's hit normal faces back along the path, which is the grown
+* shape's outward normal there: from the touched point on the triangle out to the centre.
+*
+* The pieces only describe a first touch if the sphere starts clear of the triangle, so a sphere already touching it is
+* sorted out first, by whether it is moving into the triangle or not.
+*/
+std::optional<RayHit> sweepSphere(const Sphere& sphere, const Vec3& motion, const Vec3& a, const Vec3& b, const Vec3& c) {
+    if (motion.lengthSquared() <= tiny) {
+        return std::nullopt;
+    }
+    const float length = motion.length();
+    const Vec3 direction = motion / length;
+
+    if (const std::optional<Contact> touching = contact(sphere, a, b, c)) {
+        if (direction.dot(touching->normal) < -glancing) {
+            return RayHit{0.0f, sphere.centre, touching->normal};
+        }
+        return std::nullopt;
+    }
+
+    std::optional<RayHit> best;
+    float reach = length;
+    const auto keepNearer = [&](const std::optional<RayHit>& hit) {
+        if (hit && hit->distance <= reach) {
+            best = hit;
+            reach = hit->distance;
+        }
+    };
+
+    const Vec3 across = (b - a).cross(c - a);
+    const float acrossLength = across.length();
+    if (acrossLength > tiny) {
+        const Vec3 lift = across * (sphere.radius / acrossLength);
+        keepNearer(hitTriangle(sphere.centre, direction, a + lift, b + lift, c + lift, reach));
+        keepNearer(hitTriangle(sphere.centre, direction, a - lift, b - lift, c - lift, reach));
+    }
+    const Ray path{sphere.centre, direction};
+    keepNearer(raycast(path, Capsule{a, b, sphere.radius}, reach));
+    keepNearer(raycast(path, Capsule{b, c, sphere.radius}, reach));
+    keepNearer(raycast(path, Capsule{c, a, sphere.radius}, reach));
+    return best;
 }
 
 /*

@@ -238,6 +238,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     Material gold;
     gold.colour = Pixel{230, 180, 60};
 
+    Material grenadeShell;
+    grenadeShell.colour = Pixel{70, 80, 50};
+    grenadeLooks = makeMeshRenderer(sphereMesh, grenadeShell);
+
     const Vec3 smallScale{0.7f, 0.7f, 0.7f};
 
     Transform first;
@@ -597,6 +601,8 @@ void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationS
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
     updateSpinners(world, simulationSeconds);
     updateFireflies(world, simulationSeconds);
+    moveParticles(world, staticLevel, tickSeconds);
+    updateGrenades(world, tickSeconds);
 
     // Simulation continues when the cursor is released or focus is lost.
     if (world.isAlive(player) && !world.get<CharacterMovement>(player).isMoving()) {
@@ -981,7 +987,8 @@ Entity DemoGame::getFirstPersonBody() const {
 /*
 * Once a frame, the movement keys become commands for the body's next tick: WASD a wished velocity turned by where the
 * camera faces, Shift sprints, Ctrl crouches, and a fresh press of Space jumps (holding it does not jump again on
-* landing). Outside first person, or with the mouse released, the body is told to stand still.
+* landing). A fresh press of G throws a grenade from the eyes along the view. Outside first person, or with the mouse
+* released, the body is told to stand still.
 */
 void DemoGame::updateFirstPersonCommands(World& world, const Input& input) {
     CharacterController& controller = world.get<CharacterController>(firstPersonBody);
@@ -1000,5 +1007,8 @@ void DemoGame::updateFirstPersonCommands(World& world, const Input& input) {
                                                       sprinting, body.settings);
     if (input.wasKeyPressed(Key::Space)) {
         controller.wantsJump = true;
+    }
+    if (input.wasKeyPressed(Key::G)) {
+        throwGrenade(world, camera.getPosition(), camera.getForward(), grenadeLooks, grenadeSettings);
     }
 }

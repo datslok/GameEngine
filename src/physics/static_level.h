@@ -49,5 +49,9 @@ struct LevelHit {
 std::optional<LevelHit> raycast(const StaticLevel& level, const Ray& ray, float maxDistance = unlimitedRayDistance,
                                 CollisionQueryStats* stats = nullptr);
 
+// The first triangle a sphere touches as its centre moves by motion, as the per-triangle sweepSphere describes: the hit's
+// point is the centre at that moment. Only triangles near the swept path are tested.
+std::optional<LevelHit> sweepSphere(const StaticLevel& level, const Sphere& sphere, const Vec3& motion);
+
 // Every triangle the capsule touches, one contact each, in no particular order.
 std::vector<Contact> contacts(const StaticLevel& level, const Capsule& capsule);
