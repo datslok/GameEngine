@@ -101,3 +101,12 @@ Vec3 Vec3::cross(const Vec3 &other) const
         x * other.y - y * other.x
     );
 }
+
+/*
+* Read a component by index. Box tests treat the three axes the same way, and a loop over them reads better than three
+* copies of the same lines.
+*/
+float Vec3::operator[](int index) const
+{
+    return index == 0 ? x : (index == 1 ? y : z);
+}

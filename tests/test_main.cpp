@@ -53,6 +53,8 @@ void testSphereMesh();
 void testFirefly();
 void testClosestPoints();
 void testOverlap();
+void testRaycast();
+void testCollisionMesh();
 
 int main(){
     testPixelBuffer();
@@ -108,6 +110,8 @@ int main(){
     testFirefly();
     testClosestPoints();
     testOverlap();
+    testRaycast();
+    testCollisionMesh();
 
     std::cout << "All tests passed!\n";
     return 0;
