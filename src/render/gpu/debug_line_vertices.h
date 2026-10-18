@@ -10,5 +10,6 @@ struct DebugLineVertex {
     float colour[3];
 };
 
-// Two vertices per line, in order, for drawing as a line list.
-std::vector<DebugLineVertex> buildDebugLineVertices(const std::vector<DebugLine>& lines);
+// Two vertices per line, in order, for drawing as a line list. Colours are multiplied by colourScale: what white is
+// written as on this screen (1, or an HDR screen's white level), so lines look the same on either.
+std::vector<DebugLineVertex> buildDebugLineVertices(const std::vector<DebugLine>& lines, float colourScale = 1.0f);

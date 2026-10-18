@@ -8,9 +8,10 @@
 // The lit scene, in unbounded linear brightness (16-bit floats), the same size as the screen.
 layout(set = 2, binding = 0) uniform sampler2D sceneColour;
 
-// Must match ToneMapUniformData in render/gpu/tone_mapping.h.
+// Must match ToneMapUniformData in render/gpu/tone_map_uniforms.h.
 layout(std140, set = 3, binding = 0) uniform ToneMapData {
-    vec4 parameters; // x: exposure, y: peak brightness, z: curve (a TONE_MAP_ number)
+    vec4 parameters; // x: exposure, y: peak brightness (in units of SDR white), z: curve (a TONE_MAP_ number)
+    vec4 display;    // x: what SDR white is written as (1, or an HDR screen's white level), y: 1 to dither
 };
 
 layout(location = 0) out vec4 outputColour;
@@ -70,8 +71,10 @@ vec3 applyCurve(int curve, vec3 value) {
 
 /*
 * The final pass: each screen pixel reads the same pixel of the lit scene, scales it by the exposure, measures it in
-* units of the screen's peak, curves it into 0..1 and scales back, then dithers it for the 8-bit screen. Dithering
-* belongs here, at the last step: the scene image keeps 16-bit floats, which do not band.
+* units of the screen's peak, curves it into 0..1 and scales back. An 8-bit screen then gets the dither (it belongs
+* here, at the last step: the scene image keeps 16-bit floats, which do not band). An HDR screen takes a float image in
+* scRGB, where 1 is a dim 80 nits, so the result is scaled until white sits at the white level Windows uses for the
+* desktop; the peak is the screen's headroom above that white.
 */
 void main() {
     float exposure = parameters.x;
@@ -81,5 +84,9 @@ void main() {
     vec3 scene = max(texelFetch(sceneColour, ivec2(gl_FragCoord.xy), 0).rgb, vec3(0.0));
     vec3 mapped = clamp(applyCurve(curve, scene * (exposure / peak)), 0.0, 1.0) * peak;
 
-    outputColour = vec4(ditherForEightBits(mapped), 1.0);
+    if (display.y > 0.5) {
+        mapped = ditherForEightBits(mapped);
+    }
+
+    outputColour = vec4(mapped * display.x, 1.0);
 }

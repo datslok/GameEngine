@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/shadow_map.h"
 #include "render/gpu/tone_mapping.h"
@@ -13,4 +14,5 @@ struct RenderSettings {
     LightPrioritySettings lights;
     ShadowSettings shadows;
     ToneMappingSettings toneMapping;
+    DisplaySettings display;
 };

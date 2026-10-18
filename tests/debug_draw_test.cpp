@@ -227,6 +227,11 @@ namespace {
         assert(nearlyEqual(vertices[0].position[0], 1.0f) && nearlyEqual(vertices[1].position[2], 6.0f));
         assert(nearlyEqual(vertices[0].colour[1], 0.2f) && nearlyEqual(vertices[1].colour[2], 0.3f));
 
+        // On an HDR screen colours are scaled to its white level, so the lines look as bright as on an ordinary one.
+        const std::vector<DebugLineVertex> scaled = buildDebugLineVertices(lines, 2.5f);
+        assert(nearlyEqual(scaled[0].colour[1], 0.5f) && nearlyEqual(scaled[1].colour[2], 0.75f));
+        assert(nearlyEqual(scaled[0].position[0], 1.0f));
+
         // A frame starts with no debug lines.
         const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 10.0f};
         World world;

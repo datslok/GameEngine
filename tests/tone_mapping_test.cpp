@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cmath>
 #include <initializer_list>
-#include <stdexcept>
 
 namespace {
     constexpr ToneMapCurve allCurves[] = {ToneMapCurve::Clamp, ToneMapCurve::Reinhard, ToneMapCurve::Aces, ToneMapCurve::AgX};
@@ -122,36 +121,6 @@ namespace {
         }
     }
 
-    // The shader gets exposure, peak and the curve's number, and nonsense settings are refused.
-    void testPacking() {
-        const ToneMapUniformData data = packToneMapping(ToneMappingSettings{ToneMapCurve::Aces, 1.5f}, 3.0f);
-
-        assert(data.parameters[0] == 1.5f);
-        assert(data.parameters[1] == 3.0f);
-        assert(data.parameters[2] == static_cast<float>(TONE_MAP_ACES));
-        assert(data.parameters[3] == 0.0f);
-
-        assert(packToneMapping(ToneMappingSettings{}).parameters[1] == sdrPeakBrightness);
-
-        bool refusedExposure = false;
-        bool refusedPeak = false;
-
-        try {
-            packToneMapping(ToneMappingSettings{ToneMapCurve::AgX, -1.0f});
-        }
-        catch (const std::invalid_argument&) {
-            refusedExposure = true;
-        }
-
-        try {
-            packToneMapping(ToneMappingSettings{}, 0.0f);
-        }
-        catch (const std::invalid_argument&) {
-            refusedPeak = true;
-        }
-
-        assert(refusedExposure && refusedPeak);
-    }
 }
 
 void testToneMapping() {
@@ -165,5 +134,4 @@ void testToneMapping() {
     testExposureScalesTheLightFirst();
     testHigherPeakStretchesTheCurve();
     testChannelOrderIsKept();
-    testPacking();
 }

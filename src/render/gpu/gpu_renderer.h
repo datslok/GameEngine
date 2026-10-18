@@ -6,6 +6,7 @@
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/render_settings.h"
 #include "render/gpu/debug_line_renderer.h"
+#include "render/gpu/display_output.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_mapping.h"
 #include "render/render_stats.h"
@@ -69,6 +70,9 @@ public:
 
     const RenderStats& getLastFrameStats() const;
 
+    // How the last frame reached the screen: SDR or HDR, with its peak and white level.
+    const DisplayOutput& getDisplayOutput() const;
+
     // The aspect ratio of the last frame render() drew. Read after it returns true.
     float getFrameAspectRatio() const;
 
@@ -78,9 +82,18 @@ private:
     bool windowClaimed = false;
     PresentMode presentMode = PresentMode::Vsync;
 
-    // SDR_LINEAR when supported: the swapchain encodes the shader's linear output as sRGB.
+    // SDR_LINEAR when supported: the swapchain encodes the shader's linear output as sRGB. HDR_EXTENDED_LINEAR (scRGB,
+    // 16-bit floats) while HDR output is on.
     SDL_GPUSwapchainComposition swapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
+    SDL_GPUSwapchainComposition sdrComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     void useLinearSwapchain();
+    void setSwapchainComposition(SDL_GPUSwapchainComposition composition);
+
+    // HDR output: what the screen reported last frame, and how this frame reaches it.
+    DisplayCapabilities displayCapabilities;
+    DisplayOutput displayOutput;
+    DisplayCapabilities readDisplayCapabilities() const;
+    void updateDisplayOutput(const DisplaySettings& settings);
 
     void cleanup() noexcept;
 
@@ -113,6 +126,7 @@ private:
     SDL_GPUSampler* sceneSampler = nullptr;
     SDL_GPUGraphicsPipeline* toneMapPipeline = nullptr;
     void createToneMapResources();
+    void createScreenPipelines();
 
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
