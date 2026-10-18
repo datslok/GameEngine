@@ -2,6 +2,7 @@ SHELL := /bin/sh
 .SHELLFLAGS := -c
 
 CXX := g++
+CC := gcc
 
 # Two builds from the same sources: debug (the default, unoptimised so a debugger sees every line and variable) and
 # release (make release, -O2, for playing and measuring). Each has its own folder, so switching never rebuilds the other.
@@ -43,15 +44,17 @@ rwildcard = $(foreach entry,$(wildcard $(1:=/*)),$(call rwildcard,$(entry),$(2))
 
 SOURCES := $(strip $(call rwildcard,src,*.cpp))
 MAIN_SOURCE := src/app/main.cpp
-# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and SDL_GPU backends.
+# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and SDL_GPU backends, and
+# MikkTSpace (tangents for normal maps), which is C.
 EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp)
+EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c)
 ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES)) $(EXTERNAL_SOURCES)
 TEST_SOURCES := $(wildcard tests/*.cpp)
 
 # Each source compiles to its own object file, so a change recompiles only what it touches, and the game and the
 # tests share the engine's objects instead of compiling the engine twice.
 objects_for = $(patsubst %.cpp,$(OBJECT_DIR)/%.o,$(1))
-ENGINE_OBJECTS := $(call objects_for,$(ENGINE_SOURCES))
+ENGINE_OBJECTS := $(call objects_for,$(ENGINE_SOURCES)) $(patsubst %.c,$(OBJECT_DIR)/%.o,$(EXTERNAL_C_SOURCES))
 MAIN_OBJECT := $(call objects_for,$(MAIN_SOURCE))
 TEST_OBJECTS := $(call objects_for,$(TEST_SOURCES))
 ALL_OBJECTS := $(ENGINE_OBJECTS) $(MAIN_OBJECT) $(TEST_OBJECTS)
@@ -83,6 +86,12 @@ $(TEST_TARGET): $(ENGINE_OBJECTS) $(TEST_OBJECTS)
 $(OBJECT_DIR)/%.o: %.cpp $(MAKEFILE_PATH)
 	@mkdir -p $(@D)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
+
+# The vendored C files, as C99 with the same optimisation. MikkTSpace sets two counters it never reads; that warning is
+# silenced for it only.
+$(OBJECT_DIR)/%.o: %.c $(MAKEFILE_PATH)
+	@mkdir -p $(@D)
+	$(CC) -std=c99 -Wall -Wextra -Wno-unused-but-set-variable -g $(OPTIMISATION) $(DEPFLAGS) -c $< -o $@
 
 # The header lists GCC wrote last time; missing on the first build, which compiles everything anyway.
 -include $(ALL_OBJECTS:.o=.d)

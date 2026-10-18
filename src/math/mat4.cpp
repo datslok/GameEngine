@@ -265,6 +265,11 @@ Mat4 normalMatrix(const Mat4& model) {
     return result;
 }
 
+// A squashed matrix (determinant 0) counts as unmirrored: its normals are zero anyway.
+float handedness(const Mat4& model) {
+    return upperCofactors(model).determinant < 0.0f ? -1.0f : 1.0f;
+}
+
 /*
 * A model matrix is [A t; 0 1]: A turns and scales, t moves. Undoing it means undoing the move, then the turn and scale:
 * the inverse is [A^-1, -A^-1 t; 0 1]. A^-1 is the transposed cofactor matrix (the adjugate) over the determinant, which is

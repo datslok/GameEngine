@@ -44,6 +44,10 @@ struct Mat4 {
 // Zero when the model matrix squashes space flat.
 Mat4 normalMatrix(const Mat4& model);
 
+// -1 when the model matrix mirrors space (its 3x3 part has a negative determinant), else +1. Normal maps need it: a
+// mirror reverses which side of the tangent the bitangent is on.
+float handedness(const Mat4& model);
+
 // The inverse of a model matrix (any translation, rotation and scale; the last row must be 0 0 0 1), or nothing when it
 // squashes space flat. Used to carry a world ray into an object's own coordinates.
 std::optional<Mat4> affineInverse(const Mat4& model);

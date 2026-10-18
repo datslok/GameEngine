@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 5 and phase 6's physically based materials, quaternions, reversed-Z and camera-relative rendering and the debug UI (quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps, the debug UI and settings file (visitors, presets, the overlay), gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
+**Covers:** phases 0 to 5 and phase 6's physically based materials and all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps) (normal maps: tangent frames, handedness and MikkTSpace; quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps, the debug UI and settings file (visitors, presets, the overlay), gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
 
 ---
 
@@ -144,7 +144,7 @@ The renderer keeps its GPU copies in arrays indexed exactly like the handles, so
 ### Two formats
 
 - **`Mesh`** is the *import* format: positions plus triangles, where each triangle corner may carry a normal and a UV (texture coordinate). Loaders and the software renderer use it.
-- **`IndexedMesh`** is the *render* format: a list of unique vertices (position, normal, UV, exactly the GPU's layout) and 32-bit indices into it. Corners that are identical in every component are merged, so shared vertices are stored and processed once.
+- **`IndexedMesh`** is the *render* format: a list of unique vertices (position, normal, UV and tangent, exactly the GPU's layout) and 32-bit indices into it. Corners that are identical in every component are merged, so shared vertices are stored and processed once.
 
 ### What a normal is
 
@@ -159,6 +159,20 @@ Curved models without normals, like the teapot, look blocky. `generateSmoothNorm
 - Only count faces within the **crease angle** (default 60 degrees) of the corner's own face. Gently curved areas get averaged; real edges (a cube's corners, a teapot's rim) stay sharp.
 
 It is **opt-in** per load (`MeshLoadOptions{.smoothNormals = true}`), because only the game knows whether a shape is meant to be faceted: a stealth fighter's panels meet at shallow angles but should stay flat. Normals from the file are never replaced.
+
+### Normal maps: bumps without geometry
+
+Every lighting term depends on the normal, and between vertices the normal is only interpolated, so a surface with few triangles looks like smooth plastic. A **normal map** is a texture whose texels are small tilts of the normal. The light then behaves as if the surface had grooves, weave or scratches, though the geometry stays flat: silhouettes do not change, and nothing shadows itself. In physics terms it perturbs the boundary condition, not the boundary.
+
+**Storing a direction in colour.** A texel holds three numbers c from 0 to 1, read as the direction n = 2c − 1. An untouched surface is (0, 0, 1), stored as (0.5, 0.5, 1): the light blue every normal map has. The texture is read as linear numbers, never decoded as sRGB (that would turn 0.5 into about 0.21 and tilt every flat texel). glTF's `scale` multiplies the sideways parts, so 0 flattens the bumps and 2 exaggerates them.
+
+**The frame the picture is written in.** The direction is not a world direction; it is measured in a frame stuck to the surface: the **tangent** T (the way the texture's u increases), the **bitangent** B (the way up the picture) and the normal N. The world normal is n_x T + n_y B + n_z N, a change of basis like writing a vector in a sphere's local unit vectors instead of x, y, z. Because the frame travels with the surface, one brick picture works on walls, floors and barrels alike. T and B are the partial derivatives of position with respect to u and v, the columns of the UV map's Jacobian; on one triangle they follow from its two edges and their UV differences by inverting a 2x2 system.
+
+**Handedness.** B is nearly redundant: it is ±(N × T). So each vertex stores T and a sign w (`MeshVertex::tangent`, a `Vec4`), and the shader rebuilds B = w (N × T). The sign is −1 where an artist mirrored part of the picture to paint it once for both sides of a face. Corners on a mirror seam agree in position, normal and UV but not in sign, so they stay separate vertices. A mirrored object (a model matrix with a negative determinant) flips the rebuilt bitangent too, since (Ma) × (Mb) = det(M) M⁻ᵀ(a × b); the vertex shader multiplies w by the matrix's `handedness` so its bumps stay bumps.
+
+**Why MikkTSpace.** Each vertex needs one frame, but its triangles each have their own, and averaging them involves choices: weights, where to split, whether the order of triangles matters. Bakers once all chose differently, and a normal map is only right in the exact frame it was baked in (like components of a vector read in the wrong basis), so mismatches showed as seams and odd shading. Morten Mikkelsen's MikkTSpace fixed one order-independent answer that Blender, Substance, Unity and Unreal now share, and glTF asks for it when a file has no tangents. The engine uses the file's tangents when it has them and otherwise runs the vendored MikkTSpace (`scene/tangents`). MikkTSpace's bitangent follows increasing v, and glTF counts v down from the top of the image, so glTF UVs are handed over as (u, 1 − v) (`Mesh::uvOrigin`). A test regenerates the tangents Blender exported for a Khronos test model and gets the same ones, signs included. MikkTSpace also asks the shader to use the interpolated normal and tangent as they arrive, unnormalised, and to normalise only the result, because that is what its baker does.
+
+**Odds and ends.** A material without a normal map gets scale 0 and the white stand-in texture, which gives exactly the old normal, so the shader needs no branch. Shadow lookups keep the geometric normal: tilts far smaller than a shadow texel would only add noise there. The demo has a gallery of three Khronos test models left of the path: CompareNormal (the same shape without and with a map) and two grids of bumps whose pictures are turned and mirrored cell by cell. Every cell should look lit from the same side; a wrong sign or a flipped green channel shows up as cells lit from below. Not yet: a distant mipmap averages tilted normals into a shorter one, a sign of bumps too fine to see, which should become extra roughness (Toksvig's correction), planned with TAA.
 
 ---
 

@@ -53,6 +53,23 @@ namespace {
     constexpr float moonDistance = 64.0f;
     constexpr float moonRadius = 4.0f;
 
+    // The normal map gallery: Khronos's glTF test models floating at eye height in a row left of the path ahead, each
+    // turned to the path's middle line at a point this far nearer the start, so they face the start and the flashlight shows their bumps.
+    // CompareNormal shows the same shape without and with a normal map; NormalTangentTest's tangents are generated
+    // (MikkTSpace); NormalTangentMirrorTest's come from the file, and half of its pictures are mirrored.
+    struct Exhibit {
+        const char* path;
+        Vec3 position;
+    };
+
+    const Exhibit galleryExhibits[] = {
+        {"assets/models/CompareNormal.glb", Vec3{-3.2f, 1.3f, -3.2f}},
+        {"assets/models/NormalTangentTest.glb", Vec3{-3.2f, 1.3f, -1.2f}},
+        {"assets/models/NormalTangentMirrorTest.glb", Vec3{-3.2f, 1.3f, -5.2f}}
+    };
+    constexpr float galleryExhibitSize = 1.5f; // the longest side
+    constexpr float galleryFacingDistance = 3.0f;
+
     // The outline of the selected object (linear cyan), distinct from the engine's orange collider view.
     const Vec3 selectionColour{0.1f, 0.9f, 1.0f};
 
@@ -355,6 +372,21 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     // The floodlights over the course start switched on.
     toggleFloodlights(world);
+
+    for (const Exhibit& exhibit : galleryExhibits) {
+        const Model& model = assets.loadModel(exhibit.path);
+        ModelRenderer renderer = assets.makeModelRenderer(model, model.getNormalizationMatrix(galleryExhibitSize));
+
+        // glTF models face +z; a turn of atan2(x, z) about y points them along (x, 0, z).
+        Transform placement;
+        placement.position = exhibit.position;
+        placement.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, std::atan2(-exhibit.position.x, galleryFacingDistance));
+
+        const Entity entity = world.create();
+        world.add(entity, placement);
+        world.add(entity, meshCollider(std::make_shared<const TriangleMesh>(assets.makeCollisionMesh(renderer))));
+        world.add(entity, std::move(renderer));
+    }
 
     // Change this configuration to use another compatible static model. Size and speeds keep CharacterConfig's defaults.
     const CharacterConfig playerConfig{

@@ -127,8 +127,8 @@ const Model& AssetManager::loadModel(const std::string& path) {
 }
 
 /*
-* The colour texture holds colours (sRGB) and the metallic-roughness texture numbers (linear). Both are read with the
-* same UVs, so they share the flip.
+* The colour texture holds colours (sRGB), the metallic-roughness texture numbers and the normal map directions (both
+* linear). All are read with the same UVs, so they share the flip.
 */
 Material AssetManager::makeMaterial(const MaterialSource& source) {
     Material material;
@@ -138,6 +138,8 @@ Material AssetManager::makeMaterial(const MaterialSource& source) {
     material.emissive = source.emissive;
     material.texture = loadTexture(source.colourTexture, source.flipTextureVertically, TextureEncoding::Srgb);
     material.metallicRoughnessTexture = loadTexture(source.metallicRoughnessTexture, source.flipTextureVertically, TextureEncoding::Linear);
+    material.normalTexture = loadTexture(source.normalTexture, source.flipTextureVertically, TextureEncoding::Linear);
+    material.normalScale = source.normalScale;
 
     return material;
 }

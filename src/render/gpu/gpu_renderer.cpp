@@ -187,7 +187,7 @@ void GpuRenderer::createPipeline() {
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             3, // Material colour, lights, shadow data.
-            5, // Colour texture, shadow atlas (compared), shadow atlas (raw depths), metallic-roughness texture, BRDF table.
+            6, // Colour texture, shadow atlas (compared), shadow atlas (raw depths), metallic-roughness texture, BRDF table, normal map.
             1  // Shadow tiles.
         );
 
@@ -200,7 +200,7 @@ void GpuRenderer::createPipeline() {
         vertexDescription.pitch = static_cast<Uint32>(sizeof(MeshVertex));
         vertexDescription.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-        SDL_GPUVertexAttribute attributes[3]{};
+        SDL_GPUVertexAttribute attributes[4]{};
 
         // Position: shader input location 0.
         attributes[0].location = 0;
@@ -219,6 +219,12 @@ void GpuRenderer::createPipeline() {
         attributes[2].buffer_slot = 0;
         attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
         attributes[2].offset = static_cast<Uint32>(offsetof(MeshVertex, uv));
+
+        // Tangent and its sign, for normal maps.
+        attributes[3].location = 3;
+        attributes[3].buffer_slot = 0;
+        attributes[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+        attributes[3].offset = static_cast<Uint32>(offsetof(MeshVertex, tangent));
 
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vertexShader;
@@ -240,7 +246,7 @@ void GpuRenderer::createPipeline() {
 
         info.vertex_input_state.num_vertex_buffers = 1;
         info.vertex_input_state.vertex_buffer_descriptions = &vertexDescription;
-        info.vertex_input_state.num_vertex_attributes = 3;
+        info.vertex_input_state.num_vertex_attributes = 4;
         info.vertex_input_state.vertex_attributes = attributes;
         info.target_info.has_depth_stencil_target = true;
         info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
@@ -1060,12 +1066,13 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
     // the world model matrix gives the same normals.
     const Mat4 normals = normalMatrix(model);
 
-    // The shader expects three consecutive column-major matrices:
-    // the complete transform, the camera-relative model matrix, and the normal matrix.
-    float matrixData[48]{};
+    // The shader expects three consecutive column-major matrices (the complete transform, the camera-relative model
+    // matrix and the normal matrix), then whether the model matrix mirrors space, which flips tangents' signs.
+    float matrixData[52]{};
     writeColumnMajor(transform, matrixData);
     writeColumnMajor(relativeModel, matrixData + 16);
     writeColumnMajor(normals, matrixData + 32);
+    matrixData[48] = handedness(model);
 
     SDL_PushGPUVertexUniformData(commands, 0, matrixData, static_cast<Uint32>(sizeof(matrixData)));
 
@@ -1075,10 +1082,12 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
 
     const GpuTexture& colourTexture = textureOrWhite(material.texture);
     const GpuTexture& metallicRoughnessTexture = textureOrWhite(material.metallicRoughnessTexture);
+    const GpuTexture& normalTexture = textureOrWhite(material.normalTexture);
 
     // Slot 0: the surface's colour texture. Slot 1: the shadow atlas, read with depth comparison. Slot 2: the same atlas,
-    // read as raw depths. Slot 3: the surface's metallic-roughness texture. Slot 4: the BRDF table.
-    SDL_GPUTextureSamplerBinding textureBindings[5]{};
+    // read as raw depths. Slot 3: the surface's metallic-roughness texture. Slot 4: the BRDF table. Slot 5: the normal map
+    // (white without one, which the material's normal scale of 0 then ignores).
+    SDL_GPUTextureSamplerBinding textureBindings[6]{};
     textureBindings[0].texture = colourTexture.getTexture();
     textureBindings[0].sampler = colourTexture.getSampler();
     textureBindings[1].texture = shadowAtlas;
@@ -1089,8 +1098,10 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
     textureBindings[3].sampler = metallicRoughnessTexture.getSampler();
     textureBindings[4].texture = brdfTable->getTexture();
     textureBindings[4].sampler = brdfTable->getSampler();
+    textureBindings[5].texture = normalTexture.getTexture();
+    textureBindings[5].sampler = normalTexture.getSampler();
 
-    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 5);
+    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 6);
 
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }

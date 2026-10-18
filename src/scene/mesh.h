@@ -24,12 +24,23 @@ struct Triangle {
     std::array<std::optional<Vec3>, 3> normals{};
     // One optional texture coordinate per triangle corner.
     std::array<std::optional<Vec2>, 3> uvs{};
+    // One optional tangent per corner, as a file supplies it (xyz: the direction of increasing u; w: +1 or -1, the side
+    // the bitangent is on, see MeshVertex). Empty means: generate one (scene/tangents.h).
+    std::array<std::optional<Vec4>, 3> tangents{};
+};
+
+// Where UV (0, 0) is in the image: OBJ counts v up from the bottom row, glTF down from the top row. Tangents point the
+// bitangent up the picture, so generating them needs to know which way v runs.
+enum class UvOrigin {
+    BottomLeft,
+    TopLeft
 };
 
 struct Mesh {
     std::vector<Vec4> vertices;
     std::vector<Edge> edges;
     std::vector<Triangle> triangles;
+    UvOrigin uvOrigin = UvOrigin::BottomLeft;
 
     static Mesh cube();
     static Mesh plane(float halfSize = 20.0f);

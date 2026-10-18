@@ -21,6 +21,8 @@ namespace {
         assert(nearlyEqual(material.metallic, 0.0f));
         assert(nearlyEqual(material.roughness, 0.5f));
         assert(!material.metallicRoughnessTexture.isValid());
+        assert(!material.normalTexture.isValid());
+        assert(nearlyEqual(material.normalScale, 1.0f));
     }
 
     // Byte colours are sRGB like image files, so the shader gets them decoded to linear light, with full opacity.
@@ -63,6 +65,18 @@ namespace {
 }
 
 namespace {
+    // No normal map, no bumps: the scale goes to the shader as 0, which makes it ignore the white stand-in texture.
+    void testNormalScaleNeedsATexture() {
+        Material material;
+        material.normalScale = 0.8f;
+        assert(nearlyEqual(packMaterial(material).surface, 0.0f, 0.5f, 0.0f, 0.0f));
+
+        material.normalTexture = TextureHandle{3};
+        assert(nearlyEqual(packMaterial(material).surface, 0.0f, 0.5f, 0.8f, 0.0f));
+    }
+}
+
+namespace {
     // Surfaces do not glow unless asked to: the default emissive colour is black.
     void testDefaultMaterialDoesNotGlow() {
         const MaterialUniformData data = packMaterial(Material{});
@@ -89,4 +103,5 @@ void testMaterialUniforms() {
     testDefaultSurfaceIsPacked();
     testCustomSurfaceIsPacked();
     testSurfaceIsClamped();
+    testNormalScaleNeedsATexture();
 }

@@ -26,8 +26,8 @@ namespace {
 
     /*
     * Three primitives sharing one triangle: a full metallic-roughness material (factors, a metallic-roughness texture,
-    * an emissive colour made brighter by KHR_materials_emissive_strength), a material with no pbrMetallicRoughness block,
-    * and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
+    * a normal map with its scale, an emissive colour made brighter by KHR_materials_emissive_strength), a material with no
+    * pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
     */
     const char* const document = R"json(
 {
@@ -51,6 +51,7 @@ namespace {
                 "roughnessFactor": 0.75,
                 "metallicRoughnessTexture": { "index": 0 }
             },
+            "normalTexture": { "index": 0, "scale": 0.5 },
             "emissiveFactor": [0.5, 0.25, 0.0],
             "extensions": { "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 } }
         },
@@ -108,11 +109,15 @@ void testGltfMaterials() {
         assert(full.metallicRoughnessTexture.path == (directory / "surface.png").lexically_normal().generic_string());
         assert(!full.flipTextureVertically);
         assert(full.hasTexture());
+        assert(full.normalTexture.path == full.metallicRoughnessTexture.path);
+        assert(nearlyEqual(full.normalScale, 0.5f));
 
         const MaterialSource& withoutFactors = model.parts[1].material;
         assert(nearlyEqual(withoutFactors.metallic, 1.0f));
         assert(nearlyEqual(withoutFactors.roughness, 1.0f));
         assert(!withoutFactors.hasTexture());
+        assert(!withoutFactors.normalTexture.isSet());
+        assert(nearlyEqual(withoutFactors.normalScale, 1.0f));
 
         const MaterialSource& withoutMaterial = model.parts[2].material;
         assert(nearlyEqual(withoutMaterial.metallic, 1.0f));
