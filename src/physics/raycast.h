@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/mat4.h"
 #include "math/ray.h"
 #include "physics/shapes.h"
 #include "physics/triangle_mesh.h"
@@ -29,3 +30,8 @@ std::optional<RayHit> raycast(const Ray& ray, const Shape& shape, float maxDista
 
 // Tests every triangle (a broad phase will cut that down later) and keeps the nearest hit.
 std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, float maxDistance = unlimitedRayDistance);
+
+// The same, for a mesh stored in an object's own coordinates and placed by its model matrix. The ray is carried into the
+// mesh's coordinates instead of the mesh into the world; the hit comes back in world units and directions. A matrix that
+// squashes space flat hits nothing.
+std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, const Mat4& model, float maxDistance = unlimitedRayDistance);

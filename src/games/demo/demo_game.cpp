@@ -4,6 +4,7 @@
 #include "gameplay/spinner.h"
 #include "math/angles.h"
 #include "math/transform.h"
+#include "physics/collider_raycast.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
@@ -38,6 +39,9 @@ namespace {
     const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
     constexpr float moonDistance = 64.0f;
     constexpr float moonRadius = 4.0f;
+
+    // The outline of the selected object (linear cyan), distinct from the engine's orange collider view.
+    const Vec3 selectionColour{0.1f, 0.9f, 1.0f};
 
     // The lamp field (L): a grid of 6 x 7 = 42 lamps, 5 units apart, centred on the ground and offset half a step so no
     // lamp lands in the spinning objects, on the duck or in the free camera's face. 42 is well past the shader's 16 point
@@ -103,14 +107,21 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // The teapot file has no normals; it is a curved surface, so smooth them. The pyramid's flat faces are meant to look flat.
     const MeshHandle teapotMesh = assets.loadMesh("assets/models/teapot.obj", MeshLoadOptions{.smoothNormals = true});
 
-    // A spinning demo object: Transform + ModelRenderer + Spinner, plus PreviousTransform so it is drawn smoothly.
-    const auto spawnSpinner = [&world](MeshHandle mesh, const Material& material,
+    // A collider for a prop: the box around its mesh for quick tests, and the triangles themselves for exact clicks.
+    const auto propCollider = [&assets](MeshHandle mesh) {
+        return meshCollider(std::make_shared<const TriangleMesh>(assets.makeCollisionMesh(makeMeshRenderer(mesh))));
+    };
+    cubeCollider = propCollider(cubeMesh);
+
+    // A spinning demo object: Transform + ModelRenderer + Spinner + Collider, plus PreviousTransform so it is drawn smoothly.
+    const auto spawnSpinner = [&world](MeshHandle mesh, const Material& material, const Collider& collider,
                                        const Transform& transform, const Vec3& speed) {
         const Entity entity = world.create();
         world.add(entity, transform);
         world.add(entity, PreviousTransform{transform});
         world.add(entity, makeMeshRenderer(mesh, material));
         world.add(entity, Spinner{transform.rotation, speed});
+        world.add(entity, collider);
     };
 
     Material textured;
@@ -127,23 +138,23 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     Transform first;
     first.position = Vec3{-3.0f, 0.0f, -10.0f};
     first.rotation.x = 0.3f;
-    spawnSpinner(cubeMesh, textured, first, Vec3{2.0f, 2.0f, 0.0f});
+    spawnSpinner(cubeMesh, textured, cubeCollider, first, Vec3{2.0f, 2.0f, 0.0f});
 
     Transform second;
     second.position = Vec3{3.0f, 0.0f, -10.0f};
     second.scale = smallScale;
-    spawnSpinner(cubeMesh, textured, second, Vec3{0.0f, -1.0f, 0.0f});
+    spawnSpinner(cubeMesh, textured, cubeCollider, second, Vec3{0.0f, -1.0f, 0.0f});
 
     Transform third;
     third.position = Vec3{0.0f, 3.0f, -10.0f};
     third.scale = smallScale;
-    spawnSpinner(pyramidMesh, green, third, Vec3{0.0f, 1.0f, 0.0f});
+    spawnSpinner(pyramidMesh, green, propCollider(pyramidMesh), third, Vec3{0.0f, 1.0f, 0.0f});
 
     Transform fourth;
     // The teapot's origin is at its base, so y = 0 stands it on the grass. Set back so its spout clears the cubes as it spins.
     fourth.position = Vec3{0.0f, 0.0f, -13.0f};
     fourth.scale = smallScale;
-    spawnSpinner(teapotMesh, gold, fourth, Vec3{0.0f, -1.0f, 0.0f});
+    spawnSpinner(teapotMesh, gold, propCollider(teapotMesh), fourth, Vec3{0.0f, -1.0f, 0.0f});
 
     // Night: a faint ambient light and a weak, cool moon, so the flashlight stands out.
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam, and cast shadows.
@@ -168,6 +179,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     ModelRenderer moonRenderer = makeMeshRenderer(sphereMesh, moonGlow);
     moonRenderer.castsShadows = false;
     world.add(moon, std::move(moonRenderer));
+    // The sphere mesh has radius 1, so a unit sphere collider scaled with it fits exactly; it needs no triangles.
+    world.add(moon, Collider{Sphere{Vec3{0.0f, 0.0f, 0.0f}, 1.0f}, nullptr});
 
     // The flashlight. updateFlashlight places it every frame, at the camera or (in MOBA mode) in the duck's hands.
     flashlight = world.create();
@@ -217,6 +230,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 void DemoGame::onInput(World& world, const Input& input) {
     // Pick using the camera pose before this frame's panning.
     updatePlayerCommands(world, input);
+    updateSelection(world, input);
 
     if (input.wasKeyPressed(Key::F)) {
         toggleFlashlight(world);
@@ -240,6 +254,14 @@ bool DemoGame::wantsDebugView() const {
 * along its beam. The walk target is the destination marker, which is shown exactly while the duck is walking to it.
 */
 void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
+    // The selection is outlined whether or not the debug view is on: it stands in for a selection ring until the HUD exists.
+    if (world.isAlive(selected)) {
+        if (const Collider* collider = world.tryGet<Collider>(selected)) {
+            const Mat4 model = getRenderTransform(world, selected, alpha).getMatrix();
+            debug.shape(worldShape(collider->shape, model), selectionColour);
+        }
+    }
+
     if (!debugViewEnabled) {
         return;
     }
@@ -342,6 +364,7 @@ void DemoGame::toggleLamps(World& world) {
             world.add(lamp, PreviousTransform{lampPlacement});
             world.add(lamp, flight);
             world.add(lamp, std::move(bulb));
+            world.add(lamp, Collider{Sphere{Vec3{0.0f, 0.0f, 0.0f}, 1.0f}, nullptr});
             world.add(lamp, PointLight{.colour = colour, .intensity = lampIntensity, .range = lampRange, .sourceRadius = lampSourceRadius});
             lampEntities.push_back(lamp);
 
@@ -352,6 +375,7 @@ void DemoGame::toggleLamps(World& world) {
             const Entity pillar = world.create();
             world.add(pillar, pillarPlacement);
             world.add(pillar, makeMeshRenderer(cubeMesh, stone));
+            world.add(pillar, cubeCollider);
             lampEntities.push_back(pillar);
 
             ++index;
@@ -447,6 +471,10 @@ Entity DemoGame::getFlashlight() const {
 
 Entity DemoGame::getMoon() const {
     return moon;
+}
+
+Entity DemoGame::getSelected() const {
+    return selected;
 }
 
 void DemoGame::setControlMode(World& world, ControlMode mode) {
@@ -546,11 +574,7 @@ void DemoGame::updateCamera(const World& world, const Input& input, float frameS
 */
 void DemoGame::updatePlayerCommands(World& world, const Input& input) {
     // Only accept new commands while MOBA input is active.
-    const bool commandsActive =
-        world.isAlive(player) &&
-        controlMode == ControlMode::Moba &&
-        input.hasKeyboardFocus() &&
-        input.isCursorConfined();
+    const bool commandsActive = world.isAlive(player) && mobaPointerActive(input);
 
     if (!commandsActive) {
         groundSteeringActive = false;
@@ -576,22 +600,12 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
         return;
     }
 
-    const Vec2 size = input.getWindowSize();
-
-    if (size.x <= 0.0f || size.y <= 0.0f ||
-        target->x < 0.0f || target->y < 0.0f ||
-        target->x >= size.x || target->y >= size.y) {
+    const std::optional<Ray> ray = rayThroughPixel(input, *target);
+    if (!ray) {
         return;
     }
 
-    const Ray ray = makeCameraRay(
-        camera,
-        target->x / size.x,
-        target->y / size.y,
-        size.x / size.y
-    );
-
-    const auto hit = intersectGround(ray, 0.0f);
+    const auto hit = intersectGround(*ray, 0.0f);
 
     if (!hit) {
         return;
@@ -616,4 +630,50 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
         hit->z
     };
     world.get<ModelRenderer>(destinationMarker).visible = true;
+}
+
+/*
+* MOBA mouse commands only count while the game has the keyboard and the cursor is confined to the window, so a click
+* that merely brings the window back into focus does not also order the duck around.
+*/
+bool DemoGame::mobaPointerActive(const Input& input) const {
+    return controlMode == ControlMode::Moba && input.hasKeyboardFocus() && input.isCursorConfined();
+}
+
+/*
+* The ray from the camera through a window pixel, or nothing for a pixel outside the window (or a window with no size).
+*/
+std::optional<Ray> DemoGame::rayThroughPixel(const Input& input, const Vec2& pixel) const {
+    const Vec2 size = input.getWindowSize();
+
+    if (size.x <= 0.0f || size.y <= 0.0f ||
+        pixel.x < 0.0f || pixel.y < 0.0f ||
+        pixel.x >= size.x || pixel.y >= size.y) {
+        return std::nullopt;
+    }
+
+    return makeCameraRay(camera, pixel.x / size.x, pixel.y / size.y, size.x / size.y);
+}
+
+/*
+* A left-click selects the nearest collider under the exact click position, tested against triangles where a collider has
+* them, so the gap in the teapot's handle is not the teapot. Missing everything (the ground has no collider) deselects.
+*/
+void DemoGame::updateSelection(World& world, const Input& input) {
+    if (!mobaPointerActive(input)) {
+        return;
+    }
+
+    const auto press = input.getLastMouseButtonPress(MouseButton::Left);
+    if (!press) {
+        return;
+    }
+
+    const std::optional<Ray> ray = rayThroughPixel(input, press->position);
+    if (!ray) {
+        return;
+    }
+
+    const std::optional<ColliderHit> hit = raycastColliders(world, *ray, RaycastDetail::Triangles);
+    selected = hit ? hit->entity : Entity{};
 }

@@ -1,6 +1,7 @@
 #include "gameplay/character.h"
 #include "assets/gltf_loader.h"
 #include "math/transform.h"
+#include "physics/collider.h"
 #include "scene/interpolation.h"
 #include "scene/model_renderer.h"
 
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <variant>
 #include <stdexcept>
 
 namespace {
@@ -185,4 +187,17 @@ void testCharacter() {
         assert(rejected);
         assert(invalidWorld.getEntityCount() == 0);
     }
+
+    // Characters get an upright capsule collider fitted to their model, so they can be clicked (and, later, collide).
+    // The test model is 1 wide and 2 tall after normalization, standing on the entity's origin: a capsule of radius 0.5
+    // whose segment runs from 0.5 to 1.5, so it reaches from the feet (0) to the top of the head (2).
+    World colliderWorld;
+    const Entity fitted = spawnCharacter(colliderWorld, assets, cube, CharacterConfig{}, Vec3{0, 0, 0});
+    const Collider& collider = colliderWorld.get<Collider>(fitted);
+    assert(std::holds_alternative<Capsule>(collider.shape));
+    const Capsule& capsule = std::get<Capsule>(collider.shape);
+    assert(nearlyEqual(capsule.radius, 0.5f));
+    assert(nearlyEqual(capsule.a.x, 0.0f) && nearlyEqual(capsule.a.y, 0.5f) && nearlyEqual(capsule.a.z, 0.0f));
+    assert(nearlyEqual(capsule.b.x, 0.0f) && nearlyEqual(capsule.b.y, 1.5f) && nearlyEqual(capsule.b.z, 0.0f));
+    assert(collider.detail == nullptr);
 }

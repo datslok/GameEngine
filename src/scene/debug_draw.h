@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
+#include "physics/shapes.h"
 #include "scene/model.h"
 
 #include <vector>
@@ -33,6 +34,9 @@ public:
     // Every point within radius of the segment from a to b, the usual shape of a character's collider:
     // a circle at each end, four lines along the sides, and half circles over the ends.
     void capsule(const Vec3& a, const Vec3& b, float radius, const Vec3& colour, int segments = 24);
+
+    // Any collision shape, drawn by the matching call above (a box with no transform: it is already in place).
+    void shape(const Shape& shape, const Vec3& colour);
 
     // A line on the screen itself, in window pixels from the top-left corner, for overlays such as text. Not affected by the camera.
     void screenLine(const Vec2& from, const Vec2& to, const Vec3& colour);

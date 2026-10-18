@@ -3,6 +3,7 @@
 #include "assets/image_loader.h"
 #include "math/angles.h"
 #include "math/mat4.h"
+#include "physics/triangle_mesh.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
 #include "scene/mesh.h"
@@ -61,6 +62,10 @@ public:
     // Turn an imported model into a renderer component: meshes and textures become handles, and normalization is folded into each part.
     // A part without a mesh is rejected before anything is registered. A texture that fails to load can still throw part-way; the parts already registered stay cached, which is harmless.
     ModelRenderer makeModelRenderer(const Model& model, const Mat4& normalization = Mat4::identity());
+
+    // One collision mesh with every part of a renderer: each part's triangles placed by its local transform, in the
+    // entity's own coordinates (like a Collider). Throws std::out_of_range for parts whose mesh this manager does not have.
+    TriangleMesh makeCollisionMesh(const ModelRenderer& renderer) const;
 
     // Throw std::out_of_range for handles this manager did not create, including "none".
     const Mesh& getMesh(MeshHandle handle) const;

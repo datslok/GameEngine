@@ -91,6 +91,16 @@ void testAssetManager() {
     assert(white.index == 3);
     assert(throws([&] { assets.addTexture(ImageData{2, 2, {255, 255, 255, 255}}); }));
 
+    // A collision mesh for everything a renderer draws: each part's triangles, placed by the part's local transform, in one mesh.
+    ModelRenderer twoParts;
+    twoParts.parts.push_back(RenderPart{cube, Material{}, Mat4::identity()});
+    twoParts.parts.push_back(RenderPart{cube, Material{}, Mat4::translation(0.0f, 3.0f, 0.0f)});
+    const TriangleMesh merged = assets.makeCollisionMesh(twoParts);
+    const Mesh& cubeMesh = assets.getMesh(cube);
+    assert(merged.positions.size() == 2 * cubeMesh.vertices.size());
+    assert(merged.indices.size() == 2 * cubeMesh.triangles.size() * 3);
+    assert(merged.positions[cubeMesh.vertices.size()].y == cubeMesh.vertices[0].y + 3.0f);
+
     // Handles this manager did not create are rejected.
     assert(throws([&] { assets.getMesh(MeshHandle{}); }));
     assert(throws([&] { assets.getMesh(MeshHandle{99}); }));

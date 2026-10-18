@@ -3,6 +3,7 @@
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
 #include "math/transform.h"
+#include "physics/collider.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
@@ -28,6 +29,64 @@ namespace {
         input.setWindowState(true, false, true);
         input.setCursor(Vec2{800.0f, 450.0f}, true);
         return input;
+    }
+
+    // The window pixel where a world point appears: makeCameraRay run backwards. Seen from the camera, the point lies along
+    // forward + right * x + up * y with x and y in units of distance ahead; the projection's [1][1] = cot(fov / 2) and the
+    // aspect ratio turn those into -1..1 screen coordinates, and the window size into pixels (y counting down).
+    Vec2 pixelOf(const Camera& camera, const Vec3& point, const Vec2& windowSize) {
+        const Vec3 toPoint = point - camera.getPosition();
+        const Vec3 forward = camera.getForward();
+        const Vec3 right = camera.getRight();
+        const Vec3 screenUp = right.cross(forward).normalized();
+        const float ahead = toPoint.dot(forward);
+        const float verticalScale = camera.getProjectionMatrix().values[1][1];
+        const float aspect = windowSize.x / windowSize.y;
+        const float ndcX = toPoint.dot(right) / ahead * verticalScale / aspect;
+        const float ndcY = toPoint.dot(screenUp) / ahead * verticalScale;
+        return Vec2{(ndcX + 1.0f) * 0.5f * windowSize.x, (1.0f - ndcY) * 0.5f * windowSize.y};
+    }
+
+    void leftClick(DemoGame& game, World& world, const Vec2& pixel) {
+        Input click = mobaInput();
+        click.pressMouseButton(MouseButtonPress{MouseButton::Left, pixel, 0});
+        click.releaseMouseButton(MouseButton::Left);
+        game.onInput(world, click);
+    }
+
+    // In MOBA mode a left-click selects whatever collider is under the cursor (the nearest one), and a click on bare
+    // ground clears the selection. The selection is outlined even with the debug view off.
+    void testSelection() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+        assert(game.getSelected() == Entity{});
+
+        const Vec2 window{1600.0f, 900.0f};
+        const Camera& camera = game.getCamera();
+
+        leftClick(game, world, pixelOf(camera, getCharacterVisualCentre(world, game.getPlayer(), 1.0f), window));
+        assert(game.getSelected() == game.getPlayer());
+
+        DebugDraw outline;
+        game.onDebugDraw(world, outline, 1.0f);
+        assert(!game.wantsDebugView());
+        assert(!outline.getLines().empty());
+
+        // A spinning cube is picked by its triangles: the click at its centre selects it, not the duck.
+        leftClick(game, world, pixelOf(camera, Vec3{-3.0f, 0.0f, -10.0f}, window));
+        const Entity cube = game.getSelected();
+        assert(world.isAlive(cube));
+        assert(!(cube == game.getPlayer()));
+        assert(world.get<Collider>(cube).detail != nullptr);
+
+        // Bare ground between them: nothing is selected, and nothing is outlined.
+        leftClick(game, world, pixelOf(camera, Vec3{3.0f, 0.0f, -4.0f}, window));
+        assert(game.getSelected() == Entity{});
+        DebugDraw empty;
+        game.onDebugDraw(world, empty, 1.0f);
+        assert(empty.getLines().empty());
     }
 
     void runTicks(DemoGame& game, World& world, int count, int& ticksSoFar) {
@@ -161,6 +220,7 @@ namespace {
 */
 void testDemoGame() {
     testDebugViewToggles();
+    testSelection();
     testLampsToggle();
     testLampsFly();
 

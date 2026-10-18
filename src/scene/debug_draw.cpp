@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <type_traits>
+#include <variant>
 
 void DebugDraw::line(const Vec3& from, const Vec3& to, const Vec3& colour) {
     lines.push_back(DebugLine{from, to, colour});
@@ -106,4 +108,20 @@ const std::vector<DebugLine>& DebugDraw::getScreenLines() const {
 
 const std::vector<DebugLine>& DebugDraw::getLines() const {
     return lines;
+}
+/*
+* One entry point for any collision shape, so collider views need not care which kind they hold. `if constexpr` picks the
+* branch for the held type when the code is compiled, so each branch only has to make sense for its own type.
+*/
+void DebugDraw::shape(const Shape& shape, const Vec3& colour) {
+    std::visit([&](const auto& held) {
+        using Held = std::decay_t<decltype(held)>;
+        if constexpr (std::is_same_v<Held, Sphere>) {
+            sphere(held.centre, held.radius, colour);
+        } else if constexpr (std::is_same_v<Held, Capsule>) {
+            capsule(held.a, held.b, held.radius, colour);
+        } else {
+            box(held, Mat4::identity(), colour);
+        }
+    }, shape);
 }

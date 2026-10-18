@@ -7,10 +7,13 @@
 #include "gameplay/camera/moba_camera_controller.h"
 #include "games/demo/control_mode.h"
 #include "input/input.h"
+#include "math/ray.h"
+#include "physics/collider.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/light.h"
 
+#include <optional>
 #include <vector>
 
 /*
@@ -37,12 +40,24 @@ public:
     Entity getFlashlight() const;
     Entity getMoon() const;
 
+    // What the last left-click in MOBA mode picked, or Entity{} for nothing.
+    Entity getSelected() const;
+
 private:
     void createScene(World& world, AssetManager& assets);
     void setControlMode(World& world, ControlMode mode);
 
     // Turn right-clicks into move commands for the player.
     void updatePlayerCommands(World& world, const Input& input);
+
+    // Turn left-clicks into a selection: the nearest collider under the cursor, or none.
+    void updateSelection(World& world, const Input& input);
+
+    // Whether MOBA mouse commands count right now: MOBA mode, keyboard focus and a confined cursor.
+    bool mobaPointerActive(const Input& input) const;
+
+    // The camera ray through a window pixel, or nothing outside the window.
+    std::optional<Ray> rayThroughPixel(const Input& input, const Vec2& pixel) const;
 
     // Returns true when the mode changed, so this frame's mouse motion is not applied to the new camera pose.
     bool updateModeSwitching(World& world, const Input& input);
@@ -84,10 +99,16 @@ private:
     std::vector<Entity> lampEntities;
     MeshHandle sphereMesh;
     MeshHandle cubeMesh;
+
+    // The cube's collider (its box plus its triangles), shared by the spinning cubes and the lamp pillars.
+    Collider cubeCollider;
     void toggleLamps(World& world);
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;
+
+    // What the last left-click picked (Entity{} for nothing), outlined every frame.
+    Entity selected;
 
     // F4: show bounding boxes, the culling readout, light markers and the walk target.
     bool debugViewEnabled = false;
