@@ -154,6 +154,7 @@ src/            Engine and game source, in layers (lower ones never include high
   math/         Vectors, matrices, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
+                ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)
                 ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
                 RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
 tools/          package_demo.py (the shareable zip), make_glb_demo.py
