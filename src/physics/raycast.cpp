@@ -248,3 +248,36 @@ std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, float ma
 
     return best;
 }
+
+/*
+* Carry the ray into the mesh's own coordinates with the inverse model matrix, rather than moving every corner into the world.
+* The map is affine, so the local ray is the same line, and distances along it all scale by one factor: worldPerLocal, how far
+* the world ray goes for each unit the local ray goes. That converts the reach in and the hit distance out, and keeps the nearest
+* hit the nearest. The normal is a surface direction, so it comes back through the normal matrix (the inverse transpose), not
+* the model matrix: under uneven scale the two disagree, and only the normal matrix keeps it perpendicular to the surface.
+*/
+std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, const Mat4& model, float maxDistance) {
+    const std::optional<Mat4> toLocal = affineInverse(model);
+    if (!toLocal) {
+        return std::nullopt;
+    }
+
+    const Vec3 localDirection = transformDirection(*toLocal, ray.direction);
+    if (localDirection.lengthSquared() <= tiny || ray.direction.lengthSquared() <= tiny) {
+        return std::nullopt;
+    }
+
+    const float worldPerLocal = ray.direction.length() / localDirection.length();
+    const Ray localRay{transformPoint(*toLocal, ray.origin), localDirection};
+    const std::optional<RayHit> localHit = raycast(localRay, mesh, maxDistance / worldPerLocal);
+    if (!localHit) {
+        return std::nullopt;
+    }
+
+    Vec3 normal = transformDirection(normalMatrix(model), localHit->normal).normalized();
+    if (normal.dot(ray.direction) > 0.0f) {
+        normal = normal * -1.0f;
+    }
+
+    return RayHit{localHit->distance * worldPerLocal, transformPoint(model, localHit->point), normal};
+}

@@ -34,6 +34,14 @@ void testCollisionMesh() {
     const TriangleMesh local = collisionMesh(cube);
     assert(nearlyEqual(local.positions[0].x, -1.0f));
 
+    // Appending a second mesh: its corners follow the first's, and its indices are shifted past them.
+    TriangleMesh both = collisionMesh(cube);
+    appendCollisionMesh(both, cube, Mat4::translation(0.0f, 5.0f, 0.0f));
+    assert(both.positions.size() == 2 * cube.vertices.size());
+    assert(both.indices.size() == 2 * cube.triangles.size() * 3);
+    assert(nearlyEqual(both.positions[cube.vertices.size()].y, 4.0f));
+    assert(both.indices[cube.triangles.size() * 3] == cube.triangles[0].first + cube.vertices.size());
+
     // A triangle that points at a missing corner is an error, not a crash later.
     Mesh broken = cube;
     broken.triangles[0].third = broken.vertices.size();

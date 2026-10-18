@@ -1,6 +1,7 @@
 #include "assets/asset_manager.h"
 #include "assets/gltf_loader.h"
 #include "assets/obj_loader.h"
+#include "scene/collision_mesh.h"
 #include "scene/smooth_normals.h"
 
 #include <span>
@@ -166,4 +167,16 @@ std::size_t AssetManager::getMeshCount() const {
 
 std::size_t AssetManager::getTextureCount() const {
     return textures.size();
+}
+
+/*
+* Each part's triangles go in with the part's local transform (normalization and imported node transforms included), so
+* the mesh lines up with what the renderer draws for the same entity.
+*/
+TriangleMesh AssetManager::makeCollisionMesh(const ModelRenderer& renderer) const {
+    TriangleMesh result;
+    for (const RenderPart& part : renderer.parts) {
+        appendCollisionMesh(result, getMesh(part.mesh), part.localTransform);
+    }
+    return result;
 }

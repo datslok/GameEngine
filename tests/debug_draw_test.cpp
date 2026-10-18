@@ -1,4 +1,6 @@
 #include "engine/debug_views.h"
+#include "math/transform.h"
+#include "physics/collider.h"
 #include "render/gpu/debug_line_vertices.h"
 #include "scene/debug_draw.h"
 #include "scene/frame_description.h"
@@ -147,6 +149,64 @@ namespace {
         assert(none.getLines().empty());
     }
 
+    bool sameLines(const DebugDraw& actual, const DebugDraw& expected) {
+        if (actual.getLines().size() != expected.getLines().size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < actual.getLines().size(); ++i) {
+            const DebugLine& a = actual.getLines()[i];
+            const DebugLine& b = expected.getLines()[i];
+            if (!nearlyEqual(a.from, b.from) || !nearlyEqual(a.to, b.to) || !nearlyEqual(a.colour, b.colour)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Any collision shape can be drawn through one call, which draws exactly what the matching specific call draws.
+    void testShapeMatchesDirectCalls() {
+        const Sphere ball{Vec3{1.0f, 2.0f, 3.0f}, 0.5f};
+        DebugDraw viaShape;
+        DebugDraw direct;
+        viaShape.shape(ball, green);
+        direct.sphere(ball.centre, ball.radius, green);
+        assert(sameLines(viaShape, direct));
+
+        const Capsule pill{Vec3{0.0f, 0.5f, 0.0f}, Vec3{0.0f, 1.5f, 0.0f}, 0.5f};
+        viaShape.clear();
+        direct.clear();
+        viaShape.shape(pill, green);
+        direct.capsule(pill.a, pill.b, pill.radius, green);
+        assert(sameLines(viaShape, direct));
+
+        const Aabb crate{Vec3{-1.0f, 0.0f, -1.0f}, Vec3{1.0f, 2.0f, 1.0f}};
+        viaShape.clear();
+        direct.clear();
+        viaShape.shape(crate, green);
+        direct.box(crate, Mat4::identity(), green);
+        assert(sameLines(viaShape, direct));
+    }
+
+    // The engine's collider view draws each collider where its entity is, as the shape a query would test.
+    void testColliderView() {
+        World world;
+        const Entity entity = world.create();
+        Transform placement;
+        placement.position = Vec3{4.0f, 0.0f, 0.0f};
+        world.add(entity, placement);
+        world.add(entity, Collider{Sphere{Vec3{0.0f, 1.0f, 0.0f}, 0.5f}, nullptr});
+
+        // A collider with no Transform is nowhere, so it is not drawn.
+        world.add(world.create(), Collider{Sphere{Vec3{0.0f, 0.0f, 0.0f}, 1.0f}, nullptr});
+
+        DebugDraw view;
+        drawColliders(world, 1.0f, view);
+
+        DebugDraw expected;
+        expected.shape(Sphere{Vec3{4.0f, 1.0f, 0.0f}, 0.5f}, colliderDebugColour);
+        assert(sameLines(view, expected));
+    }
+
     // The GPU gets two vertices per line, each a position and a colour.
     void testLinesBecomeVertices() {
         const std::vector<DebugLine> lines = {DebugLine{Vec3{1.0f, 2.0f, 3.0f}, Vec3{4.0f, 5.0f, 6.0f}, Vec3{0.1f, 0.2f, 0.3f}}};
@@ -170,5 +230,7 @@ void testDebugDraw() {
     testCapsuleOutlinesItsSurface();
     testMeshBounds();
     testBoundingBoxView();
+    testShapeMatchesDirectCalls();
+    testColliderView();
     testLinesBecomeVertices();
 }

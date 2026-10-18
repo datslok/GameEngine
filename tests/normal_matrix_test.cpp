@@ -18,11 +18,6 @@ namespace {
         return Vec3{result.x, result.y, result.z}.normalized();
     }
 
-    Vec3 transformDirection(const Mat4& matrix, const Vec3& direction) {
-        const Vec4 result = matrix * Vec4{direction.x, direction.y, direction.z, 0.0f};
-        return Vec3{result.x, result.y, result.z};
-    }
-
     void assertUpperMatricesEqual(const Mat4& actual, const Mat4& expected) {
         for (int row = 0; row < 3; ++row) {
             for (int column = 0; column < 3; ++column) {

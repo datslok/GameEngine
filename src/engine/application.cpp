@@ -135,6 +135,7 @@ void Application::render(float alpha, float frameSeconds) {
 
     if (game.wantsDebugView()) {
         drawBoundingBoxes(frame.draws, boundsByMesh, debugDraw);
+        drawColliders(world, alpha, debugDraw);
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
         drawRenderStats(renderer.getLastFrameStats(), debugDraw);

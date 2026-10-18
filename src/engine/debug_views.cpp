@@ -1,4 +1,7 @@
 #include "engine/debug_views.h"
+#include "math/transform.h"
+#include "physics/collider.h"
+#include "scene/interpolation.h"
 #include "scene/debug_text.h"
 
 #include <string>
@@ -42,4 +45,14 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     debugText(debug, Vec2{margin, margin + lineSpacing}, textHeight, shadows, boundingBoxColour);
     debugText(debug, Vec2{margin, margin + 2.0f * lineSpacing}, textHeight, lights, boundingBoxColour);
     debugText(debug, Vec2{margin, margin + 3.0f * lineSpacing}, textHeight, tiles, boundingBoxColour);
+}
+/*
+* Colliders are drawn at the interpolated pose, like the meshes, so the wireframes sit on what is drawn instead of trailing
+* it by up to a tick. Queries use the current pose; the difference is less than one tick of motion.
+*/
+void drawColliders(const World& world, float alpha, DebugDraw& debug) {
+    world.each<Collider, Transform>([&](Entity entity, const Collider& collider, const Transform&) {
+        const Mat4 model = getRenderTransform(world, entity, alpha).getMatrix();
+        debug.shape(worldShape(collider.shape, model), colliderDebugColour);
+    });
 }

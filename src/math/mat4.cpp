@@ -232,6 +232,40 @@ Mat4 Mat4::lookAt(
     return result;
 }
 
+namespace {
+    // The cofactor matrix of a model matrix's 3x3 part (in a Mat4's top-left, the rest zero), and that part's determinant.
+    struct UpperCofactors {
+        Mat4 cofactors;
+        float determinant = 0.0f;
+    };
+
+    /*
+    * Both the normal matrix and the inverse are built from cofactors, so they are computed in one place. Each cofactor is
+    * the 2x2 determinant left after crossing out its row and column; taking the rows and columns cyclically gives the
+    * checkerboard sign for free. Expanding along the first row gives the determinant.
+    */
+    UpperCofactors upperCofactors(const Mat4& model) {
+        const auto& m = model.values;
+        UpperCofactors result;
+
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                const int row1 = (row + 1) % 3;
+                const int row2 = (row + 2) % 3;
+                const int column1 = (column + 1) % 3;
+                const int column2 = (column + 2) % 3;
+
+                result.cofactors.values[row][column] = m[row1][column1] * m[row2][column2] - m[row1][column2] * m[row2][column1];
+            }
+        }
+
+        result.determinant = m[0][0] * result.cofactors.values[0][0]
+            + m[0][1] * result.cofactors.values[0][1]
+            + m[0][2] * result.cofactors.values[0][2];
+        return result;
+    }
+}
+
 /*
 * Normals describe surfaces, and surfaces stretch differently from lines: scale x by 2 and a slope gets shallower, so its normal
 * must tip the other way. The inverse transpose does that. It equals the cofactor matrix divided by the determinant.
@@ -239,29 +273,14 @@ Mat4 Mat4::lookAt(
 * otherwise get inward normals and be lit from behind.
 */
 Mat4 normalMatrix(const Mat4& model) {
-    const auto& m = model.values;
-    Mat4 result;
+    UpperCofactors upper = upperCofactors(model);
 
-    // Each cofactor from the 2x2 minor that skips its row and column; taking rows and columns cyclically gives the sign.
-    for (int row = 0; row < 3; ++row) {
-        for (int column = 0; column < 3; ++column) {
-            const int row1 = (row + 1) % 3;
-            const int row2 = (row + 2) % 3;
-            const int column1 = (column + 1) % 3;
-            const int column2 = (column + 2) % 3;
-
-            result.values[row][column] = m[row1][column1] * m[row2][column2] - m[row1][column2] * m[row2][column1];
-        }
-    }
-
-    const float determinant =
-        m[0][0] * result.values[0][0] + m[0][1] * result.values[0][1] + m[0][2] * result.values[0][2];
-
-    if (determinant == 0.0f) {
+    if (upper.determinant == 0.0f) {
         return Mat4{};
     }
 
-    const float sign = determinant > 0.0f ? 1.0f : -1.0f;
+    const float sign = upper.determinant > 0.0f ? 1.0f : -1.0f;
+    Mat4& result = upper.cofactors;
 
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column) {
@@ -271,6 +290,51 @@ Mat4 normalMatrix(const Mat4& model) {
 
     result.values[3][3] = 1.0f;
     return result;
+}
+
+/*
+* A model matrix is [A t; 0 1]: A turns and scales, t moves. Undoing it means undoing the move, then the turn and scale:
+* the inverse is [A^-1, -A^-1 t; 0 1]. A^-1 is the transposed cofactor matrix (the adjugate) over the determinant, which is
+* cheaper and more accurate than a general 4x4 inverse, and exact for every matrix a Transform can make.
+*/
+std::optional<Mat4> affineInverse(const Mat4& model) {
+    const UpperCofactors upper = upperCofactors(model);
+
+    if (upper.determinant == 0.0f || !std::isfinite(upper.determinant)) {
+        return std::nullopt;
+    }
+
+    Mat4 inverse;
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            inverse.values[row][column] = upper.cofactors.values[column][row] / upper.determinant;
+        }
+    }
+
+    for (int row = 0; row < 3; ++row) {
+        inverse.values[row][3] = -(inverse.values[row][0] * model.values[0][3]
+            + inverse.values[row][1] * model.values[1][3]
+            + inverse.values[row][2] * model.values[2][3]);
+    }
+
+    inverse.values[3][3] = 1.0f;
+    return inverse;
+}
+
+/*
+* Positions have w = 1, so the matrix's translation column moves them.
+*/
+Vec3 transformPoint(const Mat4& matrix, const Vec3& point) {
+    const Vec4 moved = matrix * Vec4{point.x, point.y, point.z, 1.0f};
+    return Vec3{moved.x, moved.y, moved.z};
+}
+
+/*
+* Directions have w = 0: an arrow does not change when the thing it belongs to moves, only when it turns or stretches.
+*/
+Vec3 transformDirection(const Mat4& matrix, const Vec3& direction) {
+    const Vec4 turned = matrix * Vec4{direction.x, direction.y, direction.z, 0.0f};
+    return Vec3{turned.x, turned.y, turned.z};
 }
 
 /*

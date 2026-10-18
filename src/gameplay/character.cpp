@@ -1,6 +1,7 @@
 #include "gameplay/character.h"
 #include "math/angles.h"
 #include "math/transform.h"
+#include "physics/collider.h"
 #include "scene/interpolation.h"
 #include "scene/model.h"
 #include "scene/model_renderer.h"
@@ -60,6 +61,20 @@ Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
     };
     ModelRenderer renderer = assets.makeModelRenderer(model, groundedNormalization);
 
+    // An upright capsule around the model as drawn: as wide as its wider horizontal side, from its feet to the top of its
+    // head. Generous rather than exact (the corners of the model's box poke out), which is what clicking a unit wants.
+    const Vec3 lowCorner = transformPoint(groundedNormalization, bounds.minimum);
+    const Vec3 highCorner = transformPoint(groundedNormalization, bounds.maximum);
+    const Aabb drawn{
+        Vec3{std::min(lowCorner.x, highCorner.x), std::min(lowCorner.y, highCorner.y), std::min(lowCorner.z, highCorner.z)},
+        Vec3{std::max(lowCorner.x, highCorner.x), std::max(lowCorner.y, highCorner.y), std::max(lowCorner.z, highCorner.z)}
+    };
+    const float radius = std::max(drawn.size().x, drawn.size().z) * 0.5f;
+    const Vec3 middle = drawn.centre();
+    const float lowEnd = drawn.minimum.y + radius;
+    const float highEnd = std::max(lowEnd, drawn.maximum.y - radius);
+    const Collider collider{Capsule{Vec3{middle.x, lowEnd, middle.z}, Vec3{middle.x, highEnd, middle.z}, radius}, nullptr};
+
     Transform placement;
     placement.position = groundPosition;
 
@@ -68,6 +83,7 @@ Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
     world.add(entity, PreviousTransform{placement});
     world.add(entity, std::move(renderer));
     world.add(entity, std::move(movement));
+    world.add(entity, collider);
 
     return entity;
 }

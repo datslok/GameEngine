@@ -55,6 +55,9 @@ void testClosestPoints();
 void testOverlap();
 void testRaycast();
 void testCollisionMesh();
+void testAffineInverse();
+void testCollider();
+void testColliderRaycast();
 
 int main(){
     testPixelBuffer();
@@ -112,6 +115,9 @@ int main(){
     testOverlap();
     testRaycast();
     testCollisionMesh();
+    testAffineInverse();
+    testCollider();
+    testColliderRaycast();
 
     std::cout << "All tests passed!\n";
     return 0;
