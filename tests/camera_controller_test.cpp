@@ -24,12 +24,9 @@ namespace {
         return Camera{position, target, Vec3{0.0f, 1.0f, 0.0f}, pi / 2.0f, 16.0f / 9.0f, 0.1f, 100.0f};
     }
 
-    // The values the walking and jumping checks below are worked out for: 3 units/s, double speed with Shift, 0.001 rad per pixel, jumps 1.2 high under gravity 20.
+    // The look settings the first-person checks below are worked out for: 0.001 radians per pixel of mouse motion.
     const FirstPersonCameraSettings walker{
-        .look = LookSettings{.radiansPerPixel = 0.001f, .sprintMultiplier = 2.0f},
-        .moveSpeed = 3.0f,
-        .jumpHeight = 1.2f,
-        .gravity = 20.0f
+        .look = LookSettings{.radiansPerPixel = 0.001f, .sprintMultiplier = 2.0f}
     };
 
     // A focused window with the mouse captured for mouse look.
@@ -111,122 +108,32 @@ void testCameraControllers() {
         assert(nearlyEqual(camera.getForward(), facing));
     }
 
-    // First person walks on the ground plane: looking up does not change height.
-    {
-        Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 2.0f, -1.0f});
-        FirstPersonCameraController controller{walker};
-        controller.takeOver(camera);
-
-        Input input = capturedInput();
-        input.pressKey(Key::W);
-        controller.update(camera, input, 1.0f);
-        assert(nearlyEqual(camera.getPosition(), Vec3{0.0f, 1.0f, -3.0f}));
-
-        // Strafing right while facing -Z moves towards +X, and diagonals are not faster.
-        Input diagonal = capturedInput();
-        diagonal.pressKey(Key::W);
-        diagonal.pressKey(Key::D);
-        const Vec3 start = camera.getPosition();
-        controller.update(camera, diagonal, 1.0f);
-        const Vec3 moved = camera.getPosition() - start;
-        assert(nearlyEqual(moved.x, 3.0f / std::sqrt(2.0f)));
-        assert(nearlyEqual(moved.z, -3.0f / std::sqrt(2.0f)));
-
-        // Holding Shift runs at double speed; either Shift key works.
-        Camera runner = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
-        FirstPersonCameraController running{walker};
-        running.takeOver(runner);
-        Input run = capturedInput();
-        run.pressKey(Key::W);
-        run.pressKey(Key::LeftShift);
-        running.update(runner, run, 1.0f);
-        assert(nearlyEqual(runner.getPosition(), Vec3{0.0f, 1.0f, -6.0f}));
-
-        Input runRight = capturedInput();
-        runRight.pressKey(Key::W);
-        runRight.pressKey(Key::RightShift);
-        running.update(runner, runRight, 1.0f);
-        assert(nearlyEqual(runner.getPosition(), Vec3{0.0f, 1.0f, -12.0f}));
-
-        // Mouse motion turns the camera and changes the walking direction.
-        Input turn = capturedInput();
-        turn.addMouseMotion(pi / 2.0f / 0.001f, 0.0f);
-        controller.update(camera, turn, 1.0f);
-        assert(nearlyEqual(controller.getAngles().yaw, pi / 2.0f));
-    }
-
-    // First person jumps with Space: up to the jump height, back down to the eye height it started at, and no jumping in mid-air.
+    // The first-person camera only looks: the mouse turns it, but keys never move it (the body it rides on walks, see
+    // first_person_body_test), and after Escape (mouse not captured) it does not turn either.
     {
         Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
         FirstPersonCameraController controller{walker};
         controller.takeOver(camera);
-        assert(!controller.isAirborne());
 
-        Input jump = capturedInput();
-        jump.pressKey(Key::Space);
-        controller.update(camera, jump, 0.01f);
-        assert(controller.isAirborne());
-        assert(camera.getPosition().y > 1.0f);
+        Input walkAndJump = capturedInput();
+        walkAndJump.pressKey(Key::W);
+        walkAndJump.pressKey(Key::D);
+        walkAndJump.pressKey(Key::Space);
+        controller.update(camera, walkAndJump, 1.0f);
+        assert(nearlyEqual(camera.getPosition(), Vec3{0.0f, 1.0f, 0.0f}));
 
-        // Fall back in small frames, tracking the highest point and the time in the air.
-        const Input idle = capturedInput();
-        float highest = camera.getPosition().y;
-        float airTime = 0.01f;
+        Input turn = capturedInput();
+        turn.addMouseMotion(pi / 2.0f / 0.001f, 0.0f);
+        controller.update(camera, turn, 1.0f);
+        assert(nearlyEqual(controller.getAngles().yaw, pi / 2.0f));
+        assert(nearlyEqual(camera.getForward(), Vec3{1.0f, 0.0f, 0.0f}));
 
-        while (controller.isAirborne() && airTime < 5.0f) {
-            controller.update(camera, idle, 0.01f);
-            highest = std::fmax(highest, camera.getPosition().y);
-            airTime += 0.01f;
-        }
-
-        // Peak at the jump height above the eyes, land exactly at eye height. Up and down takes 2 * speed / gravity,
-        // where speed = sqrt(2 * gravity * height): sqrt(48) / 10, about 0.69 s.
-        assert(std::abs(highest - 2.2f) < 0.01f);
-        assert(nearlyEqual(camera.getPosition().y, 1.0f));
-        assert(std::abs(airTime - std::sqrt(48.0f) / 10.0f) < 0.02f);
-
-        // Pressing Space again in mid-air does nothing: the second press lands at the same time as no press.
-        Camera single = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
-        Camera doubled = single;
-        FirstPersonCameraController singleJump{walker};
-        FirstPersonCameraController doubleJump{walker};
-        singleJump.takeOver(single);
-        doubleJump.takeOver(doubled);
-        singleJump.update(single, jump, 0.2f);
-        doubleJump.update(doubled, jump, 0.2f);
-        singleJump.update(single, idle, 0.1f);
-        doubleJump.update(doubled, jump, 0.1f);
-        assert(nearlyEqual(single.getPosition().y, doubled.getPosition().y));
-    }
-
-    // The jump follows the same parabola however the frames are cut: one long frame lands where many short ones do.
-    {
-        Camera longFrames = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
-        Camera shortFrames = longFrames;
-        FirstPersonCameraController slow{walker};
-        FirstPersonCameraController fast{walker};
-        slow.takeOver(longFrames);
-        fast.takeOver(shortFrames);
-
-        Input jump = capturedInput();
-        jump.pressKey(Key::Space);
-        const Input idle = capturedInput();
-
-        slow.update(longFrames, jump, 0.3f);
-        fast.update(shortFrames, jump, 0.01f);
-
-        for (int frame = 1; frame < 30; ++frame) {
-            fast.update(shortFrames, idle, 0.01f);
-        }
-
-        assert(nearlyEqual(longFrames.getPosition().y, shortFrames.getPosition().y));
-
-        // Walking while in the air still moves you across the ground.
-        Input forward = capturedInput();
-        forward.pressKey(Key::W);
-        const float zBefore = shortFrames.getPosition().z;
-        fast.update(shortFrames, forward, 0.1f);
-        assert(shortFrames.getPosition().z < zBefore);
+        Input released;
+        released.beginFrame();
+        released.setWindowState(true, false, false);
+        released.addMouseMotion(500.0f, 0.0f);
+        controller.update(camera, released, 1.0f);
+        assert(nearlyEqual(controller.getAngles().yaw, pi / 2.0f));
     }
 
     // The MOBA camera follows a target at its fixed offset, or pans at the window edges.
@@ -290,14 +197,12 @@ void testCameraControllers() {
         Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
         FirstPersonCameraController controller{walker};
         controller.takeOver(camera);
-        controller.getSettings().moveSpeed = 5.0f;
-        controller.getSettings().look.sprintMultiplier = 3.0f;
-
-        Input run = capturedInput();
-        run.pressKey(Key::W);
-        run.pressKey(Key::LeftShift);
-        controller.update(camera, run, 1.0f);
-        assert(nearlyEqual(camera.getPosition(), Vec3{0.0f, 1.0f, -15.0f}));
+        controller.getSettings().look.radiansPerPixel = 0.002f;
+        Input turn = capturedInput();
+        turn.addMouseMotion(100.0f, 0.0f);
+        controller.update(camera, turn, 1.0f);
+        assert(nearlyEqual(controller.getAngles().yaw, 0.2f));
+        camera.setPose(Vec3{0.0f, 1.0f, -15.0f}, Vec3{0.0f, 1.0f, -16.0f}, Vec3{0.0f, 1.0f, 0.0f});
 
         FreeFlyCameraController flyer;
         flyer.takeOver(camera);

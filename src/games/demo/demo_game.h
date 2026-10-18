@@ -76,12 +76,18 @@ public:
     // The floodlight entities (each a spotlight and its glowing lamp head) while they are on, or none.
     const std::vector<Entity>& getFloodlights() const;
 
+    // The player's body in first person: an invisible capsule that walks through the level, with the camera at its eyes.
+    Entity getFirstPersonBody() const;
+
 private:
     void createScene(World& world, AssetManager& assets);
     void setControlMode(World& world, ControlMode mode);
 
     // Turn right-clicks into move commands for the player.
     void updatePlayerCommands(World& world, const Input& input);
+
+    // Turn the first-person movement keys into commands for the body.
+    void updateFirstPersonCommands(World& world, const Input& input);
 
     // Turn left-clicks into a selection: the nearest collider under the cursor, or none.
     void updateSelection(World& world, const Input& input);
@@ -155,6 +161,9 @@ private:
     bool groundSteeringActive = false;
 
     // What the last left-click picked (Entity{} for nothing), outlined every frame.
+    // The player's body in first person (always there; it only takes commands in first person).
+    Entity firstPersonBody;
+
     Entity selected;
 
     // What the cursor is over (Entity{} for nothing), outlined faintly, and what finding it cost (for the F4 readout).

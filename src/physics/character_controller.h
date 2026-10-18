@@ -61,5 +61,9 @@ Capsule controllerCapsule(const CharacterControllerSettings& settings, const Vec
 */
 void moveCharacter(CharacterController& controller, Vec3& feet, const StaticLevel& level, float seconds);
 
+// Whether a character with these settings would fit with its feet there, overlapping nothing (touching is fine): what
+// standing up from a crouch needs to know.
+bool characterFits(const CharacterControllerSettings& settings, const Vec3& feet, const StaticLevel& level);
+
 // moveCharacter for every entity with a CharacterController and a Transform (whose position is the feet).
 void moveCharacters(World& world, const StaticLevel& level, float seconds);
