@@ -4,6 +4,7 @@
 #include "math/mat4.h"
 #include "physics/collider_raycast.h"
 #include "physics/collision_settings.h"
+#include "physics/query_stats.h"
 #include "physics/uniform_grid.h"
 
 #include <memory>
@@ -40,12 +41,6 @@ private:
     UniformGrid grid;
     int builtLargeItemCells = settings.largeItemCells;
     std::vector<SceneCollider> colliders;
-};
-
-// What a query cost: how many colliders the exact tests ran on, and how many grid cells a ray walked.
-struct CollisionQueryStats {
-    int collidersTested = 0;
-    int cellsWalked = 0;
 };
 
 // The nearest collider the ray meets within maxDistance, like raycastColliders, through the scene's grid. stats, when

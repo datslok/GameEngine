@@ -152,6 +152,39 @@ namespace {
         // Reach limits it to the upper one or nothing.
         assert(!raycast(Ray{Vec3{0.4f, 0.4f, 5.0f}, Vec3{0.0f, 0.0f, -1.0f}}, mesh, 4.0f));
 
+        // A single triangle on its own: hit from the front and behind (normal facing the ray), missed beside it, and limited by reach.
+        const Vec3 corner0{0.0f, 0.0f, 0.0f};
+        const Vec3 corner1{1.0f, 0.0f, 0.0f};
+        const Vec3 corner2{0.0f, 1.0f, 0.0f};
+        assertHit(raycastTriangle(Ray{Vec3{0.2f, 0.2f, 5.0f}, Vec3{0.0f, 0.0f, -2.0f}}, corner0, corner1, corner2),
+            5.0f, Vec3{0.2f, 0.2f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f});
+        assertHit(raycastTriangle(Ray{Vec3{0.2f, 0.2f, -5.0f}, Vec3{0.0f, 0.0f, 1.0f}}, corner0, corner1, corner2),
+            5.0f, Vec3{0.2f, 0.2f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f});
+        assert(!raycastTriangle(Ray{Vec3{0.8f, 0.8f, 5.0f}, Vec3{0.0f, 0.0f, -1.0f}}, corner0, corner1, corner2));
+        assert(!raycastTriangle(Ray{Vec3{0.2f, 0.2f, 5.0f}, Vec3{0.0f, 0.0f, -1.0f}}, corner0, corner1, corner2, 4.0f));
+
+        // Watertight seams: rays aimed exactly at the diagonal two triangles of a quad share must hit one of them, not slip
+        // through the crack that rounding can open when each triangle's edge test is strict. (The quad is the demo course's
+        // floor slab top, where this was found.)
+        TriangleMesh slab;
+        slab.positions = {Vec3{14.0f, 0.1f, -12.0f}, Vec3{14.0f, 0.1f, 4.0f}, Vec3{20.0f, 0.1f, 4.0f}, Vec3{20.0f, 0.1f, -12.0f}};
+        slab.indices = {0, 1, 2, 0, 2, 3};
+        const Vec3 eye{17.0f, 12.0f, 8.0f};
+        for (int step = 1; step < 200; ++step) {
+            const float along = static_cast<float>(step) / 200.0f;
+            const Vec3 onDiagonal = slab.positions[0] + (slab.positions[2] - slab.positions[0]) * along;
+            assert(raycast(Ray{eye, onDiagonal - eye}, slab).has_value());
+        }
+
+        // The exact ray (as hexadecimal floats, bit for bit) that slipped through that seam in the demo: it crosses the slab
+        // top a hair from the diagonal, where each triangle's rounded edge test put it just outside.
+        slab.positions = {Vec3{14.0f, 0x1.99999ap-4f, -12.0f}, Vec3{14.0f, 0x1.99999ap-4f, 4.0f},
+                          Vec3{20.0f, 0x1.99999ap-4f, 4.0f}, Vec3{20.0f, 0x1.99999ap-4f, -12.0f}};
+        const Ray seamRay{Vec3{17.0f, 12.0f, 8.0f}, Vec3{0.0f, -0x1.68854ap-1f, -0x1.6b8cdep-1f}};
+        const auto seamHit = raycast(seamRay, slab);
+        assert(seamHit.has_value());
+        assert(std::abs(seamHit->point.y - 0.1f) < 0.0001f);
+
         // An empty mesh is never hit.
         assert(!raycast(Ray{Vec3{0.2f, 0.2f, 5.0f}, Vec3{0.0f, 0.0f, -1.0f}}, TriangleMesh{}));
     }

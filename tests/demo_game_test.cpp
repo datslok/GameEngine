@@ -12,6 +12,8 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <optional>
 
 namespace {
     bool nearlyEqual(float a, float b) {
@@ -116,6 +118,48 @@ namespace {
         hoverGround.setCursor(pixelOf(game.getCamera(), Vec3{3.0f, 0.0f, -4.0f}, window), true);
         game.onUpdate(world, hoverGround, 1.0f / 120.0f, 1.0f);
         assert(game.getHovered() == Entity{});
+    }
+
+    // The obstacle course is static level geometry: hovering it finds a level triangle, not an entity, and outlines it.
+    void testHoverLevel() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+        assert(game.getLevel().getTriangleCount() > 0);
+        assert(!game.getHoveredTriangle().has_value());
+
+        // Slide the MOBA camera over the course (it does not reset itself), then point at the floor slab's top.
+        Camera& camera = game.getCamera();
+        camera.setPosition(camera.getPosition() + Vec3{17.0f, 0.0f, 4.0f});
+        const Vec2 window{1600.0f, 900.0f};
+        const Vec3 slabTop = obstacleCourseOrigin + Vec3{0.0f, obstacleCourseFloorTop, 0.0f};
+
+        Input hover = mobaInput();
+        hover.setCursor(pixelOf(camera, slabTop, window), true);
+        game.onUpdate(world, hover, 1.0f / 120.0f, 1.0f);
+
+        assert(game.getHovered() == Entity{});
+        const std::optional<std::uint32_t> triangle = game.getHoveredTriangle();
+        assert(triangle.has_value());
+
+        // It is a floor triangle facing up, at the slab's height.
+        const auto corners = game.getLevel().getTriangle(*triangle);
+        const Vec3 normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]).normalized();
+        assert(std::abs(normal.y) > 0.99f);
+        assert(nearlyEqual(corners[0].y, obstacleCourseFloorTop));
+
+        // Level triangles are outlined only in the debug view (the ground is two huge triangles, always under the cursor).
+        DebugDraw plain;
+        game.onDebugDraw(world, plain, 1.0f);
+        assert(plain.getLines().empty());
+
+        Input pressF4 = mobaInput();
+        pressF4.pressKey(Key::F4);
+        game.onInput(world, pressF4);
+        DebugDraw outline;
+        game.onDebugDraw(world, outline, 1.0f);
+        assert(!outline.getLines().empty());
     }
 
     void runTicks(DemoGame& game, World& world, int count, int& ticksSoFar) {
@@ -251,6 +295,7 @@ void testDemoGame() {
     testDebugViewToggles();
     testSelection();
     testHover();
+    testHoverLevel();
     testLampsToggle();
     testLampsFly();
 

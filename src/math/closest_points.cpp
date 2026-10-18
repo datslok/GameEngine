@@ -172,3 +172,100 @@ ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& 
 
     return best;
 }
+
+/*
+* The plane around a triangle splits into seven regions by which feature is nearest: the face (straight above or below it),
+* three edges and three corners. A few dot products of the point's offset with the edges are, in effect, the signs of its
+* barycentric coordinates, and they say which region it is in; only that region's case is then worked out. Corners are
+* checked first because they need the fewest products. Follows Ericson, "Real-Time Collision Detection", section 5.1.5.
+*/
+Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c) {
+    const Vec3 ab = b - a;
+    const Vec3 ac = c - a;
+
+    const Vec3 ap = point - a;
+    const float d1 = ab.dot(ap);
+    const float d2 = ac.dot(ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) {
+        return a;
+    }
+
+    const Vec3 bp = point - b;
+    const float d3 = ab.dot(bp);
+    const float d4 = ac.dot(bp);
+    if (d3 >= 0.0f && d4 <= d3) {
+        return b;
+    }
+
+    const float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+        return a + ab * (d1 / (d1 - d3));
+    }
+
+    const Vec3 cp = point - c;
+    const float d5 = ab.dot(cp);
+    const float d6 = ac.dot(cp);
+    if (d6 >= 0.0f && d5 <= d6) {
+        return c;
+    }
+
+    const float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+        return a + ac * (d2 / (d2 - d6));
+    }
+
+    const float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
+        return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    }
+
+    // Inside the face region. The three products are proportional to the barycentric weights; a triangle with no area
+    // makes them all zero, and then its nearest edge is the answer.
+    const float total = va + vb + vc;
+    if (total <= 0.0f) {
+        Vec3 best = closestPointOnSegment(point, a, b);
+        for (const Vec3& candidate : {closestPointOnSegment(point, b, c), closestPointOnSegment(point, c, a)}) {
+            if ((candidate - point).lengthSquared() < (best - point).lengthSquared()) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+    return a + ab * (vb / total) + ac * (vc / total);
+}
+
+/*
+* Either the segment pierces the triangle (distance zero, where it crosses the plane inside the triangle), or the nearest
+* pair has an end of the segment or an edge of the triangle in it: if both nearest points were inside (the segment's middle
+* and the triangle's face), sliding along the segment would bring them closer, unless the segment is parallel to the face,
+* in which case its ends are just as near. So the answer is the best of: each end against the triangle, and the segment
+* against each edge.
+*/
+ClosestPoints closestPointsSegmentTriangle(const Vec3& s0, const Vec3& s1, const Vec3& a, const Vec3& b, const Vec3& c) {
+    const Vec3 normal = (b - a).cross(c - a);
+    const float side0 = normal.dot(s0 - a);
+    const float side1 = normal.dot(s1 - a);
+
+    if ((side0 <= 0.0f && side1 >= 0.0f) || (side0 >= 0.0f && side1 <= 0.0f)) {
+        if (side0 != side1) {
+            const Vec3 crossing = s0 + (s1 - s0) * (side0 / (side0 - side1));
+            const Vec3 onTriangle = closestPointOnTriangle(crossing, a, b, c);
+            if ((onTriangle - crossing).lengthSquared() <= degenerateLengthSquared * normal.length()) {
+                return ClosestPoints{crossing, crossing};
+            }
+        }
+    }
+
+    ClosestPoints best{s0, closestPointOnTriangle(s0, a, b, c)};
+    const auto consider = [&best](const ClosestPoints& candidate) {
+        if (candidate.distanceSquared() < best.distanceSquared()) {
+            best = candidate;
+        }
+    };
+
+    consider(ClosestPoints{s1, closestPointOnTriangle(s1, a, b, c)});
+    consider(closestPointsBetweenSegments(s0, s1, a, b));
+    consider(closestPointsBetweenSegments(s0, s1, b, c));
+    consider(closestPointsBetweenSegments(s0, s1, c, a));
+    return best;
+}

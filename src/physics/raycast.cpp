@@ -192,10 +192,68 @@ std::optional<RayHit> raycast(const Ray& ray, const Shape& shape, float maxDista
     return std::visit([&](const auto& held) { return raycast(ray, held, maxDistance); }, shape);
 }
 
+namespace {
+    /*
+    * Moller-Trumbore: write the hit point both as origin + t * direction and as a weighted mix of the triangle's corners,
+    * and solve the 3x3 system for t and the two weights with Cramer's rule. The point is on the triangle when both weights
+    * and their sum lie in 0..1. The direction must be unit length, so t is a distance.
+    *
+    * The weights are allowed edgeTolerance outside 0..1. Rounding can put a point that lies on the edge two triangles share
+    * just outside both of them, and a ray through the seam would fall through the floor; with the margin, neighbours overlap
+    * by a sliver instead (a few millionths of their size), at the price of a ray grazing an outer edge hitting that sliver
+    * beyond it.
+    */
+    constexpr float edgeTolerance = 1e-5f;
+
+    std::optional<RayHit> hitTriangle(const Vec3& origin, const Vec3& direction, const Vec3& a, const Vec3& b, const Vec3& c,
+                                      float reach) {
+        const Vec3 edge1 = b - a;
+        const Vec3 edge2 = c - a;
+
+        const Vec3 p = direction.cross(edge2);
+        const float determinant = edge1.dot(p);
+
+        // Zero when the ray runs along the triangle's plane, or the triangle has no area.
+        if (std::abs(determinant) <= tiny * edge1.lengthSquared() * edge2.lengthSquared()) {
+            return std::nullopt;
+        }
+
+        const float inverse = 1.0f / determinant;
+        const Vec3 fromFirst = origin - a;
+        const float u = fromFirst.dot(p) * inverse;
+        if (u < -edgeTolerance || u > 1.0f + edgeTolerance) {
+            return std::nullopt;
+        }
+
+        const Vec3 q = fromFirst.cross(edge1);
+        const float v = direction.dot(q) * inverse;
+        if (v < -edgeTolerance || u + v > 1.0f + edgeTolerance) {
+            return std::nullopt;
+        }
+
+        const float distance = edge2.dot(q) * inverse;
+        if (distance < 0.0f || distance > reach) {
+            return std::nullopt;
+        }
+
+        Vec3 normal = edge1.cross(edge2).normalized();
+        if (normal.dot(direction) > 0.0f) {
+            normal = normal * -1.0f;
+        }
+        return RayHit{distance, origin + direction * distance, normal};
+    }
+}
+
+std::optional<RayHit> raycastTriangle(const Ray& ray, const Vec3& a, const Vec3& b, const Vec3& c, float maxDistance) {
+    const std::optional<Vec3> direction = unitDirection(ray);
+    if (!direction) {
+        return std::nullopt;
+    }
+    return hitTriangle(ray.origin, *direction, a, b, c, maxDistance);
+}
+
 /*
-* Moller-Trumbore: write the hit point both as origin + t * direction and as a weighted mix of the triangle's corners,
-* and solve the 3x3 system for t and the two weights with Cramer's rule. The point is on the triangle when both weights
-* and their sum lie in 0..1. Each triangle that hits nearer than the best so far replaces it.
+* Each triangle that hits nearer than the best so far replaces it, and the reach shrinks to it.
 */
 std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, float maxDistance) {
     const std::optional<Vec3> direction = unitDirection(ray);
@@ -207,43 +265,12 @@ std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, float ma
     float reach = maxDistance;
 
     for (std::size_t corner = 0; corner + 2 < mesh.indices.size(); corner += 3) {
-        const Vec3& first = mesh.positions[mesh.indices[corner]];
-        const Vec3 edge1 = mesh.positions[mesh.indices[corner + 1]] - first;
-        const Vec3 edge2 = mesh.positions[mesh.indices[corner + 2]] - first;
-
-        const Vec3 p = direction->cross(edge2);
-        const float determinant = edge1.dot(p);
-
-        // Zero when the ray runs along the triangle's plane, or the triangle has no area.
-        if (std::abs(determinant) <= tiny * edge1.lengthSquared() * edge2.lengthSquared()) {
-            continue;
+        const std::optional<RayHit> hit = hitTriangle(ray.origin, *direction, mesh.positions[mesh.indices[corner]],
+                                                      mesh.positions[mesh.indices[corner + 1]], mesh.positions[mesh.indices[corner + 2]], reach);
+        if (hit) {
+            best = hit;
+            reach = hit->distance;
         }
-
-        const float inverse = 1.0f / determinant;
-        const Vec3 fromFirst = ray.origin - first;
-        const float u = fromFirst.dot(p) * inverse;
-        if (u < 0.0f || u > 1.0f) {
-            continue;
-        }
-
-        const Vec3 q = fromFirst.cross(edge1);
-        const float v = direction->dot(q) * inverse;
-        if (v < 0.0f || u + v > 1.0f) {
-            continue;
-        }
-
-        const float distance = edge2.dot(q) * inverse;
-        if (distance < 0.0f || distance > reach) {
-            continue;
-        }
-
-        Vec3 normal = edge1.cross(edge2).normalized();
-        if (normal.dot(*direction) > 0.0f) {
-            normal = normal * -1.0f;
-        }
-
-        best = RayHit{distance, ray.origin + *direction * distance, normal};
-        reach = distance;
     }
 
     return best;

@@ -71,7 +71,7 @@ std::optional<ColliderHit> raycast(const CollisionScene& scene, const Ray& ray, 
     });
 
     if (stats) {
-        stats->collidersTested = walk.items;
+        stats->tested = walk.items;
         stats->cellsWalked = walk.cells;
     }
     return best;

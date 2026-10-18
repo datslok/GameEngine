@@ -49,6 +49,9 @@ namespace {
     // The outline of whatever the cursor is over: the selection's cyan, dimmed.
     const Vec3 hoverColour = selectionColour * 0.35f;
 
+    // How long the face normal drawn on a hovered level triangle is, in world units.
+    constexpr float triangleNormalLength = 0.5f;
+
     // The lamp field (L): a grid of 6 x 7 = 42 lamps, 5 units apart, centred on the ground and offset half a step so no
     // lamp lands in the spinning objects, on the duck or in the free camera's face. 42 is well past the shader's 16 point
     // light seats and 4 shadows.
@@ -80,6 +83,72 @@ namespace {
     constexpr float lampHeightWobble = 0.35f;
     constexpr float lampSlowestOrbit = 0.35f;
     constexpr float lampOrbitSpread = 0.4f;
+
+    // The obstacle course, in its own coordinates around obstacleCourseOrigin: a 6 x 16 floor slab with a wall and doorway
+    // across it, five 0.25-high steps up to a platform, a gentle ramp (20 degrees, walkable) and a steep one (50 degrees,
+    // too steep to walk up), all for the character controller to try.
+    constexpr float courseHalfWidth = 3.0f;
+    constexpr float courseHalfLength = 8.0f;
+    constexpr float wallHeight = 2.5f;
+    constexpr float wallThickness = 0.3f;
+    constexpr float doorwayHalfWidth = 0.75f;
+    constexpr int stairSteps = 5;
+    constexpr float stairRise = 0.25f;
+    constexpr float stairRun = 0.5f;
+    constexpr float gentleSlopeDegrees = 20.0f;
+    constexpr float steepSlopeDegrees = 50.0f;
+    constexpr float rampThickness = 0.2f;
+
+    /*
+    * One block of the course: the unit cube (-1..1) stretched to the half-sizes, turned, then moved to its centre.
+    */
+    RenderPart courseBlock(MeshHandle cube, const Material& material, const Vec3& centre, const Vec3& halfSize,
+                           const Mat4& turn = Mat4::identity()) {
+        return RenderPart{cube, material, Mat4::translation(centre.x, centre.y, centre.z) * turn * Mat4::scaling(halfSize.x, halfSize.y, halfSize.z)};
+    }
+
+    /*
+    * A ramp rising towards +z: a thin block tipped up by the slope angle about x (a negative turn about x lifts the +z end),
+    * placed so its low end rests on the floor slab at lowZ.
+    */
+    RenderPart courseRamp(MeshHandle cube, const Material& material, float centreX, float lowZ, float length, float slopeDegrees) {
+        const float slope = radiansFromDegrees(slopeDegrees);
+        const float halfLength = length * 0.5f;
+        const Vec3 centre{centreX, obstacleCourseFloorTop + halfLength * std::sin(slope), lowZ + halfLength * std::cos(slope)};
+        return courseBlock(cube, material, centre, Vec3{1.0f, rampThickness * 0.5f, halfLength}, Mat4::rotationX(-slope));
+    }
+
+    /*
+    * Every block of the course as parts of one renderer, so it is a single entity; the level's collision mesh is made from
+    * the same parts, so what is drawn and what is solid cannot disagree.
+    */
+    ModelRenderer buildObstacleCourse(MeshHandle cube, const Material& stone) {
+        ModelRenderer course;
+        const float floorHalfHeight = obstacleCourseFloorTop * 0.5f;
+        course.parts.push_back(courseBlock(cube, stone, Vec3{0.0f, floorHalfHeight, 0.0f}, Vec3{courseHalfWidth, floorHalfHeight, courseHalfLength}));
+
+        // A wall across the slab at z = -2, with a doorway in the middle.
+        const float wallPieceHalf = (courseHalfWidth - doorwayHalfWidth) * 0.5f;
+        const float wallCentreY = obstacleCourseFloorTop + wallHeight * 0.5f;
+        for (const float side : {-1.0f, 1.0f}) {
+            course.parts.push_back(courseBlock(cube, stone, Vec3{side * (doorwayHalfWidth + wallPieceHalf), wallCentreY, -2.0f},
+                                               Vec3{wallPieceHalf, wallHeight * 0.5f, wallThickness * 0.5f}));
+        }
+
+        // Stairs on the -x half, rising towards +z from z = 1; each step is a solid block from the slab up to its tread.
+        const float stairsEnd = 1.0f + stairRun * static_cast<float>(stairSteps);
+        for (int step = 0; step < stairSteps; ++step) {
+            const float start = 1.0f + stairRun * static_cast<float>(step);
+            const float top = obstacleCourseFloorTop + stairRise * static_cast<float>(step + 1);
+            course.parts.push_back(courseBlock(cube, stone, Vec3{-2.0f, (obstacleCourseFloorTop + top) * 0.5f, (start + stairsEnd + 2.5f) * 0.5f},
+                                               Vec3{1.0f, (top - obstacleCourseFloorTop) * 0.5f, (stairsEnd + 2.5f - start) * 0.5f}));
+        }
+
+        // The ramps on the +x half: the gentle one rising beside the stairs, the steep one beyond the wall.
+        course.parts.push_back(courseRamp(cube, stone, 1.5f, 1.0f, 4.0f, gentleSlopeDegrees));
+        course.parts.push_back(courseRamp(cube, stone, 1.5f, -7.0f, 3.0f, steepSlopeDegrees));
+        return course;
+    }
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
@@ -205,6 +274,24 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(ground, groundPlacement);
     world.add(ground, makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass));
 
+    // The obstacle course: plain stone blocks for the character controller to walk on, climb and bump into.
+    Material courseStone;
+    courseStone.colour = Pixel{150, 148, 140};
+    courseStone.specularStrength = 0.1f;
+
+    Transform coursePlacement;
+    coursePlacement.position = obstacleCourseOrigin;
+    ModelRenderer course = buildObstacleCourse(cubeMesh, courseStone);
+
+    // The static level: the ground and the course never move, so their triangles go into the level once, made from the
+    // same parts that are drawn.
+    staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(ground)), groundPlacement.getMatrix());
+    staticLevel.add(assets.makeCollisionMesh(course), coursePlacement.getMatrix());
+
+    const Entity courseEntity = world.create();
+    world.add(courseEntity, coursePlacement);
+    world.add(courseEntity, std::move(course));
+
     // Change this configuration to use another compatible static model. Size and speeds keep CharacterConfig's defaults.
     const CharacterConfig playerConfig{
         .modelPath = "assets/models/Duck.glb",
@@ -282,9 +369,24 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
 
     // Below the engine's four lines: how many colliders there are, and how few the hover ray had to test.
     const std::string broadPhase = "COLLIDERS " + std::to_string(collisionScene.getColliders().size()) +
-                                   "  TESTED " + std::to_string(hoverStats.collidersTested) +
+                                   "  TESTED " + std::to_string(hoverStats.tested) +
                                    "  CELLS " + std::to_string(hoverStats.cellsWalked);
     debugText(debug, debugReadoutLine(4), debugReadoutTextHeight, broadPhase, colliderDebugColour);
+
+    // The level triangle under the cursor, with a short line along its face normal, and what the level query cost.
+    if (hoveredTriangle) {
+        const auto corners = staticLevel.getTriangle(*hoveredTriangle);
+        debug.line(corners[0], corners[1], hoverColour);
+        debug.line(corners[1], corners[2], hoverColour);
+        debug.line(corners[2], corners[0], hoverColour);
+        const Vec3 middle = (corners[0] + corners[1] + corners[2]) / 3.0f;
+        const Vec3 normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]).normalized();
+        debug.line(middle, middle + normal * triangleNormalLength, hoverColour);
+    }
+    const std::string levelLine = "LEVEL TRIANGLES " + std::to_string(staticLevel.getTriangleCount()) +
+                                  "  TESTED " + std::to_string(levelHoverStats.tested) +
+                                  "  CELLS " + std::to_string(levelHoverStats.cellsWalked);
+    debugText(debug, debugReadoutLine(5), debugReadoutTextHeight, levelLine, colliderDebugColour);
 
     constexpr float markerRadius = 0.25f;
     constexpr float beamLength = 2.0f;
@@ -701,9 +803,7 @@ void DemoGame::updateSelection(World& world, const Input& input) {
         return;
     }
 
-    collisionScene.rebuild(world);
-    const std::optional<ColliderHit> hit = raycast(collisionScene, *ray, RaycastDetail::Triangles);
-    selected = hit ? hit->entity : Entity{};
+    selected = pick(world, *ray).entity;
 }
 
 /*
@@ -712,7 +812,9 @@ void DemoGame::updateSelection(World& world, const Input& input) {
 */
 void DemoGame::updateHover(const World& world, const Input& input) {
     hovered = Entity{};
+    hoveredTriangle.reset();
     hoverStats = CollisionQueryStats{};
+    levelHoverStats = CollisionQueryStats{};
 
     if (!mobaPointerActive(input) || !input.isCursorInWindow()) {
         return;
@@ -723,9 +825,31 @@ void DemoGame::updateHover(const World& world, const Input& input) {
         return;
     }
 
+    const Pick found = pick(world, *ray, &hoverStats, &levelHoverStats);
+    hovered = found.entity;
+    hoveredTriangle = found.triangle;
+}
+
+/*
+* Colliders first (by their triangles where they have them), then the level, which only needs to look as far as the
+* collider hit: whichever is nearer is what the ray points at. So a wall hides what stands behind it.
+*/
+DemoGame::Pick DemoGame::pick(const World& world, const Ray& ray, CollisionQueryStats* colliderStats, CollisionQueryStats* levelStats) {
     collisionScene.rebuild(world);
-    const std::optional<ColliderHit> hit = raycast(collisionScene, *ray, RaycastDetail::Triangles, unlimitedRayDistance, &hoverStats);
-    if (hit) {
-        hovered = hit->entity;
+    const std::optional<ColliderHit> colliderHit = raycast(collisionScene, ray, RaycastDetail::Triangles, unlimitedRayDistance, colliderStats);
+    const float colliderDistance = colliderHit ? colliderHit->hit.distance : unlimitedRayDistance;
+    const std::optional<LevelHit> levelHit = raycast(staticLevel, ray, colliderDistance, levelStats);
+
+    if (levelHit && (!colliderHit || levelHit->hit.distance < colliderHit->hit.distance)) {
+        return Pick{Entity{}, levelHit->triangle};
     }
+    return Pick{colliderHit ? colliderHit->entity : Entity{}, std::nullopt};
+}
+
+std::optional<std::uint32_t> DemoGame::getHoveredTriangle() const {
+    return hoveredTriangle;
+}
+
+const StaticLevel& DemoGame::getLevel() const {
+    return staticLevel;
 }

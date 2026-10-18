@@ -28,3 +28,9 @@ ClosestPoints closestPointsBetweenSegments(const Vec3& a1, const Vec3& b1, const
 
 // The nearest points between the segment from a to b and the box (onSecond is in the box; zero distance when they cross).
 ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& box);
+
+// The point on the triangle a, b, c nearest to point: on its face, one of its edges or one of its corners.
+Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c);
+
+// The nearest points between the segment from s0 to s1 and the triangle a, b, c (zero distance where the segment pierces it).
+ClosestPoints closestPointsSegmentTriangle(const Vec3& s0, const Vec3& s1, const Vec3& a, const Vec3& b, const Vec3& c);
