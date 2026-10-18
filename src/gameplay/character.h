@@ -21,6 +21,10 @@ struct CharacterMovement {
     // Height of the model's visual centre above its ground position, for cameras that follow it.
     float visualCentreHeight = 0.0f;
 
+    // The facing about the vertical axis, in radians (-pi..pi). The character's own angle: updateCharacters turns it and
+    // writes the Transform's rotation from it each tick, so set this, not the Transform, to face a character somewhere.
+    float yaw = 0.0f;
+
     // Yaw still being turned towards, kept after arrival so the turn can finish.
     std::optional<float> targetYaw;
 

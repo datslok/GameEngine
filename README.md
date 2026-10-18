@@ -11,7 +11,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Model loading: OBJ, and glTF/GLB with embedded or external textures, metallic and roughness (factors and texture) and emissive colour (with KHR_materials_emissive_strength); optional smooth normals with a crease angle for models that have none
 - Entities and components: generational entity handles, sparse-set component storage, systems as plain functions that may destroy entities and remove components mid-walk (queued until the walk ends)
 - An asset manager that loads each file once and hands out typed handles
-- Fixed 120 Hz simulation with interpolated rendering, so movement is smooth at any frame rate; deterministic (the same commands give a bit-identical result, checked by a test that plays the demo twice), ready for replays and networking
+- Fixed 120 Hz simulation with interpolated rendering, so movement is smooth at any frame rate (orientations are quaternions, blended along the shortest turn); deterministic (the same commands give a bit-identical result, checked by a test that plays the demo twice), ready for replays and networking
 - Event-based input with engine-owned key codes, no SDL types in game code
 - Three camera modes: first person (a body that walks, jumps, crouches and sprints through the level with Overwatch-like movement), MOBA-style top-down with click-to-move, and a free debug camera
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
@@ -151,7 +151,7 @@ src/            Engine and game source, in layers (lower ones never include high
   ecs/          Entities, component storage and the World
   core/         Fixed timestep, profiler, sRGB conversions and small shared types
   physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision, sphere sweeps, particles and the character controller
-  math/         Vectors, matrices, transforms, rays, boxes, closest points
+  math/         Vectors, matrices, quaternions, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
                 ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)

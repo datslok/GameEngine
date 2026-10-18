@@ -21,17 +21,10 @@ namespace {
 
 void updateSpinners(World& world, double simulationSeconds) {
     world.each<Spinner, Transform>([simulationSeconds](Entity, Spinner& spinner, Transform& transform) {
-        // Leave axes with zero speed alone, so other code can still control them.
-        if (spinner.speed.x != 0.0f) {
-            transform.rotation.x = animatedAngle(spinner.initialRotation.x, spinner.speed.x, simulationSeconds);
-        }
-
-        if (spinner.speed.y != 0.0f) {
-            transform.rotation.y = animatedAngle(spinner.initialRotation.y, spinner.speed.y, simulationSeconds);
-        }
-
-        if (spinner.speed.z != 0.0f) {
-            transform.rotation.z = animatedAngle(spinner.initialRotation.z, spinner.speed.z, simulationSeconds);
-        }
+        transform.rotation = Quat::fromEulerAngles(Vec3{
+            animatedAngle(spinner.initialAngles.x, spinner.speed.x, simulationSeconds),
+            animatedAngle(spinner.initialAngles.y, spinner.speed.y, simulationSeconds),
+            animatedAngle(spinner.initialAngles.z, spinner.speed.z, simulationSeconds)
+        });
     });
 }

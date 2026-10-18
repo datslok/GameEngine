@@ -1,4 +1,5 @@
 #include "math/transform.h"
+#include "math/quat.h"
 #include "math/vec4.h"
 
 #include <cassert>
@@ -58,7 +59,7 @@ void testTransform() {
     {
         Transform transform;
         transform.scale = Vec3{2.0f, 3.0f, 4.0f};
-        transform.rotation.z = std::numbers::pi_v<float> / 2.0f;
+        transform.rotation = Quat::fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, std::numbers::pi_v<float> / 2.0f);
         transform.position = Vec3{10.0f, 20.0f, 30.0f};
 
         // (1, 2, 3) -> (2, 6, 12) -> (-6, 2, 12)
@@ -69,14 +70,12 @@ void testTransform() {
         );
     }
 
-    // Combined rotations must apply X, then Y, then Z.
+    // Rotations built from Euler angles apply X, then Y, then Z.
     {
         Transform transform;
         const float quarterTurn = std::numbers::pi_v<float> / 2.0f;
 
-        transform.rotation = Vec3{
-            quarterTurn, quarterTurn, quarterTurn
-        };
+        transform.rotation = Quat::fromEulerAngles(Vec3{quarterTurn, quarterTurn, quarterTurn});
 
         // (1, 2, 3) -> (1, -3, 2) -> (2, -3, -1)
         // -> (3, 2, -1).
@@ -84,5 +83,21 @@ void testTransform() {
             transform.getMatrix() * Vec4{1.0f, 2.0f, 3.0f, 1.0f},
             Vec4{3.0f, 2.0f, -1.0f, 1.0f}
         );
+    }
+
+    // The matrix is translation times rotation times scale, whatever the turn, so scale happens along the model's own axes.
+    {
+        Transform transform;
+        transform.position = Vec3{1.0f, -2.0f, 3.0f};
+        transform.rotation = Quat::fromAxisAngle(Vec3{1.0f, 2.0f, -2.0f}.normalized(), 0.8f);
+        transform.scale = Vec3{2.0f, 3.0f, 4.0f};
+
+        const Mat4 expected = Mat4::translation(1.0f, -2.0f, 3.0f) * transform.rotation.toMatrix() * Mat4::scaling(2.0f, 3.0f, 4.0f);
+        const Mat4 actual = transform.getMatrix();
+        for (int row = 0; row < 4; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                assertNear(actual.values[row][column], expected.values[row][column]);
+            }
+        }
     }
 }

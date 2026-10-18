@@ -35,14 +35,18 @@ namespace {
         assert(nearlyEqual(bottom, height));
     }
 
+    // The model's own forward axis, turned by the entity's Transform, points along expected. The Transform's turn is the
+    // character's yaw about the vertical axis.
     void assertFacing(const World& world, Entity character, float localForwardYaw,
                       const Vec3& expected) {
-        const float yaw = world.get<Transform>(character).rotation.y;
-        const Vec4 forward = Mat4::rotationY(yaw) * Vec4{
-            std::sin(localForwardYaw), 0.0f, std::cos(localForwardYaw), 0.0f
-        };
+        const Quat rotation = world.get<Transform>(character).rotation;
+        const Vec3 forward = rotation.rotate(Vec3{std::sin(localForwardYaw), 0.0f, std::cos(localForwardYaw)});
         assert(nearlyEqual(forward.x, expected.x));
+        assert(nearlyEqual(forward.y, 0.0f));
         assert(nearlyEqual(forward.z, expected.z));
+
+        const float yaw = world.get<CharacterMovement>(character).yaw;
+        assert(angleBetween(rotation, Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, yaw)) < 0.0001f);
     }
 
     const Vec3& position(const World& world, Entity character) {
@@ -50,7 +54,7 @@ namespace {
     }
 
     float yaw(const World& world, Entity character) {
-        return world.get<Transform>(character).rotation.y;
+        return world.get<CharacterMovement>(character).yaw;
     }
 
     // A level that is one wide, flat floor with its top at the given height.
@@ -123,21 +127,24 @@ void testCharacter() {
 
     // Halfway through a tick that turned it from +Z to +X, it is drawn facing between the two.
     Transform turnStart = world.get<Transform>(character);
-    turnStart.rotation.y = 0.0f;
+    turnStart.rotation = Quat{};
     world.get<PreviousTransform>(character).transform = turnStart;
-    world.get<Transform>(character).rotation.y = pi / 2.0f;
+    world.get<Transform>(character).rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, pi / 2.0f);
     const Vec3 halfway = getCharacterFacing(world, character, 0.5f);
     assert(nearlyEqual(halfway.x, std::sin(pi / 4.0f)) && nearlyEqual(halfway.z, std::cos(pi / 4.0f)));
     world.get<PreviousTransform>(character).transform = world.get<Transform>(character);
 
-    // Turning crosses the +/-pi boundary by the shortest route.
-    world.get<Transform>(character).rotation.y = pi - 0.05f;
+    // Turning crosses the +/-pi boundary by the shortest route. The yaw is the character's own angle; its Transform
+    // follows it on the next update.
+    world.get<CharacterMovement>(character).yaw = pi - 0.05f;
     const float desiredYaw = -pi + 0.05f;
     world.get<CharacterMovement>(character).moveTo(position(world, character) + Vec3{
         std::sin(desiredYaw), 0, std::cos(desiredYaw)
     });
     updateCharacters(world, floor, 0.01f);
     assert(nearlyEqual(yaw(world, character), pi - 0.05f + pi * 0.01f));
+    const float turnedYaw = yaw(world, character);
+    assertFacing(world, character, 0, Vec3{std::sin(turnedYaw), 0, std::cos(turnedYaw)});
 
     // Explicit stop cancels both travel and any remaining turn.
     world.get<CharacterMovement>(character).stop();
