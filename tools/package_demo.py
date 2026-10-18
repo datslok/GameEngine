@@ -2,8 +2,8 @@
 Package the demo into a zip that runs on a Windows PC without MSYS2.
 
 Usage (from anywhere):
-    python tools/package_demo.py               build with make, then package
-    python tools/package_demo.py --no-build    package the existing build/game.exe
+    python tools/package_demo.py               build the optimised release with make, then package
+    python tools/package_demo.py --no-build    package the existing build/release/game.exe
 
 Output: build/GameEngineDemo.zip, staged in build/package/GameEngineDemo/.
 
@@ -272,7 +272,7 @@ def make_zip(stage: Path, zip_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Package the demo into a zip for another Windows PC.")
-    parser.add_argument("--no-build", action="store_true", help="package the existing build/game.exe without running make")
+    parser.add_argument("--no-build", action="store_true", help="package the existing build/release/game.exe without running make")
     parser.add_argument("--msys-root", type=Path, default=Path(os.environ.get("MSYS2_ROOT", r"C:\msys64")), help="MSYS2 install folder (default C:\\msys64)")
     parser.add_argument("--name", default="GameEngineDemo", help="name of the exe, folder and zip (default GameEngineDemo)")
     arguments = parser.parse_args()
@@ -290,12 +290,13 @@ def main() -> int:
     environment = msys_environment(arguments.msys_root)
 
     if not arguments.no_build:
-        print("Building with make...")
-        run([str(make)], environment)
+        print("Building the release with make...")
+        run([str(make), "release"], environment)
 
-    game = REPO_ROOT / "build" / "game.exe"
+    # Players get the optimised build: the -O0 debug build runs physics several times slower.
+    game = REPO_ROOT / "build" / "release" / "game.exe"
     if not game.exists():
-        raise PackagingError(f"{game} does not exist. Run without --no-build, or build it first.")
+        raise PackagingError(f"{game} does not exist. Run without --no-build, or run make release first.")
 
     stage = REPO_ROOT / "build" / "package" / arguments.name
     zip_path = REPO_ROOT / "build" / f"{arguments.name}.zip"

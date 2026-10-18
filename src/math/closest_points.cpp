@@ -108,11 +108,11 @@ ClosestPoints closestPointsBetweenSegments(const Vec3& a1, const Vec3& b1, const
 ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& box) {
     const Vec3 direction = b - a;
 
-    // 0, 1 and up to two plane crossings per axis.
+    // 0, up to two plane crossings per axis, and 1, kept in order: each crossing is slid into its place as it is found
+    // (an insertion sort, the simplest sort for a handful of numbers).
     std::array<float, 8> cuts{};
     int cutCount = 0;
     cuts[cutCount++] = 0.0f;
-    cuts[cutCount++] = 1.0f;
 
     for (int index = 0; index < 3; ++index) {
         const float step = direction[index];
@@ -125,12 +125,17 @@ ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& 
             const float t = (plane - a[index]) / step;
 
             if (t > 0.0f && t < 1.0f) {
-                cuts[cutCount++] = t;
+                int place = cutCount++;
+                while (place > 0 && cuts[place - 1] > t) {
+                    cuts[place] = cuts[place - 1];
+                    --place;
+                }
+                cuts[place] = t;
             }
         }
     }
 
-    std::sort(cuts.begin(), cuts.begin() + cutCount);
+    cuts[cutCount++] = 1.0f;
 
     ClosestPoints best{a, closestPointInBox(a, box)};
     float bestDistanceSquared = best.distanceSquared();
