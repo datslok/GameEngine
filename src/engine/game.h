@@ -3,9 +3,12 @@
 #include "assets/asset_manager.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
+#include "engine/golden_view.h"
 #include "input/input.h"
 #include "scene/camera.h"
 #include "scene/debug_draw.h"
+
+#include <vector>
 
 /*
 * The boundary between the engine and one particular game.
@@ -66,6 +69,18 @@ public:
     // the settings file saves and loads them with the engine's. Visiting must not change anything by itself.
     virtual void visitSettings(SettingsVisitor& visitor) {
         (void)visitor;
+    }
+
+    // Golden image views (engine/golden.h): fixed scenes the renderer must keep drawing the same, optional.
+    virtual std::vector<GoldenView> goldenViews() const {
+        return {};
+    }
+
+    // Set up one of goldenViews() in a world fresh from onInit: pose the camera, switch things on or off. The engine
+    // then simulates it to the view's time and captures it.
+    virtual void prepareGoldenView(World& world, const GoldenView& view) {
+        (void)world;
+        (void)view;
     }
 };
 

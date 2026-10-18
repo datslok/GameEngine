@@ -10,10 +10,21 @@
 #include "engine/settings_file.h"
 #include "input/input.h"
 #include "platform/window.h"
+#include "engine/golden_view.h"
+#include "render/captured_frame.h"
 #include "render/gpu/gpu_renderer.h"
+#include "scene/frame_description.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
+
+// Whether the engine loads the settings the debug UI saved (settings.cfg). Golden image captures ignore them, so every
+// capture uses the engine's defaults whatever a player changed.
+enum class SavedSettings {
+    Load,
+    Ignore
+};
 
 /*
 * The engine: runs the main loop for one Game, and owns everything that is the same for every game (window, renderer, input, World, fixed timestep).
@@ -22,16 +33,27 @@
 */
 class Application {
 public:
-    Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings = {});
+    Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings = {},
+                SavedSettings saved = SavedSettings::Load);
 
     void run();
 
     // The engine's tunable values. Most are read every frame (see EngineSettings for the ones read only at start-up).
     EngineSettings& getSettings();
 
+    // Bring the game (fresh from onInit, nothing run yet) to a golden view and capture it off screen at the golden size
+    // (engine/golden.h). Call it instead of run(), once per Application.
+    CapturedFrame captureGoldenView(const GoldenView& view);
+
+    // The GPU's name, for keeping golden images per GPU.
+    std::string getRendererName() const;
+
 private:
     // Draw the World from the game's camera, between the last two ticks. ui is the debug UI's frame, or null.
     void render(float alpha, float frameSeconds, ImDrawData* ui);
+
+    // What render() and captures draw: the World seen from the game's camera at alpha, with bounds for culling.
+    FrameDescription describeFrame(float alpha, float frameSeconds);
 
     // Upload meshes and textures the AssetManager gained since the last frame, before the frame begins.
     void prepareNewResources();
@@ -50,7 +72,7 @@ private:
 
     // Remember the settings as they are (the defaults, for saving only what changed and for resetting), then load the
     // saved file over them. Returns the defaults.
-    static std::vector<SettingEntry> captureDefaultsAndLoad(EngineSettings& settings, Game& game);
+    static std::vector<SettingEntry> captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved);
 
     Game& game;
 

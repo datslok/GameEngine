@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
     // Tell unique_ptr how to release an SDL surface.
@@ -142,4 +143,40 @@ ImageData loadImageFromMemory(
         "embedded image",
         flipVertically
     );
+}
+
+/*
+* SDL describes the bytes in place (no copy); RGBA32 is red, green, blue, alpha in memory order, as RawImage holds them.
+*/
+void saveRawImagePng(const RawImage& image, const std::string& filename) {
+    if (image.format != PixelFormat::Rgba8 || image.bytes.size() != static_cast<std::size_t>(image.width) * image.height * 4) {
+        throw std::invalid_argument("Only whole 8-bit RGBA images can be saved as PNG: " + filename);
+    }
+
+    std::unique_ptr<SDL_Surface, SurfaceDeleter> surface{SDL_CreateSurfaceFrom(
+        static_cast<int>(image.width),
+        static_cast<int>(image.height),
+        SDL_PIXELFORMAT_RGBA32,
+        const_cast<std::uint8_t*>(image.bytes.data()),
+        static_cast<int>(image.width * 4)
+    )};
+
+    if (!surface) {
+        throw imageError("Could not describe image", filename);
+    }
+
+    if (!IMG_SavePNG(surface.get(), filename.c_str())) {
+        throw imageError("Could not save PNG", filename);
+    }
+}
+
+RawImage loadRawImagePng(const std::string& filename) {
+    ImageData loaded = loadImage(filename, false);
+
+    RawImage image;
+    image.width = loaded.width;
+    image.height = loaded.height;
+    image.format = PixelFormat::Rgba8;
+    image.bytes = std::move(loaded.pixels);
+    return image;
 }

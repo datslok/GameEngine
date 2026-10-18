@@ -57,6 +57,8 @@ public:
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
     bool wantsDebugView() const override;
     void visitSettings(SettingsVisitor& visitor) override;
+    std::vector<GoldenView> goldenViews() const override;
+    void prepareGoldenView(World& world, const GoldenView& view) override;
 
     // For tests and debugging.
     Entity getPlayer() const;
