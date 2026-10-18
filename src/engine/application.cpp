@@ -1,5 +1,6 @@
 #include "engine/application.h"
 #include "engine/debug_views.h"
+#include "engine/golden.h"
 #include "scene/culling.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
@@ -10,10 +11,11 @@
 #include <string>
 #include <vector>
 
-Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings):
+Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings,
+                         SavedSettings saved):
     game(game),
     settings(initialSettings),
-    defaultSettings(captureDefaultsAndLoad(settings, game)),
+    defaultSettings(captureDefaultsAndLoad(settings, game, saved)),
     window(title, width, height),
     renderer(window.getSdlWindow(), settings.gpuValidation),
     debugUi(window, renderer),
@@ -106,9 +108,13 @@ SettingsWalk Application::allSettings() {
 * The game's settings are read the same way, so the game must exist already (it does: it is borrowed). A file that
 * cannot be read or holds mistakes never stops the game; each problem is logged and the rest is used.
 */
-std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& settings, Game& game) {
+std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved) {
     const SettingsWalk walk = engineAndGameSettings(settings, game);
     std::vector<SettingEntry> defaults = captureSettings(walk);
+
+    if (saved == SavedSettings::Ignore) {
+        return defaults;
+    }
 
     try {
         const std::optional<std::string> text = readSettingsFile(savedSettingsPath);
@@ -213,12 +219,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     const double sceneStart = profilerSeconds();
 
     Camera& camera = game.getCamera();
-    FrameDescription frame = buildFrame(world, camera, alpha);
-    frame.lightFocus = game.getLightFocus();
-    frame.frameSeconds = frameSeconds;
-
-    // Spheres around each draw let the renderer skip what a view cannot see.
-    attachBoundingSpheres(frame.draws, boundsByMesh);
+    FrameDescription frame = describeFrame(alpha, frameSeconds);
 
     // Debug shapes are gathered fresh every frame, so anything not added again disappears.
     debugDraw.clear();
@@ -249,4 +250,31 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
     // so turning clicks into rays (makeCameraRay) matches what is on screen.
     camera.setAspectRatio(renderer.getFrameAspectRatio());
+}
+
+FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
+    FrameDescription frame = buildFrame(world, game.getCamera(), alpha);
+    frame.lightFocus = game.getLightFocus();
+    frame.frameSeconds = frameSeconds;
+
+    // Spheres around each draw let the renderer skip what a view cannot see.
+    attachBoundingSpheres(frame.draws, boundsByMesh);
+    return frame;
+}
+
+/*
+* The loop's steps without real time: the game is set up and simulated to the view's time, the assets it loaded are
+* uploaded, and the frame is drawn at alpha 1 (on the last tick) off screen at the golden size.
+*/
+CapturedFrame Application::captureGoldenView(const GoldenView& view) {
+    advanceToGoldenView(game, world, view, settings.ticksPerSecond);
+    prepareNewResources();
+
+    const float tickSeconds = static_cast<float>(1.0 / static_cast<double>(settings.ticksPerSecond));
+    const FrameDescription frame = describeFrame(1.0f, tickSeconds);
+    return renderer.capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr));
+}
+
+std::string Application::getRendererName() const {
+    return renderer.getDeviceName();
 }

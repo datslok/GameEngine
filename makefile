@@ -66,7 +66,7 @@ SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test shaders clean release run-release test-release
+.PHONY: all run test shaders clean release run-release test-release golden golden-save
 
 all: $(TARGET) shaders
 
@@ -113,6 +113,14 @@ run: $(TARGET) shaders
 
 test: $(TEST_TARGET) shaders
 	./$(TEST_TARGET)
+
+# Golden images (src/engine/golden.h): golden-save renders the demo's fixed views as the references in tests/golden/<GPU>/,
+# golden compares fresh captures with them (captures and difference heatmaps go to build/golden/<GPU>/). They need a GPU.
+golden: $(TARGET) shaders
+	./$(TARGET) --golden-check
+
+golden-save: $(TARGET) shaders
+	./$(TARGET) --golden-save
 
 # The release build through the same rules, in build/release. Running the tests optimised as well catches bugs that only
 # show at -O2 (uninitialised variables, code that breaks the language rules the optimiser relies on).

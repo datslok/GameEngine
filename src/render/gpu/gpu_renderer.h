@@ -11,6 +11,7 @@
 #include "render/gpu/overlay_renderer.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_mapping.h"
+#include "render/captured_frame.h"
 #include "render/render_stats.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 /*
@@ -57,6 +59,14 @@ public:
     // ui is the debug UI's finished frame (ImGui::GetDrawData()), drawn over everything; null for none.
     // Returns false if no frame was available (a minimized window), in which case nothing was drawn.
     bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr);
+
+    // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
+    // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU.
+    CapturedFrame capture(const FrameDescription& frame, const RenderSettings& settings, Uint32 width, Uint32 height,
+                          const DisplayOutput& output);
+
+    // The GPU's name as the driver reports it, for keeping golden images per GPU.
+    std::string getDeviceName() const;
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear).
@@ -111,9 +121,11 @@ private:
     SDL_GPUTexture* acquireFrame();
     void uploadShadowTiles(const std::vector<ShadowTileData>& tileData);
     void drawShadows(const FrameDescription& frame, const std::vector<ShadowTile>& tiles);
+    BloomComposite drawScene(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui);
     void beginMainPass();
     void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
-    void beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
+    void beginToneMapPass(SDL_GPUTexture* targetTexture, SDL_GPUGraphicsPipeline* toneMap, const ToneMappingSettings& settings,
+                          const BloomComposite& bloomMix);
     void endFrame();
     void abandonFrame() noexcept;
 
@@ -141,6 +153,7 @@ private:
     SDL_GPUGraphicsPipeline* toneMapPipeline = nullptr;
     void createToneMapResources();
     void createScreenPipelines();
+    SDL_GPUGraphicsPipeline* createToneMapPipeline(SDL_GPUTextureFormat targetFormat) const;
 
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;

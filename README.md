@@ -18,7 +18,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them; static level collision: the level's triangles in their own grid, built once, with raycasts and capsule contacts (how deep, and which way out); a kinematic character controller tuned to feel like Overwatch: walls slide, steps and ramps are climbed, the ground is followed down, gravity has air drag up to a terminal speed, and jumps and air steering use Overwatch's measured numbers; sphere sweeps (the first touch of a moving ball, so nothing fast can pass through a wall) and particles: balls that fly on exact parabolas, bounce with restitution and Coulomb friction, slide to a stop and rest without jitter (the demo throws them as grenades)
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity, grenade physics) lives in a settings struct owned by its system and is described once by a `visit()` next to it (label, limits, unit), which drives everything else: a debug UI (F5, Dear ImGui: a slider, checkbox or list for every setting, quality presets Low, Medium and High, Save and Reset buttons, drawn over the image in its own layer so it looks right in HDR too), a settings file (`settings.cfg`, only the values changed from the defaults, loaded at start-up, forgiving of hand edits) and tests that every default lies within its limits; numbers the shaders share with C++ are written once
 - Profiling: frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second, in the F4 view
-- Unit tests that run without a GPU or window
+- Unit tests that run without a GPU or window, and golden images: fixed demo views rendered once as references (the scene image in half floats and the final image, SDR and HDR) that later captures must match pixel for pixel, with a difference heatmap when they do not
 
 ## Requirements
 
@@ -69,6 +69,8 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | `make release` | Builds the optimised release (`-O2`) into `build/release/`. Physics runs about 7 times faster than in the debug build; use it to play and to measure |
 | `make run-release` | Builds the release, then starts it |
 | `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides |
+| `make golden` | Renders the demo's golden views and compares them with the references in `tests/golden/<GPU>/` (needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/`) |
+| `make golden-save` | Renders the golden views and saves them as the new references (only on purpose: after a change that is meant to alter the picture) |
 | `make clean` | Removes the compiled objects, executables and shaders |
 
 New `.cpp` files in `src/` and `tests/` are picked up automatically.
@@ -154,6 +156,7 @@ src/            Engine and game source, in layers (lower ones never include high
   physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision, sphere sweeps, particles and the character controller
   math/         Vectors, matrices, quaternions, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
+  golden/       Golden image references, one folder per GPU (see tests/golden/README.md)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
                 ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)
                 ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)

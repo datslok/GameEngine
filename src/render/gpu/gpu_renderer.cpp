@@ -482,15 +482,24 @@ void GpuRenderer::createScreenPipelines() {
     debugLines.reset();
     overlay.reset();
 
+    const SDL_GPUTextureFormat screenFormat = SDL_GetGPUSwapchainTextureFormat(device, window);
+    toneMapPipeline = createToneMapPipeline(screenFormat);
+    debugLines = std::make_unique<DebugLineRenderer>(device, screenFormat);
+    overlay = std::make_unique<OverlayRenderer>(device, screenFormat);
+}
+
+// The tone mapping pass for a target format: the swapchain's, or a golden image capture's.
+SDL_GPUGraphicsPipeline* GpuRenderer::createToneMapPipeline(SDL_GPUTextureFormat targetFormat) const {
     SDL_GPUShader* vertexShader = nullptr;
     SDL_GPUShader* fragmentShader = nullptr;
+    SDL_GPUGraphicsPipeline* created = nullptr;
 
     try {
         vertexShader = loadShader(device, "assets/shaders/fullscreen_triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
         fragmentShader = loadShader(device, "assets/shaders/tone_map.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 2);
 
         SDL_GPUColorTargetDescription colourTarget{};
-        colourTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+        colourTarget.format = targetFormat;
 
         SDL_GPUGraphicsPipelineCreateInfo info{};
         info.vertex_shader = vertexShader;
@@ -503,9 +512,9 @@ void GpuRenderer::createScreenPipelines() {
         info.target_info.color_target_descriptions = &colourTarget;
         info.target_info.has_depth_stencil_target = false;
 
-        toneMapPipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+        created = SDL_CreateGPUGraphicsPipeline(device, &info);
 
-        if (toneMapPipeline == nullptr) {
+        if (created == nullptr) {
             throw gpuError("Tone mapping pipeline creation failed");
         }
     }
@@ -523,9 +532,7 @@ void GpuRenderer::createScreenPipelines() {
 
     SDL_ReleaseGPUShader(device, fragmentShader);
     SDL_ReleaseGPUShader(device, vertexShader);
-
-    debugLines = std::make_unique<DebugLineRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
-    overlay = std::make_unique<OverlayRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
+    return created;
 }
 
 GpuRenderer::~GpuRenderer() {
@@ -730,74 +737,10 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
         return false;
     }
 
-    stats = RenderStats{};
-
     try {
-        // Only now is the frame's size known, so the camera's lens is fitted to it here.
-        Camera camera = frame.camera;
-        camera.setAspectRatio(getFrameAspectRatio());
+        const BloomComposite bloomMix = drawScene(frame, settings, ui);
 
-        // The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
-        // View and projection are combined once per frame, not once per object. The world-space version decides what
-        // is seen; the main pass draws with the camera-relative one (see camera_relative.h).
-        viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
-        relativeViewProjection = cameraRelativeViewProjection(camera);
-        cameraOrigin = camera.getPosition();
-        const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
-
-        // When there are more lights than seats, the ones that matter most here get them, remembering last frame's choice.
-        const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory, frame.frameSeconds,
-                                                                 settings.lights);
-        lightHistory = prioritized.history;
-
-        stats.pointLights = frame.lighting.pointLights.size();
-        stats.pointLightsInView = prioritized.pointLightsInView;
-        stats.pointLightsLit = prioritized.lighting.pointLights.size();
-        stats.pointLightsShadowed = static_cast<std::size_t>(std::count_if(
-            prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
-            [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
-
-        const LightUniformData lights = packLighting(prioritized.lighting, cameraOrigin);
-        const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
-
-        // Copies must happen outside render passes, so the debug lines are uploaded first.
-        debugLines->upload(commands, frame.debugLines, frame.debugScreenLines, displayOutput.whiteLevel);
-        uploadShadowTiles(shadows.tileData);
-
-        // The UI goes into its own image now, while no pass is open (its backend copies its buffers first).
-        if (ui != nullptr) {
-            overlay->drawUi(commands, ui, frameWidth, frameHeight);
-        }
-
-        if (!shadows.tiles.empty()) {
-            drawShadows(frame, shadows.tiles);
-        }
-
-        beginMainPass();
-
-        // Pushed uniform data stays in effect for every later draw, so the lights and shadow data are sent once per frame.
-        SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
-        SDL_PushGPUFragmentUniformData(commands, 2, &shadows.uniforms, static_cast<Uint32>(sizeof(shadows.uniforms)));
-        SDL_BindGPUFragmentStorageBuffers(pass, 0, &shadowTileBuffer, 1);
-
-        // Only what the camera can see. Shadows chose their casters with each light's own view, above.
-        const std::vector<std::size_t> visible = visibleDraws(frame.draws, cameraFrustum);
-
-        for (std::size_t index : visible) {
-            const DrawItem& draw = frame.draws[index];
-            drawMesh(draw.mesh, draw.model, draw.material);
-        }
-
-        stats.drawn = visible.size();
-        stats.culled = frame.draws.size() - visible.size();
-
-        SDL_EndGPURenderPass(pass);
-        pass = nullptr;
-
-        // The scattered light, from the finished scene image, before tone mapping mixes it in.
-        const BloomComposite bloomMix = bloom->draw(commands, sceneColour, frameWidth, frameHeight, settings.bloom);
-
-        beginToneMapPass(swapchainTexture, settings.toneMapping, bloomMix);
+        beginToneMapPass(swapchainTexture, toneMapPipeline, settings.toneMapping, bloomMix);
 
         // Last, so they are drawn over the finished image, in exactly their own colours.
         debugLines->draw(commands, pass, viewProjection, frameWidth, frameHeight);
@@ -816,6 +759,243 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
 
     endFrame();
     return true;
+}
+
+/*
+* Everything up to tone mapping, into the frame textures (already the frame's size): lights chosen, shadows, the main
+* pass and bloom. Leaves no pass open, and returns how tone mapping should mix in the bloom.
+*/
+BloomComposite GpuRenderer::drawScene(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui) {
+    stats = RenderStats{};
+
+    // Only now is the frame's size known, so the camera's lens is fitted to it here.
+    Camera camera = frame.camera;
+    camera.setAspectRatio(getFrameAspectRatio());
+
+    // The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
+    // View and projection are combined once per frame, not once per object. The world-space version decides what
+    // is seen; the main pass draws with the camera-relative one (see camera_relative.h).
+    viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
+    relativeViewProjection = cameraRelativeViewProjection(camera);
+    cameraOrigin = camera.getPosition();
+    const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
+
+    // When there are more lights than seats, the ones that matter most here get them, remembering last frame's choice.
+    const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory, frame.frameSeconds,
+                                                             settings.lights);
+    lightHistory = prioritized.history;
+
+    stats.pointLights = frame.lighting.pointLights.size();
+    stats.pointLightsInView = prioritized.pointLightsInView;
+    stats.pointLightsLit = prioritized.lighting.pointLights.size();
+    stats.pointLightsShadowed = static_cast<std::size_t>(std::count_if(
+        prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
+        [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
+
+    const LightUniformData lights = packLighting(prioritized.lighting, cameraOrigin);
+    const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
+
+    // Copies must happen outside render passes, so the debug lines are uploaded first.
+    debugLines->upload(commands, frame.debugLines, frame.debugScreenLines, displayOutput.whiteLevel);
+    uploadShadowTiles(shadows.tileData);
+
+    // The UI goes into its own image now, while no pass is open (its backend copies its buffers first).
+    if (ui != nullptr) {
+        overlay->drawUi(commands, ui, frameWidth, frameHeight);
+    }
+
+    if (!shadows.tiles.empty()) {
+        drawShadows(frame, shadows.tiles);
+    }
+
+    beginMainPass();
+
+    // Pushed uniform data stays in effect for every later draw, so the lights and shadow data are sent once per frame.
+    SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
+    SDL_PushGPUFragmentUniformData(commands, 2, &shadows.uniforms, static_cast<Uint32>(sizeof(shadows.uniforms)));
+    SDL_BindGPUFragmentStorageBuffers(pass, 0, &shadowTileBuffer, 1);
+
+    // Only what the camera can see. Shadows chose their casters with each light's own view, above.
+    const std::vector<std::size_t> visible = visibleDraws(frame.draws, cameraFrustum);
+
+    for (std::size_t index : visible) {
+        const DrawItem& draw = frame.draws[index];
+        drawMesh(draw.mesh, draw.model, draw.material);
+    }
+
+    stats.drawn = visible.size();
+    stats.culled = frame.draws.size() - visible.size();
+
+    SDL_EndGPURenderPass(pass);
+    pass = nullptr;
+
+    // The scattered light, from the finished scene image, before tone mapping mixes it in.
+    return bloom->draw(commands, sceneColour, frameWidth, frameHeight, settings.bloom);
+}
+
+namespace {
+    // Golden captures write what the screen would get: 8-bit sRGB (as the SDR_LINEAR swapchain) or scRGB half floats.
+    SDL_GPUTextureFormat captureFormat(bool hdr) {
+        return hdr ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+    }
+
+    // A texture's bytes, as the download pass left them in the transfer buffer.
+    RawImage readDownload(SDL_GPUDevice* device, SDL_GPUTransferBuffer* transfer, Uint32 offset, Uint32 width, Uint32 height,
+                          PixelFormat format) {
+        RawImage image;
+        image.width = width;
+        image.height = height;
+        image.format = format;
+        image.bytes.resize(static_cast<std::size_t>(width) * height * bytesPerPixel(format));
+
+        const auto* mapped = static_cast<const Uint8*>(SDL_MapGPUTransferBuffer(device, transfer, false));
+
+        if (mapped == nullptr) {
+            throw gpuError("Capture read-back mapping failed");
+        }
+
+        std::memcpy(image.bytes.data(), mapped + offset, image.bytes.size());
+        SDL_UnmapGPUTransferBuffer(device, transfer);
+        return image;
+    }
+}
+
+/*
+* The same frame as render(), drawn off screen at a fixed size for a fixed display, and read back: the scene image as
+* the main pass left it (half floats) and the tone mapped image as the screen would get it. Nothing is presented and
+* the swapchain is untouched; the display output is restored afterwards so the next real frame is unaffected. Debug
+* lines and the UI are not drawn. Waits for the GPU, so it is slow: for golden images, not for frames.
+*/
+CapturedFrame GpuRenderer::capture(const FrameDescription& frame, const RenderSettings& settings, Uint32 width, Uint32 height,
+                                   const DisplayOutput& output) {
+    if (commands != nullptr) {
+        throw std::logic_error("Finish the current frame before capturing");
+    }
+
+    const DisplayOutput screenOutput = displayOutput;
+    SDL_GPUTexture* target = nullptr;
+    SDL_GPUGraphicsPipeline* capturePipeline = nullptr;
+    SDL_GPUTransferBuffer* download = nullptr;
+    const PixelFormat finalFormat = output.hdr ? PixelFormat::RgbaHalf : PixelFormat::Rgba8;
+    const Uint32 sceneBytes = width * height * static_cast<Uint32>(bytesPerPixel(PixelFormat::RgbaHalf));
+    const Uint32 finalBytes = width * height * static_cast<Uint32>(bytesPerPixel(finalFormat));
+    CapturedFrame captured;
+
+    try {
+        SDL_GPUTextureCreateInfo targetInfo{};
+        targetInfo.type = SDL_GPU_TEXTURETYPE_2D;
+        targetInfo.format = captureFormat(output.hdr);
+        targetInfo.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        targetInfo.width = width;
+        targetInfo.height = height;
+        targetInfo.layer_count_or_depth = 1;
+        targetInfo.num_levels = 1;
+        targetInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        target = SDL_CreateGPUTexture(device, &targetInfo);
+
+        if (target == nullptr) {
+            throw gpuError("Capture target creation failed");
+        }
+
+        capturePipeline = createToneMapPipeline(targetInfo.format);
+
+        SDL_GPUTransferBufferCreateInfo downloadInfo{};
+        downloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+        downloadInfo.size = sceneBytes + finalBytes;
+        download = SDL_CreateGPUTransferBuffer(device, &downloadInfo);
+
+        if (download == nullptr) {
+            throw gpuError("Capture read-back buffer creation failed");
+        }
+
+        commands = SDL_AcquireGPUCommandBuffer(device);
+
+        if (commands == nullptr) {
+            throw gpuError("GPU command buffer acquisition failed");
+        }
+
+        ensureFrameTextures(width, height);
+        displayOutput = output;
+
+        const BloomComposite bloomMix = drawScene(frame, settings, nullptr);
+        beginToneMapPass(target, capturePipeline, settings.toneMapping, bloomMix);
+        SDL_EndGPURenderPass(pass);
+        pass = nullptr;
+
+        SDL_GPUCopyPass* copyPass = SDL_BeginGPUCopyPass(commands);
+
+        if (copyPass == nullptr) {
+            throw gpuError("Capture copy pass creation failed");
+        }
+
+        SDL_GPUTextureRegion sceneRegion{};
+        sceneRegion.texture = sceneColour;
+        sceneRegion.w = width;
+        sceneRegion.h = height;
+        sceneRegion.d = 1;
+
+        SDL_GPUTextureTransferInfo sceneDestination{};
+        sceneDestination.transfer_buffer = download;
+        SDL_DownloadFromGPUTexture(copyPass, &sceneRegion, &sceneDestination);
+
+        SDL_GPUTextureRegion finalRegion = sceneRegion;
+        finalRegion.texture = target;
+
+        SDL_GPUTextureTransferInfo finalDestination{};
+        finalDestination.transfer_buffer = download;
+        finalDestination.offset = sceneBytes;
+        SDL_DownloadFromGPUTexture(copyPass, &finalRegion, &finalDestination);
+
+        SDL_EndGPUCopyPass(copyPass);
+
+        SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+        commands = nullptr;
+
+        if (fence == nullptr) {
+            throw gpuError("Capture submission failed");
+        }
+
+        const bool finished = SDL_WaitForGPUFences(device, true, &fence, 1);
+        SDL_ReleaseGPUFence(device, fence);
+
+        if (!finished) {
+            throw gpuError("Waiting for the capture failed");
+        }
+
+        captured.scene = readDownload(device, download, 0, width, height, PixelFormat::RgbaHalf);
+        captured.final = readDownload(device, download, sceneBytes, width, height, finalFormat);
+    }
+    catch (...) {
+        shadowMemory.forgetAll();
+        abandonFrame();
+        SDL_WaitForGPUIdle(device);
+        displayOutput = screenOutput;
+
+        if (download != nullptr) {
+            SDL_ReleaseGPUTransferBuffer(device, download);
+        }
+
+        if (capturePipeline != nullptr) {
+            SDL_ReleaseGPUGraphicsPipeline(device, capturePipeline);
+        }
+
+        if (target != nullptr) {
+            SDL_ReleaseGPUTexture(device, target);
+        }
+
+        throw;
+    }
+
+    displayOutput = screenOutput;
+    SDL_ReleaseGPUTransferBuffer(device, download);
+    SDL_ReleaseGPUGraphicsPipeline(device, capturePipeline);
+    SDL_ReleaseGPUTexture(device, target);
+    return captured;
+}
+
+std::string GpuRenderer::getDeviceName() const {
+    const char* name = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, nullptr);
+    return name != nullptr ? name : "unknown GPU";
 }
 
 /*
@@ -1107,16 +1287,17 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
 }
 
 /*
-* Starts the final pass, into the swapchain image, and fills it: the full-screen triangle runs the tone mapping shader on
+* Starts the final pass, into the swapchain image (or a capture target, with the pipeline built for its format), and fills it: the full-screen triangle runs the tone mapping shader on
 * every pixel. The pass stays open for the debug lines. The image is wholly overwritten, so its old contents are not loaded.
 * The display output (chosen before the frame) gives the curve's peak, the white level and whether to dither. Without
 * bloom this frame the shader never reads its texture, but the slot must still hold one, so the scene stands in.
 */
-void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings, const BloomComposite& bloomMix) {
+void GpuRenderer::beginToneMapPass(SDL_GPUTexture* targetTexture, SDL_GPUGraphicsPipeline* toneMap, const ToneMappingSettings& settings,
+                                   const BloomComposite& bloomMix) {
     const ToneMapUniformData toneMapping = packToneMapping(settings, displayOutput, bloomMix);
 
     SDL_GPUColorTargetInfo target{};
-    target.texture = swapchainTexture;
+    target.texture = targetTexture;
     target.load_op = SDL_GPU_LOADOP_DONT_CARE;
     target.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -1126,7 +1307,7 @@ void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneM
         throw gpuError("Tone mapping pass creation failed");
     }
 
-    SDL_BindGPUGraphicsPipeline(pass, toneMapPipeline);
+    SDL_BindGPUGraphicsPipeline(pass, toneMap);
     SDL_PushGPUFragmentUniformData(commands, 0, &toneMapping, static_cast<Uint32>(sizeof(toneMapping)));
 
     SDL_GPUTexture* bloomTexture = bloom->getResult();

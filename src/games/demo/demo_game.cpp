@@ -70,6 +70,27 @@ namespace {
     constexpr float galleryExhibitSize = 1.5f; // the longest side
     constexpr float galleryFacingDistance = 3.0f;
 
+    // The golden image views (engine/golden.h), each seen from the free camera: the start (spinners, gold teapot, duck,
+    // normal map gallery, the flashlight's soft shadows) in SDR and HDR, the gallery close up, the lamp field (more
+    // lamps than seats, so light priority chooses), the floodlights over the course (soft spotlight shadows), and the
+    // moon (bloom). Times are long enough for the spinners and lamps to have moved.
+    struct DemoGoldenView {
+        GoldenView view;
+        Vec3 cameraPosition;
+        Vec3 cameraTarget;
+        bool lampsOn = false;
+        bool flashlightOn = true;
+    };
+
+    const DemoGoldenView demoGoldenViews[] = {
+        {{"start", 1.5, false}, freeCameraStart, Vec3{0.0f, 0.0f, -5.0f}},
+        {{"start-hdr", 1.5, true}, freeCameraStart, Vec3{0.0f, 0.0f, -5.0f}},
+        {{"gallery", 1.0, false}, Vec3{-0.6f, 1.5f, -2.2f}, Vec3{-3.2f, 1.3f, -3.2f}},
+        {{"lamp-field", 2.0, false}, Vec3{-4.0f, 8.0f, 9.0f}, Vec3{-6.0f, 0.0f, -12.0f}, true, false},
+        {{"floodlights", 1.0, false}, Vec3{7.0f, 5.0f, 6.0f}, obstacleCourseOrigin, false, false},
+        {{"moon", 0.5, false}, freeCameraStart, freeCameraStart + towardsMoon, false, false}
+    };
+
     // The outline of the selected object (linear cyan), distinct from the engine's orange collider view.
     const Vec3 selectionColour{0.1f, 0.9f, 1.0f};
 
@@ -443,6 +464,44 @@ bool DemoGame::wantsDebugView() const {
 }
 
 // Read every frame (the cameras) or at each throw (the grenade), so changes show at once.
+std::vector<GoldenView> DemoGame::goldenViews() const {
+    std::vector<GoldenView> views;
+
+    for (const DemoGoldenView& golden : demoGoldenViews) {
+        views.push_back(golden.view);
+    }
+
+    return views;
+}
+
+/*
+* Every view looks through the free camera, which holds its pose without input; the lamps start off and the flashlight
+* on, so each switch is toggled only when the view wants it the other way.
+*/
+void DemoGame::prepareGoldenView(World& world, const GoldenView& view) {
+    for (const DemoGoldenView& golden : demoGoldenViews) {
+        if (golden.view.name != view.name) {
+            continue;
+        }
+
+        setControlMode(world, ControlMode::FreeCamera);
+        camera.setPose(golden.cameraPosition, golden.cameraTarget, Vec3{0.0f, 1.0f, 0.0f});
+        freeFlyCamera.takeOver(camera);
+
+        if (golden.lampsOn) {
+            toggleLamps(world);
+        }
+
+        if (!golden.flashlightOn) {
+            toggleFlashlight(world);
+        }
+
+        return;
+    }
+
+    throw std::invalid_argument("Unknown golden view: " + view.name);
+}
+
 void DemoGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("First person camera", [&] {
         visit(firstPersonCamera.getSettings(), visitor);
