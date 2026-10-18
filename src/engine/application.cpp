@@ -81,6 +81,7 @@ void Application::run() {
         profiler.record(workSection, workEnd - workStart);
         profiler.update(workEnd);
         gpuProfiler.update(workEnd);
+
         // 0 means unlimited.
         if (settings.targetFPS > 0) {
             const Uint64 frameDuration =
