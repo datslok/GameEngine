@@ -184,6 +184,15 @@ What both genres actually need from physics: knowing what you hit and moving a c
 - [ ] Particle physics: forces, gravity, semi-implicit Euler integration, bouncing off level geometry (projectiles, grenades). Keep the particle store plain (positions, previous positions, inverse masses) because it will serve three users: grenades here, phase 7's cloth vertices and phase 12's orbital bodies (which need double precision, so the store's vector type should be a parameter)
 - [ ] Frame and system timing (the profiler, moved here from the UI phase): frame time and tick time in the F4 readout, and a simple profiler that times each system per tick. Physics is the first work whose cost grows with the scene, so the switch to the release build below, and every later performance decision, should rest on measurements
 - [ ] `release` build target (`-O2`), with small vec/mat operators moved into headers so they can inline (moved here from the optional list). Rendering never needed it, but physics runs many tiny vector operations per tick, and unoptimised code that calls a function for every `+` will be too slow long before the frame rate drops. `make` stays the `-O0 -g` debug build
+- [ ] Phase 5 documentation (last item of the phase, after everything above is merged): a new "Collision and movement" chapter in `docs/ENGINE_GUIDE.md`, written for a reader with a maths and physics background who is new to engine programming, so it explains the software choices as carefully as the maths. Planned sections:
+  - Shapes as cores plus radii: why spheres and capsules reduce to closest points between points and segments, the segment-segment and segment-box minimisations, and why touching counts as overlapping
+  - Raycasts: the ball quadratic, the capsule side as a 2D circle problem, the slab method for boxes, Moller-Trumbore for triangles, rays that start inside, and why normals face back against the ray
+  - Colliders: shapes in local coordinates, moving them into the world (largest scale for radii, `sum |A_ij| h_j` for turned boxes), and why games click simple shapes rather than meshes
+  - Two-stage picking: shapes first, triangles to confirm, the lower-bound argument that makes skipping safe, carrying the ray into a mesh's coordinates with the affine inverse, and bringing normals back with the normal matrix
+  - The broad phase grid, static level collision against triangle meshes, the kinematic character controller (sliding, stepping, ground snapping, jumping) and particle physics (semi-implicit Euler, bouncing), each as built
+  - Measuring speed: the profiler, and why the `-O2` release build matters for physics
+  - Programming notes met along the way: `std::optional`, `std::variant` and `std::visit`, `std::shared_ptr`, overloading, floating-point tolerances, and squared distances
+  - Update the guide's "Covers" line, and check `README.md` and `CLAUDE.md` still match the code
 
 **Milestone:** walk around a small level in first person with walls, stairs and jumping, and throw a grenade that bounces.
 
