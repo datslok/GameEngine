@@ -13,6 +13,12 @@
 #include <cstring>
 #include <vector>
 
+namespace {
+    // The lit scene's format: 16-bit floats keep about three significant digits from a millionth up to 65504, plenty for
+    // light far brighter than white, at half the memory of 32-bit floats. Alpha is unused but there is no 3-channel format.
+    constexpr SDL_GPUTextureFormat sceneColourFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+}
+
 GpuRenderer::GpuRenderer(SDL_Window* window):
     window(window)
 {
@@ -49,6 +55,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
 
         createPipeline();
         createShadowResources();
+        createToneMapResources();
         debugLines = std::make_unique<DebugLineRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
         createWhiteTexture();
     }
@@ -98,10 +105,9 @@ void GpuRenderer::createPipeline() {
             1  // Shadow tiles.
         );
 
+        // The scene image, not the screen: tone mapping turns it into the screen image afterwards.
         SDL_GPUColorTargetDescription colourTarget{};
-        colourTarget.format =
-            SDL_GetGPUSwapchainTextureFormat(device, window);
-
+        colourTarget.format = sceneColourFormat;
 
         SDL_GPUVertexBufferDescription vertexDescription{};
         vertexDescription.slot = 0;
@@ -311,7 +317,7 @@ void GpuRenderer::createShadowResources() {
 
         // The tile reset: one triangle made in the shader (no vertex input), and a depth test that always passes, so it
         // overwrites the whole tile with the far depth.
-        clearVertexShader = loadShader(device, "assets/shaders/shadow_clear.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+        clearVertexShader = loadShader(device, "assets/shaders/fullscreen_triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
         info.vertex_shader = clearVertexShader;
         info.vertex_input_state = SDL_GPUVertexInputState{};
         info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
@@ -343,14 +349,86 @@ void GpuRenderer::createShadowResources() {
     SDL_ReleaseGPUShader(device, vertexShader);
 }
 
+/*
+* The final pass draws one full-screen triangle (no vertex input, no depth) whose shader reads the scene image texel for
+* texel and writes the tone mapped colour to the screen.
+*/
+void GpuRenderer::createToneMapResources() {
+    const SDL_GPUTextureUsageFlags sceneUsage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    if (!SDL_GPUTextureSupportsFormat(device, sceneColourFormat, SDL_GPU_TEXTURETYPE_2D, sceneUsage)) {
+        throw std::runtime_error("This GPU cannot draw into a 16-bit float texture, which HDR rendering needs");
+    }
+
+    SDL_GPUSamplerCreateInfo samplerInfo{};
+    samplerInfo.min_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_NEAREST;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+
+    sceneSampler = SDL_CreateGPUSampler(device, &samplerInfo);
+
+    if (sceneSampler == nullptr) {
+        throw gpuError("Scene sampler creation failed");
+    }
+
+    SDL_GPUShader* vertexShader = nullptr;
+    SDL_GPUShader* fragmentShader = nullptr;
+
+    try {
+        vertexShader = loadShader(device, "assets/shaders/fullscreen_triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+        fragmentShader = loadShader(device, "assets/shaders/tone_map.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+
+        SDL_GPUColorTargetDescription colourTarget{};
+        colourTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
+
+        SDL_GPUGraphicsPipelineCreateInfo info{};
+        info.vertex_shader = vertexShader;
+        info.fragment_shader = fragmentShader;
+        info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+        info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+        info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        info.target_info.num_color_targets = 1;
+        info.target_info.color_target_descriptions = &colourTarget;
+        info.target_info.has_depth_stencil_target = false;
+
+        toneMapPipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+
+        if (toneMapPipeline == nullptr) {
+            throw gpuError("Tone mapping pipeline creation failed");
+        }
+    }
+    catch (...) {
+        if (fragmentShader != nullptr) {
+            SDL_ReleaseGPUShader(device, fragmentShader);
+        }
+
+        if (vertexShader != nullptr) {
+            SDL_ReleaseGPUShader(device, vertexShader);
+        }
+
+        throw;
+    }
+
+    SDL_ReleaseGPUShader(device, fragmentShader);
+    SDL_ReleaseGPUShader(device, vertexShader);
+}
+
 GpuRenderer::~GpuRenderer() {
     cleanup();
 }
 
-void GpuRenderer::ensureDepthTexture(Uint32 width, Uint32 height) {
+/*
+* The scene image and its depth follow the acquired frame's size, so they are remade when the window is resized. Both
+* are created before either old one is released, so a failure leaves the previous pair intact.
+*/
+void GpuRenderer::ensureFrameTextures(Uint32 width, Uint32 height) {
     if (depthTexture != nullptr &&
-        depthWidth == width &&
-        depthHeight == height) {
+        frameWidth == width &&
+        frameHeight == height) {
         return;
     }
 
@@ -364,19 +442,34 @@ void GpuRenderer::ensureDepthTexture(Uint32 width, Uint32 height) {
     info.num_levels = 1;
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-    SDL_GPUTexture* replacement = SDL_CreateGPUTexture(device, &info);
+    SDL_GPUTexture* depthReplacement = SDL_CreateGPUTexture(device, &info);
 
-    if (replacement == nullptr) {
+    if (depthReplacement == nullptr) {
         throw gpuError("Depth texture creation failed");
+    }
+
+    info.format = sceneColourFormat;
+    info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+
+    SDL_GPUTexture* sceneReplacement = SDL_CreateGPUTexture(device, &info);
+
+    if (sceneReplacement == nullptr) {
+        SDL_ReleaseGPUTexture(device, depthReplacement);
+        throw gpuError("Scene colour texture creation failed");
     }
 
     if (depthTexture != nullptr) {
         SDL_ReleaseGPUTexture(device, depthTexture);
     }
 
-    depthTexture = replacement;
-    depthWidth = width;
-    depthHeight = height;
+    if (sceneColour != nullptr) {
+        SDL_ReleaseGPUTexture(device, sceneColour);
+    }
+
+    depthTexture = depthReplacement;
+    sceneColour = sceneReplacement;
+    frameWidth = width;
+    frameHeight = height;
 }
 
 void GpuRenderer::cleanup() noexcept {
@@ -403,8 +496,23 @@ void GpuRenderer::cleanup() noexcept {
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
             depthTexture = nullptr;
-            depthWidth = 0;
-            depthHeight = 0;
+            frameWidth = 0;
+            frameHeight = 0;
+        }
+
+        if (sceneColour != nullptr) {
+            SDL_ReleaseGPUTexture(device, sceneColour);
+            sceneColour = nullptr;
+        }
+
+        if (sceneSampler != nullptr) {
+            SDL_ReleaseGPUSampler(device, sceneSampler);
+            sceneSampler = nullptr;
+        }
+
+        if (toneMapPipeline != nullptr) {
+            SDL_ReleaseGPUGraphicsPipeline(device, toneMapPipeline);
+            toneMapPipeline = nullptr;
         }
 
         if (pipeline != nullptr) {
@@ -511,7 +619,7 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
             drawShadows(frame, shadows.tiles);
         }
 
-        beginMainPass(swapchainTexture);
+        beginMainPass();
 
         // Pushed uniform data stays in effect for every later draw, so the lights and shadow data are sent once per frame.
         SDL_PushGPUFragmentUniformData(commands, 1, &lights, static_cast<Uint32>(sizeof(lights)));
@@ -529,8 +637,13 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
         stats.drawn = visible.size();
         stats.culled = frame.draws.size() - visible.size();
 
-        // Last, so they are drawn over the finished scene.
-        debugLines->draw(commands, pass, viewProjection, depthWidth, depthHeight);
+        SDL_EndGPURenderPass(pass);
+        pass = nullptr;
+
+        beginToneMapPass(swapchainTexture, settings.toneMapping);
+
+        // Last, so they are drawn over the finished image, in exactly their own colours.
+        debugLines->draw(commands, pass, viewProjection, frameWidth, frameHeight);
     }
     catch (...) {
         // The shadow pass may have stopped part-way, so no cached tile can be trusted.
@@ -559,10 +672,10 @@ SDL_GPUTexture* GpuRenderer::acquireFrame() {
     }
 
     SDL_GPUTexture* swapchainTexture = nullptr;
-    Uint32 frameWidth = 0;
-    Uint32 frameHeight = 0;
+    Uint32 acquiredWidth = 0;
+    Uint32 acquiredHeight = 0;
 
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, window, &swapchainTexture, &frameWidth, &frameHeight)) {
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, window, &swapchainTexture, &acquiredWidth, &acquiredHeight)) {
         const std::runtime_error error = gpuError("Swapchain acquisition failed");
 
         SDL_CancelGPUCommandBuffer(commands);
@@ -584,7 +697,7 @@ SDL_GPUTexture* GpuRenderer::acquireFrame() {
     }
 
     try {
-        ensureDepthTexture(frameWidth, frameHeight);
+        ensureFrameTextures(acquiredWidth, acquiredHeight);
     }
     catch (...) {
         abandonFrame();
@@ -730,14 +843,16 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<S
 }
 
 /*
-* Clears colour and depth, then starts the pass that draws the camera's view into the swapchain image.
+* Clears colour and depth, then starts the pass that draws the camera's view into the scene image. Cycling lets the GPU
+* hand out a fresh copy if last frame's is still being read.
 */
-void GpuRenderer::beginMainPass(SDL_GPUTexture* swapchainTexture) {
+void GpuRenderer::beginMainPass() {
     SDL_GPUColorTargetInfo target{};
-    target.texture = swapchainTexture;
+    target.texture = sceneColour;
     target.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
     target.load_op = SDL_GPU_LOADOP_CLEAR;
-    target.store_op = SDL_GPU_STOREOP_STORE;
+    target.store_op = SDL_GPU_STOREOP_STORE; // The tone mapping pass reads it.
+    target.cycle = true;
 
     SDL_GPUDepthStencilTargetInfo depthTarget{};
     depthTarget.texture = depthTexture;
@@ -823,6 +938,36 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
     SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 3);
 
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
+}
+
+/*
+* Starts the final pass, into the swapchain image, and fills it: the full-screen triangle runs the tone mapping shader on
+* every pixel. The pass stays open for the debug lines. The image is wholly overwritten, so its old contents are not loaded.
+* The screen is ordinary (SDR) for now, so its peak is white.
+*/
+void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings) {
+    const ToneMapUniformData toneMapping = packToneMapping(settings, sdrPeakBrightness);
+
+    SDL_GPUColorTargetInfo target{};
+    target.texture = swapchainTexture;
+    target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    target.store_op = SDL_GPU_STOREOP_STORE;
+
+    pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+
+    if (pass == nullptr) {
+        throw gpuError("Tone mapping pass creation failed");
+    }
+
+    SDL_BindGPUGraphicsPipeline(pass, toneMapPipeline);
+    SDL_PushGPUFragmentUniformData(commands, 0, &toneMapping, static_cast<Uint32>(sizeof(toneMapping)));
+
+    SDL_GPUTextureSamplerBinding sceneBinding{};
+    sceneBinding.texture = sceneColour;
+    sceneBinding.sampler = sceneSampler;
+    SDL_BindGPUFragmentSamplers(pass, 0, &sceneBinding, 1);
+
+    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 }
 
 void GpuRenderer::endFrame() {
@@ -927,10 +1072,10 @@ PresentMode GpuRenderer::getPresentMode() const {
 }
 
 float GpuRenderer::getFrameAspectRatio() const {
-    if (depthWidth == 0 || depthHeight == 0) {
+    if (frameWidth == 0 || frameHeight == 0) {
         throw std::logic_error("No frame dimensions are available");
     }
 
-    return static_cast<float>(depthWidth) /
-           static_cast<float>(depthHeight);
+    return static_cast<float>(frameWidth) /
+           static_cast<float>(frameHeight);
 }

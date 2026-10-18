@@ -3,7 +3,9 @@
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
-#include "core/dither_shared.h"
+
+// Per-pixel noise, which turns each pixel's soft shadow samples.
+#include "dither.glsl"
 
 layout(location = 0) in vec3 worldNormal;
 layout(location = 1) in vec2 textureUv;
@@ -85,8 +87,6 @@ layout(location = 0) out vec4 outputColour;
 // (screen-space derivatives are only defined there, not inside the per-light loops some pixels leave early).
 vec3 positionStepRight;
 vec3 positionStepDown;
-
-float interleavedGradientNoise(vec2 pixel);
 
 /*
 * One light's contribution, already scaled by distance falloff (and the cone, for spotlights).
@@ -303,32 +303,6 @@ float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emi
     return softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, emitterRadius);
 }
 
-// The sRGB curve, as in core/srgb.cpp.
-vec3 linearToSrgb(vec3 linear) {
-    return mix(linear * 12.92, 1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), linear));
-}
-
-vec3 srgbToLinear(vec3 encoded) {
-    return mix(encoded / 12.92, pow((encoded + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), encoded));
-}
-
-/*
-* Dithering against banding. The screen keeps 256 levels per channel, and a slow, dark fade (the flashlight's pool at night)
-* changes by less than one level over many pixels, so it rounds into visible rings. Adding a little noise first, up to half
-* a level either way and different per pixel, makes nearby pixels round to the two levels around the true value in the
-* right proportion, and the eye averages them: the rings become fine grain. Mirrors core/dither.cpp, which tests the maths.
-*/
-float interleavedGradientNoise(vec2 pixel) {
-    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
-}
-
-vec3 ditherForEightBits(vec3 linear) {
-    vec3 encoded = linearToSrgb(max(linear, vec3(0.0)));
-    float noise = interleavedGradientNoise(gl_FragCoord.xy);
-    vec3 nudged = encoded + (noise - 0.5) * (DITHER_STEP_FRACTION / DITHER_LEVELS);
-    return srgbToLinear(clamp(nudged, 0.0, 1.0));
-}
-
 void main() {
     positionStepRight = dFdx(worldPosition);
     positionStepDown = dFdy(worldPosition);
@@ -411,5 +385,5 @@ void main() {
     }
 
     // The surface colour tints scattered light; the highlight keeps the light's own colour; emitted light is added as is.
-    outputColour = vec4(ditherForEightBits(albedo.rgb * (ambient.rgb + diffuse) + specular + emissive.rgb), albedo.a);
+    outputColour = vec4(albedo.rgb * (ambient.rgb + diffuse) + specular + emissive.rgb, albedo.a);
 }

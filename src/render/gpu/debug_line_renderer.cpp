@@ -28,8 +28,9 @@ DebugLineRenderer::~DebugLineRenderer() {
 }
 
 /*
-* Debug lines are drawn as a line list (every two vertices one line), unlit, into the same colour and depth targets as the
-* scene but ignoring depth, so they show through walls: they are for seeing what is hidden.
+* Debug lines are drawn as a line list (every two vertices one line), unlit, onto the finished screen image after tone
+* mapping, so their colours are exactly the ones asked for. There is no depth target there, so they show through walls:
+* they are for seeing what is hidden.
 */
 void DebugLineRenderer::createPipeline(SDL_GPUTextureFormat colourFormat) {
     SDL_GPUShader* vertexShader = nullptr;
@@ -70,10 +71,7 @@ void DebugLineRenderer::createPipeline(SDL_GPUTextureFormat colourFormat) {
 
         info.target_info.num_color_targets = 1;
         info.target_info.color_target_descriptions = &colourTarget;
-        info.target_info.has_depth_stencil_target = true;
-        info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-        info.depth_stencil_state.enable_depth_test = false;
-        info.depth_stencil_state.enable_depth_write = false;
+        info.target_info.has_depth_stencil_target = false;
 
         pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
 

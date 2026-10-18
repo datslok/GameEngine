@@ -10,11 +10,11 @@
 /*
 * Draws a frame's debug lines on top of the finished scene: world lines through the camera, screen lines in window pixels.
 * Owns its pipeline and a vertex buffer that grows when a frame has more lines than it holds.
-* Each frame: upload() before any render pass (copies cannot happen inside one), then draw() at the end of the main pass.
+* Each frame: upload() before any render pass (copies cannot happen inside one), then draw() at the end of the tone mapping pass.
 */
 class DebugLineRenderer {
 public:
-    // Builds the pipeline for colour targets of this format (the swapchain's) with a D32 depth target.
+    // Builds the pipeline for colour targets of this format (the swapchain's), with no depth target.
     DebugLineRenderer(SDL_GPUDevice* device, SDL_GPUTextureFormat colourFormat);
     ~DebugLineRenderer();
 

@@ -24,7 +24,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Shader sources are compiled to .spv at build time; the game only loads the .spv files.
-SKIPPED_ASSET_SUFFIXES = {".vert", ".frag"}
+SKIPPED_ASSET_SUFFIXES = {".vert", ".frag", ".glsl"}
 
 # SDL3_image does not link its image decoders. It loads them with LoadLibrary the first time an image
 # of that type is opened, so they never appear in an import table. Each image format maps to the
