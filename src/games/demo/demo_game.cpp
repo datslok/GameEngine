@@ -103,6 +103,22 @@ namespace {
     constexpr float steepSlopeDegrees = 50.0f;
     constexpr float rampThickness = 0.2f;
 
+    // Floodlights: four masts standing just inside the course's corners, each lamp aimed down across the middle so the
+    // beams cross and fill in each other's shadows, the way a stadium lights its pitch. Brightness falls off as
+    // intensity / (d^2 + r^2): the course is 8 to 14 away from a lamp, which this intensity lights at about 0.3 to 0.5.
+    constexpr float floodlightPoleInset = 0.3f;       // from the slab's edges
+    constexpr float floodlightPoleHalfWidth = 0.15f;
+    constexpr float floodlightHeadOffset = 0.5f;      // the lamp sits this far out from the pole, towards the course
+    constexpr float floodlightAimAcross = 0.3f;       // aims at the point this fraction of the way past the middle
+    constexpr float floodlightIntensity = 40.0f;
+    constexpr float floodlightRange = 25.0f;
+    constexpr float floodlightInnerDegrees = 20.0f;
+    constexpr float floodlightOuterDegrees = 35.0f;
+    constexpr float floodlightSourceRadius = 1.5f;
+    constexpr float floodlightEmitterRadius = 0.15f;  // a big glowing face, so soft-edged shadows
+    const Vec3 floodlightColour{1.0f, 0.97f, 0.92f};  // a cool white, unlike the warm flashlight
+    const Vec3 floodlightHeadHalfSize{0.4f, 0.2f, 0.4f};
+
     /*
     * One block of the course: the unit cube (-1..1) stretched to the half-sizes, turned, then moved to its centre.
     */
@@ -151,6 +167,15 @@ namespace {
         // The ramps on the +x half: the gentle one rising beside the stairs, the steep one beyond the wall.
         course.parts.push_back(courseRamp(cube, stone, 1.5f, 1.0f, 4.0f, gentleSlopeDegrees));
         course.parts.push_back(courseRamp(cube, stone, 1.5f, -7.0f, 3.0f, steepSlopeDegrees));
+
+        // The floodlight poles, from the slab up to the lamps. They are part of the course, so they are solid and stay when
+        // the lamps are switched off.
+        const float poleHalfHeight = (floodlightHeight - obstacleCourseFloorTop) * 0.5f;
+        for (const Vec3& foot : floodlightPoleFeet()) {
+            const Vec3 local = foot - obstacleCourseOrigin;
+            course.parts.push_back(courseBlock(cube, stone, Vec3{local.x, obstacleCourseFloorTop + poleHalfHeight, local.z},
+                                               Vec3{floodlightPoleHalfWidth, poleHalfHeight, floodlightPoleHalfWidth}));
+        }
         return course;
     }
 }
@@ -296,6 +321,9 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(courseEntity, coursePlacement);
     world.add(courseEntity, std::move(course));
 
+    // The floodlights over the course start switched on.
+    toggleFloodlights(world);
+
     // Change this configuration to use another compatible static model. Size and speeds keep CharacterConfig's defaults.
     const CharacterConfig playerConfig{
         .modelPath = "assets/models/Duck.glb",
@@ -337,6 +365,10 @@ void DemoGame::onInput(World& world, const Input& input) {
 
     if (input.wasKeyPressed(Key::L)) {
         toggleLamps(world);
+    }
+
+    if (input.wasKeyPressed(Key::K)) {
+        toggleFloodlights(world);
     }
 
     if (input.wasKeyPressed(Key::F4)) {
@@ -861,4 +893,72 @@ std::optional<std::uint32_t> DemoGame::getHoveredTriangle() const {
 
 const StaticLevel& DemoGame::getLevel() const {
     return staticLevel;
+}
+
+/*
+* One pole just inside each corner of the course's floor slab, standing on it.
+*/
+std::array<Vec3, floodlightCount> floodlightPoleFeet() {
+    const float x = courseHalfWidth - floodlightPoleInset;
+    const float z = courseHalfLength - floodlightPoleInset;
+    std::array<Vec3, floodlightCount> feet;
+    int index = 0;
+    for (const float sideX : {-1.0f, 1.0f}) {
+        for (const float sideZ : {-1.0f, 1.0f}) {
+            feet[index++] = obstacleCourseOrigin + Vec3{sideX * x, obstacleCourseFloorTop, sideZ * z};
+        }
+    }
+    return feet;
+}
+
+const std::vector<Entity>& DemoGame::getFloodlights() const {
+    return floodlights;
+}
+
+/*
+* Off means the lamp entities (spotlight and glowing head) are gone, like the lamp field, so they take no light seats
+* or shadow tiles; the poles are level geometry and stay. Each lamp hangs out from its pole towards the course, high up,
+* and aims at a point past the course's middle, so the four beams cross. Its head glows with the light's colour and does
+* not block the light that comes from inside it.
+*/
+void DemoGame::toggleFloodlights(World& world) {
+    if (!floodlights.empty()) {
+        for (const Entity light : floodlights) {
+            world.destroy(light);
+        }
+        floodlights.clear();
+        return;
+    }
+
+    Material glow;
+    glow.colour = Pixel{0, 0, 0};
+    glow.specularStrength = 0.0f;
+    glow.emissive = floodlightColour;
+
+    for (const Vec3& foot : floodlightPoleFeet()) {
+        const Vec3 towardsMiddle = Vec3{obstacleCourseOrigin.x - foot.x, 0.0f, obstacleCourseOrigin.z - foot.z};
+        Transform placement;
+        placement.position = Vec3{foot.x, floodlightHeight, foot.z} + towardsMiddle.normalized() * floodlightHeadOffset;
+        placement.scale = floodlightHeadHalfSize;
+
+        const Vec3 aim = obstacleCourseOrigin + towardsMiddle * floodlightAimAcross + Vec3{0.0f, obstacleCourseFloorTop, 0.0f};
+
+        ModelRenderer head = makeMeshRenderer(cubeMesh, glow);
+        head.castsShadows = false;
+
+        const Entity light = world.create();
+        world.add(light, placement);
+        world.add(light, std::move(head));
+        world.add(light, SpotLight{
+            .colour = floodlightColour,
+            .intensity = floodlightIntensity,
+            .range = floodlightRange,
+            .direction = aim - placement.position,
+            .innerAngle = radiansFromDegrees(floodlightInnerDegrees),
+            .outerAngle = radiansFromDegrees(floodlightOuterDegrees),
+            .sourceRadius = floodlightSourceRadius,
+            .emitterRadius = floodlightEmitterRadius
+        });
+        floodlights.push_back(light);
+    }
 }
