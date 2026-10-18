@@ -10,7 +10,9 @@
 
 layout(location = 0) in vec3 worldNormal;
 layout(location = 1) in vec2 textureUv;
-layout(location = 2) in vec3 worldPosition;
+// Where the fragment is relative to the camera (camera-relative rendering): world axes, the camera at the origin. Light
+// positions and shadow matrices are measured the same way.
+layout(location = 2) in vec3 relativePosition;
 
 layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 
@@ -42,12 +44,12 @@ struct DirectionalLightData {
 };
 
 struct PointLightData {
-    vec4 positionRange; // xyz: world position, w: range
+    vec4 positionRange; // xyz: position relative to the camera, w: range
     vec4 radiance;      // rgb: colour times intensity, w: radius of the glowing source
 };
 
 struct SpotLightData {
-    vec4 positionRange;     // xyz: world position, w: range
+    vec4 positionRange;     // xyz: position relative to the camera, w: range
     vec4 directionCosOuter; // xyz: unit beam direction, w: cosine of the outer cone angle
     vec4 radianceCosInner;  // rgb: colour times intensity, w: cosine of the inner cone angle
     vec4 sourceRadius;      // x: radius of the glowing source, for the falloff
@@ -55,7 +57,6 @@ struct SpotLightData {
 
 layout(std140, set = 3, binding = 1) uniform LightData {
     vec4 ambient;
-    vec4 cameraPosition; // xyz: where the viewer is
     ivec4 counts;        // x: directional lights used, y: point lights used, z: spotlights used
     DirectionalLightData directional[MAX_DIRECTIONAL_LIGHTS];
     PointLightData points[MAX_POINT_LIGHTS];
@@ -65,7 +66,7 @@ layout(std140, set = 3, binding = 1) uniform LightData {
 // Must match ShadowTileData in render/gpu/shadow_map.h. Over a hundred tiles do not fit in a uniform block (the shader
 // can read only 4 KB of one), so they are in a storage buffer: set 2, after the five samplers.
 struct ShadowTileData {
-    mat4 matrix; // the tile's view-projection, the same one the shadow pass drew with
+    mat4 matrix; // the shadow pass's view-projection, for points measured from the camera
     vec4 offset; // normal offset against acne: x per unit of distance from the light, y fixed
     vec4 rect;   // where the tile is in the atlas, 0..1: xy corner, zw size
     vec4 lens;   // perspective tiles only (else zeros): x near, y far plane, z world size of a texel per unit of distance
@@ -221,7 +222,7 @@ int pointShadowFace(vec3 fromLight) {
 * Texels cover more of the world further from a light in a perspective view, hence the part that grows with distance.
 */
 vec3 offsetForShadow(int tile, vec3 normal, float distanceToLight) {
-    return worldPosition + normal * (shadowTiles[tile].offset.x * distanceToLight + shadowTiles[tile].offset.y);
+    return relativePosition + normal * (shadowTiles[tile].offset.x * distanceToLight + shadowTiles[tile].offset.y);
 }
 
 /*
@@ -272,7 +273,7 @@ const vec2 poissonDisc[16] = vec2[](
 );
 
 float linearShadowDepth(float depth, float nearPlane, float farPlane) {
-    return farPlane * nearPlane / (farPlane - depth * (farPlane - nearPlane));
+    return farPlane * nearPlane / (nearPlane + depth * (farPlane - nearPlane));
 }
 
 float blockerSearchTexels(float emitterRadius, float receiverDepth, float nearPlane, float texelPerUnit) {
@@ -285,7 +286,7 @@ float penumbraTexels(float emitterRadius, float receiverDepth, float blockerDept
     return clamp(worldWidth / (receiverDepth * texelPerUnit), minShadowFilterTexels, maxShadowFilterTexels);
 }
 
-// Where a world point lands in the atlas (xy) and its stored-depth value (z), for one tile.
+// Where a point (measured from the camera) lands in the atlas (xy) and its stored-depth value (z), for one tile.
 vec3 atlasPoint(int tile, vec3 position) {
     vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
     vec3 projected = clip.xyz / clip.w;
@@ -296,7 +297,7 @@ vec3 atlasPoint(int tile, vec3 position) {
 /*
 * Percentage-closer soft shadows (PCSS) for a perspective tile: how much of a glowing area of radius emitterRadius the
 * point sees. Directional boxes, and lights without an emitter size, use the plain 3x3 filter.
-* 1. Blocker search: look around the point for stored depths nearer the light than it, and average their distances.
+* 1. Blocker search: look around the point for stored depths nearer the light than it (larger, with reversed-Z), and average their distances.
 * 2. Penumbra: from that, how wide the soft edge is here (wider the further the point is behind the blocker).
 * 3. Filter: average sixteen depth comparisons spread over that width.
 * A wide filter on a sloping surface would compare the surface with itself further along, where it is nearer to or
@@ -350,7 +351,7 @@ float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
         vec2 uv = clamp(here.xy + turn * poissonDisc[i] * searchRadius * atlasTexel.xy, lowest, highest);
         float stored = textureLod(shadowDepths, uv, 0.0).r;
 
-        if (stored < here.z + dot(depthSlope, uv - here.xy)) {
+        if (stored > here.z + dot(depthSlope, uv - here.xy)) {
             blockerDistances += linearShadowDepth(stored, lens.x, lens.y);
             blockers += 1.0;
         }
@@ -374,13 +375,13 @@ float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
 
 // A point light has six tiles in a row, one per cube face; the face is picked from the direction to the point.
 float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emitterRadius) {
-    vec3 position = offsetForShadow(firstTile, normal, length(worldPosition - lightPosition));
+    vec3 position = offsetForShadow(firstTile, normal, length(relativePosition - lightPosition));
     return softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, emitterRadius);
 }
 
 void main() {
-    positionStepRight = dFdx(worldPosition);
-    positionStepDown = dFdy(worldPosition);
+    positionStepRight = dFdx(relativePosition);
+    positionStepDown = dFdy(relativePosition);
 
     // Read the textures at this fragment's interpolated UV coordinate. glTF packs roughness in green and metallic in blue.
     vec4 albedo = texture(colourTexture, textureUv) * baseColour;
@@ -393,7 +394,8 @@ void main() {
     vec3 specular = vec3(0.0);
 
     float normalLength = length(worldNormal);
-    vec3 cameraOffset = cameraPosition.xyz - worldPosition;
+    // The camera is at the origin, so the way to it is minus the fragment's position.
+    vec3 cameraOffset = -relativePosition;
     float cameraDistance = length(cameraOffset);
 
     // Without a usable normal there is no way to tell which side faces a light, so only ambient applies, seen head-on.
@@ -414,7 +416,7 @@ void main() {
         }
 
         for (int i = 0; i < counts.y; ++i) {
-            vec3 offset = points[i].positionRange.xyz - worldPosition;
+            vec3 offset = points[i].positionRange.xyz - relativePosition;
             float range = points[i].positionRange.w;
             float distance = length(offset);
 
@@ -435,7 +437,7 @@ void main() {
         }
 
         for (int i = 0; i < counts.z; ++i) {
-            vec3 offset = spots[i].positionRange.xyz - worldPosition;
+            vec3 offset = spots[i].positionRange.xyz - relativePosition;
             float distance = length(offset);
 
             if (distance <= 0.0 || distance >= spots[i].positionRange.w) {

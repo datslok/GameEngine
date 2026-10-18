@@ -138,8 +138,11 @@ private:
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
 
-    // This frame's camera view and projection.
+    // This frame's camera view and projection in world space, for culling and the debug lines, and the same for points
+    // measured from the camera (cameraOrigin), which the main pass draws with (camera-relative rendering).
     Mat4 viewProjection = Mat4::identity();
+    Mat4 relativeViewProjection = Mat4::identity();
+    Vec3 cameraOrigin{0.0f, 0.0f, 0.0f};
 
     RenderStats stats;
 

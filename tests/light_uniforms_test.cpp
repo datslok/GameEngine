@@ -73,11 +73,23 @@ namespace {
         assert(data.counts[1] == 0);
     }
 
-    // Specular highlights depend on where the viewer is, so the camera position travels with the lights.
-    void testCameraPositionIsPacked() {
-        const LightUniformData data = packLighting(FrameLighting{}, Vec3{1.0f, 2.0f, 3.0f});
+    // The shader works relative to the camera (it sits at the origin there), so light positions arrive measured from it.
+    // Directions do not depend on where anything is, so they are unchanged.
+    void testPositionsAreRelativeToTheCamera() {
+        FrameLighting lighting;
+        lighting.pointLights.push_back(pointLightAt(Vec3{1.0f, 2.0f, 3.0f}, 5.0f));
 
-        assert(nearlyEqual(data.cameraPosition, 1.0f, 2.0f, 3.0f, 0.0f));
+        PlacedSpotLight spot{};
+        spot.position = Vec3{-4.0f, 6.0f, 0.0f};
+        spot.light.direction = Vec3{0.0f, -1.0f, 0.0f};
+        spot.light.range = 8.0f;
+        lighting.spotLights.push_back(spot);
+
+        const LightUniformData data = packLighting(lighting, Vec3{0.5f, 1.0f, -2.0f});
+
+        assert(nearlyEqual(data.points[0].positionRange, 0.5f, 1.0f, 5.0f, 5.0f));
+        assert(nearlyEqual(data.spots[0].positionRange, -4.5f, 5.0f, 2.0f, 8.0f));
+        assert(nearlyEqual(data.spots[0].directionCosOuter[1], -1.0f));
     }
 
     // Lights past the limits are dropped; the first ones collected win.
@@ -230,6 +242,6 @@ void testLightUniforms() {
     testZeroDirectionIsSkipped();
     testPointLightIsPacked();
     testPointLightWithoutRangeIsSkipped();
-    testCameraPositionIsPacked();
+    testPositionsAreRelativeToTheCamera();
     testCountsAreCapped();
 }

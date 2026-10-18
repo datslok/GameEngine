@@ -6,19 +6,21 @@ layout(location = 2) in vec2 uv;
 
 layout(location = 0) out vec3 worldNormal;
 layout(location = 1) out vec2 textureUv;
-layout(location = 2) out vec3 worldPosition;
+layout(location = 2) out vec3 relativePosition;
 
+// Camera-relative rendering (render/gpu/camera_relative.h): positions are measured from the camera along the world's
+// axes, so the numbers stay small and precise however far from the world's origin the camera is.
 layout(std140, set = 1, binding = 0) uniform TransformData {
-    mat4 transform;
-    mat4 model;
+    mat4 transform;    // the camera-relative view-projection times the camera-relative model matrix
+    mat4 model;        // places the vertex relative to the camera
     mat4 normalMatrix; // Inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if the object is squashed flat).
 };
 
 void main() {
     gl_Position = transform * vec4(position, 1.0);
 
-    // Point lights need to know where each fragment is in the world.
-    worldPosition = (model * vec4(position, 1.0)).xyz;
+    // Point lights need to know where each fragment is, relative to the camera like the lights themselves.
+    relativePosition = (model * vec4(position, 1.0)).xyz;
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;

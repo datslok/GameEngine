@@ -3,7 +3,7 @@
 #include <algorithm>
 
 float linearShadowDepth(float depth, float nearPlane, float farPlane) {
-    return farPlane * nearPlane / (farPlane - depth * (farPlane - nearPlane));
+    return farPlane * nearPlane / (nearPlane + depth * (farPlane - nearPlane));
 }
 
 /*

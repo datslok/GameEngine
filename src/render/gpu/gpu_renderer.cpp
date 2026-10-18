@@ -1,6 +1,7 @@
 #include "render/gpu/gpu_renderer.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/debug_line_renderer.h"
+#include "render/gpu/camera_relative.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/gpu_helpers.h"
 #include "render/gpu/light_uniforms.h"
@@ -244,7 +245,8 @@ void GpuRenderer::createPipeline() {
 
         info.depth_stencil_state.enable_depth_test = true;
         info.depth_stencil_state.enable_depth_write = true;
-        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+        // Reversed-Z: nearer surfaces have larger depths, so the nearest is the greatest.
+        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER;
         pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
 
         if (pipeline == nullptr) {
@@ -307,9 +309,9 @@ void GpuRenderer::createShadowResources() {
     samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    // Lit when our depth is no further from the light than the nearest surface it saw.
+    // Lit when our depth is no further from the light than the nearest surface it saw: with reversed-Z, at least as large.
     samplerInfo.enable_compare = true;
-    samplerInfo.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+    samplerInfo.compare_op = SDL_GPU_COMPAREOP_GREATER_OR_EQUAL;
 
     shadowSampler = SDL_CreateGPUSampler(device, &samplerInfo);
 
@@ -390,7 +392,7 @@ void GpuRenderer::createShadowResources() {
 
         info.depth_stencil_state.enable_depth_test = true;
         info.depth_stencil_state.enable_depth_write = true;
-        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER; // reversed-Z, as in the main pass
 
         shadowPipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
 
@@ -696,9 +698,12 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
         camera.setAspectRatio(getFrameAspectRatio());
 
         // The projection follows OpenGL's depth range; the GPU's differs, and that is the renderer's business, so it is converted here.
-        // View and projection are combined once per frame, not once per object.
+        // View and projection are combined once per frame, not once per object. The world-space version decides what
+        // is seen; the main pass draws with the camera-relative one (see camera_relative.h).
         viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
-        const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::ZeroToOne);
+        relativeViewProjection = cameraRelativeViewProjection(camera);
+        cameraOrigin = camera.getPosition();
+        const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
         // When there are more lights than seats, the ones that matter most here get them, remembering last frame's choice.
         const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory, frame.frameSeconds,
@@ -712,7 +717,7 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
             prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
             [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
-        const LightUniformData lights = packLighting(prioritized.lighting, camera.getPosition());
+        const LightUniformData lights = packLighting(prioritized.lighting, cameraOrigin);
         const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
 
         // Copies must happen outside render passes, so the debug lines are uploaded first.
@@ -878,7 +883,7 @@ void GpuRenderer::drawShadows(const FrameDescription& frame, const std::vector<S
         }
 
         // The light's own view decides, not the camera's: things off screen can still throw shadows into view.
-        std::vector<std::size_t> casters = shadowCasters(frame.draws, Frustum::fromClipMatrix(tile.matrix, ClipDepth::ZeroToOne));
+        std::vector<std::size_t> casters = shadowCasters(frame.draws, Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero));
         const std::uint64_t signature = shadowCasterSignature(frame.draws, casters);
 
         if (shadowMemory.isCurrent(tile, signature)) {
@@ -963,7 +968,7 @@ void GpuRenderer::beginMainPass() {
 
     SDL_GPUDepthStencilTargetInfo depthTarget{};
     depthTarget.texture = depthTexture;
-    depthTarget.clear_depth = 1.0f;
+    depthTarget.clear_depth = gpuFarDepth;
     depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
     depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
     depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -1003,16 +1008,19 @@ const GpuMesh& GpuRenderer::bindMesh(MeshHandle meshHandle) {
 void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Material& material) {
     const GpuMesh& mesh = bindMesh(meshHandle);
 
-    const Mat4 transform = viewProjection * model;
+    // The object placed relative to the camera before any matrix multiplies it (camera-relative rendering).
+    const Mat4 relativeModel = relativeTo(model, cameraOrigin);
+    const Mat4 transform = relativeViewProjection * relativeModel;
 
-    // Once per object here rather than once per vertex in the shader.
+    // Once per object here rather than once per vertex in the shader. Moving the origin does not turn anything, so
+    // the world model matrix gives the same normals.
     const Mat4 normals = normalMatrix(model);
 
     // The shader expects three consecutive column-major matrices:
-    // the complete transform, the model matrix, and the normal matrix.
+    // the complete transform, the camera-relative model matrix, and the normal matrix.
     float matrixData[48]{};
     writeColumnMajor(transform, matrixData);
-    writeColumnMajor(model, matrixData + 16);
+    writeColumnMajor(relativeModel, matrixData + 16);
     writeColumnMajor(normals, matrixData + 32);
 
     SDL_PushGPUVertexUniformData(commands, 0, matrixData, static_cast<Uint32>(sizeof(matrixData)));

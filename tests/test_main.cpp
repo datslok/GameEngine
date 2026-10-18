@@ -45,6 +45,7 @@ void testGltfMaterials();
 void testSmoothNormals();
 void testNormalMatrix();
 void testGpuDepthRange();
+void testCameraRelative();
 void testMipLevels();
 void testSrgb();
 void testFrameDescription();
@@ -129,6 +130,7 @@ int main(){
     testSmoothNormals();
     testNormalMatrix();
     testGpuDepthRange();
+    testCameraRelative();
     testMipLevels();
     testSrgb();
     testFrameDescription();

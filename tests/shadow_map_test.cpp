@@ -11,7 +11,7 @@ namespace {
         return std::abs(actual - expected) < tolerance;
     }
 
-    // Where a world point lands in a tile's image: x and y from -1 to 1 across the tile, depth from 0 (near) to 1 (far).
+    // Where a world point lands in a tile's image: x and y from -1 to 1 across the tile, depth from 1 (near) to 0 (far).
     Vec3 project(const Mat4& tileMatrix, const Vec3& point) {
         const Vec4 clip = tileMatrix * Vec4{point.x, point.y, point.z, 1.0f};
         return Vec3{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
@@ -83,13 +83,13 @@ namespace {
         }
     }
 
-    // Depth grows with distance from the light, from 0 at the near plane to 1 at the far plane (the light's range).
-    void testDepthGrowsWithDistance() {
+    // Depth shrinks with distance from the light (reversed-Z), from 1 at the near plane to 0 at the far plane (the light's range).
+    void testDepthShrinksWithDistance() {
         const Mat4 face = pointShadowFaceMatrix(Vec3{0.0f, 0.0f, 0.0f}, 0, 50.0f);
 
-        assert(nearlyEqual(project(face, Vec3{shadowNearPlane, 0.0f, 0.0f}).z, 0.0f));
-        assert(nearlyEqual(project(face, Vec3{50.0f, 0.0f, 0.0f}).z, 1.0f));
-        assert(project(face, Vec3{10.0f, 0.0f, 0.0f}).z < project(face, Vec3{20.0f, 0.0f, 0.0f}).z);
+        assert(nearlyEqual(project(face, Vec3{shadowNearPlane, 0.0f, 0.0f}).z, 1.0f));
+        assert(nearlyEqual(project(face, Vec3{50.0f, 0.0f, 0.0f}).z, 0.0f));
+        assert(project(face, Vec3{10.0f, 0.0f, 0.0f}).z > project(face, Vec3{20.0f, 0.0f, 0.0f}).z);
     }
 }
 
@@ -144,8 +144,8 @@ namespace {
         // Things between the view and the sun still cast into it, even well outside the view.
         assert(landsInside(project(view, centre - sunlight.normalized() * 40.0f)));
 
-        // Further from the sun means deeper.
-        assert(project(view, centre).z < project(view, centre + sunlight.normalized() * 5.0f).z);
+        // Further from the sun means a smaller depth (reversed-Z).
+        assert(project(view, centre).z > project(view, centre + sunlight.normalized() * 5.0f).z);
 
         // How far the box reaches is a setting: twice the distance covers a point the default box leaves out.
         const Vec3 farAhead = camera.getPosition() + camera.getForward() * 50.0f;
@@ -370,13 +370,16 @@ namespace {
         assert(plan.tiles.size() == 14);
         assertTilesFitTheAtlas(plan);
 
-        // The shader gets the same matrices the shadow pass draws with, column-major.
-        const Mat4 secondFace = pointShadowFaceMatrix(Vec3{1.0f, 0.0f, 0.0f}, 1, 20.0f, plan.tiles[3].size);
+        // The shadow pass draws with the face's world matrix. The shader gets the same view of the light placed relative
+        // to the camera (the shader's origin), column-major.
+        const Vec3 light{1.0f, 0.0f, 0.0f};
+        const Mat4 secondFace = pointShadowFaceMatrix(light, 1, 20.0f, plan.tiles[3].size);
+        const Mat4 secondFaceForShader = pointShadowFaceMatrix(light - makeOverviewCamera().getPosition(), 1, 20.0f, plan.tiles[3].size);
 
         for (int row = 0; row < 4; ++row) {
             for (int column = 0; column < 4; ++column) {
                 assert(nearlyEqual(plan.tiles[3].matrix.values[row][column], secondFace.values[row][column]));
-                assert(nearlyEqual(plan.tileData[3].matrix[column * 4 + row], secondFace.values[row][column]));
+                assert(nearlyEqual(plan.tileData[3].matrix[column * 4 + row], secondFaceForShader.values[row][column]));
             }
         }
 
@@ -589,16 +592,78 @@ namespace {
         assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][1], 0.0f));
         assert(nearlyEqual(plan.uniforms.spotShadowStrengths[0][0], 0.7f));
     }
+
+    // A tile's shader matrix, from the column-major numbers the shader reads.
+    Mat4 shaderMatrix(const ShadowTileData& data) {
+        Mat4 matrix;
+
+        for (int row = 0; row < 4; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                matrix.values[row][column] = data.matrix[column * 4 + row];
+            }
+        }
+
+        return matrix;
+    }
+
+    /*
+    * The shadow pass draws in world space (so a still light's tiles stay cached however the camera moves), while the
+    * shader works relative to the camera. Both matrices must put every point on the same texel at the same depth: the
+    * shader's matrix, given the point measured from the camera, lands where the pass's matrix put the world point.
+    */
+    void testShaderMatricesAreCameraRelative() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.3f, -1.0f, -0.4f}, Vec3{1.0f, 1.0f, 1.0f}, 1.0f, true});
+        lighting.spotLights.push_back(spotLightAt(Vec3{6.0f, 4.0f, 9.0f}, true));
+        lighting.pointLights.push_back(pointLightAt(Vec3{5.0f, 1.5f, 8.0f}, true));
+
+        const Camera camera = makeTestCamera(Vec3{7.0f, 3.0f, 12.0f});
+        const ShadowPlan plan = planShadows(lighting, camera);
+        const Vec3 points[4] = {Vec3{6.0f, 0.0f, 7.0f}, Vec3{4.0f, 0.5f, 9.5f}, Vec3{7.5f, 1.0f, 6.0f}, Vec3{5.0f, 0.2f, 3.0f}};
+        int compared = 0;
+        int tilesCompared = 0;
+
+        for (std::size_t i = 0; i < plan.tiles.size(); ++i) {
+            if (plan.tiles[i].size == 0) {
+                continue;
+            }
+
+            const int comparedBefore = compared;
+
+            const Mat4 forShader = shaderMatrix(plan.tileData[i]);
+
+            for (const Vec3& point : points) {
+                const Vec3 drawn = project(plan.tiles[i].matrix, point);
+
+                // Only points the tile covers are ever looked up in it (behind a cube face, w is near zero or negative).
+                if (!landsInside(drawn)) {
+                    continue;
+                }
+
+                const Vec3 lookedUp = project(forShader, point - camera.getPosition());
+
+                assert(nearlyEqual(lookedUp.x, drawn.x, 1e-4f) && nearlyEqual(lookedUp.y, drawn.y, 1e-4f));
+                assert(nearlyEqual(lookedUp.z, drawn.z, 1e-5f));
+                ++compared;
+            }
+
+            tilesCompared += compared > comparedBefore ? 1 : 0;
+        }
+
+        // The directional box, the spotlight and at least one cube face were all checked.
+        assert(tilesCompared >= 3);
+    }
 }
 
 void testShadowMap() {
     testFacesInViewGetTiles();
     testFacesOutOfViewAreLeftOut();
     testShadowStrengthIsPassed();
+    testShaderMatricesAreCameraRelative();
     testFaceFollowsTheLargestAxis();
     testEachFaceLooksAlongItsAxis();
     testEveryDirectionLandsInsideItsFace();
-    testDepthGrowsWithDistance();
+    testDepthShrinksWithDistance();
     testOrthographic();
     testSpotShadowCoversTheCone();
     testDirectionalShadowCoversTheViewNearTheCamera();

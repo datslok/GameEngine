@@ -19,8 +19,8 @@ inline constexpr float minShadowFilterTexels = static_cast<float>(MIN_SHADOW_FIL
 inline constexpr float maxShadowFilterTexels = static_cast<float>(MAX_SHADOW_FILTER_TEXELS);
 inline constexpr float maxBlockerSearchTexels = static_cast<float>(MAX_BLOCKER_SEARCH_TEXELS);
 
-// Depth from the shadow map (the GPU's 0..1) back to distance from the light along the view's axis. Perspective depth
-// is f (d - n) / (d (f - n)), so d = f n / (f - depth (f - n)).
+// Depth from the shadow map (the GPU's reversed 1..0) back to distance from the light along the view's axis.
+// Reversed perspective depth is n (f - d) / (d (f - n)), so d = f n / (n + depth (f - n)).
 float linearShadowDepth(float depth, float nearPlane, float farPlane);
 
 /*

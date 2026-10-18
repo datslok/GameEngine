@@ -79,7 +79,7 @@ namespace {
 
         for (int face = 0; face < 6; ++face) {
             const Mat4 widest = pointShadowFaceMatrix(lightPosition, face, range, smallestShadowTileSize);
-            inView[static_cast<std::size_t>(face)] = Frustum::fromClipMatrix(widest, ClipDepth::ZeroToOne).mayIntersect(cameraView);
+            inView[static_cast<std::size_t>(face)] = Frustum::fromClipMatrix(widest, ClipDepth::OneToZero).mayIntersect(cameraView);
         }
 
         return inView;
@@ -133,15 +133,18 @@ namespace {
         lens[2] = 2.0f * halfWidth / static_cast<float>(tileSize);
     }
 
-    void addTile(ShadowPlan& plan, ShadowTile tile, const Mat4& matrix, float offsetPerDistance, float fixedOffset) {
-        tile.matrix = matrix;
+    // drawMatrix is the world-space view the shadow pass draws with; shaderMatrix the same view for points measured from
+    // the camera, which is how the main shader sees them.
+    void addTile(ShadowPlan& plan, ShadowTile tile, const Mat4& drawMatrix, const Mat4& shaderMatrix, float offsetPerDistance,
+                 float fixedOffset) {
+        tile.matrix = drawMatrix;
         plan.tiles.push_back(tile);
 
         ShadowTileData data{};
 
         for (int row = 0; row < 4; ++row) {
             for (int column = 0; column < 4; ++column) {
-                data.matrix[column * 4 + row] = matrix.values[row][column];
+                data.matrix[column * 4 + row] = shaderMatrix.values[row][column];
             }
         }
 
@@ -261,6 +264,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, cons
 
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout, const ShadowSettings& settings) {
     const FrameLighting selected = selectDrawableLights(lighting);
+    const Vec3 origin = camera.getPosition();
     ShadowPlan plan{};
 
     std::fill(&plan.uniforms.pointTiles[0][0], &plan.uniforms.pointTiles[0][0] + pointLightVec4s * 4, -1);
@@ -339,9 +343,12 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
         if (request.kind == ShadowKind::Directional) {
             // A box texel is the same size everywhere, so its offset is fixed rather than growing with distance.
+            // The box is snapped to texels in world space (see directionalShadowMatrix), so the shader's version is the
+            // same box shifted to the camera, rather than one snapped around the camera, which would crawl as it moves.
             const DirectionalLight& light = selected.directionalLights[request.slot];
             plan.uniforms.directionalTiles[request.slot] = firstTile;
-            addTile(plan, request.tiles[0], directionalShadowMatrix(light.direction, camera, settings), 0.0f,
+            const Mat4 box = directionalShadowMatrix(light.direction, camera, settings);
+            addTile(plan, request.tiles[0], box, box * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
                     settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(standardShadowTileSize));
         }
         else if (request.kind == ShadowKind::Spot) {
@@ -351,8 +358,11 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             plan.uniforms.spotEmitterRadii[request.slot / 4][request.slot % 4] = placed.light.emitterRadius;
 
             const float halfWidth = withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size);
+            // Built again from the light's offset from the camera, so the subtraction happens once, on positions, before
+            // any matrix (see camera_relative.h).
             addTile(plan, request.tiles[0],
                     spotShadowMatrix(placed.position, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
+                    spotShadowMatrix(placed.position - origin, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
                     perspectiveOffset(halfWidth, request.size, settings.normalOffsetTexels), 0.0f);
             setLens(plan, halfWidth, placed.light.range, request.size);
         }
@@ -372,6 +382,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
                     : ShadowTile{Mat4::identity(), 0, 0, 0};
 
                 addTile(plan, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
+                        pointShadowFaceMatrix(placed.position - origin, face, placed.light.range, request.size),
                         perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size, settings.normalOffsetTexels), 0.0f);
                 setLens(plan, withEdgeMargin(1.0f, request.size), placed.light.range, request.size);
             }
