@@ -96,9 +96,9 @@ Covers the input and "separate simulation and rendering" parts of the original s
 |---|---|
 | 7. Shading and lighting: point lights | Phase 4 (rendering upgrades) |
 | 8. Particle physics: forces, gravity, integration | Phase 5 (collision and movement) |
-| 9. Rigid-body physics: orientation, angular velocity, mass and inertia, collision | Collision in phase 5; full rigid-body dynamics in phase 13 |
+| 9. Rigid-body physics: orientation, angular velocity, mass and inertia, collision | Collision in phase 5; rigid bodies and joints in phase 8 (ragdolls); stacking and box contacts in phase 14 |
 | 10. Engine architecture: scene management, entities and components, resource loading | Phase 3 |
-| 10. Engine architecture: debug tools | Debug drawing in phase 4; profiler in phase 5; debug UI in phase 8 |
+| 10. Engine architecture: debug tools | Debug drawing in phase 4; profiler in phase 5; debug UI in phase 9 |
 
 ## Phase 3: Engine architecture (done, Oct 8 2026)
 
@@ -183,7 +183,7 @@ What both genres actually need from physics: knowing what you hit and moving a c
 - [x] Kinematic character controller: capsule, sliding along walls, stepping up stairs, ground snapping, gravity and jumping (first person has a camera-only placeholder jump until then, `fps-jump`). Tuned to feel like Overwatch (community-measured numbers: 5.5 m/s walking, 90% backwards, 3 m/s crouched, a 5.72 m/s jump, 17.5 m/s' gravity with quadratic drag to a 30 m/s terminal speed, slope-consistent speed and speed-keeping air steering from the 2018 movement update)
   - [x] The controller (`character-controller`): `CharacterController` component and `moveCharacter`/`moveCharacters` (`physics/character_controller`): move in substeps of at most half the radius, push out of level contacts deepest first (ground straight up by depth / n_y, walls along the normal removing the velocity into them, steep slopes sideways only while walking), edges of ledges up to `stepHeight` count as ground so the capsule rides up steps, settling onto the ground every tick in 0.05 drops (snapping, no hovering), semi-implicit gravity with drag, jumps only from the ground, ground and air acceleration. The MOBA duck walks through it (`updateCharacters` takes the level; `MoveToController` now gives a velocity), climbs the course's stairs and ramps, and right-clicks aim at the level. F4 shows its ground normal, slope and substeps
   - [x] First-person body (`first-person-body`): `FirstPersonBody` (`gameplay/first_person_body`), an invisible capsule entity with a `CharacterController`; once a frame WASD becomes a wished velocity turned by the camera's yaw and normalised (`firstPersonWishVelocity`: 5.5 m/s, 90% straight back, 93.3% on the back diagonals, 3 m/s crouched, 1.5 times sprinting with Shift), Space a jump on a fresh press, Ctrl a crouch (shorter capsule, eyes eased down over 0.1 s, standing only where the full capsule fits: `characterFits`); the camera sits at the body's interpolated eyes and `FirstPersonCameraController` only looks; F1 from the free camera drops the body where the camera is. The camera-only walking and placeholder jump are gone
-- [x] Particle physics (`particle-physics`): a `Particle` component (`physics/particle`) for balls that fly and bounce off the level. Flight under constant gravity uses the average of the starting and ending velocities (`fly`), which is exact, so throws follow the true parabola; collisions are swept, not stepped: `sweepSphere` finds the first touch of a moving sphere against the level (the centre's path raycast against each triangle grown by the radius: two offset faces and three edge capsules), so nothing passes through a wall at any speed. Bounces use restitution and Coulomb friction as impulses (`bounceVelocity`), which also gives sliding the kinetic friction deceleration mu g; arriving slower than a resting speed does not bounce, so a ball settles and then rests exactly still. The demo throws grenades with G in first person (`gameplay/grenade`: 15 m/s along the view, gone after 5 s). The shared part for cloth and orbits is the per-particle maths; cloth keeps its own array store in phase 7, and the functions become templates over the vector type when phase 12 adds `DVec3`
+- [x] Particle physics (`particle-physics`): a `Particle` component (`physics/particle`) for balls that fly and bounce off the level. Flight under constant gravity uses the average of the starting and ending velocities (`fly`), which is exact, so throws follow the true parabola; collisions are swept, not stepped: `sweepSphere` finds the first touch of a moving sphere against the level (the centre's path raycast against each triangle grown by the radius: two offset faces and three edge capsules), so nothing passes through a wall at any speed. Bounces use restitution and Coulomb friction as impulses (`bounceVelocity`), which also gives sliding the kinetic friction deceleration mu g; arriving slower than a resting speed does not bounce, so a ball settles and then rests exactly still. The demo throws grenades with G in first person (`gameplay/grenade`: 15 m/s along the view, gone after 5 s). The shared part for cloth and orbits is the per-particle maths; cloth keeps its own array store in phase 7, and the functions become templates over the vector type when phase 13 adds `DVec3`
 - [ ] Frame and system timing (the profiler, moved here from the UI phase): frame time and tick time in the F4 readout, and a simple profiler that times each system per tick. Physics is the first work whose cost grows with the scene, so the switch to the release build below, and every later performance decision, should rest on measurements
 - [ ] `release` build target (`-O2`), with small vec/mat operators moved into headers so they can inline (moved here from the optional list). Rendering never needed it, but physics runs many tiny vector operations per tick, and unoptimised code that calls a function for every `+` will be too slow long before the frame rate drops. `make` stays the `-O0 -g` debug build
 - [ ] Phase 5 documentation (last item of the phase, after everything above is merged): a new "Collision and movement" chapter in `docs/ENGINE_GUIDE.md`, written for a reader with a maths and physics background who is new to engine programming, so it explains the software choices as carefully as the maths. Planned sections:
@@ -202,11 +202,11 @@ What both genres actually need from physics: knowing what you hit and moving a c
 
 Light that bounces: the biggest visual step up from today's direct-only lighting, and done early because it is one of the two things we most want to see. It needs nothing from phase 5 except the profiler and release build to measure it, so it could even start alongside it. Everything here also serves later phases: the HDR target settles where the HUD goes, compute pipelines run the cloth solver, and physically based materials carry fabric shading.
 
-- [ ] HDR off-screen render target and tone mapping: render the scene to a high-precision off-screen texture, then a final pass rolls brightness above 1 off smoothly instead of clipping to white and writes the 8-bit screen image. The dither moves from `triangle.frag` into that final pass (the off-screen image needs none). It comes before the HUD (phase 8) because it changes where everything drawn on top of the scene goes, so the HUD is built once, over the finished image. Bloom and DDGI build on it
+- [ ] HDR off-screen render target and tone mapping: render the scene to a high-precision off-screen texture, then a final pass rolls brightness above 1 off smoothly instead of clipping to white and writes the 8-bit screen image. The dither moves from `triangle.frag` into that final pass (the off-screen image needs none). It comes before the HUD (phase 9) because it changes where everything drawn on top of the scene goes, so the HUD is built once, over the finished image. Bloom and DDGI build on it
   - Once tone mapping exists, consider physical light units plus a camera exposure for all lights. Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers), with the exposure step mapping the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen. Until then, the demo keeps the moon sphere's glow and the moonlight as separate artistic dials, because the renderer clips at 1.0
 - [ ] Bloom: bright and emissive pixels blurred and added back before tone mapping, giving the moon and lamps a soft halo
-- [ ] SDL_GPU compute pipelines: the engine's first compute shaders (`SDL_CreateGPUComputePipeline`, compiled by `glslc` like the others), reading and writing storage buffers and textures. One foundation shared by DDGI's probe updates below, the GPU cloth solver (phase 7) and, if needed, Barnes-Hut gravity (phase 12)
-- [ ] Physically based materials (glTF metallic-roughness): what glTF models are authored for. Bounce light depends on how much light each surface reflects, so materials should be physically sensible before global illumination is tuned; fabric shading (phase 9) and the hardware ray-tracing backend (phase 13) build on them too
+- [ ] SDL_GPU compute pipelines: the engine's first compute shaders (`SDL_CreateGPUComputePipeline`, compiled by `glslc` like the others), reading and writing storage buffers and textures. One foundation shared by DDGI's probe updates below, the GPU cloth solver (phase 7) and, if needed, Barnes-Hut gravity (phase 13)
+- [ ] Physically based materials (glTF metallic-roughness): what glTF models are authored for. Bounce light depends on how much light each surface reflects, so materials should be physically sensible before global illumination is tuned; fabric shading (phase 10) and the hardware ray-tracing backend (phase 14) build on them too
 - [ ] Dynamic global illumination with a probe grid (DDGI, "Dynamic Diffuse Global Illumination", Majercik et al. 2019, built in the form of its 2021 production follow-up, "Scaling Probe-Based Real-Time Dynamic Global Illumination for Production"). Today light stops at the first surface it hits, so a room lit through one window is black wherever the sunbeam does not land, and the ambient light is a flat stand-in for all the light bouncing around. DDGI measures that bounced light at points in space each frame and lets every surface look it up. Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINATION.md](docs/ILLUMINATION.md)
   - Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), and the compute pipelines above
   - [ ] Probe grid: a 3D grid of light probes over the level, one every 1-2 m. Each stores the light arriving from every direction in a small octahedral texture (the sphere of directions unfolded onto a square, e.g. 8x8 texels), and all probes are packed into one atlas, like the shadow tiles. Diffuse light changes slowly across space, so a coarse grid captures it
@@ -216,7 +216,7 @@ Light that bounces: the biggest visual step up from today's direct-only lighting
   - [ ] Probe relocation and probe states: a grid ignores the level's shape, so some probes land inside geometry, where most rays hit back faces, or a hair from a surface. Over a few start-up iterations move each one (less than half a cell) out through the nearest back face or away from a too-close surface, against the static level only. Then give each a state: off (still buried, or sees no surface), vigilant (a static surface within about a cell: always updated, even off screen, because it carries bounce light), sleeping (nothing nearby: not traced) or awake (a sleeping probe inside a moving object's grown box, checked every frame). Sleeping saved 30-50% of the probe work in the 2021 paper
   - Needs first: ray tracing that reports back faces (below)
   - [ ] Sampling in `triangle.frag`: each pixel blends the 8 probes at the corners of the grid cell around it, weighted by distance (trilinear), visibility (the Chebyshev test, from a point moved off the surface by one tunable "self-shadow bias", mostly towards the viewer) and a soft test of whether each probe lies in front of the surface, then adds the result as diffuse light in place of the flat ambient
-  - [ ] Ray tracing without RTX: rays are traced against a simplified copy of the scene, signed distance fields or a coarse voxel grid of the level, built in compute shaders, because SDL_GPU has no ray tracing. Probes only need blurry diffuse light, so coarse geometry is enough. Phase 13's hardware ray-tracing backend can replace this later
+  - [ ] Ray tracing without RTX: rays are traced against a simplified copy of the scene, signed distance fields or a coarse voxel grid of the level, built in compute shaders, because SDL_GPU has no ray tracing. Probes only need blurry diffuse light, so coarse geometry is enough. Phase 14's hardware ray-tracing backend can replace this later
   - [ ] Cascades for large worlds: a dense grid near the camera and coarser ones further out (each about twice the spacing of the last). The dense grid is a tracking window: when the camera moves a cell, the plane of probes behind it is reused in front (a circular buffer, so nothing is copied) and only that plane starts from scratch. Each volume fades out across its outer cell, sampled densest first, with the camera window's fade region centred on the camera so a jumping plane does not pop. A single dense grid over a whole MOBA map or open level would cost too much memory and too many rays
   - [ ] Debug view: draw each probe as a small sphere shaded with its stored light (and off, sleeping and vigilant probes marked by colour), so leaks, dark probes stuck in walls and slow updates are visible at a glance
 
@@ -224,7 +224,7 @@ Light that bounces: the biggest visual step up from today's direct-only lighting
 
 ## Phase 7: Cloth simulation
 
-The physics half of the dressmaking game, early because it is the other thing we most want to see: fabric that drapes, folds and piles up without passing through itself. Builds on phase 5's particle store and collision shapes and phase 6's compute pipelines. Cloth code lives in its own module on top of the core, like the FPS and MOBA code. Garments, sewing and the game itself follow in phase 9, once phase 8 has skinned characters to dress.
+The physics half of the dressmaking game, early because it is the other thing we most want to see: fabric that drapes, folds and piles up without passing through itself. Builds on phase 5's particle store and collision shapes and phase 6's compute pipelines. Cloth code lives in its own module on top of the core, like the FPS and MOBA code. Garments, sewing and the game itself follow in phase 10, once phase 9 has skinned characters to dress.
 
 - [ ] Dynamic meshes: a GPU upload path for meshes whose vertices change every frame, with normals recomputed each time (today a mesh is uploaded once and never changes)
 - [ ] Particle store for cloth: the sheet's vertices as plain arrays (positions, previous positions, velocities, inverse masses, with 0 for pinned points), contiguous for the cache and for upload to the GPU, inside the cloth component, reusing phase 5's per-particle functions (`fly`, `bounceVelocity`)
@@ -240,10 +240,26 @@ The physics half of the dressmaking game, early because it is the other thing we
 
 **Milestone:** a sheet pinned at two corners drapes over a sphere; a sheet dropped onto itself folds into a pile with no intersections (the self-collision stress test); a silk sheet and a denim sheet fall visibly differently.
 
-## Phase 8: Animation, UI and audio
+## Phase 8: Active ragdolls
 
-- [ ] Parent/child entity hierarchy: attach entities to others and to skeleton joints (a weapon to a hand, a hat to a head, a turret to a vehicle). Skeletal animation is the first thing that needs it, and phase 11's first-person weapon uses it
+Euphoria-style characters: a simulated body held up by joint motors and kept standing by balance controllers, so a shove makes it stagger, step, fall with its hands out and get up again. Layers 1-5 of the plan in `docs/RAGDOLLPLAN.md` (read it first: it holds the papers' formulas and numbers and how each layer fits the engine); layer 6, following animation clips, comes in phase 9 with skeletal animation. Placed straight after cloth because the rigid-body solver is phase 7's XPBD with rotation and inertia added. Real-world values throughout, as in the papers: gravity 9.81 for ragdolls (the character controller keeps its Overwatch 17.5), SI masses, torques and push forces, so the papers' results can be reproduced. Until phase 9 the body is drawn as its capsules, a mannequin.
+
+- [ ] Quaternions (`quaternions`): `math/quat` (multiply, rotate a vector, axis-angle, matrix, slerp, the log map for joint errors), and `Transform::rotation` switched from Euler angles to a `Quat`, with `interpolate` using slerp. A tumbling body passes through gimbal lock, and blending three angles separately does not give the in-between orientation. Phase 9's glTF skins need quaternions too
+- [ ] Rigid bodies (`rigid-bodies`, moved here from phase 14's rigid-body dynamics): a `RigidBody` component (mass, body-frame inertia, velocity, angular velocity, a compound of capsules) and an XPBD substep solver (Müller et al. 2020; 10 substeps per tick, 1.2 kHz), with gyroscopic torque, capsule contacts against the static level from `contact(capsule, triangle)`, restitution 0 and friction 0.8. Capsules only: there is no oriented box. `Mesh::capsule` to draw them. Tests: momentum and angular momentum conserved in flight, the tennis-racket theorem's tumble, a dropped capsule rests without jitter, and the same run twice is bit-identical
+- [ ] Joints (`joints`): ball and hinge `Joint`s with swing-twist limits and soft limits, capsule-against-capsule self-collision between unjoined parts, and the ragdoll builder from `RagdollBodySettings` (1.8 m and 70 kg by default, anthropometric proportions, feet as two parallel capsules for a flat sole). Each part is an entity with a capsule `Collider`, so picking finds ragdolls with no new code
+- [ ] Joint drives (`joint-drives`): an inertia-scaled PD servo per joint, stiffness as a natural frequency and damping as a damping ratio (GTA V's units), applied as equal and opposite torques on the two bodies, capped, and scaled by a global strength and health
+- [ ] Gravity compensation (`gravity-compensation`): feed-forward torques from virtual forces (τ = Jᵀ F) that hold the body up, so the drives stay soft; faded out when the centre of mass leaves the feet's support area, so a falling body goes limp
+- [ ] Standing balance and stepping (`standing-balance`, `stepping`): the torso held upright in world space with the stance hip taking the balance of the torques (SIMBICON), foot placement from the inverted-pendulum capture point (Coros 2010), two-bone IK, a step state machine, and failure detection. Headless test: a 300 N push for 0.1 s at the chest leaves it standing 3 s later
+- [ ] Behaviours and supervisor (`falling`, `behaviour-supervisor`): behaviours that score the situation and write targets for the body parts they own (balance, stagger, catch fall, arms windmill, head look, get up), run by a supervisor; handover between a character's kinematic capsule and its ragdoll and back
+- [ ] Debug view and demo: R spawns a ragdoll in front of the camera, E shoves what the view ray hits; F4 draws the capsules, joint frames, centre of mass, support area, next foot target and the active behaviours
+
+**Milestone:** shove a capsule mannequin off the obstacle course's steps: it staggers, takes recovery steps, falls with its hands out and gets back up.
+
+## Phase 9: Animation, UI and audio
+
+- [ ] Parent/child entity hierarchy: attach entities to others and to skeleton joints (a weapon to a hand, a hat to a head, a turret to a vehicle). Skeletal animation is the first thing that needs it, and phase 12's first-person weapon uses it
 - [ ] Skeletal animation from glTF skins: joints, skinning in the vertex shader, playing and blending clips
+- [ ] Ragdolls follow animation (layer 6 of `docs/RAGDOLLPLAN.md`): a table from skeleton bones to ragdoll bodies, clip poses as the joint drives' targets (a powered ragdoll), skinned characters drawn from the bodies, softening and shaped impulses on a hit, then a smooth blend back into a matching clip or get-up animation
 - [ ] Text rendering with a bitmap font (debug overlays already have a stroke font, `debugText`, good for numbers but not for real UI)
 - [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after phase 6's tone mapping (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker (an emissive plane for now) into a HUD ring of constant pixel size
 - [ ] Debug UI and in-game stats (entity count, and phase 5's frame, tick and per-system timings)
@@ -252,9 +268,9 @@ The physics half of the dressmaking game, early because it is the other thing we
 
 **Milestone:** an animated character that walks and idles with something held in its hand, with a HUD, sounds and a debug overlay.
 
-## Phase 9: Garments and a dressmaking game
+## Phase 10: Garments and a dressmaking game
 
-A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them into garments and see them hang and move on a body. Needs phase 8's skinned characters and phase 6's physically based materials.
+A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them into garments and see them hang and move on a body. Needs phase 9's skinned characters and phase 6's physically based materials.
 
 **Garments**
 - [ ] Sewing patterns: 2D panel outlines triangulated into cloth meshes, with UVs from the flat layout
@@ -271,7 +287,7 @@ A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them int
 
 **Milestone:** a simple skirt sewn from two panels hangs on a mannequin and swings as it turns; then a garment follows an animated character as it walks.
 
-## Phase 10: Networking
+## Phase 11: Networking
 
 Builds on the fixed tick and the headless simulation. Commands go up, snapshots come down.
 
@@ -286,7 +302,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 
 **Milestone:** two clients move around the same level through a dedicated server, with smooth movement under 100 ms of simulated latency.
 
-## Phase 11: Genre demos
+## Phase 12: Genre demos
 
 **Engine**
 - [ ] GPU instancing for many identical meshes (minion waves, the lamp field, asteroids): one draw call for all copies instead of one each
@@ -294,7 +310,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 **FPS**
 - [ ] Hitscan and projectile weapons, recoil and spread. Projectiles and grenades (phase 5's particles) must also hit moving things, characters and props, not only the static level: sweep the sphere against the moving colliders' shapes too (a sphere or capsule is a raycast against the shape grown by the radius, like `sweepSphere`; a box needs a rounded-box sweep)
 - [ ] Health, damage, death and respawn
-- [ ] First-person weapon model (attached with phase 8's hierarchy) and camera feel (bob, field of view)
+- [ ] First-person weapon model (attached with phase 9's hierarchy) and camera feel (bob, field of view)
 
 **MOBA**
 - [ ] Pathfinding: A* on a grid first, then a navigation mesh
@@ -305,7 +321,7 @@ Builds on the fixed tick and the headless simulation. Commands go up, snapshots 
 
 **Milestone:** a small online deathmatch, and a 1v1 lane with minions and towers.
 
-## Phase 12: Orbital simulation (a solar system)
+## Phase 13: Orbital simulation (a solar system)
 
 A fourth kind of world: the Sun, planets and moons at real scale, moving under gravity. Like cloth, it lives in its own module on top of the core. It needs phase 5's particles and release build but no collision, animation or networking, so it can move earlier whenever we want it sooner.
 
@@ -318,15 +334,15 @@ A fourth kind of world: the Sun, planets and moons at real scale, moving under g
 - [ ] N-body gravity with a symplectic integrator (leapfrog / velocity Verlet). Ordinary integrators slowly pump energy into or out of an orbit, so planets spiral outwards or fall into the Sun; symplectic ones keep the energy error bounded forever. Tested: total energy stays within a small band over many orbits
 - [ ] Its own simulation clock with time warp: many substeps per 120 Hz tick so a year can pass in seconds, with the step size adapting to how close bodies come to each other. A naively varied step breaks the symplectic guarantee and the energy drifts again, so the adaptivity has to keep it (for example a time-symmetric step choice, or fixed-step substepping only for the bodies in a close pass)
 - [ ] "On rails" Keplerian orbits for distant bodies: the position comes from the exact ellipse at any time, with no integration error and almost no cost. A body switches to full simulation when the player comes near (and back when they leave), so a spacecraft's thrust or a close pass can change its path
-- [ ] Barnes-Hut (or the fast multipole method) for thousands of bodies, such as an asteroid belt: a distant cluster pulls like a single mass at its centre, as a far galaxy does, turning the O(n²) pair sum into O(n log n). Drawn with phase 11's instancing
+- [ ] Barnes-Hut (or the fast multipole method) for thousands of bodies, such as an asteroid belt: a distant cluster pulls like a single mass at its centre, as a far galaxy does, turning the O(n²) pair sum into O(n log n). Drawn with phase 12's instancing
 
 **Milestone:** the Sun, planets and Moon orbit stably for 100 simulated years at high time warp, and you can fly the free camera from Earth to Neptune without jitter.
 
-## Phase 13: Later and optional
+## Phase 14: Later and optional
 
 Ideas with no fixed place and nothing waiting on them: pick one up when a game needs it.
 
-- [ ] Full rigid-body dynamics: orientation, angular velocity, mass and inertia, collision response, stacking. This includes particles colliding with each other (grenades knocking each other about), left out of phase 5 because piles need this phase's iterative contact solver: find pairs with the uniform grid over each particle's swept box, detect the touch by sweeping in relative motion (a ray against a sphere of the summed radii, so fast crossings are not missed), and respond by running the relative velocity through `bounceVelocity` and sharing the change by mass (an equal and opposite impulse, so momentum is conserved), with the two materials' restitution and friction averaged
+- [ ] More rigid-body dynamics, extending phase 8's solver (bodies, joints and capsule contacts come with the ragdolls): oriented boxes with box contacts (separating axes), stacking and piles of crates. This includes particles colliding with each other (grenades knocking each other about), left out of phase 5 because piles need this phase's iterative contact solver: find pairs with the uniform grid over each particle's swept box, detect the touch by sweeping in relative motion (a ray against a sphere of the summed radii, so fast crossings are not missed), and respond by running the relative velocity through `bounceVelocity` and sharing the change by mass (an equal and opposite impulse, so momentum is conserved), with the two materials' restitution and friction averaged
 - [ ] Clustered shading (once there are hundreds of lights): each pixel loops only over the lights that reach its part of the view, instead of every seated light
 - [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
 - [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw

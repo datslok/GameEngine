@@ -123,7 +123,7 @@ Optionally multiply by screen-space ambient occlusion on directly visible pixels
 
 ## Reflections from probes [2021]
 
-Second and later bounces of glossy reflections can sample the irradiance probes in the reflected direction instead of tracing further rays: a reflection forced to maximum roughness. Not needed until phase 13's ray-traced reflections exist; noted so the probe data structure is not designed in a way that rules it out.
+Second and later bounces of glossy reflections can sample the irradiance probes in the reflected direction instead of tracing further rays: a reflection forced to maximum roughness. Not needed until phase 14's ray-traced reflections exist; noted so the probe data structure is not designed in a way that rules it out.
 
 ## Costs measured
 
