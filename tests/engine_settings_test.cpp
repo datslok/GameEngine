@@ -21,9 +21,16 @@ namespace {
         const EngineSettings settings;
         assert(settings.gpuValidation == isDebugBuild);
     }
+
+    // SDL_GPU draws until the Vulkan renderer passes every golden image (phase 6b), and the choice is read once.
+    void testGraphicsApiDefaultsToSdlGpu() {
+        const EngineSettings settings;
+        assert(settings.graphicsApi == GraphicsApi::SdlGpu);
+    }
 }
 
 void testEngineSettings() {
     testBuildIsKnown();
     testGpuValidationFollowsTheBuild();
+    testGraphicsApiDefaultsToSdlGpu();
 }

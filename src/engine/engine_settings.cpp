@@ -6,11 +6,17 @@ namespace {
 
     static_assert(static_cast<int>(PresentMode::Vsync) == 0 && static_cast<int>(PresentMode::Immediate) == 2,
                   "presentModeNames lists the modes by their values");
+
+    // In the order of GraphicsApi's values.
+    constexpr std::array<const char*, 2> graphicsApiNames{"SDL_GPU", "Vulkan"};
+
+    static_assert(static_cast<int>(GraphicsApi::SdlGpu) == 0 && static_cast<int>(GraphicsApi::Vulkan) == 1,
+                  "graphicsApiNames lists the APIs by their values");
 }
 
 /*
 * The tick rate and frame clamp are read once, when the timestep is built, and GPU validation when the device is, so
-* they are start-up fields: loaded from the settings file, shown but not changed by the debug UI.
+* they are start-up fields, as is the graphics API: loaded from the settings file, shown but not changed by the debug UI.
 */
 void visit(EngineSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Target FPS", settings.targetFPS, {.min = 0, .max = 10000, .sliderMax = 500, .unit = "(0: unlimited)"});
@@ -20,6 +26,7 @@ void visit(EngineSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Max frame seconds", settings.maxFrameSeconds,
                   {.min = 0.001f, .max = 10.0f, .sliderMax = 1.0f, .unit = "s", .applies = FieldApplies::AtStartup});
     visitor.field("GPU validation", settings.gpuValidation, FieldApplies::AtStartup);
+    visitor.choice("Graphics API", settings.graphicsApi, graphicsApiNames, FieldApplies::AtStartup);
     visitor.group("Render", [&] {
         visit(settings.render, visitor);
     });

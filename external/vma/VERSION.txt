@@ -1,0 +1,4 @@
+Vulkan Memory Allocator v3.4.0 (commit 3aa9212), https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+include/vk_mem_alloc.h and the licence, unmodified. vk_mem_alloc.cpp is ours: it compiles the implementation once,
+fetching Vulkan's functions at run time (volk loads them, so there are no static prototypes to link against).
+To update: copy vk_mem_alloc.h from a newer tag and note it here.

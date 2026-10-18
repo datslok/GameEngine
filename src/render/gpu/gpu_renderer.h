@@ -12,6 +12,8 @@
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_mapping.h"
 #include "render/captured_frame.h"
+#include "render/present_mode.h"
+#include "render/render_backend.h"
 #include "render/render_stats.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
@@ -28,27 +30,14 @@
 #include <vector>
 
 /*
-* How finished frames reach the screen.
-* Vsync: each frame waits its turn for a screen refresh. No tearing, but queued frames add latency. Always supported.
-* Mailbox: no tearing, and a newer frame replaces one still waiting, so the screen shows the freshest frame. Low latency.
-* Immediate: frames are shown as soon as they are ready. Lowest latency, but the image can tear.
-*/
-
-enum class PresentMode {
-    Vsync,
-    Mailbox,
-    Immediate
-};
-
-/*
 * Draws meshes with SDL's GPU API (Vulkan backend) into a window it does not own.
 * The window must outlive the renderer, so declare the window first wherever both are members.
 */
-class GpuRenderer {
+class GpuRenderer final : public RenderBackend {
 public:
     // validation checks every graphics call (EngineSettings::gpuValidation): slow, for development.
     GpuRenderer(SDL_Window* window, bool validation);
-    ~GpuRenderer();
+    ~GpuRenderer() override;
 
     // GPU resources must have a single owner.
     GpuRenderer(const GpuRenderer&) = delete;
@@ -58,43 +47,42 @@ public:
     // The settings are read fresh each frame, so changes show at once.
     // ui is the debug UI's finished frame (ImGui::GetDrawData()), drawn over everything; null for none.
     // Returns false if no frame was available (a minimized window), in which case nothing was drawn.
-    bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr);
+    bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr) override;
 
     // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
     // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU.
     CapturedFrame capture(const FrameDescription& frame, const RenderSettings& settings, Uint32 width, Uint32 height,
-                          const DisplayOutput& output);
+                          const DisplayOutput& output) override;
 
     // The GPU's name as the driver reports it, for keeping golden images per GPU.
-    std::string getDeviceName() const;
+    std::string getDeviceName() const override;
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear).
-    void uploadMesh(const IndexedMesh& mesh);
-    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding);
+    void uploadMesh(const IndexedMesh& mesh) override;
+    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding) override;
 
-    std::size_t getMeshCount() const;
-    std::size_t getTextureCount() const;
+    std::size_t getMeshCount() const override;
+    std::size_t getTextureCount() const override;
 
-
-    SDL_GPUDevice* getDevice() const;
 
     // The debug UI's drawing (ImGui's SDL_GPU backend), into the overlay image. Start it once an ImGui context exists,
     // and stop it before that context is destroyed; stopping waits for the GPU to finish with the UI's buffers.
-    void startDebugUi();
-    void stopDebugUi();
+    void startDebugUi() override;
+    void beginDebugUiFrame() override;
+    void stopDebugUi() override;
 
     // Ask for a present mode. Falls back to Vsync when the GPU does not support it, and returns the mode now in use.
-    PresentMode setPresentMode(PresentMode requested);
-    PresentMode getPresentMode() const;
+    PresentMode setPresentMode(PresentMode requested) override;
+    PresentMode getPresentMode() const override;
 
-    const RenderStats& getLastFrameStats() const;
+    const RenderStats& getLastFrameStats() const override;
 
     // How the last frame reached the screen: SDR or HDR, with its peak and white level.
-    const DisplayOutput& getDisplayOutput() const;
+    const DisplayOutput& getDisplayOutput() const override;
 
     // The aspect ratio of the last frame render() drew. Read after it returns true.
-    float getFrameAspectRatio() const;
+    float getFrameAspectRatio() const override;
 
 private:
     SDL_Window* window = nullptr;

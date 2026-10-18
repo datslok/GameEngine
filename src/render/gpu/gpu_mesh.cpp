@@ -1,4 +1,5 @@
 #include "render/gpu/gpu_mesh.h"
+#include "render/mesh_upload.h"
 
 #include <cstdint>
 #include <cstring>
@@ -25,38 +26,12 @@ GpuMesh::GpuMesh(SDL_GPUDevice* device, const IndexedMesh& mesh):
         throw std::invalid_argument("GpuMesh requires a GPU device");
     }
 
-    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3 != 0) {
-        throw std::invalid_argument(
-            "GpuMesh requires vertices and whole triangles of indices"
-        );
-    }
-
-    // Upload sizes are 32-bit.
-    const std::size_t maxBytes = std::numeric_limits<Uint32>::max();
-
-    if (mesh.vertices.size() > maxBytes / sizeof(MeshVertex) ||
-        mesh.indices.size() > maxBytes / sizeof(Uint32) ||
-        mesh.vertices.size() * sizeof(MeshVertex) > maxBytes - mesh.indices.size() * sizeof(Uint32)) {
-        throw std::overflow_error("Combined mesh upload is too large");
-    }
-
-    // An out-of-range index would make the GPU read past the vertex buffer.
-    for (const std::uint32_t index : mesh.indices) {
-        if (index >= mesh.vertices.size()) {
-            throw std::out_of_range("Mesh index references a missing vertex");
-        }
-    }
+    checkMeshUpload(mesh);
 
     const std::vector<MeshVertex>& vertices = mesh.vertices;
     const std::vector<std::uint32_t>& indices = mesh.indices;
-
-    const Uint32 vertexBytes = static_cast<Uint32>(
-        vertices.size() * sizeof(MeshVertex)
-    );
-
-    const Uint32 indexBytes = static_cast<Uint32>(
-        indices.size() * sizeof(Uint32)
-    );
+    const Uint32 vertexBytes = ::vertexBytes(mesh);
+    const Uint32 indexBytes = ::indexBytes(mesh);
 
     indexCount = static_cast<Uint32>(indices.size());
 

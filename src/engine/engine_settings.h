@@ -2,7 +2,8 @@
 
 #include "core/settings_visitor.h"
 #include "core/build_info.h"
-#include "render/gpu/gpu_renderer.h"
+#include "render/present_mode.h"
+#include "render/render_backend.h"
 #include "render/gpu/render_settings.h"
 
 #include <cstdint>
@@ -29,6 +30,10 @@ struct EngineSettings {
     // It catches mistakes early but costs a lot of CPU time, so it is on in debug builds and off in release. Read once,
     // at start-up: the GPU device is created with it.
     bool gpuValidation = isDebugBuild;
+
+    // Which renderer draws the frames while phase 6b ports it from SDL_GPU to Vulkan (render/render_backend.h). Read
+    // once, at start-up. Goes away with SDL_GPU.
+    GraphicsApi graphicsApi = GraphicsApi::SdlGpu;
 
     RenderSettings render;
 };

@@ -7,6 +7,7 @@
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/tone_map_uniforms.h"
+#include "render/window_display.h"
 #include "scene/culling.h"
 
 #include "imgui/imgui_impl_sdlgpu3.h"
@@ -111,12 +112,7 @@ void GpuRenderer::setSwapchainComposition(SDL_GPUSwapchainComposition compositio
 * float image is asked only when HDR comes on, since that query talks to the driver.
 */
 DisplayCapabilities GpuRenderer::readDisplayCapabilities() const {
-    const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
-
-    DisplayCapabilities capabilities;
-    capabilities.hdrEnabled = SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
-    capabilities.hdrHeadroom = SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f);
-    capabilities.sdrWhiteLevel = SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f);
+    DisplayCapabilities capabilities = readWindowDisplay(window);
 
     if (capabilities.hdrEnabled == displayCapabilities.hdrEnabled) {
         capabilities.hdrSwapchainSupported = displayCapabilities.hdrSwapchainSupported;
@@ -688,10 +684,6 @@ void GpuRenderer::cleanup() noexcept {
     // The window belongs to its owner, so it is released from the device above but never destroyed here.
 }
 
-SDL_GPUDevice* GpuRenderer::getDevice() const {
-    return device;
-}
-
 /*
 * ImGui's backend draws into the overlay image, whose format never changes, so switching HDR on or off does not touch it.
 */
@@ -709,6 +701,10 @@ void GpuRenderer::startDebugUi() {
     }
 
     debugUiStarted = true;
+}
+
+void GpuRenderer::beginDebugUiFrame() {
+    ImGui_ImplSDLGPU3_NewFrame();
 }
 
 void GpuRenderer::stopDebugUi() {

@@ -1,3 +1,4 @@
 Dear ImGui v1.92.9b (commit f1cc2ae), https://github.com/ocornut/imgui
-The core files and the SDL3 and SDL_GPU backends (from backends/), unmodified. The makefile compiles every .cpp here
-with the engine. To update: copy the same files from a newer tag and note it here.
+The core files and the SDL3, SDL_GPU and Vulkan backends (from backends/), unmodified. The makefile compiles every .cpp here
+with the engine (the Vulkan backend through volk: IMGUI_IMPL_VULKAN_USE_VOLK). To update: copy the same files from a newer tag
+and note it here.
