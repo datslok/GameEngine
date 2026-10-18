@@ -2,6 +2,7 @@
 #include "games/demo/demo_game.h"
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
+#include "gameplay/first_person_body.h"
 #include "math/transform.h"
 #include "physics/character_controller.h"
 #include "physics/collider.h"
@@ -14,6 +15,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 
 namespace {
@@ -190,6 +192,77 @@ namespace {
         assert(!world.get<CharacterMovement>(duck).isMoving());
         assert(nearlyEqual(world.get<Transform>(duck).position.y, obstacleCoursePlatformTop));
         assert(world.get<CharacterController>(duck).grounded);
+    }
+
+    // A focused window with the mouse captured, as in first person, holding the given keys.
+    Input firstPersonInput(std::initializer_list<Key> held) {
+        Input input;
+        input.beginFrame();
+        input.setWindowSize(Vec2{1600.0f, 900.0f});
+        input.setWindowState(true, true, false);
+        for (const Key key : held) {
+            input.pressKey(key);
+        }
+        return input;
+    }
+
+    // One frame of the engine loop for a demo game: input, the ticks that fall in it, then the per-frame update.
+    void runFrame(DemoGame& game, World& world, const Input& input, int& ticks) {
+        game.onInput(world, input);
+        runTicks(game, world, 1, ticks);
+        game.onUpdate(world, input, tickSeconds, 1.0f);
+    }
+
+    // First person is a body walking through the level: holding W walks it forward at Overwatch's 5.5 m/s, the camera
+    // rides at its eyes, and Space jumps it off the ground.
+    void testFirstPersonWalking() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::FirstPerson, false};
+        game.onInit(world, assets);
+        const Entity body = game.getFirstPersonBody();
+        assert(world.isAlive(body));
+        const Vec3 start = world.get<Transform>(body).position;
+        int ticks = 0;
+
+        for (int frame = 0; frame < 120; ++frame) {
+            runFrame(game, world, firstPersonInput({Key::W}), ticks);
+        }
+        const Vec3 walked = world.get<Transform>(body).position - start;
+        assert(std::abs(walked.z + 5.5f) < 0.2f && std::abs(walked.x) < 1e-3f);
+        const Vec3 eye = firstPersonEyePosition(world, body, 1.0f);
+        assert(nearlyEqual(game.getCamera().getPosition().x, eye.x));
+        assert(nearlyEqual(game.getCamera().getPosition().y, eye.y));
+        assert(nearlyEqual(game.getCamera().getPosition().z, eye.z));
+
+        runFrame(game, world, firstPersonInput({Key::Space}), ticks);
+        runFrame(game, world, firstPersonInput({}), ticks);
+        assert(!world.get<CharacterController>(body).grounded);
+        assert(world.get<Transform>(body).position.y > start.y);
+    }
+
+    // F1 from the free camera drops the body where the camera is, and it falls onto whatever is below: here the course.
+    void testDropIntoFirstPerson() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::FreeCamera, true};
+        game.onInit(world, assets);
+        game.getCamera().setPosition(obstacleCourseOrigin + Vec3{0.0f, 6.0f, 0.0f});
+
+        Input pressF1;
+        pressF1.beginFrame();
+        pressF1.setWindowState(true, false, false);
+        pressF1.pressKey(Key::F1);
+        game.onUpdate(world, pressF1, tickSeconds, 1.0f);
+
+        const Entity body = game.getFirstPersonBody();
+        assert(world.get<Transform>(body).position.y > 4.0f);
+        int ticks = 0;
+        for (int frame = 0; frame < 240; ++frame) {
+            runFrame(game, world, firstPersonInput({}), ticks);
+        }
+        assert(world.get<CharacterController>(body).grounded);
+        assert(nearlyEqual(world.get<Transform>(body).position.y, obstacleCourseFloorTop));
     }
 
     // Floodlights over the course: four shadow-casting spotlights on poles at its corners, high up, each beam's centre line
@@ -392,6 +465,8 @@ void testDemoGame() {
     testDuckClimbsCourse();
     testClickOnPlatform();
     testFloodlights();
+    testFirstPersonWalking();
+    testDropIntoFirstPerson();
     testLampsToggle();
     testLampsFly();
 

@@ -295,3 +295,7 @@ void moveCharacters(World& world, const StaticLevel& level, float seconds) {
         moveCharacter(controller, transform.position, level, seconds);
     });
 }
+
+bool characterFits(const CharacterControllerSettings& settings, const Vec3& feet, const StaticLevel& level) {
+    return !overlapsLevel(settings, feet, level);
+}

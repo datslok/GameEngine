@@ -65,6 +65,7 @@ void testTriangleContact();
 void testStaticLevel();
 void testCharacterController();
 void testAngles();
+void testFirstPersonBody();
 
 int main(){
     testPixelBuffer();
@@ -132,6 +133,7 @@ int main(){
     testStaticLevel();
     testCharacterController();
     testAngles();
+    testFirstPersonBody();
 
     std::cout << "All tests passed!\n";
     return 0;

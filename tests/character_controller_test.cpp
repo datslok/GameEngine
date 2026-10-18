@@ -314,6 +314,20 @@ namespace {
         assert((fastFeet - slowFeet).length() < 0.05f);
     }
 
+    // Whether a capsule would fit somewhere (what standing up from a crouch needs to know): standing on the floor fits,
+    // under a low roof or poking into a wall does not.
+    void testFits() {
+        StaticLevel level = flatLevel();
+        level.add(block(Vec3{2.0f, 1.5f, -5.0f}, Vec3{10.0f, 2.5f, 5.0f}));
+        const CharacterControllerSettings standing;
+        assert(characterFits(standing, Vec3{0.0f, 0.0f, 0.0f}, level));
+        assert(!characterFits(standing, Vec3{4.0f, 0.0f, 0.0f}, level));
+        CharacterControllerSettings crouched;
+        crouched.height = 1.2f;
+        assert(characterFits(crouched, Vec3{4.0f, 0.0f, 0.0f}, level));
+        assert(!characterFits(standing, Vec3{0.0f, -0.5f, 0.0f}, level));
+    }
+
     // The system moves every entity with a controller and a Transform.
     void testSystem() {
         const StaticLevel flat = flatLevel();
@@ -344,5 +358,6 @@ void testCharacterController() {
     testFalling();
     testAirControl();
     testTickRate();
+    testFits();
     testSystem();
 }

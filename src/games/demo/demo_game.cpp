@@ -1,6 +1,7 @@
 #include "games/demo/demo_game.h"
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
+#include "gameplay/first_person_body.h"
 #include "gameplay/spinner.h"
 #include "math/angles.h"
 #include "math/transform.h"
@@ -303,6 +304,9 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(ground, groundPlacement);
     world.add(ground, makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass));
 
+    // The player's own body for first person: an invisible capsule standing where the first-person view starts.
+    firstPersonBody = spawnFirstPersonBody(world, Vec3{0.0f, 0.0f, 0.0f});
+
     // The obstacle course: plain stone blocks for the character controller to walk on, climb and bump into.
     Material courseStone;
     courseStone.colour = Pixel{150, 148, 140};
@@ -357,6 +361,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 void DemoGame::onInput(World& world, const Input& input) {
     // Pick using the camera pose before this frame's panning.
     updatePlayerCommands(world, input);
+    updateFirstPersonCommands(world, input);
     updateSelection(world, input);
 
     if (input.wasKeyPressed(Key::F)) {
@@ -589,6 +594,7 @@ void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationS
     latestSimulationSeconds = simulationSeconds;
 
     updateCharacters(world, staticLevel, tickSeconds);
+    updateFirstPersonBodies(world, staticLevel, tickSeconds);
     updateSpinners(world, simulationSeconds);
     updateFireflies(world, simulationSeconds);
 
@@ -665,11 +671,15 @@ void DemoGame::setControlMode(World& world, ControlMode mode) {
     // Each selection starts from a predictable test position.
     switch (mode) {
     case ControlMode::FirstPerson:
-        camera.setPose(
-            Vec3{0.0f, 1.0f, 0.0f},
-            Vec3{0.0f, 1.0f, -6.0f},
-            worldUp
-        );
+        // From the free camera, drop the body where the camera is (it falls onto whatever is below) and keep looking the
+        // same way; otherwise look straight ahead from wherever the body stands.
+        if (controlMode == ControlMode::FreeCamera) {
+            const float eyeHeight = world.get<FirstPersonBody>(firstPersonBody).settings.standingEyeHeight;
+            placeFirstPersonBody(world, firstPersonBody, camera.getPosition() - Vec3{0.0f, eyeHeight, 0.0f});
+        } else {
+            const Vec3 eye = firstPersonEyePosition(world, firstPersonBody, 1.0f);
+            camera.setPose(eye, eye + Vec3{0.0f, 0.0f, -1.0f}, worldUp);
+        }
         firstPersonCamera.takeOver(camera);
         break;
 
@@ -728,6 +738,7 @@ void DemoGame::updateCamera(const World& world, const Input& input, float frameS
     switch (controlMode) {
     case ControlMode::FirstPerson:
         firstPersonCamera.update(camera, input, frameSeconds);
+        camera.setPosition(firstPersonEyePosition(world, firstPersonBody, alpha));
         break;
 
     case ControlMode::FreeCamera:
@@ -960,5 +971,34 @@ void DemoGame::toggleFloodlights(World& world) {
             .emitterRadius = floodlightEmitterRadius
         });
         floodlights.push_back(light);
+    }
+}
+
+Entity DemoGame::getFirstPersonBody() const {
+    return firstPersonBody;
+}
+
+/*
+* Once a frame, the movement keys become commands for the body's next tick: WASD a wished velocity turned by where the
+* camera faces, Shift sprints, Ctrl crouches, and a fresh press of Space jumps (holding it does not jump again on
+* landing). Outside first person, or with the mouse released, the body is told to stand still.
+*/
+void DemoGame::updateFirstPersonCommands(World& world, const Input& input) {
+    CharacterController& controller = world.get<CharacterController>(firstPersonBody);
+    FirstPersonBody& body = world.get<FirstPersonBody>(firstPersonBody);
+
+    if (controlMode != ControlMode::FirstPerson || !input.isMouseCaptured()) {
+        controller.wishVelocity = Vec3{};
+        controller.wantsJump = false;
+        body.wantsCrouch = false;
+        return;
+    }
+
+    body.wantsCrouch = input.isKeyHeld(Key::LeftCtrl) || input.isKeyHeld(Key::RightCtrl);
+    const bool sprinting = input.isKeyHeld(Key::LeftShift) || input.isKeyHeld(Key::RightShift);
+    controller.wishVelocity = firstPersonWishVelocity(getMoveAxes(input), firstPersonCamera.getAngles().yaw, body.crouching,
+                                                      sprinting, body.settings);
+    if (input.wasKeyPressed(Key::Space)) {
+        controller.wantsJump = true;
     }
 }
