@@ -22,13 +22,13 @@ The roadmap is in `ROADMAP.md`. Phases 0-5 (foundations, GPU rendering and asset
 
 Code lives in layered folders under `src/`. Dependencies point downward only: a folder may include from folders below it, never above.
 
-- `ecs/` (`Entity`, `ComponentStorage`, `World`), `core/` (`fixed_timestep`, `profiler`, `pixel`, `srgb`, `dither`) and `math/` (vectors, `Mat4`, `Transform`, `Ray`, `Frustum`, `Aabb`, `closest_points`, `angles`: `fullTurnRadians`, `radiansFromDegrees`, `wrapAngle` to -pi..pi, used wherever angles wrap or convert): depend on nothing else.
+- `ecs/` (`Entity`, `ComponentStorage`, `World`), `core/` (`fixed_timestep`, `profiler`, `pixel`, `srgb`, `dither`, `hash` (`Fnv1aHash`), `build_info` (`isDebugBuild`)) and `math/` (vectors, `Mat4`, `Transform`, `Ray`, `Frustum`, `Aabb`, `closest_points`, `angles`: `fullTurnRadians`, `radiansFromDegrees`, `wrapAngle` to -pi..pi, used wherever angles wrap or convert): depend on nothing else.
 - `physics/` (`shapes`: `Sphere`, `Capsule`, the `Shape` variant; `overlap`; `raycast`; `triangle_mesh`; `collider`: the `Collider` component; `collider_raycast`; `uniform_grid`; `collision_settings`; `collision_scene`; `query_stats`; `triangle_contact`; `static_level`; `character_controller`; `particle`): depends on `math/` and `ecs/`. Collision and, later, particles and the character controller.
 - `input/` (`Key`, `MouseButton`, `Input`): SDL-free, depends on `math/`.
 - `scene/` (meshes, `indexed_mesh`, models, `MaterialSource`, `Material`, `asset_handles`, `ModelRenderer`, `interpolation`, `light`, `lighting`, `frame_description`, `debug_draw`, `debug_text`, `culling`, `Camera`, `camera_ray`, `collision_mesh`) and `assets/` (`AssetManager`, loaders, cgltf). `scene/` and `render/` never include `assets/`.
 - `gameplay/` (`CharacterMovement` and `CharacterConfig` in `character`/`character_config`, `FirstPersonBody`, `Spinner`, `Firefly`, `Grenade`, `MoveToController`, `edge_pan`) and `gameplay/camera/` (`look_controls`, `FreeFlyCameraController`, `FirstPersonCameraController`, `MobaCameraController`).
 - `platform/` (`Window`, `sdl_input`), `render/gpu/` (`GpuRenderer`, `GpuMesh`, `GpuTexture`, `DebugLineRenderer`, uniform packing (`light_uniforms`, `material_uniforms`, `uniform_limits`, `shader_shared.h`), `render_settings`, `light_priority`, `shadow_map`, `shadow_atlas` (persistent tile layout), `shadow_cache` (tile memory), `soft_shadow` (PCSS arithmetic mirrored for tests), `tone_mapping` (`ToneMappingSettings`, `toneMap` mirroring `tone_map.frag`, `validateToneMapping`), `tone_map_uniforms` (`packToneMapping`), `bloom` (`BloomSettings`, the CPU mirror of the bloom chain and `packBloomPass`), `bloom_renderer` (`BloomRenderer`), `brdf` (physically based shading: the CPU mirror of the shader's BRDF, `BrdfTable` and `buildBrdfTable`), `display_output` (HDR output: `DisplaySettings`, `DisplayCapabilities`, `chooseDisplayOutput`), `mip_levels`, `gpu_depth_range`, `debug_line_vertices`, `gpu_helpers` for `gpuError`, `loadShader` and `writeColumnMajor`), `render/software/` (reference rasterizer), and `render/render_stats.h` (`RenderStats`, shared by both). `render/` takes a raw `SDL_Window*` and never includes `input/` or `platform/`.
-- `engine/` (`Application`, the `Game` interface, `runFixedUpdate`, `debug_views`): the loop and everything shared by all games. Never includes `games/`.
+- `engine/` (`Application`, the `Game` interface, `runFixedUpdate`, `debug_views`, `state_hash` (`hashSimulationState`, for determinism checks)): the loop and everything shared by all games. Never includes `games/`.
 - `games/` (`demo/DemoGame`, `demo/ControlMode`): one folder per game, built on the `Game` interface. Games never include `platform/`, `render/` or SDL, so they can run headless.
 - `app/` (`main`): picks a game and starts the engine; may include everything.
 
@@ -45,7 +45,7 @@ The full reference, with every name, file and number, is `docs/ARCHITECTURE.md`,
 - **Renderer today (SDL_GPU on Vulkan, to be replaced by the engine's own Vulkan 1.3 renderer in phase 6b):** a shadow pass into one cached D32 atlas, the main forward pass into an `R16G16B16A16_FLOAT` scene image, bloom, then tone mapping into the swapchain (SDR or scRGB HDR) with debug lines on top. Lights are ranked by `prioritizeLights` (seats, shadow caps, hysteresis, fades) before `packLighting` and `planShadows`. Shading is physically based (glTF metallic-roughness, `render/gpu/brdf`). **Uniform blocks must stay at or under 4096 bytes** (`maxUniformBlockBytes`): SDL's Vulkan backend reads nothing past that, and every uniform struct has a `static_assert`.
 - **Shader maths is mirrored on the CPU and tested** (`brdf`, `tone_mapping`, `bloom`, `soft_shadow`, `core/dither`); numbers both sides use live once in macro-only headers (`*_shared.h`).
 - **Assets:** `MeshHandle` and `TextureHandle` are typed indices (default = none); the `AssetManager` loads each file once and is append-only, and `Application` uploads whatever it gained before each frame. Textures carry a `TextureEncoding` (sRGB colour or linear data).
-- **ECS:** generational `Entity` handles, one sparse-set `ComponentStorage<T>` per type in `World`; systems are free functions run with `world.each<A, B>(...)` (list the rarest component first; inside `each`, do not add or remove the listed components or destroy entities).
+- **ECS:** generational `Entity` handles, one sparse-set `ComponentStorage<T>` per type in `World`; systems are free functions run with `world.each<A, B>(...)` (list the rarest component first; inside `each`, `destroy` and `remove` are queued until the outermost walk ends, adding a component of a walked type throws, and `addLater` queues it).
 - **Physics:** shapes (`Sphere`, `Capsule`, `Aabb`, the `Shape` variant) with exact overlaps and raycasts, `Collider` components and picking through a `UniformGrid` broad phase (`CollisionScene`, rebuilt rather than updated), the `StaticLevel` (world triangles in their own grid), sphere sweeps, particles and the kinematic character controller (Overwatch-like tuning, approved: ask before retuning).
 - **Demo:** `DemoGame` (`games/demo/`) holds the camera, control modes (F1 first person, F2 MOBA, F3 free camera), the player, the scene and all demo input rules.
 
@@ -63,7 +63,7 @@ Software renderer (reference path, used only by tests): `Renderer`, `Display`, `
 
 ## Tests
 
-- Plain `assert`-based tests, one `testXxx()` function per file in `tests/`. Small levels and comparisons shared by the physics tests (`near`, `block`, `flatLevel`, `addRamp`) live in `tests/test_levels.h`; add to it rather than copying helpers between test files.
+- Plain `assert`-based tests, one `testXxx()` function per file in `tests/`. Small levels and comparisons shared by the physics tests (`near`, `block`, `flatLevel`, `addRamp`) live in `tests/test_levels.h`; driving the demo game headless (`tickSeconds`, `mobaInput`, `firstPersonInput`, `runTicks`, `runFrame`) lives in `tests/demo_helpers.h`; add to it rather than copying helpers between test files.
 - **Register every new test** by adding a forward declaration and a call in `tests/test_main.cpp`. The makefile compiles the file automatically, but it will not run unless registered.
 - Tests do not need a GPU or window.
 - Do not compile with `-DNDEBUG`, because it turns every assert into a no-op.
@@ -81,6 +81,7 @@ Documentation habits (part of the work, not optional):
 Notes for upcoming work:
 
 - Never read `Input` inside `simulate`; key and click edges are handled once per frame and reach the simulation as commands.
+- Keep the simulation deterministic (the same build given the same commands reaches a bit-identical state, checked by `determinism_test`): inside ticks, no clock reads, no containers ordered by memory address, no threads finishing in an arbitrary order (the job system must keep results in a fixed order). A new component that ticks change goes into `hashSimulationState`.
 - Not built yet: parent/child entity hierarchies (attach a weapon to a hand). Listed in ROADMAP.md phase 9, alongside skeletal animation.
 - Phase 6b replaces SDL_GPU with raw Vulkan 1.3 (volk, VMA, vk-bootstrap, dynamic rendering, synchronization2; SDL keeps the window, input and audio). Port every pass one for one against golden images before adding features, write barriers by hand per pass and explain each, keep validation layers on in debug builds. NVRHI is the fallback if the port stalls past about four weeks.
 - Before building phase 6d's global illumination, read `docs/ILLUMINATION.md` (its units section predates physically based shading: re-derive it against `render/gpu/brdf.h` first): research notes on the two DDGI papers (2019 and its 2021 production follow-up) and their reference code, with the exact formulas, defaults, where text and code disagree, and what each means for this engine. Add to it when reading further sources.
@@ -89,4 +90,3 @@ Notes for upcoming work:
 ## Known small issues and ideas
 
 - Latency: `GpuRenderer` allows one frame in flight, and `Application` requests `PresentMode::Mailbox` (falls back to vsync if unsupported), so `EngineSettings::targetFPS` (240) is the real frame cap. `PresentMode::Immediate` is lower latency still but tears.
-- GPU device is created with debug mode hardcoded on.

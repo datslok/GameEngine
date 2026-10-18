@@ -123,7 +123,7 @@ Each component type has a `ComponentStorage<T>`, a **sparse set**:
 
 Adding, removing and lookup are all constant time. Removing swaps the last element into the hole, which keeps the array packed.
 
-Systems run with `world.each<A, B>(function)`. It walks the first type's packed array and skips entities that lack the others, so list the **rarest component first**. Inside `each`, do not add or remove components of the listed types or destroy entities: that would reorder the arrays being walked.
+Systems run with `world.each<A, B>(function)`. It walks the first type's packed array and skips entities that lack the others, so list the **rarest component first**. Removing a component moves the last one into the hole, and adding one can move the whole array, so neither may happen to an array while `each` walks it. The `World` therefore counts the walks running (they can nest): inside one, `destroy` and `remove` are written into a queue and carried out, in order, when the outermost walk ends, much as a physics step computes every force before moving anything, so no update sees a half-updated world. A system can destroy what it is walking without a second loop. Adding a component of a type being walked throws instead (a deferred add could not hand back the component); `addLater` queues it.
 
 ---
 

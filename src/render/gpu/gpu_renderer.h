@@ -43,7 +43,8 @@ enum class PresentMode {
 */
 class GpuRenderer {
 public:
-    explicit GpuRenderer(SDL_Window* window);
+    // validation checks every graphics call (EngineSettings::gpuValidation): slow, for development.
+    GpuRenderer(SDL_Window* window, bool validation);
     ~GpuRenderer();
 
     // GPU resources must have a single owner.

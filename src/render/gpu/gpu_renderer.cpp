@@ -30,7 +30,7 @@ namespace {
     }
 }
 
-GpuRenderer::GpuRenderer(SDL_Window* window):
+GpuRenderer::GpuRenderer(SDL_Window* window, bool validation):
     window(window)
 {
     if (window == nullptr) {
@@ -41,7 +41,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         // Select Vulkan and the shader format we will use later.
         device = SDL_CreateGPUDevice(
             SDL_GPU_SHADERFORMAT_SPIRV,
-            true,
+            validation,
             "vulkan"
         );
 

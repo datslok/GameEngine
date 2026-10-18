@@ -1,21 +1,10 @@
 #include "render/gpu/shadow_cache.h"
+#include "core/hash.h"
 
 #include <algorithm>
 #include <cstring>
 
 namespace {
-    // FNV-1a: a simple, well-spread hash, fed one byte at a time.
-    constexpr std::uint64_t fnvOffset = 14695981039346656037ull;
-    constexpr std::uint64_t fnvPrime = 1099511628211ull;
-
-    void mix(std::uint64_t& hash, const void* data, std::size_t byteCount) {
-        const unsigned char* bytes = static_cast<const unsigned char*>(data);
-
-        for (std::size_t i = 0; i < byteCount; ++i) {
-            hash = (hash ^ bytes[i]) * fnvPrime;
-        }
-    }
-
     bool sameMatrix(const Mat4& a, const Mat4& b) {
         return std::memcmp(a.values, b.values, sizeof(a.values)) == 0;
     }
@@ -30,17 +19,16 @@ namespace {
 * too, so a list cannot match a longer one that starts the same way.
 */
 std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters) {
-    std::uint64_t hash = fnvOffset;
-    const std::uint64_t count = casters.size();
-    mix(hash, &count, sizeof(count));
+    Fnv1aHash hash;
+    hash.add(static_cast<std::uint64_t>(casters.size()));
 
     for (std::size_t index : casters) {
         const DrawItem& draw = draws[index];
-        mix(hash, &draw.mesh.index, sizeof(draw.mesh.index));
-        mix(hash, draw.model.values, sizeof(draw.model.values));
+        hash.add(draw.mesh.index);
+        hash.addBytes(draw.model.values, sizeof(draw.model.values));
     }
 
-    return hash;
+    return hash.value;
 }
 
 /*

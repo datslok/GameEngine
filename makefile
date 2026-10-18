@@ -13,12 +13,14 @@ ifeq ($(BUILD),release)
 else ifeq ($(BUILD),debug)
     OPTIMISATION := -O0
     BUILD_DIR := build
+    # Read through core/build_info.h (isDebugBuild), for debug-only defaults such as GPU validation.
+    BUILD_DEFINES := -DENGINE_DEBUG_BUILD
 else
     $(error BUILD must be debug or release, not $(BUILD))
 endif
 
 # Never -DNDEBUG (the tests rely on assert) or -ffast-math (it changes floating-point results and breaks NaN checks).
-CXXFLAGS := -std=c++20 -Wall -Wextra -g $(OPTIMISATION)
+CXXFLAGS := -std=c++20 -Wall -Wextra -g $(OPTIMISATION) $(BUILD_DEFINES)
 # Includes are written from these roots, for example "math/vec3.h" and "cgltf/cgltf.h".
 CPPFLAGS := -Isrc -Iexternal
 # GCC writes a .d file next to each object listing the headers it read, so a header change rebuilds exactly the

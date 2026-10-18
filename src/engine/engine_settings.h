@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/build_info.h"
 #include "render/gpu/gpu_renderer.h"
 #include "render/gpu/render_settings.h"
 
@@ -22,6 +23,11 @@ struct EngineSettings {
 
     // Low latency without tearing. Falls back to vsync on GPUs without mailbox support. Applied whenever it changes.
     PresentMode presentMode = PresentMode::Mailbox;
+
+    // Check every graphics call against the API's rules (SDL's checks, and Vulkan's validation layers when installed).
+    // It catches mistakes early but costs a lot of CPU time, so it is on in debug builds and off in release. Read once,
+    // at start-up: the GPU device is created with it.
+    bool gpuValidation = isDebugBuild;
 
     RenderSettings render;
 };

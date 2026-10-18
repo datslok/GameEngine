@@ -10,7 +10,7 @@
 
 Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& settings):
     window(title, width, height),
-    renderer(window.getSdlWindow()),
+    renderer(window.getSdlWindow(), settings.gpuValidation),
     game(game),
     settings(settings),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
