@@ -23,8 +23,10 @@ enum class ToneMapCurve {
 struct ToneMappingSettings {
     ToneMapCurve curve = ToneMapCurve::AgX;
 
-    // Multiplies the scene's brightness before the curve, like a camera's exposure. 1 leaves it unchanged.
-    float exposure = 1.0f;
+    // Multiplies the scene's brightness before the curve, like a camera's exposure. 1 leaves it unchanged. The curves
+    // darken the faintest values and compress the brightest, so 1.5 keeps a scene lit for the old, clipped look about as
+    // bright in its shadows and mid-tones (AgX shows 0.006 as 0.005 and 0.5 as 0.52), while highlights still roll off.
+    float exposure = 1.5f;
 };
 
 // The brightest an ordinary (SDR) screen shows: its white. An HDR screen goes several times past it.

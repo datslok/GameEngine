@@ -22,8 +22,8 @@
 
 namespace {
     // The night's light: a faint grey ambient and a weak, cool moon (linear units).
-    constexpr float nightAmbient = 0.024f;
-    constexpr float moonlightIntensity = 0.12f;
+    constexpr float nightAmbient = 0.012f;
+    constexpr float moonlightIntensity = 0.06f;
 
     // Where the duck holds the flashlight in MOBA mode, and how far it tilts the beam down (radians, about 20 degrees).
     constexpr float flashlightHeight = 1.2f;
@@ -275,8 +275,6 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam, and cast shadows.
     // It is a directional light, like the real moon: parallel rays, the same brightness everywhere.
     // Light values are linear: the screen's sRGB encoding brightens dark values a lot, so night light is tiny in these units.
-    // Tone mapping's toe darkens the faintest values further (AgX shows 0.006 as 0.0024), so these are twice what they
-    // were before it.
     world.add(world.create(), AmbientLight{Vec3{nightAmbient, nightAmbient, nightAmbient}});
     world.add(world.create(), DirectionalLight{towardsMoon * -1.0f, Vec3{0.32f, 0.45f, 1.0f}, moonlightIntensity});
 
