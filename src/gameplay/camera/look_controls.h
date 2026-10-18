@@ -1,10 +1,10 @@
 #pragma once
 
 #include "input/input.h"
+#include "math/angles.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
-
-#include <numbers>
+#include "scene/camera.h"
 
 /*
 * A view direction stored as angles, like spherical coordinates with world up = +Y.
@@ -16,8 +16,14 @@ struct ViewAngles {
     float pitch = 0.0f;
 };
 
+// The tuning shared by every mouse-look controller.
+struct LookSettings {
+    float radiansPerPixel = 0.001f; // mouse sensitivity
+    float sprintMultiplier = 2.0f;  // movement speed multiple while either Shift key is held (run, or fly fast)
+};
+
 // Stop just short of straight up or down, where yaw would become meaningless.
-inline constexpr float maxPitchRadians = 89.0f * std::numbers::pi_v<float> / 180.0f;
+inline constexpr float maxPitchRadians = radiansFromDegrees(89.0f);
 
 // The unit direction these angles point along.
 Vec3 directionFromAngles(const ViewAngles& angles);
@@ -31,8 +37,12 @@ void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPer
 // WASD as axes: x is strafe (+1 right), y is forward (+1 forward). Not normalized.
 Vec2 getMoveAxes(const Input& input);
 
-// Holding either Shift key runs (first person) or flies fast (free camera) at this multiple of the normal speed.
-inline constexpr float sprintSpeedMultiplier = 2.0f;
+// The factor to scale movement speed by this frame: sprintMultiplier while Shift is held, otherwise 1.
+float getSpeedMultiplier(const Input& input, float sprintMultiplier);
 
-// The factor to scale movement speed by this frame: sprintSpeedMultiplier while Shift is held, otherwise 1.
-float getSpeedMultiplier(const Input& input);
+// Turn the angles by this frame's mouse motion and point the camera along them.
+void turnCamera(Camera& camera, ViewAngles& angles, const Input& input, const LookSettings& look);
+
+// Move the camera along a direction at speed (times the sprint multiplier while Shift is held). The direction is
+// normalized first, so moving diagonally is no faster; a zero direction does nothing.
+void moveCamera(Camera& camera, const Vec3& direction, float speed, const Input& input, const LookSettings& look, float frameSeconds);

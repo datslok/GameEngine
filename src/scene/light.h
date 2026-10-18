@@ -13,7 +13,7 @@ struct DirectionalLight {
     Vec3 colour{1.0f, 1.0f, 1.0f};
     float intensity = 1.0f;
 
-    // Whether objects block this light. Its shadow covers directionalShadowDistance in front of the camera.
+    // Whether objects block this light. Its shadow covers the renderer's ShadowSettings::directionalDistance in front of the camera.
     bool castsShadows = true;
 };
 

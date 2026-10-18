@@ -1,17 +1,14 @@
 #include "math/transform.h"
-
-#include <cmath>
-#include <numbers>
+#include "math/angles.h"
 
 namespace {
     Vec3 lerp(const Vec3& from, const Vec3& to, float alpha) {
         return from + (to - from) * alpha;
     }
 
-    // remainder() maps the difference into -pi..pi, which is the shortest turn between the two angles.
+    // Wrapping the difference gives the shortest turn between the two angles.
     float lerpAngle(float from, float to, float alpha) {
-        constexpr float fullTurn = 2.0f * std::numbers::pi_v<float>;
-        return from + std::remainder(to - from, fullTurn) * alpha;
+        return from + wrapAngle(to - from) * alpha;
     }
 }
 

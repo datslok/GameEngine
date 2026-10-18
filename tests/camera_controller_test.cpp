@@ -24,6 +24,14 @@ namespace {
         return Camera{position, target, Vec3{0.0f, 1.0f, 0.0f}, pi / 2.0f, 16.0f / 9.0f, 0.1f, 100.0f};
     }
 
+    // The values the walking and jumping checks below are worked out for: 3 units/s, double speed with Shift, 0.001 rad per pixel, jumps 1.2 high under gravity 20.
+    const FirstPersonCameraSettings walker{
+        .look = LookSettings{.radiansPerPixel = 0.001f, .sprintMultiplier = 2.0f},
+        .moveSpeed = 3.0f,
+        .jumpHeight = 1.2f,
+        .gravity = 20.0f
+    };
+
     // A focused window with the mouse captured for mouse look.
     Input capturedInput() {
         Input input;
@@ -64,7 +72,7 @@ void testCameraControllers() {
     // Free fly moves along the view direction, including up and down.
     {
         Camera camera = makeCamera(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
-        FreeFlyCameraController controller{2.0f, 0.001f};
+        FreeFlyCameraController controller{FreeFlyCameraSettings{.look = {}, .moveSpeed = 2.0f}};
         controller.takeOver(camera);
         assert(nearlyEqual(controller.getAngles().pitch, pi / 4.0f));
 
@@ -77,7 +85,7 @@ void testCameraControllers() {
 
         // Space rises straight up.
         Camera level = makeCamera(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f});
-        FreeFlyCameraController rising{2.0f, 0.001f};
+        FreeFlyCameraController rising{FreeFlyCameraSettings{.look = {}, .moveSpeed = 2.0f}};
         rising.takeOver(level);
         Input space = capturedInput();
         space.pressKey(Key::Space);
@@ -106,7 +114,7 @@ void testCameraControllers() {
     // First person walks on the ground plane: looking up does not change height.
     {
         Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 2.0f, -1.0f});
-        FirstPersonCameraController controller{3.0f, 0.001f};
+        FirstPersonCameraController controller{walker};
         controller.takeOver(camera);
 
         Input input = capturedInput();
@@ -126,7 +134,7 @@ void testCameraControllers() {
 
         // Holding Shift runs at double speed; either Shift key works.
         Camera runner = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
-        FirstPersonCameraController running{3.0f, 0.001f};
+        FirstPersonCameraController running{walker};
         running.takeOver(runner);
         Input run = capturedInput();
         run.pressKey(Key::W);
@@ -150,7 +158,7 @@ void testCameraControllers() {
     // First person jumps with Space: up to the jump height, back down to the eye height it started at, and no jumping in mid-air.
     {
         Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
-        FirstPersonCameraController controller{3.0f, 0.001f, 1.2f, 20.0f};
+        FirstPersonCameraController controller{walker};
         controller.takeOver(camera);
         assert(!controller.isAirborne());
 
@@ -180,8 +188,8 @@ void testCameraControllers() {
         // Pressing Space again in mid-air does nothing: the second press lands at the same time as no press.
         Camera single = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
         Camera doubled = single;
-        FirstPersonCameraController singleJump{3.0f, 0.001f, 1.2f, 20.0f};
-        FirstPersonCameraController doubleJump{3.0f, 0.001f, 1.2f, 20.0f};
+        FirstPersonCameraController singleJump{walker};
+        FirstPersonCameraController doubleJump{walker};
         singleJump.takeOver(single);
         doubleJump.takeOver(doubled);
         singleJump.update(single, jump, 0.2f);
@@ -195,8 +203,8 @@ void testCameraControllers() {
     {
         Camera longFrames = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
         Camera shortFrames = longFrames;
-        FirstPersonCameraController slow{3.0f, 0.001f, 1.2f, 20.0f};
-        FirstPersonCameraController fast{3.0f, 0.001f, 1.2f, 20.0f};
+        FirstPersonCameraController slow{walker};
+        FirstPersonCameraController fast{walker};
         slow.takeOver(longFrames);
         fast.takeOver(shortFrames);
 
@@ -224,7 +232,7 @@ void testCameraControllers() {
     // The MOBA camera follows a target at its fixed offset, or pans at the window edges.
     {
         const Vec3 offset{0.0f, 12.0f, 10.0f};
-        MobaCameraController controller{offset, 9.0f};
+        MobaCameraController controller{MobaCameraSettings{.offset = offset, .panSpeed = 9.0f}};
         Camera camera = makeCamera(Vec3{0.0f, 5.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f});
 
         Input input;
@@ -275,5 +283,28 @@ void testCameraControllers() {
         }
         assert(rejected);
         assert(nearlyEqual(camera.getVerticalFov(), pi / 4.0f));
+    }
+
+    // Settings are read every frame, so a UI or game can change them on a live controller.
+    {
+        Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        FirstPersonCameraController controller{walker};
+        controller.takeOver(camera);
+        controller.getSettings().moveSpeed = 5.0f;
+        controller.getSettings().look.sprintMultiplier = 3.0f;
+
+        Input run = capturedInput();
+        run.pressKey(Key::W);
+        run.pressKey(Key::LeftShift);
+        controller.update(camera, run, 1.0f);
+        assert(nearlyEqual(camera.getPosition(), Vec3{0.0f, 1.0f, -15.0f}));
+
+        FreeFlyCameraController flyer;
+        flyer.takeOver(camera);
+        flyer.getSettings().moveSpeed = 4.0f;
+        Input forward = capturedInput();
+        forward.pressKey(Key::W);
+        flyer.update(camera, forward, 0.5f);
+        assert(nearlyEqual(camera.getPosition(), Vec3{0.0f, 1.0f, -17.0f}));
     }
 }

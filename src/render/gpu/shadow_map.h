@@ -2,6 +2,7 @@
 
 #include "math/mat4.h"
 #include "math/vec3.h"
+#include "render/gpu/light_uniforms.h"
 #include "render/gpu/shadow_atlas.h"
 #include "render/gpu/uniform_limits.h"
 #include "scene/camera.h"
@@ -27,8 +28,22 @@ inline constexpr std::uint32_t shadowAtlasHeight = 4096;
 inline constexpr std::uint32_t largestShadowTileSize = 1024;
 inline constexpr std::uint32_t smallestShadowTileSize = 256;
 
-// How much world one texel should cover where a light's reach ends. Shadows nearer the light come out sharper.
-inline constexpr float shadowTexelTarget = 0.04f;
+// The tunable part of shadows: read every frame, so a change shows on the next frame (the tiles it affects are redrawn).
+struct ShadowSettings {
+    // How much world one texel should cover where a light's reach ends. Shadows nearer the light come out sharper.
+    float texelTarget = 0.04f;
+
+    // How far in front of the camera a directional light's shadows reach. Beyond it, everything counts as lit.
+    float directionalDistance = 30.0f;
+
+    // How far behind a directional light's box (towards the light) objects still cast shadows into it.
+    float directionalCasterReach = 50.0f;
+
+    // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
+    // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
+    // light grazes. Measured in texels, it shrinks and grows with each tile's size.
+    float normalOffsetTexels = 2.5f;
+};
 
 // The most shadowed lights of each kind; the rest still give light, without shadows.
 inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; as many as the shader has seats, now that cached tiles cost little
@@ -37,14 +52,11 @@ inline constexpr int maxShadowedDirectionalLights = 4; // 1 tile each, always th
 inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights;
 
 // Tile edge length in pixels for a square view of the given half-width (tan of its half-angle) reaching range: enough
-// for shadowTexelTarget across the far end of the view, as a power of two between the smallest and largest tile sizes.
-std::uint32_t shadowTileSizeFor(float halfWidth, float range);
+// for the texel target across the far end of the view, as a power of two between the smallest and largest tile sizes.
+std::uint32_t shadowTileSizeFor(float halfWidth, float range, const ShadowSettings& settings = {});
 
 // Closest distance to a point light or spotlight that can be shadowed.
 inline constexpr float shadowNearPlane = 0.1f;
-
-// How far in front of the camera a directional light's shadows reach. Beyond it, everything counts as lit.
-inline constexpr float directionalShadowDistance = 30.0f;
 
 // Which cube face sees this direction from a point light: the axis of its largest component, 0..5 in the order
 // +X, -X, +Y, -Y, +Z, -Z. The shader picks faces the same way.
@@ -58,8 +70,8 @@ Mat4 pointShadowFaceMatrix(const Vec3& lightPosition, int face, float farPlane, 
 Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float outerAngle, float range,
                       std::uint32_t tileSize = largestShadowTileSize);
 
-// A directional light's box around the part of the camera's view within directionalShadowDistance.
-Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera);
+// A directional light's box around the part of the camera's view within the settings' directional distance.
+Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const ShadowSettings& settings = {});
 
 /*
 * Mirrors the ShadowData uniform block in triangle.frag (std140, every member a multiple of 16 bytes): which tiles
@@ -67,18 +79,18 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera);
 * a row from its first one.
 */
 struct ShadowUniformData {
-    std::int32_t pointTiles[16][4]; // first tile of point light i at [i / 4][i % 4], one per light slot
-    std::int32_t spotTiles[2][4];   // tile of spotlight i at [i / 4][i % 4]
-    std::int32_t directionalTiles[4];
+    std::int32_t pointTiles[pointLightVec4s][4]; // first tile of point light i at [i / 4][i % 4], one per light slot
+    std::int32_t spotTiles[spotLightVec4s][4];   // tile of spotlight i at [i / 4][i % 4]
+    std::int32_t directionalTiles[maxDirectionalLights];
     float atlasTexel[4];            // xy: one texel's size in atlas coordinates
 
     // How strong each light slot's shadow is, 0..1, while shadows fade between lights (0 for a slot without one).
-    float pointShadowStrengths[16][4];
-    float spotShadowStrengths[2][4];
+    float pointShadowStrengths[pointLightVec4s][4];
+    float spotShadowStrengths[spotLightVec4s][4];
 
     // Each shadowed light's emitterRadius, which sizes its soft shadows.
-    float pointEmitterRadii[16][4];
-    float spotEmitterRadii[2][4];
+    float pointEmitterRadii[pointLightVec4s][4];
+    float spotEmitterRadii[spotLightVec4s][4];
 };
 
 static_assert(sizeof(ShadowUniformData) == 896, "ShadowUniformData must match the shader's ShadowData block");
@@ -120,7 +132,8 @@ struct ShadowPlan {
 // Hand out atlas tiles to the shadow-casting lights, in the same slots packLighting gives the shader. Tiles are numbered
 // directional lights first, then spotlights, then six per point light, each in slot order. The layout lasts from frame
 // to frame, so lights keep their squares of the atlas and what was drawn into them can be kept.
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout);
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout,
+                       const ShadowSettings& settings = {});
 
 // The same, packed into an empty atlas (for one-off plans and tests).
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera);
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings = {});

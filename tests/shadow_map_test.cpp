@@ -127,8 +127,8 @@ namespace {
         const Vec3 sunlight{0.4f, -1.0f, -0.6f};
         const Mat4 view = directionalShadowMatrix(sunlight, camera);
 
-        const Vec3 centre = camera.getPosition() + camera.getForward() * (directionalShadowDistance * 0.5f);
-        const float reach = directionalShadowDistance * 0.45f;
+        const Vec3 centre = camera.getPosition() + camera.getForward() * (ShadowSettings{}.directionalDistance * 0.5f);
+        const float reach = ShadowSettings{}.directionalDistance * 0.45f;
         const Vec3 offsets[6] = {
             Vec3{reach, 0.0f, 0.0f}, Vec3{-reach, 0.0f, 0.0f},
             Vec3{0.0f, reach, 0.0f}, Vec3{0.0f, -reach, 0.0f},
@@ -146,6 +146,12 @@ namespace {
 
         // Further from the sun means deeper.
         assert(project(view, centre).z < project(view, centre + sunlight.normalized() * 5.0f).z);
+
+        // How far the box reaches is a setting: twice the distance covers a point the default box leaves out.
+        const Vec3 farAhead = camera.getPosition() + camera.getForward() * 50.0f;
+        const ShadowSettings longer{.directionalDistance = 2.0f * ShadowSettings{}.directionalDistance};
+        assert(!landsInside(project(view, farAhead)));
+        assert(landsInside(project(directionalShadowMatrix(sunlight, camera, longer), farAhead)));
     }
 
     // The box moves with the camera in whole shadow texels, so shadow edges do not crawl and shimmer as the camera moves.
@@ -264,6 +270,11 @@ namespace {
         assert(shadowTileSizeFor(1.0f, 100.0f) == 1024);
         assert(shadowTileSizeFor(1.0f, 0.5f) == 256);
         assert(shadowTileSizeFor(std::tan(0.44f), 50.0f) == 1024);
+
+        // A coarser texel target (a setting) needs half the texels: 40 units across at 0.08 each is 500, and 20 is 250.
+        const ShadowSettings coarse{.texelTarget = 0.08f};
+        assert(shadowTileSizeFor(1.0f, 20.0f, coarse) == 512);
+        assert(shadowTileSizeFor(1.0f, 10.0f, coarse) == 256);
     }
 
     // Tiles are numbered directional lights first, then spotlights, then six per point light, each in slot order.

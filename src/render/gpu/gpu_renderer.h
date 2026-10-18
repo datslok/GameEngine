@@ -3,11 +3,10 @@
 #include "math/mat4.h"
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
-#include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/render_settings.h"
 #include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/shadow_cache.h"
-#include "render/gpu/shadow_map.h"
 #include "render/render_stats.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
@@ -49,8 +48,9 @@ public:
     GpuRenderer& operator=(const GpuRenderer&) = delete;
 
     // Draw and present one whole frame. The frame's camera gets the acquired frame's aspect ratio (the caller's camera is not changed).
+    // The settings are read fresh each frame, so changes show at once.
     // Returns false if no frame was available (a minimized window), in which case nothing was drawn.
-    bool render(const FrameDescription& frame);
+    bool render(const FrameDescription& frame, const RenderSettings& settings);
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     void uploadMesh(const IndexedMesh& mesh);

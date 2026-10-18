@@ -8,13 +8,15 @@
 #include <cstdint>
 #include <span>
 
-Application::Application(const char* title, int width, int height, Game& game):
+Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& settings):
     window(title, width, height),
     renderer(window.getSdlWindow()),
-    game(game)
+    game(game),
+    settings(settings),
+    timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
 {
-    // Low latency without tearing. Falls back to vsync on GPUs without mailbox support.
-    renderer.setPresentMode(PresentMode::Mailbox);
+    requestedPresentMode = settings.presentMode;
+    renderer.setPresentMode(requestedPresentMode);
 
     game.onInit(world, assets);
 
@@ -57,12 +59,13 @@ void Application::run() {
         game.onUpdate(world, input, static_cast<float>(timestep.getFrameSeconds()), alpha);
 
         applyMouseMode();
+        applyPresentMode();
         render(alpha, static_cast<float>(timestep.getFrameSeconds()));
 
         // 0 means unlimited.
-        if (targetFPS > 0) {
+        if (settings.targetFPS > 0) {
             const Uint64 frameDuration =
-                1'000'000'000ULL / targetFPS;
+                1'000'000'000ULL / settings.targetFPS;
 
             const Uint64 elapsed =
                 SDL_GetTicksNS() - frameStart;
@@ -71,6 +74,17 @@ void Application::run() {
                 SDL_DelayNS(frameDuration - elapsed);
             }
         }
+    }
+}
+
+EngineSettings& Application::getSettings() {
+    return settings;
+}
+
+void Application::applyPresentMode() {
+    if (settings.presentMode != requestedPresentMode) {
+        requestedPresentMode = settings.presentMode;
+        renderer.setPresentMode(requestedPresentMode);
     }
 }
 
@@ -130,7 +144,7 @@ void Application::render(float alpha, float frameSeconds) {
     frame.debugLines = debugDraw.getLines();
     frame.debugScreenLines = debugDraw.getScreenLines();
 
-    if (!renderer.render(frame)) {
+    if (!renderer.render(frame, settings.render)) {
         return;
     }
 

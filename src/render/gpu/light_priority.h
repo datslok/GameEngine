@@ -16,21 +16,15 @@
 * - The rest are ranked by priority (a game's own marking, higher always wins), then by how brightly they light the
 *   focus point (where the action is), and the top ones are seated.
 * - Of the seated point lights and spotlights that cast shadows, the top ones of each kind get shadows.
+* The tunable numbers are in LightPrioritySettings.
 * - Hysteresis: a light that had a seat (or a shadow) last frame counts incumbentAdvantage times as important, so a
 *   rival must be clearly brighter to take it, and two similar lights do not swap every frame as the focus moves.
 *   It only applies between lights of equal priority.
-* - Fading: when a seat or a shadow changes hands, the light losing it fades out over lightFadeSeconds while it still
+* - Fading: when a seat or a shadow changes hands, the light losing it fades out over fadeSeconds while it still
 *   holds it, and only then does the winner fade in, so the limits always hold and nothing pops. A light that was not
 *   on screen last frame (just switched on, or just come into view) starts at full strength instead: nothing showed
 *   it before, so there is nothing to blend from. A light that leaves the view is dropped at once, for the same reason.
 */
-
-// How much more important a light counts for keeping what it had last frame. In distance terms a rival must be about
-// 11% closer (sqrt(1.25) = 1.118) to take a seat or a shadow from an equally bright light.
-inline constexpr float incumbentAdvantage = 1.25f;
-
-// How long a light or its shadow takes to fade fully in or out during a handover.
-inline constexpr float lightFadeSeconds = 0.25f;
 
 // A light holding a seat, and how far it is into the seat and into a shadow (0..1; shadow 0 = none).
 struct LightFade {
@@ -64,16 +58,25 @@ struct PrioritizedLighting {
 */
 float lightImportance(const Vec3& lightPosition, const Vec3& colour, float intensity, float sourceRadius, const Vec3& focus);
 
-// How many lights of each kind get a seat in the shader, and how many of those a shadow. The defaults are the engine's
-// limits; shadows may be capped below the seats (then lights can lose their shadow but keep shining), never above.
-struct LightLimits {
+// The tunable part of light priority, read every frame.
+struct LightPrioritySettings {
+    // How many lights of each kind get a seat in the shader, and how many of those a shadow. The defaults are the
+    // engine's limits; lower values cap below them (shadows below the seats: then lights can lose their shadow but keep
+    // shining), and higher values are clamped to them.
     int pointSeats = maxPointLights;
     int spotSeats = maxSpotLights;
     int shadowedPoints = maxShadowedPointLights;
     int shadowedSpots = maxShadowedSpotLights;
+
+    // How much more important a light counts for keeping what it had last frame. In distance terms a rival must be
+    // about 11% closer (sqrt(1.25) = 1.118) to take a seat or a shadow from an equally bright light.
+    float incumbentAdvantage = 1.25f;
+
+    // How long a light or its shadow takes to fade fully in or out during a handover. Zero hands over at once.
+    float fadeSeconds = 0.25f;
 };
 
 // Choose this frame's lights. view is the camera's frustum; previous is the history this function returned last frame;
 // elapsedSeconds is the time since then, which moves the fades along.
 PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
-                                     float elapsedSeconds, const LightLimits& limits = LightLimits{});
+                                     float elapsedSeconds, const LightPrioritySettings& settings = {});

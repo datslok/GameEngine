@@ -1,4 +1,9 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
+#include "render/gpu/shader_shared.h"
+#include "core/dither_shared.h"
 
 layout(location = 0) in vec3 worldNormal;
 layout(location = 1) in vec2 textureUv;
@@ -43,9 +48,9 @@ layout(std140, set = 3, binding = 1) uniform LightData {
     vec4 ambient;
     vec4 cameraPosition; // xyz: where the viewer is
     ivec4 counts;        // x: directional lights used, y: point lights used, z: spotlights used
-    DirectionalLightData directional[4];
-    PointLightData points[64];
-    SpotLightData spots[8];
+    DirectionalLightData directional[MAX_DIRECTIONAL_LIGHTS];
+    PointLightData points[MAX_POINT_LIGHTS];
+    SpotLightData spots[MAX_SPOT_LIGHTS];
 };
 
 // Must match ShadowTileData in render/gpu/shadow_map.h. Over a hundred tiles do not fit in a uniform block (the shader
@@ -63,14 +68,14 @@ layout(std430, set = 2, binding = 3) readonly buffer ShadowTiles {
 
 // Must match ShadowUniformData in render/gpu/shadow_map.h. Tile numbers are -1 for a light without a shadow.
 layout(std140, set = 3, binding = 2) uniform ShadowData {
-    ivec4 pointTiles[16];  // first of six tiles for point light i at [i / 4][i % 4]
-    ivec4 spotTiles[2];    // tile for spotlight i at [i / 4][i % 4]
+    ivec4 pointTiles[(MAX_POINT_LIGHTS + 3) / 4];  // first of six tiles for point light i at [i / 4][i % 4]
+    ivec4 spotTiles[(MAX_SPOT_LIGHTS + 3) / 4];    // tile for spotlight i at [i / 4][i % 4]
     ivec4 directionalTiles;
     vec4 atlasTexel;       // xy: one texel's size in atlas coordinates
-    vec4 pointShadowStrengths[16]; // how strong point light i's shadow is, 0..1, at [i / 4][i % 4] (fades between lights)
-    vec4 spotShadowStrengths[2];
-    vec4 pointEmitterRadii[16];    // the size of point light i's glowing part, at [i / 4][i % 4], for soft shadows
-    vec4 spotEmitterRadii[2];
+    vec4 pointShadowStrengths[(MAX_POINT_LIGHTS + 3) / 4]; // how strong point light i's shadow is, 0..1, at [i / 4][i % 4] (fades between lights)
+    vec4 spotShadowStrengths[(MAX_SPOT_LIGHTS + 3) / 4];
+    vec4 pointEmitterRadii[(MAX_POINT_LIGHTS + 3) / 4];    // the size of point light i's glowing part, at [i / 4][i % 4], for soft shadows
+    vec4 spotEmitterRadii[(MAX_SPOT_LIGHTS + 3) / 4];
 };
 
 layout(location = 0) out vec4 outputColour;
@@ -179,9 +184,9 @@ float shadowFromTile(int tile, vec3 position) {
 }
 
 // Soft shadows: the arithmetic mirrors render/gpu/soft_shadow.cpp, which tests it. Widths are in texels of the tile.
-const float minShadowFilterTexels = 1.0;
-const float maxShadowFilterTexels = 12.0;
-const float maxBlockerSearchTexels = 12.0;
+const float minShadowFilterTexels = MIN_SHADOW_FILTER_TEXELS;
+const float maxShadowFilterTexels = MAX_SHADOW_FILTER_TEXELS;
+const float maxBlockerSearchTexels = MAX_BLOCKER_SEARCH_TEXELS;
 
 // Sixteen points spread over a unit disc with no two close together (a Poisson disc): even coverage from few samples.
 const vec2 poissonDisc[16] = vec2[](
@@ -320,7 +325,7 @@ float interleavedGradientNoise(vec2 pixel) {
 vec3 ditherForEightBits(vec3 linear) {
     vec3 encoded = linearToSrgb(max(linear, vec3(0.0)));
     float noise = interleavedGradientNoise(gl_FragCoord.xy);
-    vec3 nudged = encoded + (noise - 0.5) * (0.99 / 255.0);
+    vec3 nudged = encoded + (noise - 0.5) * (DITHER_STEP_FRACTION / DITHER_LEVELS);
     return srgbToLinear(clamp(nudged, 0.0, 1.0));
 }
 

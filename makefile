@@ -63,11 +63,17 @@ $(OBJECT_DIR)/%.o: %.cpp $(MAKEFILE_PATH)
 # The header lists GCC wrote last time; missing on the first build, which compiles everything anyway.
 -include $(ALL_OBJECTS:.o=.d)
 
-# Compile each shader when its source changes or its output is missing.
+# Compile each shader when its source, a header it includes, or the makefile changes. Shaders include the headers they
+# share with C++ from the same src root (-Isrc), and glslc writes the list of what each one read to build/obj/shaders.
+SHADER_DEPENDENCY_DIR := $(OBJECT_DIR)/shaders
+
 shaders: $(SHADER_BINARIES)
 
 assets/shaders/%.spv: assets/shaders/% $(MAKEFILE_PATH)
-	$(GLSLC) $< -o $@
+	@mkdir -p $(SHADER_DEPENDENCY_DIR)
+	$(GLSLC) -Isrc -MD -MF $(SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
+
+-include $(patsubst assets/shaders/%,$(SHADER_DEPENDENCY_DIR)/%.d,$(SHADER_BINARIES))
 
 run: $(TARGET) shaders
 	./$(TARGET)

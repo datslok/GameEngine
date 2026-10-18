@@ -55,7 +55,7 @@ namespace {
     // The engine gives every seated point light a shadow, so a light can only lose its shadow by losing its seat. The
     // tests of shadow-only handovers use a cap below the seats, as a game could.
     constexpr int shadowCap = 16;
-    const LightLimits fewShadows{.shadowedPoints = shadowCap};
+    const LightPrioritySettings fewShadows{.shadowedPoints = shadowCap};
 
     bool isShadowed(const std::vector<PlacedPointLight>& lights, std::uint32_t entityIndex) {
         return std::any_of(lights.begin(), lights.end(), [&](const PlacedPointLight& placed) {
@@ -207,6 +207,14 @@ namespace {
 
         assert(isShadowed(taken.lighting.pointLights, rival));
         assert(countShadowed(taken.lighting.pointLights) == shadowCap);
+
+        // Both are settings: with no hysteresis and no fade, the slightly brighter rival takes a shadow in one frame.
+        LightPrioritySettings eager = fewShadows;
+        eager.incumbentAdvantage = 1.0f;
+        eager.fadeSeconds = 0.0f;
+        const PrioritizedLighting switched = prioritizeLights(slightly, focus, makeTestView(), before.history, frame, eager);
+        assert(isShadowed(switched.lighting.pointLights, rival));
+        assert(countShadowed(switched.lighting.pointLights) == shadowCap);
     }
 
     // Seats work the same way: a light that was lit last frame stays lit against a slightly more important newcomer.
@@ -355,7 +363,7 @@ namespace {
         // It gets the shadow as soon as one of the others has faded out, within one fade.
         PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame);
 
-        for (float elapsed = frame; elapsed < lightFadeSeconds + 5.0f * frame; elapsed += frame) {
+        for (float elapsed = frame; elapsed < LightPrioritySettings{}.fadeSeconds + 5.0f * frame; elapsed += frame) {
             after = prioritizeLights(lighting, focus, makeTestView(), after.history, frame);
         }
 
@@ -427,7 +435,7 @@ namespace {
         assert(result.lighting.spotLights[0].fade == 1.0f && result.lighting.spotLights[0].shadowFade == 1.0f);
     }
 
-    // When a clearly brighter rival takes a shadow, the displaced light's shadow fades out over lightFadeSeconds while
+    // When a clearly brighter rival takes a shadow, the displaced light's shadow fades out over fadeSeconds while
     // it keeps its tile, and only then does the rival's fade in, so the cap is never exceeded.
     void testShadowHandoverFades() {
         FrameLighting lighting;

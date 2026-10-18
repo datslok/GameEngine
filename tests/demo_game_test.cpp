@@ -1,3 +1,4 @@
+#include "engine/engine_settings.h"
 #include "games/demo/demo_game.h"
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
@@ -16,7 +17,8 @@ namespace {
         return std::abs(a - b) < 0.001f;
     }
 
-    constexpr float tickSeconds = 1.0f / 120.0f;
+    // The engine's own tick length, so the demo is tested at the rate it runs at.
+    const float tickSeconds = static_cast<float>(1.0 / EngineSettings{}.ticksPerSecond);
 
     // An Input that looks like a focused MOBA window with a confined cursor.
     Input mobaInput() {

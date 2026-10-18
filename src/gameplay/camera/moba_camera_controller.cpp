@@ -1,22 +1,20 @@
 #include "gameplay/camera/moba_camera_controller.h"
 #include "gameplay/edge_pan.h"
 
-MobaCameraController::MobaCameraController(const Vec3& offset, float panSpeed, float edgeMarginPixels):
-    offset(offset),
-    panSpeed(panSpeed),
-    edgeMarginPixels(edgeMarginPixels)
+MobaCameraController::MobaCameraController(const MobaCameraSettings& settings):
+    settings(settings)
 {
 }
 
 void MobaCameraController::centreOn(Camera& camera, const Vec3& point) const {
-    camera.setPose(point + offset, point, Vec3{0.0f, 1.0f, 0.0f});
+    camera.setPose(point + settings.offset, point, Vec3{0.0f, 1.0f, 0.0f});
 }
 
 /*
 * The camera only ever moves by whole offsets from a point and pans without turning, so the point is always one offset away.
 */
 Vec3 MobaCameraController::getLookPoint(const Camera& camera) const {
-    return camera.getPosition() - offset;
+    return camera.getPosition() - settings.offset;
 }
 
 /*
@@ -34,12 +32,16 @@ void MobaCameraController::update(Camera& camera, const Input& input, float fram
         return;
     }
 
-    const Vec2 edge = getEdgePanDirection(input, edgeMarginPixels);
+    const Vec2 edge = getEdgePanDirection(input, settings.edgeMarginPixels);
 
     // Screen left/right maps to world X; screen top/bottom maps to world -Z/+Z.
     const Vec3 movement{edge.x, 0.0f, edge.y};
 
     if (movement.lengthSquared() > 0.0f) {
-        camera.setPosition(camera.getPosition() + movement.normalized() * (panSpeed * frameSeconds));
+        camera.setPosition(camera.getPosition() + movement.normalized() * (settings.panSpeed * frameSeconds));
     }
+}
+
+MobaCameraSettings& MobaCameraController::getSettings() {
+    return settings;
 }

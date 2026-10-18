@@ -2,15 +2,8 @@
 
 #include <cmath>
 
-/*
-* A thrown ball rises until gravity has used up its speed: v^2 = 2 g h, so the launch speed for a chosen height is sqrt(2 g h).
-* Setting the height and gravity (rather than the speed) keeps the jump's feel easy to tune.
-*/
-FirstPersonCameraController::FirstPersonCameraController(float moveSpeed, float radiansPerPixel, float jumpHeight, float gravity):
-    moveSpeed(moveSpeed),
-    radiansPerPixel(radiansPerPixel),
-    gravity(gravity),
-    jumpSpeed(std::sqrt(2.0f * gravity * jumpHeight))
+FirstPersonCameraController::FirstPersonCameraController(const FirstPersonCameraSettings& settings):
+    settings(settings)
 {
 }
 
@@ -26,6 +19,8 @@ bool FirstPersonCameraController::isAirborne() const {
 }
 
 /*
+* A thrown ball rises until gravity has used up its speed: v^2 = 2 g h, so the launch speed for a chosen height is
+* sqrt(2 g h). Setting the height and gravity (rather than the speed) keeps the jump's feel easy to tune.
 * Constant gravity has an exact answer for any length of time: y += v t - g t^2 / 2 and v -= g t. Using it instead of a
 * step-by-step approximation makes the jump the same parabola at any frame rate. Reaching the eye height again is landing.
 * Space only jumps from the ground, so pressing it in mid-air does nothing.
@@ -33,7 +28,7 @@ bool FirstPersonCameraController::isAirborne() const {
 void FirstPersonCameraController::updateJump(Camera& camera, const Input& input, float frameSeconds) {
     if (!airborne && input.wasKeyPressed(Key::Space)) {
         airborne = true;
-        verticalSpeed = jumpSpeed;
+        verticalSpeed = std::sqrt(2.0f * settings.gravity * settings.jumpHeight);
     }
 
     if (!airborne) {
@@ -41,8 +36,8 @@ void FirstPersonCameraController::updateJump(Camera& camera, const Input& input,
     }
 
     Vec3 position = camera.getPosition();
-    position.y += verticalSpeed * frameSeconds - 0.5f * gravity * frameSeconds * frameSeconds;
-    verticalSpeed -= gravity * frameSeconds;
+    position.y += verticalSpeed * frameSeconds - 0.5f * settings.gravity * frameSeconds * frameSeconds;
+    verticalSpeed -= settings.gravity * frameSeconds;
 
     if (position.y <= eyeHeight && verticalSpeed < 0.0f) {
         position.y = eyeHeight;
@@ -61,23 +56,21 @@ void FirstPersonCameraController::update(Camera& camera, const Input& input, flo
         return;
     }
 
-    applyMouseLook(angles, input.getMouseDelta(), radiansPerPixel);
-    camera.setForward(directionFromAngles(angles));
+    turnCamera(camera, angles, input, settings.look);
 
     const Vec2 axes = getMoveAxes(input);
     const Vec3 levelForward = directionFromAngles(ViewAngles{angles.yaw, 0.0f});
     const Vec3 levelRight = levelForward.cross(Vec3{0.0f, 1.0f, 0.0f});
 
-    const Vec3 movement = levelForward * axes.y + levelRight * axes.x;
-
-    // Normalizing keeps diagonal movement from being faster.
-    if (movement.lengthSquared() > 0.0f) {
-        camera.setPosition(camera.getPosition() + movement.normalized() * (moveSpeed * getSpeedMultiplier(input) * frameSeconds));
-    }
+    moveCamera(camera, levelForward * axes.y + levelRight * axes.x, settings.moveSpeed, input, settings.look, frameSeconds);
 
     updateJump(camera, input, frameSeconds);
 }
 
 const ViewAngles& FirstPersonCameraController::getAngles() const {
     return angles;
+}
+
+FirstPersonCameraSettings& FirstPersonCameraController::getSettings() {
+    return settings;
 }

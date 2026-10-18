@@ -13,14 +13,6 @@ namespace {
     // wider than needed, so every point they are meant to cover stays this many texels inside its tile.
     constexpr float edgeMarginTexels = 2.0f;
 
-    // How far behind a directional light's box (towards the light) objects still cast shadows into it.
-    constexpr float directionalCasterReach = 50.0f;
-
-    // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
-    // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
-    // light grazes. Measured in texels, it shrinks and grows with each tile's size.
-    constexpr float normalOffsetTexels = 2.5f;
-
     // Even with every light at its largest size cut down to the smallest (directional lights never shrink), all tiles fit.
     constexpr std::uint32_t areaInSmallestTiles(std::uint32_t size) {
         return (size / smallestShadowTileSize) * (size / smallestShadowTileSize);
@@ -49,7 +41,7 @@ namespace {
     }
 
     // One texel of a perspective view covers 2 * distance * halfWidth / tileSize of world, so the offset is stored per unit of distance.
-    float perspectiveOffset(float halfWidth, std::uint32_t tileSize) {
+    float perspectiveOffset(float halfWidth, std::uint32_t tileSize, float normalOffsetTexels) {
         return normalOffsetTexels * 2.0f * halfWidth / static_cast<float>(tileSize);
     }
 
@@ -168,8 +160,8 @@ namespace {
 * A view of half-width h reaching range r is 2 * h * r across at its far end. Rounding up to a power of two keeps every
 * tile a whole quarter, sixteenth, ... of the largest one, which is what lets the atlas pack them without gaps.
 */
-std::uint32_t shadowTileSizeFor(float halfWidth, float range) {
-    const float texelsNeeded = 2.0f * halfWidth * range / shadowTexelTarget;
+std::uint32_t shadowTileSizeFor(float halfWidth, float range, const ShadowSettings& settings) {
+    const float texelsNeeded = 2.0f * halfWidth * range / settings.texelTarget;
     std::uint32_t size = smallestShadowTileSize;
 
     while (static_cast<float>(size) < texelsNeeded && size < largestShadowTileSize) {
@@ -231,9 +223,9 @@ Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float ou
 * jumps a whole texel at a time, so every shadow edge falls on the same texels instead of crawling and shimmering.
 * Directional lights always get the largest tile.
 */
-Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera) {
+Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const ShadowSettings& settings) {
     const Vec3 along = direction.lengthSquared() > 1e-12f ? direction.normalized() : Vec3{0.0f, -1.0f, 0.0f};
-    const float radius = directionalShadowDistance * 0.5f;
+    const float radius = settings.directionalDistance * 0.5f;
     const Vec3 centre = camera.getPosition() + camera.getForward() * radius;
 
     // The light's orientation only: a view at the origin looking along the light.
@@ -249,7 +241,7 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera) {
     const Mat4 box = Mat4::orthographic(
         snappedX - radius, snappedX + radius,
         snappedY - radius, snappedY + radius,
-        centreDistance - radius - directionalCasterReach, centreDistance + radius
+        centreDistance - radius - settings.directionalCasterReach, centreDistance + radius
     );
 
     return toGpuDepthRange(box) * rotation;
@@ -262,18 +254,18 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera) {
 * gives each tile a square, the same one as last frame when it can (see ShadowAtlasLayout). Tiles are numbered in
 * request order, so the numbering does not depend on sizes or places.
 */
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera) {
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings) {
     ShadowAtlasLayout freshLayout;
-    return planShadows(lighting, camera, freshLayout);
+    return planShadows(lighting, camera, freshLayout, settings);
 }
 
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout) {
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout, const ShadowSettings& settings) {
     const FrameLighting selected = selectDrawableLights(lighting);
     ShadowPlan plan{};
 
-    std::fill(&plan.uniforms.pointTiles[0][0], &plan.uniforms.pointTiles[0][0] + 64, -1);
-    std::fill(&plan.uniforms.spotTiles[0][0], &plan.uniforms.spotTiles[0][0] + 8, -1);
-    std::fill(plan.uniforms.directionalTiles, plan.uniforms.directionalTiles + 4, -1);
+    std::fill(&plan.uniforms.pointTiles[0][0], &plan.uniforms.pointTiles[0][0] + pointLightVec4s * 4, -1);
+    std::fill(&plan.uniforms.spotTiles[0][0], &plan.uniforms.spotTiles[0][0] + spotLightVec4s * 4, -1);
+    std::fill(plan.uniforms.directionalTiles, plan.uniforms.directionalTiles + maxDirectionalLights, -1);
 
     plan.uniforms.atlasTexel[0] = 1.0f / static_cast<float>(shadowAtlasWidth);
     plan.uniforms.atlasTexel[1] = 1.0f / static_cast<float>(shadowAtlasHeight);
@@ -292,7 +284,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         const SpotLight& light = selected.spotLights[slot].light;
 
         if (light.castsShadows) {
-            ShadowRequest request{ShadowKind::Spot, slot, 1, shadowTileSizeFor(spotHalfWidth(light.outerAngle), light.range), {}};
+            ShadowRequest request{ShadowKind::Spot, slot, 1, shadowTileSizeFor(spotHalfWidth(light.outerAngle), light.range, settings), {}};
             request.entity = selected.spotLights[slot].entity;
             requests.push_back(request);
             ++shadowedSpots;
@@ -306,7 +298,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         const PlacedPointLight& placed = selected.pointLights[slot];
 
         if (placed.light.castsShadows) {
-            ShadowRequest request{ShadowKind::Point, slot, 0, shadowTileSizeFor(1.0f, placed.light.range), {}};
+            ShadowRequest request{ShadowKind::Point, slot, 0, shadowTileSizeFor(1.0f, placed.light.range, settings), {}};
             request.facesInView = pointFacesInView(placed.position, placed.light.range, cameraView);
             request.tileCount = static_cast<int>(std::count(request.facesInView.begin(), request.facesInView.end(), true));
             request.entity = placed.entity;
@@ -347,8 +339,8 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             // A box texel is the same size everywhere, so its offset is fixed rather than growing with distance.
             const DirectionalLight& light = selected.directionalLights[request.slot];
             plan.uniforms.directionalTiles[request.slot] = firstTile;
-            addTile(plan, request.tiles[0], directionalShadowMatrix(light.direction, camera), 0.0f,
-                    normalOffsetTexels * directionalShadowDistance / static_cast<float>(largestShadowTileSize));
+            addTile(plan, request.tiles[0], directionalShadowMatrix(light.direction, camera, settings), 0.0f,
+                    settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(largestShadowTileSize));
         }
         else if (request.kind == ShadowKind::Spot) {
             const PlacedSpotLight& placed = selected.spotLights[request.slot];
@@ -359,7 +351,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             const float halfWidth = withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size);
             addTile(plan, request.tiles[0],
                     spotShadowMatrix(placed.position, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
-                    perspectiveOffset(halfWidth, request.size), 0.0f);
+                    perspectiveOffset(halfWidth, request.size, settings.normalOffsetTexels), 0.0f);
             setLens(plan, halfWidth, placed.light.range, request.size);
         }
         else {
@@ -378,7 +370,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
                     : ShadowTile{Mat4::identity(), 0, 0, 0};
 
                 addTile(plan, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
-                        perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size), 0.0f);
+                        perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size, settings.normalOffsetTexels), 0.0f);
                 setLens(plan, withEdgeMargin(1.0f, request.size), placed.light.range, request.size);
             }
         }
