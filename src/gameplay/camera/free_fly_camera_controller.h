@@ -4,14 +4,19 @@
 #include "input/input.h"
 #include "scene/camera.h"
 
+struct FreeFlyCameraSettings {
+    LookSettings look;
+    float moveSpeed = 3.0f; // units per second
+};
+
 /*
 * A debug or spectator camera: the mouse turns it, WASD moves along the view direction, Space and Ctrl move straight up and down,
-* and holding Shift flies at double speed.
+* and holding Shift flies faster.
 * Pauses while the mouse is not captured (after Escape).
 */
 class FreeFlyCameraController {
 public:
-    FreeFlyCameraController(float moveSpeed, float radiansPerPixel);
+    explicit FreeFlyCameraController(const FreeFlyCameraSettings& settings = {});
 
     // Continue from wherever the camera currently looks.
     void takeOver(const Camera& camera);
@@ -20,8 +25,10 @@ public:
 
     const ViewAngles& getAngles() const;
 
+    // Read every frame, so changes take effect at once.
+    FreeFlyCameraSettings& getSettings();
+
 private:
-    float moveSpeed;
-    float radiansPerPixel;
+    FreeFlyCameraSettings settings;
     ViewAngles angles;
 };

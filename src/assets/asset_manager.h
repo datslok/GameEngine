@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/image_loader.h"
+#include "math/angles.h"
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
@@ -11,7 +12,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <numbers>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -23,7 +23,7 @@ struct MeshLoadOptions {
     bool smoothNormals = false;
 
     // Faces meeting at more than this angle (radians) keep a sharp edge when smoothing.
-    float creaseAngle = 60.0f * std::numbers::pi_v<float> / 180.0f;
+    float creaseAngle = radiansFromDegrees(60.0f);
 };
 
 /*

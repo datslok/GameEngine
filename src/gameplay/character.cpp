@@ -1,4 +1,5 @@
 #include "gameplay/character.h"
+#include "math/angles.h"
 #include "math/transform.h"
 #include "scene/interpolation.h"
 #include "scene/model.h"
@@ -90,19 +91,15 @@ void updateCharacters(World& world, float deltaTime) {
             return;
         }
 
-        constexpr float fullTurn = 2.0f * std::numbers::pi_v<float>;
         float& currentYaw = transform.rotation.y;
-        const float difference = std::remainder(*character.targetYaw - currentYaw, fullTurn);
+        const float difference = wrapAngle(*character.targetYaw - currentYaw);
         const float maximumTurn = character.turnSpeed * deltaTime;
 
         if (std::abs(difference) <= maximumTurn) {
-            currentYaw = std::remainder(*character.targetYaw, fullTurn);
+            currentYaw = wrapAngle(*character.targetYaw);
             character.targetYaw.reset();
         } else {
-            currentYaw = std::remainder(
-                currentYaw + std::clamp(difference, -maximumTurn, maximumTurn),
-                fullTurn
-            );
+            currentYaw = wrapAngle(currentYaw + std::clamp(difference, -maximumTurn, maximumTurn));
         }
     });
 }

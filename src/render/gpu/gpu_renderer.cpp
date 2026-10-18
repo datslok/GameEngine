@@ -469,7 +469,7 @@ SDL_GPUDevice* GpuRenderer::getDevice() const {
 * scene into the shadow atlas, then the camera's view, which reads that atlas. Culling will later skip draws the camera cannot see.
 * If anything fails part-way, the frame is still submitted (a swapchain image was acquired), then the error is passed on.
 */
-bool GpuRenderer::render(const FrameDescription& frame) {
+bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& settings) {
     SDL_GPUTexture* swapchainTexture = acquireFrame();
 
     if (swapchainTexture == nullptr) {
@@ -489,7 +489,8 @@ bool GpuRenderer::render(const FrameDescription& frame) {
         const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::ZeroToOne);
 
         // When there are more lights than seats, the ones that matter most here get them, remembering last frame's choice.
-        const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory, frame.frameSeconds);
+        const PrioritizedLighting prioritized = prioritizeLights(frame.lighting, frame.lightFocus, cameraFrustum, lightHistory, frame.frameSeconds,
+                                                                 settings.lights);
         lightHistory = prioritized.history;
 
         stats.pointLights = frame.lighting.pointLights.size();
@@ -500,7 +501,7 @@ bool GpuRenderer::render(const FrameDescription& frame) {
             [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
         const LightUniformData lights = packLighting(prioritized.lighting, camera.getPosition());
-        const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout);
+        const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
 
         // Copies must happen outside render passes, so the debug lines are uploaded first.
         debugLines->upload(commands, frame.debugLines, frame.debugScreenLines);

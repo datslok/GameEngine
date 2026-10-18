@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/gpu/shader_shared.h"
+
 /*
 * Soft shadows sized by the light (percentage-closer soft shadows, PCSS). A real light glows over an area, not a point,
 * so behind an object's edge there is a band where part of the glowing area is hidden (the penumbra), and it widens the
@@ -12,10 +14,10 @@
 */
 
 // The narrowest filter (about the old fixed 3x3 softness) and the widest. Wider filters cost no more samples but look
-// grainier, and they must stay well inside a tile's edge margin of samples.
-inline constexpr float minShadowFilterTexels = 1.0f;
-inline constexpr float maxShadowFilterTexels = 12.0f;
-inline constexpr float maxBlockerSearchTexels = 12.0f;
+// grainier, and they must stay well inside a tile's edge margin of samples. Shared with the shader.
+inline constexpr float minShadowFilterTexels = static_cast<float>(MIN_SHADOW_FILTER_TEXELS);
+inline constexpr float maxShadowFilterTexels = static_cast<float>(MAX_SHADOW_FILTER_TEXELS);
+inline constexpr float maxBlockerSearchTexels = static_cast<float>(MAX_BLOCKER_SEARCH_TEXELS);
 
 // Depth from the shadow map (the GPU's 0..1) back to distance from the light along the view's axis. Perspective depth
 // is f (d - n) / (d (f - n)), so d = f n / (f - depth (f - n)).

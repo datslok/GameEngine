@@ -1,4 +1,5 @@
 #include "scene/debug_draw.h"
+#include "math/angles.h"
 
 #include <algorithm>
 #include <cmath>
@@ -49,14 +50,13 @@ void DebugDraw::arc(const Vec3& centre, const Vec3& axisA, const Vec3& axisB, fl
 }
 
 void DebugDraw::sphere(const Vec3& centre, float radius, const Vec3& colour, int segments) {
-    const float fullTurn = 2.0f * std::numbers::pi_v<float>;
     const Vec3 x{1.0f, 0.0f, 0.0f};
     const Vec3 y{0.0f, 1.0f, 0.0f};
     const Vec3 z{0.0f, 0.0f, 1.0f};
 
-    arc(centre, x, y, radius, 0.0f, fullTurn, colour, segments);
-    arc(centre, y, z, radius, 0.0f, fullTurn, colour, segments);
-    arc(centre, z, x, radius, 0.0f, fullTurn, colour, segments);
+    arc(centre, x, y, radius, 0.0f, fullTurnRadians, colour, segments);
+    arc(centre, y, z, radius, 0.0f, fullTurnRadians, colour, segments);
+    arc(centre, z, x, radius, 0.0f, fullTurnRadians, colour, segments);
 }
 
 /*

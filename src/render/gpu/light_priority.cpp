@@ -40,7 +40,8 @@ namespace {
     * priorities, last frame's choices count incumbentAdvantage times as much. The sort is stable, so equally important
     * lights keep the order they were collected in.
     */
-    std::vector<std::size_t> chooseMostImportant(const std::vector<Contender>& contenders, const std::vector<Entity>& incumbents, int count) {
+    std::vector<std::size_t> chooseMostImportant(const std::vector<Contender>& contenders, const std::vector<Entity>& incumbents, int count,
+                                                 float incumbentAdvantage) {
         std::vector<float> standing(contenders.size());
 
         for (std::size_t i = 0; i < contenders.size(); ++i) {
@@ -101,6 +102,14 @@ namespace {
         return entities;
     }
 
+    // How one kind of light is handed out this frame: its seats and shadows, how far fades move, and the hysteresis.
+    struct Handover {
+        int seats;
+        int shadows;
+        float fadeStep;
+        float incumbentAdvantage;
+    };
+
     // A light holding a seat this frame: which candidate, how far into its seat and its shadow, and how bright it was last frame.
     struct Holder {
         std::size_t candidate;
@@ -121,8 +130,11 @@ namespace {
     */
     template <typename Placed>
     std::vector<Holder> holdSeats(const std::vector<Placed>& candidates, const std::vector<Contender>& contenders,
-                                  const LightHistory& previous, const std::vector<LightFade>& previouslyHeld, int seats, float fadeStep) {
-        const std::vector<std::size_t> wantedOrder = chooseMostImportant(contenders, holdersOf(previouslyHeld, false), seats);
+                                  const LightHistory& previous, const std::vector<LightFade>& previouslyHeld, const Handover& handover) {
+        const int seats = handover.seats;
+        const float fadeStep = handover.fadeStep;
+        const std::vector<std::size_t> wantedOrder =
+            chooseMostImportant(contenders, holdersOf(previouslyHeld, false), seats, handover.incumbentAdvantage);
         std::vector<bool> wanted(candidates.size(), false);
 
         for (std::size_t index : wantedOrder) {
@@ -165,7 +177,9 @@ namespace {
     */
     template <typename Placed>
     void holdShadows(std::vector<Holder>& holders, const std::vector<Placed>& candidates, const Vec3& focus,
-                     const std::vector<LightFade>& previouslyHeld, int shadows, float fadeStep) {
+                     const std::vector<LightFade>& previouslyHeld, const Handover& handover) {
+        const int shadows = handover.shadows;
+        const float fadeStep = handover.fadeStep;
         std::vector<std::size_t> casters;
         std::vector<Contender> contenders;
 
@@ -179,7 +193,8 @@ namespace {
             }
         }
 
-        const std::vector<std::size_t> wantedOrder = chooseMostImportant(contenders, holdersOf(previouslyHeld, true), shadows);
+        const std::vector<std::size_t> wantedOrder =
+            chooseMostImportant(contenders, holdersOf(previouslyHeld, true), shadows, handover.incumbentAdvantage);
         std::vector<bool> wanted(casters.size(), false);
 
         for (std::size_t index : wantedOrder) {
@@ -225,7 +240,7 @@ namespace {
     template <typename Placed>
     std::vector<Placed> chooseLights(const std::vector<Placed>& lights, const Vec3& focus, const Frustum& view,
                                      const LightHistory& previous, const std::vector<LightFade>& previouslyHeld,
-                                     int seats, int shadows, float fadeStep, LightHistory& history,
+                                     const Handover& handover, LightHistory& history,
                                      std::vector<LightFade>& held, std::size_t& candidateCount) {
         std::vector<Placed> candidates;
         std::vector<Contender> contenders;
@@ -243,8 +258,8 @@ namespace {
 
         candidateCount = candidates.size();
 
-        std::vector<Holder> holders = holdSeats(candidates, contenders, previous, previouslyHeld, seats, fadeStep);
-        holdShadows(holders, candidates, focus, previouslyHeld, shadows, fadeStep);
+        std::vector<Holder> holders = holdSeats(candidates, contenders, previous, previouslyHeld, handover);
+        holdShadows(holders, candidates, focus, previouslyHeld, handover);
 
         std::vector<Placed> seated;
 
@@ -278,7 +293,7 @@ float lightImportance(const Vec3& lightPosition, const Vec3& colour, float inten
 * history: their brightness does not change as the camera moves.
 */
 PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
-                                     float elapsedSeconds, const LightLimits& limits) {
+                                     float elapsedSeconds, const LightPrioritySettings& settings) {
     PrioritizedLighting result;
     result.lighting.ambient = lighting.ambient;
 
@@ -297,16 +312,29 @@ PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& 
         directional.resize(static_cast<std::size_t>(maxDirectionalLights));
     }
 
-    const float fadeStep = std::max(elapsedSeconds, 0.0f) / lightFadeSeconds;
+    // A fade time of zero (or less) hands over at once.
+    const float fadeStep = settings.fadeSeconds > 0.0f ? std::max(elapsedSeconds, 0.0f) / settings.fadeSeconds : 1.0f;
 
-    result.lighting.pointLights = chooseLights(lighting.pointLights, focus, view, previous, previous.points, limits.pointSeats,
-                                               limits.shadowedPoints, fadeStep, result.history, result.history.points,
-                                               result.pointLightsInView);
+    // Seats and shadows can be capped below what the shader and the atlas hold, never above.
+    const Handover points{
+        std::clamp(settings.pointSeats, 0, maxPointLights),
+        std::clamp(settings.shadowedPoints, 0, maxShadowedPointLights),
+        fadeStep,
+        settings.incumbentAdvantage
+    };
+    const Handover spots{
+        std::clamp(settings.spotSeats, 0, maxSpotLights),
+        std::clamp(settings.shadowedSpots, 0, maxShadowedSpotLights),
+        fadeStep,
+        settings.incumbentAdvantage
+    };
+
+    result.lighting.pointLights = chooseLights(lighting.pointLights, focus, view, previous, previous.points, points,
+                                               result.history, result.history.points, result.pointLightsInView);
 
     std::size_t spotLightsInView = 0;
-    result.lighting.spotLights = chooseLights(lighting.spotLights, focus, view, previous, previous.spots, limits.spotSeats,
-                                              limits.shadowedSpots, fadeStep, result.history, result.history.spots,
-                                              spotLightsInView);
+    result.lighting.spotLights = chooseLights(lighting.spotLights, focus, view, previous, previous.spots, spots,
+                                              result.history, result.history.spots, spotLightsInView);
 
     return result;
 }

@@ -2,6 +2,7 @@
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
 #include "gameplay/spinner.h"
+#include "math/angles.h"
 #include "math/transform.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
@@ -10,7 +11,6 @@
 
 #include <cmath>
 #include <memory>
-#include <numbers>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -77,16 +77,12 @@ DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
         Vec3{2.0f, 1.0f, 0.0f},
         Vec3{0.0f, 0.0f, -5.0f},
         Vec3{0.0f, 1.0f, 0.0f},
-        70.0f * std::numbers::pi_v<float> / 180.0f, // FoV
+        radiansFromDegrees(70.0f), // FoV
         16.0f / 9.0f, // Replaced by the engine with the real frame's aspect ratio.
         0.1f,
         100.0f
     ),
-    // Movement speed in units per second, mouse sensitivity in radians per pixel.
-    firstPersonCamera(3.0f, 0.001f),
-    // Camera position relative to the point it looks at, then pan speed.
-    mobaCamera(Vec3{0.0f, 12.0f, 10.0f}, 9.0f),
-    freeFlyCamera(3.0f, 0.001f),
+    // The camera controllers start with their default settings; change them through getSettings().
     controlMode(startMode),
     enableDebugModeSwitching(debugModeSwitching)
 {
@@ -190,13 +186,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(ground, groundPlacement);
     world.add(ground, makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass));
 
-    // Change this configuration to use another compatible static model.
+    // Change this configuration to use another compatible static model. Size and speeds keep CharacterConfig's defaults.
     const CharacterConfig playerConfig{
         .modelPath = "assets/models/Duck.glb",
-        .modelSize = 2.0f,
-        .movementSpeed = 6.0f,
-        .turnSpeed = 6.0f * std::numbers::pi_v<float>,
-        .modelForwardYaw = std::numbers::pi_v<float> / 2.0f
+        .modelForwardYaw = radiansFromDegrees(90.0f)
     };
 
     const Model& model = assets.loadModel(playerConfig.modelPath);

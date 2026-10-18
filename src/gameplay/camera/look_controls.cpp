@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 /*
 * Spherical to Cartesian: the horizontal part has length cos(pitch), split between x and -z by the yaw.
@@ -30,7 +29,7 @@ ViewAngles anglesFromDirection(const Vec3& direction) {
 }
 
 void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPerPixel) {
-    angles.yaw = std::remainder(angles.yaw + mouseDelta.x * radiansPerPixel, 2.0f * std::numbers::pi_v<float>);
+    angles.yaw = wrapAngle(angles.yaw + mouseDelta.x * radiansPerPixel);
 
     // Screen y grows downwards, so moving the mouse up (negative y) looks up.
     angles.pitch = std::clamp(
@@ -40,9 +39,21 @@ void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPer
     );
 }
 
-float getSpeedMultiplier(const Input& input) {
+float getSpeedMultiplier(const Input& input, float sprintMultiplier) {
     const bool sprinting = input.isKeyHeld(Key::LeftShift) || input.isKeyHeld(Key::RightShift);
-    return sprinting ? sprintSpeedMultiplier : 1.0f;
+    return sprinting ? sprintMultiplier : 1.0f;
+}
+
+void turnCamera(Camera& camera, ViewAngles& angles, const Input& input, const LookSettings& look) {
+    applyMouseLook(angles, input.getMouseDelta(), look.radiansPerPixel);
+    camera.setForward(directionFromAngles(angles));
+}
+
+void moveCamera(Camera& camera, const Vec3& direction, float speed, const Input& input, const LookSettings& look, float frameSeconds) {
+    if (direction.lengthSquared() > 0.0f) {
+        const float distance = speed * getSpeedMultiplier(input, look.sprintMultiplier) * frameSeconds;
+        camera.setPosition(camera.getPosition() + direction.normalized() * distance);
+    }
 }
 
 Vec2 getMoveAxes(const Input& input) {

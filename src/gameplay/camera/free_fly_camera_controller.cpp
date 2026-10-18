@@ -1,8 +1,7 @@
 #include "gameplay/camera/free_fly_camera_controller.h"
 
-FreeFlyCameraController::FreeFlyCameraController(float moveSpeed, float radiansPerPixel):
-    moveSpeed(moveSpeed),
-    radiansPerPixel(radiansPerPixel)
+FreeFlyCameraController::FreeFlyCameraController(const FreeFlyCameraSettings& settings):
+    settings(settings)
 {
 }
 
@@ -18,8 +17,7 @@ void FreeFlyCameraController::update(Camera& camera, const Input& input, float f
         return;
     }
 
-    applyMouseLook(angles, input.getMouseDelta(), radiansPerPixel);
-    camera.setForward(directionFromAngles(angles));
+    turnCamera(camera, angles, input, settings.look);
 
     const Vec2 axes = getMoveAxes(input);
     const Vec3 worldUp{0.0f, 1.0f, 0.0f};
@@ -34,12 +32,13 @@ void FreeFlyCameraController::update(Camera& camera, const Input& input, float f
         movement = movement - worldUp;
     }
 
-    // Normalizing keeps diagonal movement from being faster.
-    if (movement.lengthSquared() > 0.0f) {
-        camera.setPosition(camera.getPosition() + movement.normalized() * (moveSpeed * getSpeedMultiplier(input) * frameSeconds));
-    }
+    moveCamera(camera, movement, settings.moveSpeed, input, settings.look, frameSeconds);
 }
 
 const ViewAngles& FreeFlyCameraController::getAngles() const {
     return angles;
+}
+
+FreeFlyCameraSettings& FreeFlyCameraController::getSettings() {
+    return settings;
 }

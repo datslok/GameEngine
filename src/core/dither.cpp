@@ -1,4 +1,5 @@
 #include "core/dither.h"
+#include "core/dither_shared.h"
 #include "core/srgb.h"
 
 #include <algorithm>
@@ -21,11 +22,11 @@ float interleavedGradientNoise(float pixelX, float pixelY) {
 
 /*
 * The screen stores sRGB values in 256 steps, so the noise is sized in those steps: encode, add up to half a step either
-* way, decode. Kept just under a full step, so a value exactly on a level can never be pushed onto the rounding boundary.
+* way, decode. The step size is shared with the shader (core/dither_shared.h).
 */
 float ditherForEightBits(float linear, float noise) {
     const float encoded = linearToSrgb(std::max(linear, 0.0f));
-    const float nudged = encoded + (noise - 0.5f) * (0.99f / 255.0f);
+    const float nudged = encoded + (noise - 0.5f) * static_cast<float>(DITHER_STEP_FRACTION / DITHER_LEVELS);
 
     return srgbToLinear(std::clamp(nudged, 0.0f, 1.0f));
 }

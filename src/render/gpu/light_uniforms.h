@@ -1,16 +1,21 @@
 #pragma once
 
+#include "render/gpu/shader_shared.h"
 #include "render/gpu/uniform_limits.h"
 #include "scene/lighting.h"
 
 #include <cstdint>
 
-// The most lights the shader can use. Must match the array sizes in triangle.frag.
-inline constexpr int maxDirectionalLights = 4;
+// The most lights the shader can use, from the header triangle.frag shares, so its array sizes always match.
 // Each pixel loops over every light it gets, but a light out of range costs only a distance check, so dozens are cheap.
 // Hundreds would need clustered shading (each pixel only looks at the lights that reach its part of the view).
-inline constexpr int maxPointLights = 64;
-inline constexpr int maxSpotLights = 8;
+inline constexpr int maxDirectionalLights = MAX_DIRECTIONAL_LIGHTS;
+inline constexpr int maxPointLights = MAX_POINT_LIGHTS;
+inline constexpr int maxSpotLights = MAX_SPOT_LIGHTS;
+
+// Per-light shadow values are packed four to a vec4 (std140 pads single floats to 16 bytes), so slot i is at [i / 4][i % 4].
+inline constexpr int pointLightVec4s = (maxPointLights + 3) / 4;
+inline constexpr int spotLightVec4s = (maxSpotLights + 3) / 4;
 
 struct DirectionalLightUniform {
     float toLight[4];  // xyz: unit direction towards the light

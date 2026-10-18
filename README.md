@@ -15,6 +15,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Event-based input with engine-owned key codes, no SDL types in game code
 - Three camera modes: first person, MOBA-style top-down with click-to-move, and a free debug camera
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
+- Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, camera speeds and mouse sensitivity) lives in a settings struct owned by its system, ready for a debug UI, and numbers the shaders share with C++ are written once
 - Unit tests that run without a GPU or window
 
 ## Requirements
