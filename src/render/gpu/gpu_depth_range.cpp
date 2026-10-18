@@ -1,7 +1,7 @@
 #include "render/gpu/gpu_depth_range.h"
 
 /*
-* Vulkan (and so SDL_GPU) keeps depths from 0 to 1, while Mat4::perspective follows OpenGL's -1 to 1. Taking half of w
+* Vulkan keeps depths from 0 to 1, while Mat4::perspective follows OpenGL's -1 to 1. Taking half of w
 * and subtracting half of depth maps -w..w to w..0, so after the divide by w the near plane is at 1 and the far plane
 * at 0 (reversed-Z). x, y and w are untouched.
 *

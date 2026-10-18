@@ -14,8 +14,7 @@ class VulkanDevice;
 inline constexpr VkFormat vulkanOverlayFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
 /*
-* The debug UI drawn into its own transparent image, then laid over the finished screen image last of all, as
-* OverlayRenderer does: on an HDR screen the UI's colours are decoded and scaled to the white level (overlay.frag)
+* The debug UI drawn into its own transparent image, then laid over the finished screen image last of all: on an HDR screen the UI's colours are decoded and scaled to the white level (overlay.frag)
 * instead of being shown at scRGB's dim 80 nits. ImGui's Vulkan backend draws the UI; this owns the image and the
 * composite pipeline (built for the screen's format).
 */

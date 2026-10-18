@@ -32,7 +32,7 @@ LDLIBS := -lSDL3_image -lSDL3
 
 GLSLC := glslc
 
-# The Vulkan renderer's validation layers (debug builds): MSYS2 installs them beside its DLLs, where the Vulkan loader
+# The renderer's Vulkan validation layers (debug builds): MSYS2 installs them beside its DLLs, where the Vulkan loader
 # does not look on its own, so every program make runs is told the folder.
 export VK_ADD_LAYER_PATH ?= $(shell cygpath -w /ucrt64/bin 2>/dev/null)
 
@@ -49,7 +49,7 @@ rwildcard = $(foreach entry,$(wildcard $(1:=/*)),$(call rwildcard,$(entry),$(2))
 
 SOURCES := $(strip $(call rwildcard,src,*.cpp))
 MAIN_SOURCE := src/app/main.cpp
-# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3, SDL_GPU and Vulkan backends,
+# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and Vulkan backends,
 # vk-bootstrap (Vulkan device set-up) and the Vulkan Memory Allocator, and in C, MikkTSpace (tangents for normal maps)
 # and volk (Vulkan function loading).
 EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-bootstrap/*.cpp) $(wildcard external/vma/*.cpp)
@@ -72,7 +72,7 @@ SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test shaders clean release run-release test-release golden golden-save run-vulkan golden-vulkan
+.PHONY: all run test shaders clean release run-release test-release golden golden-save
 
 all: $(TARGET) shaders
 
@@ -134,14 +134,6 @@ golden: $(TARGET) shaders
 
 golden-save: $(TARGET) shaders
 	./$(TARGET) --golden-save
-
-# The engine's own Vulkan renderer instead of SDL_GPU (phase 6b, until SDL_GPU is removed): the game, and its golden
-# images compared with the references SDL_GPU saved.
-run-vulkan: $(TARGET) shaders
-	./$(TARGET) --vulkan
-
-golden-vulkan: $(TARGET) shaders
-	./$(TARGET) --golden-check --vulkan
 
 # The release build through the same rules, in build/release. Running the tests optimised as well catches bugs that only
 # show at -O2 (uninitialised variables, code that breaks the language rules the optimiser relies on).

@@ -2,11 +2,11 @@
 
 A game engine written from scratch in C++20, as a learning project. The long-term goal is an engine that can run both an **FPS** and a **MOBA**, and eventually a dressmaking game with real cloth physics: the core stays genre-agnostic, and genre-specific code (camera styles, weapons, abilities, netcode) sits on top.
 
-It began life as a software rasterizer drawing pixels on the CPU and now renders on the GPU through SDL3's GPU API (Vulkan backend). See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
+It began life as a software rasterizer drawing pixels on the CPU and now renders on the GPU with its own Vulkan 1.3 renderer. See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
 
 ## Features
 
-- GPU rendering with SPIR-V shaders, through SDL_GPU (Vulkan) or the engine's own Vulkan 1.3 renderer (volk, vk-bootstrap and VMA; dynamic rendering, synchronization2 and hand-written barriers; `make run-vulkan`), which draws every golden image bit for bit the same and will replace SDL_GPU: reversed-Z depth (near at 1, far at 0, so depth precision is nearly even out to the far plane) and camera-relative rendering (positions measured from the camera before they become floats in matrices, so distant scenes do not jitter), indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering, gamma-correct (linear-light) colour with sRGB textures and swapchain, HDR rendering (the scene is lit in 16-bit floats, then tone mapped with a choice of curves, AgX, ACES, Reinhard or plain clamping, and an exposure, so bright lights roll off smoothly instead of clipping to white), bloom (a few percent of all light scattered into a soft halo, as in a camera lens: the scene halved down a chain of levels with Jimenez's 13-tap filter and grown back with tent filters, energy-conserving, with a firefly filter), HDR output on HDR monitors (scRGB, with paper white and peak brightness settings in nits, falling back to SDR when Windows HDR is off), dithering against banding
+- GPU rendering with SPIR-V shaders on the engine's own Vulkan 1.3 renderer (volk, vk-bootstrap and VMA; dynamic rendering, synchronization2 and hand-written barriers), which replaced SDL_GPU drawing every golden image bit for bit the same: reversed-Z depth (near at 1, far at 0, so depth precision is nearly even out to the far plane) and camera-relative rendering (positions measured from the camera before they become floats in matrices, so distant scenes do not jitter), indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering, gamma-correct (linear-light) colour with sRGB textures and swapchain, HDR rendering (the scene is lit in 16-bit floats, then tone mapped with a choice of curves, AgX, ACES, Reinhard or plain clamping, and an exposure, so bright lights roll off smoothly instead of clipping to white), bloom (a few percent of all light scattered into a soft halo, as in a camera lens: the scene halved down a chain of levels with Jimenez's 13-tap filter and grown back with tent filters, energy-conserving, with a firefly filter), HDR output on HDR monitors (scRGB, with paper white and peak brightness settings in nits, falling back to SDR when Windows HDR is off), dithering against banding
 - Lighting: directional, point, spot and ambient lights as components, physically based materials (glTF metallic-roughness: GGX microfacet highlights with Smith shadowing and Schlick Fresnel, Lambert diffuse, and energy compensation for light that bounces between microfacets, so nothing is lost or created at any roughness), emissive (glowing) materials, frustum culling (each view, camera or shadow, skips what it cannot see), debug drawing (lines, boxes, spheres and capsules drawn over the scene, with an F4 debug view), shadows from every light (point lights as six cube faces, minus the faces that cannot shadow anything on screen, spotlights and directional lights as one view each, all in one depth atlas with tiles sized by each light's reach, so up to 64 point lights and 8 spotlights cast shadows, with soft edges that widen with distance from the blocker like real ones (PCSS, sized by each light's glowing size), and cached: a tile is only redrawn when its light or something in its view moves), up to 64 point lights and 8 spotlights at once, light priority (with more lights than the shader and shadow atlas hold, the brightest ones where the action is win, skipping lights out of view, with hysteresis so shadows do not flicker between similar lights, and a priority a game can set so a light is never dropped while in view)
 - Model loading: OBJ, and glTF/GLB with embedded or external textures, metallic and roughness (factors and texture), normal maps (with the file's tangents, or tangents generated with MikkTSpace as baking tools do, so the bumps look as their authors made them, mirrored pictures included) and emissive colour (with KHR_materials_emissive_strength); optional smooth normals with a crease angle for models that have none
 - Entities and components: generational entity handles, sparse-set component storage, systems as plain functions that may destroy entities and remove components mid-walk (queued until the walk ends)
@@ -73,8 +73,6 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides |
 | `make golden` | Renders the demo's golden views and compares them with the references in `tests/golden/<GPU>/` (needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/`) |
 | `make golden-save` | Renders the golden views and saves them as the new references (only on purpose: after a change that is meant to alter the picture) |
-| `make run-vulkan` | Runs the game on the engine's own Vulkan renderer instead of SDL_GPU (phase 6b, until SDL_GPU is removed) |
-| `make golden-vulkan` | Checks the Vulkan renderer's golden images against the same references |
 | `make clean` | Removes the compiled objects, executables and shaders |
 
 New `.cpp` files in `src/` and `tests/` are picked up automatically.
@@ -150,8 +148,8 @@ src/            Engine and game source, in layers (lower ones never include high
   engine/       The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
   gameplay/     Character movement, spinners, fireflies, grenades and camera controllers
   platform/     The window and SDL input translation
-  render/gpu/   GPU renderer (SDL_GPU): physically based shading and normal mapping (and their tested CPU mirrors), shadow atlas and caching, soft shadows, light priority, debug lines, the overlay the debug UI is drawn into, quality presets, and the packing of lights and materials for the shaders
-  render/vulkan/ The engine's own Vulkan 1.3 renderer: device, swapchain, barriers, pipelines, per-frame uniforms and descriptors, every pass of the SDL_GPU renderer
+  render/gpu/   The renderer's parts that do not call Vulkan: physically based shading and normal mapping (and their tested CPU mirrors), shadow atlas and caching, soft shadows, light priority, debug lines, the overlay the debug UI is drawn into, quality presets, and the packing of lights and materials for the shaders
+  render/vulkan/ The engine's own Vulkan 1.3 renderer: device, swapchain, barriers, pipelines, per-frame uniforms and descriptors, and every pass (shadows, main, bloom, tone mapping, debug lines, the debug UI)
   render/software/  Software rasterizer, kept as a tested reference
   scene/        Meshes (with tangents for normal maps), models, materials, lights, the camera, render components, interpolation and the frame description
   assets/       The asset manager, and OBJ, glTF and image loaders
@@ -172,7 +170,7 @@ assets/
   shaders/      GLSL shaders (compiled to .spv by make)
   textures/     Images
 external/cgltf  Vendored glTF loader
-external/imgui  Vendored Dear ImGui (the debug UI), with its SDL3, SDL_GPU and Vulkan backends
+external/imgui  Vendored Dear ImGui (the debug UI), with its SDL3 and Vulkan backends
 external/mikktspace  Vendored MikkTSpace (tangents for normal maps, C)
 external/volk   Vendored volk (loads Vulkan's functions from the driver, C)
 external/vk-bootstrap  Vendored vk-bootstrap (Vulkan instance, GPU and device set-up)

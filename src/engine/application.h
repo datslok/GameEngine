@@ -12,11 +12,10 @@
 #include "platform/window.h"
 #include "engine/golden_view.h"
 #include "render/captured_frame.h"
-#include "render/render_backend.h"
+#include "render/vulkan/vulkan_renderer.h"
 #include "scene/frame_description.h"
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -85,7 +84,7 @@ private:
     // Members are destroyed in reverse order: the window outlives the renderer that draws into it,
     // and the renderer owns every GPU copy of the assets.
     Window window;
-    std::unique_ptr<RenderBackend> renderer;
+    VulkanRenderer renderer;
 
     // Refreshed once per frame by window.processEvents().
     Input input;

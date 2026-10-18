@@ -1,7 +1,7 @@
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/gpu/debug_line_vertices.h"
 #include "render/gpu/gpu_depth_range.h"
-#include "render/gpu/gpu_helpers.h"
+#include "render/gpu/column_major.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/vulkan_device.h"
 

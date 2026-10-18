@@ -2,7 +2,7 @@
 
 #include "core/settings_visitor.h"
 #include "platform/window.h"
-#include "render/render_backend.h"
+#include "render/vulkan/vulkan_renderer.h"
 #include "render/gpu/render_settings.h"
 
 #include <string>
@@ -26,7 +26,7 @@ struct DebugUiRequests {
 */
 class DebugUi {
 public:
-    DebugUi(Window& window, RenderBackend& renderer);
+    DebugUi(Window& window, VulkanRenderer& renderer);
     ~DebugUi();
 
     // One ImGui context per program.
@@ -38,7 +38,7 @@ public:
 
     /*
     * Build this frame's UI, changing the walked settings as the player moves controls. Returns what to draw
-    * (RenderBackend::render's ui), valid until the next build, or null while closed, when nothing is built at all.
+    * (VulkanRenderer::render's ui), valid until the next build, or null while closed, when nothing is built at all.
     */
     ImDrawData* build(const SettingsWalk& settings, RenderSettings& render, DebugUiRequests& requests);
 
@@ -49,7 +49,7 @@ private:
     void cleanup() noexcept;
 
     Window& window;
-    RenderBackend& renderer;
+    VulkanRenderer& renderer;
     bool open = false;
     bool platformStarted = false;
     std::string status;

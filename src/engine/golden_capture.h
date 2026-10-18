@@ -1,6 +1,5 @@
 #pragma once
 
-#include "engine/engine_settings.h"
 #include "engine/game.h"
 
 #include <functional>
@@ -21,5 +20,4 @@ inline constexpr const char* goldenReferenceRoot = "tests/golden";
 inline constexpr const char* goldenCheckRoot = "build/golden";
 
 // Returns the number of images that failed (missing references count as failures), 0 when all passed or were saved.
-// settings are the engine's defaults unless a start-up choice must differ (the graphics API, while phase 6b compares two).
-int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, GoldenMode mode, const EngineSettings& settings = {});
+int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, GoldenMode mode);

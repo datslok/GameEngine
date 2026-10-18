@@ -13,7 +13,7 @@
 class VulkanDevice;
 
 /*
-* A frame's debug lines over the finished image, as DebugLineRenderer draws them: world lines through the camera, screen
+* A frame's debug lines over the finished image: world lines through the camera, screen
 * lines in window pixels, unlit and with no depth test, so they show through walls. Each frame in flight has its own
 * vertex buffer in upload memory, written directly by the CPU (no copy pass), growing when a frame has more lines.
 */

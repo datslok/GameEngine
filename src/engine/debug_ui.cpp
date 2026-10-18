@@ -144,7 +144,7 @@ namespace {
 * navigation stays off, so with the UI open the game keeps its keys (fly around while tuning). Sizes and the font
 * follow the display's scale, so the UI is readable on a high-DPI screen.
 */
-DebugUi::DebugUi(Window& window, RenderBackend& renderer):
+DebugUi::DebugUi(Window& window, VulkanRenderer& renderer):
     window(window),
     renderer(renderer)
 {

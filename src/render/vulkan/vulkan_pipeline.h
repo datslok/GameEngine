@@ -13,7 +13,7 @@ class VulkanDevice;
 
 /*
 * How many resources a pipeline's shaders read, in the descriptor layout the shaders were written for (SDL_GPU's, kept
-* so both renderers run the same compiled shaders): set 0 holds vertex textures (none so far), set 1 the vertex
+* from the port so the pictures stayed the same): set 0 holds vertex textures (none so far), set 1 the vertex
 * uniform blocks, set 2 the fragment textures followed by the fragment storage buffers, and set 3 the fragment
 * uniform blocks. Uniform blocks are bound as dynamic uniform buffers: one descriptor per block, pointing into the
 * frame's uniform buffer, with the offset given at each draw.

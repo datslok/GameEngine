@@ -3,7 +3,7 @@
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/depth_shared.h"
 #include "render/gpu/gpu_depth_range.h"
-#include "render/gpu/gpu_helpers.h"
+#include "render/gpu/column_major.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/tone_map_uniforms.h"
 #include "render/vulkan/render_pass.h"
@@ -557,7 +557,7 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
 /*
 * Everything up to tone mapping, into the frame textures (already the frame's size): lights chosen, shadows, the main
 * pass and bloom, with the UI drawn into its own image on the way. Leaves the scene image readable and no pass open,
-* and returns how tone mapping should mix in the bloom. The CPU half is GpuRenderer's, unchanged.
+* and returns how tone mapping should mix in the bloom.
 */
 BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings,
                                          ImDrawData* ui) {

@@ -8,7 +8,10 @@
 #include "render/gpu/shadow_atlas.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/shadow_map.h"
-#include "render/render_backend.h"
+#include "render/captured_frame.h"
+#include "render/gpu/render_settings.h"
+#include "render/present_mode.h"
+#include "render/render_stats.h"
 #include "render/vulkan/frame_context.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/render_pass.h"
@@ -22,57 +25,83 @@
 #include "render/vulkan/vulkan_pipeline.h"
 #include "render/vulkan/vulkan_swapchain.h"
 #include "render/vulkan/vulkan_texture.h"
+#include "scene/asset_handles.h"
+#include "scene/frame_description.h"
+#include "scene/indexed_mesh.h"
 
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
+#include <string>
 #include <vector>
 
+struct ImDrawData;
+
 /*
-* How many frames the CPU may prepare ahead of the GPU. One, as SDL_GPU was set up: the CPU waits for the last frame to
-* finish before recording the next, so input is never more than a frame old. Becomes an EngineSettings value next in
-* phase 6b (2 lets the CPU and GPU work at the same time).
+* How many frames the CPU may prepare ahead of the GPU. One: the CPU waits for the last frame to finish before recording
+* the next, so input is never more than a frame old. Becomes an EngineSettings value next in phase 6b (2 lets the CPU
+* and GPU work at the same time).
 */
 inline constexpr std::uint32_t vulkanFramesInFlight = 1;
 
 /*
-* The engine's own Vulkan 1.3 renderer (phase 6b), drawing exactly what GpuRenderer draws with the same shaders: the
-* shadow atlas, the main pass into a float scene image, bloom, tone mapping into the swapchain image, debug lines and
-* the debug UI's overlay. Unlike SDL_GPU it says itself when each image changes from being written to being read (the
-* barriers in each pass), which work goes to the GPU when, and how the CPU waits for it.
+* The engine's renderer, on Vulkan 1.3 (phase 6b; it replaced SDL_GPU, drawing every golden image bit for bit the same):
+* the shadow atlas, the main pass into a float scene image, bloom, tone mapping into the swapchain image, debug lines
+* and the debug UI's overlay. It draws into a window it does not own, so the window must outlive it. It says itself when
+* each image changes from being written to being read (the barriers in each pass), which work goes to the GPU when,
+* and how the CPU waits for it.
 *
 * Each frame: wait until the GPU has finished the last frame that used this frame's resources (a fence), acquire a
 * swapchain image (a semaphore signals when it is free), record every pass into one command buffer, submit it (waiting
 * for that semaphore, signalling another when done), and present (waiting for the second semaphore).
 */
-class VulkanRenderer final : public RenderBackend {
+class VulkanRenderer {
 public:
+    // validation checks every graphics call (EngineSettings::gpuValidation): slow, for development.
     VulkanRenderer(SDL_Window* window, bool validation);
-    ~VulkanRenderer() override;
+    ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
-    bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr) override;
+    // Draw and present one whole frame. The frame's camera gets the acquired image's aspect ratio (the caller's camera
+    // is not changed); the settings are read fresh each frame. ui is the debug UI's finished frame (ImGui::GetDrawData()),
+    // drawn over everything, or null. Returns false, drawing nothing, when no image was available (a minimised window).
+    bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr);
+
+    // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
+    // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU.
     CapturedFrame capture(const FrameDescription& frame, const RenderSettings& settings, Uint32 width, Uint32 height,
-                          const DisplayOutput& output) override;
-    std::string getDeviceName() const override;
+                          const DisplayOutput& output);
 
-    void uploadMesh(const IndexedMesh& mesh) override;
-    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding) override;
-    std::size_t getMeshCount() const override;
-    std::size_t getTextureCount() const override;
+    // The GPU's name as the driver reports it, for keeping golden images per GPU.
+    std::string getDeviceName() const;
 
-    void startDebugUi() override;
-    void beginDebugUiFrame() override;
-    void stopDebugUi() override;
+    // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
+    // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear). Between frames only.
+    void uploadMesh(const IndexedMesh& mesh);
+    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding);
+    std::size_t getMeshCount() const;
+    std::size_t getTextureCount() const;
 
-    PresentMode setPresentMode(PresentMode requested) override;
-    PresentMode getPresentMode() const override;
+    // The debug UI's drawing (ImGui's Vulkan backend), into the overlay image. Start it once an ImGui context exists,
+    // call beginDebugUiFrame() before each ImGui::NewFrame(), and stop it before the context is destroyed.
+    void startDebugUi();
+    void beginDebugUiFrame();
+    void stopDebugUi();
 
-    const RenderStats& getLastFrameStats() const override;
-    const DisplayOutput& getDisplayOutput() const override;
-    float getFrameAspectRatio() const override;
+    // Ask for a present mode. Falls back to Vsync when the window does not support it, and returns the mode now in use.
+    PresentMode setPresentMode(PresentMode requested);
+    PresentMode getPresentMode() const;
+
+    const RenderStats& getLastFrameStats() const;
+
+    // How the last frame reached the screen: SDR or HDR, with its peak and white level.
+    const DisplayOutput& getDisplayOutput() const;
+
+    // The aspect ratio of the last frame render() drew. Read after it returns true.
+    float getFrameAspectRatio() const;
 
 private:
     SDL_Window* window = nullptr;

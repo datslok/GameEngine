@@ -17,12 +17,12 @@ Application::Application(const char* title, int width, int height, Game& game, c
     settings(initialSettings),
     defaultSettings(captureDefaultsAndLoad(settings, game, saved)),
     window(title, width, height),
-    renderer(createRenderBackend(settings.graphicsApi, window.getSdlWindow(), settings.gpuValidation)),
-    debugUi(window, *renderer),
+    renderer(window.getSdlWindow(), settings.gpuValidation),
+    debugUi(window, renderer),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
 {
     requestedPresentMode = settings.presentMode;
-    renderer->setPresentMode(requestedPresentMode);
+    renderer.setPresentMode(requestedPresentMode);
 
     game.onInit(world, assets);
 
@@ -178,7 +178,7 @@ ImDrawData* Application::updateDebugUi() {
 void Application::applyPresentMode() {
     if (settings.presentMode != requestedPresentMode) {
         requestedPresentMode = settings.presentMode;
-        renderer->setPresentMode(requestedPresentMode);
+        renderer.setPresentMode(requestedPresentMode);
     }
 }
 
@@ -197,17 +197,17 @@ void Application::applyMouseMode() {
 * Uploads must happen before the frame begins.
 */
 void Application::prepareNewResources() {
-    while (renderer->getMeshCount() < assets.getMeshCount()) {
-        const MeshHandle next{static_cast<std::uint32_t>(renderer->getMeshCount())};
+    while (renderer.getMeshCount() < assets.getMeshCount()) {
+        const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
         // Convert to the render format once, when the mesh first reaches the GPU.
-        renderer->uploadMesh(buildIndexedMesh(assets.getMesh(next)));
+        renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next)));
         boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
     }
 
-    while (renderer->getTextureCount() < assets.getTextureCount()) {
-        const TextureHandle next{static_cast<std::uint32_t>(renderer->getTextureCount())};
+    while (renderer.getTextureCount() < assets.getTextureCount()) {
+        const TextureHandle next{static_cast<std::uint32_t>(renderer.getTextureCount())};
         const ImageData& image = assets.getTexture(next);
-        renderer->uploadTexture(image.width, image.height, std::span<const Uint8>{image.pixels.data(), image.pixels.size()}, image.encoding);
+        renderer.uploadTexture(image.width, image.height, std::span<const Uint8>{image.pixels.data(), image.pixels.size()}, image.encoding);
     }
 }
 
@@ -229,7 +229,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         drawColliders(world, alpha, debugDraw);
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
-        drawRenderStats(renderer->getLastFrameStats(), debugDraw);
+        drawRenderStats(renderer.getLastFrameStats(), debugDraw);
 
         // Also from the previous window: the profiler shows a finished half second at a time.
         drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
@@ -241,7 +241,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
     const double renderStart = profilerSeconds();
     profiler.record(sceneSection, renderStart - sceneStart);
-    const bool rendered = renderer->render(frame, settings.render, ui);
+    const bool rendered = renderer.render(frame, settings.render, ui);
     profiler.record(renderSection, profilerSeconds() - renderStart);
     if (!rendered) {
         return;
@@ -249,7 +249,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
     // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
     // so turning clicks into rays (makeCameraRay) matches what is on screen.
-    camera.setAspectRatio(renderer->getFrameAspectRatio());
+    camera.setAspectRatio(renderer.getFrameAspectRatio());
 }
 
 FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
@@ -272,9 +272,9 @@ CapturedFrame Application::captureGoldenView(const GoldenView& view) {
 
     const float tickSeconds = static_cast<float>(1.0 / static_cast<double>(settings.ticksPerSecond));
     const FrameDescription frame = describeFrame(1.0f, tickSeconds);
-    return renderer->capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr));
+    return renderer.capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr));
 }
 
 std::string Application::getRendererName() const {
-    return renderer->getDeviceName();
+    return renderer.getDeviceName();
 }

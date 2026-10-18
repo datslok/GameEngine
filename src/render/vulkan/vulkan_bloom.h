@@ -12,7 +12,7 @@
 class VulkanDevice;
 
 /*
-* The bloom chain (render/gpu/bloom.h) on the GPU, as BloomRenderer draws it: the lit scene halved level by level into
+* The bloom chain (render/gpu/bloom.h) on the GPU: the lit scene halved level by level into
 * small float images, then grown back, each level adding the one below, so level 0 ends up holding the blurred scene for
 * tone mapping to mix in. Each step is one pass of the full-screen triangle; between steps, the level just drawn becomes
 * the next step's texture (a barrier from colour target to fragment read).

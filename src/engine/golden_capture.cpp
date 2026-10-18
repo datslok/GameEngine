@@ -63,7 +63,7 @@ namespace {
 * A fresh game and engine per view, so no view sees what an earlier one switched on, and each starts with a cold shadow
 * cache and no light history, exactly like the game's first frame.
 */
-int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, GoldenMode mode, const EngineSettings& settings) {
+int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, GoldenMode mode) {
     const std::vector<GoldenView> views = makeGame()->goldenViews();
     int failures = 0;
 
@@ -73,7 +73,7 @@ int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, Gold
         }
 
         std::unique_ptr<Game> game = makeGame();
-        Application application{"Golden images", 640, 360, *game, settings, SavedSettings::Ignore};
+        Application application{"Golden images", 640, 360, *game, EngineSettings{}, SavedSettings::Ignore};
         const CapturedFrame captured = application.captureGoldenView(view);
 
         const std::string gpuFolder = goldenFolderName(application.getRendererName());
