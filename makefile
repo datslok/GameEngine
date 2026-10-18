@@ -2,7 +2,23 @@ SHELL := /bin/sh
 .SHELLFLAGS := -c
 
 CXX := g++
-CXXFLAGS := -std=c++20 -Wall -Wextra -g
+
+# Two builds from the same sources: debug (the default, unoptimised so a debugger sees every line and variable) and
+# release (make release, -O2, for playing and measuring). Each has its own folder, so switching never rebuilds the other.
+# Debug symbols (-g) stay in both: they cost nothing at run time, and packaging strips them.
+BUILD ?= debug
+ifeq ($(BUILD),release)
+    OPTIMISATION := -O2
+    BUILD_DIR := build/release
+else ifeq ($(BUILD),debug)
+    OPTIMISATION := -O0
+    BUILD_DIR := build
+else
+    $(error BUILD must be debug or release, not $(BUILD))
+endif
+
+# Never -DNDEBUG (the tests rely on assert) or -ffast-math (it changes floating-point results and breaks NaN checks).
+CXXFLAGS := -std=c++20 -Wall -Wextra -g $(OPTIMISATION)
 # Includes are written from these roots, for example "math/vec3.h" and "cgltf/cgltf.h".
 CPPFLAGS := -Isrc -Iexternal
 # GCC writes a .d file next to each object listing the headers it read, so a header change rebuilds exactly the
@@ -16,9 +32,9 @@ GLSLC := glslc
 JOBS ?= $(shell nproc)
 MAKEFLAGS += -j$(JOBS) --output-sync=target
 
-TARGET := build/game.exe
-TEST_TARGET := build/tests.exe
-OBJECT_DIR := build/obj
+TARGET := $(BUILD_DIR)/game.exe
+TEST_TARGET := $(BUILD_DIR)/tests.exe
+OBJECT_DIR := $(BUILD_DIR)/obj
 
 # Recursive wildcard: $(call rwildcard,dir,pattern) finds matching files in dir and all its subfolders.
 rwildcard = $(foreach entry,$(wildcard $(1:=/*)),$(call rwildcard,$(entry),$(2)) $(filter $(subst *,%,$(2)),$(entry)))
@@ -43,7 +59,7 @@ SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test shaders clean
+.PHONY: all run test shaders clean release run-release test-release
 
 all: $(TARGET) shaders
 
@@ -81,5 +97,16 @@ run: $(TARGET) shaders
 test: $(TEST_TARGET) shaders
 	./$(TEST_TARGET)
 
+# The release build through the same rules, in build/release. Running the tests optimised as well catches bugs that only
+# show at -O2 (uninitialised variables, code that breaks the language rules the optimiser relies on).
+release:
+	$(MAKE) BUILD=release all
+
+run-release:
+	$(MAKE) BUILD=release run
+
+test-release:
+	$(MAKE) BUILD=release test
+
 clean:
-	rm -rf $(OBJECT_DIR) $(TARGET) $(TEST_TARGET) $(SHADER_BINARIES)
+	rm -rf build/obj build/game.exe build/tests.exe build/release $(SHADER_BINARIES)

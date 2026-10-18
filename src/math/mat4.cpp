@@ -25,33 +25,6 @@ Mat4 Mat4::identity() {
 }
 
 /*
-* Multiply the matrix by a vector to apply the matrix transformation.
-*/
-Vec4 Mat4::operator*(const Vec4& vector) const{
-    return Vec4{
-        (values[0][0] * vector.x +
-        values[0][1] * vector.y +
-        values[0][2] * vector.z +
-        values[0][3] * vector.w),
-
-        (values[1][0] * vector.x +
-        values[1][1] * vector.y +
-        values[1][2] * vector.z +
-        values[1][3] * vector.w),
-
-        (values[2][0] * vector.x +
-        values[2][1] * vector.y +
-        values[2][2] * vector.z +
-        values[2][3] * vector.w),
-
-        (values[3][0] * vector.x +
-        values[3][1] * vector.y +
-        values[3][2] * vector.z +
-        values[3][3] * vector.w)
-    };
-}
-
-/*
 * Create a translation matrix to move objects by the specified x,y, and z values.
 */
 Mat4 Mat4::translation(float x, float y, float z){
@@ -319,22 +292,6 @@ std::optional<Mat4> affineInverse(const Mat4& model) {
 
     inverse.values[3][3] = 1.0f;
     return inverse;
-}
-
-/*
-* Positions have w = 1, so the matrix's translation column moves them.
-*/
-Vec3 transformPoint(const Mat4& matrix, const Vec3& point) {
-    const Vec4 moved = matrix * Vec4{point.x, point.y, point.z, 1.0f};
-    return Vec3{moved.x, moved.y, moved.z};
-}
-
-/*
-* Directions have w = 0: an arrow does not change when the thing it belongs to moves, only when it turns or stretches.
-*/
-Vec3 transformDirection(const Mat4& matrix, const Vec3& direction) {
-    const Vec4 turned = matrix * Vec4{direction.x, direction.y, direction.z, 0.0f};
-    return Vec3{turned.x, turned.y, turned.z};
 }
 
 /*
