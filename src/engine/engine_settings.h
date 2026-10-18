@@ -2,6 +2,7 @@
 
 #include "core/settings_visitor.h"
 #include "core/build_info.h"
+#include "render/frames_in_flight.h"
 #include "render/present_mode.h"
 #include "render/gpu/render_settings.h"
 
@@ -24,6 +25,10 @@ struct EngineSettings {
 
     // Low latency without tearing. Falls back to vsync on GPUs without mailbox support. Applied whenever it changes.
     PresentMode presentMode = PresentMode::Mailbox;
+
+    // Frames the CPU may record ahead of the GPU (render/frames_in_flight.h): 2 lets them work at the same time, 1 has
+    // the least latency. Applied whenever it changes (the renderer waits for the GPU and rebuilds its per-frame parts).
+    std::uint32_t framesInFlight = 2;
 
     // Check every graphics call against Vulkan's rules (the validation layers, when installed: MSYS2's, see the makefile).
     // It catches mistakes early but costs a lot of CPU time, so it is on in debug builds and off in release. Read once,

@@ -10,6 +10,7 @@
 #include "render/gpu/shadow_map.h"
 #include "render/captured_frame.h"
 #include "render/gpu/render_settings.h"
+#include "render/frames_in_flight.h"
 #include "render/present_mode.h"
 #include "render/render_stats.h"
 #include "render/vulkan/frame_context.h"
@@ -39,27 +40,22 @@
 struct ImDrawData;
 
 /*
-* How many frames the CPU may prepare ahead of the GPU. One: the CPU waits for the last frame to finish before recording
-* the next, so input is never more than a frame old. Becomes an EngineSettings value next in phase 6b (2 lets the CPU
-* and GPU work at the same time).
-*/
-inline constexpr std::uint32_t vulkanFramesInFlight = 1;
-
-/*
 * The engine's renderer, on Vulkan 1.3 (phase 6b; it replaced SDL_GPU, drawing every golden image bit for bit the same):
 * the shadow atlas, the main pass into a float scene image, bloom, tone mapping into the swapchain image, debug lines
 * and the debug UI's overlay. It draws into a window it does not own, so the window must outlive it. It says itself when
 * each image changes from being written to being read (the barriers in each pass), which work goes to the GPU when,
 * and how the CPU waits for it.
 *
-* Each frame: wait until the GPU has finished the last frame that used this frame's resources (a fence), acquire a
+* Each frame: wait until the GPU has finished the last frame that used this frame's resources (a fence: with two frames
+* in flight that is the frame before last, so the CPU records while the GPU still draws the previous one), acquire a
 * swapchain image (a semaphore signals when it is free), record every pass into one command buffer, submit it (waiting
 * for that semaphore, signalling another when done), and present (waiting for the second semaphore).
 */
 class VulkanRenderer {
 public:
-    // validation checks every graphics call (EngineSettings::gpuValidation): slow, for development.
-    VulkanRenderer(SDL_Window* window, bool validation);
+    // validation checks every graphics call (EngineSettings::gpuValidation): slow, for development. framesInFlight
+    // as setFramesInFlight takes it.
+    VulkanRenderer(SDL_Window* window, bool validation, std::uint32_t framesInFlight);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -95,6 +91,12 @@ public:
     PresentMode setPresentMode(PresentMode requested);
     PresentMode getPresentMode() const;
 
+    // How many frames the CPU may record ahead of the GPU (render/frames_in_flight.h), clamped to 1..maxFramesInFlight;
+    // returns the count now in use. A change waits for the GPU, remakes every frame's own resources and rebuilds the
+    // swapchain before the next frame. Between frames only.
+    std::uint32_t setFramesInFlight(std::uint32_t requested);
+    std::uint32_t getFramesInFlight() const;
+
     const RenderStats& getLastFrameStats() const;
 
     // How the last frame reached the screen: SDR or HDR, with its peak and white level.
@@ -129,8 +131,11 @@ private:
         bool timestampsComplete = false;
     };
 
+    // One per frame in flight; the swapchain was built for swapchainFramesInFlight of them (rebuilt when they differ).
     std::vector<Frame> frames;
     std::uint32_t frameIndex = 0;
+    std::uint32_t framesInFlight = 1;
+    std::uint32_t swapchainFramesInFlight = 0;
 
     // The frame being recorded: its command buffer is open, and if it draws to the screen, the image it acquired.
     bool recording = false;
