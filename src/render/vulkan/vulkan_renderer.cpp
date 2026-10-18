@@ -20,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace {
     // The lit scene: 16-bit floats keep about three significant digits from a millionth up to 65504, plenty for light
@@ -119,8 +120,8 @@ void VulkanRenderer::checkFormats() const {
 }
 
 /*
-* Each frame in flight gets its own command buffer, fence, acquire semaphore, descriptor sets, uniform buffer and shadow
-* tile buffer, so the CPU can fill one while the GPU still reads another. The fence starts signalled: no frame is
+* Each frame in flight gets its own command buffer, fence, acquire semaphore, descriptor sets, uniform buffer, shadow
+* tile buffer and timestamp pool, so the CPU can fill one while the GPU still reads another. The fence starts signalled: no frame is
 * pending yet. The shadow tile buffer holds every tile there can be, so it never grows.
 */
 void VulkanRenderer::createFrames() {
@@ -140,6 +141,11 @@ void VulkanRenderer::createFrames() {
         info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         info.commandBufferCount = 1;
         vulkanCheck(vkAllocateCommandBuffers(device.getDevice(), &info, &frame.commands), "Frame command buffer allocation failed");
+        device.nameObject(VK_OBJECT_TYPE_COMMAND_BUFFER, reinterpret_cast<std::uint64_t>(frame.commands), "Frame commands");
+
+        if (device.getTimestampValidBits() > 0) {
+            frame.timestamps = device.createTimestampPool(gpuTimestampCount);
+        }
 
         frames.push_back(std::move(frame));
     }
@@ -244,6 +250,7 @@ void VulkanRenderer::createShadowAtlas() {
     description.height = shadowAtlasHeight;
     description.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     description.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    description.name = "Shadow atlas";
     shadowAtlas = VulkanImage{device, description};
 
     uploads.run([&](VkCommandBuffer commands) {
@@ -297,6 +304,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     depthDescription.height = height;
     depthDescription.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     depthDescription.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depthDescription.name = "Scene depth";
     VulkanImage depthReplacement{device, depthDescription};
 
     ImageDescription sceneDescription;
@@ -304,6 +312,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     sceneDescription.width = width;
     sceneDescription.height = height;
     sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    sceneDescription.name = "Scene colour";
     VulkanImage sceneReplacement{device, sceneDescription};
 
     device.waitIdle();
@@ -395,6 +404,7 @@ FrameContext VulkanRenderer::beginFrame() {
     vulkanCheck(vkWaitForFences(device.getDevice(), 1, &fence, VK_TRUE, std::numeric_limits<std::uint64_t>::max()),
                 "Waiting for the previous frame failed");
 
+    readGpuTimings(frame);
     frame.descriptors->reset();
     frame.uniforms->reset();
     vulkanCheck(vkResetCommandPool(device.getDevice(), frame.commandPool.get(), 0), "Frame command pool reset failed");
@@ -404,6 +414,14 @@ FrameContext VulkanRenderer::beginFrame() {
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vulkanCheck(vkBeginCommandBuffer(frame.commands, &begin), "Frame command buffer start failed");
     recording = true;
+
+    // Queries must be reset before they are written again; outside any pass, so first.
+    if (frame.timestamps) {
+        vkCmdResetQueryPool(frame.commands, frame.timestamps.get(), 0, gpuTimestampCount);
+    }
+
+    frame.timestampsWritten = 0;
+    frame.timestampsComplete = false;
 
     return FrameContext{frame.commands, *frame.uniforms, *frame.descriptors, frameIndex};
 }
@@ -492,6 +510,65 @@ void VulkanRenderer::abandonFrame() noexcept {
 }
 
 /*
+* Once the frame's fence has passed, the GPU has written every timestamp it was given, so they are read without
+* waiting. Only a frame that wrote them all is read (not an abandoned one, or one that found no swapchain image);
+* VK_NOT_READY would mean a stamp is missing, and that frame is simply not reported.
+*/
+void VulkanRenderer::readGpuTimings(Frame& frame) {
+    if (!frame.timestamps || !frame.timestampsComplete) {
+        return;
+    }
+
+    frame.timestampsComplete = false;
+    std::array<std::uint64_t, gpuTimestampCount> ticks{};
+    const VkResult result = vkGetQueryPoolResults(device.getDevice(), frame.timestamps.get(), 0, gpuTimestampCount, sizeof(ticks), ticks.data(),
+                                                  sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
+
+    if (result == VK_NOT_READY) {
+        return;
+    }
+
+    vulkanCheck(result, "Reading the GPU timestamps failed");
+    unreportedGpuTimings = gpuTimingsFromTicks(ticks, device.getTimestampPeriod(), device.getTimestampValidBits());
+}
+
+/*
+* Writes the frame's timestamps up to and including this one. Each is written once everything recorded before it has
+* finished on the GPU (the all-commands stage), so the gap between two is how much later the frame finished because of
+* the work between them. Stamps a skipped pass would have written go in at the same moment, so it takes no time.
+*/
+void VulkanRenderer::writeTimestampsThrough(FrameContext& context, std::uint32_t index) {
+    Frame& frame = frames[context.frameIndex];
+
+    if (!frame.timestamps) {
+        return;
+    }
+
+    while (frame.timestampsWritten <= index && frame.timestampsWritten < gpuTimestampCount) {
+        vkCmdWriteTimestamp2(context.commands, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, frame.timestamps.get(), frame.timestampsWritten);
+        ++frame.timestampsWritten;
+    }
+}
+
+// Pass number p starts at stamp p and ends at stamp p + 1, and is labelled in between for RenderDoc and Nsight.
+void VulkanRenderer::beginGpuPass(FrameContext& frame, GpuPass pass) {
+    writeTimestampsThrough(frame, static_cast<std::uint32_t>(pass));
+    device.beginLabel(frame.commands, gpuPassName(pass));
+}
+
+void VulkanRenderer::endGpuPass(FrameContext& frame, GpuPass pass) {
+    device.endLabel(frame.commands);
+    writeTimestampsThrough(frame, static_cast<std::uint32_t>(pass) + 1);
+}
+
+// After the last pass: any stamps of passes not drawn are written, and the frame is marked for reading next time round.
+void VulkanRenderer::finishGpuTimings(FrameContext& context) {
+    writeTimestampsThrough(context, gpuTimestampCount - 1);
+    Frame& frame = frames[context.frameIndex];
+    frame.timestampsComplete = static_cast<bool>(frame.timestamps);
+}
+
+/*
 * The whole frame arrives at once, so the renderer decides how to draw it: the shadow views into the atlas, the camera's
 * view into the scene image (reading the atlas), bloom, then tone mapping into the swapchain image with the debug lines
 * and the UI on top. The image goes from "acquired" to a colour target (its old contents discarded, since every pixel is
@@ -522,6 +599,7 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
         const BloomComposite bloomMix = drawScene(frame, description, settings, ui);
         const std::uint32_t image = *acquiredImage;
         ImageState& imageState = swapchain.getState(image);
+
         transitionImage(frame.commands, swapchain.getImage(image), VK_IMAGE_ASPECT_COLOR_BIT, imageState, ImageState::ColourTarget,
                         ImageContents::Discard);
 
@@ -529,19 +607,27 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
         beginRendering(frame.commands, extent, &colour, nullptr);
         renderingOpen = true;
 
+        // Labels begin and end inside the one rendering block, so none crosses its boundary.
+        beginGpuPass(frame, GpuPass::ToneMap);
         drawToneMap(frame, *toneMapPipeline, settings.toneMapping, bloomMix);
+        endGpuPass(frame, GpuPass::ToneMap);
 
         // Last, so they are drawn over the finished image in exactly their own colours, and the UI over them.
+        beginGpuPass(frame, GpuPass::DebugLines);
         debugLines->draw(frame, viewProjection, frameWidth, frameHeight);
+        endGpuPass(frame, GpuPass::DebugLines);
 
         if (ui != nullptr) {
+            beginGpuPass(frame, GpuPass::Overlay);
             overlay->composite(frame, displayOutput.whiteLevel);
+            endGpuPass(frame, GpuPass::Overlay);
         }
 
         vkCmdEndRendering(frame.commands);
         renderingOpen = false;
 
         transitionImage(frame.commands, swapchain.getImage(image), VK_IMAGE_ASPECT_COLOR_BIT, imageState, ImageState::Present);
+        finishGpuTimings(frame);
         submitFrame(frame, true);
     }
     catch (...) {
@@ -562,6 +648,7 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
 BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings,
                                          ImDrawData* ui) {
     stats = RenderStats{};
+    stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
 
     Camera camera = description.camera;
     camera.setAspectRatio(getFrameAspectRatio());
@@ -595,17 +682,26 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     if (ui != nullptr) {
+        beginGpuPass(frame, GpuPass::DebugUi);
         overlay->drawUi(frame, ui, frameWidth, frameHeight);
+        endGpuPass(frame, GpuPass::DebugUi);
     }
 
     if (!shadows.tiles.empty()) {
+        beginGpuPass(frame, GpuPass::Shadows);
         drawShadows(frame, description, shadows.tiles);
+        endGpuPass(frame, GpuPass::Shadows);
     }
 
+    beginGpuPass(frame, GpuPass::Main);
     drawMainPass(frame, description, lights, shadows, cameraFrustum);
+    endGpuPass(frame, GpuPass::Main);
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
-    return bloom->draw(frame, sceneColour, frameWidth, frameHeight, settings.bloom);
+    beginGpuPass(frame, GpuPass::Bloom);
+    const BloomComposite bloomMix = bloom->draw(frame, sceneColour, frameWidth, frameHeight, settings.bloom);
+    endGpuPass(frame, GpuPass::Bloom);
+    return bloomMix;
 }
 
 /*
@@ -802,6 +898,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     targetDescription.width = width;
     targetDescription.height = height;
     targetDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    targetDescription.name = "Golden capture";
     VulkanImage target{device, targetDescription};
 
     const std::unique_ptr<VulkanPipeline> capturePipeline = createToneMapPipeline(targetDescription.format);
@@ -818,9 +915,12 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
         const ColourAttachment colour{target.getView(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, {}};
         beginRendering(frame.commands, {width, height}, &colour, nullptr);
         renderingOpen = true;
+        beginGpuPass(frame, GpuPass::ToneMap);
         drawToneMap(frame, *capturePipeline, settings.toneMapping, bloomMix);
+        endGpuPass(frame, GpuPass::ToneMap);
         vkCmdEndRendering(frame.commands);
         renderingOpen = false;
+        finishGpuTimings(frame);
 
         sceneColour.transition(frame.commands, ImageState::TransferSource);
         target.transition(frame.commands, ImageState::TransferSource);

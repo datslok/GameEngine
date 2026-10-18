@@ -59,6 +59,7 @@ void VulkanBloom::ensureLevels(std::uint32_t frameWidth, std::uint32_t frameHeig
         description.width = size.width;
         description.height = size.height;
         description.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        description.name = "Bloom level";
         replacement.emplace_back(device, description);
     }
 

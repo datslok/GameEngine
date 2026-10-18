@@ -30,8 +30,18 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
 // The readout line drawRenderStats leaves for the engine's timings (drawProfile).
 constexpr int engineProfileReadoutLine = 4;
 
-// The engine's readout uses lines 0 to 4; a game's own lines start here.
-constexpr int firstGameReadoutLine = 5;
+// The readout line for the GPU's timings per pass (a profiler from makeGpuProfiler).
+constexpr int gpuProfileReadoutLine = 5;
+
+// The engine's readout uses lines 0 to 5; a game's own lines start here.
+constexpr int firstGameReadoutLine = 6;
+
+// A profiler for the GPU's timings: "GPU" (the whole frame) as section 0, then one section per pass in GpuPass order.
+Profiler makeGpuProfiler();
+
+// One frame's GPU timings into a profiler from makeGpuProfiler. Timings that are not valid are left out, so a frame
+// not measured does not count as one that took no time.
+void recordGpuTimings(Profiler& profiler, const GpuTimings& timings);
 
 // A profiler's numbers as one line of text: each section's name and its average per call, then "/" and the worst call
 // if withWorst, in milliseconds with that many decimals, then "MS".

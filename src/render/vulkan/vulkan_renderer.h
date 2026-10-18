@@ -121,6 +121,12 @@ private:
         std::unique_ptr<FrameDescriptors> descriptors;
         std::unique_ptr<FrameUniforms> uniforms;
         VulkanBuffer shadowTiles; // each shadow tile's matrix and place in the atlas, read by the main pass
+
+        // GPU timestamps around each pass (none without timestamp support): how many this frame's commands have
+        // written so far, and whether the last submission wrote them all, so they can be read once its fence passes.
+        OwnedHandle<VkQueryPool> timestamps;
+        std::uint32_t timestampsWritten = 0;
+        bool timestampsComplete = false;
     };
 
     std::vector<Frame> frames;
@@ -179,6 +185,9 @@ private:
 
     RenderStats stats;
 
+    // The last frame's GPU timings read back and not yet handed to stats (each frame's are reported once).
+    GpuTimings unreportedGpuTimings;
+
     void checkFormats() const;
     void createFrames();
     void createSamplers();
@@ -195,6 +204,13 @@ private:
     FrameContext beginFrame();
     void submitFrame(FrameContext& frame, bool toScreen);
     void abandonFrame() noexcept;
+
+    // Timing and labelling passes: a timestamp and a debug label at each pass's start and end, in GpuPass order.
+    void readGpuTimings(Frame& frame);
+    void writeTimestampsThrough(FrameContext& frame, std::uint32_t index);
+    void beginGpuPass(FrameContext& frame, GpuPass pass);
+    void endGpuPass(FrameContext& frame, GpuPass pass);
+    void finishGpuTimings(FrameContext& frame);
 
     BloomComposite drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings, ImDrawData* ui);
     void drawShadows(FrameContext& frame, const FrameDescription& description, const std::vector<ShadowTile>& tiles);

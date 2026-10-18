@@ -93,6 +93,14 @@ void VulkanDevice::createInstance(bool validation) {
         }
     }
 
+    // Debug labels and names cost nothing without a tool listening, so they are on in release builds too (profiling
+    // with Nsight wants optimised code). With validation, vk-bootstrap already adds the extension for its messages.
+    const bool validationMessages = validation && systemInfo->validation_layers_available && systemInfo->debug_utils_available;
+
+    if (systemInfo->debug_utils_available && !validationMessages) {
+        builder.enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+
     auto built = builder.build();
 
     if (!built) {
@@ -101,6 +109,7 @@ void VulkanDevice::createInstance(bool validation) {
 
     instance = built.value();
     volkLoadInstanceOnly(instance.instance);
+    debugUtils = systemInfo->debug_utils_available && vkCmdBeginDebugUtilsLabelEXT != nullptr;
 
     if (!SDL_Vulkan_CreateSurface(window, instance.instance, nullptr, &surface)) {
         throw std::runtime_error(std::string{"Vulkan surface creation failed: "} + SDL_GetError());
@@ -168,6 +177,8 @@ void VulkanDevice::createDevice() {
     if (presents != VK_TRUE) {
         throw std::runtime_error("The GPU's drawing queue cannot present to the window");
     }
+
+    timestampValidBits = device.queue_families.at(queueFamily).timestampValidBits;
 }
 
 // VMA finds Vulkan's functions through the two lookups volk already loaded.
@@ -288,6 +299,60 @@ bool VulkanDevice::supportsFormat(VkFormat format, VkFormatFeatureFlags2 feature
 
     vkGetPhysicalDeviceFormatProperties2(physicalDevice.physical_device, format, &properties);
     return (properties3.optimalTilingFeatures & features) == features;
+}
+
+std::uint32_t VulkanDevice::getTimestampValidBits() const {
+    return timestampValidBits;
+}
+
+double VulkanDevice::getTimestampPeriod() const {
+    return physicalDevice.properties.limits.timestampPeriod;
+}
+
+/*
+* A label marks a stretch of a command buffer ("Shadows", "Bloom"), so RenderDoc and Nsight show the frame as named
+* passes instead of a flat list of draws. Labels nest, and each begin needs its end in the same command buffer.
+*/
+void VulkanDevice::beginLabel(VkCommandBuffer commands, const char* name) const {
+    if (!debugUtils) {
+        return;
+    }
+
+    VkDebugUtilsLabelEXT label{};
+    label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    label.pLabelName = name;
+    vkCmdBeginDebugUtilsLabelEXT(commands, &label);
+}
+
+void VulkanDevice::endLabel(VkCommandBuffer commands) const {
+    if (debugUtils) {
+        vkCmdEndDebugUtilsLabelEXT(commands);
+    }
+}
+
+// Named objects show up by name in the tools and in validation messages, instead of as bare handle numbers.
+void VulkanDevice::nameObject(VkObjectType type, std::uint64_t handle, const char* name) const {
+    if (!debugUtils || handle == 0) {
+        return;
+    }
+
+    VkDebugUtilsObjectNameInfoEXT info{};
+    info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.objectType = type;
+    info.objectHandle = handle;
+    info.pObjectName = name;
+    vulkanCheck(vkSetDebugUtilsObjectNameEXT(device.device, &info), "Naming a Vulkan object failed");
+}
+
+OwnedHandle<VkQueryPool> VulkanDevice::createTimestampPool(std::uint32_t count) const {
+    VkQueryPoolCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    info.queryCount = count;
+
+    VkQueryPool pool = VK_NULL_HANDLE;
+    vulkanCheck(vkCreateQueryPool(device.device, &info, nullptr, &pool), "Timestamp query pool creation failed");
+    return {device.device, pool, vkDestroyQueryPool};
 }
 
 std::uint32_t VulkanDevice::getValidationErrorCount() const {
