@@ -69,6 +69,7 @@ void testFirstPersonBody();
 void testSphereCast();
 void testParticle();
 void testGrenade();
+void testProfiler();
 
 int main(){
     testPixelBuffer();
@@ -140,6 +141,7 @@ int main(){
     testSphereCast();
     testParticle();
     testGrenade();
+    testProfiler();
 
     std::cout << "All tests passed!\n";
     return 0;

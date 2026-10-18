@@ -1,11 +1,13 @@
 #pragma once
 
+#include "core/profiler.h"
 #include "ecs/world.h"
 #include "render/render_stats.h"
 #include "scene/debug_draw.h"
 #include "scene/frame_description.h"
 #include "scene/model.h"
 
+#include <string>
 #include <vector>
 
 /*
@@ -24,6 +26,22 @@ Vec2 debugReadoutLine(int line);
 
 // The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame.
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
+
+// The readout line drawRenderStats leaves for the engine's timings (drawProfile).
+constexpr int engineProfileReadoutLine = 4;
+
+// The engine's readout uses lines 0 to 4; a game's own lines start here.
+constexpr int firstGameReadoutLine = 5;
+
+// A profiler's numbers as one line of text: each section's name and its average per call, then "/" and the worst call
+// if withWorst, in milliseconds with that many decimals, then "MS".
+std::string profileText(const Profiler& profiler, int decimals, bool withWorst);
+
+// profileText drawn on one readout line.
+void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug);
+
+// Timings are drawn in this colour (linear pale green), apart from the rest of the readout.
+const Vec3 profileDebugColour{0.45f, 1.0f, 0.55f};
 
 
 // Collider wireframes are this colour (linear orange), apart from anything a game highlights itself.

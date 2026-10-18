@@ -4,6 +4,7 @@
 #include "scene/interpolation.h"
 #include "scene/debug_text.h"
 
+#include <cstdio>
 #include <string>
 
 namespace {
@@ -43,6 +44,33 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     debugText(debug, debugReadoutLine(2), debugReadoutTextHeight, lights, boundingBoxColour);
     debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
 }
+/*
+* One line so the numbers can be compared at a glance. Milliseconds rather than seconds, because frames and systems
+* cost thousandths of a second; the stroke font has no micro sign, so small costs get more decimals instead.
+*/
+std::string profileText(const Profiler& profiler, int decimals, bool withWorst) {
+    const auto milliseconds = [decimals](double seconds) {
+        char text[32];
+        std::snprintf(text, sizeof(text), "%.*f", decimals, seconds * 1000.0);
+        return std::string(text);
+    };
+
+    std::string line;
+    for (int section = 0; section < profiler.getSectionCount(); ++section) {
+        const SectionTiming& timing = profiler.getTiming(section);
+        line += profiler.getName(section) + " " + milliseconds(timing.averageSeconds);
+        if (withWorst) {
+            line += "/" + milliseconds(timing.worstSeconds);
+        }
+        line += "  ";
+    }
+    return line + "MS";
+}
+
+void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug) {
+    debugText(debug, debugReadoutLine(line), debugReadoutTextHeight, profileText(profiler, decimals, withWorst), colour);
+}
+
 /*
 * A margin from the window's corner, then one line every lineSpacing pixels: a little more than the text height, so
 * lines do not touch.

@@ -2,6 +2,7 @@
 
 #include "assets/asset_manager.h"
 #include "core/fixed_timestep.h"
+#include "core/profiler.h"
 #include "ecs/world.h"
 #include "engine/engine_settings.h"
 #include "engine/game.h"
@@ -64,6 +65,16 @@ private:
 
     // Built from the settings' tick rate and frame time clamp.
     FixedTimestep timestep;
+
+    // Frame-level timings for the debug readout. Each section is added here, in this order, after the profiler.
+    // RENDER includes waiting for the GPU and the swapchain, so it is not all CPU work; WORK is the frame minus the frame cap's sleep.
+    Profiler profiler;
+    const int frameSection = profiler.addSection("FRAME");
+    const int workSection = profiler.addSection("WORK");
+    const int tickSection = profiler.addSection("TICK");
+    const int updateSection = profiler.addSection("UPDATE");
+    const int sceneSection = profiler.addSection("SCENE");
+    const int renderSection = profiler.addSection("RENDER");
 
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
