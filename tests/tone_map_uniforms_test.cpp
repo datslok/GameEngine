@@ -31,6 +31,16 @@ namespace {
         assert(data.output[1] == 0.0f);
     }
 
+    // Bloom's strength and its 1 / level count ride in the spare slots; without bloom the strength is 0.
+    void testBloomPacking() {
+        const ToneMapUniformData none = packToneMapping(ToneMappingSettings{});
+        assert(none.parameters[3] == 0.0f);
+
+        const ToneMapUniformData data = packToneMapping(ToneMappingSettings{}, DisplayOutput{}, BloomComposite{0.04f, 0.25f});
+        assert(data.parameters[3] == 0.04f);
+        assert(data.output[2] == 0.25f);
+    }
+
     // Nonsense settings are refused.
     void testNonsenseIsRefused() {
         bool refusedExposure = false;
@@ -59,5 +69,6 @@ namespace {
 void testToneMapUniforms() {
     testSdrPacking();
     testHdrPacking();
+    testBloomPacking();
     testNonsenseIsRefused();
 }

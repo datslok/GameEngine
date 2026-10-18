@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/bloom.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/shadow_map.h"
@@ -13,6 +14,7 @@
 struct RenderSettings {
     LightPrioritySettings lights;
     ShadowSettings shadows;
+    BloomSettings bloom;
     ToneMappingSettings toneMapping;
     DisplaySettings display;
 };
