@@ -96,6 +96,31 @@ std::optional<LevelHit> raycast(const StaticLevel& level, const Ray& ray, float 
 }
 
 /*
+* Only triangles whose boxes overlap the box around the whole sweep (the sphere at its start and at its end) can be met
+* on the way; each of those is swept against exactly, and the nearest wins.
+*/
+std::optional<LevelHit> sweepSphere(const StaticLevel& level, const Sphere& sphere, const Vec3& motion) {
+    const Aabb start = boundsOf(Shape{sphere});
+    const Aabb end = boundsOf(Shape{Sphere{sphere.centre + motion, sphere.radius}});
+    const Aabb swept{
+        Vec3{std::min(start.minimum.x, end.minimum.x), std::min(start.minimum.y, end.minimum.y), std::min(start.minimum.z, end.minimum.z)},
+        Vec3{std::max(start.maximum.x, end.maximum.x), std::max(start.maximum.y, end.maximum.y), std::max(start.maximum.z, end.maximum.z)}
+    };
+    std::vector<std::uint32_t> candidates;
+    level.getGrid().query(swept, candidates);
+
+    std::optional<LevelHit> best;
+    for (const std::uint32_t triangle : candidates) {
+        const auto corners = level.getTriangle(triangle);
+        const std::optional<RayHit> hit = sweepSphere(sphere, motion, corners[0], corners[1], corners[2]);
+        if (hit && (!best || hit->distance < best->hit.distance)) {
+            best = LevelHit{*hit, triangle};
+        }
+    }
+    return best;
+}
+
+/*
 * Only triangles whose boxes overlap the capsule's box can touch it; each of those gets the exact contact test.
 */
 std::vector<Contact> contacts(const StaticLevel& level, const Capsule& capsule) {

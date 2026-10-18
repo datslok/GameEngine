@@ -3,6 +3,7 @@
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
 #include "gameplay/first_person_body.h"
+#include "gameplay/grenade.h"
 #include "math/transform.h"
 #include "physics/character_controller.h"
 #include "physics/collider.h"
@@ -452,6 +453,62 @@ namespace {
         runTicks(game, world, 120, ticks);
         assert((world.get<Transform>(someLamp).position - before).length() > 0.1f);
     }
+
+    std::size_t countGrenades(World& world) {
+        std::size_t count = 0;
+        world.each<Grenade>([&](Entity, Grenade&) {
+            ++count;
+        });
+        return count;
+    }
+
+    // In first person, G throws a grenade from the eyes along the view; it flies off forward and falls, and disappears when
+    // its lifetime is over. Other modes do not throw.
+    void testThrowGrenade() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::FirstPerson, true};
+        game.onInit(world, assets);
+        int ticks = 0;
+        runFrame(game, world, firstPersonInput({}), ticks);
+        assert(countGrenades(world) == 0);
+
+        const Vec3 eye = game.getCamera().getPosition();
+        const Vec3 forward = game.getCamera().getForward();
+        runFrame(game, world, firstPersonInput({Key::G}), ticks);
+        assert(countGrenades(world) == 1);
+        Entity grenade;
+        world.each<Grenade>([&](Entity entity, Grenade&) {
+            grenade = entity;
+        });
+        assert((world.get<Transform>(grenade).position - eye).length() < 0.5f);
+
+        for (int frame = 0; frame < 30; ++frame) {
+            runFrame(game, world, firstPersonInput({}), ticks);
+        }
+        const Vec3 flown = world.get<Transform>(grenade).position - eye;
+        assert(flown.dot(forward) > 2.0f);
+        assert(world.get<Particle>(grenade).velocity.y < 0.0f);
+
+        // Each fresh press throws another.
+        runFrame(game, world, firstPersonInput({Key::G}), ticks);
+        assert(countGrenades(world) == 2);
+
+        const int lifetimeFrames = static_cast<int>(GrenadeSettings{}.lifetimeSeconds / tickSeconds) + 2;
+        for (int frame = 0; frame < lifetimeFrames; ++frame) {
+            runFrame(game, world, firstPersonInput({}), ticks);
+        }
+        assert(countGrenades(world) == 0);
+
+        World mobaWorld;
+        AssetManager mobaAssets;
+        DemoGame moba{ControlMode::Moba, false};
+        moba.onInit(mobaWorld, mobaAssets);
+        Input pressG = mobaInput();
+        pressG.pressKey(Key::G);
+        moba.onInput(mobaWorld, pressG);
+        assert(countGrenades(mobaWorld) == 0);
+    }
 }
 
 /*
@@ -469,6 +526,7 @@ void testDemoGame() {
     testDropIntoFirstPerson();
     testLampsToggle();
     testLampsFly();
+    testThrowGrenade();
 
     World world;
     AssetManager assets;

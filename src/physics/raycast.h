@@ -32,6 +32,18 @@ std::optional<RayHit> raycast(const Ray& ray, const Shape& shape, float maxDista
 std::optional<RayHit> raycastTriangle(const Ray& ray, const Vec3& a, const Vec3& b, const Vec3& c,
                                       float maxDistance = unlimitedRayDistance);
 
+/*
+* The first place a moving sphere touches one triangle (from either side) as its centre moves by motion, or nothing.
+* The centre touches when it reaches the triangle grown by the radius: the triangle pushed out both ways along its normal,
+* plus a capsule of that radius round each edge (whose round ends cover the corners). So the sweep is a raycast of the
+* centre against those two triangles and three capsules. The hit's distance is how far the centre moved, its point is the
+* centre at that moment, and its normal points from the touched point on the triangle towards the centre.
+*
+* A sphere already touching or overlapping the triangle hits at distance 0 (with the contact's normal) if it is moving
+* into it, and ignores it if moving along or away from it, so a sphere resting on a floor can still roll off it.
+*/
+std::optional<RayHit> sweepSphere(const Sphere& sphere, const Vec3& motion, const Vec3& a, const Vec3& b, const Vec3& c);
+
 // Tests every triangle (a broad phase will cut that down later) and keeps the nearest hit.
 std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, float maxDistance = unlimitedRayDistance);
 
