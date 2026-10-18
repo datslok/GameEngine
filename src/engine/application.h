@@ -62,8 +62,8 @@ private:
     // Tell the window when the game switches between mouse look and a visible cursor.
     void applyMouseMode();
 
-    // Ask the renderer for the settings' present mode when it changes.
-    void applyPresentMode();
+    // Ask the renderer for the settings' present mode and frames in flight when they change.
+    void applyPresentation();
 
     // F5 opens and closes the debug UI; while open it is built each frame and its save and reset requests carried out.
     ImDrawData* updateDebugUi();

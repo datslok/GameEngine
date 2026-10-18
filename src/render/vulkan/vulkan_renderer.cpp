@@ -70,12 +70,13 @@ namespace {
     }
 }
 
-VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation):
+VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_t requestedFramesInFlight):
     window(window),
     device(window, validation),
     layouts(device.getDevice()),
     uploads(device),
-    swapchain(device, window)
+    swapchain(device, window),
+    framesInFlight(validFramesInFlight(requestedFramesInFlight))
 {
     checkFormats();
     createFrames();
@@ -85,10 +86,11 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation):
     createFixedTextures();
 
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
-    debugLines = std::make_unique<VulkanDebugLines>(device, layouts, vulkanFramesInFlight);
+    debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
 
-    if (swapchain.rebuild(false, presentMode, vulkanFramesInFlight)) {
+    if (swapchain.rebuild(false, presentMode, framesInFlight)) {
+        swapchainFramesInFlight = framesInFlight;
         createScreenPipelines(swapchain.getFormat());
     }
 }
@@ -122,10 +124,15 @@ void VulkanRenderer::checkFormats() const {
 /*
 * Each frame in flight gets its own command buffer, fence, acquire semaphore, descriptor sets, uniform buffer, shadow
 * tile buffer and timestamp pool, so the CPU can fill one while the GPU still reads another. The fence starts signalled: no frame is
-* pending yet. The shadow tile buffer holds every tile there can be, so it never grows.
+* pending yet. The shadow tile buffer holds every tile there can be, so it never grows. Images only the GPU writes (the
+* scene, depth, bloom, the shadow atlas, the overlay) are shared: the GPU runs submissions in order, and each pass's
+* barriers also wait for the previous frame's use of them.
 */
 void VulkanRenderer::createFrames() {
-    for (std::uint32_t index = 0; index < vulkanFramesInFlight; ++index) {
+    frames.clear();
+    frameIndex = 0;
+
+    for (std::uint32_t index = 0; index < framesInFlight; ++index) {
         Frame frame;
         frame.commandPool = device.createCommandPool();
         frame.finished = device.createFence(true);
@@ -349,7 +356,8 @@ void VulkanRenderer::updateDisplayOutput(const DisplaySettings& settings) {
 bool VulkanRenderer::prepareSwapchain() {
     const bool wantHdr = displayOutput.hdr;
 
-    if (swapchain.exists() && !swapchain.needsRebuild() && swapchain.isHdr() == wantHdr && swapchain.getPresentMode() == presentMode) {
+    if (swapchain.exists() && !swapchain.needsRebuild() && swapchain.isHdr() == wantHdr && swapchain.getPresentMode() == presentMode &&
+        swapchainFramesInFlight == framesInFlight) {
         return true;
     }
 
@@ -358,7 +366,7 @@ bool VulkanRenderer::prepareSwapchain() {
     bool built = false;
 
     try {
-        built = swapchain.rebuild(wantHdr, presentMode, vulkanFramesInFlight);
+        built = swapchain.rebuild(wantHdr, presentMode, framesInFlight);
     }
     catch (const std::runtime_error& error) {
         if (!wantHdr) {
@@ -368,13 +376,14 @@ bool VulkanRenderer::prepareSwapchain() {
         SDL_Log("HDR output unavailable: %s", error.what());
         displayCapabilities.hdrSwapchainSupported = false;
         displayOutput = DisplayOutput{};
-        built = swapchain.rebuild(false, presentMode, vulkanFramesInFlight);
+        built = swapchain.rebuild(false, presentMode, framesInFlight);
     }
 
     if (!built) {
         return false;
     }
 
+    swapchainFramesInFlight = framesInFlight;
     createScreenPipelines(swapchain.getFormat());
 
     if (hdrChanged) {
@@ -473,7 +482,7 @@ void VulkanRenderer::submitFrame(FrameContext& context, bool toScreen) {
         swapchain.present(device.getQueue(), image);
     }
 
-    frameIndex = (frameIndex + 1) % vulkanFramesInFlight;
+    frameIndex = (frameIndex + 1) % framesInFlight;
 }
 
 /*
@@ -1050,7 +1059,7 @@ void VulkanRenderer::startDebugUi() {
     info.Queue = device.getQueue();
     info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
     info.MinImageCount = 2;
-    info.ImageCount = std::max<std::uint32_t>(2, vulkanFramesInFlight);
+    info.ImageCount = std::max<std::uint32_t>(2, maxFramesInFlight);
     info.UseDynamicRendering = true;
     info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
@@ -1092,6 +1101,33 @@ PresentMode VulkanRenderer::setPresentMode(PresentMode requested) {
 
 PresentMode VulkanRenderer::getPresentMode() const {
     return presentMode;
+}
+
+/*
+* The GPU may still be reading the frames' own buffers, so it is waited for before they go. Timings already read stay
+* to be reported; those of frames not read yet are dropped with their pools. The swapchain is rebuilt before the next
+* frame, since its image count depends on the number of frames in flight.
+*/
+std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
+    if (recording) {
+        throw std::logic_error("Change the frames in flight between frames");
+    }
+
+    const std::uint32_t count = validFramesInFlight(requested);
+
+    if (count == framesInFlight) {
+        return framesInFlight;
+    }
+
+    device.waitIdle();
+    framesInFlight = count;
+    createFrames();
+    debugLines->setFramesInFlight(count);
+    return framesInFlight;
+}
+
+std::uint32_t VulkanRenderer::getFramesInFlight() const {
+    return framesInFlight;
 }
 
 const RenderStats& VulkanRenderer::getLastFrameStats() const {

@@ -15,6 +15,7 @@ namespace {
 void visit(EngineSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Target FPS", settings.targetFPS, {.min = 0, .max = 10000, .sliderMax = 500, .unit = "(0: unlimited)"});
     visitor.choice("Present mode", settings.presentMode, presentModeNames);
+    visitor.field("Frames in flight", settings.framesInFlight, {.min = 1, .max = static_cast<int>(maxFramesInFlight)});
     visitor.field("Ticks per second", settings.ticksPerSecond,
                   {.min = 1.0f, .max = 10000.0f, .sliderMin = 30.0f, .sliderMax = 480.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Max frame seconds", settings.maxFrameSeconds,

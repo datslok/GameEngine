@@ -17,7 +17,7 @@ Application::Application(const char* title, int width, int height, Game& game, c
     settings(initialSettings),
     defaultSettings(captureDefaultsAndLoad(settings, game, saved)),
     window(title, width, height),
-    renderer(window.getSdlWindow(), settings.gpuValidation),
+    renderer(window.getSdlWindow(), settings.gpuValidation, settings.framesInFlight),
     debugUi(window, renderer),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
 {
@@ -74,7 +74,7 @@ void Application::run() {
         }
 
         applyMouseMode();
-        applyPresentMode();
+        applyPresentation();
         render(alpha, static_cast<float>(timestep.getFrameSeconds()), ui);
 
         const double workEnd = profilerSeconds();
@@ -176,10 +176,15 @@ ImDrawData* Application::updateDebugUi() {
     return ui;
 }
 
-void Application::applyPresentMode() {
+void Application::applyPresentation() {
     if (settings.presentMode != requestedPresentMode) {
         requestedPresentMode = settings.presentMode;
         renderer.setPresentMode(requestedPresentMode);
+    }
+
+    // The renderer clamps the count, and asking again for the count it has costs nothing.
+    if (settings.framesInFlight != renderer.getFramesInFlight()) {
+        renderer.setFramesInFlight(settings.framesInFlight);
     }
 }
 

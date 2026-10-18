@@ -16,6 +16,11 @@ VulkanDebugLines::VulkanDebugLines(const VulkanDevice& device, DescriptorLayouts
 {
 }
 
+// The buffers start again empty (they grow on the next upload). The GPU must be idle: it may still read the old ones.
+void VulkanDebugLines::setFramesInFlight(std::uint32_t framesInFlight) {
+    frames = std::vector<FrameLines>(framesInFlight);
+}
+
 // A line list: every two vertices one line.
 void VulkanDebugLines::setTargetFormat(VkFormat format) {
     if (format == targetFormat && pipeline) {

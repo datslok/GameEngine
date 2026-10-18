@@ -21,6 +21,9 @@ class VulkanDebugLines {
 public:
     VulkanDebugLines(const VulkanDevice& device, DescriptorLayouts& layouts, std::uint32_t framesInFlight);
 
+    // One vertex buffer per frame in flight. Only while the GPU is idle.
+    void setFramesInFlight(std::uint32_t framesInFlight);
+
     // The pipeline draws into images of this format (the screen's); remade when it changes.
     void setTargetFormat(VkFormat format);
 
