@@ -135,7 +135,7 @@ namespace {
                                  unlimitedRayDistance, &stats);
         assert(hit && hit->entity == first);
         assert(nearlyEqual(hit->hit.distance, 9.0f));
-        assert(stats.collidersTested <= 3);
+        assert(stats.tested <= 3);
         assert(stats.cellsWalked >= 1 && stats.cellsWalked <= 4);
     }
 

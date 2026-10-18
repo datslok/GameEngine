@@ -28,6 +28,10 @@ std::optional<RayHit> raycast(const Ray& ray, const Capsule& capsule, float maxD
 std::optional<RayHit> raycast(const Ray& ray, const Aabb& box, float maxDistance = unlimitedRayDistance);
 std::optional<RayHit> raycast(const Ray& ray, const Shape& shape, float maxDistance = unlimitedRayDistance);
 
+// One triangle, hit from either side; the normal faces the ray.
+std::optional<RayHit> raycastTriangle(const Ray& ray, const Vec3& a, const Vec3& b, const Vec3& c,
+                                      float maxDistance = unlimitedRayDistance);
+
 // Tests every triangle (a broad phase will cut that down later) and keeps the nearest hit.
 std::optional<RayHit> raycast(const Ray& ray, const TriangleMesh& mesh, float maxDistance = unlimitedRayDistance);
 

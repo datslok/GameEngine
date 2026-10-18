@@ -15,7 +15,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Event-based input with engine-owned key codes, no SDL types in game code
 - Three camera modes: first person, MOBA-style top-down with click-to-move, and a free debug camera
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
-- Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them
+- Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them; static level collision: the level's triangles in their own grid, built once, with raycasts and capsule contacts (how deep, and which way out)
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, camera speeds and mouse sensitivity) lives in a settings struct owned by its system, ready for a debug UI, and numbers the shaders share with C++ are written once
 - Unit tests that run without a GPU or window
 
@@ -102,7 +102,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **Escape** | Release the mouse |
 | **F** | Toggle the flashlight (held in your right hand; in MOBA mode the duck carries it) |
 | **L** | Toggle a field of 42 coloured lamps that fly round their pillars like fireflies, so the pillars' shadows sweep round: a stress test for light priority and shadows (every shadow tile is redrawn each frame while its light moves) |
-| **F4** | Debug view: bounding boxes around every mesh, collider wireframes in orange, how many colliders the hover ray tested out of all of them (the broad phase at work), how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
+| **F4** | Debug view: bounding boxes around every mesh, collider wireframes in orange, how many colliders the hover ray tested out of all of them (the broad phase at work), the level triangle under the cursor with its normal and how many level triangles that ray tested, how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
 
 **First person and free camera**
 
@@ -141,7 +141,7 @@ src/            Engine and game source, in layers (lower ones never include high
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
   core/         Fixed timestep, sRGB conversions and small shared types
-  physics/      Collision shapes, overlap tests, raycasts, colliders, picking and the broad phase grid
+  physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid and static level collision
   math/         Vectors, matrices, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it

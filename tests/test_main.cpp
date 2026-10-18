@@ -61,6 +61,8 @@ void testColliderRaycast();
 void testShapeBounds();
 void testUniformGrid();
 void testCollisionScene();
+void testTriangleContact();
+void testStaticLevel();
 
 int main(){
     testPixelBuffer();
@@ -124,6 +126,8 @@ int main(){
     testShapeBounds();
     testUniformGrid();
     testCollisionScene();
+    testTriangleContact();
+    testStaticLevel();
 
     std::cout << "All tests passed!\n";
     return 0;

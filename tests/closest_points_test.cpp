@@ -161,8 +161,96 @@ namespace {
     }
 }
 
+namespace {
+    // The smallest squared distance from a point to many points spread over the triangle (as weights of its corners).
+    float sampledPointTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c) {
+        constexpr int steps = 60;
+        float best = 1e30f;
+        for (int i = 0; i <= steps; ++i) {
+            for (int j = 0; i + j <= steps; ++j) {
+                const float u = static_cast<float>(i) / steps;
+                const float v = static_cast<float>(j) / steps;
+                const Vec3 onTriangle = a + (b - a) * u + (c - a) * v;
+                best = std::min(best, (onTriangle - point).lengthSquared());
+            }
+        }
+        return best;
+    }
+
+    void testPointTriangle() {
+        // A right triangle in the z = 0 plane.
+        const Vec3 a{0.0f, 0.0f, 0.0f};
+        const Vec3 b{4.0f, 0.0f, 0.0f};
+        const Vec3 c{0.0f, 4.0f, 0.0f};
+
+        // Above the face: straight down onto it.
+        assertVector(closestPointOnTriangle(Vec3{1.0f, 1.0f, 3.0f}, a, b, c), Vec3{1.0f, 1.0f, 0.0f});
+        // The three corner regions.
+        assertVector(closestPointOnTriangle(Vec3{-1.0f, -1.0f, 2.0f}, a, b, c), a);
+        assertVector(closestPointOnTriangle(Vec3{6.0f, -1.0f, 0.0f}, a, b, c), b);
+        assertVector(closestPointOnTriangle(Vec3{-1.0f, 6.0f, -2.0f}, a, b, c), c);
+        // The three edge regions: below edge ab, left of edge ac, and beyond the slanted edge bc.
+        assertVector(closestPointOnTriangle(Vec3{2.0f, -3.0f, 1.0f}, a, b, c), Vec3{2.0f, 0.0f, 0.0f});
+        assertVector(closestPointOnTriangle(Vec3{-2.0f, 1.5f, 0.0f}, a, b, c), Vec3{0.0f, 1.5f, 0.0f});
+        assertVector(closestPointOnTriangle(Vec3{3.0f, 3.0f, 1.0f}, a, b, c), Vec3{2.0f, 2.0f, 0.0f});
+
+        // Random points and triangles: never further than the sampled nearest point, never much nearer.
+        Numbers numbers;
+        for (int i = 0; i < 200; ++i) {
+            const Vec3 p = numbers.nextPoint();
+            const Vec3 t0 = numbers.nextPoint();
+            const Vec3 t1 = numbers.nextPoint();
+            const Vec3 t2 = numbers.nextPoint();
+            const float exact = (closestPointOnTriangle(p, t0, t1, t2) - p).lengthSquared();
+            const float sampled = sampledPointTriangle(p, t0, t1, t2);
+            assert(exact <= sampled + 0.0001f);
+            assert(exact >= sampled - 0.05f);
+        }
+    }
+
+    void testSegmentTriangle() {
+        const Vec3 a{0.0f, 0.0f, 0.0f};
+        const Vec3 b{4.0f, 0.0f, 0.0f};
+        const Vec3 c{0.0f, 4.0f, 0.0f};
+
+        // Parallel above the face, 2 up.
+        const ClosestPoints above = closestPointsSegmentTriangle(Vec3{0.5f, 0.5f, 2.0f}, Vec3{1.5f, 1.0f, 2.0f}, a, b, c);
+        assert(nearlyEqual(above.distanceSquared(), 4.0f));
+
+        // Passing beside the slanted edge, outside the triangle: nearest to that edge.
+        const ClosestPoints beside = closestPointsSegmentTriangle(Vec3{3.0f, 3.0f, -1.0f}, Vec3{3.0f, 3.0f, 1.0f}, a, b, c);
+        assert(nearlyEqual(beside.distanceSquared(), 2.0f));
+        assertVector(beside.onSecond, Vec3{2.0f, 2.0f, 0.0f});
+
+        // Piercing the face: they meet where the segment crosses it.
+        const ClosestPoints pierce = closestPointsSegmentTriangle(Vec3{1.0f, 1.0f, -1.0f}, Vec3{1.0f, 1.0f, 3.0f}, a, b, c);
+        assert(nearlyEqual(pierce.distanceSquared(), 0.0f));
+        assertVector(pierce.onFirst, Vec3{1.0f, 1.0f, 0.0f});
+
+        // Random cases against sampling along the segment.
+        Numbers numbers;
+        for (int i = 0; i < 100; ++i) {
+            const Vec3 s0 = numbers.nextPoint();
+            const Vec3 s1 = numbers.nextPoint();
+            const Vec3 t0 = numbers.nextPoint();
+            const Vec3 t1 = numbers.nextPoint();
+            const Vec3 t2 = numbers.nextPoint();
+            const float exact = closestPointsSegmentTriangle(s0, s1, t0, t1, t2).distanceSquared();
+            float sampled = 1e30f;
+            for (int step = 0; step <= 200; ++step) {
+                const Vec3 point = s0 + (s1 - s0) * (static_cast<float>(step) / 200.0f);
+                sampled = std::min(sampled, (closestPointOnTriangle(point, t0, t1, t2) - point).lengthSquared());
+            }
+            assert(exact <= sampled + 0.0001f);
+            assert(exact >= sampled - 0.02f);
+        }
+    }
+}
+
 void testClosestPoints() {
     testPointQueries();
     testSegmentPairs();
     testSegmentBox();
+    testPointTriangle();
+    testSegmentTriangle();
 }
