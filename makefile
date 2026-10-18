@@ -43,7 +43,9 @@ rwildcard = $(foreach entry,$(wildcard $(1:=/*)),$(call rwildcard,$(entry),$(2))
 
 SOURCES := $(strip $(call rwildcard,src,*.cpp))
 MAIN_SOURCE := src/app/main.cpp
-ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES))
+# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and SDL_GPU backends.
+EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp)
+ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES)) $(EXTERNAL_SOURCES)
 TEST_SOURCES := $(wildcard tests/*.cpp)
 
 # Each source compiles to its own object file, so a change recompiles only what it touches, and the game and the
@@ -68,6 +70,10 @@ all: $(TARGET) shaders
 # Linking only joins the compiled objects, which takes a moment.
 $(TARGET): $(ENGINE_OBJECTS) $(MAIN_OBJECT)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
+# GCC's -O2 range analysis reports false array-bounds warnings in ImGui (an index it cannot prove stays below 5). Silenced
+# for the vendored files only; the engine's own code keeps every warning.
+$(call objects_for,$(EXTERNAL_SOURCES)): CXXFLAGS += -Wno-array-bounds
 
 $(TEST_TARGET): $(ENGINE_OBJECTS) $(TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)

@@ -123,3 +123,16 @@ Vec3 toneMap(const Vec3& linear, const ToneMappingSettings& settings, float peak
         std::clamp(curved.z, 0.0f, 1.0f) * peakBrightness
     };
 }
+
+namespace {
+    // In the order of ToneMapCurve's values.
+    constexpr std::array<const char*, 4> curveNames{"Clamp", "Reinhard", "ACES", "AgX"};
+
+    static_assert(static_cast<int>(ToneMapCurve::Clamp) == 0 && static_cast<int>(ToneMapCurve::AgX) == 3,
+                  "curveNames lists the curves by their values");
+}
+
+void visit(ToneMappingSettings& settings, SettingsVisitor& visitor) {
+    visitor.choice("Curve", settings.curve, curveNames);
+    visitor.field("Exposure", settings.exposure, {.min = 0.0f, .sliderMax = 4.0f});
+}

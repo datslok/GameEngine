@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "core/build_info.h"
 #include "render/gpu/gpu_renderer.h"
 #include "render/gpu/render_settings.h"
@@ -31,3 +32,6 @@ struct EngineSettings {
 
     RenderSettings render;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(EngineSettings& settings, SettingsVisitor& visitor);

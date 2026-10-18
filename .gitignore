@@ -69,3 +69,6 @@ build/
 
 # Python bytecode cache
 __pycache__/
+
+# Settings saved by the debug UI (F5)
+settings.cfg

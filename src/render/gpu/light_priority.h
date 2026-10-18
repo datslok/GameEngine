@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "ecs/entity.h"
 #include "math/frustum.h"
 #include "math/vec3.h"
@@ -75,6 +76,9 @@ struct LightPrioritySettings {
     // How long a light or its shadow takes to fade fully in or out during a handover. Zero hands over at once.
     float fadeSeconds = 0.25f;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(LightPrioritySettings& settings, SettingsVisitor& visitor);
 
 // Choose this frame's lights. view is the camera's frustum; previous is the history this function returned last frame;
 // elapsedSeconds is the time since then, which moves the fades along.

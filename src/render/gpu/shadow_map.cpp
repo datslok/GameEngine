@@ -391,3 +391,11 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
     return plan;
 }
+
+void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Texel target", settings.texelTarget, {.min = 0.001f, .sliderMin = 0.005f, .sliderMax = 0.2f, .unit = "m"});
+    visitor.field("Spot texel target", settings.spotTexelTarget, {.min = 0.001f, .sliderMin = 0.005f, .sliderMax = 0.2f, .unit = "m"});
+    visitor.field("Directional distance", settings.directionalDistance, {.min = 1.0f, .sliderMax = 200.0f, .unit = "m"});
+    visitor.field("Directional caster reach", settings.directionalCasterReach, {.min = 0.0f, .sliderMax = 200.0f, .unit = "m"});
+    visitor.field("Normal offset", settings.normalOffsetTexels, {.min = 0.0f, .sliderMax = 6.0f, .unit = "texels"});
+}

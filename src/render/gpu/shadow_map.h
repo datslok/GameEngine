@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "math/mat4.h"
 #include "math/vec3.h"
 #include "render/gpu/light_uniforms.h"
@@ -51,6 +52,9 @@ struct ShadowSettings {
     // light grazes. Measured in texels, it shrinks and grows with each tile's size.
     float normalOffsetTexels = 2.5f;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(ShadowSettings& settings, SettingsVisitor& visitor);
 
 // The most shadowed lights of each kind; the rest still give light, without shadows.
 inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; as many as the shader has seats, now that cached tiles cost little

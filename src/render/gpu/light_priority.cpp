@@ -338,3 +338,12 @@ PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& 
 
     return result;
 }
+
+void visit(LightPrioritySettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Point seats", settings.pointSeats, {.min = 0, .max = maxPointLights});
+    visitor.field("Spot seats", settings.spotSeats, {.min = 0, .max = maxSpotLights});
+    visitor.field("Shadowed points", settings.shadowedPoints, {.min = 0, .max = maxShadowedPointLights});
+    visitor.field("Shadowed spots", settings.shadowedSpots, {.min = 0, .max = maxShadowedSpotLights});
+    visitor.field("Incumbent advantage", settings.incumbentAdvantage, {.min = 1.0f, .sliderMax = 3.0f});
+    visitor.field("Fade", settings.fadeSeconds, {.min = 0.0f, .sliderMax = 2.0f, .unit = "s"});
+}

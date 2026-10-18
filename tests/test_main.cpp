@@ -83,6 +83,9 @@ void testToneMapping();
 void testToneMapUniforms();
 void testBloom();
 void testDisplayOutput();
+void testSettingsFile();
+void testQualityPreset();
+void testOverlayComposite();
 
 int main(){
     testPixelBuffer();
@@ -168,6 +171,9 @@ int main(){
     testToneMapUniforms();
     testBloom();
     testDisplayOutput();
+    testSettingsFile();
+    testQualityPreset();
+    testOverlayComposite();
 
     std::cout << "All tests passed!\n";
     return 0;

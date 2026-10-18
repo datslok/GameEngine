@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "input/input.h"
 #include "math/vec3.h"
 #include "scene/camera.h"
@@ -12,6 +13,9 @@ struct MobaCameraSettings {
     float panSpeed = 9.0f;          // units per second
     float edgeMarginPixels = 5.0f;  // how close to a window edge the cursor must be to pan
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(MobaCameraSettings& settings, SettingsVisitor& visitor);
 
 /*
 * A top-down MOBA camera at a fixed angle: it follows a target when given one, and otherwise pans when the confined cursor touches a window edge.

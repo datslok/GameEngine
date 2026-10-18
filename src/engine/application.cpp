@@ -7,12 +7,16 @@
 #include <SDL3/SDL.h>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <vector>
 
-Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& settings):
+Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings):
+    game(game),
+    settings(initialSettings),
+    defaultSettings(captureDefaultsAndLoad(settings, game)),
     window(title, width, height),
     renderer(window.getSdlWindow(), settings.gpuValidation),
-    game(game),
-    settings(settings),
+    debugUi(window, renderer),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
 {
     requestedPresentMode = settings.presentMode;
@@ -47,6 +51,9 @@ void Application::run() {
 
         const int ticks = timestep.advance(deltaSeconds);
 
+        // Before the game reads its settings this frame, so a slider's change shows at once.
+        ImDrawData* ui = updateDebugUi();
+
         game.onInput(world, input);
 
         for (int tick = 0; tick < ticks; ++tick) {
@@ -66,7 +73,7 @@ void Application::run() {
 
         applyMouseMode();
         applyPresentMode();
-        render(alpha, static_cast<float>(timestep.getFrameSeconds()));
+        render(alpha, static_cast<float>(timestep.getFrameSeconds()), ui);
 
         const double workEnd = profilerSeconds();
         profiler.record(workSection, workEnd - workStart);
@@ -91,6 +98,77 @@ EngineSettings& Application::getSettings() {
     return settings;
 }
 
+SettingsWalk Application::allSettings() {
+    return engineAndGameSettings(settings, game);
+}
+
+/*
+* The game's settings are read the same way, so the game must exist already (it does: it is borrowed). A file that
+* cannot be read or holds mistakes never stops the game; each problem is logged and the rest is used.
+*/
+std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& settings, Game& game) {
+    const SettingsWalk walk = engineAndGameSettings(settings, game);
+    std::vector<SettingEntry> defaults = captureSettings(walk);
+
+    try {
+        const std::optional<std::string> text = readSettingsFile(savedSettingsPath);
+
+        if (!text) {
+            return defaults;
+        }
+
+        const ParsedSettings parsed = parseSettingsText(*text);
+        std::vector<std::string> warnings = parsed.warnings;
+        const std::vector<std::string> applyWarnings = applySettings(parsed.entries, walk, StartupFields::Apply);
+        warnings.insert(warnings.end(), applyWarnings.begin(), applyWarnings.end());
+
+        const std::string loaded = "Loaded " + std::to_string(parsed.entries.size()) + " saved settings from " + savedSettingsPath;
+        SDL_Log("%s", loaded.c_str());
+
+        for (const std::string& warning : warnings) {
+            SDL_Log("%s: %s", savedSettingsPath, warning.c_str());
+        }
+    }
+    catch (const std::exception& error) {
+        SDL_Log("Saved settings not loaded: %s", error.what());
+    }
+
+    return defaults;
+}
+
+/*
+* Saving writes only what differs from the defaults. Resetting leaves the start-up fields alone, since the running
+* engine was built from them.
+*/
+ImDrawData* Application::updateDebugUi() {
+    if (input.wasKeyPressed(Key::F5)) {
+        debugUi.setOpen(!debugUi.isOpen());
+    }
+
+    const SettingsWalk walk = allSettings();
+    DebugUiRequests requests;
+    ImDrawData* ui = debugUi.build(walk, settings.render, requests);
+
+    if (requests.save) {
+        try {
+            const std::string text = formatSettingsText(captureSettings(walk), defaultSettings);
+            writeSettingsFile(savedSettingsPath, text);
+            const std::size_t changed = parseSettingsText(text).entries.size();
+            debugUi.setStatus("Saved " + std::to_string(changed) + " changed settings to " + savedSettingsPath);
+        }
+        catch (const std::exception& error) {
+            debugUi.setStatus(std::string{"Not saved: "} + error.what());
+        }
+    }
+
+    if (requests.resetToDefaults) {
+        applySettings(defaultSettings, walk, StartupFields::Keep);
+        debugUi.setStatus("Defaults restored (not saved yet)");
+    }
+
+    return ui;
+}
+
 void Application::applyPresentMode() {
     if (settings.presentMode != requestedPresentMode) {
         requestedPresentMode = settings.presentMode;
@@ -99,7 +177,8 @@ void Application::applyPresentMode() {
 }
 
 void Application::applyMouseMode() {
-    const bool wanted = game.wantsMouseLook();
+    // The open debug UI needs the cursor, whatever the game wants.
+    const bool wanted = game.wantsMouseLook() && !debugUi.isOpen();
 
     if (wanted != mouseLookEnabled) {
         mouseLookEnabled = wanted;
@@ -129,7 +208,7 @@ void Application::prepareNewResources() {
 /*
 * Draw the scene. alpha (0..1) is how far real time has moved past the last tick, and each object is drawn that far between its previous and current transform.
 */
-void Application::render(float alpha, float frameSeconds) {
+void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     prepareNewResources();
     const double sceneStart = profilerSeconds();
 
@@ -161,7 +240,7 @@ void Application::render(float alpha, float frameSeconds) {
 
     const double renderStart = profilerSeconds();
     profiler.record(sceneSection, renderStart - sceneStart);
-    const bool rendered = renderer.render(frame, settings.render);
+    const bool rendered = renderer.render(frame, settings.render, ui);
     profiler.record(renderSection, profilerSeconds() - renderStart);
     if (!rendered) {
         return;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "render/gpu/tone_mapping.h"
 
 /*
@@ -21,6 +22,9 @@ struct DisplaySettings {
     // The brightest the game shows anything, in nits, never past what the monitor reports. 0 uses the monitor's peak.
     float peakNits = 0.0f;
 };
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(DisplaySettings& settings, SettingsVisitor& visitor);
 
 // What the window's screen reports (read from SDL each frame; it changes when Windows HDR is switched or the window
 // moves to another monitor).

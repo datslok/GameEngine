@@ -42,3 +42,10 @@ const ViewAngles& FreeFlyCameraController::getAngles() const {
 FreeFlyCameraSettings& FreeFlyCameraController::getSettings() {
     return settings;
 }
+
+void visit(FreeFlyCameraSettings& settings, SettingsVisitor& visitor) {
+    visitor.group("Look", [&] {
+        visit(settings.look, visitor);
+    });
+    visitor.field("Move speed", settings.moveSpeed, {.min = 0.0f, .sliderMax = 50.0f, .unit = "m/s"});
+}

@@ -3,9 +3,11 @@
 #include "assets/asset_manager.h"
 #include "core/fixed_timestep.h"
 #include "core/profiler.h"
+#include "engine/debug_ui.h"
 #include "ecs/world.h"
 #include "engine/engine_settings.h"
 #include "engine/game.h"
+#include "engine/settings_file.h"
 #include "input/input.h"
 #include "platform/window.h"
 #include "render/gpu/gpu_renderer.h"
@@ -16,10 +18,11 @@
 /*
 * The engine: runs the main loop for one Game, and owns everything that is the same for every game (window, renderer, input, World, fixed timestep).
 * The game is borrowed, so it must outlive the Application.
+* Settings saved by the debug UI (savedSettingsPath) are loaded over the given ones before anything reads them.
 */
 class Application {
 public:
-    Application(const char* title, int width, int height, Game& game, const EngineSettings& settings = {});
+    Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings = {});
 
     void run();
 
@@ -27,8 +30,8 @@ public:
     EngineSettings& getSettings();
 
 private:
-    // Draw the World from the game's camera, between the last two ticks.
-    void render(float alpha, float frameSeconds);
+    // Draw the World from the game's camera, between the last two ticks. ui is the debug UI's frame, or null.
+    void render(float alpha, float frameSeconds, ImDrawData* ui);
 
     // Upload meshes and textures the AssetManager gained since the last frame, before the frame begins.
     void prepareNewResources();
@@ -39,15 +42,27 @@ private:
     // Ask the renderer for the settings' present mode when it changes.
     void applyPresentMode();
 
+    // F5 opens and closes the debug UI; while open it is built each frame and its save and reset requests carried out.
+    ImDrawData* updateDebugUi();
+
+    // The engine's and the game's settings as one tree, for the debug UI and the settings file.
+    SettingsWalk allSettings();
+
+    // Remember the settings as they are (the defaults, for saving only what changed and for resetting), then load the
+    // saved file over them. Returns the defaults.
+    static std::vector<SettingEntry> captureDefaultsAndLoad(EngineSettings& settings, Game& game);
+
+    Game& game;
+
+    // Before the window and renderer, so the saved settings are loaded before anything is built from them (GPU validation and the
+    // timestep are read once). defaultSettings is what they were before loading.
+    EngineSettings settings;
+    const std::vector<SettingEntry> defaultSettings;
+
     // Members are destroyed in reverse order: the window outlives the renderer that draws into it,
     // and the renderer owns every GPU copy of the assets.
     Window window;
     GpuRenderer renderer;
-
-    Game& game;
-
-    // Declared before the timestep, which is built from it.
-    EngineSettings settings;
 
     // Refreshed once per frame by window.processEvents().
     Input input;
@@ -59,6 +74,9 @@ private:
 
     // Each uploaded mesh's bounds, indexed like MeshHandle, for the bounding box view.
     std::vector<Aabb> boundsByMesh;
+
+    // After the window and renderer, which it uses until it is destroyed.
+    DebugUi debugUi;
 
     // This frame's wireframe shapes, cleared every frame.
     DebugDraw debugDraw;
