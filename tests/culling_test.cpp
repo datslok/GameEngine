@@ -47,7 +47,18 @@ namespace {
     // The six sides come straight out of a view-projection matrix, in either depth convention.
     void testFrustumFromMatrix() {
         checkTestFrustum(Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne));
-        checkTestFrustum(Frustum::fromClipMatrix(toGpuDepthRange(testProjection()), ClipDepth::ZeroToOne));
+        checkTestFrustum(Frustum::fromClipMatrix(toGpuDepthRange(testProjection()), ClipDepth::OneToZero));
+
+        // Reversed-Z swaps which side of 0 <= z <= w is near, but the sides keep their names: plane 4 is still the near plane.
+        for (ClipDepth depth : {ClipDepth::NegativeOneToOne, ClipDepth::OneToZero}) {
+            const Mat4 projection = depth == ClipDepth::OneToZero ? toGpuDepthRange(testProjection()) : testProjection();
+            const Frustum frustum = Frustum::fromClipMatrix(projection, depth);
+
+            assert(frustum.planes[4].signedDistance(Vec3{0.0f, 0.0f, -0.5f}) < 0.0f);
+            assert(frustum.planes[4].signedDistance(Vec3{0.0f, 0.0f, -11.0f}) > 0.0f);
+            assert(frustum.planes[5].signedDistance(Vec3{0.0f, 0.0f, -11.0f}) < 0.0f);
+            assert(frustum.planes[5].signedDistance(Vec3{0.0f, 0.0f, -0.5f}) > 0.0f);
+        }
 
         // A moved camera: the same view shifted 100 units along x.
         const Mat4 moved = testProjection() * Mat4::translation(-100.0f, 0.0f, 0.0f);

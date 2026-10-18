@@ -1,6 +1,10 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
-// One triangle big enough to cover the whole viewport, made in the shader (no vertex input), at the far depth, 1. Its
+// The far depth, shared with the C++ side (reversed-Z: 0 is the far plane).
+#include "render/gpu/depth_shared.h"
+
+// One triangle big enough to cover the whole viewport, made in the shader (no vertex input), at the far depth. Its
 // corners lie at -1 and 3, so the visible square from -1 to 1 is inside it: one triangle instead of two avoids the seam
 // along a quad's diagonal, where both triangles would shade the same pixels.
 //
@@ -10,5 +14,5 @@
 // per frame to run its shader on every pixel of the screen.
 void main() {
     const vec2 corners[3] = vec2[](vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
-    gl_Position = vec4(corners[gl_VertexIndex], 1.0, 1.0);
+    gl_Position = vec4(corners[gl_VertexIndex], GPU_FAR_DEPTH, 1.0);
 }

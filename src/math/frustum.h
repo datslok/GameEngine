@@ -5,10 +5,11 @@
 
 #include <array>
 
-// How a projection maps depth: OpenGL style (-w..w, what Mat4::perspective gives) or 0..w (what GPUs use).
+// How a projection maps depth: OpenGL style (-w..w, near to far: what Mat4::perspective gives) or the GPU's
+// reversed-Z (w..0, near to far: what toGpuDepthRange gives).
 enum class ClipDepth {
     NegativeOneToOne,
-    ZeroToOne
+    OneToZero
 };
 
 // A plane as the points p with normal.dot(p) + distance = 0. The normal is unit length and points to the inside.

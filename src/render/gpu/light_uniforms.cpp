@@ -67,14 +67,14 @@ FrameLighting selectDrawableLights(const FrameLighting& lighting) {
 
 /*
 * Work that is the same for every pixel is done here once per frame: colour times intensity, and normalising and flipping the
-* direction (the shader's N dot L needs the direction towards the light).
+* direction (the shader's N dot L needs the direction towards the light), and measuring positions from the camera, which
+* is where the shader's origin is.
 */
 LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition) {
     const FrameLighting selected = selectDrawableLights(lighting);
     LightUniformData data{};
 
     writeVector(data.ambient, selected.ambient, 0.0f);
-    writeVector(data.cameraPosition, cameraPosition, 0.0f);
 
     for (std::size_t i = 0; i < selected.directionalLights.size(); ++i) {
         const DirectionalLight& light = selected.directionalLights[i];
@@ -86,7 +86,7 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
     for (std::size_t i = 0; i < selected.pointLights.size(); ++i) {
         const PlacedPointLight& placed = selected.pointLights[i];
         PointLightUniform& slot = data.points[i];
-        writeVector(slot.positionRange, placed.position, placed.light.range);
+        writeVector(slot.positionRange, placed.position - cameraPosition, placed.light.range);
 
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive falls back to 1.
         const float sourceRadius = placed.light.sourceRadius > 0.0f ? placed.light.sourceRadius : 1.0f;
@@ -103,7 +103,7 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
         const float cosInner = std::cos(std::min(light.innerAngle, light.outerAngle));
 
         SpotLightUniform& slot = data.spots[i];
-        writeVector(slot.positionRange, selected.spotLights[i].position, light.range);
+        writeVector(slot.positionRange, selected.spotLights[i].position - cameraPosition, light.range);
         writeVector(slot.directionCosOuter, light.direction.normalized(), cosOuter);
         writeVector(slot.radianceCosInner, light.colour * (light.intensity * selected.spotLights[i].fade), cosInner);
 

@@ -11,7 +11,7 @@ namespace {
         return std::abs(actual - expected) < tolerance;
     }
 
-    // The shadow map stores depth squashed into 0..1 (finely spaced near the light, coarsely far away). Turned back into
+    // The shadow map stores depth squashed into 0..1 (1 at the light's near plane, 0 at its reach). Turned back into
     // distance along the view, a point 3 units in front of the light reads 3 again.
     void testDepthTurnsBackIntoDistance() {
         const float range = 20.0f;
@@ -23,8 +23,8 @@ namespace {
             assert(nearlyEqual(linearShadowDepth(depth, shadowNearPlane, range), distance, 0.01f));
         }
 
-        assert(nearlyEqual(linearShadowDepth(0.0f, 0.1f, 20.0f), 0.1f));
-        assert(nearlyEqual(linearShadowDepth(1.0f, 0.1f, 20.0f), 20.0f, 0.01f));
+        assert(nearlyEqual(linearShadowDepth(1.0f, 0.1f, 20.0f), 0.1f));
+        assert(nearlyEqual(linearShadowDepth(0.0f, 0.1f, 20.0f), 20.0f, 0.01f));
     }
 
     /*
