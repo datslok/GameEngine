@@ -86,6 +86,7 @@ void testSphereCast();
 void testParticle();
 void testGrenade();
 void testProfiler();
+void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
 void testBloom();
@@ -184,6 +185,7 @@ int main(){
     testParticle();
     testGrenade();
     testProfiler();
+    testGpuTiming();
     testToneMapping();
     testToneMapUniforms();
     testBloom();

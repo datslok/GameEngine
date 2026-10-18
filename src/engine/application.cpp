@@ -80,7 +80,7 @@ void Application::run() {
         const double workEnd = profilerSeconds();
         profiler.record(workSection, workEnd - workStart);
         profiler.update(workEnd);
-
+        gpuProfiler.update(workEnd);
         // 0 means unlimited.
         if (settings.targetFPS > 0) {
             const Uint64 frameDuration =
@@ -233,6 +233,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
         // Also from the previous window: the profiler shows a finished half second at a time.
         drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
+        drawProfile(gpuProfiler, gpuProfileReadoutLine, 2, false, profileDebugColour, debugDraw);
     }
 
     game.onDebugDraw(world, debugDraw, alpha);
@@ -246,6 +247,8 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     if (!rendered) {
         return;
     }
+
+    recordGpuTimings(gpuProfiler, renderer.getLastFrameStats().gpu);
 
     // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
     // so turning clicks into rays (makeCameraRay) matches what is on screen.

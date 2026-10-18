@@ -3,6 +3,7 @@
 #include "assets/asset_manager.h"
 #include "core/fixed_timestep.h"
 #include "core/profiler.h"
+#include "engine/debug_views.h"
 #include "engine/debug_ui.h"
 #include "ecs/world.h"
 #include "engine/engine_settings.h"
@@ -115,6 +116,9 @@ private:
     const int updateSection = profiler.addSection("UPDATE");
     const int sceneSection = profiler.addSection("SCENE");
     const int renderSection = profiler.addSection("RENDER");
+
+    // The GPU's time per pass, from the renderer's timestamps, averaged over the same window.
+    Profiler gpuProfiler = makeGpuProfiler();
 
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;

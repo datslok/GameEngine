@@ -51,6 +51,7 @@ void VulkanOverlay::ensureImage(std::uint32_t width, std::uint32_t height) {
     description.width = width;
     description.height = height;
     description.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    description.name = "Debug UI overlay";
 
     VulkanImage replacement{device, description};
     device.waitIdle();

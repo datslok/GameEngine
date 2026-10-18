@@ -142,6 +142,10 @@ VulkanImage::VulkanImage(const VulkanDevice& device, const ImageDescription& des
         VkImageView created = VK_NULL_HANDLE;
         vulkanCheck(vkCreateImageView(device.getDevice(), &viewInfo, nullptr, &created), "Image view creation failed");
         view = OwnedHandle<VkImageView>{device.getDevice(), created, vkDestroyImageView};
+
+        if (description.name != nullptr) {
+            device.nameObject(VK_OBJECT_TYPE_IMAGE, reinterpret_cast<std::uint64_t>(image), description.name);
+        }
     }
     catch (...) {
         release();

@@ -43,6 +43,19 @@ public:
     // Whether images of this format, laid out for the GPU (optimal tiling), support all of these features.
     bool supportsFormat(VkFormat format, VkFormatFeatureFlags2 features) const;
 
+    // The queue's timestamp counter: how many of its bits count before it rolls over (0: it writes no timestamps), and
+    // nanoseconds per tick.
+    std::uint32_t getTimestampValidBits() const;
+    double getTimestampPeriod() const;
+
+    // Debug labels and object names (VK_EXT_debug_utils) for RenderDoc and Nsight. Do nothing when the extension is missing.
+    void beginLabel(VkCommandBuffer commands, const char* name) const;
+    void endLabel(VkCommandBuffer commands) const;
+    void nameObject(VkObjectType type, std::uint64_t handle, const char* name) const;
+
+    // A query pool of count timestamps.
+    OwnedHandle<VkQueryPool> createTimestampPool(std::uint32_t count) const;
+
     // Errors the validation layers reported so far (0 without validation).
     std::uint32_t getValidationErrorCount() const;
 
@@ -67,6 +80,8 @@ private:
     std::uint32_t queueFamily = 0;
     VmaAllocator allocator = VK_NULL_HANDLE;
     bool swapchainColourSpaces = false;
+    bool debugUtils = false;
+    std::uint32_t timestampValidBits = 0;
     std::atomic<std::uint32_t> validationErrors{0};
 
     void createInstance(bool validation);

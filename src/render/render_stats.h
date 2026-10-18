@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/gpu/gpu_timing.h"
+
 #include <cstddef>
 
 // What the last frame drew and what it skipped, counting each mesh once per view (each shadow tile is a view).
@@ -21,4 +23,8 @@ struct RenderStats {
     std::size_t pointLightsInView = 0;
     std::size_t pointLightsLit = 0;
     std::size_t pointLightsShadowed = 0;
+
+    // How long each pass took on the GPU, from timestamps. They can only be read once the GPU has finished a frame, so
+    // these are an earlier frame's (as many back as there are frames in flight); not valid until one has been measured.
+    GpuTimings gpu;
 };

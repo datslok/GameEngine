@@ -64,6 +64,7 @@ struct ImageDescription {
     std::uint32_t levels = 1;
     VkImageUsageFlags usage = 0;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    const char* name = nullptr; // for RenderDoc, Nsight and validation messages (a string literal: it is kept)
 };
 
 /*

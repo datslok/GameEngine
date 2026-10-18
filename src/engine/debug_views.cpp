@@ -67,6 +67,33 @@ std::string profileText(const Profiler& profiler, int decimals, bool withWorst) 
     return line + "MS";
 }
 
+/*
+* The GPU's numbers go through the same profiler as the CPU's, so they are averaged over the same half second and
+* read the same way. Section numbers follow GpuPass, one past the total, so recording needs no lookup.
+*/
+Profiler makeGpuProfiler() {
+    Profiler profiler;
+    profiler.addSection("GPU");
+
+    for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
+        profiler.addSection(gpuPassName(static_cast<GpuPass>(pass)));
+    }
+
+    return profiler;
+}
+
+void recordGpuTimings(Profiler& profiler, const GpuTimings& timings) {
+    if (!timings.valid) {
+        return;
+    }
+
+    profiler.record(0, timings.totalSeconds);
+
+    for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
+        profiler.record(static_cast<int>(pass) + 1, timings.passSeconds[pass]);
+    }
+}
+
 void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug) {
     debugText(debug, debugReadoutLine(line), debugReadoutTextHeight, profileText(profiler, decimals, withWorst), colour);
 }
