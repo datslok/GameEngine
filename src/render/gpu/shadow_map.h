@@ -97,8 +97,8 @@ static_assert(sizeof(ShadowUniformData) == 896, "ShadowUniformData must match th
 static_assert(sizeof(ShadowUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
 
 /*
-* One tile as the shader reads it, from the ShadowTiles storage buffer (std430). There can be over a hundred tiles,
-* about 10 KB in all, more than a uniform block can hold, which is why they live in a storage buffer.
+* One tile as the shader reads it, from the ShadowTiles storage buffer (std430). There can be up to maxShadowTiles (396) of
+* them, about 44 KB in all, far more than a uniform block can hold, which is why they live in a storage buffer.
 */
 struct ShadowTileData {
     float matrix[16]; // column-major view-projection, the same one the shadow pass drew with
