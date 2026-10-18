@@ -23,6 +23,12 @@ struct Material {
     // multiplying the numbers above. A linear (not sRGB) texture; no handle means the numbers alone.
     TextureHandle metallicRoughnessTexture;
 
+    // Optional normal map: a linear texture of small tilts of the surface normal, in the frame of the mesh's tangents
+    // (render/gpu/normal_mapping.h), so flat geometry catches the light like bricks or weave. normalScale multiplies the
+    // tilts (glTF's normalTexture.scale): 0 flattens them, more than 1 exaggerates them. No handle means no tilts.
+    TextureHandle normalTexture;
+    float normalScale = 1.0f;
+
     // Light the surface gives off itself (0..1 per channel, or more for very bright), added whatever lights the scene has.
     // Black means it does not glow. A glowing object with a black colour shows only its emitted light, so it never changes with lighting.
     Vec3 emissive{0.0f, 0.0f, 0.0f};

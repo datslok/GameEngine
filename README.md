@@ -8,7 +8,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 
 - GPU rendering with SDL_GPU (Vulkan) and SPIR-V shaders: reversed-Z depth (near at 1, far at 0, so depth precision is nearly even out to the far plane) and camera-relative rendering (positions measured from the camera before they become floats in matrices, so distant scenes do not jitter), indexed meshes, textures with mipmaps and trilinear plus anisotropic filtering, gamma-correct (linear-light) colour with sRGB textures and swapchain, HDR rendering (the scene is lit in 16-bit floats, then tone mapped with a choice of curves, AgX, ACES, Reinhard or plain clamping, and an exposure, so bright lights roll off smoothly instead of clipping to white), bloom (a few percent of all light scattered into a soft halo, as in a camera lens: the scene halved down a chain of levels with Jimenez's 13-tap filter and grown back with tent filters, energy-conserving, with a firefly filter), HDR output on HDR monitors (scRGB, with paper white and peak brightness settings in nits, falling back to SDR when Windows HDR is off), dithering against banding
 - Lighting: directional, point, spot and ambient lights as components, physically based materials (glTF metallic-roughness: GGX microfacet highlights with Smith shadowing and Schlick Fresnel, Lambert diffuse, and energy compensation for light that bounces between microfacets, so nothing is lost or created at any roughness), emissive (glowing) materials, frustum culling (each view, camera or shadow, skips what it cannot see), debug drawing (lines, boxes, spheres and capsules drawn over the scene, with an F4 debug view), shadows from every light (point lights as six cube faces, minus the faces that cannot shadow anything on screen, spotlights and directional lights as one view each, all in one depth atlas with tiles sized by each light's reach, so up to 64 point lights and 8 spotlights cast shadows, with soft edges that widen with distance from the blocker like real ones (PCSS, sized by each light's glowing size), and cached: a tile is only redrawn when its light or something in its view moves), up to 64 point lights and 8 spotlights at once, light priority (with more lights than the shader and shadow atlas hold, the brightest ones where the action is win, skipping lights out of view, with hysteresis so shadows do not flicker between similar lights, and a priority a game can set so a light is never dropped while in view)
-- Model loading: OBJ, and glTF/GLB with embedded or external textures, metallic and roughness (factors and texture) and emissive colour (with KHR_materials_emissive_strength); optional smooth normals with a crease angle for models that have none
+- Model loading: OBJ, and glTF/GLB with embedded or external textures, metallic and roughness (factors and texture), normal maps (with the file's tangents, or tangents generated with MikkTSpace as baking tools do, so the bumps look as their authors made them, mirrored pictures included) and emissive colour (with KHR_materials_emissive_strength); optional smooth normals with a crease angle for models that have none
 - Entities and components: generational entity handles, sparse-set component storage, systems as plain functions that may destroy entities and remove components mid-walk (queued until the walk ends)
 - An asset manager that loads each file once and hands out typed handles
 - Fixed 120 Hz simulation with interpolated rendering, so movement is smooth at any frame rate (orientations are quaternions, blended along the shortest turn); deterministic (the same commands give a bit-identical result, checked by a test that plays the demo twice), ready for replays and networking
@@ -32,7 +32,7 @@ The project is developed on **Windows** with **MSYS2** (UCRT64 environment). You
 | shaderc (`glslc`) | Compiling GLSL shaders to SPIR-V |
 | A GPU and driver with Vulkan support | Running the game (not needed for the tests) |
 
-[cgltf](https://github.com/jkuhlmann/cgltf) is included in `external/cgltf`, so it needs no install.
+[cgltf](https://github.com/jkuhlmann/cgltf) is included in `external/cgltf` and MikkTSpace in `external/mikktspace`, so they need no install.
 
 ## Install
 
@@ -144,9 +144,9 @@ src/            Engine and game source, in layers (lower ones never include high
   engine/       The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
   gameplay/     Character movement, spinners, fireflies, grenades and camera controllers
   platform/     The window and SDL input translation
-  render/gpu/   GPU renderer (SDL_GPU): physically based shading (and its tested CPU mirror), shadow atlas and caching, soft shadows, light priority, debug lines, the overlay the debug UI is drawn into, quality presets, and the packing of lights and materials for the shaders
+  render/gpu/   GPU renderer (SDL_GPU): physically based shading and normal mapping (and their tested CPU mirrors), shadow atlas and caching, soft shadows, light priority, debug lines, the overlay the debug UI is drawn into, quality presets, and the packing of lights and materials for the shaders
   render/software/  Software rasterizer, kept as a tested reference
-  scene/        Meshes, models, materials, lights, the camera, render components, interpolation and the frame description
+  scene/        Meshes (with tangents for normal maps), models, materials, lights, the camera, render components, interpolation and the frame description
   assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
@@ -160,11 +160,12 @@ docs/           ENGINE_GUIDE.md: how the engine works and why, for people learni
                 RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
 tools/          package_demo.py (the shareable zip), make_glb_demo.py
 assets/
-  models/       OBJ and glTF test models
+  models/       OBJ and glTF test models (the normal map gallery: Khronos's CompareNormal, NormalTangentTest and NormalTangentMirrorTest)
   shaders/      GLSL shaders (compiled to .spv by make)
   textures/     Images
 external/cgltf  Vendored glTF loader
 external/imgui  Vendored Dear ImGui (the debug UI), with its SDL3 and SDL_GPU backends
+external/mikktspace  Vendored MikkTSpace (tangents for normal maps, C)
 build/          Build output (git-ignored)
 ```
 
@@ -179,5 +180,6 @@ build/          Build output (git-ignored)
 
 - [cgltf](https://github.com/jkuhlmann/cgltf) by Johannes Kuhlmann, for glTF parsing
 - [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut, for the debug UI
+- [MikkTSpace](https://github.com/mmikk/MikkTSpace) by Morten S. Mikkelsen, for tangents (zlib licence)
 - [SDL3](https://www.libsdl.org/) and SDL3_image
-- The duck model is from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets)
+- The duck model and the normal map gallery are from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): CompareNormal by Eric Chadwick and DGG (CC0), NormalTangentTest and NormalTangentMirrorTest by Ed Mackey, © 2018 Analytical Graphics, Inc. ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))

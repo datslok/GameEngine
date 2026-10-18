@@ -37,6 +37,28 @@ namespace {
             );
         }
     }
+    /*
+    * One vertex's tangent: a unit direction (normalised here, as normals are) and a sign that glTF requires to be +1 or
+    * -1, the side of the tangent the normal map's "up" is on.
+    */
+    Vec4 readTangent(const cgltf_accessor& tangents, std::size_t vertexIndex) {
+        cgltf_float tangent[4]{};
+
+        if (!cgltf_accessor_read_float(&tangents, vertexIndex, tangent, 4)) {
+            throw std::runtime_error("Could not read glTF tangent");
+        }
+
+        const Vec3 direction{tangent[0], tangent[1], tangent[2]};
+        const float lengthSquared = direction.lengthSquared();
+
+        if (!std::isfinite(lengthSquared) || lengthSquared <= 0.0f || (tangent[3] != 1.0f && tangent[3] != -1.0f)) {
+            throw std::runtime_error("glTF tangent must be a finite non-zero direction with w = 1 or -1");
+        }
+
+        const Vec3 unit = direction.normalized();
+        return Vec4{unit.x, unit.y, unit.z, tangent[3]};
+    }
+
     Mesh readPrimitive(const cgltf_primitive& primitive) {
         if (primitive.type != cgltf_primitive_type_triangles) {
             throw std::runtime_error(
@@ -95,7 +117,21 @@ namespace {
             }
         }
 
+        const cgltf_accessor* tangents = cgltf_find_accessor(&primitive, cgltf_attribute_type_tangent, 0);
+
+        if (tangents != nullptr) {
+            if (tangents->type != cgltf_type_vec4 ||
+                tangents->count != positions->count ||
+                tangents->is_sparse) {
+                throw std::runtime_error(
+                    "Unsupported glTF tangent data"
+                );
+            }
+        }
+
         Mesh mesh;
+        // glTF's UV origin is the image's top-left corner.
+        mesh.uvOrigin = UvOrigin::TopLeft;
         mesh.vertices.reserve(positions->count);
 
         // Read each position through cgltf so buffer offsets
@@ -249,6 +285,10 @@ namespace {
                         uv[0],
                         uv[1]
                     };
+                }
+
+                if (tangents != nullptr) {
+                    triangle.tangents[offset] = readTangent(*tangents, vertexIndex);
                 }
             }
 
@@ -458,6 +498,17 @@ namespace {
         material.roughness = readUnitFactor(properties.roughness_factor, "glTF roughness factor must be between 0 and 1");
         material.colourTexture = readTexture(properties.base_color_texture, modelDirectory);
         material.metallicRoughnessTexture = readTexture(properties.metallic_roughness_texture, modelDirectory);
+        material.normalTexture = readTexture(source->normal_texture, modelDirectory);
+
+        if (material.normalTexture.isSet()) {
+            if (!std::isfinite(source->normal_texture.scale)) {
+                throw std::runtime_error(
+                    "glTF normal texture scale must be finite"
+                );
+            }
+
+            material.normalScale = source->normal_texture.scale;
+        }
 
         const float strength = source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f;
 

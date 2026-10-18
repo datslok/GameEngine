@@ -13,6 +13,8 @@ layout(location = 1) in vec2 textureUv;
 // Where the fragment is relative to the camera (camera-relative rendering): world axes, the camera at the origin. Light
 // positions and shadow matrices are measured the same way.
 layout(location = 2) in vec3 relativePosition;
+// The surface's tangent (direction of increasing u) and in w the side of it the normal map's "up" is on.
+layout(location = 3) in vec4 worldTangent;
 
 layout(set = 2, binding = 0) uniform sampler2D colourTexture;
 
@@ -30,10 +32,14 @@ layout(set = 2, binding = 3) uniform sampler2D metallicRoughnessTexture;
 // The specular albedo table (render/gpu/brdf.h): scale and bias for the reflectance head-on, over n.v and roughness.
 layout(set = 2, binding = 4) uniform sampler2D brdfTable;
 
+// Per-texel tilts of the surface normal, linear numbers: x along the tangent, y up the picture, z out of the surface,
+// each stored as 0..1 (white when there is none, which a normal scale of 0 ignores).
+layout(set = 2, binding = 5) uniform sampler2D normalTexture;
+
 // Must match MaterialUniformData in render/gpu/material_uniforms.h.
 layout(std140, set = 3, binding = 0) uniform MaterialData {
     vec4 baseColour;
-    vec4 surfaceParameters; // x: metallic, y: roughness
+    vec4 surfaceParameters; // x: metallic, y: roughness, z: normal map scale (0 without a normal map)
     vec4 emissive;          // rgb: light the surface gives off itself
 };
 
@@ -64,7 +70,7 @@ layout(std140, set = 3, binding = 1) uniform LightData {
 };
 
 // Must match ShadowTileData in render/gpu/shadow_map.h. Over a hundred tiles do not fit in a uniform block (the shader
-// can read only 4 KB of one), so they are in a storage buffer: set 2, after the five samplers.
+// can read only 4 KB of one), so they are in a storage buffer: set 2, after the six samplers.
 struct ShadowTileData {
     mat4 matrix; // the shadow pass's view-projection, for points measured from the camera
     vec4 offset; // normal offset against acne: x per unit of distance from the light, y fixed
@@ -72,7 +78,7 @@ struct ShadowTileData {
     vec4 lens;   // perspective tiles only (else zeros): x near, y far plane, z world size of a texel per unit of distance
 };
 
-layout(std430, set = 2, binding = 5) readonly buffer ShadowTiles {
+layout(std430, set = 2, binding = 6) readonly buffer ShadowTiles {
     ShadowTileData shadowTiles[];
 };
 
@@ -158,6 +164,25 @@ ShadingPoint prepareShading(vec3 baseColour, float metallic, float roughness, ve
     point.specularAlbedo = (point.f0 * entry.x + entry.y) * point.energyCompensation;
     point.diffuse = baseColour * (1.0 - metallic) * (1.0 - point.specularAlbedo);
     return point;
+}
+
+// Normal mapping: the arithmetic mirrors render/gpu/normal_mapping.cpp, which tests it.
+
+// A texel as a direction in the surface's frame: 0..1 to -1..1, the scale on the sideways parts only.
+vec3 decodeNormalTexel(vec3 texel, float scale) {
+    return (texel * 2.0 - 1.0) * vec3(scale, scale, 1.0);
+}
+
+/*
+* The frame's axes weighted by the decoded direction: x along the tangent, y along the bitangent (up the picture),
+* z along the normal. The interpolated normal and tangent are used as they arrive, not normalised first, as MikkTSpace
+* asks so the result matches the baker's; only the sum is normalised. Zero when there is no usable direction.
+*/
+vec3 perturbNormal(vec3 normal, vec4 tangent, vec3 tangentSpaceNormal) {
+    vec3 bitangent = tangent.w * cross(normal, tangent.xyz);
+    vec3 combined = tangentSpaceNormal.x * tangent.xyz + tangentSpaceNormal.y * bitangent + tangentSpaceNormal.z * normal;
+    float combinedLength = length(combined);
+    return combinedLength > 0.0 ? combined / combinedLength : vec3(0.0);
 }
 
 /*
@@ -399,7 +424,20 @@ void main() {
     float cameraDistance = length(cameraOffset);
 
     // Without a usable normal there is no way to tell which side faces a light, so only ambient applies, seen head-on.
-    vec3 normal = normalLength > 0.0 ? worldNormal / normalLength : vec3(0.0, 1.0, 0.0);
+    // The geometric normal (the triangle's own, smoothed) moves points off the surface for shadow lookups; the normal
+    // map's tilts are far smaller than a shadow texel and would only add noise there.
+    vec3 geometricNormal = normalLength > 0.0 ? worldNormal / normalLength : vec3(0.0, 1.0, 0.0);
+    vec3 normal = geometricNormal;
+
+    if (normalLength > 0.0) {
+        vec3 tilt = decodeNormalTexel(texture(normalTexture, textureUv).rgb, surfaceParameters.z);
+        vec3 bumped = perturbNormal(worldNormal, worldTangent, tilt);
+
+        if (dot(bumped, bumped) > 0.0) {
+            normal = bumped;
+        }
+    }
+
     vec3 toCamera = cameraDistance > 0.0 ? cameraOffset / cameraDistance : normal;
     ShadingPoint point = prepareShading(albedo.rgb, metallic, roughness, normalLength > 0.0 ? normal : toCamera, toCamera);
 
@@ -409,7 +447,7 @@ void main() {
             int tile = directionalTiles[i];
 
             if (tile >= 0) {
-                radiance *= shadowFromTile(tile, offsetForShadow(tile, normal, 0.0));
+                radiance *= shadowFromTile(tile, offsetForShadow(tile, geometricNormal, 0.0));
             }
 
             addLight(radiance, directional[i].toLight.xyz, point, diffuse, specular);
@@ -430,7 +468,7 @@ void main() {
             int firstTile = pointTiles[i / 4][i % 4];
 
             if (firstTile >= 0) {
-                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, normal, pointEmitterRadii[i / 4][i % 4]), pointShadowStrengths[i / 4][i % 4]);
+                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, pointEmitterRadii[i / 4][i % 4]), pointShadowStrengths[i / 4][i % 4]);
             }
 
             addLight(radiance, offset / distance, point, diffuse, specular);
@@ -459,7 +497,7 @@ void main() {
             int tile = spotTiles[i / 4][i % 4];
 
             if (tile >= 0) {
-                radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, normal, distance), spotEmitterRadii[i / 4][i % 4]), spotShadowStrengths[i / 4][i % 4]);
+                radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spotEmitterRadii[i / 4][i % 4]), spotShadowStrengths[i / 4][i % 4]);
             }
             addLight(radiance, toLight, point, diffuse, specular);
         }

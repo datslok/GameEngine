@@ -39,13 +39,17 @@ struct MaterialSource {
     float roughness = Material{}.roughness;
     TextureSource metallicRoughnessTexture;
 
+    // A normal map (linear) and how strongly it tilts the surface. The default scale is Material's own.
+    TextureSource normalTexture;
+    float normalScale = Material{}.normalScale;
+
     Vec3 emissive{0.0f, 0.0f, 0.0f}; // linear light
 
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
-        return colourTexture.isSet() || metallicRoughnessTexture.isSet();
+        return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet();
     }
 };
 

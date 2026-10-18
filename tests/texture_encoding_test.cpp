@@ -59,7 +59,8 @@ namespace {
         assert(assets.getTexture(assets.addTexture(image)).encoding == TextureEncoding::Linear);
     }
 
-    // A material's factors arrive as they are; its colour texture is sRGB and its metallic-roughness texture linear.
+    // A material's factors arrive as they are; its colour texture is sRGB, its metallic-roughness and
+    // normal textures linear (numbers and directions, not colours).
     void testMakeMaterialReadsThePhysicalProperties() {
         AssetManager assets;
 
@@ -70,6 +71,8 @@ namespace {
         source.emissive = Vec3{2.0f, 1.0f, 0.0f};
         source.colourTexture.path = imagePath;
         source.metallicRoughnessTexture.embeddedImage = readImageBytes();
+        source.normalTexture.path = imagePath;
+        source.normalScale = 0.6f;
         source.flipTextureVertically = false;
 
         const Material material = assets.makeMaterial(source);
@@ -83,6 +86,8 @@ namespace {
         assert(material.metallicRoughnessTexture.isValid());
         assert(assets.getTexture(material.texture).encoding == TextureEncoding::Srgb);
         assert(assets.getTexture(material.metallicRoughnessTexture).encoding == TextureEncoding::Linear);
+        assert(assets.getTexture(material.normalTexture).encoding == TextureEncoding::Linear);
+        assert(material.normalScale == 0.6f);
 
         // The same flip as the colour texture: both are read with the same UVs.
         assert(material.texture == assets.loadTexture(imagePath, false));
@@ -98,6 +103,8 @@ namespace {
         assert(material.roughness == defaults.roughness);
         assert(!material.texture.isValid());
         assert(!material.metallicRoughnessTexture.isValid());
+        assert(!material.normalTexture.isValid());
+        assert(material.normalScale == defaults.normalScale);
         assert(!MaterialSource{}.hasTexture());
 
         MaterialSource both;

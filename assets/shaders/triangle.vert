@@ -3,10 +3,13 @@
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 uv;
+// xyz: the surface's direction of increasing u; w: +1 or -1, which side of it "up the picture" is (MeshVertex).
+layout(location = 3) in vec4 tangent;
 
 layout(location = 0) out vec3 worldNormal;
 layout(location = 1) out vec2 textureUv;
 layout(location = 2) out vec3 relativePosition;
+layout(location = 3) out vec4 worldTangent;
 
 // Camera-relative rendering (render/gpu/camera_relative.h): positions are measured from the camera along the world's
 // axes, so the numbers stay small and precise however far from the world's origin the camera is.
@@ -14,6 +17,7 @@ layout(std140, set = 1, binding = 0) uniform TransformData {
     mat4 transform;    // the camera-relative view-projection times the camera-relative model matrix
     mat4 model;        // places the vertex relative to the camera
     mat4 normalMatrix; // Inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if the object is squashed flat).
+    vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
 };
 
 void main() {
@@ -30,4 +34,12 @@ void main() {
     float normalLength = length(transformedNormal);
 
     worldNormal = normalLength > 0.0 ? transformedNormal / normalLength : vec3(0.0);
+
+    // Tangents lie in the surface like edges, so the model matrix itself carries them. On a mirrored object the bitangent
+    // rebuilt from normal and tangent would come out reversed, so the sign takes the matrix's handedness. Mirrored and
+    // tested as transformTangent in render/gpu/normal_mapping.cpp.
+    vec3 transformedTangent = mat3(model) * tangent.xyz;
+    float tangentLength = length(transformedTangent);
+
+    worldTangent = vec4(tangentLength > 0.0 ? transformedTangent / tangentLength : vec3(0.0), tangent.w * handedness.x);
 }
