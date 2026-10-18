@@ -1,0 +1,4 @@
+volk vulkan-sdk-1.4.363.0 (commit 54fc0d7), https://github.com/zeux/volk
+volk.c, volk.h and the licence, unmodified. Loads Vulkan's functions straight from the driver (no loader dispatch per call).
+The makefile compiles volk.c as C; VK_NO_PROTOTYPES is defined for every file, so all Vulkan calls go through volk.
+To update: copy the same files from a newer tag (matching the MSYS2 vulkan-headers version) and note it here.

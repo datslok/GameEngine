@@ -93,6 +93,9 @@ void testDisplayOutput();
 void testSettingsFile();
 void testQualityPreset();
 void testOverlayComposite();
+void testSwapchainChoice();
+void testImageState();
+void testUniformRing();
 
 int main(){
     testPixelBuffer();
@@ -188,6 +191,9 @@ int main(){
     testSettingsFile();
     testQualityPreset();
     testOverlayComposite();
+    testSwapchainChoice();
+    testImageState();
+    testUniformRing();
 
     std::cout << "All tests passed!\n";
     return 0;

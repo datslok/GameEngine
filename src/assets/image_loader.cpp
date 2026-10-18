@@ -60,7 +60,7 @@ static ImageData convertImage(SDL_Surface* loadedSurface, const std::string& fil
     const std::uint64_t pixelCount =
         static_cast<std::uint64_t>(image.width) * image.height;
 
-    // Match the upload size limit in GpuTexture.
+    // Match the upload size limit in VulkanTexture (sizes in 32 bits).
     if (pixelCount > std::numeric_limits<std::uint32_t>::max() / 4) {
         throw std::overflow_error(
             "Image is too large for GPU upload: " + filename

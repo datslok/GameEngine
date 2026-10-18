@@ -2,7 +2,7 @@
 
 #include "core/settings_visitor.h"
 #include "platform/window.h"
-#include "render/gpu/gpu_renderer.h"
+#include "render/vulkan/vulkan_renderer.h"
 #include "render/gpu/render_settings.h"
 
 #include <string>
@@ -21,12 +21,12 @@ struct DebugUiRequests {
 * at start-up are shown greyed out. Above them: the quality preset (render/gpu/quality_preset.h), and buttons to save
 * the settings or return them to their defaults.
 *
-* Owns the ImGui context and both of its backends (SDL events, SDL_GPU drawing), so it must be destroyed before the
+* Owns the ImGui context and both of its backends (SDL events, and the renderer's drawing), so it must be destroyed before the
 * window and renderer it was given: declare it after them.
 */
 class DebugUi {
 public:
-    DebugUi(Window& window, GpuRenderer& renderer);
+    DebugUi(Window& window, VulkanRenderer& renderer);
     ~DebugUi();
 
     // One ImGui context per program.
@@ -38,7 +38,7 @@ public:
 
     /*
     * Build this frame's UI, changing the walked settings as the player moves controls. Returns what to draw
-    * (GpuRenderer::render's ui), valid until the next build, or null while closed, when nothing is built at all.
+    * (VulkanRenderer::render's ui), valid until the next build, or null while closed, when nothing is built at all.
     */
     ImDrawData* build(const SettingsWalk& settings, RenderSettings& render, DebugUiRequests& requests);
 
@@ -49,7 +49,7 @@ private:
     void cleanup() noexcept;
 
     Window& window;
-    GpuRenderer& renderer;
+    VulkanRenderer& renderer;
     bool open = false;
     bool platformStarted = false;
     std::string status;

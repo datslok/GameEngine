@@ -22,14 +22,19 @@ endif
 
 # Never -DNDEBUG (the tests rely on assert) or -ffast-math (it changes floating-point results and breaks NaN checks).
 CXXFLAGS := -std=c++20 -Wall -Wextra -g $(OPTIMISATION) $(BUILD_DEFINES)
-# Includes are written from these roots, for example "math/vec3.h" and "cgltf/cgltf.h".
-CPPFLAGS := -Isrc -Iexternal
+# Includes are written from these roots, for example "math/vec3.h" and "cgltf/cgltf.h". VK_NO_PROTOTYPES: every Vulkan
+# function is a pointer volk fetches from the driver at run time (external/volk), never a symbol linked from the loader.
+CPPFLAGS := -Isrc -Iexternal -DVK_NO_PROTOTYPES
 # GCC writes a .d file next to each object listing the headers it read, so a header change rebuilds exactly the
 # files that include it. -MP adds an empty rule per header, so deleting a header does not break the build.
 DEPFLAGS := -MMD -MP
 LDLIBS := -lSDL3_image -lSDL3
 
 GLSLC := glslc
+
+# The renderer's Vulkan validation layers (debug builds): MSYS2 installs them beside its DLLs, where the Vulkan loader
+# does not look on its own, so every program make runs is told the folder.
+export VK_ADD_LAYER_PATH ?= $(shell cygpath -w /ucrt64/bin 2>/dev/null)
 
 # Build on every core, and keep each file's messages together instead of interleaved.
 JOBS ?= $(shell nproc)
@@ -44,10 +49,11 @@ rwildcard = $(foreach entry,$(wildcard $(1:=/*)),$(call rwildcard,$(entry),$(2))
 
 SOURCES := $(strip $(call rwildcard,src,*.cpp))
 MAIN_SOURCE := src/app/main.cpp
-# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and SDL_GPU backends, and
-# MikkTSpace (tangents for normal maps), which is C.
-EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp)
-EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c)
+# Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and Vulkan backends,
+# vk-bootstrap (Vulkan device set-up) and the Vulkan Memory Allocator, and in C, MikkTSpace (tangents for normal maps)
+# and volk (Vulkan function loading).
+EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-bootstrap/*.cpp) $(wildcard external/vma/*.cpp)
+EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c) $(wildcard external/volk/*.c)
 ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES)) $(EXTERNAL_SOURCES)
 TEST_SOURCES := $(wildcard tests/*.cpp)
 
@@ -77,6 +83,13 @@ $(TARGET): $(ENGINE_OBJECTS) $(MAIN_OBJECT)
 # GCC's -O2 range analysis reports false array-bounds warnings in ImGui (an index it cannot prove stays below 5). Silenced
 # for the vendored files only; the engine's own code keeps every warning.
 $(call objects_for,$(EXTERNAL_SOURCES)): CXXFLAGS += -Wno-array-bounds
+
+# The Vulkan Memory Allocator leaves parameters unused in some configurations and initialises Vulkan structs partly
+# (the rest zero, as intended). Silenced for it only.
+$(OBJECT_DIR)/external/vma/vk_mem_alloc.o: CXXFLAGS += -Wno-unused-parameter -Wno-unused-variable -Wno-missing-field-initializers
+
+# ImGui's Vulkan backend calls Vulkan through volk, which it includes as <volk.h>.
+$(OBJECT_DIR)/external/imgui/imgui_impl_vulkan.o: CPPFLAGS += -DIMGUI_IMPL_VULKAN_USE_VOLK -Iexternal/volk
 
 $(TEST_TARGET): $(ENGINE_OBJECTS) $(TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)

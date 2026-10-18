@@ -3,7 +3,6 @@
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl3.h"
-#include "imgui/imgui_impl_sdlgpu3.h"
 
 #include <algorithm>
 #include <optional>
@@ -145,7 +144,7 @@ namespace {
 * navigation stays off, so with the UI open the game keeps its keys (fly around while tuning). Sizes and the font
 * follow the display's scale, so the UI is readable on a high-DPI screen.
 */
-DebugUi::DebugUi(Window& window, GpuRenderer& renderer):
+DebugUi::DebugUi(Window& window, VulkanRenderer& renderer):
     window(window),
     renderer(renderer)
 {
@@ -165,7 +164,7 @@ DebugUi::DebugUi(Window& window, GpuRenderer& renderer):
             style.FontScaleDpi = scale;
         }
 
-        if (!ImGui_ImplSDL3_InitForSDLGPU(window.getSdlWindow())) {
+        if (!ImGui_ImplSDL3_InitForVulkan(window.getSdlWindow())) {
             throw std::runtime_error("Debug UI input start-up failed");
         }
 
@@ -217,7 +216,7 @@ ImDrawData* DebugUi::build(const SettingsWalk& settings, RenderSettings& render,
         return nullptr;
     }
 
-    ImGui_ImplSDLGPU3_NewFrame();
+    renderer.beginDebugUiFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
