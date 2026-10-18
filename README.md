@@ -102,6 +102,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **Escape** | Release the mouse |
 | **F** | Toggle the flashlight (held in your right hand; in MOBA mode the duck carries it) |
 | **L** | Toggle a field of 42 coloured lamps that fly round their pillars like fireflies, so the pillars' shadows sweep round: a stress test for light priority and shadows (every shadow tile is redrawn each frame while its light moves) |
+| **K** | Toggle the four floodlights over the obstacle course (on at the start): shadow-casting spotlights on poles whose crossing beams fill in each other's shadows, like stadium lights |
 | **F4** | Debug view: bounding boxes around every mesh, collider wireframes in orange, how many colliders the hover ray tested out of all of them (the broad phase at work), the level triangle under the cursor with its normal and how many level triangles that ray tested, the duck's ground normal, slope and movement substeps, how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
 
 **First person and free camera**

@@ -192,6 +192,53 @@ namespace {
         assert(world.get<CharacterController>(duck).grounded);
     }
 
+    // Floodlights over the course: four shadow-casting spotlights on poles at its corners, high up, each beam's centre line
+    // landing on the course; their lamp heads glow and do not block their own light. The poles are part of the level.
+    // K switches the lights (and heads) off and on again; the poles stay.
+    void testFloodlights() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+
+        const std::vector<Entity> lights = game.getFloodlights();
+        assert(lights.size() == floodlightCount);
+        for (const Entity light : lights) {
+            const SpotLight& beam = world.get<SpotLight>(light);
+            assert(beam.castsShadows);
+            assert(beam.direction.y < 0.0f);
+            assert(!world.get<ModelRenderer>(light).castsShadows);
+
+            const Vec3 head = world.get<Transform>(light).position;
+            assert(head.y > obstacleCourseFloorTop + 7.0f);
+            const std::optional<LevelHit> landing = raycast(game.getLevel(), Ray{head, beam.direction});
+            assert(landing.has_value());
+            const Vec3 spot = landing->hit.point - obstacleCourseOrigin;
+            assert(std::abs(spot.x) < 3.0f && std::abs(spot.z) < 8.0f);
+        }
+
+        // Walking sideways into a pole from 2 to its left, at knee height, meets it just before its centre.
+        for (const Vec3& foot : floodlightPoleFeet()) {
+            const std::optional<LevelHit> pole = raycast(game.getLevel(), Ray{foot + Vec3{-2.0f, 1.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}});
+            assert(pole.has_value());
+            assert(pole->hit.distance > 1.5f && pole->hit.distance < 2.0f);
+        }
+
+        Input pressK = mobaInput();
+        pressK.pressKey(Key::K);
+        game.onInput(world, pressK);
+        assert(game.getFloodlights().empty());
+        for (const Entity light : lights) {
+            assert(!world.isAlive(light));
+        }
+        assert(raycast(game.getLevel(), Ray{floodlightPoleFeet()[0] + Vec3{-2.0f, 1.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}}).has_value());
+
+        Input pressAgain = mobaInput();
+        pressAgain.pressKey(Key::K);
+        game.onInput(world, pressAgain);
+        assert(game.getFloodlights().size() == floodlightCount);
+    }
+
     // A right-click on the platform aims at the platform itself (the level), not at the ground plane beneath it: the
     // marker appears on top of it.
     void testClickOnPlatform() {
@@ -344,6 +391,7 @@ void testDemoGame() {
     testHoverLevel();
     testDuckClimbsCourse();
     testClickOnPlatform();
+    testFloodlights();
     testLampsToggle();
     testLampsFly();
 

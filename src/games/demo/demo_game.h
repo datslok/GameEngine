@@ -15,6 +15,7 @@
 #include "scene/camera.h"
 #include "scene/light.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -28,6 +29,13 @@ inline constexpr float obstacleCourseFloorTop = 0.1f;
 inline constexpr int obstacleCourseStairSteps = 5;
 inline constexpr float obstacleCourseStairRise = 0.25f;
 inline constexpr float obstacleCoursePlatformTop = obstacleCourseFloorTop + obstacleCourseStairRise * obstacleCourseStairSteps;
+
+// Floodlight masts at the course's four corners, their lamps this high above the ground; K switches the lamps.
+inline constexpr int floodlightCount = 4;
+inline constexpr float floodlightHeight = 8.0f;
+
+// Where each floodlight pole stands: its foot, on the course's floor slab, just inside a corner.
+std::array<Vec3, floodlightCount> floodlightPoleFeet();
 
 /*
 * The demo scene: spinning objects, a ground plane and a duck you can steer by clicking.
@@ -64,6 +72,9 @@ public:
 
     // The demo's static level: the ground and the obstacle course.
     const StaticLevel& getLevel() const;
+
+    // The floodlight entities (each a spotlight and its glowing lamp head) while they are on, or none.
+    const std::vector<Entity>& getFloodlights() const;
 
 private:
     void createScene(World& world, AssetManager& assets);
@@ -135,6 +146,10 @@ private:
     // The cube's collider (its box plus its triangles), shared by the spinning cubes and the lamp pillars.
     Collider cubeCollider;
     void toggleLamps(World& world);
+
+    // K switches the floodlights over the obstacle course (on at the start).
+    std::vector<Entity> floodlights;
+    void toggleFloodlights(World& world);
 
     // True while a right-click that started in MOBA mode is still held, so the player keeps following the cursor.
     bool groundSteeringActive = false;
