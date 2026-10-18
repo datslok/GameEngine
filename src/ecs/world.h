@@ -19,9 +19,11 @@
 */
 class World {
 public:
+    // Safe at any time, also inside each(): it touches no component array.
     Entity create();
 
-    // Removes the entity and all its components. Handles to it become stale.
+    // Removes the entity and all its components. Handles to it become stale. Inside each() it is deferred until the
+    // outermost walk ends (the entity and its components stay visible until then), so systems may destroy freely.
     void destroy(Entity entity);
 
     bool isAlive(Entity entity) const;
@@ -29,6 +31,8 @@ public:
 
     /*
     * Attach a component. An entity can hold at most one component of each type.
+    * Inside a walk over this component type it throws std::logic_error: the array could move under the walk, and a
+    * deferred add could not hand back the component. Use addLater there. Other types can be added during a walk.
     */
     template <typename Component>
     Component& add(Entity entity, Component component) {
@@ -36,11 +40,41 @@ public:
             throw std::logic_error("Cannot add a component to a dead entity");
         }
 
-        return getOrCreateStorage<Component>().add(entity, std::move(component));
+        ComponentStorage<Component>& storage = getOrCreateStorage<Component>();
+
+        if (storage.activeWalks > 0) {
+            throw std::logic_error("Cannot add a component of a type being walked by each(); use addLater");
+        }
+
+        return storage.add(entity, std::move(component));
     }
 
+    /*
+    * Attach a component now, or, inside each(), when the outermost walk ends. A queued add to an entity destroyed
+    * before it runs is skipped.
+    */
+    template <typename Component>
+    void addLater(Entity entity, Component component) {
+        if (activeWalks == 0) {
+            add(entity, std::move(component));
+            return;
+        }
+
+        defer([entity, component = std::move(component)](World& world) mutable {
+            if (world.isAlive(entity)) {
+                world.add(entity, std::move(component));
+            }
+        });
+    }
+
+    // Inside each() it is deferred until the outermost walk ends, like destroy.
     template <typename Component>
     void remove(Entity entity) {
+        if (activeWalks > 0) {
+            defer([entity](World& world) { world.remove<Component>(entity); });
+            return;
+        }
+
         if (ComponentStorage<Component>* storage = findStorage<Component>()) {
             storage->remove(entity);
         }
@@ -88,7 +122,9 @@ public:
     * Run a system: call function(entity, first, rest...) for every entity that has all the listed components.
     * Example: world.each<Transform, Spinner>([](Entity entity, Transform& transform, Spinner& spinner) { ... });
     * It walks the packed array of the first type and skips entities missing any of the others, so list the rarest component first.
-    * The function may change component values, but must not add or remove components of the listed types or destroy entities, because that reorders the arrays being walked.
+    * The function may change component values, create entities, destroy them and remove components (those two are
+    * queued and done when the outermost walk ends, so the arrays being walked never change under it), and add
+    * components of types not being walked; adding one of the walked types takes addLater.
     */
     template <typename First, typename... Rest, typename Function>
     void each(Function&& function) {
@@ -100,16 +136,35 @@ public:
             return;
         }
 
-        const std::vector<Entity>& entities = first->getEntities();
-        std::vector<First>& components = first->getComponents();
+        const auto countWalk = [&](int change) {
+            activeWalks += change;
+            first->activeWalks += change;
+            ((std::get<ComponentStorage<Rest>*>(rest)->activeWalks += change), ...);
+        };
 
-        for (std::size_t i = 0; i < entities.size(); ++i) {
-            const Entity entity = entities[i];
+        countWalk(1);
 
-            if ((std::get<ComponentStorage<Rest>*>(rest)->contains(entity) && ...)) {
-                function(entity, components[i], *std::get<ComponentStorage<Rest>*>(rest)->tryGet(entity)...);
+        try {
+            const std::vector<Entity>& entities = first->getEntities();
+            std::vector<First>& components = first->getComponents();
+
+            for (std::size_t i = 0; i < entities.size(); ++i) {
+                const Entity entity = entities[i];
+
+                if ((std::get<ComponentStorage<Rest>*>(rest)->contains(entity) && ...)) {
+                    function(entity, components[i], *std::get<ComponentStorage<Rest>*>(rest)->tryGet(entity)...);
+                }
             }
         }
+        catch (...) {
+            // A failing system still ends its walk, so the world does not stay locked; what it queued is applied.
+            countWalk(-1);
+            applyPendingIfIdle();
+            throw;
+        }
+
+        countWalk(-1);
+        applyPendingIfIdle();
     }
 
     /*
@@ -128,6 +183,34 @@ private:
         std::uint32_t generation = 1;
         bool alive = false;
     };
+
+    // A change asked for during a walk, waiting for the outermost walk to end. Type-erased, because removes and adds
+    // name their component type.
+    struct PendingChange {
+        virtual ~PendingChange() = default;
+        virtual void apply(World& world) = 0;
+    };
+
+    template <typename Call>
+    struct PendingCall final : PendingChange {
+        explicit PendingCall(Call call): call(std::move(call)) {}
+        void apply(World& world) override { call(world); }
+        Call call;
+    };
+
+    template <typename Call>
+    void defer(Call call) {
+        pending.push_back(std::make_unique<PendingCall<Call>>(std::move(call)));
+    }
+
+    // Runs the queued changes in the order they were asked for, once no walk is running.
+    void applyPendingIfIdle();
+
+    void destroyNow(Entity entity);
+
+    // How many walks are running (they can nest), and the changes waiting for them to end.
+    int activeWalks = 0;
+    std::vector<std::unique_ptr<PendingChange>> pending;
 
     template <typename Component>
     ComponentStorage<Component>* findStorage() {

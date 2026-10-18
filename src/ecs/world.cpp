@@ -20,10 +20,20 @@ Entity World::create() {
     return Entity{index, slots[index].generation};
 }
 
-/*
-* Bumping the generation is what makes every existing handle to this entity stale.
-*/
 void World::destroy(Entity entity) {
+    if (activeWalks > 0) {
+        defer([entity](World& world) { world.destroyNow(entity); });
+        return;
+    }
+
+    destroyNow(entity);
+}
+
+/*
+* Bumping the generation is what makes every existing handle to this entity stale. An entity already gone (destroyed
+* twice, or by an earlier queued change) is left alone.
+*/
+void World::destroyNow(Entity entity) {
     if (!isAlive(entity)) {
         return;
     }
@@ -48,4 +58,19 @@ bool World::isAlive(Entity entity) const {
 
 std::size_t World::getEntityCount() const {
     return entityCount;
+}
+
+/*
+* The queue is taken out before running it, so a change that queues another (it cannot today, since no walk runs
+* while it is applied, but a future one might walk) never invalidates the list being run.
+*/
+void World::applyPendingIfIdle() {
+    while (activeWalks == 0 && !pending.empty()) {
+        std::vector<std::unique_ptr<PendingChange>> changes = std::move(pending);
+        pending.clear();
+
+        for (const std::unique_ptr<PendingChange>& change : changes) {
+            change->apply(*this);
+        }
+    }
 }

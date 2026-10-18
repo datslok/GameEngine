@@ -4,7 +4,6 @@
 #include "physics/collider.h"
 #include "scene/interpolation.h"
 
-#include <vector>
 
 /*
 * The looks and the collider are a unit sphere, scaled by the Transform to the particle's radius, so one sphere mesh
@@ -33,16 +32,12 @@ Entity throwGrenade(World& world, const Vec3& from, const Vec3& direction, const
     return grenade;
 }
 
-// Entities cannot be destroyed inside each(), so the expired ones are collected first.
+// Expired grenades are destroyed inside the walk: the World carries that out once the walk has finished.
 void updateGrenades(World& world, float seconds) {
-    std::vector<Entity> expired;
     world.each<Grenade>([&](Entity entity, Grenade& grenade) {
         grenade.secondsLeft -= seconds;
         if (grenade.secondsLeft <= 0.0f) {
-            expired.push_back(entity);
+            world.destroy(entity);
         }
     });
-    for (const Entity entity : expired) {
-        world.destroy(entity);
-    }
 }

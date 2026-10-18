@@ -16,6 +16,10 @@ class ComponentStorageBase {
 public:
     virtual ~ComponentStorageBase() = default;
     virtual void remove(Entity entity) = 0;
+
+    // How many walks (World::each) are going through this storage right now. Its packed arrays must not grow or
+    // shrink meanwhile: removing moves the last component into the hole, and adding can move the whole array.
+    int activeWalks = 0;
 };
 
 /*

@@ -13,6 +13,7 @@
 #include "scene/light.h"
 #include "scene/lighting.h"
 #include "scene/model_renderer.h"
+#include "demo_helpers.h"
 
 #include <cassert>
 #include <cmath>
@@ -23,19 +24,6 @@
 namespace {
     bool nearlyEqual(float a, float b) {
         return std::abs(a - b) < 0.001f;
-    }
-
-    // The engine's own tick length, so the demo is tested at the rate it runs at.
-    const float tickSeconds = static_cast<float>(1.0 / EngineSettings{}.ticksPerSecond);
-
-    // An Input that looks like a focused MOBA window with a confined cursor.
-    Input mobaInput() {
-        Input input;
-        input.beginFrame();
-        input.setWindowSize(Vec2{1600.0f, 900.0f});
-        input.setWindowState(true, false, true);
-        input.setCursor(Vec2{800.0f, 450.0f}, true);
-        return input;
     }
 
     // The window pixel where a world point appears: makeCameraRay run backwards. Seen from the camera, the point lies along
@@ -167,13 +155,6 @@ namespace {
         assert(!outline.getLines().empty());
     }
 
-    void runTicks(DemoGame& game, World& world, int count, int& ticksSoFar) {
-        for (int i = 0; i < count; ++i) {
-            ++ticksSoFar;
-            runFixedUpdate(game, world, tickSeconds, ticksSoFar * static_cast<double>(tickSeconds));
-        }
-    }
-
     // The duck walks on the level through the character controller: sent in front of the course's stairs, then up them
     // onto the platform, it ends up standing on top.
     void testDuckClimbsCourse() {
@@ -194,25 +175,6 @@ namespace {
         assert(!world.get<CharacterMovement>(duck).isMoving());
         assert(nearlyEqual(world.get<Transform>(duck).position.y, obstacleCoursePlatformTop));
         assert(world.get<CharacterController>(duck).grounded);
-    }
-
-    // A focused window with the mouse captured, as in first person, holding the given keys.
-    Input firstPersonInput(std::initializer_list<Key> held) {
-        Input input;
-        input.beginFrame();
-        input.setWindowSize(Vec2{1600.0f, 900.0f});
-        input.setWindowState(true, true, false);
-        for (const Key key : held) {
-            input.pressKey(key);
-        }
-        return input;
-    }
-
-    // One frame of the engine loop for a demo game: input, the ticks that fall in it, then the per-frame update.
-    void runFrame(DemoGame& game, World& world, const Input& input, int& ticks) {
-        game.onInput(world, input);
-        runTicks(game, world, 1, ticks);
-        game.onUpdate(world, input, tickSeconds, 1.0f);
     }
 
     // First person is a body walking through the level: holding W walks it forward at Overwatch's 5.5 m/s, the camera
