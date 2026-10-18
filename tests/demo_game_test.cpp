@@ -89,6 +89,35 @@ namespace {
         assert(empty.getLines().empty());
     }
 
+    // In MOBA mode whatever is under the cursor is "hovered" every frame (outlined faintly), found through the broad phase.
+    void testHover() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+        assert(game.getHovered() == Entity{});
+
+        const Vec2 window{1600.0f, 900.0f};
+        const Vec2 overDuck = pixelOf(game.getCamera(), getCharacterVisualCentre(world, game.getPlayer(), 1.0f), window);
+
+        Input hoverDuck = mobaInput();
+        hoverDuck.setCursor(overDuck, true);
+        game.onUpdate(world, hoverDuck, 1.0f / 120.0f, 1.0f);
+        assert(game.getHovered() == game.getPlayer());
+
+        // Hovering is not selecting.
+        assert(game.getSelected() == Entity{});
+        DebugDraw outline;
+        game.onDebugDraw(world, outline, 1.0f);
+        assert(!outline.getLines().empty());
+
+        // Over bare ground: nothing.
+        Input hoverGround = mobaInput();
+        hoverGround.setCursor(pixelOf(game.getCamera(), Vec3{3.0f, 0.0f, -4.0f}, window), true);
+        game.onUpdate(world, hoverGround, 1.0f / 120.0f, 1.0f);
+        assert(game.getHovered() == Entity{});
+    }
+
     void runTicks(DemoGame& game, World& world, int count, int& ticksSoFar) {
         for (int i = 0; i < count; ++i) {
             ++ticksSoFar;
@@ -221,6 +250,7 @@ namespace {
 void testDemoGame() {
     testDebugViewToggles();
     testSelection();
+    testHover();
     testLampsToggle();
     testLampsFly();
 

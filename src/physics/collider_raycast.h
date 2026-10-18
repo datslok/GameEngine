@@ -21,8 +21,8 @@ struct ColliderHit {
 
 /*
 * The nearest entity with a Collider and a Transform that the ray meets within maxDistance, or nothing. Uses each entity's
-* current Transform, not the interpolated pose on screen (they differ by at most one tick of motion). Tests every collider:
-* the broad phase will cut that down later.
+* current Transform, not the interpolated pose on screen (they differ by at most one tick of motion). Builds a
+* CollisionScene for this one query; to ask many, keep a scene (physics/collision_scene) and rebuild it once.
 */
 std::optional<ColliderHit> raycastColliders(const World& world, const Ray& ray, RaycastDetail detail,
                                             float maxDistance = unlimitedRayDistance);

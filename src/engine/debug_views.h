@@ -17,6 +17,11 @@
 // Draws whose mesh has no known bounds are skipped.
 void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug);
 
+// The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts, so a game
+// can put its own lines below the engine's (drawRenderStats uses lines 0 to 3).
+constexpr float debugReadoutTextHeight = 14.0f;
+Vec2 debugReadoutLine(int line);
+
 // The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame.
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
 

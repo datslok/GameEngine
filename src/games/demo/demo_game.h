@@ -9,6 +9,7 @@
 #include "input/input.h"
 #include "math/ray.h"
 #include "physics/collider.h"
+#include "physics/collision_scene.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/light.h"
@@ -43,6 +44,9 @@ public:
     // What the last left-click in MOBA mode picked, or Entity{} for nothing.
     Entity getSelected() const;
 
+    // What the cursor is over in MOBA mode, updated every frame, or Entity{} for nothing.
+    Entity getHovered() const;
+
 private:
     void createScene(World& world, AssetManager& assets);
     void setControlMode(World& world, ControlMode mode);
@@ -52,6 +56,9 @@ private:
 
     // Turn left-clicks into a selection: the nearest collider under the cursor, or none.
     void updateSelection(World& world, const Input& input);
+
+    // Find what the cursor is over (MOBA mode only), through the collision scene, every frame.
+    void updateHover(const World& world, const Input& input);
 
     // Whether MOBA mouse commands count right now: MOBA mode, keyboard focus and a confined cursor.
     bool mobaPointerActive(const Input& input) const;
@@ -109,6 +116,13 @@ private:
 
     // What the last left-click picked (Entity{} for nothing), outlined every frame.
     Entity selected;
+
+    // What the cursor is over (Entity{} for nothing), outlined faintly, and what finding it cost (for the F4 readout).
+    Entity hovered;
+    CollisionQueryStats hoverStats;
+
+    // Every collider, rebuilt before each use (once per frame for hovering, and on a click), so it is never stale.
+    CollisionScene collisionScene;
 
     // F4: show bounding boxes, the culling readout, light markers and the walk target.
     bool debugViewEnabled = false;
