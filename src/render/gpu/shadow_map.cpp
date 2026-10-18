@@ -20,7 +20,7 @@ namespace {
 
     constexpr std::uint32_t atlasCapacity = (shadowAtlasWidth / smallestShadowTileSize) * (shadowAtlasHeight / smallestShadowTileSize);
 
-    static_assert(maxShadowedDirectionalLights * areaInSmallestTiles(largestShadowTileSize) +
+    static_assert(maxShadowedDirectionalLights * areaInSmallestTiles(standardShadowTileSize) +
                   maxShadowedSpotLights + maxShadowedPointLights * 6 <= atlasCapacity,
                   "the smallest shadow tiles for every shadowed light must fit in the atlas");
 
@@ -160,11 +160,11 @@ namespace {
 * A view of half-width h reaching range r is 2 * h * r across at its far end. Rounding up to a power of two keeps every
 * tile a whole quarter, sixteenth, ... of the largest one, which is what lets the atlas pack them without gaps.
 */
-std::uint32_t shadowTileSizeFor(float halfWidth, float range, const ShadowSettings& settings) {
-    const float texelsNeeded = 2.0f * halfWidth * range / settings.texelTarget;
+std::uint32_t shadowTileSizeFor(float halfWidth, float range, float texelTarget, std::uint32_t largestSize) {
+    const float texelsNeeded = 2.0f * halfWidth * range / texelTarget;
     std::uint32_t size = smallestShadowTileSize;
 
-    while (static_cast<float>(size) < texelsNeeded && size < largestShadowTileSize) {
+    while (static_cast<float>(size) < texelsNeeded && size < largestSize) {
         size *= 2;
     }
 
@@ -232,7 +232,7 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const 
     const Mat4 rotation = Mat4::lookAt(Vec3{0.0f, 0.0f, 0.0f}, along, upFor(along));
     const Vec4 centreInLight = rotation * Vec4{centre.x, centre.y, centre.z, 1.0f};
 
-    const float texel = 2.0f * radius / static_cast<float>(largestShadowTileSize);
+    const float texel = 2.0f * radius / static_cast<float>(standardShadowTileSize);
     const float snappedX = std::round(centreInLight.x / texel) * texel;
     const float snappedY = std::round(centreInLight.y / texel) * texel;
 
@@ -274,7 +274,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
     for (std::size_t slot = 0; slot < selected.directionalLights.size(); ++slot) {
         if (selected.directionalLights[slot].castsShadows && static_cast<int>(slot) < maxShadowedDirectionalLights) {
-            requests.push_back(ShadowRequest{ShadowKind::Directional, slot, 1, largestShadowTileSize, {}});
+            requests.push_back(ShadowRequest{ShadowKind::Directional, slot, 1, standardShadowTileSize, {}});
         }
     }
 
@@ -284,7 +284,8 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         const SpotLight& light = selected.spotLights[slot].light;
 
         if (light.castsShadows) {
-            ShadowRequest request{ShadowKind::Spot, slot, 1, shadowTileSizeFor(spotHalfWidth(light.outerAngle), light.range, settings), {}};
+            const std::uint32_t size = shadowTileSizeFor(spotHalfWidth(light.outerAngle), light.range, settings.spotTexelTarget, largestShadowTileSize);
+            ShadowRequest request{ShadowKind::Spot, slot, 1, size, {}};
             request.entity = selected.spotLights[slot].entity;
             requests.push_back(request);
             ++shadowedSpots;
@@ -298,7 +299,8 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         const PlacedPointLight& placed = selected.pointLights[slot];
 
         if (placed.light.castsShadows) {
-            ShadowRequest request{ShadowKind::Point, slot, 0, shadowTileSizeFor(1.0f, placed.light.range, settings), {}};
+            const std::uint32_t size = shadowTileSizeFor(1.0f, placed.light.range, settings.texelTarget, standardShadowTileSize);
+            ShadowRequest request{ShadowKind::Point, slot, 0, size, {}};
             request.facesInView = pointFacesInView(placed.position, placed.light.range, cameraView);
             request.tileCount = static_cast<int>(std::count(request.facesInView.begin(), request.facesInView.end(), true));
             request.entity = placed.entity;
@@ -340,7 +342,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             const DirectionalLight& light = selected.directionalLights[request.slot];
             plan.uniforms.directionalTiles[request.slot] = firstTile;
             addTile(plan, request.tiles[0], directionalShadowMatrix(light.direction, camera, settings), 0.0f,
-                    settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(largestShadowTileSize));
+                    settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(standardShadowTileSize));
         }
         else if (request.kind == ShadowKind::Spot) {
             const PlacedSpotLight& placed = selected.spotLights[request.slot];

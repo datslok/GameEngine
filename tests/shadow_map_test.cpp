@@ -19,7 +19,7 @@ namespace {
 
     // Inside the tile, at least 1.5 texels from its edge, so the 3x3 soft-shadow samples stay on the tile.
     bool landsInside(const Vec3& projected) {
-        const float limit = 1.0f - 3.0f / static_cast<float>(largestShadowTileSize);
+        const float limit = 1.0f - 3.0f / static_cast<float>(standardShadowTileSize);
         return std::abs(projected.x) <= limit && std::abs(projected.y) <= limit && projected.z > 0.0f && projected.z < 1.0f;
     }
 
@@ -158,7 +158,7 @@ namespace {
     void testDirectionalShadowMovesInWholeTexels() {
         const Vec3 sunlight{0.4f, -1.0f, -0.6f};
         const Vec3 fixedPoint{1.0f, 0.0f, -3.0f};
-        const float texelsPerUnit = static_cast<float>(largestShadowTileSize) * 0.5f; // projected units -1..1 span the tile
+        const float texelsPerUnit = static_cast<float>(standardShadowTileSize) * 0.5f; // projected units -1..1 span the tile
 
         for (int step = 1; step < 6; ++step) {
             const float nudge = 0.013f * static_cast<float>(step);
@@ -241,7 +241,7 @@ namespace {
             }
 
             assert(tile.x + tile.size <= shadowAtlasWidth && tile.y + tile.size <= shadowAtlasHeight);
-            assert(tile.size == 256 || tile.size == 512 || tile.size == 1024);
+            assert(tile.size == 256 || tile.size == 512 || tile.size == 1024 || tile.size == 2048);
 
             for (std::size_t j = i + 1; j < plan.tiles.size(); ++j) {
                 assert(!overlap(tile, plan.tiles[j]));
@@ -261,20 +261,86 @@ namespace {
         assert(DirectionalLight{}.castsShadows);
     }
 
-    // A tile gets enough texels for about 0.04 units each where the light's reach ends, as a power of two from 256 to 1024:
-    // a lamp needs far fewer than a long flashlight beam.
+    // A tile gets enough texels for one to cover about the texel target where the light's reach ends, as a power of two
+    // from 256 up to the largest size allowed: a lamp needs far fewer than a long flashlight beam.
     void testTileSizeFollowsTheLightsReach() {
-        assert(shadowTileSizeFor(1.0f, 5.0f) == 256);   // 10 units across: 250 texels
-        assert(shadowTileSizeFor(1.0f, 10.0f) == 512);  // 500
-        assert(shadowTileSizeFor(1.0f, 20.0f) == 1024); // 1000
-        assert(shadowTileSizeFor(1.0f, 100.0f) == 1024);
-        assert(shadowTileSizeFor(1.0f, 0.5f) == 256);
-        assert(shadowTileSizeFor(std::tan(0.44f), 50.0f) == 1024);
+        const float target = ShadowSettings{}.texelTarget;
+        assert(target == 0.04f);
+        assert(shadowTileSizeFor(1.0f, 5.0f, target, standardShadowTileSize) == 256);   // 10 units across: 250 texels
+        assert(shadowTileSizeFor(1.0f, 10.0f, target, standardShadowTileSize) == 512);  // 500
+        assert(shadowTileSizeFor(1.0f, 20.0f, target, standardShadowTileSize) == 1024); // 1000
+        assert(shadowTileSizeFor(1.0f, 100.0f, target, standardShadowTileSize) == 1024);
+        assert(shadowTileSizeFor(1.0f, 0.5f, target, standardShadowTileSize) == 256);
 
-        // A coarser texel target (a setting) needs half the texels: 40 units across at 0.08 each is 500, and 20 is 250.
-        const ShadowSettings coarse{.texelTarget = 0.08f};
-        assert(shadowTileSizeFor(1.0f, 20.0f, coarse) == 512);
-        assert(shadowTileSizeFor(1.0f, 10.0f, coarse) == 256);
+        // Allowed to, a long reach goes on to the largest size: 1500 texels needs 2048.
+        assert(largestShadowTileSize == 2048 && standardShadowTileSize == 1024);
+        assert(shadowTileSizeFor(1.0f, 30.0f, target, largestShadowTileSize) == 2048);
+        assert(shadowTileSizeFor(1.0f, 100.0f, target, largestShadowTileSize) == 2048);
+
+        // A coarser texel target needs half the texels: 40 units across at 0.08 each is 500, and 20 is 250.
+        assert(shadowTileSizeFor(1.0f, 20.0f, 0.08f, standardShadowTileSize) == 512);
+        assert(shadowTileSizeFor(1.0f, 10.0f, 0.08f, standardShadowTileSize) == 256);
+    }
+
+    // Spotlights aim for finer texels than point lights (spotTexelTarget, 0.02): there are few of them, they usually stand
+    // still (so their cached tiles cost nothing), and their beams land on the ground at a slant far short of their reach,
+    // which stretches each texel. A floodlight (a 35 degree cone reaching 25) gets the largest tile, a default spotlight
+    // (25 degrees, reaching 10) 512.
+    void testSpotlightsGetFinerTiles() {
+        assert(ShadowSettings{}.spotTexelTarget == 0.02f);
+
+        FrameLighting lighting;
+        PlacedSpotLight floodlight = spotLightAt(Vec3{0.0f, 8.0f, 0.0f}, true, 25.0f);
+        floodlight.light.outerAngle = 35.0f * 3.14159265f / 180.0f;
+        lighting.spotLights.push_back(floodlight);
+        lighting.spotLights.push_back(spotLightAt(Vec3{3.0f, 2.0f, 0.0f}, true, 10.0f));
+
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+
+        assert(plan.tiles.size() == 2);
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[0][0])].size == 2048);
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[0][1])].size == 512);
+        assertTilesFitTheAtlas(plan);
+
+        // The shader and the shadow pass agree on the large tile's matrix.
+        const Mat4 expected = spotShadowMatrix(floodlight.position, floodlight.light.direction, floodlight.light.outerAngle,
+                                               floodlight.light.range, 2048);
+        for (int row = 0; row < 4; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                assert(nearlyEqual(plan.tiles[0].matrix.values[row][column], expected.values[row][column]));
+            }
+        }
+    }
+
+    // When the atlas is full, spotlights only give up their large tiles once every point light is down to the smallest
+    // size, least important spotlight first; the most important keeps its 2048 tile.
+    void testSpotTilesShrinkAfterPointLights() {
+        FrameLighting lighting;
+
+        for (int i = 0; i < 6; ++i) {
+            lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 3.0f, 0.0f}, true, 50.0f));
+        }
+
+        for (int i = 0; i < 40; ++i) {
+            lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
+        }
+
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+        assertTilesFitTheAtlas(plan);
+
+        for (int slot = 0; slot < 40; ++slot) {
+            const std::size_t first = static_cast<std::size_t>(plan.uniforms.pointTiles[slot / 4][slot % 4]);
+            assert(plan.tiles[first].size == smallestShadowTileSize);
+        }
+
+        std::uint32_t previousSize = largestShadowTileSize;
+        for (int slot = 0; slot < 6; ++slot) {
+            const std::uint32_t size = plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[slot / 4][slot % 4])].size;
+            assert(size <= previousSize);
+            previousSize = size;
+        }
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[0][0])].size == largestShadowTileSize);
+        assert(previousSize < largestShadowTileSize);
     }
 
     // Tiles are numbered directional lights first, then spotlights, then six per point light, each in slot order.
@@ -319,8 +385,8 @@ namespace {
         assert(plan.tileData[1].offset[0] > 0.0f);
         assert(plan.tileData[0].offset[0] == 0.0f && plan.tileData[0].offset[1] > 0.0f);
 
-        // A directional light's box always gets a full-size tile.
-        assert(plan.tiles[0].size == largestShadowTileSize);
+        // A directional light's box always gets a standard-size tile.
+        assert(plan.tiles[0].size == standardShadowTileSize);
     }
 
     // Every one of the 64 point light seats in the shader can have a shadow; lights past the seats get neither.
@@ -349,8 +415,9 @@ namespace {
             lighting.directionalLights.push_back(DirectionalLight{});
         }
 
+        // Spotlights reaching 20 ask for 1024 tiles, so the point lights are the ones that must shrink.
         for (int i = 0; i < 8; ++i) {
-            lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 3.0f, 0.0f}, true, 50.0f));
+            lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 3.0f, 0.0f}, true, 20.0f));
         }
 
         for (int i = 0; i < 16; ++i) {
@@ -363,10 +430,10 @@ namespace {
         assertTilesFitTheAtlas(plan);
 
         for (int i = 0; i < 4; ++i) {
-            assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[i])].size == largestShadowTileSize);
+            assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[i])].size == standardShadowTileSize);
         }
 
-        std::uint32_t previousSize = largestShadowTileSize;
+        std::uint32_t previousSize = standardShadowTileSize;
 
         for (int slot = 0; slot < 16; ++slot) {
             const std::size_t first = static_cast<std::size_t>(plan.uniforms.pointTiles[slot / 4][slot % 4]);
@@ -381,8 +448,8 @@ namespace {
         }
 
         // The most important point light keeps the size it asked for; the least important was shrunk.
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == largestShadowTileSize);
-        assert(previousSize < largestShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == standardShadowTileSize);
+        assert(previousSize < standardShadowTileSize);
     }
 
     // The worst case: every shadowed light there can be, all asking for the largest tiles. Everything still fits, with
@@ -406,7 +473,7 @@ namespace {
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
         assertTilesFitTheAtlas(plan);
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[3])].size == largestShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[3])].size == standardShadowTileSize);
         assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == smallestShadowTileSize);
     }
 
@@ -538,6 +605,8 @@ void testShadowMap() {
     testDirectionalShadowMovesInWholeTexels();
     testLightsCastShadowsByDefault();
     testTileSizeFollowsTheLightsReach();
+    testSpotlightsGetFinerTiles();
+    testSpotTilesShrinkAfterPointLights();
     testTilesAreHandedOut();
     testShadowedLightsAreCapped();
     testTilesShrinkToFit();

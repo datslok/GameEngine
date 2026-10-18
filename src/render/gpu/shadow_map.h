@@ -19,19 +19,26 @@
 * - A directional light (parallel rays) needs one box-shaped (orthographic) view, around what the camera sees nearby.
 * All views share one depth texture, an atlas of square tiles, so the shadow pass is a single render pass and the
 * shader binds one texture. Tiles are sized by how far their light reaches (a lamp needs far fewer texels than a long
-* flashlight beam), from 256 to 1024 pixels, and packed into the atlas each frame.
+* flashlight beam), from 256 to 1024 pixels (2048 for spotlights), and packed into the atlas each frame.
 */
 
-// The atlas: 8192 x 4096 depth texels (128 MB), room for 32 tiles of the largest size or 512 of the smallest.
+// The atlas: 8192 x 4096 depth texels (128 MB), room for 8 tiles of the largest size, 32 of the standard size or 512 of
+// the smallest. Directional lights always get the standard size and point light faces at most that; only spotlights,
+// few and usually still (so their cached tiles cost nothing to keep), may grow to the largest.
 inline constexpr std::uint32_t shadowAtlasWidth = 8192;
 inline constexpr std::uint32_t shadowAtlasHeight = 4096;
-inline constexpr std::uint32_t largestShadowTileSize = 1024;
+inline constexpr std::uint32_t largestShadowTileSize = 2048;
+inline constexpr std::uint32_t standardShadowTileSize = 1024;
 inline constexpr std::uint32_t smallestShadowTileSize = 256;
 
 // The tunable part of shadows: read every frame, so a change shows on the next frame (the tiles it affects are redrawn).
 struct ShadowSettings {
-    // How much world one texel should cover where a light's reach ends. Shadows nearer the light come out sharper.
+    // How much world one texel should cover where a point light's reach ends. Shadows nearer the light come out sharper.
     float texelTarget = 0.04f;
+
+    // The same for spotlights, finer: their beams usually land on the ground at a slant well short of their reach, which
+    // stretches each texel along the ground, and the floodlights' step and pole shadows came out jagged at 0.04.
+    float spotTexelTarget = 0.02f;
 
     // How far in front of the camera a directional light's shadows reach. Beyond it, everything counts as lit.
     float directionalDistance = 30.0f;
@@ -48,12 +55,13 @@ struct ShadowSettings {
 // The most shadowed lights of each kind; the rest still give light, without shadows.
 inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; as many as the shader has seats, now that cached tiles cost little
 inline constexpr int maxShadowedSpotLights = 8;        // 1 tile each
-inline constexpr int maxShadowedDirectionalLights = 4; // 1 tile each, always the largest size
+inline constexpr int maxShadowedDirectionalLights = 4; // 1 tile each, always the standard size
 inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights;
 
 // Tile edge length in pixels for a square view of the given half-width (tan of its half-angle) reaching range: enough
-// for the texel target across the far end of the view, as a power of two between the smallest and largest tile sizes.
-std::uint32_t shadowTileSizeFor(float halfWidth, float range, const ShadowSettings& settings = {});
+// for one texel to cover texelTarget across the far end of the view, as a power of two from the smallest tile size up
+// to largestSize.
+std::uint32_t shadowTileSizeFor(float halfWidth, float range, float texelTarget, std::uint32_t largestSize);
 
 // Closest distance to a point light or spotlight that can be shadowed.
 inline constexpr float shadowNearPlane = 0.1f;
@@ -64,11 +72,11 @@ int pointShadowFace(const Vec3& fromLight);
 
 // One cube face's view and projection, in the GPU's depth range. farPlane is the light's range, since nothing beyond it is lit.
 // The view is widened by a margin of texels, so it depends on the size of the tile it is drawn into.
-Mat4 pointShadowFaceMatrix(const Vec3& lightPosition, int face, float farPlane, std::uint32_t tileSize = largestShadowTileSize);
+Mat4 pointShadowFaceMatrix(const Vec3& lightPosition, int face, float farPlane, std::uint32_t tileSize = standardShadowTileSize);
 
 // A spotlight's view down its beam, just wide enough for its outer cone (plus the texel margin).
 Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float outerAngle, float range,
-                      std::uint32_t tileSize = largestShadowTileSize);
+                      std::uint32_t tileSize = standardShadowTileSize);
 
 // A directional light's box around the part of the camera's view within the settings' directional distance.
 Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const ShadowSettings& settings = {});
@@ -118,7 +126,7 @@ struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;
     std::uint32_t y = 0;
-    std::uint32_t size = largestShadowTileSize;
+    std::uint32_t size = standardShadowTileSize;
 };
 
 // What the shadow pass draws (one tile per view, in tile order) and what the shader reads (the uniforms, and tileData

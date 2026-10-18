@@ -34,9 +34,10 @@ namespace {
         squares.push_back(*allocator.allocate(256));
         squares.push_back(*allocator.allocate(512));
         squares.push_back(*allocator.allocate(256));
+        squares.push_back(*allocator.allocate(2048));
         assertSeparateAndInside(squares);
-        assert(squares[1].size == 256 && squares[2].size == 512);
-        assert(allocator.freeTexels() == atlasTexels - 1024 * 1024 - 512 * 512 - 2 * 256 * 256);
+        assert(squares[1].size == 256 && squares[2].size == 512 && squares[4].size == 2048);
+        assert(allocator.freeTexels() == atlasTexels - 2048 * 2048 - 1024 * 1024 - 512 * 512 - 2 * 256 * 256);
 
         ShadowAtlasAllocator full;
 
@@ -63,9 +64,14 @@ namespace {
 
         assert(allocator.freeTexels() == atlasTexels);
 
-        for (int i = 0; i < 32; ++i) {
-            assert(allocator.allocate(1024).has_value());
+        // They merge all the way up to the largest squares: the 8192 x 4096 atlas holds exactly eight of 2048.
+        std::vector<AtlasSquare> largest;
+        for (int i = 0; i < 8; ++i) {
+            largest.push_back(*allocator.allocate(2048));
         }
+        assertSeparateAndInside(largest);
+        assert(!allocator.allocate(2048).has_value());
+        assert(allocator.freeTexels() == 0);
     }
 
     ShadowSquareRequest request(std::uint32_t index, std::uint32_t size) {
