@@ -29,23 +29,30 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * a seat in the shader and a shadow), and the shadow tiles drawn and point light cube faces skipped as unseen.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
-    constexpr float margin = 16.0f;
-    constexpr float textHeight = 14.0f;
-    constexpr float lineSpacing = 22.0f;
 
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled);
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled);
     const std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +
                               "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
 
-    debugText(debug, Vec2{margin, margin}, textHeight, camera, boundingBoxColour);
+    debugText(debug, debugReadoutLine(0), debugReadoutTextHeight, camera, boundingBoxColour);
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +
                                "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed);
 
-    debugText(debug, Vec2{margin, margin + lineSpacing}, textHeight, shadows, boundingBoxColour);
-    debugText(debug, Vec2{margin, margin + 2.0f * lineSpacing}, textHeight, lights, boundingBoxColour);
-    debugText(debug, Vec2{margin, margin + 3.0f * lineSpacing}, textHeight, tiles, boundingBoxColour);
+    debugText(debug, debugReadoutLine(1), debugReadoutTextHeight, shadows, boundingBoxColour);
+    debugText(debug, debugReadoutLine(2), debugReadoutTextHeight, lights, boundingBoxColour);
+    debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
 }
+/*
+* A margin from the window's corner, then one line every lineSpacing pixels: a little more than the text height, so
+* lines do not touch.
+*/
+Vec2 debugReadoutLine(int line) {
+    constexpr float margin = 16.0f;
+    constexpr float lineSpacing = 22.0f;
+    return Vec2{margin, margin + static_cast<float>(line) * lineSpacing};
+}
+
 /*
 * Colliders are drawn at the interpolated pose, like the meshes, so the wireframes sit on what is drawn instead of trailing
 * it by up to a tick. Queries use the current pose; the difference is less than one tick of motion.

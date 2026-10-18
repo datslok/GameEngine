@@ -26,3 +26,6 @@ struct Capsule {
 
 // Any one of the shapes, for code that handles colliders without knowing their kind (the broad phase, picking).
 using Shape = std::variant<Sphere, Capsule, Aabb>;
+
+// The smallest axis-aligned box around a shape: what the broad phase files it under.
+Aabb boundsOf(const Shape& shape);

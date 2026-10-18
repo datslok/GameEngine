@@ -4,7 +4,9 @@
 #include "gameplay/spinner.h"
 #include "math/angles.h"
 #include "math/transform.h"
+#include "engine/debug_views.h"
 #include "physics/collider_raycast.h"
+#include "scene/debug_text.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
@@ -14,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace {
@@ -42,6 +45,9 @@ namespace {
 
     // The outline of the selected object (linear cyan), distinct from the engine's orange collider view.
     const Vec3 selectionColour{0.1f, 0.9f, 1.0f};
+
+    // The outline of whatever the cursor is over: the selection's cyan, dimmed.
+    const Vec3 hoverColour = selectionColour * 0.35f;
 
     // The lamp field (L): a grid of 6 x 7 = 42 lamps, 5 units apart, centred on the ground and offset half a step so no
     // lamp lands in the spinning objects, on the duck or in the free camera's face. 42 is well past the shader's 16 point
@@ -254,17 +260,31 @@ bool DemoGame::wantsDebugView() const {
 * along its beam. The walk target is the destination marker, which is shown exactly while the duck is walking to it.
 */
 void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
-    // The selection is outlined whether or not the debug view is on: it stands in for a selection ring until the HUD exists.
-    if (world.isAlive(selected)) {
-        if (const Collider* collider = world.tryGet<Collider>(selected)) {
-            const Mat4 model = getRenderTransform(world, selected, alpha).getMatrix();
-            debug.shape(worldShape(collider->shape, model), selectionColour);
+    // The selection and the hovered object are outlined whether or not the debug view is on: they stand in for selection
+    // rings until the HUD exists. Something both hovered and selected keeps the brighter selection outline.
+    const auto outline = [&](Entity entity, const Vec3& colour) {
+        if (!world.isAlive(entity)) {
+            return;
         }
+        if (const Collider* collider = world.tryGet<Collider>(entity)) {
+            const Mat4 model = getRenderTransform(world, entity, alpha).getMatrix();
+            debug.shape(worldShape(collider->shape, model), colour);
+        }
+    };
+    outline(selected, selectionColour);
+    if (!(hovered == selected)) {
+        outline(hovered, hoverColour);
     }
 
     if (!debugViewEnabled) {
         return;
     }
+
+    // Below the engine's four lines: how many colliders there are, and how few the hover ray had to test.
+    const std::string broadPhase = "COLLIDERS " + std::to_string(collisionScene.getColliders().size()) +
+                                   "  TESTED " + std::to_string(hoverStats.collidersTested) +
+                                   "  CELLS " + std::to_string(hoverStats.cellsWalked);
+    debugText(debug, debugReadoutLine(4), debugReadoutTextHeight, broadPhase, colliderDebugColour);
 
     constexpr float markerRadius = 0.25f;
     constexpr float beamLength = 2.0f;
@@ -435,6 +455,9 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
     }
 
     updateFlashlight(world, alpha);
+
+    // After the camera has moved, so the outline matches what this frame shows under the cursor.
+    updateHover(world, input);
 }
 
 Camera& DemoGame::getCamera() {
@@ -475,6 +498,10 @@ Entity DemoGame::getMoon() const {
 
 Entity DemoGame::getSelected() const {
     return selected;
+}
+
+Entity DemoGame::getHovered() const {
+    return hovered;
 }
 
 void DemoGame::setControlMode(World& world, ControlMode mode) {
@@ -674,6 +701,31 @@ void DemoGame::updateSelection(World& world, const Input& input) {
         return;
     }
 
-    const std::optional<ColliderHit> hit = raycastColliders(world, *ray, RaycastDetail::Triangles);
+    collisionScene.rebuild(world);
+    const std::optional<ColliderHit> hit = raycast(collisionScene, *ray, RaycastDetail::Triangles);
     selected = hit ? hit->entity : Entity{};
+}
+
+/*
+* Every frame in MOBA mode, the nearest collider under the live cursor, by its triangles where it has them, like a click.
+* The scene is rebuilt first so the answer matches this frame; the grid then lets the ray test only colliders along its way.
+*/
+void DemoGame::updateHover(const World& world, const Input& input) {
+    hovered = Entity{};
+    hoverStats = CollisionQueryStats{};
+
+    if (!mobaPointerActive(input) || !input.isCursorInWindow()) {
+        return;
+    }
+
+    const std::optional<Ray> ray = rayThroughPixel(input, input.getCursorPosition());
+    if (!ray) {
+        return;
+    }
+
+    collisionScene.rebuild(world);
+    const std::optional<ColliderHit> hit = raycast(collisionScene, *ray, RaycastDetail::Triangles, unlimitedRayDistance, &hoverStats);
+    if (hit) {
+        hovered = hit->entity;
+    }
 }

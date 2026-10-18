@@ -207,6 +207,17 @@ namespace {
         assert(sameLines(view, expected));
     }
 
+    // The readout's lines are spaced evenly down from the top-left margin, so games can add lines below the engine's.
+    void testReadoutLines() {
+        const Vec2 first = debugReadoutLine(0);
+        const Vec2 second = debugReadoutLine(1);
+        const Vec2 fifth = debugReadoutLine(4);
+        assert(first.x > 0.0f && first.y > 0.0f);
+        assert(nearlyEqual(second.x, first.x));
+        assert(second.y - first.y > debugReadoutTextHeight);
+        assert(nearlyEqual(fifth.y - first.y, 4.0f * (second.y - first.y)));
+    }
+
     // The GPU gets two vertices per line, each a position and a colour.
     void testLinesBecomeVertices() {
         const std::vector<DebugLine> lines = {DebugLine{Vec3{1.0f, 2.0f, 3.0f}, Vec3{4.0f, 5.0f, 6.0f}, Vec3{0.1f, 0.2f, 0.3f}}};
@@ -232,5 +243,6 @@ void testDebugDraw() {
     testBoundingBoxView();
     testShapeMatchesDirectCalls();
     testColliderView();
+    testReadoutLines();
     testLinesBecomeVertices();
 }

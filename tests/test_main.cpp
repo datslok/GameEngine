@@ -58,6 +58,9 @@ void testCollisionMesh();
 void testAffineInverse();
 void testCollider();
 void testColliderRaycast();
+void testShapeBounds();
+void testUniformGrid();
+void testCollisionScene();
 
 int main(){
     testPixelBuffer();
@@ -118,6 +121,9 @@ int main(){
     testAffineInverse();
     testCollider();
     testColliderRaycast();
+    testShapeBounds();
+    testUniformGrid();
+    testCollisionScene();
 
     std::cout << "All tests passed!\n";
     return 0;
