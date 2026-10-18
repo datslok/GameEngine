@@ -2,6 +2,7 @@
 
 #include "render/gpu/light_priority.h"
 #include "render/gpu/shadow_map.h"
+#include "render/gpu/tone_mapping.h"
 
 /*
 * Everything about drawing that a game, the debug UI or a player may tune, in one place. The renderer reads it every
@@ -11,4 +12,5 @@
 struct RenderSettings {
     LightPrioritySettings lights;
     ShadowSettings shadows;
+    ToneMappingSettings toneMapping;
 };

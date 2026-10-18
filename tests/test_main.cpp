@@ -70,6 +70,7 @@ void testSphereCast();
 void testParticle();
 void testGrenade();
 void testProfiler();
+void testToneMapping();
 
 int main(){
     testPixelBuffer();
@@ -142,6 +143,7 @@ int main(){
     testParticle();
     testGrenade();
     testProfiler();
+    testToneMapping();
 
     std::cout << "All tests passed!\n";
     return 0;

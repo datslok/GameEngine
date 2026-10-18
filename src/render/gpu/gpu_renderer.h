@@ -7,6 +7,7 @@
 #include "render/gpu/render_settings.h"
 #include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/shadow_cache.h"
+#include "render/gpu/tone_mapping.h"
 #include "render/render_stats.h"
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
@@ -87,8 +88,9 @@ private:
     SDL_GPUTexture* acquireFrame();
     void uploadShadowTiles(const std::vector<ShadowTileData>& tileData);
     void drawShadows(const FrameDescription& frame, const std::vector<ShadowTile>& tiles);
-    void beginMainPass(SDL_GPUTexture* swapchainTexture);
+    void beginMainPass();
     void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
+    void beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings);
     void endFrame();
     void abandonFrame() noexcept;
 
@@ -98,11 +100,19 @@ private:
     SDL_GPUGraphicsPipeline* pipeline = nullptr;
     void createPipeline();
 
+    // The main pass draws into these, both the size of the acquired frame: the lit scene in 16-bit floats, so brightness
+    // above 1 survives until tone mapping (an 8-bit screen image would cut it off), and its depth.
+    SDL_GPUTexture* sceneColour = nullptr;
     SDL_GPUTexture* depthTexture = nullptr;
-    Uint32 depthWidth = 0;
-    Uint32 depthHeight = 0;
+    Uint32 frameWidth = 0;
+    Uint32 frameHeight = 0;
 
-    void ensureDepthTexture(Uint32 width, Uint32 height);
+    void ensureFrameTextures(Uint32 width, Uint32 height);
+
+    // The final pass: reads the scene image (exact texels, no filtering) and writes the tone mapped screen image.
+    SDL_GPUSampler* sceneSampler = nullptr;
+    SDL_GPUGraphicsPipeline* toneMapPipeline = nullptr;
+    void createToneMapResources();
 
     SDL_GPUCommandBuffer* commands = nullptr;
     SDL_GPURenderPass* pass = nullptr;
@@ -132,7 +142,7 @@ private:
     SDL_GPUTransferBuffer* shadowTileTransfer = nullptr;
     void createShadowResources();
 
-    // Debug lines, drawn over the finished scene.
+    // Debug lines, drawn over the tone mapped screen image.
     std::unique_ptr<DebugLineRenderer> debugLines;
 
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
