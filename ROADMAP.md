@@ -1,6 +1,6 @@
 # Roadmap
 
-A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**, and eventually a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic). The core stays genre-agnostic; genre code (camera styles, weapons, abilities, netcode tuning, cloth and sewing) lives in modules on top.
+A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**, and eventually a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic), and a **solar system** simulated at real scale. The core stays genre-agnostic; genre code (camera styles, weapons, abilities, netcode tuning, cloth and sewing, orbital mechanics) lives in modules on top.
 
 Each phase ends with a **milestone**: something you can run and see. A phase is done when its milestone works and has tests where it makes sense.
 
@@ -96,9 +96,9 @@ Covers the input and "separate simulation and rendering" parts of the original s
 |---|---|
 | 7. Shading and lighting: point lights | Phase 4 (rendering upgrades) |
 | 8. Particle physics: forces, gravity, integration | Phase 5 (collision and movement) |
-| 9. Rigid-body physics: orientation, angular velocity, mass and inertia, collision | Collision in phase 5; full rigid-body dynamics in phase 9 |
+| 9. Rigid-body physics: orientation, angular velocity, mass and inertia, collision | Collision in phase 5; full rigid-body dynamics in phase 13 |
 | 10. Engine architecture: scene management, entities and components, resource loading | Phase 3 |
-| 10. Engine architecture: debug tools | Debug drawing in phase 4; debug UI and profiler in phase 6 |
+| 10. Engine architecture: debug tools | Debug drawing in phase 4; profiler in phase 5; debug UI in phase 8 |
 
 ## Phase 3: Engine architecture (done, Oct 8 2026)
 
@@ -174,89 +174,74 @@ Finishes the old "shading and lighting" step and adds the tools the next phases 
 
 What both genres actually need from physics: knowing what you hit and moving a character through a level without passing through walls.
 
+- [ ] Settings in one place (`settings-structs`), first, before physics adds dozens of new constants: gather today's scattered tuning values (camera speeds, light seat and shadow limits, fade time, hysteresis, shadow texel target and distance, tick rate, frame cap) into a settings struct per system, owned where the system lives and passed in rather than read from file-level constants. Look for duplicated logic on the way and merge it. Constants a shader shares with C++ (today mirrored by hand, for example in the soft-shadow and dither maths) get one source too. Then phase 8's debug UI and any game can edit each value in exactly one spot, and later physics settings (gravity, substeps, cloth stiffness) start out in the same shape
 - [ ] Shapes: sphere, capsule, axis-aligned box; overlap tests between them
 - [ ] Raycasts against shapes and against triangle meshes
 - [ ] Mouse picking: click a unit or object, not only the ground
 - [ ] Broad phase: uniform grid, so tests only check nearby objects
 - [ ] Static level collision against triangle meshes
 - [ ] Kinematic character controller: capsule, sliding along walls, stepping up stairs, ground snapping, gravity and jumping (first person has a camera-only placeholder jump until then, `fps-jump`)
-- [ ] Particle physics: forces, gravity, semi-implicit Euler integration, bouncing off level geometry (projectiles, grenades). Keep the particle store plain (positions, previous positions, inverse masses) so phase 10's cloth can reuse it for its vertices
+- [ ] Particle physics: forces, gravity, semi-implicit Euler integration, bouncing off level geometry (projectiles, grenades). Keep the particle store plain (positions, previous positions, inverse masses) because it will serve three users: grenades here, phase 7's cloth vertices and phase 12's orbital bodies (which need double precision, so the store's vector type should be a parameter)
+- [ ] Frame and system timing (the profiler, moved here from the UI phase): frame time and tick time in the F4 readout, and a simple profiler that times each system per tick. Physics is the first work whose cost grows with the scene, so the switch to the release build below, and every later performance decision, should rest on measurements
+- [ ] `release` build target (`-O2`), with small vec/mat operators moved into headers so they can inline (moved here from the optional list). Rendering never needed it, but physics runs many tiny vector operations per tick, and unoptimised code that calls a function for every `+` will be too slow long before the frame rate drops. `make` stays the `-O0 -g` debug build
 
 **Milestone:** walk around a small level in first person with walls, stairs and jumping, and throw a grenade that bounces.
 
-## Phase 6: Animation, UI and audio
+## Phase 6: Lighting: HDR and global illumination
 
+Light that bounces: the biggest visual step up from today's direct-only lighting, and done early because it is one of the two things we most want to see. It needs nothing from phase 5 except the profiler and release build to measure it, so it could even start alongside it. Everything here also serves later phases: the HDR target settles where the HUD goes, compute pipelines run the cloth solver, and physically based materials carry fabric shading.
+
+- [ ] HDR off-screen render target and tone mapping: render the scene to a high-precision off-screen texture, then a final pass rolls brightness above 1 off smoothly instead of clipping to white and writes the 8-bit screen image. The dither moves from `triangle.frag` into that final pass (the off-screen image needs none). It comes before the HUD (phase 8) because it changes where everything drawn on top of the scene goes, so the HUD is built once, over the finished image. Bloom and DDGI build on it
+  - Once tone mapping exists, consider physical light units plus a camera exposure for all lights. Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers), with the exposure step mapping the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen. Until then, the demo keeps the moon sphere's glow and the moonlight as separate artistic dials, because the renderer clips at 1.0
+- [ ] Bloom: bright and emissive pixels blurred and added back before tone mapping, giving the moon and lamps a soft halo
+- [ ] SDL_GPU compute pipelines: the engine's first compute shaders (`SDL_CreateGPUComputePipeline`, compiled by `glslc` like the others), reading and writing storage buffers and textures. One foundation shared by DDGI's probe updates below, the GPU cloth solver (phase 7) and, if needed, Barnes-Hut gravity (phase 12)
+- [ ] Physically based materials (glTF metallic-roughness): what glTF models are authored for. Bounce light depends on how much light each surface reflects, so materials should be physically sensible before global illumination is tuned; fabric shading (phase 9) and the hardware ray-tracing backend (phase 13) build on them too
+- [ ] Dynamic global illumination with a probe grid (DDGI, "Dynamic Diffuse Global Illumination", Majercik et al. 2019). Today light stops at the first surface it hits, so a room lit through one window is black wherever the sunbeam does not land, and the ambient light is a flat stand-in for all the light bouncing around. DDGI measures that bounced light at points in space each frame and lets every surface look it up
+  - Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), and the compute pipelines above
+  - [ ] Probe grid: a 3D grid of light probes over the level, one every 1-2 m. Each stores the light arriving from every direction in a small octahedral texture (the sphere of directions unfolded onto a square, e.g. 8x8 texels), and all probes are packed into one atlas, like the shadow tiles. Diffuse light changes slowly across space, so a coarse grid captures it
+  - [ ] Probe update in a compute shader: each probe traces a few hundred rays per frame, in directions given a new random rotation every frame so the samples add up to the whole sphere over time. Each hit gets direct light from the existing lights and shadow atlas, plus indirect light read from last frame's probes, so each frame adds one more bounce: infinite bounces for the price of one. Caveat: the shadow atlas only holds lights and cube faces the camera can see (light priority and face culling), so hits outside the view need lights kept for the probes, or go unshadowed
+  - [ ] Hysteresis blending: each texel keeps about 97% of its old value and takes 3% of the new one, which averages a few hundred noisy rays into a smooth result over time, like a long-exposure photograph. When a texel's new value differs a lot (a light switched on, a door opened), it blends faster so the change does not lag for seconds
+  - [ ] Leak prevention: each probe also stores the mean and mean-squared hit distance per direction (a second small octahedral texture). When shading, a Chebyshev test on these (as in variance shadow maps) estimates whether the probe can actually see the point; a probe behind a wall gets almost no weight, so sunlight in one room does not bleed through into the next
+  - [ ] Probe relocation and deactivation: a grid ignores the level's shape, so some probes land inside geometry, where every ray hits a back face and they report darkness. Move each one a short way out into open space, and switch off probes buried inside solid walls (they only waste rays and darken their neighbours)
+  - [ ] Sampling in `triangle.frag`: each pixel blends the 8 probes at the corners of the grid cell around it, weighted by distance (trilinear), visibility (the Chebyshev test) and how far each probe lies in front of the surface along its normal, then adds the result as diffuse light in place of the flat ambient
+  - [ ] Ray tracing without RTX: rays are traced against a simplified copy of the scene, signed distance fields or a coarse voxel grid of the level, built in compute shaders, because SDL_GPU has no ray tracing. Probes only need blurry diffuse light, so coarse geometry is enough. Phase 13's hardware ray-tracing backend can replace this later
+  - [ ] Cascades for large worlds: a dense grid near the camera and coarser ones further out (each about twice the spacing of the last), scrolling with the camera so only the newly uncovered slice of probes starts from scratch. A single dense grid over a whole MOBA map or open level would cost too much memory and too many rays
+  - [ ] Debug view: draw each probe as a small sphere shaded with its stored light (and switched-off probes in another colour), so leaks, dark probes stuck in walls and slow updates are visible at a glance
+
+**Milestone:** a room lit only through a window by the moving sun fills with soft bounce light that changes as the sun moves, a red wall tints the floor beside it, and no light leaks through the walls into the next room; the moon and lamps glow with bloom.
+
+## Phase 7: Cloth simulation
+
+The physics half of the dressmaking game, early because it is the other thing we most want to see: fabric that drapes, folds and piles up without passing through itself. Builds on phase 5's particle store and collision shapes and phase 6's compute pipelines. Cloth code lives in its own module on top of the core, like the FPS and MOBA code. Garments, sewing and the game itself follow in phase 9, once phase 8 has skinned characters to dress.
+
+- [ ] Dynamic meshes: a GPU upload path for meshes whose vertices change every frame, with normals recomputed each time (today a mesh is uploaded once and never changes)
+- [ ] XPBD solver (extended position-based dynamics): particles integrated with gravity, then constraints project their positions back towards valid states. Each constraint has a compliance (inverse stiffness), so nearly unstretchable fabric stays stable at the 120 Hz tick, where stiff springs would need a tiny timestep. Use many substeps (10-20 per tick, one constraint iteration each) rather than many iterations of one big step: small steps converge faster for the same work, so fabric stretches less (Macklin et al. 2019, "Small Steps in Physics Simulation")
+- [ ] Cloth constraints: stretch (edge lengths), bending (angle between neighbouring triangles), pinning (fixed points, for testing and for hangers)
+- [ ] Collision with bodies: spheres and capsules first (phase 5's shapes), then a signed distance field around a mannequin; friction between cloth and body
+- [ ] Self-collision, so folds and layers never pass through each other. A broad phase (a BVH or spatial hash) only finds nearby pairs; cloth is so thin that a fast-moving layer can jump right through another between two substeps, so it also needs continuous collision detection (vertex-triangle and edge-edge pairs checked along their motion during the step) and a cloth thickness that keeps layers apart
+- [ ] Untangling pass (Baraff, Witkin & Kass 2003, "Untangling Cloth") as a safety net: finds intersections that slipped through anyway and pushes the tangled regions apart over the next steps, instead of letting them lock together for good
+- [ ] Multithreading: a job system for simulation and asset loading. The cloth solver is the first work that needs more than one core
+- [ ] Solver on the GPU (phase 6's compute pipelines) or on several threads (the job system above), once a sheet is too slow on one core
+- [ ] Fabric properties: different stiffness along the threads (warp and weft) than across them (the bias), bending stiffness (silk vs denim), mass per area, friction; a few presets
+- [ ] Optional, later: IPC or codimensional IPC (incremental potential contact) for hero garments: guaranteed intersection-free at any step size, at a much higher cost per step
+
+**Milestone:** a sheet pinned at two corners drapes over a sphere; a sheet dropped onto itself folds into a pile with no intersections (the self-collision stress test); a silk sheet and a denim sheet fall visibly differently.
+
+## Phase 8: Animation, UI and audio
+
+- [ ] Parent/child entity hierarchy: attach entities to others and to skeleton joints (a weapon to a hand, a hat to a head, a turret to a vehicle). Skeletal animation is the first thing that needs it, and phase 11's first-person weapon uses it
 - [ ] Skeletal animation from glTF skins: joints, skinning in the vertex shader, playing and blending clips
 - [ ] Text rendering with a bitmap font (debug overlays already have a stroke font, `debugText`, good for numbers but not for real UI)
-- [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after the 3D scene (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker (an emissive plane for now) into a HUD ring of constant pixel size
-- [ ] Debug UI and in-game stats (frame time, tick time, entity count)
+- [ ] HUD: crosshair, health bars above units, ability cooldowns. Start with flat-coloured screen-space shapes drawn after phase 6's tone mapping (no depth test, alpha blending) and a tested `worldToScreen(camera, point, windowSize)`; turn the demo's MOBA destination marker (an emissive plane for now) into a HUD ring of constant pixel size
+- [ ] Debug UI and in-game stats (entity count, and phase 5's frame, tick and per-system timings)
 - [ ] Key bindings: games read actions (`MoveForward`, `LockCamera`) instead of keys, and players can rebind them
 - [ ] Audio with SDL3: play sounds, volume, simple 3D panning by distance and direction
-- [ ] Simple profiler: time each system per frame
 
-**Milestone:** an animated character that walks and idles, with a HUD, sounds and a debug overlay.
+**Milestone:** an animated character that walks and idles with something held in its hand, with a HUD, sounds and a debug overlay.
 
-## Phase 7: Networking
+## Phase 9: Garments and a dressmaking game
 
-Builds on the fixed tick and the headless simulation. Commands go up, snapshots come down.
-
-- [ ] Serialization of commands and snapshots into compact byte buffers
-- [ ] UDP sockets, connections, and a small reliability layer for messages that must arrive
-- [ ] Dedicated server build that runs the simulation headless
-- [ ] Authoritative server: clients send commands, the server simulates and sends snapshots
-- [ ] Snapshot interpolation for other players' entities
-- [ ] Client-side prediction and reconciliation for the local player
-- [ ] Lag compensation: the server rewinds hitboxes to what the shooter saw (FPS)
-- [ ] Simulated latency and packet loss for testing
-
-**Milestone:** two clients move around the same level through a dedicated server, with smooth movement under 100 ms of simulated latency.
-
-## Phase 8: Genre demos
-
-**FPS**
-- [ ] Hitscan and projectile weapons, recoil and spread
-- [ ] Health, damage, death and respawn
-- [ ] First-person weapon model and camera feel (bob, field of view)
-
-**MOBA**
-- [ ] Pathfinding: A* on a grid first, then a navigation mesh
-- [ ] Unit selection and attack-move commands
-- [ ] Abilities with cooldowns, mana and targeting (point, unit, area)
-- [ ] Minion waves with simple AI, towers
-- [ ] Fog of war
-
-**Milestone:** a small online deathmatch, and a 1v1 lane with minions and towers.
-
-## Phase 9: Later and optional
-
-- [ ] Parent/child entity hierarchy: attach entities to others (a weapon to a hand, a turret to a vehicle)
-- [ ] Full rigid-body dynamics: orientation, angular velocity, mass and inertia, collision response, stacking
-- [ ] Physically based materials (glTF metallic-roughness)
-- [ ] Clustered shading (once there are hundreds of lights): each pixel loops only over the lights that reach its part of the view, instead of every seated light
-- [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
-- [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw
-- [ ] Hardware ray tracing (RTX-class GPUs): a new Vulkan backend built on the frame description from phase 4, with an acceleration structure per mesh built once at upload. SDL_GPU has no ray-tracing support, so SDL keeps the window while the backend talks to Vulkan directly. Start with ray-traced shadows or reflections over the rasterised image, and keep the rasterised path for GPUs without ray tracing. Physically based materials first
-- [ ] Particle effects for visuals (sparks, smoke, ability effects)
-- [ ] Post-processing: render the scene to an off-screen texture first, then bloom (bright and emissive pixels blurred and added back, giving the moon and lamps a soft halo) and tone mapping (brightness above 1 rolled off smoothly instead of clipping to white). The dither then moves from `triangle.frag` into this final pass, the one that writes the 8-bit screen image; the off-screen image is high precision and needs none
-  - Once tone mapping exists, consider physical light units plus a camera exposure for all lights. Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers), with the exposure step mapping the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen. Until then, the demo keeps the moon sphere's glow and the moonlight as separate artistic dials, because the renderer clips at 1.0
-- [ ] GPU instancing for many identical units
-- [ ] Multithreading: a job system for simulation and asset loading
-- [ ] Level editor or scene file format
-- [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering). Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up. Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
-- [ ] Scripting for gameplay code
-- [ ] `release` build target (`-O2`), with small vec/mat operators moved into headers so they can inline. Deferred indefinitely: only worth doing once the frame rate drops below the 240 FPS cap
-
-## Phase 10: Cloth and a dressmaking game
-
-A third kind of game: cut fabric panels, sew them into garments and see them hang and move on a body. Builds on phase 5's particles and collision, phase 6's skinned characters, and phase 9's physically based materials and multithreading. Cloth code lives in its own module on top of the core, like the FPS and MOBA code.
-
-**Simulation**
-- [ ] Dynamic meshes: a GPU upload path for meshes whose vertices change every frame, with normals recomputed each time (today a mesh is uploaded once and never changes)
-- [ ] XPBD solver (extended position-based dynamics): particles integrated with gravity, then constraints project their positions back towards valid states. Each constraint has a compliance (inverse stiffness), so nearly unstretchable fabric stays stable at the 120 Hz tick, where stiff springs would need a tiny timestep
-- [ ] Cloth constraints: stretch (edge lengths), bending (angle between neighbouring triangles), pinning (fixed points, for testing and for hangers)
-- [ ] Collision with bodies: capsules first, then a signed distance field around a mannequin; friction between cloth and body
-- [ ] Self-collision, so folds and layers never pass through each other, using a broad phase like phase 5's grid
-- [ ] Fabric properties: different stiffness along the threads (warp and weft) than across them (the bias), bending stiffness (silk vs denim), mass per area, friction; a few presets
+A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them into garments and see them hang and move on a body. Needs phase 8's skinned characters and phase 6's physically based materials.
 
 **Garments**
 - [ ] Sewing patterns: 2D panel outlines triangulated into cloth meshes, with UVs from the flat layout
@@ -271,4 +256,69 @@ A third kind of game: cut fabric panels, sew them into garments and see them han
 - [ ] Pattern editor: draw and edit panel outlines, choose which edges are sewn together
 - [ ] Fabric choice, colours and prints per panel
 
-**Milestone:** a sheet pinned at two corners drapes over a sphere; then a simple skirt sewn from two panels hangs on a mannequin and swings as it turns.
+**Milestone:** a simple skirt sewn from two panels hangs on a mannequin and swings as it turns; then a garment follows an animated character as it walks.
+
+## Phase 10: Networking
+
+Builds on the fixed tick and the headless simulation. Commands go up, snapshots come down.
+
+- [ ] Serialization of commands and snapshots into compact byte buffers
+- [ ] UDP sockets, connections, and a small reliability layer for messages that must arrive
+- [ ] Dedicated server build that runs the simulation headless
+- [ ] Authoritative server: clients send commands, the server simulates and sends snapshots
+- [ ] Snapshot interpolation for other players' entities
+- [ ] Client-side prediction and reconciliation for the local player
+- [ ] Lag compensation: the server rewinds hitboxes to what the shooter saw (FPS)
+- [ ] Simulated latency and packet loss for testing
+
+**Milestone:** two clients move around the same level through a dedicated server, with smooth movement under 100 ms of simulated latency.
+
+## Phase 11: Genre demos
+
+**Engine**
+- [ ] GPU instancing for many identical meshes (minion waves, the lamp field, asteroids): one draw call for all copies instead of one each
+
+**FPS**
+- [ ] Hitscan and projectile weapons, recoil and spread
+- [ ] Health, damage, death and respawn
+- [ ] First-person weapon model (attached with phase 8's hierarchy) and camera feel (bob, field of view)
+
+**MOBA**
+- [ ] Pathfinding: A* on a grid first, then a navigation mesh
+- [ ] Unit selection and attack-move commands
+- [ ] Abilities with cooldowns, mana and targeting (point, unit, area)
+- [ ] Minion waves with simple AI, towers
+- [ ] Fog of war
+
+**Milestone:** a small online deathmatch, and a 1v1 lane with minions and towers.
+
+## Phase 12: Orbital simulation (a solar system)
+
+A fourth kind of world: the Sun, planets and moons at real scale, moving under gravity. Like cloth, it lives in its own module on top of the core. It needs phase 5's particles and release build but no collision, animation or networking, so it can move earlier whenever we want it sooner.
+
+**Precision and rendering**
+- [ ] Double-precision vectors (`DVec3`) for simulation positions. A float keeps about 7 significant digits, so at Neptune's distance (4.5 billion km) positions would snap in steps of hundreds of kilometres; a double's 16 digits give about a millimetre. Float `Vec3` stays for rendering and everything else
+- [ ] Camera-relative rendering (floating origin): subtract the camera position from each body's position in double, then convert the small difference to float, so the GPU only ever sees numbers near zero and far-away objects do not jitter
+- [ ] Depth at planetary scale: reversed-Z (far plane at depth 0, where floating-point values are densest) or a logarithmic depth buffer, so a nearby spacecraft and a planet millions of kilometres behind it both sort correctly
+
+**Simulation**
+- [ ] N-body gravity with a symplectic integrator (leapfrog / velocity Verlet). Ordinary integrators slowly pump energy into or out of an orbit, so planets spiral outwards or fall into the Sun; symplectic ones keep the energy error bounded forever. Tested: total energy stays within a small band over many orbits
+- [ ] Its own simulation clock with time warp: many substeps per 120 Hz tick so a year can pass in seconds, with the step size adapting to how close bodies come to each other. A naively varied step breaks the symplectic guarantee and the energy drifts again, so the adaptivity has to keep it (for example a time-symmetric step choice, or fixed-step substepping only for the bodies in a close pass)
+- [ ] "On rails" Keplerian orbits for distant bodies: the position comes from the exact ellipse at any time, with no integration error and almost no cost. A body switches to full simulation when the player comes near (and back when they leave), so a spacecraft's thrust or a close pass can change its path
+- [ ] Barnes-Hut (or the fast multipole method) for thousands of bodies, such as an asteroid belt: a distant cluster pulls like a single mass at its centre, as a far galaxy does, turning the O(n²) pair sum into O(n log n). Drawn with phase 11's instancing
+
+**Milestone:** the Sun, planets and Moon orbit stably for 100 simulated years at high time warp, and you can fly the free camera from Earth to Neptune without jitter.
+
+## Phase 13: Later and optional
+
+Ideas with no fixed place and nothing waiting on them: pick one up when a game needs it.
+
+- [ ] Full rigid-body dynamics: orientation, angular velocity, mass and inertia, collision response, stacking
+- [ ] Clustered shading (once there are hundreds of lights): each pixel loops only over the lights that reach its part of the view, instead of every seated light
+- [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
+- [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw
+- [ ] Hardware ray tracing (RTX-class GPUs): a new Vulkan backend built on the frame description from phase 4, with an acceleration structure per mesh built once at upload. SDL_GPU has no ray-tracing support, so SDL keeps the window while the backend talks to Vulkan directly. Start with ray-traced shadows or reflections over the rasterised image, and keep the rasterised path for GPUs without ray tracing. Builds on phase 6's physically based materials
+- [ ] Particle effects for visuals (sparks, smoke, ability effects)
+- [ ] Level editor or scene file format
+- [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering). Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up. Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
+- [ ] Scripting for gameplay code
