@@ -4,8 +4,9 @@ Package the demo into a zip that runs on a Windows PC without MSYS2.
 Usage (from anywhere):
     python tools/package_demo.py               build the optimised release with make, then package
     python tools/package_demo.py --no-build    package the existing build/release/game.exe
+    python tools/package_demo.py --anonymous   for sharing anonymously: nothing that matches the public repo
 
-Output: build/GameEngineDemo.zip, staged in build/package/GameEngineDemo/.
+Output: build/GameEngineDemo.zip, staged in build/package/GameEngineDemo/ (build/Demo.zip with --anonymous).
 
 Only the Python standard library is used. It needs MSYS2's UCRT64 tools (make, strip, objdump),
 found in C:/msys64 by default; pass --msys-root or set MSYS2_ROOT if MSYS2 lives elsewhere.
@@ -49,8 +50,8 @@ IMAGE_EXTENSIONS = {
     ".jxl": "jxl",
 }
 
-README_TEXT = """GameEngine demo
-===============
+README_TEXT = """{title}
+{underline}
 
 How to run
 ----------
@@ -73,16 +74,47 @@ Controls
 # The zip's README is plain text read in Notepad, so lines are wrapped to this width.
 README_WIDTH = 78
 
+# For --anonymous: the zip's own name and title, neither of which is the repo's name.
+ANONYMOUS_NAME = "Demo"
+
+# For --anonymous: every file in the zip gets this date (the earliest a zip can store), so the zip does not say when
+# it was made.
+ANONYMOUS_ZIP_DATE = (1980, 1, 1, 0, 0, 0)
+
+
+def clear_build_time(exe: Path) -> None:
+    """
+    For --anonymous: zero the time the linker stamped into the exe's header, so the exe does not say when it was
+    built. Windows does not use the stamp to run the program. Its place: the 4-byte offset at 0x3C points to the
+    "PE\\0\\0" signature, which is followed by the machine type (2 bytes), the section count (2) and then the stamp (4).
+    """
+    data = bytearray(exe.read_bytes())
+    header = int.from_bytes(data[0x3C:0x40], "little")
+    if data[header:header + 4] != b"PE\0\0":
+        raise PackagingError(f"{exe} does not look like a Windows exe")
+    data[header + 8:header + 12] = bytes(4)
+    exe.write_bytes(data)
+
+
+def brief_action(action: str) -> str:
+    """
+    The start of a control's description, up to its first explanation, for --anonymous: "Toggle the four floodlights
+    over the obstacle course (on at the start): shadow-casting..." becomes "Toggle the four floodlights over the
+    obstacle course". Short generic phrases are hard to search for; the full sentences match the public README.
+    """
+    return re.split(r" \(|: |; |\. ", action, maxsplit=1)[0].strip()
+
 
 class PackagingError(Exception):
     pass
 
 
-def readme_controls(readme: str) -> str:
+def readme_controls(readme: str, brief: bool = False) -> str:
     """
     The controls, taken from the "## Controls" section of the repo's README.md, so the zip's README can
     never fall behind it. Markdown becomes plain text: **bold** lines become headings, and each table
-    becomes two columns with long actions wrapped under themselves.
+    becomes two columns with long actions wrapped under themselves. brief (for --anonymous) keeps only
+    the headings, the keys and the start of each action (brief_action), and leaves out the paragraphs.
     """
     match = re.search(r"^## Controls\n(.*?)(?=^## |\Z)", readme, re.MULTILINE | re.DOTALL)
     if not match:
@@ -112,13 +144,15 @@ def readme_controls(readme: str) -> str:
             # Skip the header row and the |---|---| line under it.
             if cells[0] == "Input" or set(cells[0]) <= {"-"}:
                 continue
-            table.append((cells[0], cells[1]))
+            table.append((cells[0], brief_action(cells[1]) if brief else cells[1]))
             continue
 
         flush_table()
         is_heading = line.startswith("**") and line.endswith("**")
         if is_heading:
             output.append(line.strip("*") + ":")
+        elif line and brief:
+            continue
         elif line:
             output.append(textwrap.fill(line.replace("**", ""), width=README_WIDTH))
         elif not headed:
@@ -127,7 +161,7 @@ def readme_controls(readme: str) -> str:
         headed = is_heading
 
     flush_table()
-    return "\n".join(output) + "\n"
+    return "\n".join(output).strip("\n") + "\n"
 
 
 def msys_environment(msys_root: Path) -> dict:
@@ -262,20 +296,36 @@ def verify(stage: Path, objdump: Path, environment: dict) -> None:
         raise PackagingError("The package would not run on another PC:\n  " + "\n  ".join(missing))
 
 
-def make_zip(stage: Path, zip_path: Path) -> None:
-    """Zip the staged folder itself, so extracting gives one tidy folder instead of loose files."""
+def make_zip(stage: Path, zip_path: Path, fixed_date: tuple = None) -> None:
+    """
+    Zip the staged folder itself, so extracting gives one tidy folder instead of loose files. Each file keeps
+    its own date unless fixed_date is given (--anonymous), which every file then gets instead.
+    """
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in sorted(stage.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(stage.parent))
+            if not path.is_file():
+                continue
+            name = path.relative_to(stage.parent).as_posix()
+            if fixed_date is None:
+                archive.write(path, name)
+            else:
+                entry = zipfile.ZipInfo(name, date_time=fixed_date)
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(entry, path.read_bytes(), compresslevel=9)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Package the demo into a zip for another Windows PC.")
     parser.add_argument("--no-build", action="store_true", help="package the existing build/release/game.exe without running make")
     parser.add_argument("--msys-root", type=Path, default=Path(os.environ.get("MSYS2_ROOT", r"C:\msys64")), help="MSYS2 install folder (default C:\\msys64)")
-    parser.add_argument("--name", default="GameEngineDemo", help="name of the exe, folder and zip (default GameEngineDemo)")
+    parser.add_argument("--name", help="name of the exe, folder and zip (default GameEngineDemo, or Demo with --anonymous)")
+    parser.add_argument("--anonymous", action="store_true",
+                        help="for sharing anonymously: a README with only short generic control names, a neutral name and undated zip entries, "
+                             "so nothing in the zip matches the public repo's text or says when it was made")
     arguments = parser.parse_args()
+
+    if arguments.name is None:
+        arguments.name = ANONYMOUS_NAME if arguments.anonymous else "GameEngineDemo"
 
     msys_bin = arguments.msys_root / "ucrt64" / "bin"
     objdump = msys_bin / "objdump.exe"
@@ -308,6 +358,8 @@ def main() -> int:
     # Debug symbols are only useful with a debugger and make the exe several times larger.
     exe = stage / f"{arguments.name}.exe"
     run([str(strip), "--strip-debug", "-o", str(exe), str(game)], environment)
+    if arguments.anonymous:
+        clear_build_time(exe)
 
     print("Copying assets...")
     copy_assets(REPO_ROOT / "assets", stage / "assets")
@@ -331,8 +383,9 @@ def main() -> int:
         loaded_at_runtime = path in decoders
         print(f"  {path.name}{'  (loaded at runtime by SDL3_image)' if loaded_at_runtime else ''}")
 
-    controls = readme_controls((REPO_ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n"))
-    readme = README_TEXT.format(exe_name=exe.name, controls=controls)
+    controls = readme_controls((REPO_ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n"), brief=arguments.anonymous)
+    title = ANONYMOUS_NAME if arguments.anonymous else "GameEngine demo"
+    readme = README_TEXT.format(title=title, underline="=" * len(title), exe_name=exe.name, controls=controls)
     (stage / "README.txt").write_text(readme.replace("\n", "\r\n"), encoding="utf-8", newline="")
 
     print("Checking every DLL resolves inside the package or Windows...")
@@ -340,7 +393,7 @@ def main() -> int:
 
     if zip_path.exists():
         zip_path.unlink()
-    make_zip(stage, zip_path)
+    make_zip(stage, zip_path, ANONYMOUS_ZIP_DATE if arguments.anonymous else None)
 
     size = zip_path.stat().st_size / (1024 * 1024)
     print(f"\nDone: {zip_path} ({size:.1f} MB)")
