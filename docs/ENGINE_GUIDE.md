@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 5 and phase 6's physically based materials (collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
+**Covers:** phases 0 to 5 and phase 6's physically based materials and quaternions (quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
 
 ---
 
@@ -68,7 +68,7 @@ A slow frame runs several ticks to catch up; a fast frame may run none. The 0.25
 
 After the ticks, some time is left over (`alpha` of a tick). If we drew objects exactly where the last tick put them, motion would stutter: at 240 FPS with 120 ticks, every other frame would show the same position.
 
-So entities that move continuously keep a `PreviousTransform` (their pose at the start of the last tick), and rendering blends: `drawn = previous + (current - previous) * alpha`. Angles take the shortest way around, so something rotating past 360 degrees does not spin backwards for a frame.
+So entities that move continuously keep a `PreviousTransform` (their pose at the start of the last tick), and rendering blends: `drawn = previous + (current - previous) * alpha`. Rotations blend along the shortest turn between the two orientations (slerp, see "Orientation: quaternions" in section 7), so something rotating past 360 degrees does not spin backwards for a frame.
 
 Things that teleport (the destination marker) deliberately have no `PreviousTransform`: blending would make them slide.
 
@@ -189,6 +189,25 @@ model space  --model-->  world space  --view-->  camera space  --projection-->  
 - The **projection** matrix applies perspective: after the GPU divides by `w`, distant things shrink.
 
 Convention: `Mat4` is row-major (`values[row][column]`) and multiplies column vectors (`M * v`), in right-handed coordinates.
+
+### Orientation: quaternions
+
+A `Transform` stores its rotation as a **unit quaternion** (`Quat`, `math/quat`), not as three angles. Three Euler angles (turn about x, then y, then z) are easy to read but have two faults. **Gimbal lock**: when the middle turn reaches 90 degrees, the first and last axes line up, so two angles do the same thing and one direction of turning is lost; near that pose a small change of orientation needs a huge change of angles, and a tumbling body passes through it all the time. **Blending**: blending each angle separately does not follow the real in-between orientation, except for turns about one axis.
+
+A quaternion is a scalar plus a vector, q = (w, **v**), the way a complex number is a real part plus an imaginary one. (Hamilton, who invented them in 1843, coined the words *scalar* and *vector* for these two parts.) Their product is
+
+  (w₁, **v**₁)(w₂, **v**₂) = (w₁w₂ − **v**₁·**v**₂, w₁**v**₂ + w₂**v**₁ + **v**₁×**v**₂).
+
+The cross product in it is why the order matters, just as two turns of a book give different results in different orders. A turn by θ about a unit axis **n** is q = (cos θ/2, **n** sin θ/2), and it rotates a vector as **p**′ = q **p** q*, with q* = (w, −**v**) the conjugate undoing the turn. The 2D version is a unit complex number e^{iθ} turning the plane by multiplication; in 3D the sandwich is needed so the result stays a pure vector, and each side carries half the angle.
+
+The half angle has a consequence a physicist will know from spin-½: q and −q are the same rotation. Unit quaternions live on a 4D sphere that covers the rotations twice (it is SU(2) covering SO(3)), and a full 2π turn stores −1.
+
+What the engine does with them:
+
+- **Composing**: `a * b` turns by `b` first, then `a`, the same order as matrices multiplying column vectors. `toMatrix` reads the rotation matrix straight from the components, with no trigonometry.
+- **Blending** (`slerp`): the shortest arc between two orientations on that sphere, at constant angular speed, so a drawn frame between two ticks is the true in-between orientation. Because of the double cover, `to` is flipped to −`to` when the two are on opposite sides, which makes the turn take the short way round. Below about 1.8 degrees apart, a plain blend normalised back to unit length is used instead, which avoids dividing by the sine of a tiny angle and is just as accurate there. At 120 Hz that is the common case.
+- **Errors as vectors** (`toRotationVector`, the log map): any turn as one vector, axis times angle. `(target * current.conjugate()).toRotationVector()` is what is left to turn, and which way, to reach a target. It can drive a spring as a displacement would, which the ragdolls' joint drives (phase 8) will use. `fromRotationVector` (the exp map) goes back, and turns an angular velocity times a time step into the turn made in that step.
+- **Angles where they are natural**: mouse look keeps a yaw and a pitch, and a character keeps its own `yaw`, since "turn at most this fast towards that heading" is easiest in one angle. A spinner keeps three angles and their speeds. Each builds its quaternion at the end (`fromAxisAngle`, `fromEulerAngles`), and nothing reads angles back out of one.
 
 ---
 

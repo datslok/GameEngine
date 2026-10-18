@@ -86,7 +86,7 @@ namespace {
         Transform start;
         start.position = fireflyPosition(firefly, 0.0);
         start.scale = Vec3{0.12f, 0.12f, 0.12f};
-        start.rotation.y = 0.5f;
+        start.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.5f);
 
         const Entity entity = world.create();
         world.add(entity, start);
@@ -101,7 +101,7 @@ namespace {
         assert(nearlyEqual(moved.position.y, expected.y));
         assert(nearlyEqual(moved.position.z, expected.z));
         assert(nearlyEqual(moved.scale.x, 0.12f));
-        assert(nearlyEqual(moved.rotation.y, 0.5f));
+        assert(angleBetween(moved.rotation, start.rotation) < 0.0001f);
     }
 }
 

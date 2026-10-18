@@ -1,6 +1,7 @@
 #include "core/fixed_timestep.h"
 #include "scene/interpolation.h"
 #include "math/transform.h"
+#include "math/quat.h"
 
 #include <cassert>
 #include <cmath>
@@ -87,7 +88,7 @@ void testFixedTimestep() {
 
         Transform to;
         to.position = Vec3{10.0f, -2.0f, 4.0f};
-        to.rotation.y = 1.0f;
+        to.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 1.0f);
         to.scale = Vec3{3.0f, 3.0f, 3.0f};
 
         const Transform halfway = interpolate(from, to, 0.5f);
@@ -95,7 +96,7 @@ void testFixedTimestep() {
         assert(nearlyEqual(halfway.position.x, 5.0));
         assert(nearlyEqual(halfway.position.y, -1.0));
         assert(nearlyEqual(halfway.position.z, 2.0));
-        assert(nearlyEqual(halfway.rotation.y, 0.5));
+        assert(angleBetween(halfway.rotation, Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.5f)) < 0.0001f);
         assert(nearlyEqual(halfway.scale.x, 2.0));
 
         const Transform start = interpolate(from, to, 0.0f);
@@ -105,21 +106,32 @@ void testFixedTimestep() {
         assert(nearlyEqual(end.position.x, 10.0));
     }
 
-    // An angle that wraps past 2 pi takes the short way round instead of spinning backwards.
+    // A turn that wraps past 2 pi takes the short way round instead of spinning backwards.
     {
         constexpr float fullTurn = 2.0f * std::numbers::pi_v<float>;
 
         Transform from;
-        from.rotation.y = fullTurn - 0.1f;
+        from.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, fullTurn - 0.1f);
 
         Transform to;
-        to.rotation.y = 0.1f;
+        to.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.1f);
+
+        // Halfway is a full turn (the same as no turn), not a half turn.
+        const Transform halfway = interpolate(from, to, 0.5f);
+        assert(angleBetween(halfway.rotation, Quat{}) < 0.0001f);
+    }
+
+    // A tumble about a tilted axis is drawn halfway along that same turn. Blending three Euler angles separately could not
+    // do this: their in-between orientation is off the turn's path.
+    {
+        const Vec3 tiltedAxis = Vec3{1.0f, 1.0f, 1.0f}.normalized();
+
+        Transform from;
+        Transform to;
+        to.rotation = Quat::fromAxisAngle(tiltedAxis, 1.2f);
 
         const Transform halfway = interpolate(from, to, 0.5f);
-
-        // Halfway is a full turn (the same as 0), not pi.
-        const float wrapped = std::remainder(halfway.rotation.y, fullTurn);
-        assert(nearlyEqual(wrapped, 0.0));
+        assert(angleBetween(halfway.rotation, Quat::fromAxisAngle(tiltedAxis, 0.6f)) < 0.0001f);
     }
 
     // Entities with a PreviousTransform are drawn between the last two ticks.

@@ -42,7 +42,7 @@ namespace {
         for (int i = 0; i < count; ++i) {
             Transform transform;
             transform.position = numbers.nextPoint(20.0f, 4.0f);
-            transform.rotation = Vec3{0.0f, numbers.next(-3.0f, 3.0f), numbers.next(-0.5f, 0.5f)};
+            transform.rotation = Quat::fromEulerAngles(Vec3{0.0f, numbers.next(-3.0f, 3.0f), numbers.next(-0.5f, 0.5f)});
             const float size = numbers.next(0.3f, 1.5f);
             transform.scale = Vec3{size, size * numbers.next(0.5f, 2.0f), size};
 

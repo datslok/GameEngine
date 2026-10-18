@@ -15,6 +15,13 @@ namespace {
         hash.add(vector.z);
     }
 
+    void add(Fnv1aHash& hash, const Quat& rotation) {
+        hash.add(rotation.x);
+        hash.add(rotation.y);
+        hash.add(rotation.z);
+        hash.add(rotation.w);
+    }
+
     void add(Fnv1aHash& hash, const Transform& transform) {
         add(hash, transform.position);
         add(hash, transform.rotation);
@@ -77,6 +84,7 @@ std::uint64_t hashSimulationState(const World& world) {
     world.each<CharacterMovement>([&](Entity entity, const CharacterMovement& movement) {
         add(hash, entity);
         add(hash, movement.movement.getTarget());
+        hash.add(movement.yaw);
         add(hash, movement.targetYaw);
     });
 

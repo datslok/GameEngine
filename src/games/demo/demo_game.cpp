@@ -241,13 +241,15 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     cubeCollider = propCollider(cubeMesh);
 
     // A spinning demo object: Transform + ModelRenderer + Spinner + Collider, plus PreviousTransform so it is drawn smoothly.
+    // It starts at the spinner's initial angles.
     const auto spawnSpinner = [&world](MeshHandle mesh, const Material& material, const Collider& collider,
-                                       const Transform& transform, const Vec3& speed) {
+                                       Transform transform, const Spinner& spinner) {
+        transform.rotation = Quat::fromEulerAngles(spinner.initialAngles);
         const Entity entity = world.create();
         world.add(entity, transform);
         world.add(entity, PreviousTransform{transform});
         world.add(entity, makeMeshRenderer(mesh, material));
-        world.add(entity, Spinner{transform.rotation, speed});
+        world.add(entity, spinner);
         world.add(entity, collider);
     };
 
@@ -272,24 +274,23 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     Transform first;
     first.position = Vec3{-3.0f, 0.0f, -10.0f};
-    first.rotation.x = 0.3f;
-    spawnSpinner(cubeMesh, textured, cubeCollider, first, Vec3{2.0f, 2.0f, 0.0f});
+    spawnSpinner(cubeMesh, textured, cubeCollider, first, Spinner{Vec3{0.3f, 0.0f, 0.0f}, Vec3{2.0f, 2.0f, 0.0f}});
 
     Transform second;
     second.position = Vec3{3.0f, 0.0f, -10.0f};
     second.scale = smallScale;
-    spawnSpinner(cubeMesh, textured, cubeCollider, second, Vec3{0.0f, -1.0f, 0.0f});
+    spawnSpinner(cubeMesh, textured, cubeCollider, second, Spinner{Vec3{}, Vec3{0.0f, -1.0f, 0.0f}});
 
     Transform third;
     third.position = Vec3{0.0f, 3.0f, -10.0f};
     third.scale = smallScale;
-    spawnSpinner(pyramidMesh, green, propCollider(pyramidMesh), third, Vec3{0.0f, 1.0f, 0.0f});
+    spawnSpinner(pyramidMesh, green, propCollider(pyramidMesh), third, Spinner{Vec3{}, Vec3{0.0f, 1.0f, 0.0f}});
 
     Transform fourth;
     // The teapot's origin is at its base, so y = 0 stands it on the grass. Set back so its spout clears the cubes as it spins.
     fourth.position = Vec3{0.0f, 0.0f, -13.0f};
     fourth.scale = smallScale;
-    spawnSpinner(teapotMesh, gold, propCollider(teapotMesh), fourth, Vec3{0.0f, -1.0f, 0.0f});
+    spawnSpinner(teapotMesh, gold, propCollider(teapotMesh), fourth, Spinner{Vec3{}, Vec3{0.0f, -1.0f, 0.0f}});
 
     // Night: a faint ambient light and a weak, cool moon, so the flashlight stands out.
     // Unlike ambient light, the moon comes from a direction, so shapes keep a lit side and a dark side outside the beam, and cast shadows.

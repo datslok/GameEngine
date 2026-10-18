@@ -1,24 +1,26 @@
 #include "math/transform.h"
-#include "math/angles.h"
 
 namespace {
     Vec3 lerp(const Vec3& from, const Vec3& to, float alpha) {
         return from + (to - from) * alpha;
     }
-
-    // Wrapping the difference gives the shortest turn between the two angles.
-    float lerpAngle(float from, float to, float alpha) {
-        return from + wrapAngle(to - from) * alpha;
-    }
 }
 
+/*
+* Translation times rotation times scale, written out directly: scaling column j of the rotation matrix by scale j and
+* putting the position in the last column gives the same matrix as the three products, without the matrix multiplies.
+*/
 Mat4 Transform::getMatrix() const {
-    return
-        Mat4::translation(position.x, position.y, position.z) *
-        Mat4::rotationZ(rotation.z) *
-        Mat4::rotationY(rotation.y) *
-        Mat4::rotationX(rotation.x) *
-        Mat4::scaling(scale.x, scale.y, scale.z);
+    Mat4 result = rotation.toMatrix();
+
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            result.values[row][column] *= scale[column];
+        }
+        result.values[row][3] = position[row];
+    }
+
+    return result;
 }
 
 /*
@@ -28,11 +30,7 @@ Transform interpolate(const Transform& from, const Transform& to, float alpha) {
     Transform result;
 
     result.position = lerp(from.position, to.position, alpha);
-    result.rotation = Vec3{
-        lerpAngle(from.rotation.x, to.rotation.x, alpha),
-        lerpAngle(from.rotation.y, to.rotation.y, alpha),
-        lerpAngle(from.rotation.z, to.rotation.z, alpha)
-    };
+    result.rotation = slerp(from.rotation, to.rotation, alpha);
     result.scale = lerp(from.scale, to.scale, alpha);
 
     return result;

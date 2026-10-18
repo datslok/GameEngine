@@ -95,7 +95,7 @@ void testModelRenderer() {
     // One entity Transform moves, rotates and scales every part together.
     Transform placement;
     placement.position = Vec3{0.0f, 0.0f, -6.0f};
-    placement.rotation.z = std::numbers::pi_v<float> / 2.0f;
+    placement.rotation = Quat::fromAxisAngle(Vec3{0.0f, 0.0f, 1.0f}, std::numbers::pi_v<float> / 2.0f);
 
     assertPartOrigin(placement, a, 0.0f, 1.0f, -6.0f);
     assertPartOrigin(placement, b, 0.0f, -1.0f, -6.0f);

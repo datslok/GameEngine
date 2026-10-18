@@ -62,6 +62,7 @@ Entity spawnCharacter(World& world, AssetManager& assets, const Model& model,
         config.turnSpeed,
         config.modelForwardYaw,
         visualCentreHeight,
+        0.0f,
         std::nullopt
     };
     ModelRenderer renderer = assets.makeModelRenderer(model, groundedNormalization);
@@ -116,20 +117,20 @@ void updateCharacters(World& world, const StaticLevel& level, float deltaTime) {
         }
 
         // Finish facing the last movement direction even after arrival.
-        if (!character.targetYaw) {
-            return;
+        if (character.targetYaw) {
+            float& currentYaw = character.yaw;
+            const float difference = wrapAngle(*character.targetYaw - currentYaw);
+            const float maximumTurn = character.turnSpeed * deltaTime;
+
+            if (std::abs(difference) <= maximumTurn) {
+                currentYaw = wrapAngle(*character.targetYaw);
+                character.targetYaw.reset();
+            } else {
+                currentYaw = wrapAngle(currentYaw + std::clamp(difference, -maximumTurn, maximumTurn));
+            }
         }
 
-        float& currentYaw = transform.rotation.y;
-        const float difference = wrapAngle(*character.targetYaw - currentYaw);
-        const float maximumTurn = character.turnSpeed * deltaTime;
-
-        if (std::abs(difference) <= maximumTurn) {
-            currentYaw = wrapAngle(*character.targetYaw);
-            character.targetYaw.reset();
-        } else {
-            currentYaw = wrapAngle(currentYaw + std::clamp(difference, -maximumTurn, maximumTurn));
-        }
+        transform.rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, character.yaw);
     });
 }
 
@@ -141,11 +142,12 @@ Vec3 getCharacterVisualCentre(const World& world, Entity character, float alpha)
 }
 
 /*
-* The model's own forward axis is at modelForwardYaw from +Z, and the entity's yaw turns it further, so the facing is the
-* sum of the two. Using the drawn (interpolated) yaw keeps anything aimed along it, like a carried flashlight, in step with the model.
+* The model's own forward axis is at modelForwardYaw from +Z, and the entity's rotation turns it further. Using the drawn
+* (interpolated) rotation keeps anything aimed along it, like a carried flashlight, in step with the model.
 */
 Vec3 getCharacterFacing(const World& world, Entity character, float alpha) {
-    const float yaw = getRenderTransform(world, character, alpha).rotation.y + world.get<CharacterMovement>(character).modelForwardYaw;
+    const float modelForwardYaw = world.get<CharacterMovement>(character).modelForwardYaw;
+    const Vec3 modelForward{std::sin(modelForwardYaw), 0.0f, std::cos(modelForwardYaw)};
 
-    return Vec3{std::sin(yaw), 0.0f, std::cos(yaw)};
+    return getRenderTransform(world, character, alpha).rotation.rotate(modelForward);
 }
