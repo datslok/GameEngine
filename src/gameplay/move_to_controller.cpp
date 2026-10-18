@@ -1,5 +1,6 @@
 #include "gameplay/move_to_controller.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -32,34 +33,31 @@ bool MoveToController::isMoving() const {
     return target.has_value();
 }
 
-void MoveToController::update(Vec3& position, float deltaTime) {
-    if (!std::isfinite(deltaTime) || deltaTime < 0.0f) {
-        throw std::invalid_argument(
-            "Movement delta time must be finite and nonnegative"
-        );
+/*
+* Across the ground only: the character controller deals with height (stairs, ramps), so the target's height never
+* pulls the character up or down. On the last step the speed is cut to what reaches the target exactly.
+*/
+Vec3 MoveToController::desiredVelocity(const Vec3& position, float deltaTime) const {
+    if (!target || !std::isfinite(deltaTime) || deltaTime <= 0.0f) {
+        return Vec3{};
     }
 
+    const Vec3 across{target->x - position.x, 0.0f, target->z - position.z};
+    const float distance = across.length();
+    if (distance <= arrivalDistance) {
+        return Vec3{};
+    }
+
+    return across * (std::min(speed, distance / deltaTime) / distance);
+}
+
+void MoveToController::updateArrival(const Vec3& position) {
     if (!target) {
         return;
     }
 
-    // Move only across the ground; preserve the model's height.
-    const Vec3 displacement{
-        target->x - position.x,
-        0.0f,
-        target->z - position.z
-    };
-
-    const float distance = displacement.length();
-    const float step = speed * deltaTime;
-
-    if (distance <= step) {
-        position.x = target->x;
-        position.z = target->z;
-
+    const Vec3 across{target->x - position.x, 0.0f, target->z - position.z};
+    if (across.length() <= arrivalDistance) {
         stop();
-        return;
     }
-
-    position = position + displacement * (step / distance);
 }

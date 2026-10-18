@@ -52,6 +52,12 @@ namespace {
     // How long the face normal drawn on a hovered level triangle is, in world units.
     constexpr float triangleNormalLength = 0.5f;
 
+    // How far above the clicked surface the walk target marker floats, so the surface does not hide it.
+    constexpr float markerLift = 0.02f;
+
+    // A MOBA unit's ground acceleration: high enough to reach full speed (and stop) within a tick.
+    constexpr float mobaUnitAcceleration = 1000.0f;
+
     // The lamp field (L): a grid of 6 x 7 = 42 lamps, 5 units apart, centred on the ground and offset half a step so no
     // lamp lands in the spinning objects, on the duck or in the free camera's face. 42 is well past the shader's 16 point
     // light seats and 4 shadows.
@@ -92,8 +98,6 @@ namespace {
     constexpr float wallHeight = 2.5f;
     constexpr float wallThickness = 0.3f;
     constexpr float doorwayHalfWidth = 0.75f;
-    constexpr int stairSteps = 5;
-    constexpr float stairRise = 0.25f;
     constexpr float stairRun = 0.5f;
     constexpr float gentleSlopeDegrees = 20.0f;
     constexpr float steepSlopeDegrees = 50.0f;
@@ -136,10 +140,10 @@ namespace {
         }
 
         // Stairs on the -x half, rising towards +z from z = 1; each step is a solid block from the slab up to its tread.
-        const float stairsEnd = 1.0f + stairRun * static_cast<float>(stairSteps);
-        for (int step = 0; step < stairSteps; ++step) {
+        const float stairsEnd = 1.0f + stairRun * static_cast<float>(obstacleCourseStairSteps);
+        for (int step = 0; step < obstacleCourseStairSteps; ++step) {
             const float start = 1.0f + stairRun * static_cast<float>(step);
-            const float top = obstacleCourseFloorTop + stairRise * static_cast<float>(step + 1);
+            const float top = obstacleCourseFloorTop + obstacleCourseStairRise * static_cast<float>(step + 1);
             course.parts.push_back(courseBlock(cube, stone, Vec3{-2.0f, (obstacleCourseFloorTop + top) * 0.5f, (start + stairsEnd + 2.5f) * 0.5f},
                                                Vec3{1.0f, (top - obstacleCourseFloorTop) * 0.5f, (stairsEnd + 2.5f - start) * 0.5f}));
         }
@@ -295,7 +299,9 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Change this configuration to use another compatible static model. Size and speeds keep CharacterConfig's defaults.
     const CharacterConfig playerConfig{
         .modelPath = "assets/models/Duck.glb",
-        .modelForwardYaw = radiansFromDegrees(90.0f)
+        .modelForwardYaw = radiansFromDegrees(90.0f),
+        // A MOBA unit starts and stops at once, so it arrives exactly where it was sent; a little wider than a hero.
+        .controller = CharacterControllerSettings{.radius = 0.5f, .groundAcceleration = mobaUnitAcceleration}
     };
 
     const Model& model = assets.loadModel(playerConfig.modelPath);
@@ -313,7 +319,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     // Slightly above the ground to avoid overlapping surfaces.
     Transform markerPlacement;
-    markerPlacement.position = Vec3{0.0f, 0.02f, 0.0f};
+    markerPlacement.position = Vec3{0.0f, markerLift, 0.0f};
 
     destinationMarker = world.create();
     world.add(destinationMarker, markerPlacement);
@@ -387,6 +393,21 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
                                   "  TESTED " + std::to_string(levelHoverStats.tested) +
                                   "  CELLS " + std::to_string(levelHoverStats.cellsWalked);
     debugText(debug, debugReadoutLine(5), debugReadoutTextHeight, levelLine, colliderDebugColour);
+
+    // The duck's character controller: what it stands on (a line along the ground normal at its feet), how steep that is,
+    // and how many substeps its last move took.
+    if (world.isAlive(player)) {
+        const CharacterController& controller = world.get<CharacterController>(player);
+        const Vec3 feet = getRenderTransform(world, player, alpha).position;
+        if (controller.grounded) {
+            debug.line(feet, feet + controller.groundNormal * triangleNormalLength, colliderDebugColour);
+        }
+        const int slopeDegrees = static_cast<int>(std::lround(degreesFromRadians(std::acos(std::clamp(controller.groundNormal.y, -1.0f, 1.0f)))));
+        const std::string duckLine = std::string("DUCK ") + (controller.grounded ? "GROUNDED" : "AIRBORNE") +
+                                     "  SLOPE " + std::to_string(slopeDegrees) +
+                                     "  SUBSTEPS " + std::to_string(controller.lastSubsteps);
+        debugText(debug, debugReadoutLine(6), debugReadoutTextHeight, duckLine, colliderDebugColour);
+    }
 
     constexpr float markerRadius = 0.25f;
     constexpr float beamLength = 2.0f;
@@ -535,7 +556,7 @@ void DemoGame::updateFlashlight(World& world, float alpha) {
 void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     latestSimulationSeconds = simulationSeconds;
 
-    updateCharacters(world, tickSeconds);
+    updateCharacters(world, staticLevel, tickSeconds);
     updateSpinners(world, simulationSeconds);
     updateFireflies(world, simulationSeconds);
 
@@ -734,30 +755,18 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
         return;
     }
 
-    const auto hit = intersectGround(*ray, 0.0f);
-
+    // Aim at the level (the ground, or the top of a step or platform), not at a flat plane: the duck heads for the
+    // point across the ground and the character controller takes it up whatever is in the way. Off the level, nothing.
+    const std::optional<LevelHit> hit = raycast(staticLevel, *ray);
     if (!hit) {
         return;
     }
+    const Vec3& point = hit->hit.point;
 
-    const bool insideGround =
-        hit->x >= -20.0f &&
-        hit->x <= 20.0f &&
-        hit->z >= -26.0f &&
-        hit->z <= 14.0f;
+    world.get<CharacterMovement>(player).moveTo(point);
 
-    if (!insideGround) {
-        return;
-    }
-
-    world.get<CharacterMovement>(player).moveTo(*hit);
-
-    // The marker has no PreviousTransform, so it jumps straight to the new spot.
-    world.get<Transform>(destinationMarker).position = Vec3{
-        hit->x,
-        0.02f,
-        hit->z
-    };
+    // The marker has no PreviousTransform, so it jumps straight to the new spot, just above the surface so it is not hidden in it.
+    world.get<Transform>(destinationMarker).position = point + Vec3{0.0f, markerLift, 0.0f};
     world.get<ModelRenderer>(destinationMarker).visible = true;
 }
 

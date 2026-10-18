@@ -3,6 +3,7 @@
 #include "gameplay/character.h"
 #include "gameplay/firefly.h"
 #include "math/transform.h"
+#include "physics/character_controller.h"
 #include "physics/collider.h"
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
@@ -168,6 +169,51 @@ namespace {
             runFixedUpdate(game, world, tickSeconds, ticksSoFar * static_cast<double>(tickSeconds));
         }
     }
+
+    // The duck walks on the level through the character controller: sent in front of the course's stairs, then up them
+    // onto the platform, it ends up standing on top.
+    void testDuckClimbsCourse() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+        const Entity duck = game.getPlayer();
+        int ticks = 0;
+
+        world.get<CharacterMovement>(duck).moveTo(obstacleCourseOrigin + Vec3{-2.0f, 0.0f, -0.5f});
+        runTicks(game, world, 600, ticks);
+        assert(!world.get<CharacterMovement>(duck).isMoving());
+        assert(nearlyEqual(world.get<Transform>(duck).position.y, obstacleCourseFloorTop));
+
+        world.get<CharacterMovement>(duck).moveTo(obstacleCourseOrigin + Vec3{-2.0f, 0.0f, 4.5f});
+        runTicks(game, world, 600, ticks);
+        assert(!world.get<CharacterMovement>(duck).isMoving());
+        assert(nearlyEqual(world.get<Transform>(duck).position.y, obstacleCoursePlatformTop));
+        assert(world.get<CharacterController>(duck).grounded);
+    }
+
+    // A right-click on the platform aims at the platform itself (the level), not at the ground plane beneath it: the
+    // marker appears on top of it.
+    void testClickOnPlatform() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+
+        Camera& camera = game.getCamera();
+        camera.setPosition(camera.getPosition() + Vec3{17.0f, 0.0f, 4.0f});
+        const Vec3 onPlatform = obstacleCourseOrigin + Vec3{-2.0f, obstacleCoursePlatformTop, 4.5f};
+
+        Input click = mobaInput();
+        click.pressMouseButton(MouseButtonPress{MouseButton::Right, pixelOf(camera, onPlatform, Vec2{1600.0f, 900.0f}), 0});
+        click.releaseMouseButton(MouseButton::Right);
+        game.onInput(world, click);
+
+        const Vec3 marker = world.get<Transform>(game.getDestinationMarker()).position;
+        assert(std::abs(marker.x - onPlatform.x) < 0.01f && std::abs(marker.z - onPlatform.z) < 0.01f);
+        assert(marker.y > obstacleCoursePlatformTop);
+        assert(marker.y < obstacleCoursePlatformTop + 0.1f);
+    }
 }
 
 namespace {
@@ -296,6 +342,8 @@ void testDemoGame() {
     testSelection();
     testHover();
     testHoverLevel();
+    testDuckClimbsCourse();
+    testClickOnPlatform();
     testLampsToggle();
     testLampsFly();
 

@@ -24,25 +24,29 @@ std::optional<Contact> contact(const Capsule& capsule, const Vec3& a, const Vec3
         return std::nullopt;
     }
 
-    const float distance = std::sqrt(distanceSquared);
-    if (distance > coreTouchDistance) {
-        return Contact{nearest.onSecond, (nearest.onFirst - nearest.onSecond) / distance, capsule.radius - distance};
-    }
-
     const Vec3 face = (b - a).cross(c - a);
     if (face.lengthSquared() == 0.0f) {
         return std::nullopt;
     }
+    Vec3 faceNormal = face.normalized();
 
-    Vec3 normal = face.normalized();
+    const float distance = std::sqrt(distanceSquared);
+    if (distance > coreTouchDistance) {
+        const Vec3 normal = (nearest.onFirst - nearest.onSecond) / distance;
+        if (faceNormal.dot(normal) < 0.0f) {
+            faceNormal = faceNormal * -1.0f;
+        }
+        return Contact{nearest.onSecond, normal, capsule.radius - distance, 0, faceNormal};
+    }
+
     const Vec3 middle = (capsule.a + capsule.b) * 0.5f;
-    if (normal.dot(middle - a) < 0.0f) {
-        normal = normal * -1.0f;
+    if (faceNormal.dot(middle - a) < 0.0f) {
+        faceNormal = faceNormal * -1.0f;
     }
 
     // How far each end of the core is behind the plane (negative if in front); the deeper one decides.
-    const float behind = std::max({0.0f, -normal.dot(capsule.a - a), -normal.dot(capsule.b - a)});
-    return Contact{nearest.onSecond, normal, behind + capsule.radius};
+    const float behind = std::max({0.0f, -faceNormal.dot(capsule.a - a), -faceNormal.dot(capsule.b - a)});
+    return Contact{nearest.onSecond, faceNormal, behind + capsule.radius, 0, faceNormal};
 }
 
 /*

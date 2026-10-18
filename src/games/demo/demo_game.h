@@ -24,6 +24,11 @@
 inline const Vec3 obstacleCourseOrigin{17.0f, 0.0f, -4.0f};
 inline constexpr float obstacleCourseFloorTop = 0.1f;
 
+// The course's stairs: this many steps, each this much higher, up to a platform at obstacleCoursePlatformTop.
+inline constexpr int obstacleCourseStairSteps = 5;
+inline constexpr float obstacleCourseStairRise = 0.25f;
+inline constexpr float obstacleCoursePlatformTop = obstacleCourseFloorTop + obstacleCourseStairRise * obstacleCourseStairSteps;
+
 /*
 * The demo scene: spinning objects, a ground plane and a duck you can steer by clicking.
 * F1/F2/F3 switch between first person, MOBA and free camera when debug mode switching is on.

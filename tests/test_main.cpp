@@ -63,6 +63,8 @@ void testUniformGrid();
 void testCollisionScene();
 void testTriangleContact();
 void testStaticLevel();
+void testCharacterController();
+void testAngles();
 
 int main(){
     testPixelBuffer();
@@ -128,6 +130,8 @@ int main(){
     testCollisionScene();
     testTriangleContact();
     testStaticLevel();
+    testCharacterController();
+    testAngles();
 
     std::cout << "All tests passed!\n";
     return 0;
