@@ -39,7 +39,7 @@ void testModelBounds() {
     model.parts = {first, second};
 
     // Bounds must include both instances and their transforms.
-    const ModelBounds bounds = model.getBounds();
+    const Aabb bounds = model.getBounds();
 
     assertVector(bounds.minimum, Vec3{-5.0f, -1.0f, -1.0f});
     assertVector(bounds.maximum, Vec3{ 4.0f,  3.0f,  1.0f});
@@ -54,7 +54,7 @@ void testModelBounds() {
         part.transform = normalization * part.transform;
     }
 
-    const ModelBounds normalizedBounds = normalized.getBounds();
+    const Aabb normalizedBounds = normalized.getBounds();
 
     assertVector(
         normalizedBounds.centre(),

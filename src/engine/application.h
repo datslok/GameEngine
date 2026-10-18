@@ -57,7 +57,7 @@ private:
     AssetManager assets;
 
     // Each uploaded mesh's bounds, indexed like MeshHandle, for the bounding box view.
-    std::vector<ModelBounds> boundsByMesh;
+    std::vector<Aabb> boundsByMesh;
 
     // This frame's wireframe shapes, cleared every frame.
     DebugDraw debugDraw;

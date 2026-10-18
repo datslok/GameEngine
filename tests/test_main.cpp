@@ -51,6 +51,8 @@ void testDebugText();
 void testDither();
 void testSphereMesh();
 void testFirefly();
+void testClosestPoints();
+void testOverlap();
 
 int main(){
     testPixelBuffer();
@@ -104,6 +106,8 @@ int main(){
     testDither();
     testSphereMesh();
     testFirefly();
+    testClosestPoints();
+    testOverlap();
 
     std::cout << "All tests passed!\n";
     return 0;

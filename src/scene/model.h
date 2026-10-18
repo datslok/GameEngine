@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/pixel.h"
+#include "math/aabb.h"
 #include "math/mat4.h"
 #include "scene/mesh.h"
 #include "math/vec3.h"
@@ -40,21 +41,13 @@ struct ModelPart {
     Mat4 transform = Mat4::identity();
 };
 
-struct ModelBounds {
-    Vec3 minimum;
-    Vec3 maximum;
-
-    Vec3 centre() const;
-    Vec3 size() const;
-};
-
 // The smallest axis-aligned box around a mesh's vertices, in its own coordinates. Empty meshes give a zero box at the origin.
-ModelBounds meshBounds(const Mesh& mesh);
+Aabb meshBounds(const Mesh& mesh);
 
 struct Model {
     std::vector<ModelPart> parts;
 
-    ModelBounds getBounds() const;
+    Aabb getBounds() const;
 
     // Centre the model and scale its longest side to targetSize.
     Mat4 getNormalizationMatrix(float targetSize = 2.0f) const;

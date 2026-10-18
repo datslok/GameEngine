@@ -104,14 +104,14 @@ namespace {
 
     // A box's bounding sphere: its centre moved by the model matrix, its half-diagonal grown by the largest scale.
     void testBoundingSphere() {
-        const ModelBounds cube{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}};
+        const Aabb cube{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}};
         const BoundingSphere sphere = boundingSphere(cube, Mat4::translation(5.0f, 0.0f, 0.0f) * Mat4::scaling(2.0f, 1.0f, 1.0f));
 
         assert(nearlyEqual(sphere.centre.x, 5.0f) && nearlyEqual(sphere.centre.y, 0.0f));
         assert(nearlyEqual(sphere.radius, std::sqrt(3.0f) * 2.0f));
 
         // An off-centre box keeps its own centre.
-        const ModelBounds raised{Vec3{0.0f, 2.0f, 0.0f}, Vec3{2.0f, 4.0f, 2.0f}};
+        const Aabb raised{Vec3{0.0f, 2.0f, 0.0f}, Vec3{2.0f, 4.0f, 2.0f}};
         assert(nearlyEqual(boundingSphere(raised, Mat4::identity()).centre.y, 3.0f));
     }
 
@@ -125,7 +125,7 @@ namespace {
     // Draws get their spheres from their mesh's bounds; a mesh with unknown bounds gets none and is never culled.
     void testDrawsGetSpheres() {
         std::vector<DrawItem> draws = {drawAt(0.0f, 0.0f, -5.0f, 0), drawAt(0.0f, 0.0f, 5.0f, 9)};
-        const std::vector<ModelBounds> bounds = {ModelBounds{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}};
+        const std::vector<Aabb> bounds = {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}};
 
         attachBoundingSpheres(draws, bounds);
 
@@ -137,7 +137,7 @@ namespace {
     // The camera's view skips what it cannot see; draws without known bounds are always kept.
     void testCameraSkipsWhatItCannotSee() {
         std::vector<DrawItem> draws = {drawAt(0.0f, 0.0f, -5.0f, 0), drawAt(0.0f, 0.0f, 5.0f, 0), drawAt(0.0f, 0.0f, 5.0f, 9)};
-        attachBoundingSpheres(draws, {ModelBounds{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
+        attachBoundingSpheres(draws, {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
 
         const std::vector<std::size_t> visible = visibleDraws(draws, Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne));
 
@@ -149,7 +149,7 @@ namespace {
     // passes pick casters with the light's own view, never the camera's.
     void testOffScreenObjectsStillCastShadows() {
         std::vector<DrawItem> draws = {drawAt(0.0f, 0.0f, 5.0f, 0)};
-        attachBoundingSpheres(draws, {ModelBounds{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
+        attachBoundingSpheres(draws, {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
 
         const Frustum camera = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne);
         assert(visibleDraws(draws, camera).empty());

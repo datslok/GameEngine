@@ -45,7 +45,7 @@ namespace {
     // A box is its 12 edges. Its corners go through the transform, so it can follow a rotated, scaled object.
     void testBoxHasTwelveEdgesThroughItsCorners() {
         DebugDraw debug;
-        const ModelBounds bounds{Vec3{-1.0f, 0.0f, -2.0f}, Vec3{1.0f, 3.0f, 2.0f}};
+        const Aabb bounds{Vec3{-1.0f, 0.0f, -2.0f}, Vec3{1.0f, 3.0f, 2.0f}};
         debug.box(bounds, Mat4::translation(10.0f, 0.0f, 0.0f), green);
 
         assert(debug.getLines().size() == 12);
@@ -114,7 +114,7 @@ namespace {
         Mesh mesh;
         mesh.vertices = {Vec4{1.0f, -2.0f, 0.5f, 1.0f}, Vec4{-3.0f, 4.0f, 0.0f, 1.0f}, Vec4{0.0f, 0.0f, -1.0f, 1.0f}};
 
-        const ModelBounds bounds = meshBounds(mesh);
+        const Aabb bounds = meshBounds(mesh);
 
         assert(nearlyEqual(bounds.minimum, Vec3{-3.0f, -2.0f, -1.0f}));
         assert(nearlyEqual(bounds.maximum, Vec3{1.0f, 4.0f, 0.5f}));
@@ -128,9 +128,9 @@ namespace {
         draws[0].model = Mat4::translation(5.0f, 0.0f, 0.0f);
         draws[1].mesh = MeshHandle{1};
 
-        const std::vector<ModelBounds> bounds = {
-            ModelBounds{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}},
-            ModelBounds{Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 2.0f, 2.0f}}
+        const std::vector<Aabb> bounds = {
+            Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}},
+            Aabb{Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 2.0f, 2.0f}}
         };
 
         DebugDraw debug;
