@@ -66,6 +66,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         createPipeline();
         createShadowResources();
         createToneMapResources();
+        bloom = std::make_unique<BloomRenderer>(device);
         createScreenPipelines();
         createWhiteTexture();
     }
@@ -473,7 +474,7 @@ void GpuRenderer::createScreenPipelines() {
 
     try {
         vertexShader = loadShader(device, "assets/shaders/fullscreen_triangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-        fragmentShader = loadShader(device, "assets/shaders/tone_map.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+        fragmentShader = loadShader(device, "assets/shaders/tone_map.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 2);
 
         SDL_GPUColorTargetDescription colourTarget{};
         colourTarget.format = SDL_GetGPUSwapchainTextureFormat(device, window);
@@ -588,6 +589,7 @@ void GpuRenderer::cleanup() noexcept {
         textures.clear();
         whiteTexture.reset();
         debugLines.reset();
+        bloom.reset();
 
         if (depthTexture != nullptr) {
             SDL_ReleaseGPUTexture(device, depthTexture);
@@ -739,7 +741,10 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
         SDL_EndGPURenderPass(pass);
         pass = nullptr;
 
-        beginToneMapPass(swapchainTexture, settings.toneMapping);
+        // The scattered light, from the finished scene image, before tone mapping mixes it in.
+        const BloomComposite bloomMix = bloom->draw(commands, sceneColour, frameWidth, frameHeight, settings.bloom);
+
+        beginToneMapPass(swapchainTexture, settings.toneMapping, bloomMix);
 
         // Last, so they are drawn over the finished image, in exactly their own colours.
         debugLines->draw(commands, pass, viewProjection, frameWidth, frameHeight);
@@ -1042,10 +1047,11 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
 /*
 * Starts the final pass, into the swapchain image, and fills it: the full-screen triangle runs the tone mapping shader on
 * every pixel. The pass stays open for the debug lines. The image is wholly overwritten, so its old contents are not loaded.
-* The display output (chosen before the frame) gives the curve's peak, the white level and whether to dither.
+* The display output (chosen before the frame) gives the curve's peak, the white level and whether to dither. Without
+* bloom this frame the shader never reads its texture, but the slot must still hold one, so the scene stands in.
 */
-void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings) {
-    const ToneMapUniformData toneMapping = packToneMapping(settings, displayOutput);
+void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings, const BloomComposite& bloomMix) {
+    const ToneMapUniformData toneMapping = packToneMapping(settings, displayOutput, bloomMix);
 
     SDL_GPUColorTargetInfo target{};
     target.texture = swapchainTexture;
@@ -1061,10 +1067,15 @@ void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneM
     SDL_BindGPUGraphicsPipeline(pass, toneMapPipeline);
     SDL_PushGPUFragmentUniformData(commands, 0, &toneMapping, static_cast<Uint32>(sizeof(toneMapping)));
 
-    SDL_GPUTextureSamplerBinding sceneBinding{};
-    sceneBinding.texture = sceneColour;
-    sceneBinding.sampler = sceneSampler;
-    SDL_BindGPUFragmentSamplers(pass, 0, &sceneBinding, 1);
+    SDL_GPUTexture* bloomTexture = bloom->getResult();
+
+    // Slot 0: the scene, exact texels. Slot 1: the bloom, filtered (it is half the screen's size).
+    SDL_GPUTextureSamplerBinding bindings[2]{};
+    bindings[0].texture = sceneColour;
+    bindings[0].sampler = sceneSampler;
+    bindings[1].texture = bloomTexture != nullptr ? bloomTexture : sceneColour;
+    bindings[1].sampler = bloom->getSampler();
+    SDL_BindGPUFragmentSamplers(pass, 0, bindings, 2);
 
     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 }

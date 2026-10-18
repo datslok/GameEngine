@@ -72,6 +72,7 @@ void testGrenade();
 void testProfiler();
 void testToneMapping();
 void testToneMapUniforms();
+void testBloom();
 void testDisplayOutput();
 
 int main(){
@@ -147,6 +148,7 @@ int main(){
     testProfiler();
     testToneMapping();
     testToneMapUniforms();
+    testBloom();
     testDisplayOutput();
 
     std::cout << "All tests passed!\n";

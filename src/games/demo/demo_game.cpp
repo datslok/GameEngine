@@ -25,6 +25,11 @@ namespace {
     constexpr float nightAmbient = 0.012f;
     constexpr float moonlightIntensity = 0.06f;
 
+    // How brightly the moon sphere's surface glows (times its tint). Only the object: the moonlight above is separate.
+    // Real light sources are far brighter than what they light, and well past white the tone mapping curve turns them
+    // white-hot while the bloom's few percent of scattered light becomes a visible halo.
+    constexpr float moonGlowBrightness = 6.0f;
+
     // Where the duck holds the flashlight in MOBA mode, and how far it tilts the beam down (radians, about 20 degrees).
     constexpr float flashlightHeight = 1.2f;
     constexpr float flashlightTilt = 0.35f;
@@ -124,6 +129,7 @@ namespace {
     constexpr float floodlightSourceRadius = 1.5f;
     constexpr float floodlightEmitterRadius = 0.15f;  // a big glowing face, so soft-edged shadows
     const Vec3 floodlightColour{1.0f, 0.97f, 0.92f};  // a cool white, unlike the warm flashlight
+    constexpr float floodlightGlowBrightness = 20.0f; // the lamp heads' glowing surface (times the colour), not the light
     const Vec3 floodlightHeadHalfSize{0.4f, 0.2f, 0.4f};
 
     /*
@@ -282,7 +288,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     Material moonGlow;
     moonGlow.colour = Pixel{0, 0, 0};
     moonGlow.specularStrength = 0.0f;
-    moonGlow.emissive = Vec3{0.69f, 0.79f, 1.0f};
+    moonGlow.emissive = Vec3{0.69f, 0.79f, 1.0f} * moonGlowBrightness;
 
     Transform moonPlacement;
     moonPlacement.scale = Vec3{moonRadius, moonRadius, moonRadius};
@@ -968,7 +974,7 @@ void DemoGame::toggleFloodlights(World& world) {
     Material glow;
     glow.colour = Pixel{0, 0, 0};
     glow.specularStrength = 0.0f;
-    glow.emissive = floodlightColour;
+    glow.emissive = floodlightColour * floodlightGlowBrightness;
 
     for (const Vec3& foot : floodlightPoleFeet()) {
         const Vec3 towardsMiddle = Vec3{obstacleCourseOrigin.x - foot.x, 0.0f, obstacleCourseOrigin.z - foot.z};

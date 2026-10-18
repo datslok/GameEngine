@@ -1,6 +1,7 @@
 #pragma once
 
 #include "math/mat4.h"
+#include "render/gpu/bloom_renderer.h"
 #include "render/gpu/gpu_mesh.h"
 #include "render/gpu/gpu_texture.h"
 #include "render/gpu/light_uniforms.h"
@@ -103,7 +104,7 @@ private:
     void drawShadows(const FrameDescription& frame, const std::vector<ShadowTile>& tiles);
     void beginMainPass();
     void drawMesh(MeshHandle mesh, const Mat4& model, const Material& material);
-    void beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings);
+    void beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
     void endFrame();
     void abandonFrame() noexcept;
 
@@ -122,7 +123,11 @@ private:
 
     void ensureFrameTextures(Uint32 width, Uint32 height);
 
-    // The final pass: reads the scene image (exact texels, no filtering) and writes the tone mapped screen image.
+    // Between the main pass and tone mapping: the scene's scattered light, blurred into half-size float textures.
+    std::unique_ptr<BloomRenderer> bloom;
+
+    // The final pass: reads the scene image (exact texels, no filtering), mixes in the bloom and writes the tone mapped
+    // screen image.
     SDL_GPUSampler* sceneSampler = nullptr;
     SDL_GPUGraphicsPipeline* toneMapPipeline = nullptr;
     void createToneMapResources();
