@@ -204,7 +204,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
     Material yellow;
-    // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 6.
+    // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 8.
     yellow.colour = Pixel{0, 0, 0};
     yellow.specularStrength = 0.0f;
     yellow.emissive = Vec3{1.0f, 0.71f, 0.022f};
