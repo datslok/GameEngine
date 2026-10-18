@@ -53,37 +53,57 @@ MeshHandle AssetManager::loadMesh(const std::string& path, MeshLoadOptions optio
     return handle;
 }
 
-TextureHandle AssetManager::loadTexture(const std::string& path, bool flipVertically) {
-    const auto key = std::make_pair(path, flipVertically);
+TextureHandle AssetManager::loadTexture(const std::string& path, bool flipVertically, TextureEncoding encoding) {
+    const auto key = std::make_tuple(path, flipVertically, encoding);
 
     if (const auto found = texturesByPath.find(key); found != texturesByPath.end()) {
         return found->second;
     }
 
-    const TextureHandle handle = addTexture(loadImage(path, flipVertically));
+    ImageData image = loadImage(path, flipVertically);
+    image.encoding = encoding;
+
+    const TextureHandle handle = addTexture(std::move(image));
     texturesByPath.emplace(key, handle);
 
     return handle;
 }
 
-TextureHandle AssetManager::loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically) {
+TextureHandle AssetManager::loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically, TextureEncoding encoding) {
     if (!encodedImage) {
         throw std::invalid_argument("Cannot load a texture from a null image buffer");
     }
 
-    if (const auto found = texturesByBuffer.find(encodedImage.get()); found != texturesByBuffer.end()) {
+    const auto key = std::make_pair(encodedImage.get(), encoding);
+
+    if (const auto found = texturesByBuffer.find(key); found != texturesByBuffer.end()) {
         return found->second;
     }
 
-    const TextureHandle handle = addTexture(loadImageFromMemory(
-        std::span<const std::uint8_t>{encodedImage->data(), encodedImage->size()},
-        flipVertically
-    ));
+    ImageData image = loadImageFromMemory(std::span<const std::uint8_t>{encodedImage->data(), encodedImage->size()}, flipVertically);
+    image.encoding = encoding;
 
-    texturesByBuffer.emplace(encodedImage.get(), handle);
+    const TextureHandle handle = addTexture(std::move(image));
+    texturesByBuffer.emplace(key, handle);
     keptBuffers.push_back(std::move(encodedImage));
 
     return handle;
+}
+
+TextureHandle AssetManager::loadTexture(const TextureSource& source, bool flipVertically, TextureEncoding encoding) {
+    if (!source.path.empty() && source.embeddedImage) {
+        throw std::invalid_argument("A texture must come from either a file or an embedded image");
+    }
+
+    if (!source.path.empty()) {
+        return loadTexture(source.path, flipVertically, encoding);
+    }
+
+    if (source.embeddedImage) {
+        return loadTexture(source.embeddedImage, flipVertically, encoding);
+    }
+
+    return TextureHandle{};
 }
 
 TextureHandle AssetManager::addTexture(ImageData image) {
@@ -106,19 +126,18 @@ const Model& AssetManager::loadModel(const std::string& path) {
     return modelsByPath.emplace(path, loadGltf(path)).first->second;
 }
 
+/*
+* The colour texture holds colours (sRGB) and the metallic-roughness texture numbers (linear). Both are read with the
+* same UVs, so they share the flip.
+*/
 Material AssetManager::makeMaterial(const MaterialSource& source) {
-    if (!source.texturePath.empty() && source.embeddedImage) {
-        throw std::invalid_argument("Material must use either a file or an embedded image");
-    }
-
     Material material;
     material.colour = source.colour;
-
-    if (!source.texturePath.empty()) {
-        material.texture = loadTexture(source.texturePath, source.flipTextureVertically);
-    } else if (source.embeddedImage) {
-        material.texture = loadTexture(source.embeddedImage, source.flipTextureVertically);
-    }
+    material.metallic = source.metallic;
+    material.roughness = source.roughness;
+    material.emissive = source.emissive;
+    material.texture = loadTexture(source.colourTexture, source.flipTextureVertically, TextureEncoding::Srgb);
+    material.metallicRoughnessTexture = loadTexture(source.metallicRoughnessTexture, source.flipTextureVertically, TextureEncoding::Linear);
 
     return material;
 }

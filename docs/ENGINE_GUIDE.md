@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 5 (collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
+**Covers:** phases 0 to 5 and phase 6's physically based materials (collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
 
 ---
 
@@ -337,31 +337,48 @@ The comparison uses cosines rather than angles (a bigger cosine means closer to 
 
 The demo's flashlight is held in the right hand, a little to the side of and below the eye, and aimed at the middle of the view. If it sat exactly at the eye, every shadow it casts would hide straight behind the thing casting it, out of sight. A light that follows the camera is placed every frame in `onUpdate`, not in ticks: the camera moves per frame, and updating the light per tick would make the beam trail behind mouse look. When the duck carries it in MOBA mode, it uses the duck's interpolated pose, for the same reason moving lights are interpolated.
 
-### Specular: Blinn-Phong highlights
+### Physically based materials: what a surface does with light
 
-Shiny surfaces also reflect light like a blurry mirror, producing a highlight that **moves when you move**. Picture the surface as countless tiny mirror facets tilted randomly around the normal. A facet reflects light from the light into your eye only if it is tilted halfway between them, along the **halfway vector** `H = normalize(L + V)`, where `V` points towards the camera. The question becomes how many facets point along `H`:
+Every pixel answers one question: of the light arriving from direction `L`, how much leaves towards the eye along `V`? The function that answers it is the **BRDF** (bidirectional reflectance distribution function), `f(L, V)`, and a light's contribution is `f · E · (N · L)`, with `E` the light's irradiance and `N · L` Lambert's cosine from above. The engine uses the model glTF files are authored for, **metallic-roughness**, so a material is just three numbers (plus textures that vary them across the surface): a base colour, how **metallic** it is (0 or 1, in-between only for blends such as dusty metal), and how **rough** (0 a polished mirror, 1 fully matte).
+
+**Microfacets.** Up close, every surface is a landscape of tiny perfect mirrors facing in random directions. A facet can send light from `L` into the eye only if its normal lies along the **halfway vector** `H = normalize(L + V)`, by the law of reflection. That gives the specular part as a product of three factors, each answering a physical question:
 
 ```
-specular = lightRadiance * specularStrength * max(0, N · H)^shininess
+f_specular = D(H) · G(L, V) · F(V · H) / (4 (N · L)(N · V))
 ```
 
-High `shininess` (128) means most facets line up with `N`: a small, sharp highlight, like polished plastic. Low (8) is broad and dim. The highlight keeps the light's colour; it is not tinted by the surface colour, which is why highlights on red plastic are white. Materials default to slightly shiny (`specularStrength` 0.25, `shininess` 32); matte surfaces like grass set the strength to 0.
+- **D, the distribution (GGX):** what fraction of facets point along `H`? A probability density over directions, `D = α² / (π ((N·H)²(α² − 1) + 1)²)` with `α = roughness²`, normalised so the facets' area projected onto the surface equals the surface's own area. Smooth surfaces have a narrow peak (a small, bright highlight), rough ones a wide one. GGX has long tails, so highlights get the soft glow around them that measured materials show.
+- **G, shadowing and masking (Smith, height-correlated):** of those facets, how many can both the light and the eye actually see? At grazing angles the bumps hide each other, like a field of tall grass seen edge-on. The height-correlated form counts a facet hidden from both once, not twice: a deep valley tends to hide from both together.
+- **F, Fresnel (Schlick's fit):** how much does a mirror reflect rather than let in? It follows from Maxwell's equations at the boundary; Schlick's `F = F₀ + (1 − F₀)(1 − V·H)⁵` fits them closely. `F₀`, the reflectance head-on, is about 4% for glass, plastic, stone and paint (refractive index 1.5), and every surface becomes a mirror at grazing incidence: a lake at sunset, a wet road ahead of you.
+- The `4 (N·L)(N·V)` is geometry: the change of variables from facet normals to reflected directions, and the projection onto the surface.
+
+**Diffuse and metals.** Light that gets *into* a non-metal scatters around under the surface and comes back out in all directions: the diffuse part, Lambert's `colour / π`. It only gets what the mirror part did not reflect, so it is weighted by one minus the specular albedo, and energy is conserved. Metals are different: their free electrons absorb refracted light within nanometres, so **a metal has no diffuse part at all**, and its colour is in its reflection instead (gold's `F₀` is about 1.00, 0.77, 0.33). glTF's metallic blends the two: `F₀ = mix(0.04, baseColour, metallic)`, diffuse colour `baseColour · (1 − metallic)`. That is why highlights on red plastic are white (4% of white light), but on gold they are gold.
+
+**Light lost between facets.** The model above counts only light that bounces off one facet and leaves. On a rough surface, much of the light reflected by one facet hits another and bounces again before escaping; the single-bounce model drops it, so rough metals come out too dark (a perfectly white, fully rough metal returned only 33 to 64% of the light, depending on the view). The fix (Turquin 2019) scales the specular part by `1 + F₀ (1 / E − 1)`, where `E` is how much a perfect mirror's facets return from that view: exactly the missing share for a white metal, and close for coloured ones. `E` depends on the view angle and the roughness only, and has no formula, so the engine **integrates it numerically at start-up** into a small 32 × 32 table (`buildBrdfTable`): for each entry it averages 4096 reflected directions, drawn more often where `D` is large (importance sampling, the Monte Carlo trick of sampling in proportion to the integrand so `D` cancels) along a Hammersley sequence (evenly spread points, which converge much faster than random ones). It takes about 85 ms in the release build. The shader reads the table once per pixel.
+
+**The white furnace test.** The physics check in the tests: put a surface that absorbs nothing inside a furnace that glows the same in every direction, and it must send back exactly the light it receives, from every view, at every roughness; any more would create energy, any less would mean the model loses it. The tests integrate the shader's BRDF numerically over the whole sky and check that a white metal and a white non-metal both return 1 (to within 2%). Other tests check that GGX integrates to 1, that swapping the light and the eye changes nothing (Helmholtz reciprocity), and Fresnel's two limits.
+
+**Units.** A textbook BRDF has the `1 / π` in Lambert's term, which would make every scene 3.14 times darker than the earlier shading. The engine instead multiplies the whole BRDF by π, which is the same as saying a light's value is the irradiance it gives a surface facing it: a white matte surface lit head-on by a light of 1 shows 1, so lights and exposure tuned before kept their look. Unreal and Frostbite fold π into their light units the same way.
+
+**Ambient.** Ambient light comes from every direction alike, which is the furnace situation, so a surface returns exactly its albedo of it: the weighted diffuse colour plus the specular albedo from the table. Without the second term a metal would be pitch black wherever only ambient light reaches it. Real surroundings are not uniform, so this is a stand-in until reflections of the scene exist; global illumination (phase 6) will replace the diffuse half.
+
+**Textures.** glTF stores roughness and metallic per texel in one texture's green and blue channels. Those are plain numbers, not colours, so unlike colour images they must not be sRGB-decoded: they are the engine's first **linear** textures (`TextureEncoding::Linear`, uploaded as plain `UNORM`). The same file asked for both ways becomes two textures.
+
+The demo's teapot is real gold (metallic, roughness 0.35); grass, stone and the course have roughnesses to match the old shininess settings; glowing things (the moon, bulbs, floodlight heads, the marker) are black and fully rough, so lights reflect off them too faintly to see.
 
 ### Emissive: surfaces that glow
 
 Everything above is light a surface *reflects*. A glowing surface, like the moon, a lamp or a screen, also *emits* its own, which does not depend on any light reaching it. The material's `emissive` colour is simply added at the end. Give a glowing object a black base colour and it shows only its emitted light, so it looks the same day or night (the demo's moon and its MOBA marker).
 
-Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. And a glowing object has a hard edge: the soft halo you expect around a bright light comes from a post-processing effect (bloom), which is on the roadmap.
+Emissive surfaces do not light their surroundings: the moon's glow is just its own colour, and the actual moonlight comes from a separate `DirectionalLight`. The soft halo you expect around a bright light comes from a post-processing effect, bloom.
 
 ### The whole sum
 
 ```
-colour = albedo * (ambient + Σ diffuse) + Σ specular + emissive
+colour = ambient · (diffuse colour + specular albedo) + Σ (diffuse + specular) per light + emissive
 ```
 
-Light adds up linearly, like superposing intensities, so every light simply adds its share. `albedo` is the surface colour: the texture times the material colour. A surface with no usable normal gets ambient and emissive light only.
-
-Totals above 1 clip to white for now. Handling that gracefully (tone mapping) is a later topic. The whole sum happens in linear light (see gamma, above).
+Light adds up linearly, like superposing intensities, so every light simply adds its share. A surface with no usable normal gets ambient and emissive light only. The whole sum happens in linear light (see gamma, above), into a floating-point image that tone mapping turns into the screen image afterwards.
 
 ### Shadows: a depth photo from the light
 

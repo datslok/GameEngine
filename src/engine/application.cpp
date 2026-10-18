@@ -122,7 +122,7 @@ void Application::prepareNewResources() {
     while (renderer.getTextureCount() < assets.getTextureCount()) {
         const TextureHandle next{static_cast<std::uint32_t>(renderer.getTextureCount())};
         const ImageData& image = assets.getTexture(next);
-        renderer.uploadTexture(image.width, image.height, std::span<const Uint8>{image.pixels.data(), image.pixels.size()});
+        renderer.uploadTexture(image.width, image.height, std::span<const Uint8>{image.pixels.data(), image.pixels.size()}, image.encoding);
     }
 }
 

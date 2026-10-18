@@ -13,12 +13,14 @@ namespace {
         return nearlyEqual(actual[0], x) && nearlyEqual(actual[1], y) && nearlyEqual(actual[2], z) && nearlyEqual(actual[3], w);
     }
 
-    // Most surfaces are slightly shiny, so that is the default; matte materials set the strength to 0.
-    void testDefaultMaterialIsSlightlyShiny() {
+    // A non-metal of middling roughness by default (the earlier default highlight, shininess 32, matches roughness 0.5),
+    // with no metallic-roughness texture.
+    void testDefaultMaterialIsRoughPlastic() {
         const Material material;
 
-        assert(nearlyEqual(material.specularStrength, 0.25f));
-        assert(nearlyEqual(material.shininess, 32.0f));
+        assert(nearlyEqual(material.metallic, 0.0f));
+        assert(nearlyEqual(material.roughness, 0.5f));
+        assert(!material.metallicRoughnessTexture.isValid());
     }
 
     // Byte colours are sRGB like image files, so the shader gets them decoded to linear light, with full opacity.
@@ -31,20 +33,32 @@ namespace {
         assert(nearlyEqual(data.baseColour, 1.0f, 0.2158f, 0.0f, 1.0f));
     }
 
-    void testDefaultSpecularIsPacked() {
+    void testDefaultSurfaceIsPacked() {
         const MaterialUniformData data = packMaterial(Material{});
 
-        assert(nearlyEqual(data.specular, 0.25f, 32.0f, 0.0f, 0.0f));
+        assert(nearlyEqual(data.surface, 0.0f, 0.5f, 0.0f, 0.0f));
     }
 
-    void testCustomSpecularIsPacked() {
+    // Metallic and roughness are plain numbers, not colours, so they are packed as they are.
+    void testCustomSurfaceIsPacked() {
         Material material;
-        material.specularStrength = 0.0f;
-        material.shininess = 128.0f;
+        material.metallic = 1.0f;
+        material.roughness = 0.3f;
 
         const MaterialUniformData data = packMaterial(material);
 
-        assert(nearlyEqual(data.specular, 0.0f, 128.0f, 0.0f, 0.0f));
+        assert(nearlyEqual(data.surface, 1.0f, 0.3f, 0.0f, 0.0f));
+    }
+
+    // Both are shares, 0..1: values outside are clamped rather than shaded as nonsense.
+    void testSurfaceIsClamped() {
+        Material material;
+        material.metallic = 2.0f;
+        material.roughness = -1.0f;
+
+        const MaterialUniformData data = packMaterial(material);
+
+        assert(nearlyEqual(data.surface, 1.0f, 0.0f, 0.0f, 0.0f));
     }
 }
 
@@ -70,8 +84,9 @@ namespace {
 void testMaterialUniforms() {
     testDefaultMaterialDoesNotGlow();
     testEmissiveIsPacked();
-    testDefaultMaterialIsSlightlyShiny();
+    testDefaultMaterialIsRoughPlastic();
     testColourIsConverted();
-    testDefaultSpecularIsPacked();
-    testCustomSpecularIsPacked();
+    testDefaultSurfaceIsPacked();
+    testCustomSurfaceIsPacked();
+    testSurfaceIsClamped();
 }

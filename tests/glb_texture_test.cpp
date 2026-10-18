@@ -15,14 +15,14 @@ void testGlbTextures() {
 
     const MaterialSource& material = model.parts[0].material;
 
-    assert(material.texturePath.empty());
-    assert(material.embeddedImage != nullptr);
-    assert(!material.embeddedImage->empty());
+    assert(material.colourTexture.path.empty());
+    assert(material.colourTexture.embeddedImage != nullptr);
+    assert(!material.colourTexture.embeddedImage->empty());
     assert(!material.flipTextureVertically);
 
     // loadGltf() has already freed its cgltf data.
     // The material must still own valid image bytes.
-    const auto& bytes = *material.embeddedImage;
+    const auto& bytes = *material.colourTexture.embeddedImage;
 
     const ImageData embedded = loadImageFromMemory(
         std::span<const std::uint8_t>{

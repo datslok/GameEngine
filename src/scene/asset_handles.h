@@ -27,3 +27,13 @@ struct TextureTag;
 
 using MeshHandle = AssetHandle<MeshTag>;
 using TextureHandle = AssetHandle<TextureTag>;
+
+/*
+* How a texture's bytes are meant. Colour images (photos, painted colour maps) are stored sRGB-encoded, which spends more
+* of the 256 steps on dark shades where the eye notices them; the GPU decodes them to linear light as it samples.
+* Data images (roughness and metallic, later normal maps) hold plain numbers 0..1 and must be read exactly as stored.
+*/
+enum class TextureEncoding {
+    Srgb,
+    Linear
+};

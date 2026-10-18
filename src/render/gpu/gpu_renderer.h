@@ -56,8 +56,9 @@ public:
     bool render(const FrameDescription& frame, const RenderSettings& settings);
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
+    // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear).
     void uploadMesh(const IndexedMesh& mesh);
-    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels);
+    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding);
 
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
@@ -168,6 +169,14 @@ private:
     std::vector<std::unique_ptr<GpuMesh>> meshes;
     std::vector<std::unique_ptr<GpuTexture>> textures;
 
+    // Stands in for a missing texture: white multiplies a colour or a metallic-roughness factor by 1.
     std::unique_ptr<GpuTexture> whiteTexture;
     void createWhiteTexture();
+
+    // The uploaded texture for a handle, or white for "none".
+    const GpuTexture& textureOrWhite(TextureHandle handle) const;
+
+    // Physically based shading's specular albedo table (render/gpu/brdf.h), integrated on the CPU once at start-up.
+    std::unique_ptr<GpuTexture> brdfTable;
+    void createBrdfTable();
 };
