@@ -71,6 +71,8 @@ void testParticle();
 void testGrenade();
 void testProfiler();
 void testToneMapping();
+void testToneMapUniforms();
+void testDisplayOutput();
 
 int main(){
     testPixelBuffer();
@@ -144,6 +146,8 @@ int main(){
     testGrenade();
     testProfiler();
     testToneMapping();
+    testToneMapUniforms();
+    testDisplayOutput();
 
     std::cout << "All tests passed!\n";
     return 0;

@@ -148,9 +148,10 @@ void DebugLineRenderer::ensureCapacity(Uint32 vertexCount) {
 * World and screen lines share one buffer, world lines first, so a single copy uploads both.
 * Cycling lets the GPU keep reading last frame's copy while this frame's is written.
 */
-void DebugLineRenderer::upload(SDL_GPUCommandBuffer* commands, const std::vector<DebugLine>& worldLines, const std::vector<DebugLine>& screenLines) {
-    std::vector<DebugLineVertex> vertices = buildDebugLineVertices(worldLines);
-    const std::vector<DebugLineVertex> screenVertices = buildDebugLineVertices(screenLines);
+void DebugLineRenderer::upload(SDL_GPUCommandBuffer* commands, const std::vector<DebugLine>& worldLines, const std::vector<DebugLine>& screenLines,
+                               float colourScale) {
+    std::vector<DebugLineVertex> vertices = buildDebugLineVertices(worldLines, colourScale);
+    const std::vector<DebugLineVertex> screenVertices = buildDebugLineVertices(screenLines, colourScale);
 
     worldVertexCount = static_cast<Uint32>(vertices.size());
     screenVertexCount = static_cast<Uint32>(screenVertices.size());

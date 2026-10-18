@@ -4,6 +4,7 @@
 #include "render/gpu/gpu_helpers.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/tone_map_uniforms.h"
 #include "scene/culling.h"
 
 #include <stdexcept>
@@ -17,6 +18,15 @@ namespace {
     // The lit scene's format: 16-bit floats keep about three significant digits from a millionth up to 65504, plenty for
     // light far brighter than white, at half the memory of 32-bit floats. Alpha is unused but there is no 3-channel format.
     constexpr SDL_GPUTextureFormat sceneColourFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+
+    SDL_GPUPresentMode sdlPresentMode(PresentMode mode) {
+        switch (mode) {
+        case PresentMode::Mailbox:   return SDL_GPU_PRESENTMODE_MAILBOX;
+        case PresentMode::Immediate: return SDL_GPU_PRESENTMODE_IMMEDIATE;
+        case PresentMode::Vsync:     return SDL_GPU_PRESENTMODE_VSYNC;
+        }
+        return SDL_GPU_PRESENTMODE_VSYNC;
+    }
 }
 
 GpuRenderer::GpuRenderer(SDL_Window* window):
@@ -56,7 +66,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         createPipeline();
         createShadowResources();
         createToneMapResources();
-        debugLines = std::make_unique<DebugLineRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
+        createScreenPipelines();
         createWhiteTexture();
     }
     catch (...) {
@@ -76,11 +86,81 @@ void GpuRenderer::useLinearSwapchain() {
         return;
     }
 
-    if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR, SDL_GPU_PRESENTMODE_VSYNC)) {
-        throw gpuError("Could not switch to an sRGB swapchain");
+    setSwapchainComposition(SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR);
+    sdrComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR;
+}
+
+// Changing the composition keeps the present mode.
+void GpuRenderer::setSwapchainComposition(SDL_GPUSwapchainComposition composition) {
+    if (!SDL_SetGPUSwapchainParameters(device, window, composition, sdlPresentMode(presentMode))) {
+        throw gpuError("Could not change the swapchain's composition");
     }
 
-    swapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR;
+    swapchainComposition = composition;
+}
+
+/*
+* Windows reports HDR per monitor, and it changes while the game runs (HDR switched in Settings, the window dragged to
+* another screen), so it is read every frame; the window properties are a cheap lookup. Whether the GPU can present a
+* float image is asked only when HDR comes on, since that query talks to the driver.
+*/
+DisplayCapabilities GpuRenderer::readDisplayCapabilities() const {
+    const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
+
+    DisplayCapabilities capabilities;
+    capabilities.hdrEnabled = SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+    capabilities.hdrHeadroom = SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0f);
+    capabilities.sdrWhiteLevel = SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0f);
+
+    if (capabilities.hdrEnabled == displayCapabilities.hdrEnabled) {
+        capabilities.hdrSwapchainSupported = displayCapabilities.hdrSwapchainSupported;
+    }
+    else if (capabilities.hdrEnabled) {
+        capabilities.hdrSwapchainSupported =
+            SDL_WindowSupportsGPUSwapchainComposition(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR);
+    }
+
+    return capabilities;
+}
+
+/*
+* Between frames: decide how this frame reaches the screen, and when HDR turns on or off, swap the swapchain to the
+* float (scRGB) or sRGB format and rebuild the pipelines that draw into it. The GPU must be idle first, since the old
+* pipelines may still be in use. If the driver refuses the HDR swapchain, it is marked unsupported so it is not tried
+* again every frame, and the frame goes out in SDR.
+*/
+void GpuRenderer::updateDisplayOutput(const DisplaySettings& settings) {
+    displayCapabilities = readDisplayCapabilities();
+    DisplayOutput next = chooseDisplayOutput(settings, displayCapabilities);
+
+    if (next.hdr != displayOutput.hdr) {
+        SDL_WaitForGPUIdle(device);
+
+        try {
+            setSwapchainComposition(next.hdr ? SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR : sdrComposition);
+        }
+        catch (const std::runtime_error& error) {
+            if (!next.hdr) {
+                throw;
+            }
+
+            SDL_Log("HDR output unavailable: %s", error.what());
+            displayCapabilities.hdrSwapchainSupported = false;
+            next = DisplayOutput{};
+        }
+
+        createScreenPipelines();
+
+        if (next.hdr) {
+            SDL_Log("HDR output on: peak %.2f times SDR white, SDR white at %.2f (%.0f nits)",
+                    next.peakBrightness, next.whiteLevel, next.whiteLevel * scrgbWhiteNits);
+        }
+        else {
+            SDL_Log("HDR output off");
+        }
+    }
+
+    displayOutput = next;
 }
 
 void GpuRenderer::createPipeline() {
@@ -373,6 +453,20 @@ void GpuRenderer::createToneMapResources() {
     if (sceneSampler == nullptr) {
         throw gpuError("Scene sampler creation failed");
     }
+}
+
+/*
+* The two pipelines that draw into the swapchain image, the tone mapping pass and the debug lines, are built for its
+* format, which changes when HDR output is switched on or off (8-bit sRGB or 16-bit float). Any old ones are released
+* first; the caller makes sure the GPU no longer uses them.
+*/
+void GpuRenderer::createScreenPipelines() {
+    if (toneMapPipeline != nullptr) {
+        SDL_ReleaseGPUGraphicsPipeline(device, toneMapPipeline);
+        toneMapPipeline = nullptr;
+    }
+
+    debugLines.reset();
 
     SDL_GPUShader* vertexShader = nullptr;
     SDL_GPUShader* fragmentShader = nullptr;
@@ -415,6 +509,8 @@ void GpuRenderer::createToneMapResources() {
 
     SDL_ReleaseGPUShader(device, fragmentShader);
     SDL_ReleaseGPUShader(device, vertexShader);
+
+    debugLines = std::make_unique<DebugLineRenderer>(device, SDL_GetGPUSwapchainTextureFormat(device, window));
 }
 
 GpuRenderer::~GpuRenderer() {
@@ -578,6 +674,9 @@ SDL_GPUDevice* GpuRenderer::getDevice() const {
 * If anything fails part-way, the frame is still submitted (a swapchain image was acquired), then the error is passed on.
 */
 bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& settings) {
+    // Before acquiring an image, since switching HDR on or off replaces the swapchain.
+    updateDisplayOutput(settings.display);
+
     SDL_GPUTexture* swapchainTexture = acquireFrame();
 
     if (swapchainTexture == nullptr) {
@@ -612,7 +711,7 @@ bool GpuRenderer::render(const FrameDescription& frame, const RenderSettings& se
         const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
 
         // Copies must happen outside render passes, so the debug lines are uploaded first.
-        debugLines->upload(commands, frame.debugLines, frame.debugScreenLines);
+        debugLines->upload(commands, frame.debugLines, frame.debugScreenLines, displayOutput.whiteLevel);
         uploadShadowTiles(shadows.tileData);
 
         if (!shadows.tiles.empty()) {
@@ -943,10 +1042,10 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
 /*
 * Starts the final pass, into the swapchain image, and fills it: the full-screen triangle runs the tone mapping shader on
 * every pixel. The pass stays open for the debug lines. The image is wholly overwritten, so its old contents are not loaded.
-* The screen is ordinary (SDR) for now, so its peak is white.
+* The display output (chosen before the frame) gives the curve's peak, the white level and whether to dither.
 */
 void GpuRenderer::beginToneMapPass(SDL_GPUTexture* swapchainTexture, const ToneMappingSettings& settings) {
-    const ToneMapUniformData toneMapping = packToneMapping(settings, sdrPeakBrightness);
+    const ToneMapUniformData toneMapping = packToneMapping(settings, displayOutput);
 
     SDL_GPUColorTargetInfo target{};
     target.texture = swapchainTexture;
@@ -1040,22 +1139,13 @@ PresentMode GpuRenderer::setPresentMode(PresentMode requested) {
         throw std::logic_error("Change the present mode between frames");
     }
 
-    const auto toSdl = [](PresentMode mode) {
-        switch (mode) {
-        case PresentMode::Mailbox:   return SDL_GPU_PRESENTMODE_MAILBOX;
-        case PresentMode::Immediate: return SDL_GPU_PRESENTMODE_IMMEDIATE;
-        case PresentMode::Vsync:     return SDL_GPU_PRESENTMODE_VSYNC;
-        }
-        return SDL_GPU_PRESENTMODE_VSYNC;
-    };
-
     PresentMode chosen = requested;
 
-    if (!SDL_WindowSupportsGPUPresentMode(device, window, toSdl(chosen))) {
+    if (!SDL_WindowSupportsGPUPresentMode(device, window, sdlPresentMode(chosen))) {
         chosen = PresentMode::Vsync;
     }
 
-    if (!SDL_SetGPUSwapchainParameters(device, window, swapchainComposition, toSdl(chosen))) {
+    if (!SDL_SetGPUSwapchainParameters(device, window, swapchainComposition, sdlPresentMode(chosen))) {
         throw gpuError("Could not set the present mode");
     }
 
@@ -1065,6 +1155,10 @@ PresentMode GpuRenderer::setPresentMode(PresentMode requested) {
 
 const RenderStats& GpuRenderer::getLastFrameStats() const {
     return stats;
+}
+
+const DisplayOutput& GpuRenderer::getDisplayOutput() const {
+    return displayOutput;
 }
 
 PresentMode GpuRenderer::getPresentMode() const {

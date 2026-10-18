@@ -22,8 +22,10 @@ public:
     DebugLineRenderer(const DebugLineRenderer&) = delete;
     DebugLineRenderer& operator=(const DebugLineRenderer&) = delete;
 
-    // Copy this frame's lines to the GPU, in their own copy pass. Must be called outside render passes.
-    void upload(SDL_GPUCommandBuffer* commands, const std::vector<DebugLine>& worldLines, const std::vector<DebugLine>& screenLines);
+    // Copy this frame's lines to the GPU, in their own copy pass. Must be called outside render passes. Colours are
+    // multiplied by colourScale, what white is written as on this screen (an HDR screen's white level).
+    void upload(SDL_GPUCommandBuffer* commands, const std::vector<DebugLine>& worldLines, const std::vector<DebugLine>& screenLines,
+                float colourScale = 1.0f);
 
     // Draw the lines from the last upload into the open pass. Screen lines map (0, 0) to the top-left of a frame this size.
     void draw(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, const Mat4& viewProjection, Uint32 frameWidth, Uint32 frameHeight);

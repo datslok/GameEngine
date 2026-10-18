@@ -4,17 +4,17 @@
 #include <cmath>
 #include <stdexcept>
 
-namespace {
-    void validate(const ToneMappingSettings& settings, float peakBrightness) {
-        if (!(settings.exposure >= 0.0f)) {
-            throw std::invalid_argument("Tone mapping exposure must not be negative");
-        }
-
-        if (!(peakBrightness > 0.0f)) {
-            throw std::invalid_argument("Tone mapping peak brightness must be positive");
-        }
+void validateToneMapping(const ToneMappingSettings& settings, float peakBrightness) {
+    if (!(settings.exposure >= 0.0f)) {
+        throw std::invalid_argument("Tone mapping exposure must not be negative");
     }
 
+    if (!(peakBrightness > 0.0f)) {
+        throw std::invalid_argument("Tone mapping peak brightness must be positive");
+    }
+}
+
+namespace {
     float reinhard(float value) {
         return value / (1.0f + value);
     }
@@ -108,7 +108,7 @@ namespace {
 * Nothing is allowed below black or past the peak.
 */
 Vec3 toneMap(const Vec3& linear, const ToneMappingSettings& settings, float peakBrightness) {
-    validate(settings, peakBrightness);
+    validateToneMapping(settings, peakBrightness);
 
     const float scale = settings.exposure / peakBrightness;
     const Vec3 curved = applyCurve(settings.curve, Vec3{
@@ -122,15 +122,4 @@ Vec3 toneMap(const Vec3& linear, const ToneMappingSettings& settings, float peak
         std::clamp(curved.y, 0.0f, 1.0f) * peakBrightness,
         std::clamp(curved.z, 0.0f, 1.0f) * peakBrightness
     };
-}
-
-ToneMapUniformData packToneMapping(const ToneMappingSettings& settings, float peakBrightness) {
-    validate(settings, peakBrightness);
-
-    return ToneMapUniformData{{
-        settings.exposure,
-        peakBrightness,
-        static_cast<float>(static_cast<int>(settings.curve)),
-        0.0f
-    }};
 }

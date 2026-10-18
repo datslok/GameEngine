@@ -2,7 +2,6 @@
 
 #include "math/vec3.h"
 #include "render/gpu/tone_mapping_shared.h"
-#include "render/gpu/uniform_limits.h"
 
 /*
 * Tone mapping: the scene is lit in real, unbounded brightness (a floodlight's hotspot can be 40 times a white wall), but
@@ -32,21 +31,11 @@ struct ToneMappingSettings {
 // The brightest an ordinary (SDR) screen shows: its white. An HDR screen goes several times past it.
 inline constexpr float sdrPeakBrightness = 1.0f;
 
+// Throws std::invalid_argument for a negative exposure or a peak that is not positive.
+void validateToneMapping(const ToneMappingSettings& settings, float peakBrightness);
+
 /*
 * One pixel's linear colour (after lighting) to the linear colour the screen should show, 0..peakBrightness.
 * Throws std::invalid_argument for a negative exposure or a peak that is not positive.
 */
 Vec3 toneMap(const Vec3& linear, const ToneMappingSettings& settings, float peakBrightness = sdrPeakBrightness);
-
-/*
-* Mirrors the ToneMapData block in tone_map.frag (std140, one vec4).
-*/
-struct ToneMapUniformData {
-    float parameters[4]; // x: exposure, y: peak brightness, z: curve (a TONE_MAP_ number), w: unused
-};
-
-static_assert(sizeof(ToneMapUniformData) == 16, "ToneMapUniformData must match the shader's ToneMapData block");
-static_assert(sizeof(ToneMapUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
-
-// The settings in the shader's layout. Throws std::invalid_argument like toneMap.
-ToneMapUniformData packToneMapping(const ToneMappingSettings& settings, float peakBrightness = sdrPeakBrightness);
