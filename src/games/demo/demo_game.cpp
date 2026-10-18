@@ -414,11 +414,14 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
         return;
     }
 
-    // Below the engine's four lines: how many colliders there are, and how few the hover ray had to test.
+    // Below the engine's lines: what each system costs per tick (averages; the engine's TICK line has the worst whole tick).
+    drawProfile(systemTimes, firstGameReadoutLine, 3, false, profileDebugColour, debug);
+
+    // How many colliders there are, and how few the hover ray had to test.
     const std::string broadPhase = "COLLIDERS " + std::to_string(collisionScene.getColliders().size()) +
                                    "  TESTED " + std::to_string(hoverStats.tested) +
                                    "  CELLS " + std::to_string(hoverStats.cellsWalked);
-    debugText(debug, debugReadoutLine(4), debugReadoutTextHeight, broadPhase, colliderDebugColour);
+    debugText(debug, debugReadoutLine(firstGameReadoutLine + 1), debugReadoutTextHeight, broadPhase, colliderDebugColour);
 
     // The level triangle under the cursor, with a short line along its face normal, and what the level query cost.
     if (hoveredTriangle) {
@@ -433,7 +436,7 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
     const std::string levelLine = "LEVEL TRIANGLES " + std::to_string(staticLevel.getTriangleCount()) +
                                   "  TESTED " + std::to_string(levelHoverStats.tested) +
                                   "  CELLS " + std::to_string(levelHoverStats.cellsWalked);
-    debugText(debug, debugReadoutLine(5), debugReadoutTextHeight, levelLine, colliderDebugColour);
+    debugText(debug, debugReadoutLine(firstGameReadoutLine + 2), debugReadoutTextHeight, levelLine, colliderDebugColour);
 
     // The duck's character controller: what it stands on (a line along the ground normal at its feet), how steep that is,
     // and how many substeps its last move took.
@@ -447,7 +450,7 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
         const std::string duckLine = std::string("DUCK ") + (controller.grounded ? "GROUNDED" : "AIRBORNE") +
                                      "  SLOPE " + std::to_string(slopeDegrees) +
                                      "  SUBSTEPS " + std::to_string(controller.lastSubsteps);
-        debugText(debug, debugReadoutLine(6), debugReadoutTextHeight, duckLine, colliderDebugColour);
+        debugText(debug, debugReadoutLine(firstGameReadoutLine + 3), debugReadoutTextHeight, duckLine, colliderDebugColour);
     }
 
     constexpr float markerRadius = 0.25f;
@@ -597,12 +600,13 @@ void DemoGame::updateFlashlight(World& world, float alpha) {
 void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     latestSimulationSeconds = simulationSeconds;
 
-    updateCharacters(world, staticLevel, tickSeconds);
-    updateFirstPersonBodies(world, staticLevel, tickSeconds);
-    updateSpinners(world, simulationSeconds);
-    updateFireflies(world, simulationSeconds);
-    moveParticles(world, staticLevel, tickSeconds);
-    updateGrenades(world, tickSeconds);
+    // Each system timed on its own, so the debug readout shows where a tick goes.
+    timeSection(systemTimes, charactersSection, [&] { updateCharacters(world, staticLevel, tickSeconds); });
+    timeSection(systemTimes, bodiesSection, [&] { updateFirstPersonBodies(world, staticLevel, tickSeconds); });
+    timeSection(systemTimes, spinnersSection, [&] { updateSpinners(world, simulationSeconds); });
+    timeSection(systemTimes, firefliesSection, [&] { updateFireflies(world, simulationSeconds); });
+    timeSection(systemTimes, particlesSection, [&] { moveParticles(world, staticLevel, tickSeconds); });
+    timeSection(systemTimes, grenadesSection, [&] { updateGrenades(world, tickSeconds); });
 
     // Simulation continues when the cursor is released or focus is lost.
     if (world.isAlive(player) && !world.get<CharacterMovement>(player).isMoving()) {
@@ -625,6 +629,9 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
 
     // After the camera has moved, so the outline matches what this frame shows under the cursor.
     updateHover(world, input);
+
+    // Once a frame, like the engine's own profiler, so its windows end on time even in frames without a tick.
+    systemTimes.update(profilerSeconds());
 }
 
 Camera& DemoGame::getCamera() {

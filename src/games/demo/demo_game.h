@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/profiler.h"
 #include "ecs/world.h"
 #include "engine/game.h"
 #include "gameplay/camera/first_person_camera_controller.h"
@@ -193,4 +194,13 @@ private:
 
     // The simulation time of the latest tick, so things created between ticks (the lamps) can start mid-flight.
     double latestSimulationSeconds = 0.0;
+
+    // What each system costs per tick, for the debug readout (shown by onDebugDraw, windows advanced in onUpdate).
+    Profiler systemTimes;
+    const int charactersSection = systemTimes.addSection("CHARACTERS");
+    const int bodiesSection = systemTimes.addSection("BODIES");
+    const int spinnersSection = systemTimes.addSection("SPINNERS");
+    const int firefliesSection = systemTimes.addSection("FIREFLIES");
+    const int particlesSection = systemTimes.addSection("PARTICLES");
+    const int grenadesSection = systemTimes.addSection("GRENADES");
 };

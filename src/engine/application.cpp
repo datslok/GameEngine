@@ -32,6 +32,7 @@ void Application::run() {
 
     while (true) {
         const Uint64 frameStart = SDL_GetTicksNS();
+        const double workStart = profilerSeconds();
 
         if (!window.processEvents(input)) {
             break;
@@ -42,6 +43,7 @@ void Application::run() {
             1'000'000'000.0;
 
         previousFrameStart = frameStart;
+        profiler.record(frameSection, deltaSeconds);
 
         const int ticks = timestep.advance(deltaSeconds);
 
@@ -52,15 +54,23 @@ void Application::run() {
             const double simulationSeconds =
                 static_cast<double>(simulationTicks) * timestep.getTickSeconds();
 
+            ScopedTimer timer{profiler, tickSection};
             runFixedUpdate(game, world, static_cast<float>(timestep.getTickSeconds()), simulationSeconds);
         }
 
         const float alpha = timestep.getAlpha();
-        game.onUpdate(world, input, static_cast<float>(timestep.getFrameSeconds()), alpha);
+        {
+            ScopedTimer timer{profiler, updateSection};
+            game.onUpdate(world, input, static_cast<float>(timestep.getFrameSeconds()), alpha);
+        }
 
         applyMouseMode();
         applyPresentMode();
         render(alpha, static_cast<float>(timestep.getFrameSeconds()));
+
+        const double workEnd = profilerSeconds();
+        profiler.record(workSection, workEnd - workStart);
+        profiler.update(workEnd);
 
         // 0 means unlimited.
         if (settings.targetFPS > 0) {
@@ -121,6 +131,7 @@ void Application::prepareNewResources() {
 */
 void Application::render(float alpha, float frameSeconds) {
     prepareNewResources();
+    const double sceneStart = profilerSeconds();
 
     Camera& camera = game.getCamera();
     FrameDescription frame = buildFrame(world, camera, alpha);
@@ -139,13 +150,20 @@ void Application::render(float alpha, float frameSeconds) {
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
         drawRenderStats(renderer.getLastFrameStats(), debugDraw);
+
+        // Also from the previous window: the profiler shows a finished half second at a time.
+        drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
     }
 
     game.onDebugDraw(world, debugDraw, alpha);
     frame.debugLines = debugDraw.getLines();
     frame.debugScreenLines = debugDraw.getScreenLines();
 
-    if (!renderer.render(frame, settings.render)) {
+    const double renderStart = profilerSeconds();
+    profiler.record(sceneSection, renderStart - sceneStart);
+    const bool rendered = renderer.render(frame, settings.render);
+    profiler.record(renderSection, profilerSeconds() - renderStart);
+    if (!rendered) {
         return;
     }
 

@@ -17,6 +17,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
 - Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them; static level collision: the level's triangles in their own grid, built once, with raycasts and capsule contacts (how deep, and which way out); a kinematic character controller tuned to feel like Overwatch: walls slide, steps and ramps are climbed, the ground is followed down, gravity has air drag up to a terminal speed, and jumps and air steering use Overwatch's measured numbers; sphere sweeps (the first touch of a moving ball, so nothing fast can pass through a wall) and particles: balls that fly on exact parabolas, bounce with restitution and Coulomb friction, slide to a stop and rest without jitter (the demo throws them as grenades)
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, camera speeds and mouse sensitivity) lives in a settings struct owned by its system, ready for a debug UI, and numbers the shaders share with C++ are written once
+- Profiling: frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second, in the F4 view
 - Unit tests that run without a GPU or window
 
 ## Requirements
@@ -103,7 +104,7 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 | **F** | Toggle the flashlight (held in your right hand; in MOBA mode the duck carries it) |
 | **L** | Toggle a field of 42 coloured lamps that fly round their pillars like fireflies, so the pillars' shadows sweep round: a stress test for light priority and shadows (every shadow tile is redrawn each frame while its light moves) |
 | **K** | Toggle the four floodlights over the obstacle course (on at the start): shadow-casting spotlights on poles whose crossing beams fill in each other's shadows, like stadium lights |
-| **F4** | Debug view: bounding boxes around every mesh, collider wireframes in orange, how many colliders the hover ray tested out of all of them (the broad phase at work), the level triangle under the cursor with its normal and how many level triangles that ray tested, the duck's ground normal, slope and movement substeps, how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
+| **F4** | Debug view: timings in pale green (frame, work without the frame cap's sleep, one tick, the camera update, building the scene and rendering, which includes waiting for the GPU, as average/worst milliseconds; then each simulation system's average cost per tick), bounding boxes around every mesh, collider wireframes in orange, how many colliders the hover ray tested out of all of them (the broad phase at work), the level triangle under the cursor with its normal and how many level triangles that ray tested, the duck's ground normal, slope and movement substeps, how many meshes culling skipped and how many point lights are in view, lit and shadowed, and how many shadow tiles were drawn, kept from earlier frames or skipped (top-left), a marker at each light, and the walk target in MOBA mode |
 
 **First person and free camera**
 
@@ -144,7 +145,7 @@ src/            Engine and game source, in layers (lower ones never include high
   assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
-  core/         Fixed timestep, sRGB conversions and small shared types
+  core/         Fixed timestep, profiler, sRGB conversions and small shared types
   physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision, sphere sweeps, particles and the character controller
   math/         Vectors, matrices, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
