@@ -14,11 +14,23 @@ namespace {
     }
 }
 
+/*
+* Image files store colour sRGB-encoded. An _SRGB format makes the GPU decode texels to linear light when sampling (and
+* when averaging mip levels), so lighting maths is done on real amounts of light. Data (roughness, metallic) is read
+* exactly as stored, so it uses the plain format.
+*/
+GpuTextureDescription surfaceTextureDescription(TextureEncoding encoding) {
+    GpuTextureDescription description;
+    description.format = encoding == TextureEncoding::Srgb ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    return description;
+}
+
 GpuTexture::GpuTexture(
     SDL_GPUDevice* device,
     Uint32 width,
     Uint32 height,
-    std::span<const Uint8> pixels
+    std::span<const Uint8> texels,
+    const GpuTextureDescription& description
 ):
     device(device)
 {
@@ -31,23 +43,23 @@ GpuTexture::GpuTexture(
     }
 
     // SDL transfer buffer sizes use Uint32.
-    // Check before multiplying by four to avoid overflow.
-    const Uint64 pixelCount = static_cast<Uint64>(width) * height;
+    // Check before multiplying by the texel size to avoid overflow.
+    const Uint64 texelCount = static_cast<Uint64>(width) * height;
 
-    if (pixelCount > std::numeric_limits<Uint32>::max() / 4) {
+    if (description.bytesPerTexel == 0 || texelCount > std::numeric_limits<Uint32>::max() / description.bytesPerTexel) {
         throw std::overflow_error("Texture upload is too large");
     }
 
-    const Uint32 byteCount = static_cast<Uint32>(pixelCount * 4);
+    const Uint32 byteCount = static_cast<Uint32>(texelCount * description.bytesPerTexel);
 
-    if (pixels.size() != byteCount) {
+    if (texels.size() != byteCount) {
         throw std::invalid_argument(
-            "Texture requires exactly four bytes per pixel"
+            "Texture data does not match its size and texel format"
         );
     }
 
-    // The full chain, down to 1x1.
-    const Uint32 levelCount = mipLevelCount(width, height);
+    // Surfaces get the full chain, down to 1x1; a lookup table is read at its own size only.
+    const Uint32 levelCount = description.surface ? mipLevelCount(width, height) : 1;
 
     SDL_GPUTransferBuffer* transfer = nullptr;
     SDL_GPUCommandBuffer* uploadCommands = nullptr;
@@ -55,11 +67,9 @@ GpuTexture::GpuTexture(
     try {
         SDL_GPUTextureCreateInfo textureInfo{};
         textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-        // Image files store sRGB. An _SRGB format makes the GPU decode texels to linear light when sampling (and when averaging mip levels),
-        // so lighting maths is done on real amounts of light. Non-colour data such as normal maps will need plain UNORM.
-        textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
-        // Generating mipmaps draws each smaller level from the one above, so the texture must also be a render target.
-        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+        textureInfo.format = description.format;
+        // Generating mipmaps draws each smaller level from the one above, so a surface texture must also be a render target.
+        textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | (description.surface ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0);
         textureInfo.width = width;
         textureInfo.height = height;
         textureInfo.layer_count_or_depth = 1;
@@ -78,13 +88,15 @@ GpuTexture::GpuTexture(
         samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
         samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
         samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
-        samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-        samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-        samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+        // Surfaces tile their image; a table holds its edge values beyond its range.
+        const SDL_GPUSamplerAddressMode addressMode = description.surface ? SDL_GPU_SAMPLERADDRESSMODE_REPEAT : SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        samplerInfo.address_mode_u = addressMode;
+        samplerInfo.address_mode_v = addressMode;
+        samplerInfo.address_mode_w = addressMode;
 
         // Surfaces seen at a grazing angle (the ground) cover a long thin strip of texture per pixel;
         // anisotropic filtering samples along the strip so they stay sharp instead of blurring.
-        samplerInfo.enable_anisotropy = true;
+        samplerInfo.enable_anisotropy = description.surface;
         samplerInfo.max_anisotropy = 16.0f;
 
         // Allow every mip level. The default maximum of 0 would lock sampling to the full-size level.
@@ -115,7 +127,7 @@ GpuTexture::GpuTexture(
         }
 
         // Copy into SDL-owned upload memory.
-        std::memcpy(destination, pixels.data(), byteCount);
+        std::memcpy(destination, texels.data(), byteCount);
         SDL_UnmapGPUTransferBuffer(device, transfer);
 
         uploadCommands = SDL_AcquireGPUCommandBuffer(device);

@@ -3,6 +3,7 @@
 #include "core/pixel.h"
 #include "math/aabb.h"
 #include "math/mat4.h"
+#include "scene/material.h"
 #include "scene/mesh.h"
 #include "math/vec3.h"
 
@@ -12,22 +13,39 @@
 #include <vector>
 
 /*
-* What an imported file says about a part's material: a colour, and where its texture comes from.
-* The AssetManager loads the texture once and turns this into a Material with a TextureHandle.
+* Where one of a material's textures comes from: an image file, or image bytes embedded in the model file (a .glb).
+* Neither means no texture.
+*/
+struct TextureSource {
+    std::string path;
+    std::shared_ptr<const std::vector<std::uint8_t>> embeddedImage;
+
+    bool isSet() const {
+        return !path.empty() || embeddedImage != nullptr;
+    }
+};
+
+/*
+* What an imported file says about a part's material: colour, metallic, roughness, glow, and where its textures come from.
+* The AssetManager loads the textures once and turns this into a Material with TextureHandles.
 */
 struct MaterialSource {
     Pixel colour{255, 255, 255}; // sRGB
+    TextureSource colourTexture;
 
-    // A texture can come from a file or embedded image bytes.
-    // If both are empty, the part uses plain colour.
-    std::string texturePath;
+    // Multiplied by the texture's green (roughness) and blue (metallic) channels when there is one. The defaults are
+    // Material's own.
+    float metallic = Material{}.metallic;
+    float roughness = Material{}.roughness;
+    TextureSource metallicRoughnessTexture;
 
-    std::shared_ptr<const std::vector<std::uint8_t>> embeddedImage;
+    Vec3 emissive{0.0f, 0.0f, 0.0f}; // linear light
 
+    // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
-        return !texturePath.empty() || embeddedImage != nullptr;
+        return colourTexture.isSet() || metallicRoughnessTexture.isSet();
     }
 };
 

@@ -8,7 +8,7 @@
 */
 struct MaterialUniformData {
     float baseColour[4]; // rgba, 0..1
-    float specular[4];   // x: strength, y: shininess
+    float surface[4];    // x: metallic, y: roughness, both 0..1
     float emissive[4];   // rgb: light the surface gives off itself
 };
 

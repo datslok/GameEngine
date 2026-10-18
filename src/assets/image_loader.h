@@ -1,5 +1,7 @@
 #pragma once
 
+#include "scene/asset_handles.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,6 +13,9 @@ struct ImageData {
 
     // Four bytes per pixel: red, green, blue, alpha.
     std::vector<std::uint8_t> pixels;
+
+    // Whether the bytes are sRGB colour or plain numbers, which decides the GPU format they are uploaded in.
+    TextureEncoding encoding = TextureEncoding::Srgb;
 };
 
 // Flip rows by default to use bottom-left UV coordinates.

@@ -14,6 +14,9 @@
 #include <vector>
 
 namespace {
+    // What glTF assumes for a metallic or roughness factor a file leaves out, and for a part with no material.
+    constexpr float gltfDefaultFactor = 1.0f;
+
     // cgltf data must be released with cgltf_free(), not delete.
     struct GltfDeleter {
         void operator()(cgltf_data* data) const {
@@ -295,47 +298,24 @@ namespace {
         return linearToSrgbByte(value);
     }
 
-    std::string readTexturePath(
-        const cgltf_texture_view& view,
-        const std::filesystem::path& modelDirectory
-    ) {
-        if (view.texture == nullptr) {
-            return {};
+    // glTF's factors (metallic, roughness, emissive) are shares, 0..1.
+    float readUnitFactor(float value, const char* message) {
+        if (!std::isfinite(value) || value < 0.0f || value > 1.0f) {
+            throw std::runtime_error(message);
         }
 
-        if (view.texcoord != 0) {
-            throw std::runtime_error(
-                "Only glTF TEXCOORD_0 is supported so far"
-            );
-        }
+        return value;
+    }
 
-        if (view.has_transform) {
-            throw std::runtime_error(
-                "glTF texture transforms are not supported yet"
-            );
-        }
-
-        const cgltf_image* image = view.texture->image;
-
-        if (image == nullptr) {
-            throw std::runtime_error(
-                "glTF texture has no supported image"
-            );
-        }
-
-        if (image->buffer_view != nullptr) {
-            throw std::runtime_error(
-                "Embedded glTF images are not supported yet"
-            );
-        }
-
-        if (image->uri == nullptr || image->uri[0] == '\0') {
+    // A local image file: the URI decoded, checked, and made relative to the model's folder.
+    std::string readImagePath(const cgltf_image& image, const std::filesystem::path& modelDirectory) {
+        if (image.uri == nullptr || image.uri[0] == '\0') {
             throw std::runtime_error(
                 "glTF texture image has no filename"
             );
         }
 
-        std::string uri = image->uri;
+        std::string uri = image.uri;
 
         // Reject data URIs and remote URLs for this first version.
         if (uri.find(':') != std::string::npos ||
@@ -371,9 +351,49 @@ namespace {
             .generic_string();
     }
 
-    void readBaseColourTexture(const cgltf_texture_view& view, const std::filesystem::path& modelDirectory, MaterialSource& material) {
+    // An image packed into the file's binary buffer (a .glb), copied before cgltf frees its buffers.
+    std::shared_ptr<const std::vector<std::uint8_t>> readEmbeddedImage(const cgltf_image& image) {
+        if (image.uri != nullptr) {
+            throw std::runtime_error(
+                "glTF image cannot have both a URI and a buffer view"
+            );
+        }
+
+        const std::string mimeType =
+            image.mime_type != nullptr ? image.mime_type : "";
+
+        if (mimeType != "image/png" && mimeType != "image/jpeg") {
+            throw std::runtime_error(
+                "Embedded glTF images must be PNG or JPEG"
+            );
+        }
+
+        const cgltf_buffer_view& bufferView = *image.buffer_view;
+
+        const std::uint8_t* bytes =
+            cgltf_buffer_view_data(&bufferView);
+
+        if (bytes == nullptr || bufferView.size == 0) {
+            throw std::runtime_error(
+                "Embedded glTF image has no data"
+            );
+        }
+
+        return std::make_shared<const std::vector<std::uint8_t>>(
+            bytes,
+            bytes + bufferView.size
+        );
+    }
+
+    /*
+    * Where one of a material's textures comes from: nothing for an empty slot, else an external file or embedded bytes.
+    * Only the first UV set and textures without a transform are supported.
+    */
+    TextureSource readTexture(const cgltf_texture_view& view, const std::filesystem::path& modelDirectory) {
+        TextureSource texture;
+
         if (view.texture == nullptr) {
-            return;
+            return texture;
         }
 
         if (view.texcoord != 0) {
@@ -396,54 +416,26 @@ namespace {
             );
         }
 
-        // External image: use the path handling we already implemented.
         if (image->buffer_view == nullptr) {
-            material.texturePath = readTexturePath(
-                view,
-                modelDirectory
-            );
-            return;
+            texture.path = readImagePath(*image, modelDirectory);
+        } else {
+            texture.embeddedImage = readEmbeddedImage(*image);
         }
 
-        if (image->uri != nullptr) {
-            throw std::runtime_error(
-                "glTF image cannot have both a URI and a buffer view"
-            );
-        }
-
-        const std::string mimeType =
-            image->mime_type != nullptr ? image->mime_type : "";
-
-        if (mimeType != "image/png" && mimeType != "image/jpeg") {
-            throw std::runtime_error(
-                "Embedded glTF images must be PNG or JPEG"
-            );
-        }
-
-        const cgltf_buffer_view& bufferView = *image->buffer_view;
-
-        const std::uint8_t* bytes =
-            cgltf_buffer_view_data(&bufferView);
-
-        if (bytes == nullptr || bufferView.size == 0) {
-            throw std::runtime_error(
-                "Embedded glTF image has no data"
-            );
-        }
-
-        // Copy the compressed image before cgltf frees its buffers.
-        material.embeddedImage =
-            std::make_shared<const std::vector<std::uint8_t>>(
-                bytes,
-                bytes + bufferView.size
-            );
+        return texture;
     }
 
+    /*
+    * glTF's metallic-roughness material. cgltf fills in glTF's defaults for whatever a material leaves out (white,
+    * metallic 1, roughness 1, no glow), with or without a pbrMetallicRoughness block; a part with no material gets the
+    * same defaults. KHR_materials_emissive_strength lets the glow go past 1.
+    */
     MaterialSource readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
         MaterialSource material;
         material.flipTextureVertically = false;
+        material.metallic = gltfDefaultFactor;
+        material.roughness = gltfDefaultFactor;
 
-        // No assigned material means the default white colour.
         if (source == nullptr) {
             return material;
         }
@@ -455,17 +447,33 @@ namespace {
             );
         }
 
-        if (source->has_pbr_metallic_roughness) {
-            const cgltf_pbr_metallic_roughness& properties =
-                source->pbr_metallic_roughness;
+        const cgltf_pbr_metallic_roughness& properties = source->pbr_metallic_roughness;
 
-            material.colour = Pixel{
-                colourChannelToByte(properties.base_color_factor[0]),
-                colourChannelToByte(properties.base_color_factor[1]),
-                colourChannelToByte(properties.base_color_factor[2])
-            };
-            readBaseColourTexture(properties.base_color_texture, modelDirectory, material);
+        material.colour = Pixel{
+            colourChannelToByte(properties.base_color_factor[0]),
+            colourChannelToByte(properties.base_color_factor[1]),
+            colourChannelToByte(properties.base_color_factor[2])
+        };
+        material.metallic = readUnitFactor(properties.metallic_factor, "glTF metallic factor must be between 0 and 1");
+        material.roughness = readUnitFactor(properties.roughness_factor, "glTF roughness factor must be between 0 and 1");
+        material.colourTexture = readTexture(properties.base_color_texture, modelDirectory);
+        material.metallicRoughnessTexture = readTexture(properties.metallic_roughness_texture, modelDirectory);
+
+        const float strength = source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f;
+
+        if (!std::isfinite(strength) || strength < 0.0f) {
+            throw std::runtime_error(
+                "glTF emissive strength must be a positive number"
+            );
         }
+
+        const char* const emissiveMessage = "glTF emissive factor must be between 0 and 1";
+        material.emissive = Vec3{
+            readUnitFactor(source->emissive_factor[0], emissiveMessage),
+            readUnitFactor(source->emissive_factor[1], emissiveMessage),
+            readUnitFactor(source->emissive_factor[2], emissiveMessage)
+        } * strength;
+
         return material;
     }
 

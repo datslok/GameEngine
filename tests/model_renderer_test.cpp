@@ -52,14 +52,14 @@ void testModelRenderer() {
     first.mesh = mesh;
     first.transform = Mat4::translation(2.0f, 0.0f, 0.0f);
     first.material.colour = Pixel{10, 20, 30};
-    first.material.texturePath = "assets/textures/demo.png";
+    first.material.colourTexture.path = "assets/textures/demo.png";
     first.material.flipTextureVertically = false;
 
     ModelPart second;
     second.mesh = mesh;
     second.transform = Mat4::translation(-2.0f, 0.0f, 0.0f);
     second.material.colour = Pixel{40, 50, 60};
-    second.material.embeddedImage = imageBytes;
+    second.material.colourTexture.embeddedImage = imageBytes;
     second.material.flipTextureVertically = false;
 
     Model model;
@@ -134,8 +134,8 @@ void testModelRenderer() {
 
     // A material cannot name both a file and embedded bytes.
     MaterialSource both;
-    both.texturePath = "assets/textures/demo.png";
-    both.embeddedImage = imageBytes;
+    both.colourTexture.path = "assets/textures/demo.png";
+    both.colourTexture.embeddedImage = imageBytes;
     assert(throws([&] { fresh.makeMaterial(both); }));
 
     // A material without a texture keeps "no texture", which the renderer draws as plain colour.

@@ -191,6 +191,16 @@ namespace {
         }
         return course;
     }
+
+    // A surface that shows only its own light: black, so lights never change it, and fully rough, so their reflections
+    // (4% head-on, like any non-metal) spread too thin to see. The moon, the lamp bulbs, the floodlight heads and the marker.
+    Material glowMaterial(const Vec3& emissive) {
+        Material glow;
+        glow.colour = Pixel{0, 0, 0};
+        glow.roughness = 1.0f;
+        glow.emissive = emissive;
+        return glow;
+    }
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
@@ -247,8 +257,12 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     Material green;
     green.colour = Pixel{80, 200, 120};
 
+    // Real gold: a metal, so its colour is all in its reflection (its head-on reflectance, about 1.00, 0.77, 0.33 in
+    // linear light), polished but not a mirror.
     Material gold;
-    gold.colour = Pixel{230, 180, 60};
+    gold.colour = Pixel{255, 226, 155};
+    gold.metallic = 1.0f;
+    gold.roughness = 0.35f;
 
     Material grenadeShell;
     grenadeShell.colour = Pixel{70, 80, 50};
@@ -285,10 +299,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(world.create(), DirectionalLight{towardsMoon * -1.0f, Vec3{0.32f, 0.45f, 1.0f}, moonlightIntensity});
 
     // The moon itself: a glowing sphere in the direction the moonlight comes from, at a fixed place so you can fly to it.
-    Material moonGlow;
-    moonGlow.colour = Pixel{0, 0, 0};
-    moonGlow.specularStrength = 0.0f;
-    moonGlow.emissive = Vec3{0.69f, 0.79f, 1.0f} * moonGlowBrightness;
+    const Material moonGlow = glowMaterial(Vec3{0.69f, 0.79f, 1.0f} * moonGlowBrightness);
 
     Transform moonPlacement;
     moonPlacement.scale = Vec3{moonRadius, moonRadius, moonRadius};
@@ -311,7 +322,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
     grass.colour = Pixel{75, 110, 75};
-    grass.specularStrength = 0.0f; // Grass is matte.
+    grass.roughness = 1.0f; // Grass is matte.
 
     Transform groundPlacement;
     groundPlacement.position = Vec3{0.0f, 0.0f, -6.0f};
@@ -326,7 +337,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // The obstacle course: plain stone blocks for the character controller to walk on, climb and bump into.
     Material courseStone;
     courseStone.colour = Pixel{150, 148, 140};
-    courseStone.specularStrength = 0.1f;
+    courseStone.roughness = 0.7f; // Smoothed stone, with a faint sheen.
 
     Transform coursePlacement;
     coursePlacement.position = obstacleCourseOrigin;
@@ -356,11 +367,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     player = spawnCharacter(world, assets, model, playerConfig, Vec3{0.0f, 0.0f, -6.0f});
 
     // Movement marker. It jumps to each click instead of gliding, so it has no PreviousTransform.
-    Material yellow;
     // It glows instead of reflecting light, so it is the same yellow day or night. It will become a HUD ring in phase 9.
-    yellow.colour = Pixel{0, 0, 0};
-    yellow.specularStrength = 0.0f;
-    yellow.emissive = Vec3{1.0f, 0.71f, 0.022f};
+    const Material yellow = glowMaterial(Vec3{1.0f, 0.71f, 0.022f});
 
     ModelRenderer markerRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(0.2f)), yellow);
     markerRenderer.visible = false;
@@ -521,7 +529,7 @@ void DemoGame::toggleLamps(World& world) {
 
     Material stone;
     stone.colour = Pixel{120, 120, 130};
-    stone.specularStrength = 0.05f;
+    stone.roughness = 0.8f; // Rough-hewn.
 
     int index = 0;
 
@@ -536,10 +544,7 @@ void DemoGame::toggleLamps(World& world) {
             const Vec3& colour = colours[index % 4];
 
             // The bulb glows in the light's colour and must not block the light inside it.
-            Material glow;
-            glow.colour = Pixel{0, 0, 0};
-            glow.specularStrength = 0.0f;
-            glow.emissive = colour;
+            const Material glow = glowMaterial(colour);
 
             ModelRenderer bulb = makeMeshRenderer(sphereMesh, glow);
             bulb.castsShadows = false;
@@ -971,10 +976,7 @@ void DemoGame::toggleFloodlights(World& world) {
         return;
     }
 
-    Material glow;
-    glow.colour = Pixel{0, 0, 0};
-    glow.specularStrength = 0.0f;
-    glow.emissive = floodlightColour * floodlightGlowBrightness;
+    const Material glow = glowMaterial(floodlightColour * floodlightGlowBrightness);
 
     for (const Vec3& foot : floodlightPoleFeet()) {
         const Vec3 towardsMiddle = Vec3{obstacleCourseOrigin.x - foot.x, 0.0f, obstacleCourseOrigin.z - foot.z};

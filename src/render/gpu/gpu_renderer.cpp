@@ -1,4 +1,5 @@
 #include "render/gpu/gpu_renderer.h"
+#include "render/gpu/brdf.h"
 #include "render/gpu/debug_line_renderer.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/gpu_helpers.h"
@@ -69,6 +70,7 @@ GpuRenderer::GpuRenderer(SDL_Window* window):
         bloom = std::make_unique<BloomRenderer>(device);
         createScreenPipelines();
         createWhiteTexture();
+        createBrdfTable();
     }
     catch (...) {
         cleanup();
@@ -182,7 +184,7 @@ void GpuRenderer::createPipeline() {
             "assets/shaders/triangle.frag.spv",
             SDL_GPU_SHADERSTAGE_FRAGMENT,
             3, // Material colour, lights, shadow data.
-            3, // Colour texture, shadow atlas (compared), shadow atlas (raw depths).
+            5, // Colour texture, shadow atlas (compared), shadow atlas (raw depths), metallic-roughness texture, BRDF table.
             1  // Shadow tiles.
         );
 
@@ -588,6 +590,7 @@ void GpuRenderer::cleanup() noexcept {
         meshes.clear();
         textures.clear();
         whiteTexture.reset();
+    brdfTable.reset();
         debugLines.reset();
         bloom.reset();
 
@@ -1018,28 +1021,24 @@ void GpuRenderer::drawMesh(MeshHandle meshHandle, const Mat4& model, const Mater
 
     SDL_PushGPUFragmentUniformData(commands, 0, &materialData, static_cast<Uint32>(sizeof(materialData)));
 
-    // No texture means plain colour: the shader multiplies the colour by white.
-    const GpuTexture* selectedTexture = whiteTexture.get();
-
-    if (material.texture.isValid()) {
-        if (material.texture.index >= textures.size()) {
-            throw std::out_of_range("drawMesh: texture handle has not been uploaded");
-        }
-
-        selectedTexture = textures[material.texture.index].get();
-    }
+    const GpuTexture& colourTexture = textureOrWhite(material.texture);
+    const GpuTexture& metallicRoughnessTexture = textureOrWhite(material.metallicRoughnessTexture);
 
     // Slot 0: the surface's colour texture. Slot 1: the shadow atlas, read with depth comparison. Slot 2: the same atlas,
-    // read as raw depths.
-    SDL_GPUTextureSamplerBinding textureBindings[3]{};
-    textureBindings[0].texture = selectedTexture->getTexture();
-    textureBindings[0].sampler = selectedTexture->getSampler();
+    // read as raw depths. Slot 3: the surface's metallic-roughness texture. Slot 4: the BRDF table.
+    SDL_GPUTextureSamplerBinding textureBindings[5]{};
+    textureBindings[0].texture = colourTexture.getTexture();
+    textureBindings[0].sampler = colourTexture.getSampler();
     textureBindings[1].texture = shadowAtlas;
     textureBindings[1].sampler = shadowSampler;
     textureBindings[2].texture = shadowAtlas;
     textureBindings[2].sampler = shadowDepthSampler;
+    textureBindings[3].texture = metallicRoughnessTexture.getTexture();
+    textureBindings[3].sampler = metallicRoughnessTexture.getSampler();
+    textureBindings[4].texture = brdfTable->getTexture();
+    textureBindings[4].sampler = brdfTable->getSampler();
 
-    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 3);
+    SDL_BindGPUFragmentSamplers(pass, 0, textureBindings, 5);
 
     SDL_DrawGPUIndexedPrimitives(pass, mesh.getIndexCount(), 1, 0, 0, 0);
 }
@@ -1110,7 +1109,45 @@ void GpuRenderer::abandonFrame() noexcept {
 void GpuRenderer::createWhiteTexture() {
     const Uint8 whitePixel[4] = {255, 255, 255, 255};
 
-    whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4}
+    whiteTexture = std::make_unique<GpuTexture>(device, 1, 1, std::span<const Uint8>{whitePixel, 4}, surfaceTextureDescription(TextureEncoding::Srgb));
+}
+
+// No texture means plain colour or plain factors: the shader multiplies them by white.
+const GpuTexture& GpuRenderer::textureOrWhite(TextureHandle handle) const {
+    if (!handle.isValid()) {
+        return *whiteTexture;
+    }
+
+    if (handle.index >= textures.size()) {
+        throw std::out_of_range("drawMesh: texture handle has not been uploaded");
+    }
+
+    return *textures[handle.index];
+}
+
+/*
+* Two 16-bit channels per texel (scale and bias, 0..1). 8 bits would put errors of a few tenths of a percent into every
+* surface's reflectance; 16-bit UNORM is exact enough and smaller than floats.
+*/
+void GpuRenderer::createBrdfTable() {
+    constexpr SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R16G16_UNORM;
+
+    if (!SDL_GPUTextureSupportsFormat(device, format, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+        throw std::runtime_error("This GPU cannot sample a 16-bit two-channel texture, which physically based shading needs");
+    }
+
+    const BrdfTable table = buildBrdfTable();
+    const std::vector<std::uint16_t> texels = brdfTableTexels(table);
+
+    GpuTextureDescription description;
+    description.format = format;
+    description.bytesPerTexel = 2 * sizeof(std::uint16_t);
+    description.surface = false;
+
+    brdfTable = std::make_unique<GpuTexture>(
+        device, table.size, table.size,
+        std::span<const Uint8>{reinterpret_cast<const Uint8*>(texels.data()), texels.size() * sizeof(std::uint16_t)},
+        description
     );
 }
 
@@ -1126,12 +1163,12 @@ void GpuRenderer::uploadMesh(const IndexedMesh& mesh) {
     meshes.push_back(std::make_unique<GpuMesh>(device, mesh));
 }
 
-void GpuRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels) {
+void GpuRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding) {
     if (commands != nullptr) {
         throw std::logic_error("Upload textures before beginning a frame");
     }
 
-    textures.push_back(std::make_unique<GpuTexture>(device, width, height, pixels));
+    textures.push_back(std::make_unique<GpuTexture>(device, width, height, pixels, surfaceTextureDescription(encoding)));
 }
 
 std::size_t GpuRenderer::getMeshCount() const {
