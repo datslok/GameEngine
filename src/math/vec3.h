@@ -23,4 +23,7 @@ struct Vec3{
     float length() const;
     Vec3 normalized() const;
     Vec3 cross(const Vec3& other) const;
+
+    // x, y or z for index 0, 1 or 2, so code can loop over the axes.
+    float operator[](int index) const;
 };

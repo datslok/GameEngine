@@ -79,4 +79,10 @@ void testVec3() {
     assert(std::abs(crossResult.x - (-3.0f)) < 0.00001f);
     assert(std::abs(crossResult.y - 6.0f) < 0.00001f);
     assert(std::abs(crossResult.z - (-3.0f)) < 0.00001f);
+
+    // Components by index, for code that loops over the three axes.
+    const Vec3 indexed{7.0f, 8.0f, 9.0f};
+    assert(indexed[0] == 7.0f);
+    assert(indexed[1] == 8.0f);
+    assert(indexed[2] == 9.0f);
 }

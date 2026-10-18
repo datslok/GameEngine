@@ -10,10 +10,6 @@ namespace {
     float clamp01(float value) {
         return std::clamp(value, 0.0f, 1.0f);
     }
-
-    float axis(const Vec3& vector, int index) {
-        return index == 0 ? vector.x : (index == 1 ? vector.y : vector.z);
-    }
 }
 
 /*
@@ -119,14 +115,14 @@ ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& 
     cuts[cutCount++] = 1.0f;
 
     for (int index = 0; index < 3; ++index) {
-        const float step = axis(direction, index);
+        const float step = direction[index];
 
         if (step == 0.0f) {
             continue;
         }
 
-        for (const float plane : {axis(box.minimum, index), axis(box.maximum, index)}) {
-            const float t = (plane - axis(a, index)) / step;
+        for (const float plane : {box.minimum[index], box.maximum[index]}) {
+            const float t = (plane - a[index]) / step;
 
             if (t > 0.0f && t < 1.0f) {
                 cuts[cutCount++] = t;
@@ -150,14 +146,14 @@ ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& 
         float denominator = 0.0f;
 
         for (int index = 0; index < 3; ++index) {
-            const float position = axis(middle, index);
-            const float minimum = axis(box.minimum, index);
-            const float maximum = axis(box.maximum, index);
+            const float position = middle[index];
+            const float minimum = box.minimum[index];
+            const float maximum = box.maximum[index];
 
             if (position < minimum || position > maximum) {
                 const float plane = position < minimum ? minimum : maximum;
-                const float step = axis(direction, index);
-                numerator += step * (axis(a, index) - plane);
+                const float step = direction[index];
+                numerator += step * (a[index] - plane);
                 denominator += step * step;
             }
         }
