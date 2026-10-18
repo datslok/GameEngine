@@ -2,7 +2,7 @@
 
 A from-scratch C++20 game engine. Long-term goal: support both **FPS** and **MOBA** style games, and eventually a dressmaking game with real cloth physics (ROADMAP phases 7 and 10) and a real-scale solar system (phase 13), by keeping the core genre-agnostic and putting genre-specific code (camera controllers, weapons, abilities, netcode style, cloth, orbital mechanics) in separate modules on top.
 
-The roadmap is in `ROADMAP.md`. Phases 0-4 (foundations, GPU rendering and assets, core loop and input, engine architecture, rendering upgrades) are done; phase 5 (collision and movement) is next, then the two things the user most wants to see early: phase 6 (HDR, tone mapping, bloom, compute pipelines, physically based materials and DDGI global illumination) and phase 7 (cloth simulation), then phase 8 (Euphoria-style active ragdolls: rigid bodies, joints, motors, balance and behaviours; plan and research in `docs/RAGDOLLPLAN.md`). Optional ideas (clustered shading, a shadow redraw budget, separate still/moving shadow caches) wait in phase 14.
+The roadmap is in `ROADMAP.md`. Phases 0-5 (foundations, GPU rendering and assets, core loop and input, engine architecture, rendering upgrades, collision and movement) are done; next come the two things the user most wants to see early: phase 6 (HDR, tone mapping, bloom, compute pipelines, physically based materials and DDGI global illumination) and phase 7 (cloth simulation), then phase 8 (Euphoria-style active ragdolls: rigid bodies, joints, motors, balance and behaviours; plan and research in `docs/RAGDOLLPLAN.md`). Optional ideas (clustered shading, a shadow redraw budget, separate still/moving shadow caches) wait in phase 14.
 
 ## Build and run
 

@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 4 (lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
+**Covers:** phases 0 to 5 (collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, specular highlights, smooth normals, normal matrix and depth range, mipmaps, gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
 
 ---
 
@@ -20,6 +20,7 @@ games/          one folder per game (games/demo)
 engine/         the main loop and the Game interface
 platform/  render/          the window and SDL input / the GPU renderer
 gameplay/       movement, camera controllers
+physics/        collision shapes, raycasts, the level, character controller, particles
 scene/  assets/ meshes, materials, lights, camera / loading files
 input/          keys and the input snapshot
 ecs/  core/  math/          entities, small shared types, vectors and matrices
@@ -423,7 +424,134 @@ The demo deliberately does the opposite for the sphere: it is a fixed object 64 
 
 ---
 
-## 10. Testing
+## 10. Collision and movement
+
+Phase 5 gave the engine its first physics: knowing what a ray or a body touches, and moving a character through a level without passing through walls. Everything here lives in `physics/` (with a little in `math/` and `scene/`) and runs in the fixed-step simulation, so it works headless and in tests.
+
+### Shapes as cores plus radii
+
+There are three shapes (`physics/shapes`): a `Sphere` (centre and radius), a `Capsule` (a line segment `a`-`b` grown by a radius, like a pill; with `a == b` it is a sphere) and an `Aabb`, an axis-aligned box (its faces line up with x, y and z, so it is stored as a minimum and a maximum corner). `Shape` is a `std::variant` of the three: one value that holds exactly one of them (see the programming notes below).
+
+The key idea is that a rounded shape is a **core** (a point for a sphere, a segment for a capsule) **plus a radius**. Two rounded shapes overlap exactly when their cores come closer than the sum of their radii. So every overlap test between rounded shapes reduces to one geometry question: how close do two cores get? Think of the radius as a sheath of constant thickness round the core; the sheaths touch when the cores are within the two thicknesses of each other.
+
+Those "closest points" questions live in `math/closest_points`:
+
+- **Point to segment.** Project the point onto the segment's line, `t = (p - a)·d / (d·d)` with `d = b - a`, and clamp `t` to 0..1 so the answer stays on the segment.
+- **Point to box.** Clamp each coordinate to the box's range. A point inside stays where it is (distance 0).
+- **Segment to segment.** Two points `a1 + s d1` and `a2 + t d2`; the squared distance between them is a quadratic in `s` and `t`, a bowl-shaped surface. Its lowest point comes from setting both partial derivatives to zero (two linear equations), then clamping to the square 0..1 and re-solving along the edge it was clamped to. Parallel segments make the equations degenerate and are handled separately (Ericson, *Real-Time Collision Detection*, section 5.1.9).
+- **Segment to box.** The squared distance from a point moving along the segment to the box is a smooth bowl as well, but it changes formula where the point crosses one of the box's six planes (on each axis the point is below, inside or above the box's range, and only the axes outside count). So the segment is cut at those crossings, and on each piece the distance is an ordinary quadratic, minimised exactly. No iteration, and a segment passing through the box comes out at distance 0.
+
+**Touching counts as overlapping** (distance equal to the summed radii). The choice matters at the boundary: a character standing exactly on the floor must count as on it.
+
+**Squared distances.** Comparing `distance² < (r1 + r2)²` gives the same answer as comparing distances, without a square root. Most tests in the engine work with squares for that reason.
+
+### Raycasts
+
+A **ray** is a starting point and a direction, `p(t) = origin + t × direction`; a raycast asks for the first `t ≥ 0` where it meets a shape (`physics/raycast`). The result is a `RayHit`: the distance (in world units, since the direction is normalised first), the point, and the surface normal, always turned to face back against the ray, so shading or a bounce can use it without checking which side was hit. Starting inside a shape hits at distance 0 with the normal pointing back along the ray: you are already touching it.
+
+- **Sphere:** substitute the ray into `|p - c|² = r²` and you get a quadratic in `t`. A negative discriminant misses; otherwise the smaller root is where the ray enters.
+- **Capsule:** the side is a cylinder, which becomes a circle once motion along the axis is ignored: remove the axis component from both the ray direction and the offset, and solve the same quadratic in the remaining 2D plane. That hit only counts if it lands between the segment's ends; the ray is also tested against the two end spheres, and the first of these hits is the answer.
+- **Box (the slab method):** the box is where three slabs overlap (x between its minimum and maximum, and the same for y and z). For each axis, work out the `t` at which the ray enters and leaves that slab. The ray is inside the box when it is inside all three, so it enters at the latest entry and leaves at the earliest exit; it hits if the entry comes before the exit. The face hit is on the axis with the latest entry.
+- **Triangle (Möller-Trumbore):** solve `origin + t d = a + u (b - a) + v (c - a)` for `t`, `u` and `v` (three equations, three unknowns, solved with cross and dot products). The ray hits when `u ≥ 0`, `v ≥ 0` and `u + v ≤ 1` (the point lies inside the triangle) and `t ≥ 0`. Triangles are hit from both sides. One demo bug taught a lesson: a ray passing exactly along the seam between two triangles could slip through both, because rounding put it just outside each. So the inside test allows a tiny tolerance (`edgeTolerance`, 1e-5), and that exact ray is kept as a regression test.
+
+A **mesh** raycast (`raycast(ray, TriangleMesh)`) tests its triangles and keeps the nearest hit. `TriangleMesh` (`physics/triangle_mesh`) is the collision form of a mesh: positions plus three indices per triangle, built from a scene mesh by `collisionMesh(mesh, transform)`.
+
+### Colliders: shapes that belong to entities
+
+A `Collider` component (`physics/collider`) gives an entity a shape in its **own** coordinates, plus an optional `detail`: the exact triangles, shared between entities with `std::shared_ptr`. The shape must enclose the triangles; it is the cheap stand-in tested first.
+
+Since the shape is in the entity's coordinates, it has to be moved into the world before testing (`worldShape(shape, model)`), with the entity's model matrix (its `Transform`):
+
+- **Points** (centres, segment ends) go through the matrix exactly.
+- **Radii** are scaled by the largest stretch the matrix applies, the longest column of its 3x3 part. A sphere squashed into an ellipsoid is no longer a sphere, so the engine takes the sphere that encloses it: always safe, exact when the scale is uniform.
+- **Boxes** turned by a rotation are no longer axis-aligned, so the world box is the axis-aligned box *around* the turned one. Its half-size on axis `i` is `Σ_j |A_ij| h_j`: each of the turned box's three half-edge vectors contributes its full reach along axis `i`, whichever way it points.
+
+Games click on simple shapes rather than meshes because shapes are cheap and stable: a capsule round a character answers "did I click the duck?" in one quadratic, and a click that lands between two of the duck's feathers still counts.
+
+### Two-stage picking
+
+Clicking an object (`raycastColliders`, `physics/collider_raycast`) works in two stages. First the ray is tested against each collider's world shape. In `Triangles` mode, each shape hit is then confirmed against the entity's detail triangles; in `Shapes` mode the shape hit is the answer.
+
+The skipping argument rests on one inequality. The shape encloses the triangles, so the ray cannot reach a triangle before it reaches the shape around it: **the shape's hit distance is a lower bound on the triangles' hit distance**. Once some triangle hit is known at distance `d`, any collider whose shape is hit beyond `d` cannot contain anything nearer, and its triangles are never tested. The reach of the query shrinks as nearer hits are found.
+
+The triangles are stored in the entity's own coordinates, so the ray is carried into them rather than every triangle into the world. That needs the inverse of the model matrix. For a matrix that only rotates, scales and moves (`[A t; 0 1]`), the inverse is `[A⁻¹, -A⁻¹ t; 0 1]` (`affineInverse`, `math/mat4`), with `A⁻¹` from the same cofactors the normal matrix uses. A scaled object makes distances along the ray differ inside and out, so a hit distance is converted back by the world length per local length along the ray, and the normal comes back through the normal matrix (section 8). A ray that slips between the triangles (through a hole in a mesh, or past the duck's beak) goes on to whatever is behind.
+
+### The broad phase: a grid that skips most of the world
+
+Testing a ray against every collider costs time in proportion to the number of colliders. The **broad phase** finds the few that could possibly matter before the exact tests (the **narrow phase**) run.
+
+The engine's broad phase is a **uniform grid** (`physics/uniform_grid`): space cut into cubes 2 units on a side (`CollisionSettings::gridCellSize`), like graph paper in 3D. Each item goes into every cell its bounding box touches. Only occupied cells are stored, in a hash map from cell coordinates to the items in it, so empty space costs nothing. Items too big for this (more than 64 cells, such as the ground) go on a separate large list that every query checks.
+
+- **Region queries** look only in the cells a box touches. An item that spans several cells would be found several times, so each item remembers the number of the last query that saw it (**mailboxing**) and is reported once.
+- **Ray walks** visit the cells along the ray in order, near to far, stepping from cell to cell by whichever cell boundary the ray crosses next (Amanatides and Woo's grid traversal, the 3D version of drawing a line on pixels). The walk stops as soon as the next cell boundary is further than the nearest hit found so far, because nothing in a further cell can beat it.
+
+`CollisionScene` (`physics/collision_scene`) holds the grid for every `Collider`, and is **rebuilt from scratch** each time it is used. That sounds wasteful but is deliberate: the ECS has no change tracking, so a grid updated piece by piece could keep stale entries for things that moved or were destroyed, while a rebuild is always right and, at these sizes, cheap. Tests check every query against brute force on random scenes.
+
+### Static level collision
+
+Things that never move (the ground, the obstacle course) are a `StaticLevel` (`physics/static_level`): all their triangles merged into one world-space `TriangleMesh`, with its own uniform grid over triangle numbers. It is built once, as pieces are added, and never rebuilt.
+
+It answers raycasts (the walk stops at the nearest triangle hit) and, for movement, **contacts**: for a capsule, every triangle it touches, each as a `Contact` with the point, the normal pointing out of the triangle towards the capsule, the depth of overlap and the triangle's own face normal. The depth is the radius minus the distance from the capsule's core to the triangle, found as closest points again (`closestPointOnTriangle` decides which feature is nearest, the face, an edge or a corner, by which region of the triangle's plane the point falls in, Ericson section 5.1.5). A core that pierces the triangle is pushed out along the face normal, on the side its middle lies.
+
+Spheres can also be **swept**: `sweepSphere` finds the first touch of a moving sphere. A sphere's centre touches a triangle exactly when it reaches the triangle grown by the radius (two copies of the face, moved out along the normal, plus a capsule along each edge), so the sweep is one raycast of the centre's path against that grown shape. Nothing passes through a wall at any speed, which stepping alone cannot promise.
+
+### The kinematic character controller
+
+A real body pushed into a wall feels a contact force, decelerates and bounces a little. Game characters are usually **kinematic** instead: the code decides how they move, and collisions only correct the position. That gives precise, predictable control (stop on a coin, no sliding on slopes, no bouncing off walls), which players expect from an FPS. The controller (`physics/character_controller`) moves a capsule (radius 0.4, height 1.8) through the static level each tick, and was tuned to feel like Overwatch using community-measured numbers.
+
+One tick, in order:
+
+1. **Jump** if asked and on the ground: the vertical speed becomes 5.72 m/s. It comes first, so the take-off tick already uses air rules.
+2. **Steer.** On the ground, the horizontal velocity moves towards the wished velocity at 100 m/s² (full speed in a twentieth of a second). In the air, wishing nothing keeps the momentum; steering moves towards the wish at 30 m/s², and a turn of 90° or less keeps the speed instead of losing it on the way round, which is how Overwatch's air control has worked since 2018.
+3. **Fall.** Gravity is 17.5 m/s² (game feel, not 9.81), with quadratic air drag while falling: `a = -g + (g / v_t²) v²`. That is Newton's law for drag proportional to speed squared, and it approaches the terminal speed `v_t` = 30 m/s as `v(t) = v_t tanh(g t / v_t)`. It is integrated with **semi-implicit Euler**: update the velocity first, then move with the *new* velocity. Plain (explicit) Euler, which moves with the old velocity, slowly adds energy, so jumps would creep higher.
+4. **Move along the ground.** While walking, the horizontal velocity is tilted into the ground's plane and scaled back to full length, so slopes are walked at the same speed as flat ground.
+5. **Substeps.** The move is cut into steps of at most half the radius. A step longer than the capsule is thick could jump right over a thin wall, the classic **tunnelling** problem.
+6. **Push out** after every substep: find the deepest overlap, push the capsule out of it, ask again (pushing out of one wall can push into another, as in a corner), up to 8 times. The push depends on what was hit:
+   - **Ground** (a walkable face, up to 45°) pushes straight **up**, by `depth / normal.y`, the height that clears the same overlap. Pushing along the normal instead would slide the character downhill a little every tick; going straight up is the kinematic stand-in for static friction.
+   - **Walls and ceilings** push along the normal and remove the velocity going into them. That is a frictionless, perfectly inelastic collision: the motion into the wall stops, the motion along it continues, so the character slides along walls.
+   - **Steps.** When a round body bumps a ledge of height `h`, the contact comes from the ledge's edge, and the push points at an angle `acos((r - h) / r)` from up, often steeper than any walkable slope. So an *edge* contact no higher than `stepHeight` (0.3) above the feet also counts as ground and pushes up: the capsule rides up kerbs and stairs by itself, with no separate step-up move. A steep ramp is still a wall, because walking into it touches its *face*.
+7. **Settle onto the ground.** A character that was walking is lowered up to 0.3 units in small drops, so it follows the ground down a step or over the top of a ramp instead of launching into the air, and any hovering left by a push-out disappears.
+8. **Look underfoot.** A capsule lowered by 0.01 that touches supporting ground decides `grounded` and the ground's normal.
+
+The **first-person body** (`gameplay/first_person_body`) is an invisible capsule with this controller. Each frame, WASD becomes a wished velocity turned by the camera's yaw: 5.5 m/s, 90% backwards, 3 m/s crouched, 1.5 times sprinting. Crouching shortens the capsule at once; standing up waits until the full capsule fits. The camera sits at the body's eyes. The MOBA duck walks with the same controller, steered by its click-to-move target.
+
+### Particles: balls that bounce
+
+A `Particle` (`physics/particle`) is a small ball that flies and bounces off the level: the demo throws them as grenades with G.
+
+- **Flight** under constant gravity moves by the average of the starting and ending velocities, `Δx = v t + ½ a t²`. That is the exact solution for constant acceleration, so a throw follows the true parabola however long the tick.
+- **Collisions are swept, not stepped:** each tick the flight is swept through the level with `sweepSphere`, and at the first surface the ball stops just clear of it, bounces, and flies on for the rest of the tick (up to 4 surfaces per tick).
+- **A bounce** splits the velocity into the part into the surface and the part along it. The normal part comes back `e` times as fast (the **coefficient of restitution**, 0.45: 0 sticks, 1 bounces fully). Coulomb friction then slows the sliding part by at most `μ` (0.4) times the change in the normal speed, and never reverses it. For a ball resting on a floor this gives exactly the kinetic-friction deceleration `μ g`, as in the textbook block on a table.
+- **Coming to rest.** Arriving slower than 1 m/s does not bounce, so the bouncing dies out instead of halving forever (Zeno's ball), and a ball in contact with the ground has gravity cancelled by the surface. A resting ball stays exactly still: no jitter.
+
+### Measuring speed: the profiler and the release build
+
+Physics is the first work whose cost grows with the scene, so phase 5 added a way to measure it. `Profiler` (`core/profiler`) times named sections with `std::chrono::steady_clock`, a clock that only goes forwards at a constant rate (unlike the wall clock, which jumps when the computer corrects its time). It counts **per call**, not per frame, because ticks do not fall one per frame: at 240 frames a second and 120 ticks, half the frames run no tick at all. And it collects for half a second before showing anything, then shows that window's average and its worst call: readable digits, and the occasional slow frame (a hitch you feel) is not averaged away. F4 shows the engine's frame, work (the frame minus the frame cap's sleep), tick, update, scene and render times, and what each demo system costs per tick.
+
+Those numbers showed why the **release build** matters. The normal build compiles with no optimisation (`-O0`), so a debugger can stop on every line and see every variable. But then every variable lives in memory, nothing is simplified, and every function call really happens. A line like `velocity + acceleration * seconds` becomes two function calls, each copying three floats in and out, to do six multiplications and additions. `make release` compiles with `-O2`: values stay in registers, repeated work is removed, and small functions are **inlined** (their body is pasted where they are called). For that, the compiler must *see* the body, so the small vector operations are defined in their headers (`math/vec3.h` and friends); a body in a separate `.cpp` file is invisible when compiling the files that use it.
+
+Measured with 40 characters walking a stepped level and 200 bouncing balls, per tick:
+
+| Build | 40 characters | 200 balls |
+|---|---|---|
+| Debug (`-O0`) | 0.52 ms | 0.54 ms |
+| `-O2`, vector operations in `.cpp` files | 0.105 ms | 0.090 ms |
+| `-O2`, vector operations in headers | 0.075 ms | 0.067 ms |
+
+Seven to eight times faster in all, of which the headers gave 1.4 times: that part was the cost of the function calls themselves. Link-time optimisation (which inlines across files at link time instead) gained only another 3 to 9% and made a one-file rebuild take 20 seconds instead of 3, so it is not used.
+
+### Programming notes met along the way
+
+- **`std::optional<T>`**: a value that may be missing. A raycast returns `std::optional<RayHit>`: either a hit or nothing, with no magic distance like -1 meaning "missed". `if (hit)` checks, `*hit` or `hit->distance` reads.
+- **`std::variant` and `std::visit`**: `Shape` holds a `Sphere`, a `Capsule` or an `Aabb`, and knows which. `std::visit` calls the right function for whatever it holds, so `overlaps(Shape, Shape)` is one line that picks among the nine pair tests.
+- **Overloading**: one name, several functions told apart by their argument types. `raycast(ray, sphere)`, `raycast(ray, capsule)` and `raycast(ray, mesh)` read as one idea, and the compiler picks.
+- **`std::shared_ptr`**: shared ownership. A collider's detail mesh is held by every entity that uses it (the demo's cubes and pillars all share one), and freed when the last one lets go. The `const` in `shared_ptr<const TriangleMesh>` stops any one of them from changing it under the others.
+- **Floating-point tolerances**: floats carry about 7 significant digits, so results that should be exactly equal often differ in the last bit. The physics compares against small named tolerances (`edgeTolerance`, `clearance`, `touchingDepth`) instead of testing `==`, and keeps a ball exactly `clearance` (1 mm) off a surface it stops at, so rounding cannot leave it inside.
+- **RAII for timing**: `ScopedTimer` reads the clock when made and records the difference when destroyed. C++ always runs destructors when a block ends, however it ends, so the stopwatch can never be left running: the same idea the engine uses to free SDL resources. `timeSection(profiler, section, [&] { ... })` wraps that around a **lambda**, a small unnamed function written in place.
+
+---
+
+## 11. Testing
 
 Tests are plain `assert`-based functions, one file per area in `tests/`, registered in `tests/test_main.cpp`. They need **no GPU and no window**, which shapes the design: anything worth testing is pulled out into pure functions (`collectLighting`, `packLighting`, `packMaterial`, `normalMatrix`, `toGpuDepthRange`, `generateSmoothNormals`), and the GPU code just moves their results into buffers.
 
