@@ -217,8 +217,8 @@ namespace {
         runTicks(lab.game, lab.world, static_cast<int>(std::lround(1.0f / tickSeconds)), ticks);
         assert(near(lab.game.getSunSettings().solarHours, 16.5f, 1e-3f));
 
-        // The sun moves by default, a day in 4 minutes, but golden views hold it at their hour.
-        assert(Lab{}.game.getSunSettings().hoursPerSecond == 0.1f);
+        // The sun moves by default, a day in 16 minutes, but golden views hold it at their hour.
+        assert(Lab{}.game.getSunSettings().hoursPerSecond == 0.025f);
         for (const GoldenView& view : Lab{}.game.goldenViews()) {
             Lab golden;
             golden.game.prepareGoldenView(golden.world, view);
