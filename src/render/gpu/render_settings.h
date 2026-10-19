@@ -4,6 +4,7 @@
 #include "render/gpu/bloom.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
+#include "render/gpu/ray_tracing.h"
 #include "render/gpu/shadow_map.h"
 #include "render/gpu/tone_mapping.h"
 
@@ -30,6 +31,11 @@ struct RenderSettings {
     // A debug view: each pixel tinted by how many lights its cluster lists, black for none, then blue, green, yellow and
     // red at render/gpu/clusters.h's full scale and above.
     bool clusterHeatmap = false;
+
+    // A debug view in place of the lit scene: each pixel's first hit by a hardware-traced ray (render/gpu/ray_tracing.h)
+    // as its normal, albedo or front or back face, to check the ray tracing scene against the drawn one. Only on GPUs
+    // with ray queries; ignored elsewhere.
+    RayDebugView rayDebugView = RayDebugView::Off;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

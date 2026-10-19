@@ -62,4 +62,7 @@
 #define GPU_TEST_CASCADE_BLEND 1
 #define GPU_TEST_SUN_SHADOW_BIAS 2
 
+// ray_tracing_test.comp
+#define GPU_TEST_CAMERA_RAY 0
+
 #endif

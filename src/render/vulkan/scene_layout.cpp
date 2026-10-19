@@ -19,8 +19,8 @@ namespace {
 
     constexpr std::array<BindingKind, SceneBindingCount> sceneBindings{{
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, vertex | fragment | compute}, // frame data
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // instances
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // materials
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // instances (fragment and compute for ray hits)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // materials
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // directional lights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // point lights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // spotlights
@@ -98,6 +98,10 @@ void UploadArray::write(const void* data, std::size_t bytes) {
 
 VkDescriptorBufferInfo UploadArray::describe() const {
     return VkDescriptorBufferInfo{buffer.get(), 0, VK_WHOLE_SIZE};
+}
+
+VkDeviceAddress UploadArray::getDeviceAddress() const {
+    return buffer.getDeviceAddress();
 }
 
 SceneBuffers::SceneBuffers(VmaAllocator allocator):

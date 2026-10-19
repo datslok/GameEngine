@@ -1,0 +1,22 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs ray_tracing.glsl's functions on the cases ray_tracing_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "ray_tracing.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 right = testInput(0);
+    vec4 up = testInput(1);
+    vec4 forward = testInput(2);
+    vec4 last = testInput(3);
+
+    if (function == GPU_TEST_CAMERA_RAY) {
+        testOutput(0, vec4(cameraRayDirection(right.xyz, up.xyz, forward.xyz, right.w, up.w), 0.0));
+        testOutput(1, vec4(hitCornerWeights(forward.w, last.x), 0.0));
+    }
+}

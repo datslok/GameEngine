@@ -27,27 +27,12 @@ layout(location = 3) in vec4 worldTangent;
 // Which entry of the material buffer shades this object (from its instance; the same across the triangle).
 layout(location = 4) flat in uint materialIndex;
 
-// Every texture there is, in one array (bindless, render/vulkan/bindless_textures.h): slot 0 is white, which a missing
-// texture multiplies by, and each uploaded texture sits at its handle plus one. Neighbouring pixels may belong to
-// different objects, so an index into it is marked nonuniformEXT: without that, the GPU may assume one texture for a
-// whole group of pixels shaded together.
-layout(set = 0, binding = 0) uniform sampler2D textures[];
+// Every texture (bindless) and the frame's materials.
+#include "materials.glsl"
 
 // The frame's uniform block: ambient light, light counts and the atlas texel size are what this shader reads of it.
 #include "frame_data.glsl"
 #include "frame_clusters.glsl"
-
-// Must match GpuMaterial in render/gpu/material_uniforms.h.
-struct MaterialData {
-    vec4 baseColour;
-    vec4 surfaceParameters; // x: metallic, y: roughness, z: normal map scale (0 without a normal map)
-    vec4 emissive;          // rgb: light the surface gives off itself
-    uvec4 textureSlots;     // in the texture array: x colour, y metallic-roughness (linear), z normal map (linear)
-};
-
-layout(std430, set = 1, binding = 2) readonly buffer Materials {
-    MaterialData materials[];
-};
 
 // The frame's lights (shared with cluster_lights.comp).
 #include "scene_lights.glsl"

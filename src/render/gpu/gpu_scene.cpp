@@ -16,6 +16,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     writeColumnMajor(normalMatrix(draw.model), instance.normalMatrix);
     instance.handedness[0] = handedness(draw.model);
     instance.material[0] = material;
+    instance.material[1] = draw.mesh.index;
     return instance;
 }
 
