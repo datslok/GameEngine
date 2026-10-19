@@ -2,6 +2,7 @@
 
 #include "math/mat4.h"
 #include "math/vec3.h"
+#include "render/gpu/clusters.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
 #include "scene/asset_handles.h"
@@ -47,7 +48,8 @@ static_assert(sizeof(GpuShadowView) == 64, "GpuShadowView must match shadow.vert
 /*
 * The frame's small uniform block (std140): for the vertex shader the camera's view-projection measured from the camera
 * and the camera's position, which make each instance camera-relative (render/gpu/camera_relative.h); for every pixel
-* the ambient light, how many lights of each kind the light buffers hold this frame, and the size of one shadow atlas texel.
+* the ambient light, how many lights of each kind the light buffers hold this frame, and the size of one shadow atlas texel;
+* and the cluster grid (render/gpu/clusters.h), as clusters.glsl's ClusterGrid, for the main pass and cluster_lights.comp.
 */
 struct GpuFrameData {
     float relativeViewProjection[16];
@@ -55,16 +57,24 @@ struct GpuFrameData {
     float ambient[4];
     std::int32_t counts[4]; // x: directional lights, y: point lights, z: spotlights
     float atlasTexel[4];    // xy: one texel's size in atlas coordinates
+    std::int32_t clusterTiles[4]; // x: tiles across, y: tiles down, z: depth slices
+    float clusterScreen[4];       // xy: the screen in pixels, z: half the view's width at depth 1, w: its half height
+    float clusterSlicing[4];      // x: slice scale, y: slice bias
+    float viewRight[4];           // xyz: the view's axes in the world
+    float viewUp[4];
+    float viewForward[4];
+    std::int32_t shadingOptions[4]; // x: 1 shades from the clusters' lists, y: 1 shows their light counts (the heatmap)
 };
 
-static_assert(sizeof(GpuFrameData) == 128, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 240, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
 GpuShadowView packShadowView(const Mat4& tileMatrix);
 
-GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin);
+GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
+                           const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap);
 
 /*
 * The frame's materials, one entry per different material: draws carry their materials by value, and many share one (a

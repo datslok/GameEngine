@@ -110,3 +110,4 @@ void gpuTestToneMapping(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestBloom(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDither(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestOverlay(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report);

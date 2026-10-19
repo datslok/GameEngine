@@ -1,6 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
@@ -10,6 +11,7 @@
 #include "normal_mapping.glsl"
 #include "lighting.glsl"
 #include "soft_shadow.glsl"
+#include "clusters.glsl"
 
 // Per-pixel noise, which turns each pixel's soft shadow samples.
 #include "dither.glsl"
@@ -32,6 +34,7 @@ layout(set = 0, binding = 0) uniform sampler2D textures[];
 
 // The frame's uniform block: ambient light, light counts and the atlas texel size are what this shader reads of it.
 #include "frame_data.glsl"
+#include "frame_clusters.glsl"
 
 // Must match GpuMaterial in render/gpu/material_uniforms.h.
 struct MaterialData {
@@ -45,42 +48,12 @@ layout(std430, set = 1, binding = 2) readonly buffer Materials {
     MaterialData materials[];
 };
 
-// Must match GpuDirectionalLight, GpuPointLight and GpuSpotLight in render/gpu/light_uniforms.h. Tile numbers are -1
-// for a light without a shadow; a point light's six cube faces are six tiles in a row from its first one.
-struct DirectionalLightData {
-    vec4 toLight;  // xyz: unit direction towards the light
-    vec4 radiance; // rgb: colour times intensity
-    int shadowTile;
-};
+// The frame's lights (shared with cluster_lights.comp).
+#include "scene_lights.glsl"
 
-struct PointLightData {
-    vec4 positionRange; // xyz: position relative to the camera, w: range
-    vec4 radiance;      // rgb: colour times intensity, w: radius of the glowing source
-    int firstShadowTile;
-    float shadowStrength; // 0..1 while shadows fade between lights
-    float emitterRadius;  // the size of its glowing part, for soft shadows
-};
-
-struct SpotLightData {
-    vec4 positionRange;     // xyz: position relative to the camera, w: range
-    vec4 directionCosOuter; // xyz: unit beam direction, w: cosine of the outer cone angle
-    vec4 radianceCosInner;  // rgb: colour times intensity, w: cosine of the inner cone angle
-    float sourceRadius;     // radius of the glowing source, for the falloff
-    int shadowTile;
-    float shadowStrength;
-    float emitterRadius;
-};
-
-layout(std430, set = 1, binding = 3) readonly buffer DirectionalLights {
-    DirectionalLightData directional[];
-};
-
-layout(std430, set = 1, binding = 4) readonly buffer PointLights {
-    PointLightData points[];
-};
-
-layout(std430, set = 1, binding = 5) readonly buffer SpotLights {
-    SpotLightData spots[];
+// Which lights may reach each cluster, one bit per light (cluster_lights.comp writes them before this pass).
+layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
+    uint clusterMasks[];
 };
 
 // Must match ShadowTileData in render/gpu/shadow_map.h.
@@ -263,6 +236,95 @@ float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emi
     return softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, emitterRadius);
 }
 
+/*
+* One point light's share at this pixel, added to the sums. Beyond its range a light gives exactly nothing, so it is
+* skipped before the costly part, its shadow lookups; so is a light behind the surface.
+*/
+void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 diffuse, inout vec3 specular) {
+    vec3 offset = points[i].positionRange.xyz - relativePosition;
+    float range = points[i].positionRange.w;
+    float distance = length(offset);
+
+    if (distance <= 0.0 || distance >= range) {
+        return;
+    }
+
+    vec3 toLight = offset / distance;
+
+    if (!facesLight(point, toLight)) {
+        return;
+    }
+
+    vec3 radiance = points[i].radiance.rgb * distanceFalloff(distance, range, points[i].radiance.w);
+
+    int firstTile = points[i].firstShadowTile;
+
+    if (firstTile >= 0) {
+        radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius), points[i].shadowStrength);
+    }
+
+    addLight(radiance, toLight, point, diffuse, specular);
+}
+
+// One spotlight's share at this pixel: as a point light, and nothing outside its cone.
+void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 diffuse, inout vec3 specular) {
+    vec3 offset = spots[i].positionRange.xyz - relativePosition;
+    float distance = length(offset);
+
+    if (distance <= 0.0 || distance >= spots[i].positionRange.w) {
+        return;
+    }
+
+    vec3 toLight = offset / distance;
+
+    // How close this fragment is to the beam's axis, as a cosine.
+    float alongBeam = dot(-toLight, spots[i].directionCosOuter.xyz);
+    float cone = spotCone(alongBeam, spots[i].directionCosOuter.w, spots[i].radianceCosInner.w);
+
+    if (cone <= 0.0 || !facesLight(point, toLight)) {
+        return;
+    }
+
+    vec3 radiance = spots[i].radianceCosInner.rgb * distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone;
+    int tile = spots[i].shadowTile;
+
+    if (tile >= 0) {
+        radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius), spots[i].shadowStrength);
+    }
+    addLight(radiance, toLight, point, diffuse, specular);
+}
+
+/*
+* The lights of a whole wave (the group of pixels the GPU shades in lockstep, 32 on NVIDIA): the union of every
+* pixel's cluster list. Neighbouring pixels in different clusters would otherwise walk different lists, and the wave
+* would pay for each in turn; walking the union together, every pixel reads the same light records at the same time.
+* A pixel gets nothing from a light that is not in its own list (it cannot reach the pixel), so the sums are unchanged.
+*/
+uint lightsOfTheWave(uint bits) {
+    return subgroupOr(bits);
+}
+
+// Where this pixel's cluster's bits start in the cluster masks.
+int firstClusterWord() {
+    return clusterOfPixel(frameClusterGrid(), gl_FragCoord.xy, dot(relativePosition, viewForward.xyz)) * CLUSTER_WORDS;
+}
+
+// How many lights this pixel's cluster lists, for the heatmap debug view.
+int clusterLightCount() {
+    int firstWord = firstClusterWord();
+    int lights = 0;
+
+    for (int word = 0; word * 32 < counts.y; ++word) {
+        lights += bitCount(clusterMasks[firstWord + word]);
+    }
+
+    for (int word = 0; word * 32 < counts.z; ++word) {
+        lights += bitCount(clusterMasks[firstWord + CLUSTER_POINT_WORDS + word]);
+    }
+
+    return lights;
+}
+
 void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
@@ -321,62 +383,48 @@ void main() {
             addLight(radiance, directional[i].toLight.xyz, point, diffuse, specular);
         }
 
-        for (int i = 0; i < counts.y; ++i) {
-            vec3 offset = points[i].positionRange.xyz - relativePosition;
-            float range = points[i].positionRange.w;
-            float distance = length(offset);
+        if (shadingOptions.x != 0) {
+            // Only the lights listed for this pixel's cluster (cluster_lights.comp), lowest bit first, which is slot
+            // order: every light that reaches this point is listed, so these are the lights the loops below would add,
+            // in the same order, and the picture is the same to the last bit.
+            int firstWord = firstClusterWord();
 
-            // Beyond its range a light gives exactly nothing, so skip it before the costly part, its shadow lookups.
-            if (distance <= 0.0 || distance >= range) {
-                continue;
+            for (int word = 0; word * 32 < counts.y; ++word) {
+                uint bits = lightsOfTheWave(clusterMasks[firstWord + word]);
+
+                while (bits != 0u) {
+                    int bit = findLSB(bits);
+                    bits &= bits - 1u;
+                    addPointLight(word * 32 + bit, point, geometricNormal, diffuse, specular);
+                }
             }
 
-            vec3 toLight = offset / distance;
+            for (int word = 0; word * 32 < counts.z; ++word) {
+                uint bits = lightsOfTheWave(clusterMasks[firstWord + CLUSTER_POINT_WORDS + word]);
 
-            if (!facesLight(point, toLight)) {
-                continue;
+                while (bits != 0u) {
+                    int bit = findLSB(bits);
+                    bits &= bits - 1u;
+                    addSpotLight(word * 32 + bit, point, geometricNormal, diffuse, specular);
+                }
+            }
+        } else {
+            for (int i = 0; i < counts.y; ++i) {
+                addPointLight(i, point, geometricNormal, diffuse, specular);
             }
 
-            vec3 radiance = points[i].radiance.rgb * distanceFalloff(distance, range, points[i].radiance.w);
-
-            int firstTile = points[i].firstShadowTile;
-
-            if (firstTile >= 0) {
-                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius), points[i].shadowStrength);
+            for (int i = 0; i < counts.z; ++i) {
+                addSpotLight(i, point, geometricNormal, diffuse, specular);
             }
-
-            addLight(radiance, toLight, point, diffuse, specular);
-        }
-
-        for (int i = 0; i < counts.z; ++i) {
-            vec3 offset = spots[i].positionRange.xyz - relativePosition;
-            float distance = length(offset);
-
-            if (distance <= 0.0 || distance >= spots[i].positionRange.w) {
-                continue;
-            }
-
-            vec3 toLight = offset / distance;
-
-            // How close this fragment is to the beam's axis, as a cosine.
-            float alongBeam = dot(-toLight, spots[i].directionCosOuter.xyz);
-            float cone = spotCone(alongBeam, spots[i].directionCosOuter.w, spots[i].radianceCosInner.w);
-
-            if (cone <= 0.0 || !facesLight(point, toLight)) {
-                continue;
-            }
-
-            vec3 radiance = spots[i].radianceCosInner.rgb * distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone;
-            int tile = spots[i].shadowTile;
-
-            if (tile >= 0) {
-                radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius), spots[i].shadowStrength);
-            }
-            addLight(radiance, toLight, point, diffuse, specular);
         }
     }
 
     // Emitted light is added as is.
     vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
     outputColour = vec4(ambientReflected + diffuse + specular + material.emissive.rgb, albedo.a);
+
+    // The heatmap debug view: the picture mostly covered by the colour of how many lights this pixel's cluster lists.
+    if (shadingOptions.y != 0) {
+        outputColour.rgb = mix(outputColour.rgb, clusterHeatColour(clusterLightCount()), 0.75);
+    }
 }

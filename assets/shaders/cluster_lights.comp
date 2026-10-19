@@ -1,0 +1,111 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Clustered shading's light lists (render/gpu/clusters.h, mirrored there by buildClusterMasks): one invocation per
+* cluster writes one bit per light, set where the light may reach into the cluster, so each pixel of the main pass loops
+* only over its own cluster's lights. Lights are taken 32 at a time, one word of bits: each of the group's 32
+* invocations turns one light into cluster view space and leaves it in shared memory (fast memory on the chip, seen by
+* the whole group), then every invocation tests its cluster against all 32. Each light is read from the buffer once per
+* group instead of once per cluster, and each invocation writes only its own cluster's words, so no two invocations
+* write the same memory and the result never depends on which finishes first.
+*/
+#include "clusters.glsl"
+#include "frame_data.glsl"
+#include "frame_clusters.glsl"
+#include "scene_lights.glsl"
+
+#if CLUSTER_GROUP_SIZE != 32
+#error "cluster_lights.comp loads one word of 32 lights per group, one light per invocation"
+#endif
+
+layout(local_size_x = CLUSTER_GROUP_SIZE) in;
+
+layout(std430, set = 1, binding = 11) writeonly buffer ClusterMasks {
+    uint clusterMasks[];
+};
+
+// One word's lights in cluster view space: xyz the position, w the range; for spotlights also the beam's axis and the
+// cosine of its outer cone.
+shared vec4 wordPositionRange[32];
+shared vec4 wordAxisCosOuter[32];
+
+void main() {
+    ClusterGrid grid = frameClusterGrid();
+    int cluster = int(gl_GlobalInvocationID.x);
+    int lane = int(gl_LocalInvocationID.x);
+
+    // The last group's spare invocations still load lights and wait at the barriers with the rest; they only write nothing.
+    int tilesPerSlice = grid.tiles.x * grid.tiles.y;
+    bool inGrid = cluster < tilesPerSlice * grid.tiles.z;
+    vec3 minimum = vec3(0.0);
+    vec3 maximum = vec3(0.0);
+
+    if (inGrid) {
+        clusterBounds(grid, cluster % grid.tiles.x, (cluster / grid.tiles.x) % grid.tiles.y, cluster / tilesPerSlice, minimum, maximum);
+    }
+
+    vec3 boxCentre = 0.5 * (minimum + maximum);
+    float boxRadius = 0.5 * length(maximum - minimum);
+    int firstWord = cluster * CLUSTER_WORDS;
+
+    int pointCount = min(counts.y, CLUSTER_POINT_WORDS * 32);
+
+    for (int word = 0; word * 32 < pointCount; ++word) {
+        int light = word * 32 + lane;
+
+        if (light < pointCount) {
+            wordPositionRange[lane] = vec4(toClusterView(grid, points[light].positionRange.xyz), points[light].positionRange.w);
+        }
+
+        barrier();
+
+        uint bits = 0u;
+        int lightsInWord = min(32, pointCount - word * 32);
+
+        for (int i = 0; i < lightsInWord; ++i) {
+            if (sphereTouchesBox(wordPositionRange[i].xyz, wordPositionRange[i].w, minimum, maximum)) {
+                bits |= 1u << uint(i);
+            }
+        }
+
+        if (inGrid) {
+            clusterMasks[firstWord + word] = bits;
+        }
+
+        // Everyone is done with this word's lights before they are replaced.
+        barrier();
+    }
+
+    int spotCount = min(counts.z, CLUSTER_SPOT_WORDS * 32);
+
+    for (int word = 0; word * 32 < spotCount; ++word) {
+        int light = word * 32 + lane;
+
+        if (light < spotCount) {
+            wordPositionRange[lane] = vec4(toClusterView(grid, spots[light].positionRange.xyz), spots[light].positionRange.w);
+            wordAxisCosOuter[lane] = vec4(toClusterView(grid, spots[light].directionCosOuter.xyz), spots[light].directionCosOuter.w);
+        }
+
+        barrier();
+
+        uint bits = 0u;
+        int lightsInWord = min(32, spotCount - word * 32);
+
+        for (int i = 0; i < lightsInWord; ++i) {
+            vec4 positionRange = wordPositionRange[i];
+            vec4 axisCosOuter = wordAxisCosOuter[i];
+
+            if (sphereTouchesBox(positionRange.xyz, positionRange.w, minimum, maximum) &&
+                coneTouchesSphere(positionRange.xyz, axisCosOuter.xyz, axisCosOuter.w, positionRange.w, boxCentre, boxRadius)) {
+                bits |= 1u << uint(i);
+            }
+        }
+
+        if (inGrid) {
+            clusterMasks[firstWord + CLUSTER_POINT_WORDS + word] = bits;
+        }
+
+        barrier();
+    }
+}

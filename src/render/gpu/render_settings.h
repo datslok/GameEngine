@@ -22,6 +22,14 @@ struct RenderSettings {
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.
     bool depthPrepass = true;
+
+    // Each pixel loops only over the lights listed for its cluster (render/gpu/clusters.h) instead of every light in the
+    // frame; both add the same lights in the same order, so the picture is identical. Off is for comparing the timings.
+    bool clusteredShading = true;
+
+    // A debug view: each pixel tinted by how many lights its cluster lists, black for none, then blue, green, yellow and
+    // red at render/gpu/clusters.h's full scale and above.
+    bool clusterHeatmap = false;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

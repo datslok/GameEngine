@@ -110,3 +110,11 @@ void Camera::setVerticalFov(float verticalFovRadians) {
     Mat4::perspective(verticalFovRadians, aspectRatio, nearPlane, farPlane);
     verticalFov = verticalFovRadians;
 }
+
+float Camera::getNearPlane() const {
+    return nearPlane;
+}
+
+float Camera::getFarPlane() const {
+    return farPlane;
+}

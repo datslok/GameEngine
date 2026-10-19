@@ -57,7 +57,7 @@ struct ShadowSettings {
 void visit(ShadowSettings& settings, SettingsVisitor& visitor);
 
 // The most shadowed lights of each kind; the rest still give light, without shadows.
-inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; as many as the shader has seats, now that cached tiles cost little
+inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; cached tiles cost little, but each shadowed pixel pays 32 samples per light
 inline constexpr int maxShadowedSpotLights = 8;        // 1 tile each
 inline constexpr int maxShadowedDirectionalLights = 4; // 1 tile each, always the standard size
 inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights;

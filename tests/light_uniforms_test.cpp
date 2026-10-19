@@ -106,8 +106,8 @@ namespace {
 
         const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
-        // The storage buffer has room for far more lights than the 64 seated by default (light_priority.h).
-        assert(maxPointLights == 1024 && defaultPointSeats == 64);
+        // The storage buffer's room is what light priority seats by default (light_priority.h).
+        assert(maxPointLights == 1024 && defaultPointSeats == maxPointLights);
         assert(data.counts[0] == maxDirectionalLights);
         assert(data.counts[1] == maxPointLights);
         assert(data.points.size() == static_cast<std::size_t>(maxPointLights));
@@ -164,7 +164,7 @@ namespace {
 
         const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
-        assert(maxSpotLights == 256 && defaultSpotSeats == 8);
+        assert(maxSpotLights == 256 && defaultSpotSeats == maxSpotLights);
         assert(data.counts[2] == maxSpotLights);
         assert(data.spots.size() == static_cast<std::size_t>(maxSpotLights));
         assert(nearlyEqual(data.spots[maxSpotLights - 1].positionRange, 255.0f, 0.0f, 0.0f, 20.0f));

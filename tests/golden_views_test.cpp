@@ -2,7 +2,7 @@
 #include "engine/golden.h"
 #include "engine/state_hash.h"
 #include "games/demo/demo_game.h"
-#include "render/gpu/light_uniforms.h"
+#include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
 
 #include <cassert>
@@ -96,13 +96,13 @@ namespace {
         }
     }
 
-    // The lamp field is there to show light priority at work, so it needs more lamps than the shader has seats.
-    void testLampFieldHasMoreLightsThanSeats() {
+    // The lamp field is there to show light priority at work, so it needs more lamps than there are point light shadows.
+    void testLampFieldHasMoreLightsThanShadows() {
         const std::vector<GoldenView> views = demoViews();
         PreparedView lamps{viewNamed(views, "lamp-field")};
         const FrameDescription frame = buildFrame(lamps.world, lamps.game.getCamera(), 1.0f);
 
-        assert(frame.lighting.pointLights.size() > static_cast<std::size_t>(defaultPointSeats));
+        assert(frame.lighting.pointLights.size() > static_cast<std::size_t>(maxShadowedPointLights));
     }
 }
 
@@ -110,5 +110,5 @@ void testGoldenViews() {
     testViewsHaveUsableNames();
     testSomeViewIsHdr();
     testViewsAreDeterministic();
-    testLampFieldHasMoreLightsThanSeats();
+    testLampFieldHasMoreLightsThanShadows();
 }

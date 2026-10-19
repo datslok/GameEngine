@@ -42,6 +42,10 @@ class Camera {
         float getVerticalFov() const;
         void setVerticalFov(float verticalFovRadians);
 
+        // The distances to the near and far clipping planes along the view direction.
+        float getNearPlane() const;
+        float getFarPlane() const;
+
     private:
         Vec3 position;
         Vec3 forward;
