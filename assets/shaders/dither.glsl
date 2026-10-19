@@ -1,5 +1,6 @@
 // Shader functions shared by several shaders, included with #include "dither.glsl": per-pixel noise, the sRGB curve, and
-// the dither that uses both. Mirrors core/srgb.cpp and core/dither.cpp, which test the maths.
+// the dither that uses both. Mirrors core/srgb.cpp and core/dither.cpp, which test the maths; tests/gpu checks these
+// functions against them on the GPU.
 
 #ifndef DITHER_GLSL
 #define DITHER_GLSL
@@ -25,11 +26,11 @@ float interleavedGradientNoise(vec2 pixel) {
 * Dithering against banding. The screen keeps 256 levels per channel, and a slow, dark fade (the flashlight's pool at night)
 * changes by less than one level over many pixels, so it rounds into visible rings. Adding a little noise first, up to half
 * a level either way and different per pixel, makes nearby pixels round to the two levels around the true value in the
-* right proportion, and the eye averages them: the rings become fine grain.
+* right proportion, and the eye averages them: the rings become fine grain. noise is 0..1, different per pixel
+* (interleavedGradientNoise of the pixel's position); taken as an argument so compute shaders, which have no pixel, can test it.
 */
-vec3 ditherForEightBits(vec3 linear) {
+vec3 ditherForEightBits(vec3 linear, float noise) {
     vec3 encoded = linearToSrgb(max(linear, vec3(0.0)));
-    float noise = interleavedGradientNoise(gl_FragCoord.xy);
     vec3 nudged = encoded + (noise - 0.5) * (DITHER_STEP_FRACTION / DITHER_LEVELS);
     return srgbToLinear(clamp(nudged, 0.0, 1.0));
 }

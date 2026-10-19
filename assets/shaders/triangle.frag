@@ -3,7 +3,12 @@
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
-#include "render/gpu/brdf_shared.h"
+
+// The shading maths, in pure functions shared with the GPU tests (tests/gpu) and mirrored in C++ (render/gpu).
+#include "brdf.glsl"
+#include "normal_mapping.glsl"
+#include "lighting.glsl"
+#include "soft_shadow.glsl"
 
 // Per-pixel noise, which turns each pixel's soft shadow samples.
 #include "dither.glsl"
@@ -102,144 +107,10 @@ layout(location = 0) out vec4 outputColour;
 vec3 positionStepRight;
 vec3 positionStepDown;
 
-// Physically based shading: the arithmetic mirrors render/gpu/brdf.cpp, which tests it (energy kept, reciprocity, Fresnel).
-const float pi = 3.14159265358979;
-
-/*
-* GGX: the density of microfacet normals along the halfway vector, normalised so the facets' projected area is the
-* surface's own. alpha is roughness squared.
-*/
-float ggxDistribution(float nDotH, float alpha) {
-    float alphaSquared = alpha * alpha;
-    float denominator = nDotH * nDotH * (alphaSquared - 1.0) + 1.0;
-    return alphaSquared / (pi * denominator * denominator);
-}
-
-// Smith's height-correlated shadowing-masking (Heitz 2014), already divided by 4 (n.l)(n.v).
-float smithVisibility(float nDotV, float nDotL, float alpha) {
-    float alphaSquared = alpha * alpha;
-    float towardsView = nDotL * sqrt(nDotV * nDotV * (1.0 - alphaSquared) + alphaSquared);
-    float towardsLight = nDotV * sqrt(nDotL * nDotL * (1.0 - alphaSquared) + alphaSquared);
-    return 0.5 / (towardsView + towardsLight);
-}
-
-// Schlick's Fresnel: f0 head-on, all light at grazing.
-vec3 schlickFresnel(vec3 f0, float cosine) {
-    float grazing = pow(1.0 - clamp(cosine, 0.0, 1.0), 5.0);
-    return f0 + (1.0 - f0) * grazing;
-}
-
 // Texel i holds the value at i / (size - 1); a linear sampler places it at (i + 0.5) / size.
 vec2 sampleBrdfTable(float nDotV, float roughness) {
     vec2 grid = vec2(nDotV, roughness) * float(BRDF_TABLE_SIZE - 1);
     return textureLod(brdfTable, (grid + 0.5) / float(BRDF_TABLE_SIZE), 0.0).rg;
-}
-
-/*
-* What every light shares at this pixel (prepareShading in brdf.cpp): the reflectance head-on (f0), the GGX width, the
-* compensation for light the single-scattering model loses between facets (Turquin 2019), the specular part's albedo,
-* and the diffuse colour weighted by what the specular part leaves.
-*/
-struct ShadingPoint {
-    vec3 normal;
-    vec3 toCamera;
-    float nDotV;
-    vec3 f0;
-    float alpha;
-    vec3 energyCompensation;
-    vec3 specularAlbedo;
-    vec3 diffuse;
-};
-
-ShadingPoint prepareShading(vec3 baseColour, float metallic, float roughness, vec3 normal, vec3 toCamera) {
-    ShadingPoint point;
-    point.normal = normal;
-    point.toCamera = toCamera;
-    point.nDotV = clamp(dot(normal, toCamera), BRDF_SMALLEST_VIEW_COSINE, 1.0);
-    point.alpha = roughness * roughness;
-    point.f0 = mix(vec3(BRDF_DIELECTRIC_REFLECTANCE), baseColour, metallic);
-
-    vec2 entry = sampleBrdfTable(point.nDotV, roughness);
-    point.energyCompensation = 1.0 + point.f0 * (1.0 / (entry.x + entry.y) - 1.0);
-    point.specularAlbedo = (point.f0 * entry.x + entry.y) * point.energyCompensation;
-    point.diffuse = baseColour * (1.0 - metallic) * (1.0 - point.specularAlbedo);
-    return point;
-}
-
-// Normal mapping: the arithmetic mirrors render/gpu/normal_mapping.cpp, which tests it.
-
-// A texel as a direction in the surface's frame: 0..1 to -1..1, the scale on the sideways parts only.
-vec3 decodeNormalTexel(vec3 texel, float scale) {
-    return (texel * 2.0 - 1.0) * vec3(scale, scale, 1.0);
-}
-
-/*
-* The frame's axes weighted by the decoded direction: x along the tangent, y along the bitangent (up the picture),
-* z along the normal. The interpolated normal and tangent are used as they arrive, not normalised first, as MikkTSpace
-* asks so the result matches the baker's; only the sum is normalised. Zero when there is no usable direction.
-*/
-vec3 perturbNormal(vec3 normal, vec4 tangent, vec3 tangentSpaceNormal) {
-    vec3 bitangent = tangent.w * cross(normal, tangent.xyz);
-    vec3 combined = tangentSpaceNormal.x * tangent.xyz + tangentSpaceNormal.y * bitangent + tangentSpaceNormal.z * normal;
-    float combinedLength = length(combined);
-    return combinedLength > 0.0 ? combined / combinedLength : vec3(0.0);
-}
-
-/*
-* One light's contribution, its radiance already scaled by distance falloff (and the cone, for spotlights). The diffuse
-* part scatters evenly, so it does not depend on the viewer; the specular part is D V F, brightest where the halfway
-* vector between the light and the viewer lines up with the surface normal. Both are pi times the textbook BRDF (light
-* values are the irradiance they give a surface facing them), so a white matte surface lit head-on by 1 shows 1.
-*/
-void addLight(vec3 radiance, vec3 toLight, ShadingPoint point, inout vec3 diffuse, inout vec3 specular) {
-    float nDotL = dot(point.normal, toLight);
-
-    // No light, and so no highlight, on the side facing away.
-    if (nDotL <= 0.0) {
-        return;
-    }
-
-    vec3 incoming = radiance * nDotL;
-    diffuse += point.diffuse * incoming;
-
-    vec3 sum = toLight + point.toCamera;
-    float sumLength = length(sum);
-
-    if (sumLength > 0.0) {
-        vec3 halfway = sum / sumLength;
-        float nDotH = max(dot(point.normal, halfway), 0.0);
-        float vDotH = max(dot(point.toCamera, halfway), 0.0);
-        vec3 brdf = schlickFresnel(point.f0, vDotH) * (ggxDistribution(nDotH, point.alpha) * smithVisibility(point.nDotV, nDotL, point.alpha));
-        specular += brdf * point.energyCompensation * incoming * pi;
-    }
-}
-
-/*
-* Inverse square falloff, softened near the light by the size of its source (a point light uses 1, which keeps it finite at the light),
-* times a window that reaches exactly 0 at range with no visible edge.
-*/
-float distanceFalloff(float distance, float range, float sourceRadius) {
-    float ratio = distance / range;
-    float window = clamp(1.0 - ratio * ratio * ratio * ratio, 0.0, 1.0);
-    return window * window / (distance * distance + sourceRadius * sourceRadius);
-}
-
-/*
-* The face whose camera sees this direction from the light: the axis of the largest component, in the order
-* +X, -X, +Y, -Y, +Z, -Z. Must match pointShadowFace in render/gpu/shadow_map.cpp.
-*/
-int pointShadowFace(vec3 fromLight) {
-    vec3 size = abs(fromLight);
-
-    if (size.x >= size.y && size.x >= size.z) {
-        return fromLight.x > 0.0 ? 0 : 1;
-    }
-
-    if (size.y >= size.z) {
-        return fromLight.y > 0.0 ? 2 : 3;
-    }
-
-    return fromLight.z > 0.0 ? 4 : 5;
 }
 
 /*
@@ -284,11 +155,6 @@ float shadowFromTile(int tile, vec3 position) {
     return lit / 9.0;
 }
 
-// Soft shadows: the arithmetic mirrors render/gpu/soft_shadow.cpp, which tests it. Widths are in texels of the tile.
-const float minShadowFilterTexels = MIN_SHADOW_FILTER_TEXELS;
-const float maxShadowFilterTexels = MAX_SHADOW_FILTER_TEXELS;
-const float maxBlockerSearchTexels = MAX_BLOCKER_SEARCH_TEXELS;
-
 // Sixteen points spread over a unit disc with no two close together (a Poisson disc): even coverage from few samples.
 const vec2 poissonDisc[16] = vec2[](
     vec2(-0.94201624, -0.39906216), vec2(0.94558609, -0.76890725), vec2(-0.09418410, -0.92938870), vec2(0.34495938, 0.29387760),
@@ -296,20 +162,6 @@ const vec2 poissonDisc[16] = vec2[](
     vec2(0.44323325, -0.97511554), vec2(0.53742981, -0.47373420), vec2(-0.26496911, -0.41893023), vec2(0.79197514, 0.19090188),
     vec2(-0.24188840, 0.99706507), vec2(-0.81409955, 0.91437590), vec2(0.19984126, 0.78641367), vec2(0.14383161, -0.14100790)
 );
-
-float linearShadowDepth(float depth, float nearPlane, float farPlane) {
-    return farPlane * nearPlane / (nearPlane + depth * (farPlane - nearPlane));
-}
-
-float blockerSearchTexels(float emitterRadius, float receiverDepth, float nearPlane, float texelPerUnit) {
-    float widthPerDistance = emitterRadius * (receiverDepth - nearPlane) / (nearPlane * receiverDepth);
-    return clamp(widthPerDistance / texelPerUnit, minShadowFilterTexels, maxBlockerSearchTexels);
-}
-
-float penumbraTexels(float emitterRadius, float receiverDepth, float blockerDepth, float texelPerUnit) {
-    float worldWidth = emitterRadius * max(receiverDepth - blockerDepth, 0.0) / blockerDepth;
-    return clamp(worldWidth / (receiverDepth * texelPerUnit), minShadowFilterTexels, maxShadowFilterTexels);
-}
 
 // Where a point (measured from the camera) lands in the atlas (xy) and its stored-depth value (z), for one tile.
 vec3 atlasPoint(int tile, vec3 position) {
@@ -439,7 +291,9 @@ void main() {
     }
 
     vec3 toCamera = cameraDistance > 0.0 ? cameraOffset / cameraDistance : normal;
-    ShadingPoint point = prepareShading(albedo.rgb, metallic, roughness, normalLength > 0.0 ? normal : toCamera, toCamera);
+    vec3 shadingNormal = normalLength > 0.0 ? normal : toCamera;
+    vec2 tableEntry = sampleBrdfTable(viewCosine(shadingNormal, toCamera), roughness);
+    ShadingPoint point = prepareShading(albedo.rgb, metallic, roughness, shadingNormal, toCamera, tableEntry);
 
     if (normalLength > 0.0) {
         for (int i = 0; i < counts.x; ++i) {
@@ -484,10 +338,9 @@ void main() {
 
             vec3 toLight = offset / distance;
 
-            // How close this fragment is to the beam's axis, as a cosine: full inside the inner cone,
-            // fading smoothly to nothing at the outer cone, like a real flashlight's soft edge.
+            // How close this fragment is to the beam's axis, as a cosine.
             float alongBeam = dot(-toLight, spots[i].directionCosOuter.xyz);
-            float cone = smoothstep(spots[i].directionCosOuter.w, spots[i].radianceCosInner.w, alongBeam);
+            float cone = spotCone(alongBeam, spots[i].directionCosOuter.w, spots[i].radianceCosInner.w);
 
             if (cone <= 0.0) {
                 continue;
@@ -503,8 +356,7 @@ void main() {
         }
     }
 
-    // Ambient light comes from every direction alike, so the surface returns its albedo of it: the weighted diffuse colour
-    // plus the specular albedo (a metal, with no diffuse part, still reflects it). Emitted light is added as is.
-    vec3 ambientReflected = ambient.rgb * (point.diffuse + point.specularAlbedo);
+    // Emitted light is added as is.
+    vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
     outputColour = vec4(ambientReflected + diffuse + specular + emissive.rgb, albedo.a);
 }
