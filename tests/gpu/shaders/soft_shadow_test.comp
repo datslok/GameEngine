@@ -1,0 +1,22 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs soft_shadow.glsl's functions on the cases soft_shadow_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "soft_shadow.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_LINEAR_SHADOW_DEPTH) {
+        testOutput(0, vec4(linearShadowDepth(a.x, a.y, a.z)));
+    } else if (function == GPU_TEST_BLOCKER_SEARCH_TEXELS) {
+        testOutput(0, vec4(blockerSearchTexels(a.x, a.y, a.z, a.w)));
+    } else if (function == GPU_TEST_PENUMBRA_TEXELS) {
+        testOutput(0, vec4(penumbraTexels(a.x, a.y, a.z, a.w)));
+    }
+}

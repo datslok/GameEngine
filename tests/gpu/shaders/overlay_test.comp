@@ -1,0 +1,17 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs overlay.glsl's function on the cases overlay_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "overlay.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    // Inputs: (texel), (white level, 0, 0, 0).
+    if (function == GPU_TEST_OVERLAY_OUTPUT) {
+        testOutput(0, overlayOutput(testInput(0), testInput(1).x));
+    }
+}

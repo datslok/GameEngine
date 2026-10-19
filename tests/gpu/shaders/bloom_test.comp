@@ -1,0 +1,20 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs bloom.glsl's functions on the cases bloom_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "bloom.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_KARIS_WEIGHT) {
+        testOutput(0, vec4(karisWeight(a.rgb)));
+    } else if (function == GPU_TEST_MIX_BLOOM) {
+        testOutput(0, vec4(mixBloom(a.rgb, testInput(1).rgb, a.a), 0.0));
+    }
+}

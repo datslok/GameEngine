@@ -1,0 +1,44 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs brdf.glsl's functions on the cases brdf_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "brdf.glsl"
+
+// Inputs: (base colour, metallic), (normal, roughness), (toCamera, 0), (table entry, 0, 0), then for addLight (radiance, 0), (toLight, 0).
+ShadingPoint shadingPoint() {
+    vec4 surface = testInput(0);
+    vec4 normalRoughness = testInput(1);
+    return prepareShading(surface.rgb, surface.a, normalRoughness.w, normalRoughness.xyz, testInput(2).xyz, testInput(3).xy);
+}
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_GGX_DISTRIBUTION) {
+        testOutput(0, vec4(ggxDistribution(a.x, a.y)));
+    } else if (function == GPU_TEST_SMITH_VISIBILITY) {
+        testOutput(0, vec4(smithVisibility(a.x, a.y, a.z)));
+    } else if (function == GPU_TEST_SCHLICK_FRESNEL) {
+        testOutput(0, vec4(schlickFresnel(a.xyz, a.w), 0.0));
+    } else if (function == GPU_TEST_PREPARE_SHADING) {
+        ShadingPoint point = shadingPoint();
+        testOutput(0, vec4(point.f0, point.nDotV));
+        testOutput(1, vec4(point.energyCompensation, point.alpha));
+        testOutput(2, vec4(point.specularAlbedo, 0.0));
+        testOutput(3, vec4(point.diffuse, 0.0));
+    } else if (function == GPU_TEST_ADD_LIGHT) {
+        ShadingPoint point = shadingPoint();
+        vec3 radiance = testInput(4).xyz;
+        vec3 diffuse = vec3(0.0);
+        vec3 specular = vec3(0.0);
+        addLight(radiance, testInput(5).xyz, point, diffuse, specular);
+        testOutput(0, vec4(diffuse, 0.0));
+        testOutput(1, vec4(specular, 0.0));
+        testOutput(2, vec4(shadeAmbient(point, radiance), 0.0));
+    }
+}

@@ -1,0 +1,19 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs tone_mapping.glsl's functions on the cases tone_mapping_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "tone_mapping.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    // Inputs: (light, exposure), (peak, curve, 0, 0).
+    if (function == GPU_TEST_TONE_MAP) {
+        vec4 light = testInput(0);
+        vec4 display = testInput(1);
+        testOutput(0, vec4(toneMap(light.rgb, light.a, display.x, int(display.y + 0.5)), 0.0));
+    }
+}

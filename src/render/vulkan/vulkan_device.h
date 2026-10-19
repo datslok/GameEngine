@@ -21,6 +21,7 @@
 class VulkanDevice {
 public:
     // validation turns on the Khronos validation layers when installed: every call checked against the spec, slow.
+    // window may be null for work that never presents (the GPU tests): no surface, and getSurface returns null.
     VulkanDevice(SDL_Window* window, bool validation);
     ~VulkanDevice();
 

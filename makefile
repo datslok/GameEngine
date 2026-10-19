@@ -42,6 +42,7 @@ MAKEFLAGS += -j$(JOBS) --output-sync=target
 
 TARGET := $(BUILD_DIR)/game.exe
 TEST_TARGET := $(BUILD_DIR)/tests.exe
+GPU_TEST_TARGET := $(BUILD_DIR)/gputests.exe
 OBJECT_DIR := $(BUILD_DIR)/obj
 
 # Recursive wildcard: $(call rwildcard,dir,pattern) finds matching files in dir and all its subfolders.
@@ -56,6 +57,8 @@ EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-boot
 EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c) $(wildcard external/volk/*.c)
 ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES)) $(EXTERNAL_SOURCES)
 TEST_SOURCES := $(wildcard tests/*.cpp)
+# The GPU tests (make gputest) are a program of their own, so make test keeps running without a GPU.
+GPU_TEST_SOURCES := $(wildcard tests/gpu/*.cpp)
 
 # Each source compiles to its own object file, so a change recompiles only what it touches, and the game and the
 # tests share the engine's objects instead of compiling the engine twice.
@@ -63,16 +66,20 @@ objects_for = $(patsubst %.cpp,$(OBJECT_DIR)/%.o,$(1))
 ENGINE_OBJECTS := $(call objects_for,$(ENGINE_SOURCES)) $(patsubst %.c,$(OBJECT_DIR)/%.o,$(EXTERNAL_C_SOURCES))
 MAIN_OBJECT := $(call objects_for,$(MAIN_SOURCE))
 TEST_OBJECTS := $(call objects_for,$(TEST_SOURCES))
-ALL_OBJECTS := $(ENGINE_OBJECTS) $(MAIN_OBJECT) $(TEST_OBJECTS)
+GPU_TEST_OBJECTS := $(call objects_for,$(GPU_TEST_SOURCES))
+ALL_OBJECTS := $(ENGINE_OBJECTS) $(MAIN_OBJECT) $(TEST_OBJECTS) $(GPU_TEST_OBJECTS)
 
 # Find shader source files and their compiled output names.
 SHADER_SOURCES := $(wildcard assets/shaders/*.vert assets/shaders/*.frag)
 SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
+# The GPU tests' compute shaders, which include the real shader libraries from assets/shaders.
+GPU_TEST_SHADER_SOURCES := $(wildcard tests/gpu/shaders/*.comp)
+GPU_TEST_SHADER_BINARIES := $(addsuffix .spv,$(GPU_TEST_SHADER_SOURCES))
 
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test shaders clean release run-release test-release golden golden-save
+.PHONY: all run test shaders clean release run-release test-release golden golden-save gputest gputest-release
 
 all: $(TARGET) shaders
 
@@ -94,6 +101,9 @@ $(OBJECT_DIR)/external/imgui/imgui_impl_vulkan.o: CPPFLAGS += -DIMGUI_IMPL_VULKA
 $(TEST_TARGET): $(ENGINE_OBJECTS) $(TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
+$(GPU_TEST_TARGET): $(ENGINE_OBJECTS) $(GPU_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
 # One object per source, mirroring the source folders under build/obj. Changing the makefile rebuilds everything,
 # since the flags may have changed.
 $(OBJECT_DIR)/%.o: %.cpp $(MAKEFILE_PATH)
@@ -111,7 +121,9 @@ $(OBJECT_DIR)/%.o: %.c $(MAKEFILE_PATH)
 
 # Compile each shader when its source, a header it includes, or the makefile changes. Shaders include the headers they
 # share with C++ from the same src root (-Isrc), and glslc writes the list of what each one read to build/obj/shaders.
-SHADER_DEPENDENCY_DIR := $(OBJECT_DIR)/shaders
+# The compiled shaders are shared by the debug and release builds, so their lists are too (in a per-build folder, the
+# other build would not know what its shaders depend on and keep stale ones).
+SHADER_DEPENDENCY_DIR := build/obj/shaders
 
 shaders: $(SHADER_BINARIES)
 
@@ -120,6 +132,15 @@ assets/shaders/%.spv: assets/shaders/% $(MAKEFILE_PATH)
 	$(GLSLC) -Isrc -MD -MF $(SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
 
 -include $(patsubst assets/shaders/%,$(SHADER_DEPENDENCY_DIR)/%.d,$(SHADER_BINARIES))
+
+# The GPU tests' shaders also include the shader libraries (assets/shaders) and the function numbers (tests/gpu).
+GPU_TEST_SHADER_DEPENDENCY_DIR := $(SHADER_DEPENDENCY_DIR)/gpu_tests
+
+tests/gpu/shaders/%.spv: tests/gpu/shaders/% $(MAKEFILE_PATH)
+	@mkdir -p $(GPU_TEST_SHADER_DEPENDENCY_DIR)
+	$(GLSLC) -Isrc -Iassets/shaders -Itests/gpu -MD -MF $(GPU_TEST_SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
+
+-include $(patsubst tests/gpu/shaders/%,$(GPU_TEST_SHADER_DEPENDENCY_DIR)/%.d,$(GPU_TEST_SHADER_BINARIES))
 
 run: $(TARGET) shaders
 	./$(TARGET)
@@ -135,6 +156,12 @@ golden: $(TARGET) shaders
 golden-save: $(TARGET) shaders
 	./$(TARGET) --golden-save
 
+# The GPU test tier (tests/gpu): every shader library's functions run in compute shaders on fixed inputs and compared
+# with their C++ mirrors, then the golden images. Needs a GPU, so it is not part of make test.
+gputest: $(GPU_TEST_TARGET) $(GPU_TEST_SHADER_BINARIES) $(TARGET) shaders
+	./$(GPU_TEST_TARGET)
+	./$(TARGET) --golden-check
+
 # The release build through the same rules, in build/release. Running the tests optimised as well catches bugs that only
 # show at -O2 (uninitialised variables, code that breaks the language rules the optimiser relies on).
 release:
@@ -146,5 +173,8 @@ run-release:
 test-release:
 	$(MAKE) BUILD=release test
 
+gputest-release:
+	$(MAKE) BUILD=release gputest
+
 clean:
-	rm -rf build/obj build/game.exe build/tests.exe build/release $(SHADER_BINARIES)
+	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)
