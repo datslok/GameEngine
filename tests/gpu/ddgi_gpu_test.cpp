@@ -3,6 +3,7 @@
 
 #include "core/half_float.h"
 #include "render/gpu/ddgi.h"
+#include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/vulkan/bindless_textures.h"
@@ -99,7 +100,7 @@ namespace {
         }
     }
 
-    // Every ray of a few counts, each turned by a different frame's rotation.
+    // Every ray of a few counts, at every phase of the ray cycle in turn, each turned by a different frame's rotation.
     void checkRays(GpuFunctionRunner& runner, GpuCheckReport& report) {
         std::vector<GpuVec4> inputs;
         std::vector<ProbeRotationRows> rotations;
@@ -107,7 +108,8 @@ namespace {
         for (int count : {minRaysPerProbe, 64, 100, maxRaysPerProbe}) {
             for (int ray = 0; ray < count; ++ray) {
                 const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(static_cast<std::uint64_t>(ray * 7 + count)));
-                inputs.push_back(gpuVec4(static_cast<float>(ray), static_cast<float>(count)));
+                const int phase = (ray * 3 + count) % probeRayCycle;
+                inputs.push_back(gpuVec4(static_cast<float>(ray), static_cast<float>(count), static_cast<float>(phase)));
 
                 for (const Vec3& row : rows.rows) {
                     inputs.push_back(gpuVec4(row));
@@ -122,8 +124,9 @@ namespace {
         for (std::size_t i = 0; i < rotations.size(); ++i) {
             const int ray = static_cast<int>(inputs[i * 4][0]);
             const int count = static_cast<int>(inputs[i * 4][1]);
+            const int phase = static_cast<int>(inputs[i * 4][2]);
             report.check("sphericalFibonacci", trigonometryTolerance, sphericalFibonacci(ray, count), vec3From(outputs[i * 2]));
-            report.check("probeRayDirection", trigonometryTolerance, probeRayDirection(ray, count, rotations[i]), vec3From(outputs[i * 2 + 1]));
+            report.check("probeRayDirection", trigonometryTolerance, probeRayDirection(ray, count, phase, rotations[i]), vec3From(outputs[i * 2 + 1]));
         }
     }
 
@@ -155,50 +158,26 @@ namespace {
         }
     }
 
-    // A change in a channel, kept clear of the thresholds so rounding cannot put the two sides in different bands.
-    float changeAwayFromThresholds(CaseRandom& random) {
-        for (;;) {
-            const float change = random.between(-1.2f, 1.2f);
-            const float size = std::abs(change);
-
-            if (std::abs(size - irradianceChangeThreshold) > 1e-3f && std::abs(size - irradianceResetThreshold) > 1e-3f) {
-                return change;
-            }
-        }
-    }
-
     void checkBlending(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{63};
         std::vector<GpuVec4> inputs;
 
         for (int i = 0; i < 500; ++i) {
-            const Vec3 value{random.between(0.0f, 40.0f), random.between(0.0f, 2.0f), random.between(0.0f, 0.01f)};
-            const Vec3 old{random.between(0.0f, 3.0f), random.between(0.0f, 3.0f), random.between(0.0f, 3.0f)};
-            // The largest change in one channel, smaller ones in the others.
-            const float largest = changeAwayFromThresholds(random);
-            const Vec3 fresh = old + Vec3{largest, largest * random.between(-0.9f, 0.9f), largest * random.between(-0.9f, 0.9f)};
-            inputs.push_back(gpuVec4(value));
-            inputs.push_back(gpuVec4(old));
-            inputs.push_back(gpuVec4(fresh));
-            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 40.0f), random.between(0.0f, 3.0f), random.between(0.0f, 0.01f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 40.0f), random.between(0.0f, 3.0f), random.between(0.0f, 0.01f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_BLENDING, inputs, 4, 4);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_BLENDING, inputs, 3, 2);
 
-        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
-            const Vec3 value = vec3From(inputs[i * 4]);
-            const Vec3 old = vec3From(inputs[i * 4 + 1]);
-            const Vec3 fresh = vec3From(inputs[i * 4 + 2]);
-            const float hysteresis = inputs[i * 4 + 3][0];
-            const float share = inputs[i * 4 + 3][1];
-            const GpuVec4* out = &outputs[i * 4];
+        for (std::size_t i = 0; i < inputs.size() / 3; ++i) {
+            const Vec3 old = vec3From(inputs[i * 3]);
+            const Vec3 fresh = vec3From(inputs[i * 3 + 1]);
+            const float share = inputs[i * 3 + 2][0];
             const Vec2 blended2 = blendProbeValue(Vec2{old.x, old.y}, Vec2{fresh.x, fresh.y}, share);
-
-            report.check("encodeIrradiance", transcendentalTolerance, encodeIrradiance(value), vec3From(out[0]));
-            report.check("decodeIrradiance", transcendentalTolerance, decodeIrradiance(value), vec3From(out[1]));
-            report.check("irradianceTexelHysteresis", arithmeticTolerance, irradianceTexelHysteresis(hysteresis, old, fresh), out[0][3]);
-            report.check("blendProbeValue", arithmeticTolerance, blendProbeValue(old, fresh, share), vec3From(out[2]));
-            report.check("blendProbeValue (2)", arithmeticTolerance, Vec3{blended2.x, blended2.y, 0.0f}, Vec3{out[3][0], out[3][1], 0.0f});
+            report.check("blendProbeValue", arithmeticTolerance, blendProbeValue(old, fresh, share), vec3From(outputs[i * 2]));
+            report.check("blendProbeValue (2)", arithmeticTolerance, Vec3{blended2.x, blended2.y, 0.0f},
+                         Vec3{outputs[i * 2 + 1][0], outputs[i * 2 + 1][1], 0.0f});
         }
     }
 
@@ -285,8 +264,10 @@ namespace {
             return MeshHandle{static_cast<std::uint32_t>(meshes.size() - 1)};
         }
 
-        // The frame's set 1 for these draws (all one white matte material) and lights.
-        VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting) {
+        // The frame's set 1 for these draws (all one white matte material), lights and probes, as the renderer writes it
+        // with the camera at the origin.
+        VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting, const ProbeVolume& volume,
+                                   const VulkanDdgi& ddgi, const GlobalIlluminationSettings& settings) {
             MaterialTable materials;
             std::vector<GpuInstance> instances;
 
@@ -296,15 +277,22 @@ namespace {
 
             const GpuLights lights = packLighting(lighting, Vec3{});
             const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 100.0f};
-            const GpuFrameData frameData = makeFrameData(lights, Mat4::identity(), Vec3{}, makeClusterGrid(camera, 64, 64), false, false);
+            GpuFrameData frameData = makeFrameData(lights, Mat4::identity(), Vec3{}, makeClusterGrid(camera, 64, 64), false, false);
+            const ProbeHitLights hitLights = probeHitLights(lights, Vec3{}, volume);
+            packProbeSampling(frameData, ProbeSampling{volume, Vec3{}, settings.selfShadowBias, settings.bounceEnergy, settings.lightsPerHit,
+                                                       hitLights.points, hitLights.spots});
 
             buffers.frameData.write(&frameData, sizeof(frameData));
             buffers.instances.write(instances);
             buffers.materials.write(materials.getEntries());
             buffers.directionalLights.write(lights.directional);
+            buffers.pointLights.write(lights.points);
+            buffers.spotLights.write(lights.spots);
+            buffers.probeHitLights.write(hitLights.lights);
 
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-            return writeSceneSet(descriptors, sceneLayout, buffers, SceneImages{dummy, dummy, dummy}, clusterMasks);
+            return writeSceneSet(descriptors, sceneLayout, buffers, SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance()},
+                                 clusterMasks);
         }
     };
 
@@ -400,11 +388,10 @@ namespace {
 
     /*
     * Half floats keep 11 significant bits, and Vulkan lets a GPU round toward zero when it stores one, so a stored value
-    * may sit a whole step (up to 2^-10 of it) below the true one, not just half; irradiance is stored as its fifth
-    * root, so decoding (the fifth power) multiplies that by five, to about 5e-3. The rays' hits differ from the CPU's by
-    * the hardware's rounding.
+    * may sit a whole step (up to 2^-10 of it) below the true one, not just half. The rays' hits differ from the CPU's
+    * by the hardware's rounding.
     */
-    constexpr FloatTolerance storedIrradianceTolerance{.absolute = 1e-4f, .relative = 6e-3f};
+    constexpr FloatTolerance storedIrradianceTolerance{.absolute = 1e-4f, .relative = 2e-3f};
     constexpr FloatTolerance storedDistanceTolerance{.absolute = 1e-3f, .relative = 2e-3f};
 
     /*
@@ -418,7 +405,7 @@ namespace {
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
             const GpuVec4 stored = irradiance.texel(irradianceOrigin.x + 1 + texel % probeIrradianceTexels, irradianceOrigin.y + 1 + texel / probeIrradianceTexels);
             report.check(name + ": irradiance", storedIrradianceTolerance, expected.irradiance[static_cast<std::size_t>(texel)],
-                         decodeIrradiance(vec3From(stored)));
+                         vec3From(stored));
         }
 
         const TexelCoord distanceOrigin = probeTileOrigin(counts, probe, probeDistanceTexels);
@@ -441,13 +428,14 @@ namespace {
         }
     }
 
-    // The first update's ray directions: a fresh VulkanDdgi turns its rays by frame 0's rotation.
+    // The first update's ray directions: a fresh VulkanDdgi traces frame 0's (phase 0 of the first cycle's rotation).
     std::vector<Vec3> firstFrameRays(int count) {
-        const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(0));
+        const ProbeRayFrame first = probeRayFrame(0);
+        const ProbeRotationRows rows = probeRotationRows(first.rotation);
         std::vector<Vec3> directions;
 
         for (int ray = 0; ray < count; ++ray) {
-            directions.push_back(probeRayDirection(ray, count, rows));
+            directions.push_back(probeRayDirection(ray, count, first.phase, rows));
         }
 
         return directions;
@@ -460,7 +448,8 @@ namespace {
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
         scene.descriptors.reset();
-        const VkDescriptorSet frame = scene.writeFrame(draws, lighting);
+        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume); });
+        const VkDescriptorSet frame = scene.writeFrame(draws, lighting, volume, ddgi, settings);
 
         scene.commands.run([&](VkCommandBuffer recording) {
             scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
@@ -486,8 +475,11 @@ namespace {
     * - the furnace: probes under an empty sky drawn at B store B in every texel, and the longest distance;
     * - a probe sealed in a box sees only back faces: no light, and a fifth of each wall's distance;
     * - a probe over a white floor lit straight down by a sun of radiance R: rays that go down bring back R, rays that
-    *   go up the sky (black), and their distances the floor's.
-    * Each scene also holds a speck far below, since a top-level structure needs something in it.
+    *   go up the sky (black), and their distances the floor's;
+    * - the same floor lit by two lamps a little above it instead, one kept per hit: each ray that goes down brings back
+    *   the brighter lamp's light where it lands (pointLightAtHit), checked by a shadow ray that nothing blocks.
+    * The atlases start empty, so the light bounced from them (last frame's probes) adds nothing on a first update. Each
+    * scene also holds a speck far below, since a top-level structure needs something in it.
     */
     void checkProbePasses(const VulkanDevice& device, GpuCheckReport& report) {
         ProbeTestScene scene{device};
@@ -544,6 +536,54 @@ namespace {
             }
 
             checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sunlit floor", report);
+        }
+
+        {
+            const float height = 1.0f;
+            const ProbeVolume volume{Vec3{0.0f, height, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}};
+            FrameLighting lighting;
+
+            for (const auto& [position, intensity] : {std::pair{Vec3{0.3f, 0.4f, 0.2f}, 3.0f}, std::pair{Vec3{-0.8f, 0.6f, -0.5f}, 2.0f}}) {
+                PlacedPointLight lamp;
+                lamp.position = position;
+                lamp.light.intensity = intensity;
+                lamp.light.range = 6.0f;
+                lamp.light.sourceRadius = 0.2f;
+                lighting.pointLights.push_back(lamp);
+            }
+
+            GlobalIlluminationSettings onePerHit = settings;
+            onePerHit.lightsPerHit = 1;
+            const auto [irradiance, distance] = runProbes(scene, {speck, drawOf(floor, Mat4::identity())}, lighting, volume, onePerHit);
+
+            const GpuLights packed = packLighting(lighting, Vec3{});
+            const Vec3 up{0.0f, 1.0f, 0.0f};
+            std::vector<RayResult> results;
+
+            for (const Vec3& ray : rays) {
+                if (ray.y >= 0.0f) {
+                    results.push_back(RayResult{Vec3{0.0f, 0.0f, 0.0f}, static_cast<float>(DDGI_RAY_REACH)});
+                    continue;
+                }
+
+                const float along = height / -ray.y;
+                const Vec3 hit = volume.origin + ray * along;
+                Vec3 brightest{0.0f, 0.0f, 0.0f};
+
+                for (const GpuPointLight& light : packed.points) {
+                    const Vec3 offset = Vec3{light.positionRange[0], light.positionRange[1], light.positionRange[2]} - hit;
+                    const Vec3 lit = pointLightAtHit(offset, light.positionRange[3], vec3From(GpuVec4{light.radiance[0], light.radiance[1],
+                                                                                                      light.radiance[2], 0.0f}),
+                                                     light.radiance[3], up);
+                    if (hitLightStrength(lit) > hitLightStrength(brightest)) {
+                        brightest = lit;
+                    }
+                }
+
+                results.push_back(RayResult{brightest, along});
+            }
+
+            checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "lamp-lit floor", report);
         }
     }
 }

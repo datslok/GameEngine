@@ -60,9 +60,7 @@ void main() {
 
     if (sum.w > DDGI_MIN_TEXEL_WEIGHT) {
 #if UPDATE_IRRADIANCE
-        vec3 fresh = encodeIrradiance(sum.rgb / sum.w);
-        float hysteresis = irradianceTexelHysteresis(volume.hysteresis.x, stored.rgb, fresh);
-        result = vec4(blendProbeValue(stored.rgb, fresh, hysteresis), 1.0);
+        result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, volume.hysteresis.x), 1.0);
 #else
         result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, volume.hysteresis.y), 0.0, 1.0);
 #endif

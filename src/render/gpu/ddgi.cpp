@@ -33,6 +33,9 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Rays per probe", settings.raysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
     visitor.field("Irradiance time constant", settings.irradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "s"});
     visitor.field("Distance time constant", settings.distanceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 4.0f, .unit = "s"});
+    visitor.field("Self-shadow bias", settings.selfShadowBias, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
+    visitor.field("Bounce energy", settings.bounceEnergy, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Lights per hit", settings.lightsPerHit, {.min = 0, .max = DDGI_MAX_HIT_LIGHTS});
     visitor.field("Show probes", settings.showProbes);
     visitor.field("Probe ball radius", settings.probeBallRadius, {.min = 0.01f, .max = 1.0f, .sliderMax = 0.4f, .unit = "m"});
 }
@@ -160,8 +163,13 @@ ProbeRotationRows probeRotationRows(const Quat& rotation) {
     return rows;
 }
 
-Vec3 probeRayDirection(int ray, int count, const ProbeRotationRows& rotation) {
-    const Vec3 point = sphericalFibonacci(ray, count);
+ProbeRayFrame probeRayFrame(std::uint64_t frameNumber) {
+    const std::uint64_t cycle = static_cast<std::uint64_t>(probeRayCycle);
+    return ProbeRayFrame{randomProbeRotation(frameNumber / cycle), static_cast<int>(frameNumber % cycle)};
+}
+
+Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation) {
+    const Vec3 point = sphericalFibonacci(ray * probeRayCycle + phase, count * probeRayCycle);
     return Vec3{rotation.rows[0].dot(point), rotation.rows[1].dot(point), rotation.rows[2].dot(point)};
 }
 
@@ -182,36 +190,12 @@ float probeMaxDistance(const Vec3& spacing) {
     return maxDistanceDiagonals * spacing.length();
 }
 
-Vec3 encodeIrradiance(const Vec3& irradiance) {
-    const float power = 1.0f / irradiancePower;
-    return Vec3{std::pow(irradiance.x, power), std::pow(irradiance.y, power), std::pow(irradiance.z, power)};
-}
-
-Vec3 decodeIrradiance(const Vec3& encoded) {
-    return Vec3{std::pow(encoded.x, irradiancePower), std::pow(encoded.y, irradiancePower), std::pow(encoded.z, irradiancePower)};
-}
-
 float hysteresisForTimeConstant(float frameSeconds, float timeConstant) {
     if (timeConstant <= 0.0f) {
         return 0.0f;
     }
 
     return std::exp(-frameSeconds / timeConstant);
-}
-
-float irradianceTexelHysteresis(float hysteresis, const Vec3& oldEncoded, const Vec3& newEncoded) {
-    const Vec3 change = newEncoded - oldEncoded;
-    const float largest = std::max({std::abs(change.x), std::abs(change.y), std::abs(change.z)});
-
-    if (largest > irradianceResetThreshold) {
-        return 0.0f;
-    }
-
-    if (largest > irradianceChangeThreshold) {
-        return std::max(0.0f, hysteresis - irradianceChangeHysteresisDrop);
-    }
-
-    return hysteresis;
 }
 
 Vec3 blendProbeValue(const Vec3& oldValue, const Vec3& newValue, float hysteresis) {
@@ -311,5 +295,6 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
     packed.hysteresis[0] = frame.irradianceHysteresis;
     packed.hysteresis[1] = frame.distanceHysteresis;
     packed.hysteresis[2] = frame.ballRadius;
+    packed.hysteresis[3] = static_cast<float>(frame.rayPhase);
     return packed;
 }

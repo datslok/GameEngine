@@ -217,6 +217,10 @@ Vec3 shadeAmbient(const ShadingPoint& point, const Vec3& ambient) {
     return ambient * (point.diffuse + point.specularAlbedo);
 }
 
+Vec3 shadeProbeAmbient(const ShadingPoint& point, const Vec3& diffuseLight, const Vec3& specularLight) {
+    return diffuseLight * point.diffuse + specularLight * point.specularAlbedo;
+}
+
 /*
 * A 16-bit UNORM channel stores round(value * 65535): steps of 1.5e-5, far finer than the table's own accuracy, at half
 * the size of 32-bit floats. Values are clamped to 0..1 first (the integration can stray just past 1 on a smooth surface).

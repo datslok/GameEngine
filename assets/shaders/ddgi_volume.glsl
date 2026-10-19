@@ -10,7 +10,7 @@ layout(push_constant) uniform ProbeVolumeData {
     ivec4 counts;     // xyz probes along each axis, w rays per probe this frame
     vec4 rotation[3]; // this frame's ray rotation, its matrix's rows in xyz
     vec4 sky;         // rgb the light rays that hit nothing bring back
-    vec4 hysteresis;  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius
+    vec4 hysteresis;  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
 } volume;
 
 int volumeProbeCount() {
@@ -23,7 +23,7 @@ vec3 volumeProbePosition(int probe) {
 
 vec3 volumeRayDirection(int ray) {
     vec3 rotation[3] = vec3[3](volume.rotation[0].xyz, volume.rotation[1].xyz, volume.rotation[2].xyz);
-    return probeRayDirection(ray, volume.counts.w, rotation);
+    return probeRayDirection(ray, volume.counts.w, int(volume.hysteresis.w + 0.5), rotation);
 }
 
 #endif

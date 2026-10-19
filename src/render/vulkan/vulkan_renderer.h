@@ -75,9 +75,10 @@ public:
     bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr);
 
     // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
-    // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU.
+    // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU. A frame
+    // with light probes is drawn probeWarmUpFrames times first, so the probes have gathered their light and bounces.
     CapturedFrame capture(const FrameDescription& frame, const RenderSettings& settings, Uint32 width, Uint32 height,
-                          const DisplayOutput& output);
+                          const DisplayOutput& output, int probeWarmUpFrames = 0);
 
     // The GPU's name as the driver reports it, for keeping golden images per GPU.
     std::string getDeviceName() const;
@@ -170,6 +171,8 @@ private:
     // The main pass alone (finding the nearest surface itself) and after the depth prepass (shading only it), and the prepass.
     std::unique_ptr<VulkanPipeline> mainPipeline;
     std::unique_ptr<VulkanPipeline> mainAfterPrepassPipeline;
+    std::unique_ptr<VulkanPipeline> mainProbesPipeline;             // the same two, sampling the light probes
+    std::unique_ptr<VulkanPipeline> mainAfterPrepassProbesPipeline;
     std::unique_ptr<VulkanPipeline> depthPrepassPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
@@ -225,6 +228,9 @@ private:
     std::unique_ptr<VulkanTexture> whiteTexture;
     std::unique_ptr<VulkanTexture> brdfTable;
 
+    // Bound in place of the light probes' atlases while there are none (one black texel, never read then).
+    std::unique_ptr<VulkanTexture> noProbesTexture;
+
     // This frame's camera in world space (culling, debug lines) and measured from the camera (the main pass).
     Mat4 viewProjection = Mat4::identity();
     Mat4 relativeViewProjection = Mat4::identity();
@@ -275,19 +281,25 @@ private:
         std::vector<std::uint32_t> drawList;
     };
 
+    // probes: the frame's probe volume when this frame traces and samples it, else null.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
-                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const RenderSettings& settings);
+                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const RenderSettings& settings,
+                               const ProbeVolume* probes);
+
+    // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and a probe volume.
+    bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
+    // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
-                      const Vec3& background);
+                      bool sampleProbes, const Vec3& background);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
-    void measureDepthsBeforeCapture(const FrameDescription& description, const RenderSettings& settings);
+    void drawFramesBeforeCapture(const FrameDescription& description, const RenderSettings& settings, int frames);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 

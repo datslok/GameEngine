@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <span>
+#include <stdexcept>
+#include <utility>
 
 namespace {
     constexpr VkFormat irradianceFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -156,18 +158,29 @@ void VulkanDdgi::createAtlases(VkCommandBuffer commands, const ProbeVolume& volu
     currentVolume = volume;
 }
 
+void VulkanDdgi::prepare(VkCommandBuffer commands, const ProbeVolume& volume) {
+    validateProbeVolume(volume);
+
+    if (!currentVolume || !sameVolume(*currentVolume, volume)) {
+        createAtlases(commands, volume);
+        irradiance.transition(commands, ImageState::SurfaceRead);
+        distance.transition(commands, ImageState::SurfaceRead);
+        freshAtlases = true;
+    }
+}
+
 void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume,
                         const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds) {
-    validateProbeVolume(volume);
-    const bool fresh = !currentVolume || !sameVolume(*currentVolume, volume);
-
-    if (fresh) {
-        createAtlases(commands, volume);
+    if (!currentVolume || !sameVolume(*currentVolume, volume)) {
+        throw std::logic_error("Prepare the light probes for a volume before updating them");
     }
 
+    const bool fresh = std::exchange(freshAtlases, false);
     ProbeFrame frame;
     frame.raysPerProbe = std::clamp(settings.raysPerProbe, minRaysPerProbe, maxRaysPerProbe);
-    frame.rotation = randomProbeRotation(frameNumber++);
+    const ProbeRayFrame rays = probeRayFrame(frameNumber++);
+    frame.rotation = rays.rotation;
+    frame.rayPhase = rays.phase;
     frame.sky = sky;
     frame.irradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.irradianceTimeConstant);
     frame.distanceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant);
@@ -178,6 +191,10 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     trace(commands, descriptors, sets, probes, frame.raysPerProbe);
     blend(commands, descriptors, *irradiancePipeline, irradiance, probes);
     blend(commands, descriptors, *distancePipeline, distance, probes);
+
+    // The blends' writes made visible to every later read: this frame's main pass and debug balls, the next one's trace.
+    irradiance.transition(commands, ImageState::SurfaceRead);
+    distance.transition(commands, ImageState::SurfaceRead);
 }
 
 /*
@@ -214,8 +231,8 @@ void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, 
 }
 
 /*
-* One workgroup per probe blends the rays into one atlas, in place. The atlas goes to storage use from whatever read it
-* last (the debug balls, or last frame's update, whose writes this must see).
+* One workgroup per probe blends the rays into one atlas, in place. The atlas goes to storage use from being sampled
+* (this frame's trace, last frame's main pass and balls), whose reads must finish before it is written.
 */
 void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, VulkanImage& atlas, int probes) {
     atlas.transition(commands, ImageState::ComputeStorage);
@@ -245,12 +262,6 @@ void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, 
     vkCmdDispatch(commands, static_cast<std::uint32_t>(probes), 1, 1);
 }
 
-void VulkanDdgi::prepareToDrawProbes(VkCommandBuffer commands) {
-    if (hasProbes()) {
-        irradiance.transition(commands, ImageState::FragmentRead);
-    }
-}
-
 // Six corners (two triangles) per ball, one instance per probe.
 void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frame) {
     if (!hasProbes()) {
@@ -278,6 +289,14 @@ void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descript
 
 bool VulkanDdgi::hasProbes() const {
     return currentVolume.has_value();
+}
+
+SampledImage VulkanDdgi::sampledIrradiance() const {
+    return SampledImage{irradiance.getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+}
+
+SampledImage VulkanDdgi::sampledDistance() const {
+    return SampledImage{distance.getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
 VulkanImage& VulkanDdgi::getIrradianceAtlas() {

@@ -110,4 +110,8 @@ vec3 shadeAmbient(ShadingPoint point, vec3 ambient) {
     return ambient * (point.diffuse + point.specularAlbedo);
 }
 
+vec3 shadeProbeAmbient(ShadingPoint point, vec3 diffuseLight, vec3 specularLight) {
+    return diffuseLight * point.diffuse + specularLight * point.specularAlbedo;
+}
+
 #endif

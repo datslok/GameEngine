@@ -1,0 +1,65 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs ddgi_sampling.glsl's functions on the cases ddgi_sampling_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "ddgi_sampling.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 first = testInput(0);
+    vec4 second = testInput(1);
+    vec4 third = testInput(2);
+    vec4 fourth = testInput(3);
+
+    if (function == GPU_TEST_PROBE_BIAS) {
+        testOutput(0, vec4(probeSelfShadowBias(first.xyz, second.xyz, third.xyz, first.w), 0.0));
+    } else if (function == GPU_TEST_PROBE_CELL) {
+        ivec3 counts = ivec3(third.xyz);
+        int corner = int(third.w);
+        ProbeCell cell = probeCell(first.xyz, second.xyz, counts, fourth.xyz);
+        testOutput(0, vec4(vec3(cell.base), 0.0));
+        testOutput(1, vec4(cell.alpha, 0.0));
+        testOutput(2, vec4(vec3(probeCellCorner(cell, counts, corner)), probeTrilinearWeight(cell.alpha, corner)));
+    } else if (function == GPU_TEST_PROBE_CORNER_WEIGHTS) {
+        vec2 moments = third.yz;
+        testOutput(0, vec4(probeBackFaceWeight(first.xyz, second.xyz), probeVisibility(third.x, moments), crushProbeWeight(fourth.x),
+                           probeCornerWeight(first.xyz, second.xyz, third.x, moments, third.w)));
+    } else if (function == GPU_TEST_PROBE_VOLUME_WEIGHT) {
+        testOutput(0, vec4(probeVolumeWeight(first.xyz, second.xyz, ivec3(third.xyz), fourth.xyz)));
+    } else if (function == GPU_TEST_PROBE_BLEND) {
+        ProbeBlend blend = ProbeBlend(vec3(0.0), 0.0);
+        addProbeSample(blend, first.xyz, first.w);
+        addProbeSample(blend, second.xyz, second.w);
+        addProbeSample(blend, third.xyz, third.w);
+        testOutput(0, vec4(finishProbeBlend(blend), 0.0));
+    } else if (function == GPU_TEST_HIT_LIGHTS) {
+        vec3 point = pointLightAtHit(first.xyz, first.w, second.xyz, second.w, fourth.xyz);
+        testOutput(0, vec4(point, hitLightStrength(point)));
+        testOutput(1, vec4(spotLightAtHit(first.xyz, first.w, second.xyz, second.w, third.xyz, third.w, fourth.w, fourth.xyz), 0.0));
+    } else if (function == GPU_TEST_BRIGHTEST_LIGHTS) {
+        BrightestLights kept;
+        kept.count = 0;
+        int capacity = int(third.x);
+
+        // Spelled out: a vector indexed by a loop counter inside ?: read zeros on the RTX 5080's driver.
+        float strengths[8] = float[8](first.x, first.y, first.z, first.w, second.x, second.y, second.z, second.w);
+
+        for (int light = 0; light < 8; ++light) {
+            keepBrightestLight(kept, capacity, light, strengths[light]);
+        }
+
+        vec4 lights[2] = vec4[2](vec4(-1.0), vec4(-1.0));
+
+        for (int slot = 0; slot < kept.count; ++slot) {
+            lights[slot / 4][slot % 4] = float(kept.lights[slot]);
+        }
+
+        testOutput(0, lights[0]);
+        testOutput(1, lights[1]);
+        testOutput(2, vec4(float(kept.count)));
+    }
+}

@@ -124,5 +124,12 @@ LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const V
 // The reflected light under uniform light of the given radiance from every direction.
 Vec3 shadeAmbient(const ShadingPoint& point, const Vec3& ambient);
 
+/*
+* The same lit by the light probes instead (render/gpu/ddgi_sampling.h, ProbeLight): their irradiance for the diffuse
+* part, and the specular part's stand-in (the probes read in the mirror direction) until reflections exist. Kept apart
+* from shadeAmbient, whose grouping pictures without probes keep, so they stay the same to the last bit.
+*/
+Vec3 shadeProbeAmbient(const ShadingPoint& point, const Vec3& diffuseLight, const Vec3& specularLight);
+
 // The table as the GPU stores it: two 16-bit numbers per texel (scale, bias) for 0..1, row by row (rows are roughness).
 std::vector<std::uint16_t> brdfTableTexels(const BrdfTable& table);

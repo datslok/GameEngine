@@ -187,17 +187,20 @@ namespace {
         return tolerance;
     }
 
-    // Outputs per case: (diffuse, 0), (specular, 0), (ambient reflected under the radiance as ambient light, 0).
+    // Outputs per case: (diffuse, 0), (specular, 0), (ambient reflected under the radiance as ambient light, 0), (lit by probe
+    // light: the radiance as the diffuse part's, its channels reversed as the specular part's, 0).
     void checkAddLight(GpuFunctionRunner& runner, GpuCheckReport& report, const std::vector<ShadingCase>& cases, const BrdfTable& table) {
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_ADD_LIGHT, shadingInputs(cases, table), 6, 3);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_ADD_LIGHT, shadingInputs(cases, table), 6, 4);
 
         for (std::size_t i = 0; i < cases.size(); ++i) {
             const ShadingPoint point = prepareShading(cases[i].surface, cases[i].normal, cases[i].toCamera, table);
             const LightResponse expected = shadeLight(point, cases[i].toLight, cases[i].radiance);
-            const GpuVec4* actual = &outputs[i * 3];
+            const GpuVec4* actual = &outputs[i * 4];
+            const Vec3 reversed{cases[i].radiance.z, cases[i].radiance.y, cases[i].radiance.x};
             report.check("addLight diffuse", arithmeticTolerance, expected.diffuse, vec3From(actual[0]));
             report.check("addLight specular", specularTolerance(point, cases[i].toLight), expected.specular, vec3From(actual[1]));
             report.check("shadeAmbient", arithmeticTolerance, shadeAmbient(point, cases[i].radiance), vec3From(actual[2]));
+            report.check("shadeProbeAmbient", arithmeticTolerance, shadeProbeAmbient(point, cases[i].radiance, reversed), vec3From(actual[3]));
         }
     }
 

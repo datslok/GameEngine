@@ -24,12 +24,9 @@ inline constexpr int probeIrradianceTexels = DDGI_IRRADIANCE_TEXELS;
 inline constexpr int probeDistanceTexels = DDGI_DISTANCE_TEXELS;
 inline constexpr int minRaysPerProbe = DDGI_MIN_RAYS;
 inline constexpr int maxRaysPerProbe = DDGI_MAX_RAYS;
+inline constexpr int probeRayCycle = DDGI_RAY_CYCLE;
 inline constexpr float probeDistanceSharpness = static_cast<float>(DDGI_DISTANCE_SHARPNESS);
 inline constexpr float backFaceDistanceShare = static_cast<float>(DDGI_BACK_FACE_DISTANCE_SHARE);
-inline constexpr float irradiancePower = static_cast<float>(DDGI_IRRADIANCE_POWER);
-inline constexpr float irradianceChangeThreshold = static_cast<float>(DDGI_CHANGE_THRESHOLD);
-inline constexpr float irradianceChangeHysteresisDrop = static_cast<float>(DDGI_CHANGE_HYSTERESIS_DROP);
-inline constexpr float irradianceResetThreshold = static_cast<float>(DDGI_RESET_THRESHOLD);
 inline constexpr float minProbeTexelWeight = static_cast<float>(DDGI_MIN_TEXEL_WEIGHT);
 inline constexpr float maxDistanceDiagonals = static_cast<float>(DDGI_MAX_DISTANCE_DIAGONALS);
 inline constexpr int maxProbeAtlasSide = DDGI_MAX_ATLAS_SIDE;
@@ -50,10 +47,26 @@ struct GlobalIlluminationSettings {
     int raysPerProbe = 64;
 
     // How long the stored light takes to follow a change: after this many seconds, 1/e (37%) of a step change is left,
-    // at any frame rate. Shorter reacts faster and flickers more. Distances are kept steadier, since flickering
-    // visibility is worse than slightly late visibility [2021].
-    float irradianceTimeConstant = 0.5f;
+    // at any frame rate. Shorter reacts faster and flickers more: noise goes as 1/sqrt(rays x time constant). 2 s was
+    // chosen by eye in the light lab's dark back room, where 0.5 s crawled visibly; the price is lag, a light switched
+    // on or off bringing its bounce light in over a few seconds, and moving lights and objects trailing theirs (scene
+    // events, planned, will speed probes up for such changes). Distances are kept steadier, since flickering visibility
+    // is worse than slightly late visibility [2021].
+    float irradianceTimeConstant = 2.0f;
     float distanceTimeConstant = 1.0f;
+
+    // How far the point tested for visibility moves off the surface, in units of 0.75 of the smallest spacing [2021].
+    // Too little leaves blotches where surfaces meet the probes' distances; too much lets light leak round corners.
+    // Raise it when tracing fewer rays (noisier distances).
+    float selfShadowBias = 0.3f;
+
+    // The share of last frame's probe light that a probe ray's hit passes on (each frame adds one more bounce). 1 is
+    // physically right, since albedo below 1 already makes the bounces die out; a little less hides faint leaks, which
+    // repeated bounces would otherwise build up and the eye sees in dark rooms (the 2019 code's 0.85).
+    float bounceEnergy = 0.85f;
+
+    // The point and spot lights each probe ray's hit adds, the brightest there, each checked by a shadow ray.
+    int lightsPerHit = 4;
 
     // A debug view: each probe drawn as a small ball showing the light it stores, in the direction of the ball's surface.
     bool showProbes = false;
@@ -100,8 +113,9 @@ TexelCoord probeBorderTexel(int number, int side);
 Vec3 sphericalFibonacci(int index, int count);
 
 /*
-* A rotation drawn uniformly from all rotations (Shoemake 1992), the same for the same frame number: every probe's rays
-* are turned by it, so a fixed pattern's gaps move every frame and the samples add up to the whole sphere over time.
+* A rotation drawn uniformly from all rotations (Shoemake 1992), the same for the same number: every probe's rays are
+* turned by it (one per ray cycle, probeRayFrame), so the spiral's gaps move and the samples add up to the whole sphere
+* over time, with no direction favoured.
 */
 Quat randomProbeRotation(std::uint64_t frameNumber);
 
@@ -112,8 +126,21 @@ struct ProbeRotationRows {
 
 ProbeRotationRows probeRotationRows(const Quat& rotation);
 
-// Ray ray of a probe's count this frame: the Fibonacci point turned by the frame's rotation.
-Vec3 probeRayDirection(int ray, int count, const ProbeRotationRows& rotation);
+/*
+* Which rays a frame traces: frames take turns through one spiral of count x probeRayCycle points, frame number f taking
+* phase f mod probeRayCycle, and a cycle's frames share one rotation (randomProbeRotation of the cycle's number), so
+* together they cover the sphere evenly rather than as unevenly as independent random rotations would. In a room lit by
+* a small bright patch, how many rays find it then barely varies from cycle to cycle, which is what flickered.
+*/
+struct ProbeRayFrame {
+    Quat rotation;
+    int phase = 0;
+};
+
+ProbeRayFrame probeRayFrame(std::uint64_t frameNumber);
+
+// Ray ray of a probe's count in a frame of this phase: spiral point ray x probeRayCycle + phase, turned by the rotation.
+Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation);
 
 /*
 * The update's weights for one ray seen from one texel: irradiance weights rays by the cosine between the two (Lambert's
@@ -133,10 +160,6 @@ float distanceForUpdate(float rayDistance, float maxDistance);
 // The longest distance a probe's distances record: maxDistanceDiagonals of its cell's diagonal.
 float probeMaxDistance(const Vec3& spacing);
 
-// Irradiance as stored (its irradiancePower-th root, which like a logarithm compresses bright values) and back.
-Vec3 encodeIrradiance(const Vec3& irradiance);
-Vec3 decodeIrradiance(const Vec3& encoded);
-
 /*
 * Keeping a share h of the old value each frame relaxes exponentially, like a capacitor charging, with time constant
 * tau = -frameSeconds / ln h; so the share for a time constant is exp(-frameSeconds / tau). A time constant of 0 keeps
@@ -145,12 +168,11 @@ Vec3 decodeIrradiance(const Vec3& encoded);
 float hysteresisForTimeConstant(float frameSeconds, float timeConstant);
 
 /*
-* An irradiance texel's hysteresis this frame, from the frame's and the change between its old and new stored values
-* (the largest change of any channel): lowered by the drop past the change threshold, 0 past the reset threshold.
+* Keep hysteresis of the old value and take the rest from the new. Irradiance is blended as it is, linearly, not as
+* 2021's fifth roots with per-texel speed-ups: with few rays reaching light (a dark room seeing a sunlit doorway), the
+* mean of the roots of noisy estimates settled at half the true light, and the noise tripped the speed-ups, which
+* passed it straight to the screen as flicker (ddgi_test, the sparsely lit texel).
 */
-float irradianceTexelHysteresis(float hysteresis, const Vec3& oldEncoded, const Vec3& newEncoded);
-
-// Keep hysteresis of the old value and take the rest from the new.
 Vec3 blendProbeValue(const Vec3& oldValue, const Vec3& newValue, float hysteresis);
 Vec2 blendProbeValue(const Vec2& oldValue, const Vec2& newValue, float hysteresis);
 
@@ -191,7 +213,7 @@ struct GpuProbeVolume {
     std::int32_t counts[4]; // xyz probes along each axis, w rays per probe this frame
     float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz
     float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything)
-    float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius
+    float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
 };
 
 static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_volume.glsl and fit in 128 bytes of push constants");
@@ -200,6 +222,7 @@ static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_vol
 struct ProbeFrame {
     int raysPerProbe = 64;
     Quat rotation;
+    int rayPhase = 0; // the frame's place in its ray cycle (ProbeRayFrame)
     Vec3 sky{0.0f, 0.0f, 0.0f};
     float irradianceHysteresis = 0.0f;
     float distanceHysteresis = 0.0f;

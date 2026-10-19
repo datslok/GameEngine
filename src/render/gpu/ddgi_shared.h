@@ -14,6 +14,12 @@
 #define DDGI_MIN_RAYS 16
 #define DDGI_MAX_RAYS 256
 
+// Frames that take turns through one spiral of rays: frame f of a cycle traces every DDGI_RAY_CYCLE-th point of a
+// spiral DDGI_RAY_CYCLE times as long, from point f, so each cycle covers the sphere evenly between them. Measured in the
+// light lab's back room (lit by a small sunlit patch through a doorway), 16 left the least flicker: about a third of
+// independent random rotations each frame, as good as three times the rays; 8 and 64 were slightly worse.
+#define DDGI_RAY_CYCLE 16
+
 // How sharply a distance texel favours rays near its own direction (a cosine raised to this power), so distances stay
 // crisp at the edges of walls [2019].
 #define DDGI_DISTANCE_SHARPNESS 50.0
@@ -21,16 +27,6 @@
 // A ray that met a back face records its distance as this share of the real one: the probe treats whatever lies behind
 // as close and hidden, so nothing is lit through it [2021].
 #define DDGI_BACK_FACE_DISTANCE_SHARE 0.2
-
-// Irradiance is stored as its fifth root and blended in that space, so bright-to-dark changes do not lag [2021].
-#define DDGI_IRRADIANCE_POWER 5.0
-
-// Per-texel speed-ups on the stored (encoded) irradiance [2021]: a change larger than the first threshold lowers the
-// texel's hysteresis by the drop; one larger than the second means the scene changed entirely, and the new value is
-// taken outright.
-#define DDGI_CHANGE_THRESHOLD 0.25
-#define DDGI_CHANGE_HYSTERESIS_DROP 0.15
-#define DDGI_RESET_THRESHOLD 0.8
 
 // A texel whose rays' summed weight is below this keeps its old value (no ray came near its direction).
 #define DDGI_MIN_TEXEL_WEIGHT 1e-6
@@ -50,5 +46,40 @@
 
 // Invocations per workgroup of the trace pass, one ray each.
 #define DDGI_TRACE_GROUP_SIZE 64
+
+// Sampling the probes at a surface (render/gpu/ddgi_sampling.h, ddgi_sampling.glsl), the 2021 reference code's numbers.
+// The self-shadow bias moves the point tested for visibility off the surface: mostly towards the viewer, a little along
+// the normal, by this share of the smallest spacing times the tunable bias.
+#define DDGI_BIAS_NORMAL_SHARE 0.2
+#define DDGI_BIAS_VIEW_SHARE 0.8
+#define DDGI_BIAS_SPACING_SHARE 0.75
+
+// A probe behind the surface still counts this much (wrap shading), so small details inside a room keep some probes.
+#define DDGI_WRAP_FLOOR 0.2
+
+// Chebyshev's visibility bound is raised to this power to sharpen it, and never drops below the floor, so a point no
+// probe can see still gets some light.
+#define DDGI_VISIBILITY_POWER 3.0
+#define DDGI_MIN_VISIBILITY 0.05
+
+// A probe's weight is at least the smallest weight, and weights below the crush threshold shrink as their cube (scaled to
+// meet at the threshold), so faint leaks, which the eye notices most in the dark, fade away.
+#define DDGI_SMALLEST_WEIGHT 1e-6
+#define DDGI_CRUSH_THRESHOLD 0.2
+
+// Each trilinear factor is at least this, so a probe at a cell's far corner is never weighted to exactly nothing.
+#define DDGI_MIN_TRILINEAR 0.001
+
+// A volume lights points out to this many cells beyond its outer probes at full weight, then fades to nothing over the
+// next DDGI_VOLUME_FADE cells, where the flat ambient light takes over.
+#define DDGI_VOLUME_MARGIN 0.5
+#define DDGI_VOLUME_FADE 0.5
+
+// The main pass's specialization constant (constant_id) that switches sampling the probes on. Its pipelines without probes
+// have none of the probe code, so pictures without probes are drawn exactly as before probes existed.
+#define DDGI_SAMPLE_PROBES_CONSTANT 0
+
+// The most point and spot lights a probe ray's hit may add (each costs a shadow ray); a setting picks how many up to this.
+#define DDGI_MAX_HIT_LIGHTS 8
 
 #endif

@@ -5,6 +5,7 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/compute_dispatch.h"
+#include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/depth_prepass.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_cache.h"
@@ -260,6 +261,14 @@ void VulkanRenderer::createPipelines() {
     setDepthState(afterPrepass, mainPassDepthState(true));
     mainAfterPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, afterPrepass);
 
+    // The same two sampling the light probes, for frames that have them.
+    PipelineDescription withProbes = main;
+    withProbes.fragmentConstants = {1};
+    mainProbesPipeline = std::make_unique<VulkanPipeline>(device, layouts, withProbes);
+    PipelineDescription afterPrepassWithProbes = afterPrepass;
+    afterPrepassWithProbes.fragmentConstants = {1};
+    mainAfterPrepassProbesPipeline = std::make_unique<VulkanPipeline>(device, layouts, afterPrepassWithProbes);
+
     PipelineDescription prepass = main;
     prepass.fragmentShader = nullptr;
     prepass.colourFormat = VK_FORMAT_UNDEFINED;
@@ -419,6 +428,14 @@ void VulkanRenderer::createFixedTextures() {
         device, uploads, table.size, table.size,
         std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(texels.data()), texels.size() * sizeof(std::uint16_t)},
         description);
+
+    // In the light probes' irradiance format; the distance atlas's binding reads it too (a sampler does not care).
+    const std::array<std::uint8_t, 8> black{};
+    VulkanTextureDescription noProbes;
+    noProbes.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    noProbes.bytesPerTexel = 8;
+    noProbes.surface = false;
+    noProbesTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, black, noProbes);
 }
 
 /*
@@ -838,9 +855,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
+    // The light probes (the frame's first probe volume): their atlases readied first, since the scene set points at them.
+    const GlobalIlluminationSettings& illumination = settings.globalIllumination;
+    const bool traceProbes = tracesProbes(description, settings);
+    const ProbeVolume* probes = traceProbes ? &description.lighting.probeVolumes.front() : nullptr;
+
+    if (traceProbes) {
+        ddgi->prepare(frame.commands, *probes);
+    }
+
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, settings);
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, settings, probes);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -849,10 +875,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
-    // probes (the frame's first probe volume) or the debug view.
+    // probes or the debug view.
     const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
-    const GlobalIlluminationSettings& illumination = settings.globalIllumination;
-    const bool traceProbes = ddgi && illumination.enabled && !description.lighting.probeVolumes.empty();
 
     if (rayDebug || traceProbes) {
         beginGpuPass(frame, GpuPass::RayScene);
@@ -863,8 +887,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (traceProbes) {
         beginGpuPass(frame, GpuPass::Probes);
         const ProbeSceneSets probeSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
-        ddgi->update(frame.commands, frame.descriptors, probeSets, description.lighting.probeVolumes.front(), illumination,
-                     description.lighting.background, description.frameSeconds);
+        ddgi->update(frame.commands, frame.descriptors, probeSets, *probes, illumination, description.lighting.background, description.frameSeconds);
         endGpuPass(frame, GpuPass::Probes);
     }
 
@@ -890,7 +913,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
     const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, description.lighting.background);
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, traceProbes, description.lighting.background);
     endGpuPass(frame, GpuPass::Main);
 
     if (showProbes) {
@@ -941,12 +964,13 @@ void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Ca
 * The frame's GPU scene, into its upload buffers: the frame's uniform block, one instance per draw in the frame (instance
 * i is draw i, whichever views draw it) with its material numbered in the frame's material table, the lights with their
 * shadows, the shadow tiles, and the draw list: the main pass's instance numbers in batch order (so each batch is a run),
-* then the shadow tiles'. Returns the scene's set 1, pointing at them and at the shadow atlas and BRDF table, bound once
-* per pass.
+* then the shadow tiles', and with light probes their numbers in the uniform block and the lights their rays' hits may
+* need. Returns the scene's set 1, pointing at them and at the shadow atlas, BRDF table and probe atlases, bound once per
+* pass.
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           const RenderSettings& settings) {
+                                           const RenderSettings& settings, const ProbeVolume* probes) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
     instances.reserve(description.draws.size());
@@ -966,9 +990,19 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
-    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
-                                                 settings.clusterHeatmap, settings.shadows);
+    GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
+                                           settings.clusterHeatmap, settings.shadows);
+    ProbeHitLights hitLights;
+
+    if (probes != nullptr) {
+        const GlobalIlluminationSettings& illumination = settings.globalIllumination;
+        hitLights = probeHitLights(lights, cameraOrigin, *probes);
+        packProbeSampling(frameData, ProbeSampling{*probes, cameraOrigin, illumination.selfShadowBias, illumination.bounceEnergy,
+                                                   illumination.lightsPerHit, hitLights.points, hitLights.spots});
+    }
+
     buffers.frameData.write(&frameData, sizeof(frameData));
+    buffers.probeHitLights.write(hitLights.lights);
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
     buffers.directionalLights.write(lights.directional);
@@ -981,6 +1015,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         sampled(*brdfTable),
+        probes != nullptr ? ddgi->sampledIrradiance() : sampled(*noProbesTexture),
+        probes != nullptr ? ddgi->sampledDistance() : sampled(*noProbesTexture),
     };
 
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks);
@@ -1134,7 +1170,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 * Afterwards the scene image becomes readable for bloom and tone mapping.
 */
 void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
-                                  bool keepDepth, const Vec3& background) {
+                                  bool keepDepth, bool sampleProbes, const Vec3& background) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
@@ -1146,7 +1182,8 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
     renderingOpen = true;
 
-    const VulkanPipeline& pipeline = afterPrepass ? *mainAfterPrepassPipeline : *mainPipeline;
+    const VulkanPipeline& pipeline = sampleProbes ? (afterPrepass ? *mainAfterPrepassProbesPipeline : *mainProbesPipeline)
+                                                  : (afterPrepass ? *mainAfterPrepassPipeline : *mainPipeline);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     stats.drawCalls += drawBatches(commands, mainDraws.batches);
@@ -1162,7 +1199,6 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
 */
 void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet) {
     const VkCommandBuffer commands = frame.commands;
-    ddgi->prepareToDrawProbes(commands);
     sceneColour.transition(commands, ImageState::ColourTarget);
     depth.transition(commands, ImageState::DepthTarget);
 
@@ -1252,7 +1288,7 @@ void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipe
 * display output is restored afterwards. Debug lines and the UI are not drawn. Slow (it waits): for golden images.
 */
 CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const RenderSettings& settings, Uint32 width, Uint32 height,
-                                      const DisplayOutput& output) {
+                                      const DisplayOutput& output, int probeWarmUpFrames) {
     const DisplayOutput screenOutput = displayOutput;
     const PixelFormat finalFormat = output.hdr ? PixelFormat::RgbaHalf : PixelFormat::Rgba8;
     const VkDeviceSize sceneBytes = VkDeviceSize{width} * height * bytesPerPixel(PixelFormat::RgbaHalf);
@@ -1271,8 +1307,10 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 
     ensureFrameTextures(width, height);
 
-    if (settings.shadows.fitCascadesToDepth) {
-        measureDepthsBeforeCapture(description, settings);
+    const int framesBefore = tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0);
+
+    if (framesBefore > 0) {
+        drawFramesBeforeCapture(description, settings, framesBefore);
     }
 
     FrameContext frame = beginFrame();
@@ -1339,26 +1377,34 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 
 /*
 * A golden image is a single frame from cold, so no earlier frame has measured the screen's depths for the sun's cascades
-* to be fitted to. This draws the same frame once first, as the frame before it would have, waits for it and takes its
-* measurement, so the capture shows the cascades as play does. Everything else that frame leaves behind is undone, so the
-* capture is still a first frame: the light history (a warm one changed which lamps held shadows in the lamp field), the
-* atlas layout and the shadow cache.
+* to be fitted to, and light probes have taken in a single frame's rays, with no light bounced more than once. This draws
+* the same frame first, as the frames before it would have: once for the depths, or as many frames as the probes are
+* given to gather their light (a still scene, so they settle as in play). It waits for the last and takes its
+* measurement, so the capture shows the cascades and probes as play does. Everything else those frames leave behind is
+* undone, so the capture is otherwise still a first frame: the light history (a warm one changed which lamps held shadows
+* in the lamp field), the atlas layout and the shadow cache. Every frame is the same commands from the same start, so
+* the capture comes out the same each time.
 */
-void VulkanRenderer::measureDepthsBeforeCapture(const FrameDescription& description, const RenderSettings& settings) {
+void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description, const RenderSettings& settings, int frames) {
     const LightHistory coldHistory = lightHistory;
     const ShadowAtlasLayout coldLayout = shadowLayout;
-    FrameContext frame = beginFrame();
+    std::uint32_t lastFrame = 0;
 
-    try {
-        drawScene(frame, description, settings, nullptr);
-        finishGpuTimings(frame);
-        submitFrame(frame, false);
-    }
-    catch (...) {
-        shadowMemory.forgetAll();
-        abandonFrame();
-        device.waitIdle();
-        throw;
+    for (int drawn = 0; drawn < frames; ++drawn) {
+        FrameContext frame = beginFrame();
+        lastFrame = frame.frameIndex;
+
+        try {
+            drawScene(frame, description, settings, nullptr);
+            finishGpuTimings(frame);
+            submitFrame(frame, false);
+        }
+        catch (...) {
+            shadowMemory.forgetAll();
+            abandonFrame();
+            device.waitIdle();
+            throw;
+        }
     }
 
     device.waitIdle();
@@ -1366,9 +1412,13 @@ void VulkanRenderer::measureDepthsBeforeCapture(const FrameDescription& descript
     shadowLayout = coldLayout;
     shadowMemory.forgetAll();
 
-    if (const std::optional<ScreenDepthRange> measured = depthRange->collect(frame.frameIndex)) {
+    if (const std::optional<ScreenDepthRange> measured = depthRange->collect(lastFrame)) {
         unusedDepthRange = measured;
     }
+}
+
+bool VulkanRenderer::tracesProbes(const FrameDescription& description, const RenderSettings& settings) const {
+    return ddgi && settings.globalIllumination.enabled && !description.lighting.probeVolumes.empty();
 }
 
 std::string VulkanRenderer::getDeviceName() const {

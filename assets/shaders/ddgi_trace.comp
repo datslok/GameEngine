@@ -7,10 +7,13 @@
 * brings back written for the update: the light leaving the surface it hit, towards the probe, and its distance.
 * - a miss brings back the sky behind everything, at the ray's whole reach;
 * - a back face (the probe sees the inside of something) brings back no light, its distance recorded negative;
-* - a front face brings back its own glow plus the direct light of every directional light that reaches it, found by a
-*   shadow ray (the shadow atlas only holds what the camera sees, so it cannot answer for hits off screen). Matte only:
-*   the probes' cosine averaging blurs away gloss, so the whole base colour reflects [2019].
-* Light bounced more than once (last frame's probes, read at the hit) comes once probes are sampled.
+* - a front face brings back its own glow, plus, on its base colour (matte only: the probes' cosine averaging blurs away
+*   gloss [2019]):
+*   - the direct light of every directional light that reaches it, and of the brightest few point and spot lights near
+*     the probes (render/gpu/ddgi_sampling.h, probeHitLights), each found by a shadow ray: the shadow atlas only holds
+*     what the camera sees, so it cannot answer for hits off screen;
+*   - the light from all around as last frame's probes hold it (the flat ambient beyond the volume), times the bounce
+*     energy setting: each frame passes on one more bounce, so a still scene gathers every bounce over time.
 */
 #include "ray_scene.glsl"
 #include "materials.glsl"
@@ -19,6 +22,7 @@
 #include "scene_lights.glsl"
 #include "ddgi.glsl"
 #include "ddgi_volume.glsl"
+#include "scene_probes.glsl"
 
 layout(local_size_x = DDGI_TRACE_GROUP_SIZE) in;
 
@@ -27,16 +31,42 @@ layout(std430, set = 3, binding = 0) writeonly buffer ProbeRays {
     vec4 probeRays[];
 };
 
-// Whether nothing solid lies between a point and a directional light: the first hit anywhere along the way settles it.
-bool reachesLight(vec3 from, vec3 toLight) {
+// The point lights, then the spotlights, whose light may reach the probes' rays' hits: numbers into the light buffers.
+layout(std430, set = 1, binding = 14) readonly buffer ProbeHitLights {
+    int probeHitLights[];
+};
+
+// Whether nothing solid lies between a point and a light along toLight within reach: the first hit anywhere settles it.
+bool reachesLight(vec3 from, vec3 toLight, float reach) {
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SOLID, from, 0.0, toLight,
-                          DDGI_RAY_REACH);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SOLID, from, 0.0, toLight, reach);
 
     while (rayQueryProceedEXT(query)) {
     }
 
     return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+// Listed light number of the hit lights, measured from the camera (as the light buffers are): its offset from the surface.
+vec3 hitLightOffset(int listed, vec3 relativeHit) {
+    int light = probeHitLights[listed];
+    vec3 position = listed < probeLights.x ? points[light].positionRange.xyz : spots[light].positionRange.xyz;
+    return position - relativeHit;
+}
+
+// The irradiance listed light number gives the surface, before its shadow ray.
+vec3 hitLightIrradiance(int listed, vec3 relativeHit, vec3 normal) {
+    int light = probeHitLights[listed];
+    vec3 offset = hitLightOffset(listed, relativeHit);
+
+    if (listed < probeLights.x) {
+        PointLightData point = points[light];
+        return pointLightAtHit(offset, point.positionRange.w, point.radiance.rgb, point.radiance.w, normal);
+    }
+
+    SpotLightData spot = spots[light];
+    return spotLightAtHit(offset, spot.positionRange.w, spot.radianceCosInner.rgb, spot.sourceRadius, spot.directionCosOuter.xyz,
+                          spot.directionCosOuter.w, spot.radianceCosInner.w, normal);
 }
 
 void main() {
@@ -82,17 +112,40 @@ void main() {
 
     MaterialData material = materials[instance.material.x];
     vec3 albedo = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
-    vec3 shadowFrom = origin + direction * distance + normal * DDGI_SHADOW_RAY_OFFSET;
-    vec3 light = material.emissive.rgb;
+    vec3 hit = origin + direction * distance;
+    vec3 shadowFrom = hit + normal * DDGI_SHADOW_RAY_OFFSET;
+    vec3 irradiance = vec3(0.0);
 
     for (int i = 0; i < counts.x; ++i) {
         vec3 toLight = directional[i].toLight.xyz;
         float facing = dot(normal, toLight);
 
-        if (facing > 0.0 && reachesLight(shadowFrom, toLight)) {
-            light += albedo * directional[i].radiance.rgb * facing;
+        if (facing > 0.0 && reachesLight(shadowFrom, toLight, DDGI_RAY_REACH)) {
+            irradiance += directional[i].radiance.rgb * facing;
         }
     }
 
-    probeRays[index] = vec4(light, distance);
+    // The brightest point and spot lights here, then a shadow ray to each (to its centre: its glowing stand-in is not solid).
+    vec3 relativeHit = hit - cameraOrigin.xyz;
+    BrightestLights kept;
+    kept.count = 0;
+
+    for (int listed = 0; listed < probeLights.x + probeLights.y; ++listed) {
+        keepBrightestLight(kept, probeLights.z, listed, hitLightStrength(hitLightIrradiance(listed, relativeHit, normal)));
+    }
+
+    for (int slot = 0; slot < kept.count; ++slot) {
+        int listed = kept.lights[slot];
+        vec3 offset = hitLightOffset(listed, relativeHit + normal * DDGI_SHADOW_RAY_OFFSET);
+        float lightDistance = length(offset);
+
+        if (lightDistance > 0.0 && reachesLight(shadowFrom, offset / lightDistance, lightDistance)) {
+            irradiance += hitLightIrradiance(listed, relativeHit, normal);
+        }
+    }
+
+    // The probes are read in this pass's own space, the world.
+    irradiance += probeAmbient(hit, normal, normal, normal, -direction, volume.origin.xyz, false).diffuse * probeSpacing.w;
+
+    probeRays[index] = vec4(material.emissive.rgb + albedo * irradiance, distance);
 }

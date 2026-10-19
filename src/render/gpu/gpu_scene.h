@@ -66,9 +66,14 @@ struct GpuFrameData {
     float viewForward[4];
     std::int32_t shadingOptions[4]; // x: 1 shades from the clusters' lists, y: 1 shows their light counts (the heatmap)
     float cascadeOptions[4];        // x: the sun cascades' blend band (a share of a radius), y: 1 dithers between them instead
+    // The light probes (render/gpu/ddgi_sampling.h, packProbeSampling), all zero while they are not sampled.
+    float probeOrigin[4];           // xyz: the first probe measured from the camera, w: the self-shadow bias setting
+    float probeSpacing[4];          // xyz: the spacing between probes, w: the share of probe light a probe ray's hit passes on
+    std::int32_t probeCounts[4];    // xyz: probes along each axis
+    std::int32_t probeLights[4];    // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
 };
 
-static_assert(sizeof(GpuFrameData) == 256, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 320, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

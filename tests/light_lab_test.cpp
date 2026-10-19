@@ -1,6 +1,8 @@
 #include "games/lightlab/light_lab_game.h"
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
+#include "gameplay/flashlight.h"
+#include "input/input.h"
 #include "math/angles.h"
 #include "math/transform.h"
 #include "physics/character_controller.h"
@@ -192,6 +194,13 @@ namespace {
         // The sky behind everything dims with it, and is blue: more blue than red.
         assert(noon.background.colour.y > evening.background.colour.y && evening.background.colour.y > night.background.colour.y);
         assert(noon.background.colour.z > noon.background.colour.x);
+
+        // The flat ambient is the irradiance the drawn sky gives (a sky drawn at B lights a surface facing it with B), so
+        // it matches the light probes, which see the drawn sky itself.
+        for (const Daylight* daylight : {&night, &evening, &noon}) {
+            assert(daylight->sky.colour.x == daylight->background.colour.x && daylight->sky.colour.y == daylight->background.colour.y &&
+                   daylight->sky.colour.z == daylight->background.colour.z);
+        }
     }
 
     // The clock runs at its speed, wraps round midnight, and stands still at speed 0.
@@ -309,7 +318,37 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The flashlight (gameplay/flashlight): off at the start, so the golden views keep the sunlit picture; F switches it
+    * on and off; and every frame it is held in the right hand of the current camera, so it follows the view.
+    */
+    void testTheLabsFlashlight() {
+        Lab lab;
+        const Entity flashlight = lab.game.getFlashlight();
+        assert(lab.world.isAlive(flashlight) && !lab.world.has<SpotLight>(flashlight));
+
+        Input pressF;
+        pressF.beginFrame();
+        pressF.pressKey(Key::F);
+        lab.game.onInput(lab.world, pressF);
+        assert(lab.world.has<SpotLight>(flashlight));
+
+        Input idle;
+        idle.beginFrame();
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        const FlashlightPose held = flashlightInHand(lab.game.getCamera());
+        const Vec3 position = lab.world.get<Transform>(flashlight).position;
+        assert(near(position.x, held.position.x, 1e-5f) && near(position.y, held.position.y, 1e-5f) && near(position.z, held.position.z, 1e-5f));
+        assert(lab.world.get<SpotLight>(flashlight).direction.normalized().dot(held.direction.normalized()) > 0.99999f);
+
+        lab.game.onInput(lab.world, pressF);
+        assert(!lab.world.has<SpotLight>(flashlight));
+    }
+}
+
 void testLightLab() {
+    testTheLabsFlashlight();
     testProbeVolume();
     testSunDisc();
     testTowersDoubleAndFanOut();
