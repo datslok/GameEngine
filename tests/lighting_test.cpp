@@ -24,6 +24,21 @@ namespace {
         assert(nearlyEqual(lighting.background, Vec3{0.0f, 0.0f, 0.0f}));
         assert(lighting.directionalLights.empty());
         assert(lighting.pointLights.empty());
+        assert(lighting.probeVolumes.empty());
+    }
+
+    // A game places light probes as it places lights: each volume reaches the renderer unchanged.
+    void testProbeVolumesAreCopied() {
+        World world;
+        world.add(world.create(), ProbeVolume{Vec3{-3.0f, 0.5f, 2.0f}, Vec3{1.0f, 1.5f, 2.0f}, ProbeCounts{4, 3, 5}});
+
+        const FrameLighting lighting = collectLighting(world, 0.0f);
+
+        assert(lighting.probeVolumes.size() == 1);
+        const ProbeVolume& volume = lighting.probeVolumes[0];
+        assert(nearlyEqual(volume.origin, Vec3{-3.0f, 0.5f, 2.0f}));
+        assert(nearlyEqual(volume.spacing, Vec3{1.0f, 1.5f, 2.0f}));
+        assert(volume.counts.x == 4 && volume.counts.y == 3 && volume.counts.z == 5);
     }
 
     // What shows where nothing is drawn: black by default, the sky's colour when a game sets one (several add up).
@@ -126,4 +141,5 @@ void testLighting() {
     testSkyBackgroundIsCollected();
     testDirectionalLightsAreCopied();
     testPointLightPositionIsInterpolated();
+    testProbeVolumesAreCopied();
 }

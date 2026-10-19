@@ -8,6 +8,8 @@ const char* gpuPassName(GpuPass pass) {
         return "UI";
     case GpuPass::RayScene:
         return "TLAS";
+    case GpuPass::Probes:
+        return "PROBES";
     case GpuPass::Clusters:
         return "CLUSTERS";
     case GpuPass::Shadows:
@@ -16,6 +18,8 @@ const char* gpuPassName(GpuPass pass) {
         return "PREPASS";
     case GpuPass::Main:
         return "MAIN";
+    case GpuPass::ProbeBalls:
+        return "BALLS";
     case GpuPass::RayDebug:
         return "RAYS";
     case GpuPass::DepthRange:

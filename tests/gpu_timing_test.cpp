@@ -34,18 +34,21 @@ void testGpuTiming() {
         assert(gpuTimestampCount == gpuPassCount + 1);
     }
 
-    // The ray tracing scene is built first of the scene's passes, then the clusters' light lists, before anything that
-    // could read either.
+    // The ray tracing scene is built first of the scene's passes, then the light probes traced through it, then the
+    // clusters' light lists, before anything that could read any of them.
     {
         assert(static_cast<int>(GpuPass::DebugUi) + 1 == static_cast<int>(GpuPass::RayScene));
-        assert(static_cast<int>(GpuPass::RayScene) + 1 == static_cast<int>(GpuPass::Clusters));
+        assert(static_cast<int>(GpuPass::RayScene) + 1 == static_cast<int>(GpuPass::Probes));
+        assert(static_cast<int>(GpuPass::Probes) + 1 == static_cast<int>(GpuPass::Clusters));
         assert(static_cast<int>(GpuPass::Clusters) + 1 == static_cast<int>(GpuPass::Shadows));
         assert(std::string(gpuPassName(GpuPass::Clusters)) == "CLUSTERS");
     }
 
-    // The ray tracing debug view replaces the main pass's picture, so it comes right after it, before anything reads it.
+    // The probes' debug balls are drawn over the main pass's picture, and the ray tracing debug view replaces it, so
+    // both come right after it, before anything reads it.
     {
-        assert(static_cast<int>(GpuPass::Main) + 1 == static_cast<int>(GpuPass::RayDebug));
+        assert(static_cast<int>(GpuPass::Main) + 1 == static_cast<int>(GpuPass::ProbeBalls));
+        assert(static_cast<int>(GpuPass::ProbeBalls) + 1 == static_cast<int>(GpuPass::RayDebug));
         assert(static_cast<int>(GpuPass::RayDebug) < static_cast<int>(GpuPass::Bloom));
     }
 
@@ -74,7 +77,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 2, 40, 25, 900, 0, 6, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 4, 2, 40, 25, 900, 5, 0, 6, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -90,7 +93,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1129 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1138 * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

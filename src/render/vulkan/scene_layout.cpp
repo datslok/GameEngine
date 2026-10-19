@@ -21,7 +21,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, vertex | fragment | compute}, // frame data
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // instances (fragment and compute for ray hits)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // materials
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // directional lights
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // directional lights (compute for probe rays)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // point lights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // spotlights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // shadow tiles

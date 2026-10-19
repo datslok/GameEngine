@@ -1,0 +1,8 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+// The light probes' irradiance: the light arriving from around each texel's direction (ddgi_update.glsl).
+#include "render/gpu/ddgi_shared.h"
+#define PROBE_TEXELS DDGI_IRRADIANCE_TEXELS
+#define UPDATE_IRRADIANCE 1
+#include "ddgi_update.glsl"

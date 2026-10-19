@@ -322,6 +322,14 @@ void VulkanRenderer::createRayTracing() {
     description.sharedLayout = rayDebugLayout.get();
     description.colourFormat = sceneColourFormat;
     rayDebugPipeline = std::make_unique<VulkanPipeline>(device, layouts, description);
+
+    // The light probes write their atlases from compute; every GPU with ray queries can, but it is checked anyway.
+    const VkFormatFeatureFlags2 atlasUse = VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT;
+
+    if (device.supportsFormat(VK_FORMAT_R16G16B16A16_SFLOAT, atlasUse) && device.supportsFormat(VK_FORMAT_R16G16_SFLOAT, atlasUse)) {
+        ddgi = std::make_unique<VulkanDdgi>(device, layouts, bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), rayTracing->getSetLayout(),
+                                            linearSampler.get(), sceneColourFormat, depthFormat);
+    }
 }
 
 // The pipelines that draw into the screen image are built for its format, which changes with HDR output.
@@ -840,14 +848,24 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DebugUi);
     }
 
-    // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays (for now
-    // the debug view).
+    // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
+    // probes (the frame's first probe volume) or the debug view.
     const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
+    const GlobalIlluminationSettings& illumination = settings.globalIllumination;
+    const bool traceProbes = ddgi && illumination.enabled && !description.lighting.probeVolumes.empty();
 
-    if (rayDebug) {
+    if (rayDebug || traceProbes) {
         beginGpuPass(frame, GpuPass::RayScene);
         rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
         endGpuPass(frame, GpuPass::RayScene);
+    }
+
+    if (traceProbes) {
+        beginGpuPass(frame, GpuPass::Probes);
+        const ProbeSceneSets probeSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
+        ddgi->update(frame.commands, frame.descriptors, probeSets, description.lighting.probeVolumes.front(), illumination,
+                     description.lighting.background, description.frameSeconds);
+        endGpuPass(frame, GpuPass::Probes);
     }
 
     // The lists feed both clustered shading and its heatmap.
@@ -870,9 +888,16 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
+    const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths, description.lighting.background);
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, description.lighting.background);
     endGpuPass(frame, GpuPass::Main);
+
+    if (showProbes) {
+        beginGpuPass(frame, GpuPass::ProbeBalls);
+        drawProbeBalls(frame, sceneSet);
+        endGpuPass(frame, GpuPass::ProbeBalls);
+    }
 
     if (rayDebug) {
         beginGpuPass(frame, GpuPass::RayDebug);
@@ -1125,6 +1150,28 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     stats.drawCalls += drawBatches(commands, mainDraws.batches);
+
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+    sceneColour.transition(commands, ImageState::FragmentRead);
+}
+
+/*
+* The light probes' debug balls, over the finished main pass: the scene image and its depth are drawn into again, both
+* kept (the balls are tested against the depth, and write their own), then the image goes back to being read.
+*/
+void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet) {
+    const VkCommandBuffer commands = frame.commands;
+    ddgi->prepareToDrawProbes(commands);
+    sceneColour.transition(commands, ImageState::ColourTarget);
+    depth.transition(commands, ImageState::DepthTarget);
+
+    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, {}};
+    const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+    beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
+    renderingOpen = true;
+
+    ddgi->drawProbes(commands, frame.descriptors, bindlessTextures->getSet(), sceneSet);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;

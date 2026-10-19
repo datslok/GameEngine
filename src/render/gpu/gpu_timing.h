@@ -7,15 +7,18 @@
 
 /*
 * The renderer's passes in the order a frame records them, each timed on the GPU. The debug UI is drawn into its own
-* image first; the ray tracing scene is built and its debug view drawn only while that view is on; tone mapping, the debug lines and the overlay share one pass over the screen image but are timed apart.
+* image first; the ray tracing scene is built only while something traces rays (the light probes, the ray debug view);
+* tone mapping, the debug lines and the overlay share one pass over the screen image but are timed apart.
 */
 enum class GpuPass {
     DebugUi,
     RayScene,
+    Probes,
     Clusters,
     Shadows,
     DepthPrepass,
     Main,
+    ProbeBalls,
     RayDebug,
     DepthRange,
     Bloom,

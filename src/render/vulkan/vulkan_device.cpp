@@ -122,8 +122,9 @@ void VulkanDevice::createInstance(bool validation) {
 /*
 * A GPU qualifies if it runs Vulkan 1.3, can present to the window (when there is one), and has the features the renderer uses: dynamic
 * rendering (draw into images named when a pass begins, no render pass objects), synchronization2 (the clearer barrier
-* API), anisotropic filtering, and depth clamping (SDL_GPU's default, kept so the pictures match: depths past the near
-* and far planes are clamped instead of clipped), and descriptor indexing for bindless textures: one array of every texture,
+* API), anisotropic filtering, depth clamping (SDL_GPU's default, kept so the pictures match: depths past the near
+* and far planes are clamped instead of clipped), storage images of two-channel formats (the light probes' distances,
+* RG16F, written by compute), and descriptor indexing for bindless textures: one array of every texture,
 * indexed per object in the shader (runtimeDescriptorArray, nonuniform indexing), with slots that may be empty
 * (partially bound) and filled while frames using other slots are still in flight (update after bind, unused while
 * pending), and buffer device addresses (a buffer's place in the GPU's memory, which shaders can follow like a pointer
@@ -134,11 +135,13 @@ void VulkanDevice::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
     features.depthClamp = VK_TRUE;
+    features.shaderStorageImageExtendedFormats = VK_TRUE;
 
     VkPhysicalDeviceVulkan13Features features13{};
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
+    features13.shaderDemoteToHelperInvocation = VK_TRUE; // what discard compiles to for Vulkan 1.3 (required there)
 
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;

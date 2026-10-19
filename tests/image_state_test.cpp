@@ -168,6 +168,46 @@ namespace {
         assert(barrier.dstStageMask == VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
         assert(barrier.newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     }
+
+    /*
+    * The light probes' atlases are written by compute shaders as storage images (read and written in place, in the
+    * GENERAL layout), then sampled: by the probe balls' fragment shader, and next frame by the probe rays in compute.
+    * Storage writes after storage writes need a barrier like any write; reading after reading in compute does not.
+    */
+    void testProbeAtlasesAreWrittenInComputeAndSampled() {
+        const VkImageMemoryBarrier2 toWrite = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::FragmentRead,
+                                                           ImageState::ComputeStorage, ImageContents::Keep);
+        assert(toWrite.srcStageMask == VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        assert(toWrite.srcAccessMask == VK_ACCESS_2_NONE);
+        assert(toWrite.dstStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        assert(toWrite.dstAccessMask == (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT));
+        assert(toWrite.newLayout == VK_IMAGE_LAYOUT_GENERAL);
+
+        const VkImageMemoryBarrier2 toSample = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::ComputeStorage,
+                                                            ImageState::ComputeRead, ImageContents::Keep);
+        assert(toSample.srcStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        assert(toSample.srcAccessMask == VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        assert(toSample.dstStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        assert(toSample.dstAccessMask == VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        assert(toSample.oldLayout == VK_IMAGE_LAYOUT_GENERAL);
+        assert(toSample.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        assert(needsBarrier(ImageState::ComputeStorage, ImageState::ComputeStorage));
+        assert(!needsBarrier(ImageState::ComputeRead, ImageState::ComputeRead));
+        assert(needsBarrier(ImageState::ComputeStorage, ImageState::FragmentRead));
+    }
+
+    // The scene's textures are uploaded once and then sampled by the main pass and by the probes' rays, in compute: the
+    // upload's last barrier must make them visible to both.
+    void testSurfaceTexturesAreReadByFragmentAndComputeShaders() {
+        const VkImageMemoryBarrier2 barrier = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
+                                                           ImageState::SurfaceRead, ImageContents::Keep);
+        assert(barrier.srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        assert(barrier.dstStageMask == (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT));
+        assert(barrier.dstAccessMask == VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        assert(barrier.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        assert(!needsBarrier(ImageState::SurfaceRead, ImageState::SurfaceRead));
+    }
 }
 
 void testImageState() {
@@ -180,4 +220,6 @@ void testImageState() {
     testSceneDepthIsMeasuredInCompute();
     testBarrierCoversChosenLevels();
     testUndefinedStartsFromNothing();
+    testProbeAtlasesAreWrittenInComputeAndSampled();
+    testSurfaceTexturesAreReadByFragmentAndComputeShaders();
 }

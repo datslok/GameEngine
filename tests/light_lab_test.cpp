@@ -5,6 +5,7 @@
 #include "math/transform.h"
 #include "physics/character_controller.h"
 #include "physics/overlap.h"
+#include "render/gpu/ddgi.h"
 #include "scene/lighting.h"
 #include "scene/model_renderer.h"
 #include "scene/sky_object.h"
@@ -255,7 +256,61 @@ namespace {
     }
 }
 
+namespace {
+    bool inside(const Aabb& box, const Vec3& point) {
+        return point.x > box.minimum.x && point.x < box.maximum.x && point.y > box.minimum.y && point.y < box.maximum.y &&
+               point.z > box.minimum.z && point.z < box.maximum.z;
+    }
+
+    /*
+    * The light probes round the building: none buried in a wall, the floor or the roof (until probes move themselves
+    * out, a buried probe only sees the inside of the wall), each room holding at least one full cell of 8 (two probes
+    * along every axis inside it), and the lab hands the renderer this volume.
+    */
+    void testProbeVolume() {
+        validateProbeVolume(labProbeVolume);
+        const LightLabLayout layout = buildLightLabLayout();
+        const int probes = probeCount(labProbeVolume.counts);
+
+        for (int probe = 0; probe < probes; ++probe) {
+            const Vec3 position = probePosition(labProbeVolume, probe);
+
+            for (const LabBlock& block : layout.building) {
+                assert(!inside(block.bounds(), position));
+            }
+        }
+
+        for (const Aabb& room : {labSunlitRoom, labBackRoom}) {
+            int insideAlong[3] = {0, 0, 0};
+
+            for (int x = 0; x < labProbeVolume.counts.x; ++x) {
+                const float at = labProbeVolume.origin.x + labProbeVolume.spacing.x * static_cast<float>(x);
+                insideAlong[0] += at > room.minimum.x && at < room.maximum.x ? 1 : 0;
+            }
+
+            for (int y = 0; y < labProbeVolume.counts.y; ++y) {
+                const float at = labProbeVolume.origin.y + labProbeVolume.spacing.y * static_cast<float>(y);
+                insideAlong[1] += at > room.minimum.y && at < room.maximum.y ? 1 : 0;
+            }
+
+            for (int z = 0; z < labProbeVolume.counts.z; ++z) {
+                const float at = labProbeVolume.origin.z + labProbeVolume.spacing.z * static_cast<float>(z);
+                insideAlong[2] += at > room.minimum.z && at < room.maximum.z ? 1 : 0;
+            }
+
+            assert(insideAlong[0] >= 2 && insideAlong[1] >= 2 && insideAlong[2] >= 2);
+        }
+
+        Lab lab;
+        const FrameLighting lighting = collectLighting(lab.world, 1.0f);
+        assert(lighting.probeVolumes.size() == 1);
+        assert(lighting.probeVolumes[0].counts.x == labProbeVolume.counts.x);
+        assert(lighting.probeVolumes[0].origin.z == labProbeVolume.origin.z);
+    }
+}
+
 void testLightLab() {
+    testProbeVolume();
     testSunDisc();
     testTowersDoubleAndFanOut();
     testFence();
