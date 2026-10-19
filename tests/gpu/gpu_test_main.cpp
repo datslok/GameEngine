@@ -26,6 +26,7 @@ int main() {
             gpuTestBloom(runner, report);
             gpuTestDither(runner, report);
             gpuTestOverlay(runner, report);
+            gpuTestClusters(runner, report);
             report.print();
         }
 

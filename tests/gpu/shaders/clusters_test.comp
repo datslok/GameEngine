@@ -1,0 +1,36 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs clusters.glsl's functions on the cases clusters_gpu_test.cpp sends: each case is the grid (six vec4s, the tile
+// counts as floats) followed by three vec4s of the function's own inputs.
+#include "gpu_test.glsl"
+#include "clusters.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    ClusterGrid grid = ClusterGrid(ivec4(testInput(0)), testInput(1), testInput(2), testInput(3), testInput(4), testInput(5));
+    vec4 a = testInput(6);
+    vec4 b = testInput(7);
+    vec4 c = testInput(8);
+
+    if (function == GPU_TEST_TO_CLUSTER_VIEW) {
+        testOutput(0, vec4(toClusterView(grid, a.xyz), 0.0));
+    } else if (function == GPU_TEST_CLUSTER_SLICE) {
+        testOutput(0, vec4(float(clusterSlice(a.x, grid.slicing.x, grid.slicing.y, grid.tiles.z)), sliceStartDepth(int(a.y), grid.slicing.x, grid.slicing.y), 0.0, 0.0));
+    } else if (function == GPU_TEST_CLUSTER_OF_PIXEL) {
+        testOutput(0, vec4(float(clusterOfPixel(grid, a.xy, a.z))));
+    } else if (function == GPU_TEST_CLUSTER_BOUNDS) {
+        vec3 minimum;
+        vec3 maximum;
+        clusterBounds(grid, int(a.x), int(a.y), int(a.z), minimum, maximum);
+        testOutput(0, vec4(minimum, 0.0));
+        testOutput(1, vec4(maximum, 0.0));
+    } else if (function == GPU_TEST_SPHERE_TOUCHES_BOX) {
+        testOutput(0, vec4(sphereTouchesBox(a.xyz, a.w, b.xyz, c.xyz) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_CONE_TOUCHES_SPHERE) {
+        testOutput(0, vec4(coneTouchesSphere(a.xyz, b.xyz, a.w, b.w, c.xyz, c.w) ? 1.0 : 0.0));
+    }
+}

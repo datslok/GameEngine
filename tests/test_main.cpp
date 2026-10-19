@@ -101,6 +101,7 @@ void testImageState();
 void testUniformRing();
 void testFloatTolerance();
 void testLightFalloff();
+void testClusters();
 void testComputeDispatch();
 
 int main(){
@@ -206,6 +207,7 @@ int main(){
     testFloatTolerance();
     testLightFalloff();
     testComputeDispatch();
+    testClusters();
 
     std::cout << "All tests passed!\n";
     return 0;

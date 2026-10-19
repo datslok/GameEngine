@@ -45,4 +45,12 @@
 // overlay_test.comp
 #define GPU_TEST_OVERLAY_OUTPUT 0
 
+// clusters_test.comp
+#define GPU_TEST_TO_CLUSTER_VIEW 0
+#define GPU_TEST_CLUSTER_SLICE 1
+#define GPU_TEST_CLUSTER_OF_PIXEL 2
+#define GPU_TEST_CLUSTER_BOUNDS 3
+#define GPU_TEST_SPHERE_TOUCHES_BOX 4
+#define GPU_TEST_CONE_TOUCHES_SPHERE 5
+
 #endif
