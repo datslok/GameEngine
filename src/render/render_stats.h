@@ -24,6 +24,10 @@ struct RenderStats {
     std::size_t shadowTilesCached = 0;
     std::size_t shadowTilesSkipped = 0;
 
+    // How far along the view the sun's cascades reach, in metres: the shadow distance, or nearer when fitted to the
+    // surfaces on screen. 0 without a shadowed sun.
+    float sunShadowDistance = 0.0f;
+
     // Point lights in the frame, how many could reach what the camera sees, and how many got a seat in the shader and a shadow.
     std::size_t pointLights = 0;
     std::size_t pointLightsInView = 0;

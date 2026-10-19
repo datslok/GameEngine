@@ -24,6 +24,7 @@
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_debug_lines.h"
+#include "render/vulkan/vulkan_depth_range.h"
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "render/vulkan/vulkan_mesh.h"
@@ -195,6 +196,12 @@ private:
     ShadowTileMemory shadowMemory;
     LightHistory lightHistory;
 
+    // Fitting the sun's cascades to the screen (cascades.h): the depth measurement read back but not yet used (from a
+    // frame or two ago), and where the cascades end now.
+    std::unique_ptr<VulkanDepthRange> depthRange;
+    std::optional<ScreenDepthRange> unusedDepthRange;
+    ShadowDistanceFit sunShadowFit;
+
     std::unique_ptr<VulkanBloom> bloom;
     std::unique_ptr<VulkanDebugLines> debugLines;
     std::unique_ptr<VulkanOverlay> overlay;
@@ -262,8 +269,10 @@ private:
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
-    void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
+    void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
                       const Vec3& background);
+    void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
+    void measureDepthsBeforeCapture(const FrameDescription& description, const RenderSettings& settings);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 

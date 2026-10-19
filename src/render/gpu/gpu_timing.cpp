@@ -14,6 +14,8 @@ const char* gpuPassName(GpuPass pass) {
         return "PREPASS";
     case GpuPass::Main:
         return "MAIN";
+    case GpuPass::DepthRange:
+        return "DEPTHS";
     case GpuPass::Bloom:
         return "BLOOM";
     case GpuPass::ToneMap:

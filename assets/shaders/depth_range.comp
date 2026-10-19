@@ -1,0 +1,64 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+/*
+* The nearest and farthest surface depth on screen (render/gpu/depth_range.h), so the sun's cascades can be fitted to
+* what the camera sees. Each invocation reads a small square of pixels; the wave combines its invocations' ranges in one
+* step (subgroupMin and subgroupMax), one invocation per wave folds that into the group's range in shared memory, and
+* one per group into the result with two atomics. Only minimum and maximum are taken, so the result does not depend on
+* the order anything finishes in. The result starts as an empty range, written before this pass.
+*/
+#include "depth_range.glsl"
+
+layout(local_size_x = DEPTH_RANGE_GROUP_SIDE, local_size_y = DEPTH_RANGE_GROUP_SIDE) in;
+
+layout(std430, set = 0, binding = 0) buffer DepthRangeResult {
+    uint resultFarthestBits;
+    uint resultNearestBits;
+};
+
+layout(set = 0, binding = 1) uniform sampler2D sceneDepth;
+
+shared uint groupFarthestBits;
+shared uint groupNearestBits;
+
+void main() {
+    if (gl_LocalInvocationIndex == 0u) {
+        groupFarthestBits = DEPTH_RANGE_NO_SURFACE_FARTHEST;
+        groupNearestBits = 0u;
+    }
+
+    barrier();
+
+    ivec2 size = textureSize(sceneDepth, 0);
+    ivec2 first = ivec2(gl_GlobalInvocationID.xy) * DEPTH_RANGE_TEXELS_PER_SIDE;
+    DepthRange range = emptyDepthRange();
+
+    for (int y = 0; y < DEPTH_RANGE_TEXELS_PER_SIDE; ++y) {
+        for (int x = 0; x < DEPTH_RANGE_TEXELS_PER_SIDE; ++x) {
+            ivec2 pixel = first + ivec2(x, y);
+
+            if (all(lessThan(pixel, size))) {
+                range = includeDepth(range, texelFetch(sceneDepth, pixel, 0).r);
+            }
+        }
+    }
+
+    uint waveFarthest = subgroupMin(range.farthestBits);
+    uint waveNearest = subgroupMax(range.nearestBits);
+
+    if (subgroupElect()) {
+        atomicMin(groupFarthestBits, waveFarthest);
+        atomicMax(groupNearestBits, waveNearest);
+    }
+
+    barrier();
+
+    // A group that saw only sky leaves the result alone.
+    if (gl_LocalInvocationIndex == 0u && groupNearestBits != 0u) {
+        atomicMin(resultFarthestBits, groupFarthestBits);
+        atomicMax(resultNearestBits, groupNearestBits);
+    }
+}

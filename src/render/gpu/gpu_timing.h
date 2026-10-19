@@ -15,6 +15,7 @@ enum class GpuPass {
     Shadows,
     DepthPrepass,
     Main,
+    DepthRange,
     Bloom,
     ToneMap,
     DebugLines,

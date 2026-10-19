@@ -112,3 +112,8 @@ void gpuTestDither(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestOverlay(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCascades(GpuFunctionRunner& runner, GpuCheckReport& report);
+
+class VulkanDevice;
+
+// The cascades' depth reduction, run as the renderer runs it, on depth images of known values.
+void gpuTestDepthRange(const VulkanDevice& device, GpuCheckReport& report);

@@ -28,7 +28,7 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * Five lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
-* tiles drawn and point light cube faces skipped as unseen, and the video memory.
+* tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, and the video memory.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
@@ -36,8 +36,14 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
                                "  CALLS " + std::to_string(stats.drawCalls);
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled) +
                                 "  CALLS " + std::to_string(stats.shadowDrawCalls);
-    const std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +
-                              "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
+    std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +
+                        "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
+
+    if (stats.sunShadowDistance > 0.0f) {
+        char distance[32];
+        std::snprintf(distance, sizeof(distance), "  SUN TO %.1f M", stats.sunShadowDistance);
+        tiles += distance;
+    }
 
     debugText(debug, debugReadoutLine(0), debugReadoutTextHeight, camera, boundingBoxColour);
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +

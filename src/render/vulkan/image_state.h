@@ -18,6 +18,7 @@ enum class ImageState {
     DepthTarget,         // depth tested and written by a render pass
     FragmentRead,        // sampled by fragment shaders
     DepthFragmentRead,   // a depth image sampled (and compared) by fragment shaders
+    DepthComputeRead,    // a depth image read by compute shaders (the scene's depth, measured for the sun's cascades)
     TransferSource,      // copied or blitted from
     TransferDestination, // copied or blitted into
     Present              // handed to the screen

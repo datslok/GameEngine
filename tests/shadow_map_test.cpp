@@ -200,6 +200,52 @@ namespace {
         }
     }
 
+    /*
+    * Fitted to the depths on screen (sample distribution shadow maps), the cascades end where the farthest surface is
+    * instead of at the shadow distance: every cascade's box shrinks, so each texel covers less, and the view is still
+    * covered out to the fitted distance. A fitted distance past the settings' changes nothing.
+    */
+    void testFittedCascadesEndAtTheFittedDistance() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+        const Camera camera = makeTestCamera(Vec3{2.0f, 5.0f, 4.0f});
+        const ShadowSettings settings;
+        const float fitted = 9.3f;
+
+        const ShadowPlan full = planShadows(lighting, camera, settings);
+        const ShadowPlan close = planShadows(lighting, camera, settings, fitted);
+
+        for (std::size_t cascade = 0; cascade < full.tiles.size(); ++cascade) {
+            assert(close.tileData[cascade].lens[2] < full.tileData[cascade].lens[2]);
+            assert(close.tileData[cascade].lens[3] < full.tileData[cascade].lens[3]);
+        }
+
+        // The last cascade's sphere holds the slice's far end: about the fitted distance times the view's spread.
+        const float halfHeight = std::tan(camera.getVerticalFov() * 0.5f);
+        const float spread = std::sqrt(halfHeight * halfHeight * (1.0f + camera.getAspectRatio() * camera.getAspectRatio()));
+        assert(close.tileData[close.tiles.size() - 1].lens[3] < fitted * (spread + 1.0f));
+
+        for (int step = 1; step <= 20; ++step) {
+            const Vec3 point = camera.getPosition() + camera.getForward() * (fitted * static_cast<float>(step) / 20.0f);
+            bool covered = false;
+
+            for (const ShadowTile& tile : close.tiles) {
+                const Vec3 projected = project(tile.matrix, point);
+                covered = covered || (std::abs(projected.x) <= 1.0f && std::abs(projected.y) <= 1.0f && projected.z > 0.0f && projected.z < 1.0f);
+            }
+
+            assert(covered);
+        }
+
+        const ShadowPlan beyond = planShadows(lighting, camera, settings, 5000.0f);
+
+        for (std::size_t cascade = 0; cascade < full.tiles.size(); ++cascade) {
+            for (int value = 0; value < 16; ++value) {
+                assert(beyond.tileData[cascade].matrix[value] == full.tileData[cascade].matrix[value]);
+            }
+        }
+    }
+
     // Only the brightest directional light (the first slot) gets cascades; the others still light, unshadowed.
     void testOnlyTheFirstDirectionalLightCastsShadows() {
         FrameLighting lighting;
@@ -895,6 +941,7 @@ void testShadowMap() {
     testSunGetsOneTilePerCascade();
     testNearShadowsAreFine();
     testCascadesCoverTheViewToTheShadowDistance();
+    testFittedCascadesEndAtTheFittedDistance();
     testOnlyTheFirstDirectionalLightCastsShadows();
     testCascadesMoveInWholeTexels();
     testLightsCastShadowsByDefault();

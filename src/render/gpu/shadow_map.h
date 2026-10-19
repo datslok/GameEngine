@@ -11,6 +11,7 @@
 #include "scene/lighting.h"
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 /*
@@ -58,6 +59,10 @@ struct ShadowSettings {
     // How far behind each cascade's box (towards the light) objects still cast shadows into it. A box's depth costs no
     // texels, only a few more casters to draw, and a low sun throws a tall tower's shadow a long way.
     float directionalCasterReach = 200.0f;
+
+    // End the cascades at the farthest surface on screen, measured from the depth image, instead of always at
+    // directionalDistance (sample distribution shadow maps, cascades.h): in a room, every cascade gets far sharper.
+    bool fitCascadesToDepth = true;
 
     // How many slices the sun's shadow is cut into (1 to maxShadowCascades): more give sharper shadows near the camera
     // for the same distance, each costing a drawing of what it covers.
@@ -176,12 +181,15 @@ struct ShadowPlan {
 // Hand out atlas tiles to the shadow-casting lights, in the same slots packLighting gives the shader. Tiles are numbered
 // directional lights first, then spotlights, then six per point light, each in slot order. The layout lasts from frame
 // to frame, so lights keep their squares of the atlas and what was drawn into them can be kept. The layout must be for the
-// atlas the settings need (shadowAtlasSizeFor), or this throws std::invalid_argument.
+// atlas the settings need (shadowAtlasSizeFor), or this throws std::invalid_argument. The sun's cascades end at the
+// shadow distance, the camera's far plane or fittedSunDistance (fitted to the screen's depths, fittedShadowDistance in
+// cascades.h), whichever is nearest.
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout,
-                       const ShadowSettings& settings = {});
+                       const ShadowSettings& settings = {}, float fittedSunDistance = std::numeric_limits<float>::infinity());
 
 // The same, packed into an empty atlas (for one-off plans and tests).
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings = {});
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings = {},
+                       float fittedSunDistance = std::numeric_limits<float>::infinity());
 
 // Give each light record the shadow the plan handed out for its slot (the plan and the lights from the same frame's lights).
 void attachShadows(GpuLights& lights, const ShadowPlan& plan);

@@ -183,7 +183,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
 - [x] Cascaded sun shadows (`cascaded-shadows`)
 - [x] Video memory in the F4 readout (`vram-readout`)
 - [x] The sun's disc in the sky (`sun-disc`)
-- [ ] Sample distribution shadow maps (SDSM), next: fit the cascades to the depths actually on screen (a compute pass reducing the depth prepass to its nearest and farthest depth) instead of the fixed 200 m, so close views such as the light lab's rooms spend every texel on what is visible (often 2-4 times sharper there; about 1.3-1.5 times in open views from above, whose boxes are set by the view's width at each slice's far end). Keep the stable sphere fit and texel snapping, quantising the fitted range so it does not shimmer
+- [x] Sample distribution shadow maps: the cascades end at the farthest surface on screen (`sdsm`)
 
 **6d. Global illumination: DDGI** ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, built in the form of its 2021 production follow-up, "Scaling Probe-Based Real-Time Dynamic Global Illumination for Production"). Today light stops at the first surface it hits, so a room lit through one window is black wherever the sunbeam does not land, and the ambient light is a flat stand-in for all the light bouncing around. DDGI measures that bounced light at points in space each frame and lets every surface look it up. Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINATION.md](docs/ILLUMINATION.md)
   - Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), compute pipelines, and the Vulkan renderer (for ray queries)

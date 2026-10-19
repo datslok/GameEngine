@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 /*
 * Evenly spaced splits waste the far cascades' texels on little screen; logarithmic ones (each cascade reaching the same
@@ -54,6 +55,50 @@ BoundingSphere cascadeSphere(const Camera& camera, float nearDistance, float far
     }
 
     return BoundingSphere{camera.getPosition() + camera.getForward() * along, radius};
+}
+
+namespace {
+    float ladderDistance(int step) {
+        return std::pow(shadowDistanceStep, static_cast<float>(step));
+    }
+
+    // The lowest step reaching at least this far (the first, 1 m, for anything nearer). Corrected by a step either way
+    // after the logarithm, so rounding never leaves a distance just short of its step.
+    int stepReaching(float distance) {
+        if (!(distance > 1.0f)) {
+            return 0;
+        }
+
+        int step = static_cast<int>(std::ceil(std::log(distance) / std::log(shadowDistanceStep)));
+
+        while (step > 0 && ladderDistance(step - 1) >= distance) {
+            --step;
+        }
+
+        while (ladderDistance(step) < distance) {
+            ++step;
+        }
+
+        return step;
+    }
+}
+
+ShadowDistanceFit fitShadowDistance(const ShadowDistanceFit& previous, std::optional<float> farthestSurface) {
+    if (!farthestSurface) {
+        return ShadowDistanceFit{};
+    }
+
+    const int needed = stepReaching(*farthestSurface * shadowDistanceMargin);
+
+    if (previous.step && needed < *previous.step && needed > *previous.step - shadowDistanceShrinkSteps) {
+        return previous;
+    }
+
+    return ShadowDistanceFit{needed};
+}
+
+float fittedShadowDistance(const ShadowDistanceFit& fit) {
+    return fit.step ? ladderDistance(*fit.step) : std::numeric_limits<float>::infinity();
 }
 
 Vec3 shadowViewUp(const Vec3& forward) {

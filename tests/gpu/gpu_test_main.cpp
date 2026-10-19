@@ -28,6 +28,7 @@ int main() {
             gpuTestOverlay(runner, report);
             gpuTestClusters(runner, report);
             gpuTestCascades(runner, report);
+            gpuTestDepthRange(device, report);
             report.print();
         }
 

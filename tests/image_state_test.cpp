@@ -116,6 +116,31 @@ namespace {
         assert(toDraw.oldLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     }
 
+    /*
+    * The scene's depth, measured for the cascades' fit: written by the depth tests, then read by a compute shader in the
+    * read-only depth layout. Next frame's depth pass overwrites it, waiting only for that compute read to finish.
+    */
+    void testSceneDepthIsMeasuredInCompute() {
+        const VkImageMemoryBarrier2 toMeasure = imageBarrier(someImage(), VK_IMAGE_ASPECT_DEPTH_BIT, ImageState::DepthTarget,
+                                                             ImageState::DepthComputeRead, ImageContents::Keep);
+        const VkPipelineStageFlags2 depthTests =
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+
+        assert(toMeasure.srcStageMask == depthTests);
+        assert(toMeasure.srcAccessMask == VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+        assert(toMeasure.dstStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        assert(toMeasure.dstAccessMask == VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        assert(toMeasure.newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+
+        const VkImageMemoryBarrier2 nextFrame = imageBarrier(someImage(), VK_IMAGE_ASPECT_DEPTH_BIT, ImageState::DepthComputeRead,
+                                                             ImageState::DepthTarget, ImageContents::Discard);
+
+        assert(nextFrame.srcStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        assert(nextFrame.srcAccessMask == VK_ACCESS_2_NONE);
+        assert(nextFrame.oldLayout == VK_IMAGE_LAYOUT_UNDEFINED);
+        assert(!needsBarrier(ImageState::DepthComputeRead, ImageState::DepthComputeRead));
+    }
+
     // Mipmaps are made by copying each level from the one above: a barrier per level, so its range is that level alone.
     void testBarrierCoversChosenLevels() {
         const VkImageMemoryBarrier2 barrier = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
@@ -152,6 +177,7 @@ void testImageState() {
     testAcquiredImageChainsWithTheSemaphore();
     testPresentTakesThePresentLayout();
     testShadowAtlasRoundTrip();
+    testSceneDepthIsMeasuredInCompute();
     testBarrierCoversChosenLevels();
     testUndefinedStartsFromNothing();
 }
