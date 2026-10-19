@@ -302,9 +302,9 @@ namespace {
     }
 
     /*
-    * The schedule with the default settings and no fast light near the probes: every probe traces raysPerProbe (256,
-    * the stride too), frame after frame as probeRayFrame numbers them, with shares kept from the time constants; exactly
-    * what the probes did before fast lights.
+    * The schedule with the default settings and no fast light near the probes: every probe traces 64 rays (the stride
+    * too), frame after frame as probeRayFrame numbers them, with shares kept from the time constants; exactly what the
+    * probes did before fast lights, so the golden images do not change.
     */
     void testTheScheduleWithoutFastLights() {
         const GlobalIlluminationSettings settings;
@@ -315,7 +315,7 @@ namespace {
             const ProbeFrame frame = scheduleProbeFrame(schedule, settings, frameSeconds, false, number == 0);
             const ProbeRayFrame expected = probeRayFrame(number);
 
-            assert(frame.raysPerProbe == 256 && frame.fastRaysPerProbe == 256 && probeRayStride(frame) == 256);
+            assert(frame.raysPerProbe == 64 && frame.fastRaysPerProbe == 64 && probeRayStride(frame) == 64);
             assert(frame.rayPhase == expected.phase && sameRotation(frame.rotation, expected.rotation));
             assert(frame.ballRadius == settings.probeBallRadius);
 
@@ -337,13 +337,12 @@ namespace {
     }
 
     /*
-    * With a fast light near the probes and still probes set to 64 rays (as a slower GPU might): probes near it trace 256
-    * rays (the stride room for 256), the rest 64, on the same cycle; the fast atlas keeps a share from its own time
-    * constant, and a slow frame (a hitch of half a second) counts only as 1/30 s for it.
+    * With a fast light near the probes: probes near it trace 256 rays (the stride room for 256), the rest 64, on the same
+    * cycle; the fast atlas keeps a share from its own time constant, and a slow frame (a hitch of half a second) counts
+    * only as 1/30 s for it.
     */
     void testTheScheduleWithFastLights() {
-        GlobalIlluminationSettings settings;
-        settings.raysPerProbe = 64;
+        const GlobalIlluminationSettings settings;
         const float frameSeconds = 1.0f / 240.0f;
         ProbeSchedule schedule;
 
@@ -584,7 +583,7 @@ namespace {
         const GlobalIlluminationSettings settings;
         const SparseTexel random = sparselyLitTexel(0.5f, false);
         const SparseTexel interleaved = sparselyLitTexel(0.5f, true);
-        const SparseTexel chosen = sparselyLitTexel(settings.irradianceTimeConstant, true, settings.raysPerProbe);
+        const SparseTexel chosen = sparselyLitTexel(settings.irradianceTimeConstant, true);
 
         // A fast light's part: its 256 rays and its 0.05 s.
         const SparseTexel fast = sparselyLitTexel(settings.fastIrradianceTimeConstant, true, settings.fastRaysPerProbe);
@@ -593,7 +592,7 @@ namespace {
             assert(std::abs(texel->settled / texel->truth - 1.0) < 0.02);
         }
 
-        // Measured: 2.4% for random rotations, 1.3% interleaved, 0.33% interleaved at 2 s and 64 rays (the old default).
+        // Measured: 2.4% for random rotations, 1.3% interleaved, 0.33% interleaved at the 2 s default.
         assert(interleaved.crawl < 0.7 * random.crawl);
         assert(chosen.crawl < 0.01);
     }
