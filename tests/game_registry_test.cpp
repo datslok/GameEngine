@@ -36,8 +36,8 @@ namespace {
             assert(titles.insert(game->title()).second);
         }
 
-        assert(std::string{defaultGame().name} == "demo");
-        assert(findGame("lightlab") != nullptr);
+        assert(std::string{defaultGame().name} == "lightlab");
+        assert(findGame("demo") != nullptr);
         assert(findGame("nonsense") == nullptr);
         assert(gameNames().find("lightlab") != std::string::npos);
     }

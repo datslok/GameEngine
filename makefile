@@ -144,8 +144,8 @@ tests/gpu/shaders/%.spv: tests/gpu/shaders/% $(MAKEFILE_PATH)
 
 -include $(patsubst tests/gpu/shaders/%,$(GPU_TEST_SHADER_DEPENDENCY_DIR)/%.d,$(GPU_TEST_SHADER_BINARIES))
 
-# GAME picks the game for run and the golden targets (make run GAME=lightlab, make run-release GAME=lightlab; the names
-# are in src/app/game_registry.cpp). Empty: run starts the demo, the golden targets cover every game. Variables given on
+# GAME picks the game for run and the golden targets (make run GAME=demo, make run-release GAME=demo; the names
+# are in src/app/game_registry.cpp). Empty: run starts the light lab, the golden targets cover every game. Variables given on
 # the command line reach the release targets' inner make too.
 GAME ?=
 GAME_OPTION := $(if $(GAME),--game $(GAME))
