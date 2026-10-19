@@ -44,6 +44,11 @@ struct PointLight {
     // When there are more lights than seats or shadows, a higher priority always wins over a lower one; brightness at
     // the focus only decides between equals. For lights a game must never lose while they are in view.
     int priority = 0;
+
+    // A light that moves quickly (a flashlight, a car's headlights): global illumination keeps its bounce light apart,
+    // with a memory of a fraction of a second, so the bounce follows it instead of trailing behind for seconds (render/
+    // gpu/ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant). Costs more probe rays near it.
+    bool fast = false;
 };
 
 /*
@@ -71,6 +76,9 @@ struct SpotLight {
 
     // A higher priority always wins a seat or a shadow over a lower one, like PointLight::priority.
     int priority = 0;
+
+    // Its bounce light follows it closely, like PointLight::fast.
+    bool fast = false;
 };
 
 // Component: light that reaches every surface equally, standing in for light bounced around the scene. Several add up.

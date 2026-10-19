@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/clusters.h"
+#include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_priority.h"
@@ -281,10 +282,11 @@ private:
         std::vector<std::uint32_t> drawList;
     };
 
-    // probes: the frame's probe volume when this frame traces and samples it, else null.
+    // probes: the frame's probe volume when this frame traces and samples it, else null; hitLights: the lights its rays'
+    // hits may need (empty without probes).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const RenderSettings& settings,
-                               const ProbeVolume* probes);
+                               const ProbeVolume* probes, const ProbeHitLights& hitLights);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and a probe volume.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;

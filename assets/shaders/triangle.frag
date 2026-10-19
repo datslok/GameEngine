@@ -487,14 +487,15 @@ void main() {
 
     // The light from all around: the probes' bounced light where they reach (their visibility tested along the
     // geometric normal, steadier than the normal map's; the light read along the shaded normal, and in the mirror
-    // direction as the specular part's stand-in until reflections exist), the flat ambient elsewhere. Without probes,
-    // the flat ambient alone.
+    // direction as the specular part's stand-in until reflections exist), the flat ambient elsewhere; the still and
+    // fast lights' atlases added. Without probes, the flat ambient alone.
     vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
 
     if (probesOn) {
         vec3 reflected = reflect(-toCamera, shadingNormal);
-        ProbeLight probeLight = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, probeOrigin.xyz, true);
-        ambientReflected = shadeProbeAmbient(point, probeLight.diffuse, probeLight.specular);
+        ProbeLights probeLights = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, probeOrigin.xyz, true);
+        ambientReflected = shadeProbeAmbient(point, probeLights.still.diffuse + probeLights.fast.diffuse,
+                                             probeLights.still.specular + probeLights.fast.specular);
     }
 
     // Emitted light is added as is.

@@ -4,7 +4,8 @@
 /*
 * One probe's ball (ddgi_probes.vert): the ray from the camera through this pixel meets the ball, or the pixel is
 * discarded. The ball shows the probe's stored irradiance in the direction of its surface's normal, which is what a
-* white matte ball would look like lit by the probe, so a probe's colour reads like the light it holds. The depth is
+* white matte ball would look like lit by the probe (both atlases, still and fast lights), so a probe's colour reads
+* like the light it holds. The depth is
 * the ball's true depth at the pixel, so balls hide behind walls and each other.
 */
 #include "frame_data.glsl"
@@ -15,6 +16,7 @@ layout(location = 0) in vec3 relativePosition;
 layout(location = 1) flat in int probe;
 
 layout(set = 2, binding = 0) uniform sampler2D irradianceAtlas;
+layout(set = 2, binding = 1) uniform sampler2D fastIrradianceAtlas;
 
 layout(location = 0) out vec4 colour;
 
@@ -38,5 +40,5 @@ void main() {
     gl_FragDepth = clip.z / clip.w;
 
     vec2 uv = probeAtlasUv(volume.counts.xyz, probe, normal, DDGI_IRRADIANCE_TEXELS);
-    colour = vec4(texture(irradianceAtlas, uv).rgb, 1.0);
+    colour = vec4(texture(irradianceAtlas, uv).rgb + texture(fastIrradianceAtlas, uv).rgb, 1.0);
 }

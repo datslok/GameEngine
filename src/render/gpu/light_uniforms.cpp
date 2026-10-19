@@ -76,6 +76,8 @@ GpuLights packLighting(const FrameLighting& lighting, const Vec3& cameraPosition
     data.directional.resize(selected.directionalLights.size());
     data.points.resize(selected.pointLights.size());
     data.spots.resize(selected.spotLights.size());
+    data.fastPoints.resize(selected.pointLights.size());
+    data.fastSpots.resize(selected.spotLights.size());
 
     writeVector(data.ambient, selected.ambient, 0.0f);
 
@@ -95,6 +97,7 @@ GpuLights packLighting(const FrameLighting& lighting, const Vec3& cameraPosition
         const float sourceRadius = placed.light.sourceRadius > 0.0f ? placed.light.sourceRadius : 1.0f;
         // A light fading in or out of its seat is dimmed here, so the shader needs no field for it.
         writeVector(slot.radiance, placed.light.colour * (placed.light.intensity * placed.fade), sourceRadius);
+        data.fastPoints[i] = placed.light.fast;
     }
 
     for (std::size_t i = 0; i < selected.spotLights.size(); ++i) {
@@ -112,6 +115,7 @@ GpuLights packLighting(const FrameLighting& lighting, const Vec3& cameraPosition
 
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive would allow a division by zero at the light.
         slot.sourceRadius = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;
+        data.fastSpots[i] = light.fast;
     }
 
     data.counts[0] = static_cast<std::int32_t>(selected.directionalLights.size());

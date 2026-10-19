@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <vector>
 
 namespace {
     bool nearlyEqual(float actual, float expected) {
@@ -17,6 +18,31 @@ namespace {
 
     PlacedPointLight pointLightAt(Vec3 position, float range) {
         return PlacedPointLight{position, PointLight{Vec3{1.0f, 1.0f, 1.0f}, 1.0f, range}};
+    }
+
+    /*
+    * Which lights are fast, by slot, beside the records (for the light probes): lights the shader cannot draw drop out
+    * of both, so the flags stay with their lights.
+    */
+    void testFastLightsAreMarkedBySlot() {
+        FrameLighting lighting;
+        PlacedPointLight fastPoint = pointLightAt(Vec3{1.0f, 0.0f, 0.0f}, 5.0f);
+        fastPoint.light.fast = true;
+        lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 0.0f)); // no range: not drawn
+        lighting.pointLights.push_back(fastPoint);
+        lighting.pointLights.push_back(pointLightAt(Vec3{2.0f, 0.0f, 0.0f}, 5.0f));
+
+        PlacedSpotLight still;
+        still.light.range = 5.0f;
+        PlacedSpotLight fastSpot = still;
+        fastSpot.light.fast = true;
+        lighting.spotLights.push_back(fastSpot);
+        lighting.spotLights.push_back(still);
+
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(data.points.size() == 2 && (data.fastPoints == std::vector<bool>{true, false}));
+        assert(data.spots.size() == 2 && (data.fastSpots == std::vector<bool>{true, false}));
     }
 
     void testAmbientAndEmptyCounts() {
@@ -285,4 +311,5 @@ void testLightUniforms() {
     testPointLightWithoutRangeIsSkipped();
     testPositionsAreRelativeToTheCamera();
     testCountsAreCapped();
+    testFastLightsAreMarkedBySlot();
 }

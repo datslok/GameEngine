@@ -55,6 +55,23 @@ struct GlobalIlluminationSettings {
     float irradianceTimeConstant = 2.0f;
     float distanceTimeConstant = 1.0f;
 
+    /*
+    * Fast lights (PointLight::fast, SpotLight::fast: flashlights, headlights) keep their light in a second irradiance
+    * atlas with a much shorter memory, so their bounce follows them instead of trailing for seconds; light adds up, so
+    * the two atlases are simply summed where they are read. 0.05 s kept up with the light lab's flashlight by eye, for
+    * a little flicker (in the back room, 0.55% of change in 0.2 s at the 90th percentile at 240 frames a second, 1.6%
+    * at 60, against 0.25% for the still light alone; 0.2 s would add none, for a longer trail). Probes within reach of a
+    * fast light trace fastRaysPerProbe rays, since a short memory averages fewer frames (the rest still trace
+    * raysPerProbe); 64 flickered over three times as much. In the dense probe test every probe is within the
+    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64.
+    */
+    float fastIrradianceTimeConstant = 0.05f;
+    int fastRaysPerProbe = 256;
+
+    // The fast blend never takes a frame as longer than this, so one slow frame (a hitch) cannot replace most of its
+    // history with one noisy estimate.
+    float fastBlendMaxFrameSeconds = 1.0f / 30.0f;
+
     // How far the point tested for visibility moves off the surface, in units of 0.75 of the smallest spacing [2021].
     // Too little leaves blotches where surfaces meet the probes' distances; too much lets light leak round corners.
     // Raise it when tracing fewer rays (noisier distances).
@@ -130,7 +147,10 @@ ProbeRotationRows probeRotationRows(const Quat& rotation);
 * Which rays a frame traces: frames take turns through one spiral of count x probeRayCycle points, frame number f taking
 * phase f mod probeRayCycle, and a cycle's frames share one rotation (randomProbeRotation of the cycle's number), so
 * together they cover the sphere evenly rather than as unevenly as independent random rotations would. In a room lit by
-* a small bright patch, how many rays find it then barely varies from cycle to cycle, which is what flickered.
+* a small bright patch, how many rays find it then barely varies from cycle to cycle, which is what flickered. Probes
+* near fast lights trace more rays on the same cycle: fitting shorter cycles to their short memory (a power of two, the
+* phase modulo it, under the same rotation) measured worse at 60, 120 and 240 frames a second, since a short cycle traces
+* the same directions again and again until the rotation turns.
 */
 struct ProbeRayFrame {
     Quat rotation;
@@ -141,6 +161,12 @@ ProbeRayFrame probeRayFrame(std::uint64_t frameNumber);
 
 // Ray ray of a probe's count in a frame of this phase: spiral point ray x probeRayCycle + phase, turned by the rotation.
 Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation);
+
+/*
+* Whether a probe counts as within reach of a light, for tracing more rays: the light's range, grown by reach (the
+* longest distance the probes record), reaches the probe, as the hit lights are chosen (ddgi_sampling.h, probeHitLights).
+*/
+bool probeNearLight(const Vec3& probe, const Vec3& light, float range, float reach);
 
 /*
 * The update's weights for one ray seen from one texel: irradiance weights rays by the cosine between the two (Lambert's
@@ -205,13 +231,14 @@ Vec2 probeAtlasUv(const ProbeCounts& counts, int index, const Vec3& direction, i
 
 /*
 * What every probe pass reads, as push constants (must match ProbeVolumeData in assets/shaders/ddgi_volume.glsl):
-* exactly the 128 bytes every GPU allows.
+* exactly the 128 bytes every GPU allows, so the ray counts fill the rotation rows' spare w slots (whole numbers, exact
+* as floats).
 */
 struct GpuProbeVolume {
-    float origin[4];      // xyz the first probe
+    float origin[4];      // xyz the first probe, w the fast irradiance's share kept this frame
     float spacing[4];     // xyz the spacing between probes, w the longest distance recorded (probeMaxDistance)
-    std::int32_t counts[4]; // xyz probes along each axis, w rays per probe this frame
-    float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz
+    std::int32_t counts[4]; // xyz probes along each axis, w the ray stride: room for the most rays any probe traces
+    float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, unused
     float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything)
     float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
 };
@@ -220,13 +247,31 @@ static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_vol
 
 // What changes per frame beside the volume itself.
 struct ProbeFrame {
-    int raysPerProbe = 64;
+    int raysPerProbe = 64;     // probes that no fast light reaches
+    int fastRaysPerProbe = 64; // probes within reach of a fast light
     Quat rotation;
     int rayPhase = 0; // the frame's place in its ray cycle (ProbeRayFrame)
     Vec3 sky{0.0f, 0.0f, 0.0f};
     float irradianceHysteresis = 0.0f;
+    float fastIrradianceHysteresis = 0.0f;
     float distanceHysteresis = 0.0f;
     float ballRadius = 0.1f;
 };
 
+// Room for each probe's rays in the ray buffers: the larger count.
+int probeRayStride(const ProbeFrame& frame);
+
 GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& frame);
+
+// What the probes carry from frame to frame beside their atlases: the number of the next frame, for its rays.
+struct ProbeSchedule {
+    std::uint64_t frameNumber = 0;
+};
+
+/*
+* This frame's rays and blending (all of ProbeFrame but the sky), moving the schedule on a frame: ray counts clamped to
+* what a probe may trace, the frame's place in the ray cycle, and the shares kept from the time constants, the fast
+* one's frame time capped. Without fast lights near the volume (fastLights false) every probe traces the still count.
+* fresh: atlases just made, which keep nothing.
+*/
+ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationSettings& settings, float frameSeconds, bool fastLights, bool fresh);

@@ -27,11 +27,13 @@ inline constexpr float flashlightAimDistance = 8.0f;
 FlashlightPose flashlightInHand(const Camera& camera);
 
 // Warm, like an incandescent torch. A large source radius keeps it gentle up close; the higher intensity carries it further.
+// Fast: it swings with the view, so its bounce light must follow it closely.
 inline const SpotLight flashlightBeam{
     .colour = Vec3{1.0f, 0.89f, 0.69f},
     .intensity = 12.0f,
     .range = 50.0f,
-    .sourceRadius = 4.5f
+    .sourceRadius = 4.5f,
+    .fast = true
 };
 
 class Flashlight {

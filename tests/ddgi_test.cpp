@@ -215,6 +215,10 @@ namespace {
         assert(std::abs(first.dot(second)) < 0.999f);
     }
 
+    bool sameRotation(const Quat& a, const Quat& b) {
+        return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+    }
+
     /*
     * The shaders turn rays by the rotation's matrix rows: the same as turning by the quaternion. A ray's direction is
     * its point of the long spiral (every probeRayCycle-th from the frame's phase) turned so.
@@ -237,54 +241,122 @@ namespace {
     * Frames take turns through one spiral: a cycle's frames share its rotation and take the phases in order, the next
     * cycle turns anew, and together a cycle's frames trace every point of the long spiral once, so they cover the
     * sphere as evenly as count x probeRayCycle rays would (every direction within 1.6 of that many rays' share radii),
-    * far more evenly than one frame does.
+    * far more evenly than one frame does. The still probes' 64 rays and the fast probes' 256 alike.
     */
     void testFramesTakeTurnsThroughOneSpiral() {
-        const int count = 64;
-        const std::uint64_t firstFrame = 3 * probeRayCycle;
-        const ProbeRayFrame start = probeRayFrame(firstFrame);
-        std::vector<Vec3> cycleRays;
-        std::vector<Vec3> frameRays;
+        for (int count : {64, 256}) {
+            const std::uint64_t firstFrame = 3 * probeRayCycle;
+            const ProbeRayFrame start = probeRayFrame(firstFrame);
+            std::vector<Vec3> cycleRays;
+            std::vector<Vec3> frameRays;
 
-        for (int step = 0; step < probeRayCycle; ++step) {
-            const ProbeRayFrame frame = probeRayFrame(firstFrame + static_cast<std::uint64_t>(step));
-            assert(frame.phase == step);
-            assert(frame.rotation.x == start.rotation.x && frame.rotation.y == start.rotation.y && frame.rotation.z == start.rotation.z &&
-                   frame.rotation.w == start.rotation.w);
+            for (int step = 0; step < probeRayCycle; ++step) {
+                const ProbeRayFrame frame = probeRayFrame(firstFrame + static_cast<std::uint64_t>(step));
+                assert(frame.phase == step);
+                assert(sameRotation(frame.rotation, start.rotation));
 
-            const ProbeRotationRows rows = probeRotationRows(frame.rotation);
+                const ProbeRotationRows rows = probeRotationRows(frame.rotation);
 
-            for (int ray = 0; ray < count; ++ray) {
-                cycleRays.push_back(probeRayDirection(ray, count, frame.phase, rows));
+                for (int ray = 0; ray < count; ++ray) {
+                    cycleRays.push_back(probeRayDirection(ray, count, frame.phase, rows));
 
-                if (step == 0) {
-                    frameRays.push_back(cycleRays.back());
+                    if (step == 0) {
+                        frameRays.push_back(cycleRays.back());
+                    }
                 }
+            }
+
+            const ProbeRayFrame next = probeRayFrame(firstFrame + probeRayCycle);
+            assert(next.phase == 0 && std::abs(next.rotation.dot(start.rotation)) < 0.999f);
+
+            const auto widestGap = [](const std::vector<Vec3>& rays) {
+                float widest = 0.0f;
+
+                for (const Vec3& direction : manyDirections()) {
+                    float nearest = -1.0f;
+
+                    for (const Vec3& ray : rays) {
+                        nearest = std::max(nearest, ray.dot(direction));
+                    }
+
+                    widest = std::max(widest, std::acos(std::min(nearest, 1.0f)));
+                }
+
+                return widest;
+            };
+
+            const float shareRadius = std::acos(1.0f - 2.0f / static_cast<float>(count * probeRayCycle));
+            assert(widestGap(cycleRays) < 1.6f * shareRadius);
+            assert(widestGap(cycleRays) < 0.5f * widestGap(frameRays));
+        }
+    }
+
+    // A probe is within reach of a light when the light's range grown by the probes' longest distance reaches it.
+    void testProbesWithinReachOfALight() {
+        const Vec3 light{2.0f, 1.0f, 0.0f};
+        assert(probeNearLight(Vec3{0.0f, 1.0f, 0.0f}, light, 1.5f, 1.0f));
+        assert(!probeNearLight(Vec3{0.0f, 1.0f, 0.0f}, light, 0.5f, 1.0f));
+        assert(probeNearLight(Vec3{0.0f, 1.0f, 0.0f}, light, 0.5f, 1.6f));
+        assert(!probeNearLight(light, light, 0.0f, 0.0f));
+        assert(probeNearLight(light, light, 0.1f, 0.0f));
+    }
+
+    /*
+    * The schedule with the default settings and no fast light near the probes: every probe traces 64 rays (the stride
+    * too), frame after frame as probeRayFrame numbers them, with shares kept from the time constants; exactly what the
+    * probes did before fast lights, so the golden images do not change.
+    */
+    void testTheScheduleWithoutFastLights() {
+        const GlobalIlluminationSettings settings;
+        const float frameSeconds = 1.0f / 120.0f;
+        ProbeSchedule schedule;
+
+        for (std::uint64_t number = 0; number < 40; ++number) {
+            const ProbeFrame frame = scheduleProbeFrame(schedule, settings, frameSeconds, false, number == 0);
+            const ProbeRayFrame expected = probeRayFrame(number);
+
+            assert(frame.raysPerProbe == 64 && frame.fastRaysPerProbe == 64 && probeRayStride(frame) == 64);
+            assert(frame.rayPhase == expected.phase && sameRotation(frame.rotation, expected.rotation));
+            assert(frame.ballRadius == settings.probeBallRadius);
+
+            if (number == 0) {
+                assert(frame.irradianceHysteresis == 0.0f && frame.fastIrradianceHysteresis == 0.0f && frame.distanceHysteresis == 0.0f);
+            } else {
+                assert(frame.irradianceHysteresis == hysteresisForTimeConstant(frameSeconds, settings.irradianceTimeConstant));
+                assert(frame.distanceHysteresis == hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant));
+                assert(frame.fastIrradianceHysteresis == hysteresisForTimeConstant(frameSeconds, settings.fastIrradianceTimeConstant));
             }
         }
 
-        const ProbeRayFrame next = probeRayFrame(firstFrame + probeRayCycle);
-        assert(next.phase == 0 && std::abs(next.rotation.dot(start.rotation)) < 0.999f);
+        // Rays outside what a probe may trace are clamped.
+        GlobalIlluminationSettings extreme = settings;
+        extreme.raysPerProbe = 5000;
+        extreme.fastRaysPerProbe = 1;
+        const ProbeFrame clamped = scheduleProbeFrame(schedule, extreme, frameSeconds, true, false);
+        assert(clamped.raysPerProbe == maxRaysPerProbe && clamped.fastRaysPerProbe == minRaysPerProbe);
+    }
 
-        const auto widestGap = [](const std::vector<Vec3>& rays) {
-            float widest = 0.0f;
+    /*
+    * With a fast light near the probes: probes near it trace 256 rays (the stride room for 256), the rest 64, on the same
+    * cycle; the fast atlas keeps a share from its own time constant, and a slow frame (a hitch of half a second) counts
+    * only as 1/30 s for it.
+    */
+    void testTheScheduleWithFastLights() {
+        const GlobalIlluminationSettings settings;
+        const float frameSeconds = 1.0f / 240.0f;
+        ProbeSchedule schedule;
 
-            for (const Vec3& direction : manyDirections()) {
-                float nearest = -1.0f;
+        for (std::uint64_t number = 0; number < 40; ++number) {
+            const ProbeFrame frame = scheduleProbeFrame(schedule, settings, frameSeconds, true, number == 0);
+            const ProbeRayFrame expected = probeRayFrame(number);
 
-                for (const Vec3& ray : rays) {
-                    nearest = std::max(nearest, ray.dot(direction));
-                }
+            assert(frame.raysPerProbe == 64 && frame.fastRaysPerProbe == 256 && probeRayStride(frame) == 256);
+            assert(frame.rayPhase == expected.phase && sameRotation(frame.rotation, expected.rotation));
+        }
 
-                widest = std::max(widest, std::acos(std::min(nearest, 1.0f)));
-            }
-
-            return widest;
-        };
-
-        const float shareRadius = std::acos(1.0f - 2.0f / static_cast<float>(count * probeRayCycle));
-        assert(widestGap(cycleRays) < 1.6f * shareRadius);
-        assert(widestGap(cycleRays) < 0.5f * widestGap(frameRays));
+        const ProbeFrame hitch = scheduleProbeFrame(schedule, settings, 0.5f, true, false);
+        assert(hitch.fastIrradianceHysteresis == hysteresisForTimeConstant(settings.fastBlendMaxFrameSeconds, settings.fastIrradianceTimeConstant));
+        assert(hitch.irradianceHysteresis == hysteresisForTimeConstant(0.5f, settings.irradianceTimeConstant));
     }
 
     // Irradiance weighs a ray by the cosine between it and the texel (none from behind); distances by a far narrower
@@ -441,9 +513,8 @@ namespace {
         double crawl = 0.0;
     };
 
-    SparseTexel sparselyLitTexel(float timeConstant, bool interleaved) {
+    SparseTexel sparselyLitTexel(float timeConstant, bool interleaved, int rayCount = 64) {
         const float framesPerSecond = 240.0f;
-        const GlobalIlluminationSettings settings;
         const float hysteresis = hysteresisForTimeConstant(1.0f / framesPerSecond, timeConstant);
         const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
         const float patchCosine = std::cos(radiansFromDegrees(15.0f));
@@ -481,8 +552,8 @@ namespace {
             std::vector<Vec3> directions;
             std::vector<Vec3> radiance;
 
-            for (int ray = 0; ray < settings.raysPerProbe; ++ray) {
-                const Vec3 direction = probeRayDirection(ray, settings.raysPerProbe, rays.phase, rows);
+            for (int ray = 0; ray < rayCount; ++ray) {
+                const Vec3 direction = probeRayDirection(ray, rayCount, rays.phase, rows);
                 const float light = direction.dot(towardsPatch) > patchCosine ? 2.0f : 0.005f;
                 directions.push_back(direction);
                 radiance.push_back(Vec3{light, light, light});
@@ -513,7 +584,11 @@ namespace {
         const SparseTexel random = sparselyLitTexel(0.5f, false);
         const SparseTexel interleaved = sparselyLitTexel(0.5f, true);
         const SparseTexel chosen = sparselyLitTexel(settings.irradianceTimeConstant, true);
-        for (const SparseTexel* texel : {&random, &interleaved, &chosen}) {
+
+        // A fast light's part: its 256 rays and its 0.05 s.
+        const SparseTexel fast = sparselyLitTexel(settings.fastIrradianceTimeConstant, true, settings.fastRaysPerProbe);
+
+        for (const SparseTexel* texel : {&random, &interleaved, &chosen, &fast}) {
             assert(std::abs(texel->settled / texel->truth - 1.0) < 0.02);
         }
 
@@ -596,25 +671,29 @@ namespace {
         const ProbeVolume volume{Vec3{-2.0f, 0.5f, 3.0f}, Vec3{1.0f, 0.5f, 2.0f}, ProbeCounts{4, 3, 5}};
         ProbeFrame frame;
         frame.raysPerProbe = 96;
+        frame.fastRaysPerProbe = 200;
         frame.rotation = randomProbeRotation(3);
         frame.rayPhase = 7;
         frame.sky = Vec3{0.2f, 0.3f, 0.4f};
         frame.irradianceHysteresis = 0.97f;
+        frame.fastIrradianceHysteresis = 0.5f;
         frame.distanceHysteresis = 0.98f;
         frame.ballRadius = 0.15f;
 
         const GpuProbeVolume packed = packProbeVolume(volume, frame);
         const ProbeRotationRows rows = probeRotationRows(frame.rotation);
 
-        assert(packed.origin[0] == -2.0f && packed.origin[1] == 0.5f && packed.origin[2] == 3.0f);
+        assert(packed.origin[0] == -2.0f && packed.origin[1] == 0.5f && packed.origin[2] == 3.0f && packed.origin[3] == 0.5f);
         assert(packed.spacing[0] == 1.0f && packed.spacing[1] == 0.5f && packed.spacing[2] == 2.0f);
         assert(nearlyEqual(packed.spacing[3], probeMaxDistance(volume.spacing)));
-        assert(packed.counts[0] == 4 && packed.counts[1] == 3 && packed.counts[2] == 5 && packed.counts[3] == 96);
+        assert(packed.counts[0] == 4 && packed.counts[1] == 3 && packed.counts[2] == 5 && packed.counts[3] == 200);
+        assert(probeRayStride(frame) == 200);
 
         for (int row = 0; row < 3; ++row) {
             assert(nearlyEqual(Vec3{packed.rotation[row][0], packed.rotation[row][1], packed.rotation[row][2]}, rows.rows[row]));
         }
 
+        assert(packed.rotation[0][3] == 96.0f && packed.rotation[1][3] == 200.0f);
         assert(packed.sky[0] == 0.2f && packed.sky[1] == 0.3f && packed.sky[2] == 0.4f);
         assert(packed.hysteresis[0] == 0.97f && packed.hysteresis[1] == 0.98f && packed.hysteresis[2] == 0.15f && packed.hysteresis[3] == 7.0f);
     }
@@ -630,6 +709,9 @@ void testDdgi() {
     testRandomRotationsAreUniformAndRepeatable();
     testRayDirectionsAreTurnedByTheFramesRotation();
     testFramesTakeTurnsThroughOneSpiral();
+    testProbesWithinReachOfALight();
+    testTheScheduleWithoutFastLights();
+    testTheScheduleWithFastLights();
     testUpdateWeights();
     testDistancesForTheUpdate();
     testHysteresisFollowsATimeConstant();

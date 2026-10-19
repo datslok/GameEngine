@@ -72,6 +72,7 @@
 #define GPU_TEST_PROBE_WEIGHTS 3
 #define GPU_TEST_PROBE_BLENDING 4
 #define GPU_TEST_PROBE_GRID 5
+#define GPU_TEST_PROBE_REACH 6
 
 // ddgi_sampling_test.comp
 #define GPU_TEST_PROBE_BIAS 0

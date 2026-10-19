@@ -109,7 +109,8 @@ namespace {
     * the start (sun shadows in four cascades out to 200 m), the field from above, the sunlit room's beam on its
     * floor (the rest of the room lit by the light probes: sunlight bounced off the floor, and the sky through the
     * window), the towers again at sunset in HDR (a low,
-    * red sun and long shadows), and the sun itself, its disc and the glow bloom spreads round it.
+    * red sun and long shadows), the sun itself, its disc and the glow bloom spreads round it, and the dark back room
+    * lit by the flashlight (a fast light: its bounce light kept in the probes' fast atlas).
     */
     struct LabGoldenView {
         GoldenView view;
@@ -119,6 +120,9 @@ namespace {
 
         // Look straight at the sun instead of at the target (which then is ignored), wherever it stands at that hour.
         bool facingSun = false;
+
+        // The flashlight on (it starts off).
+        bool flashlightOn = false;
     };
 
     const LabGoldenView labGoldenViews[] = {
@@ -126,7 +130,8 @@ namespace {
         {{"overview", 0.5, false}, Vec3{40.0f, 45.0f, 50.0f}, Vec3{-10.0f, 0.0f, -30.0f}, 15.5f},
         {{"sunlit-room", 0.5, false}, Vec3{-22.3f, 2.2f, 14.4f}, Vec3{-18.6f, 0.3f, 10.6f}, 15.5f},
         {{"sunset-hdr", 0.5, true}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 17.6f},
-        {{"sun-disc", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 15.5f, true}
+        {{"sun-disc", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 15.5f, true},
+        {{"flashlight", 0.5, false}, Vec3{-18.0f, 1.7f, 9.4f}, Vec3{-21.6f, 0.9f, 6.0f}, 15.5f, false, true}
     };
 }
 
@@ -338,6 +343,10 @@ void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
                 : golden.cameraTarget;
             controls.poseFreeCamera(world, golden.cameraPosition, target);
             updateDaylight(world);
+
+            if (golden.flashlightOn && !flashlight.isOn(world)) {
+                flashlight.toggle(world);
+            }
         }
     }
 }

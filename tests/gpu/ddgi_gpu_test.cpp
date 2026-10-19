@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -127,6 +128,34 @@ namespace {
             const int phase = static_cast<int>(inputs[i * 4][2]);
             report.check("sphericalFibonacci", trigonometryTolerance, sphericalFibonacci(ray, count), vec3From(outputs[i * 2]));
             report.check("probeRayDirection", trigonometryTolerance, probeRayDirection(ray, count, phase, rotations[i]), vec3From(outputs[i * 2 + 1]));
+        }
+    }
+
+    // Probes within reach of a light or not, either side of the edge.
+    void checkReach(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{65};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 probe{random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f)};
+            const Vec3 light = probe + random.direction() * random.between(0.0f, 6.0f);
+            inputs.push_back(gpuVec4(probe, random.between(0.0f, 4.0f)));
+            inputs.push_back(gpuVec4(light, random.between(0.0f, 2.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_REACH, inputs, 2, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4& probe = inputs[i * 2];
+            const GpuVec4& light = inputs[i * 2 + 1];
+            const bool near = probeNearLight(vec3From(probe), vec3From(light), probe[3], light[3]);
+
+            // Exact unless the light is within rounding of the edge of its reach, where either answer is right.
+            const float margin = (vec3From(probe) - vec3From(light)).length() - (probe[3] + light[3]);
+
+            if (std::abs(margin) > 1e-4f) {
+                report.check("probeNearLight", exactTolerance, near ? 1.0f : 0.0f, outputs[i][0]);
+            }
         }
     }
 
@@ -289,11 +318,16 @@ namespace {
             buffers.pointLights.write(lights.points);
             buffers.spotLights.write(lights.spots);
             buffers.probeHitLights.write(hitLights.lights);
+            fastLightsListed = hitLights.fast > 0;
 
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-            return writeSceneSet(descriptors, sceneLayout, buffers, SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance()},
+            return writeSceneSet(descriptors, sceneLayout, buffers,
+                                 SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance()},
                                  clusterMasks);
         }
+
+        // Whether the last frame written lists a fast light for the probe rays' hits.
+        bool fastLightsListed = false;
     };
 
     // An atlas read back as floats, four channels per texel whatever its format.
@@ -342,13 +376,15 @@ namespace {
 
     // What the update should store for one probe, worked out on the CPU from what each of its rays brings back.
     struct ExpectedProbe {
-        std::vector<Vec3> irradiance; // decoded, per inner texel
-        std::vector<Vec2> distance;   // mean and mean square, per inner texel
+        std::vector<Vec3> irradiance;     // per inner texel
+        std::vector<Vec3> fastIrradiance; // from fast lights, per inner texel
+        std::vector<Vec2> distance;       // mean and mean square, per inner texel
     };
 
     struct RayResult {
         Vec3 light;
         float distance = 0.0f;
+        Vec3 fastLight{0.0f, 0.0f, 0.0f};
     };
 
     ExpectedProbe expectedProbe(const std::vector<Vec3>& directions, const std::vector<RayResult>& results, float maxDistance) {
@@ -357,15 +393,18 @@ namespace {
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
             const Vec3 direction = probeTexelDirection(TexelCoord{texel % probeIrradianceTexels, texel / probeIrradianceTexels}, probeIrradianceTexels);
             Vec3 sum{0.0f, 0.0f, 0.0f};
+            Vec3 fastSum{0.0f, 0.0f, 0.0f};
             float weights = 0.0f;
 
             for (std::size_t ray = 0; ray < directions.size(); ++ray) {
                 const float weight = irradianceRayWeight(direction, directions[ray]);
                 sum = sum + results[ray].light * weight;
+                fastSum = fastSum + results[ray].fastLight * weight;
                 weights += weight;
             }
 
             expected.irradiance.push_back(sum * (1.0f / weights));
+            expected.fastIrradiance.push_back(fastSum * (1.0f / weights));
         }
 
         for (int texel = 0; texel < probeDistanceTexels * probeDistanceTexels; ++texel) {
@@ -394,18 +433,31 @@ namespace {
     constexpr FloatTolerance storedIrradianceTolerance{.absolute = 1e-4f, .relative = 2e-3f};
     constexpr FloatTolerance storedDistanceTolerance{.absolute = 1e-3f, .relative = 2e-3f};
 
+    // The three atlases after an update.
+    struct ReadAtlases {
+        ReadAtlas irradiance;
+        ReadAtlas fastIrradiance;
+        ReadAtlas distance;
+    };
+
     /*
-    * Compare one probe's squares in both atlases with what the CPU expects, and check every border texel is an exact
-    * copy of the inner texel it should copy.
+    * Compare one probe's squares in all three atlases with what the CPU expects, and check every border texel is an
+    * exact copy of the inner texel it should copy.
     */
-    void checkProbe(const ReadAtlas& irradiance, const ReadAtlas& distance, const ProbeCounts& counts, int probe, const ExpectedProbe& expected,
-                    const std::string& name, GpuCheckReport& report) {
+    void checkProbe(const ReadAtlases& atlases, const ProbeCounts& counts, int probe, const ExpectedProbe& expected, const std::string& name,
+                    GpuCheckReport& report) {
+        const ReadAtlas& irradiance = atlases.irradiance;
+        const ReadAtlas& fastIrradiance = atlases.fastIrradiance;
+        const ReadAtlas& distance = atlases.distance;
         const TexelCoord irradianceOrigin = probeTileOrigin(counts, probe, probeIrradianceTexels);
 
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
-            const GpuVec4 stored = irradiance.texel(irradianceOrigin.x + 1 + texel % probeIrradianceTexels, irradianceOrigin.y + 1 + texel / probeIrradianceTexels);
+            const int x = irradianceOrigin.x + 1 + texel % probeIrradianceTexels;
+            const int y = irradianceOrigin.y + 1 + texel / probeIrradianceTexels;
             report.check(name + ": irradiance", storedIrradianceTolerance, expected.irradiance[static_cast<std::size_t>(texel)],
-                         vec3From(stored));
+                         vec3From(irradiance.texel(x, y)));
+            report.check(name + ": fast irradiance", storedIrradianceTolerance, expected.fastIrradiance[static_cast<std::size_t>(texel)],
+                         vec3From(fastIrradiance.texel(x, y)));
         }
 
         const TexelCoord distanceOrigin = probeTileOrigin(counts, probe, probeDistanceTexels);
@@ -417,6 +469,7 @@ namespace {
         }
 
         for (const auto& [atlas, side, origin] : {std::tuple{&irradiance, probeIrradianceTexels, irradianceOrigin},
+                                                  std::tuple{&fastIrradiance, probeIrradianceTexels, irradianceOrigin},
                                                   std::tuple{&distance, probeDistanceTexels, distanceOrigin}}) {
             for (int number = 0; number < probeBorderTexelCount(side); ++number) {
                 const TexelCoord bordered = probeBorderTexel(number, side);
@@ -427,6 +480,9 @@ namespace {
             }
         }
     }
+
+    // The frame time of the tests' updates.
+    constexpr float testFrameSeconds = 1.0f / 60.0f;
 
     // The first update's ray directions: a fresh VulkanDdgi traces frame 0's (phase 0 of the first cycle's rotation).
     std::vector<Vec3> firstFrameRays(int count) {
@@ -441,9 +497,9 @@ namespace {
         return directions;
     }
 
-    // One fresh update of the volume over these draws and lights, both atlases read back.
-    std::pair<ReadAtlas, ReadAtlas> runProbes(ProbeTestScene& scene, const std::vector<DrawItem>& draws, const FrameLighting& lighting,
-                                              const ProbeVolume& volume, const GlobalIlluminationSettings& settings) {
+    // One fresh update of the volume over these draws and lights, all three atlases read back.
+    ReadAtlases runProbes(ProbeTestScene& scene, const std::vector<DrawItem>& draws, const FrameLighting& lighting, const ProbeVolume& volume,
+                          const GlobalIlluminationSettings& settings) {
         VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
@@ -454,10 +510,18 @@ namespace {
         scene.commands.run([&](VkCommandBuffer recording) {
             scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
             const ProbeSceneSets sets{scene.textures.getSet(), frame, scene.rayTracing.getSceneSet(0)};
-            ddgi.update(recording, scene.descriptors, sets, volume, settings, lighting.background, 1.0f / 60.0f);
+            ddgi.update(recording, scene.descriptors, sets, volume, settings, lighting.background, testFrameSeconds, scene.fastLightsListed);
         });
 
-        return {readAtlas(scene, ddgi.getIrradianceAtlas(), 4), readAtlas(scene, ddgi.getDistanceAtlas(), 2)};
+        return ReadAtlases{readAtlas(scene, ddgi.getIrradianceAtlas(), 4), readAtlas(scene, ddgi.getFastIrradianceAtlas(), 4),
+                           readAtlas(scene, ddgi.getDistanceAtlas(), 2)};
+    }
+
+    // A lamp's light where a ray from the probe meets the floor below it (pointLightAtHit), as the packed lights hold it.
+    Vec3 lampOnFloor(const GpuPointLight& lamp, const Vec3& hit) {
+        const Vec3 offset = Vec3{lamp.positionRange[0], lamp.positionRange[1], lamp.positionRange[2]} - hit;
+        return pointLightAtHit(offset, lamp.positionRange[3], Vec3{lamp.radiance[0], lamp.radiance[1], lamp.radiance[2]}, lamp.radiance[3],
+                               Vec3{0.0f, 1.0f, 0.0f});
     }
 
     DrawItem drawOf(MeshHandle mesh, const Mat4& model) {
@@ -477,7 +541,11 @@ namespace {
     * - a probe over a white floor lit straight down by a sun of radiance R: rays that go down bring back R, rays that
     *   go up the sky (black), and their distances the floor's;
     * - the same floor lit by two lamps a little above it instead, one kept per hit: each ray that goes down brings back
-    *   the brighter lamp's light where it lands (pointLightAtHit), checked by a shadow ray that nothing blocks.
+    *   the brighter lamp's light where it lands (pointLightAtHit), checked by a shadow ray that nothing blocks;
+    * - the two lamps again, the first flagged fast and both kept per hit: the probe is within the fast lamp's reach, so
+    *   it traces the fast count of rays, and each ray's light goes into the atlas of its lamp;
+    * - the sunlit floor with a fast lamp listed for the hits but out of the probe's reach: the stride makes room for the
+    *   fast count, but the probe traces the still count, and nothing reaches the fast atlas.
     * The atlases start empty, so the light bounced from them (last frame's probes) adds nothing on a first update. Each
     * scene also holds a speck far below, since a top-level structure needs something in it.
     */
@@ -489,18 +557,19 @@ namespace {
 
         GlobalIlluminationSettings settings;
         const std::vector<Vec3> rays = firstFrameRays(settings.raysPerProbe);
+        const std::vector<Vec3> fastRays = firstFrameRays(settings.fastRaysPerProbe);
 
         {
             const ProbeVolume volume{Vec3{-1.0f, 0.5f, 2.0f}, Vec3{1.0f, 1.0f, 1.5f}, ProbeCounts{3, 2, 2}};
             FrameLighting lighting;
             lighting.background = Vec3{0.6f, 0.75f, 1.0f};
-            const auto [irradiance, distance] = runProbes(scene, {speck}, lighting, volume, settings);
+            const ReadAtlases atlases = runProbes(scene, {speck}, lighting, volume, settings);
 
             const std::vector<RayResult> results(rays.size(), RayResult{lighting.background, static_cast<float>(DDGI_RAY_REACH)});
             const ExpectedProbe expected = expectedProbe(rays, results, probeMaxDistance(volume.spacing));
 
             for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
-                checkProbe(irradiance, distance, volume.counts, probe, expected, "furnace", report);
+                checkProbe(atlases, volume.counts, probe, expected, "furnace", report);
             }
         }
 
@@ -508,7 +577,7 @@ namespace {
             const Vec3 halfSize{0.7f, 0.5f, 0.9f};
             const ProbeVolume volume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}};
             const DrawItem box = drawOf(cube, Mat4::scaling(halfSize.x, halfSize.y, halfSize.z));
-            const auto [irradiance, distance] = runProbes(scene, {speck, box}, FrameLighting{}, volume, settings);
+            const ReadAtlases atlases = runProbes(scene, {speck, box}, FrameLighting{}, volume, settings);
 
             std::vector<RayResult> results;
 
@@ -517,47 +586,51 @@ namespace {
                 results.push_back(RayResult{Vec3{0.0f, 0.0f, 0.0f}, -wall});
             }
 
-            checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sealed box", report);
+            checkProbe(atlases, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sealed box", report);
         }
 
-        {
-            const float height = 1.0f;
-            const float sunRadiance = 2.0f;
-            const ProbeVolume volume{Vec3{0.0f, height, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}};
-            FrameLighting lighting;
-            lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, sunRadiance});
-            const auto [irradiance, distance] = runProbes(scene, {speck, drawOf(floor, Mat4::identity())}, lighting, volume, settings);
+        const float height = 1.0f;
+        const float sunRadiance = 2.0f;
+        const ProbeVolume overFloor{Vec3{0.0f, height, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}};
+        const DrawItem floorDraw = drawOf(floor, Mat4::identity());
 
+        // What a ray brings back from the sunlit floor below, or the black sky above.
+        const auto sunlitFloor = [&](const Vec3& ray) {
+            return ray.y < 0.0f ? RayResult{Vec3{sunRadiance, sunRadiance, sunRadiance}, height / -ray.y}
+                                : RayResult{Vec3{0.0f, 0.0f, 0.0f}, static_cast<float>(DDGI_RAY_REACH)};
+        };
+
+        FrameLighting sunlit;
+        sunlit.directionalLights.push_back(DirectionalLight{Vec3{0.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, sunRadiance});
+
+        {
+            const ReadAtlases atlases = runProbes(scene, {speck, floorDraw}, sunlit, overFloor, settings);
             std::vector<RayResult> results;
 
             for (const Vec3& ray : rays) {
-                results.push_back(ray.y < 0.0f ? RayResult{Vec3{sunRadiance, sunRadiance, sunRadiance}, height / -ray.y}
-                                               : RayResult{Vec3{0.0f, 0.0f, 0.0f}, static_cast<float>(DDGI_RAY_REACH)});
+                results.push_back(sunlitFloor(ray));
             }
 
-            checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sunlit floor", report);
+            checkProbe(atlases, overFloor.counts, 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "sunlit floor", report);
+        }
+
+        FrameLighting lampLit;
+
+        for (const auto& [position, intensity] : {std::pair{Vec3{0.3f, 0.4f, 0.2f}, 3.0f}, std::pair{Vec3{-0.8f, 0.6f, -0.5f}, 2.0f}}) {
+            PlacedPointLight lamp;
+            lamp.position = position;
+            lamp.light.intensity = intensity;
+            lamp.light.range = 6.0f;
+            lamp.light.sourceRadius = 0.2f;
+            lampLit.pointLights.push_back(lamp);
         }
 
         {
-            const float height = 1.0f;
-            const ProbeVolume volume{Vec3{0.0f, height, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}};
-            FrameLighting lighting;
-
-            for (const auto& [position, intensity] : {std::pair{Vec3{0.3f, 0.4f, 0.2f}, 3.0f}, std::pair{Vec3{-0.8f, 0.6f, -0.5f}, 2.0f}}) {
-                PlacedPointLight lamp;
-                lamp.position = position;
-                lamp.light.intensity = intensity;
-                lamp.light.range = 6.0f;
-                lamp.light.sourceRadius = 0.2f;
-                lighting.pointLights.push_back(lamp);
-            }
-
             GlobalIlluminationSettings onePerHit = settings;
             onePerHit.lightsPerHit = 1;
-            const auto [irradiance, distance] = runProbes(scene, {speck, drawOf(floor, Mat4::identity())}, lighting, volume, onePerHit);
+            const ReadAtlases atlases = runProbes(scene, {speck, floorDraw}, lampLit, overFloor, onePerHit);
 
-            const GpuLights packed = packLighting(lighting, Vec3{});
-            const Vec3 up{0.0f, 1.0f, 0.0f};
+            const GpuLights packed = packLighting(lampLit, Vec3{});
             std::vector<RayResult> results;
 
             for (const Vec3& ray : rays) {
@@ -567,14 +640,12 @@ namespace {
                 }
 
                 const float along = height / -ray.y;
-                const Vec3 hit = volume.origin + ray * along;
+                const Vec3 hit = overFloor.origin + ray * along;
                 Vec3 brightest{0.0f, 0.0f, 0.0f};
 
                 for (const GpuPointLight& light : packed.points) {
-                    const Vec3 offset = Vec3{light.positionRange[0], light.positionRange[1], light.positionRange[2]} - hit;
-                    const Vec3 lit = pointLightAtHit(offset, light.positionRange[3], vec3From(GpuVec4{light.radiance[0], light.radiance[1],
-                                                                                                      light.radiance[2], 0.0f}),
-                                                     light.radiance[3], up);
+                    const Vec3 lit = lampOnFloor(light, hit);
+
                     if (hitLightStrength(lit) > hitLightStrength(brightest)) {
                         brightest = lit;
                     }
@@ -583,7 +654,56 @@ namespace {
                 results.push_back(RayResult{brightest, along});
             }
 
-            checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "lamp-lit floor", report);
+            checkProbe(atlases, overFloor.counts, 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "lamp-lit floor", report);
+        }
+
+        {
+            FrameLighting oneFast = lampLit;
+            oneFast.pointLights[0].light.fast = true;
+            GlobalIlluminationSettings bothPerHit = settings;
+            bothPerHit.lightsPerHit = 2;
+            const ReadAtlases atlases = runProbes(scene, {speck, floorDraw}, oneFast, overFloor, bothPerHit);
+
+            const GpuLights packed = packLighting(oneFast, Vec3{});
+            std::vector<RayResult> results;
+
+            for (const Vec3& ray : fastRays) {
+                if (ray.y >= 0.0f) {
+                    results.push_back(RayResult{Vec3{0.0f, 0.0f, 0.0f}, static_cast<float>(DDGI_RAY_REACH)});
+                    continue;
+                }
+
+                const float along = height / -ray.y;
+                const Vec3 hit = overFloor.origin + ray * along;
+                results.push_back(RayResult{lampOnFloor(packed.points[1], hit), along, lampOnFloor(packed.points[0], hit)});
+            }
+
+            checkProbe(atlases, overFloor.counts, 0, expectedProbe(fastRays, results, probeMaxDistance(overFloor.spacing)), "fast lamp", report);
+        }
+
+        {
+            // Listed: its range touches the corner of the probe's box grown by the reach. Out of the probe's reach: that
+            // corner is reach x sqrt(3) from the probe. Too far to light the floor the rays hit.
+            const float reach = probeMaxDistance(overFloor.spacing);
+            const float corner = reach + 0.02f;
+            FrameLighting farFast = sunlit;
+            PlacedPointLight lamp;
+            lamp.position = overFloor.origin + Vec3{corner, corner, corner};
+            lamp.light.range = 0.1f;
+            lamp.light.fast = true;
+            farFast.pointLights.push_back(lamp);
+
+            assert(probeHitLights(packLighting(farFast, Vec3{}), Vec3{}, overFloor).fast == 1);
+            assert(!probeNearLight(overFloor.origin, lamp.position, lamp.light.range, reach));
+
+            const ReadAtlases atlases = runProbes(scene, {speck, floorDraw}, farFast, overFloor, settings);
+            std::vector<RayResult> results;
+
+            for (const Vec3& ray : rays) {
+                results.push_back(sunlitFloor(ray));
+            }
+
+            checkProbe(atlases, overFloor.counts, 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "far fast lamp", report);
         }
     }
 }
@@ -593,6 +713,7 @@ void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheck
     checkOctahedral(runner, report);
     checkTexels(runner, report);
     checkRays(runner, report);
+    checkReach(runner, report);
     checkWeights(runner, report);
     checkBlending(runner, report);
     checkGrid(runner, report);

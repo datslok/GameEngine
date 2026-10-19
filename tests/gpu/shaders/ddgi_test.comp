@@ -38,5 +38,7 @@ void main() {
         int side = int(fourth.w);
         testOutput(0, vec4(probePosition(first.xyz, second.xyz, counts, index), 0.0));
         testOutput(1, vec4(vec2(probeTileOrigin(counts, index, side)), probeAtlasUv(counts, index, fourth.xyz, side)));
+    } else if (function == GPU_TEST_PROBE_REACH) {
+        testOutput(0, vec4(probeNearLight(first.xyz, second.xyz, first.w, second.w) ? 1.0 : 0.0));
     }
 }
