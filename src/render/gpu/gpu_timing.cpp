@@ -8,6 +8,8 @@ const char* gpuPassName(GpuPass pass) {
         return "UI";
     case GpuPass::Shadows:
         return "SHADOW";
+    case GpuPass::DepthPrepass:
+        return "PREPASS";
     case GpuPass::Main:
         return "MAIN";
     case GpuPass::Bloom:

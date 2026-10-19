@@ -69,6 +69,12 @@ ShadingPoint prepareShading(vec3 baseColour, float metallic, float roughness, ve
     return point;
 }
 
+// Whether a light along toLight reaches the side of the surface the eye sees (facesLight in brdf.cpp): grazing or from
+// behind gives nothing, so callers skip such a light before its shadow lookups.
+bool facesLight(ShadingPoint point, vec3 toLight) {
+    return dot(point.normal, toLight) > 0.0;
+}
+
 /*
 * One light's contribution, its radiance already scaled by distance falloff (and the cone, for spotlights). The diffuse
 * part scatters evenly, so it does not depend on the viewer; the specular part is D V F, brightest where the halfway
@@ -76,12 +82,12 @@ ShadingPoint prepareShading(vec3 baseColour, float metallic, float roughness, ve
 * values are the irradiance they give a surface facing them), so a white matte surface lit head-on by 1 shows 1.
 */
 void addLight(vec3 radiance, vec3 toLight, ShadingPoint point, inout vec3 diffuse, inout vec3 specular) {
-    float nDotL = dot(point.normal, toLight);
-
     // No light, and so no highlight, on the side facing away.
-    if (nDotL <= 0.0) {
+    if (!facesLight(point, toLight)) {
         return;
     }
+
+    float nDotL = dot(point.normal, toLight);
 
     vec3 incoming = radiance * nDotL;
     diffuse += point.diffuse * incoming;

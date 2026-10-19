@@ -71,7 +71,7 @@ struct VertexLayout {
 // Everything a graphics pipeline fixes in advance. Viewport and scissor are set per pass instead.
 struct PipelineDescription {
     const char* vertexShader = nullptr;
-    const char* fragmentShader = nullptr;
+    const char* fragmentShader = nullptr; // none: depth only, with no colour target
     ShaderResources resources;
 
     // A pipeline layout made elsewhere and shared (the scene's, render/vulkan/scene_layout.h), used instead of building

@@ -115,7 +115,9 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     }
 
     const OwnedHandle<VkShaderModule> vertexShader = device.loadShader(description.vertexShader);
-    const OwnedHandle<VkShaderModule> fragmentShader = device.loadShader(description.fragmentShader);
+    // No fragment shader: depth only (the depth prepass), where the depth test and write need nothing from one.
+    const bool hasFragmentShader = description.fragmentShader != nullptr;
+    const OwnedHandle<VkShaderModule> fragmentShader = hasFragmentShader ? device.loadShader(description.fragmentShader) : OwnedHandle<VkShaderModule>{};
 
     std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -206,7 +208,7 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     VkGraphicsPipelineCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     info.pNext = &rendering;
-    info.stageCount = static_cast<std::uint32_t>(stages.size());
+    info.stageCount = hasFragmentShader ? 2 : 1;
     info.pStages = stages.data();
     info.pVertexInputState = &vertexInput;
     info.pInputAssemblyState = &inputAssembly;
@@ -219,7 +221,7 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     info.layout = layout;
 
     VkPipeline created = VK_NULL_HANDLE;
-    vulkanCheck(vkCreateGraphicsPipelines(handle, VK_NULL_HANDLE, 1, &info, nullptr, &created), description.fragmentShader);
+    vulkanCheck(vkCreateGraphicsPipelines(handle, VK_NULL_HANDLE, 1, &info, nullptr, &created), hasFragmentShader ? description.fragmentShader : description.vertexShader);
     pipeline = OwnedHandle<VkPipeline>{handle, created, vkDestroyPipeline};
 }
 

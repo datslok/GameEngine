@@ -16,4 +16,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Display", [&] {
         visit(settings.display, visitor);
     });
+    visitor.group("Passes", [&] {
+        visitor.field("Depth prepass", settings.depthPrepass);
+    });
 }

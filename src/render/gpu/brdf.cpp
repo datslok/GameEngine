@@ -185,12 +185,16 @@ ShadingPoint prepareShading(const SurfaceProperties& surface, const Vec3& normal
     return point;
 }
 
-LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance) {
-    const float nDotL = point.normal.dot(toLight);
+bool facesLight(const ShadingPoint& point, const Vec3& toLight) {
+    return point.normal.dot(toLight) > 0.0f;
+}
 
-    if (nDotL <= 0.0f) {
+LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance) {
+    if (!facesLight(point, toLight)) {
         return LightResponse{};
     }
+
+    const float nDotL = point.normal.dot(toLight);
 
     LightResponse response;
     response.diffuse = point.diffuse * radiance * nDotL;

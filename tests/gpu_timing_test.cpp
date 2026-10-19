@@ -34,6 +34,12 @@ void testGpuTiming() {
         assert(gpuTimestampCount == gpuPassCount + 1);
     }
 
+    // The depth prepass is recorded after the shadows and right before the main pass, whose depth it fills.
+    {
+        assert(static_cast<int>(GpuPass::Shadows) < static_cast<int>(GpuPass::DepthPrepass));
+        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::Main));
+    }
+
     // Ticks between two stamps: a plain difference while the counter has not rolled over.
     {
         assert(timestampTicksBetween(100, 350, 64) == 250);
@@ -53,7 +59,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{3, 40, 900, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{3, 40, 25, 900, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -69,7 +75,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1085 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1110 * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

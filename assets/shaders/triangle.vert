@@ -17,6 +17,11 @@ layout(location = 3) out vec4 worldTangent;
 // Which entry of the material buffer shades this object: the same for every fragment of a triangle (flat, not interpolated).
 layout(location = 4) flat out uint materialIndex;
 
+// The depth prepass runs this same shader, and the main pass then shades only fragments whose depth EQUALS the one the
+// prepass stored. Invariant makes the compiler compute the position the same way in both pipelines, bit for bit (it
+// may not, for instance, fuse a multiply and an add in one and not the other).
+invariant gl_Position;
+
 void main() {
     InstanceData instance = instances[drawList[gl_InstanceIndex]];
     mat4 normalMatrix = instance.normalMatrix;

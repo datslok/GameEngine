@@ -4,6 +4,7 @@
 #include "render/gpu/depth_shared.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/depth_prepass.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_map_uniforms.h"
@@ -197,9 +198,30 @@ void VulkanRenderer::createSceneLayout() {
     sceneLayout = std::make_unique<SceneLayout>(device.getDevice(), bindlessTextures->getLayout());
 }
 
+namespace {
+    VkCompareOp vulkanCompare(DepthCompare compare) {
+        switch (compare) {
+        case DepthCompare::Greater:
+            return VK_COMPARE_OP_GREATER;
+        case DepthCompare::Equal:
+            return VK_COMPARE_OP_EQUAL;
+        }
+
+        throw std::invalid_argument("vulkanCompare: not a depth test");
+    }
+
+    void setDepthState(PipelineDescription& description, DepthState state) {
+        description.depthTest = true;
+        description.depthWrite = state.write;
+        description.depthCompare = vulkanCompare(state.compare);
+    }
+}
+
 /*
 * The main pass: back faces culled (counter-clockwise is the front, as SDL_GPU set it with its flipped viewport), depth
-* tested and written with GREATER (reversed-Z: nearer is larger). The shadow pass draws depth only, both sides of every
+* tested and written with GREATER (reversed-Z: nearer is larger), or after the depth prepass tested EQUAL and not
+* written. The prepass is the main pass's vertex shader with no fragment shader and no colour target, so its depths
+* match the main pass's bit for bit (render/gpu/depth_prepass.h). The shadow pass draws depth only, both sides of every
 * triangle so open meshes still cast shadows, with no depth bias (the shader's normal offset handles acne). The tile
 * reset draws the full-screen triangle at the far depth with a test that always passes, overwriting one tile.
 */
@@ -212,10 +234,18 @@ void VulkanRenderer::createPipelines() {
     main.cullMode = VK_CULL_MODE_BACK_BIT;
     main.colourFormat = sceneColourFormat;
     main.depthFormat = depthFormat;
-    main.depthTest = true;
-    main.depthWrite = true;
-    main.depthCompare = VK_COMPARE_OP_GREATER;
+    setDepthState(main, mainPassDepthState(false));
     mainPipeline = std::make_unique<VulkanPipeline>(device, layouts, main);
+
+    PipelineDescription afterPrepass = main;
+    setDepthState(afterPrepass, mainPassDepthState(true));
+    mainAfterPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, afterPrepass);
+
+    PipelineDescription prepass = main;
+    prepass.fragmentShader = nullptr;
+    prepass.colourFormat = VK_FORMAT_UNDEFINED;
+    setDepthState(prepass, prepassDepthState());
+    depthPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepass);
 
     PipelineDescription shadow;
     shadow.vertexShader = "assets/shaders/shadow.vert.spv";
@@ -720,8 +750,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Shadows);
     }
 
+    if (settings.depthPrepass) {
+        beginGpuPass(frame, GpuPass::DepthPrepass);
+        drawDepthPrepass(frame, mainDraws, sceneSet);
+        endGpuPass(frame, GpuPass::DepthPrepass);
+    }
+
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, mainDraws, sceneSet);
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass);
     endGpuPass(frame, GpuPass::Main);
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
@@ -874,24 +910,48 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 }
 
 /*
-* The camera's view into the scene image: one instanced draw per mesh, every object's matrices, material, textures and
-* lights read from the scene's buffers. Both targets start cleared, so their old contents are discarded (the barrier
-* still waits for last frame's reads of the scene image to finish first). Afterwards the scene image becomes readable
-* for bloom and tone mapping.
+* The camera's depth alone: the same draws as the main pass, with the main pass's vertex shader and no fragment shader,
+* so the depth image ends up holding the nearest surface at every pixel, computed exactly as the main pass computes it.
+* The depth image starts cleared (its old contents discarded) and is stored for the main pass.
 */
-void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet) {
+void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet) {
     const VkCommandBuffer commands = frame.commands;
-    sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
 
+    const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+    beginRendering(commands, {frameWidth, frameHeight}, nullptr, &depthTarget);
+    renderingOpen = true;
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline->get());
+    bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+    stats.drawCalls += drawBatches(commands, mainDraws.batches);
+
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+}
+
+/*
+* The camera's view into the scene image: one instanced draw per mesh, every object's matrices, material, textures and
+* lights read from the scene's buffers. The scene image starts cleared, its old contents discarded (the barrier still
+* waits for last frame's reads of it to finish first). The depth image starts cleared too, or after the depth prepass
+* keeps the prepass's depths: the barrier between them (depth target to depth target) makes the prepass's writes
+* visible to this pass's depth tests. Afterwards the scene image becomes readable for bloom and tone mapping.
+*/
+void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass) {
+    const VkCommandBuffer commands = frame.commands;
+    sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
+    depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
+
     const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {0.0f, 0.0f, 0.0f, 1.0f}};
-    const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE, gpuFarDepth};
+    const VkAttachmentLoadOp depthLoad = afterPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+    const DepthAttachment depthTarget{depth.getView(), depthLoad, VK_ATTACHMENT_STORE_OP_DONT_CARE, gpuFarDepth};
     beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
     renderingOpen = true;
 
-    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipeline->get());
+    const VulkanPipeline& pipeline = afterPrepass ? *mainAfterPrepassPipeline : *mainPipeline;
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
-    stats.drawCalls = drawBatches(commands, mainDraws.batches);
+    stats.drawCalls += drawBatches(commands, mainDraws.batches);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;

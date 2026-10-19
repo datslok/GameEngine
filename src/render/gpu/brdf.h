@@ -114,6 +114,10 @@ struct LightResponse {
     Vec3 specular;
 };
 
+// Whether a light along toLight reaches the side of the surface the eye sees: grazing (a cosine of exactly 0) or from behind
+// gives nothing. Asked before a light's shadow lookups, which a light giving nothing would waste.
+bool facesLight(const ShadingPoint& point, const Vec3& toLight);
+
 // One light's reflected light towards the eye, for a light of the given radiance (irradiance when facing it) along toLight.
 LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance);
 

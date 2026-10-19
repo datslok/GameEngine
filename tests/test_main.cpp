@@ -41,6 +41,7 @@ void testDeferredChanges();
 void testDeterminism();
 void testEngineSettings();
 void testBrdf();
+void testDepthPrepass();
 void testTextureEncoding();
 void testGltfMaterials();
 void testGltfNormalMaps();
@@ -144,6 +145,7 @@ int main(){
     testDeterminism();
     testEngineSettings();
     testBrdf();
+    testDepthPrepass();
     testTextureEncoding();
     testGltfMaterials();
     testGltfNormalMaps();
