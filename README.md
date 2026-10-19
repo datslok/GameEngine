@@ -68,7 +68,7 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | Command | What it does |
 |---|---|
 | `make` | Builds `build/game.exe` and compiles the shaders to `.spv`. Only changed files are recompiled, in parallel on every core. This is the unoptimised debug build, best for a debugger |
-| `make run` | Builds, then starts the game (the demo; `make run GAME=lightlab` starts the light lab, and `GAME=` works for `make run-release`, `make golden` and `make golden-save` too) |
+| `make run` | Builds, then starts the game (the light lab; `make run GAME=demo` starts the demo, and `GAME=` works for `make run-release`, `make golden` and `make golden-save` too) |
 | `make test` | Builds and runs the tests (`build/tests.exe`) |
 | `make release` | Builds the optimised release (`-O2`) into `build/release/`. Physics runs about 7 times faster than in the debug build; use it to play and to measure |
 | `make run-release` | Builds the release, then starts it |
@@ -99,13 +99,13 @@ To send the demo to someone without MSYS2, run:
 python tools/package_demo.py
 ```
 
-It builds the game, then creates `build/GameEngineDemo.zip` with the exe, `LightLab.bat` (starts the exe with `--game lightlab`), every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. To share it anonymously, add `--anonymous`: it makes `build/Demo.zip` with a neutral name, a README with only short control names (nothing that matches this repo's text), every zip entry dated 1 January 1980 and the exe's build time zeroed. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
+It builds the game, then creates `build/GameEngineDemo.zip` with the exe, `Demo.bat` (starts the exe with `--game demo`; the exe alone starts the light lab), every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. To share it anonymously, add `--anonymous`: it makes `build/Demo.zip` with a neutral name, a README with only short control names (nothing that matches this repo's text), every zip entry dated 1 January 1980 and the exe's build time zeroed. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
 
 ## Controls
 
 The game starts in first-person mode. F1-F3 switch modes at any time.
 
-The light lab (`--game lightlab`, or LightLab.bat in the zip) has the same controls for moving and looking (F1-F5) and the flashlight (F, off at the start, held in your right hand in every mode: shine it into the dark back room to watch its bounce light follow it: a fast light, its bounce kept apart with a short memory); the lamps (L) and grenades (G) are the demo's only. Its sun is under Light lab, Sun in the settings window (F5): latitude, day of the year, solar time, hours per second to run the clock, and the sun disc's size (1 is the real half degree). Light lab, Probes, Dense probes switches the light probes from 1 m apart round the building to 20 cm apart inside it, a test of finer bounce light (about 20 times the probe work).
+The light lab (the default game, `--game lightlab`; the exe alone in the zip) has the same controls for moving and looking (F1-F5) and the flashlight (F, off at the start, held in your right hand in every mode: shine it into the dark back room to watch its bounce light follow it: a fast light, its bounce kept apart with a short memory); the lamps (L) and grenades (G) are the demo's only. Its sun is under Light lab, Sun in the settings window (F5): latitude, day of the year, solar time, hours per second to run the clock, and the sun disc's size (1 is the real half degree). Light lab, Probes, Dense probes switches the light probes from 1 m apart round the building to 20 cm apart inside it, a test of finer bounce light (about 20 times the probe work).
 
 | Input | Action |
 |---|---|

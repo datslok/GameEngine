@@ -12,7 +12,7 @@
 /*
 * Picks the game and starts the engine. Runtime errors are reported cleanly before the program exits.
 * The game is made first, so it outlives the Application that borrows it.
-* --game <name> picks a game (app/game_registry.h; the demo without it). --golden-save captures the golden images as
+* --game <name> picks a game (app/game_registry.h; the light lab without it). --golden-save captures the golden images as
 * references, --golden-check compares with them (engine/golden.h), for the named game or else for every game; both exit
 * with 0 on success.
 */

@@ -19,8 +19,8 @@ namespace {
     // Adding a game is one line here. Plain function pointers: the entries capture nothing, so the table is built at
     // compile time.
     constexpr std::array<GameEntry, 2> games{{
-        {"demo", makeDemo},
-        {"lightlab", makeLightLab}
+        {"lightlab", makeLightLab},
+        {"demo", makeDemo}
     }};
 }
 
