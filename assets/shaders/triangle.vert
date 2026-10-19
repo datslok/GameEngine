@@ -1,4 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "frame_data.glsl"
+#include "instances.glsl"
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
@@ -13,33 +17,20 @@ layout(location = 3) out vec4 worldTangent;
 // Which entry of the material buffer shades this object: the same for every fragment of a triangle (flat, not interpolated).
 layout(location = 4) flat out uint materialIndex;
 
-// One object of the GPU scene (render/gpu/gpu_scene.h, GpuInstance). Camera-relative rendering (render/gpu/camera_relative.h):
-// positions are measured from the camera along the world's axes, so the numbers stay small and precise however far from
-// the world's origin the camera is.
-struct InstanceData {
-    mat4 transform;    // the camera-relative view-projection times the camera-relative model matrix
-    mat4 model;        // places the vertex relative to the camera
-    mat4 normalMatrix; // Inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if the object is squashed flat).
-    vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
-    uvec4 material;    // x: the material's number in the material buffer
-};
-
-// Every object drawn this frame, in batch order: an instanced draw's gl_InstanceIndex counts from its batch's first one.
-layout(std430, set = 1, binding = 1) readonly buffer Instances {
-    InstanceData instances[];
-};
-
 void main() {
-    mat4 transform = instances[gl_InstanceIndex].transform;
-    mat4 model = instances[gl_InstanceIndex].model;
-    mat4 normalMatrix = instances[gl_InstanceIndex].normalMatrix;
-    vec4 handedness = instances[gl_InstanceIndex].handedness;
-    materialIndex = instances[gl_InstanceIndex].material.x;
+    InstanceData instance = instances[drawList[gl_InstanceIndex]];
+    mat4 normalMatrix = instance.normalMatrix;
+    vec4 handedness = instance.handedness;
+    materialIndex = instance.material.x;
 
-    gl_Position = transform * vec4(position, 1.0);
-
-    // Point lights need to know where each fragment is, relative to the camera like the lights themselves.
+    // Camera-relative rendering (render/gpu/camera_relative.h): the camera is subtracted from the model matrix's
+    // translation before any product, as relativeTo does, so positions are measured from the camera along the world's
+    // axes and the numbers stay small and precise however far from the world's origin the camera is. Point lights
+    // need to know where each fragment is, relative to the camera like the lights themselves.
+    mat4 model = instance.model;
+    model[3].xyz -= cameraOrigin.xyz;
     relativePosition = (model * vec4(position, 1.0)).xyz;
+    gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;

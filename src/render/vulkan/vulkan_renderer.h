@@ -227,7 +227,8 @@ private:
     void finishGpuTimings(FrameContext& frame);
 
     BloomComposite drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings, ImDrawData* ui);
-    // The shadow tiles to redraw this frame, each with its casters batched by mesh, and every caster's instance.
+    // The shadow tiles to redraw this frame, each with its casters batched by mesh, and the shadow part of the draw list:
+    // each caster's instance number, one tile after another, following the main pass's part.
     struct ShadowTileDraw {
         const ShadowTile* tile = nullptr;
         BatchedDraws casters;
@@ -236,12 +237,12 @@ private:
 
     struct ShadowDraws {
         std::vector<ShadowTileDraw> tiles;
-        std::vector<GpuShadowInstance> instances;
+        std::vector<std::uint32_t> drawList;
     };
 
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws);
-    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles);
+    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;

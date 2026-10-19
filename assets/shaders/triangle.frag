@@ -30,12 +30,8 @@ layout(location = 4) flat in uint materialIndex;
 // whole group of pixels shaded together.
 layout(set = 0, binding = 0) uniform sampler2D textures[];
 
-// The same for every pixel of the frame. Must match GpuFrameData in render/gpu/gpu_scene.h.
-layout(std140, set = 1, binding = 0) uniform FrameData {
-    vec4 ambient;
-    ivec4 counts;    // x: directional lights used, y: point lights used, z: spotlights used
-    vec4 atlasTexel; // xy: one shadow atlas texel's size in atlas coordinates
-};
+// The frame's uniform block: ambient light, light counts and the atlas texel size are what this shader reads of it.
+#include "frame_data.glsl"
 
 // Must match GpuMaterial in render/gpu/material_uniforms.h.
 struct MaterialData {

@@ -702,7 +702,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.drawn = visible.size();
     stats.culled = description.draws.size() - visible.size();
 
-    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles);
+    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
@@ -732,25 +732,34 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 }
 
 /*
-* The frame's GPU scene, into its upload buffers: the frame's uniform block, an instance per visible draw (in the main
-* pass's batch order, so a batch's instances are consecutive) with its material numbered in the frame's material
-* table, the lights with their shadows, the shadow tiles and the shadow casters' instances. Returns the scene's set 1,
-* pointing at them and at the shadow atlas and BRDF table, bound once per pass.
+* The frame's GPU scene, into its upload buffers: the frame's uniform block, one instance per draw in the frame (instance
+* i is draw i, whichever views draw it) with its material numbered in the frame's material table, the lights with their
+* shadows, the shadow tiles, and the draw list: the main pass's instance numbers in batch order (so each batch is a run),
+* then the shadow tiles'. Returns the scene's set 1, pointing at them and at the shadow atlas and BRDF table, bound once
+* per pass.
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
-    instances.reserve(mainDraws.order.size());
+    instances.reserve(description.draws.size());
 
-    for (std::size_t index : mainDraws.order) {
-        const DrawItem& draw = description.draws[index];
+    for (const DrawItem& draw : description.draws) {
         checkTexturesUploaded(draw.material);
-        instances.push_back(packInstance(draw, relativeViewProjection, cameraOrigin, materials.add(draw.material)));
+        instances.push_back(packInstance(draw, materials.add(draw.material)));
     }
 
+    std::vector<std::uint32_t> drawList;
+    drawList.reserve(mainDraws.order.size() + shadowDraws.drawList.size());
+
+    for (std::size_t index : mainDraws.order) {
+        drawList.push_back(static_cast<std::uint32_t>(index));
+    }
+
+    drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
+
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
-    const GpuFrameData frameData = makeFrameData(lights);
+    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
@@ -758,7 +767,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.pointLights.write(lights.points);
     buffers.spotLights.write(lights.spots);
     buffers.shadowTiles.write(shadows.tileData);
-    buffers.shadowInstances.write(shadowDraws.instances);
+    buffers.drawList.write(drawList);
 
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -773,10 +782,11 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 * Which shadow tiles to redraw, and what goes into each. A tile whose view and casters are what was drawn into it last
 * time keeps its contents (shadow caching). Casters are found in two steps: first the ones the tile's light can reach at
 * all (one sphere test each, shared by a point light's six faces, which come one after another), then those inside the
-* tile's own frustum. Each redrawn tile's casters are batched by mesh, their instances (the tile's view times the
-* caster's model matrix) one tile after another.
+* tile's own frustum. Each redrawn tile's casters are batched by mesh, their instance numbers (instance i is draw i)
+* listed one tile after another, from entry firstEntry of the draw list.
 */
-VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles) {
+VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
+                                                               std::uint32_t firstEntry) {
     ShadowDraws prepared;
     std::vector<std::size_t> inReach;
     const BoundingSphere* reachOfList = nullptr;
@@ -805,10 +815,10 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
             continue;
         }
 
-        BatchedDraws batched = batchByMesh(description.draws, casters, static_cast<std::uint32_t>(prepared.instances.size()));
+        BatchedDraws batched = batchByMesh(description.draws, casters, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()));
 
         for (std::size_t index : batched.order) {
-            prepared.instances.push_back(packShadowInstance(tile.matrix, description.draws[index].model));
+            prepared.drawList.push_back(static_cast<std::uint32_t>(index));
         }
 
         stats.shadowDrawn += casters.size();
@@ -851,6 +861,9 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         drawFullScreenTriangle(commands);
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline->get());
 
+        const GpuShadowView view = packShadowView(tile.matrix);
+        vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
+
         stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches);
         shadowMemory.remember(tile, drawing.signature);
     }
@@ -887,7 +900,8 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
 
 /*
 * One instanced draw per batch: the mesh's buffers bound, and every instance of it drawn at once (gl_InstanceIndex counts
-* from firstInstance, the batch's first record in the instance buffer). Returns how many draw calls that took.
+* from firstInstance, the batch's first entry in the draw list, which names each instance). Returns how many draw calls
+* that took.
 */
 std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const {
     for (const DrawBatch& batch : batches) {

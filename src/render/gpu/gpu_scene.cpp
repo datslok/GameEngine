@@ -1,6 +1,5 @@
 #include "render/gpu/gpu_scene.h"
 #include "core/hash.h"
-#include "render/gpu/camera_relative.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/shadow_map.h"
 
@@ -8,29 +7,32 @@
 #include <cstring>
 
 /*
-* The same products in the same order as the per-draw uniforms had, so every vertex lands exactly where it did.
+* World space, so the shadow pass (whose cache keys on world matrices) and the camera share the record; the camera's
+* subtraction happens in the vertex shader, on the matrix, before any product (see camera_relative.h).
 */
-GpuInstance packInstance(const DrawItem& draw, const Mat4& relativeViewProjection, const Vec3& cameraOrigin, std::uint32_t material) {
-    const Mat4 relativeModel = relativeTo(draw.model, cameraOrigin);
-
+GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
     GpuInstance instance{};
-    writeColumnMajor(relativeViewProjection * relativeModel, instance.transform);
-    writeColumnMajor(relativeModel, instance.model);
+    writeColumnMajor(draw.model, instance.model);
     writeColumnMajor(normalMatrix(draw.model), instance.normalMatrix);
     instance.handedness[0] = handedness(draw.model);
     instance.material[0] = material;
     return instance;
 }
 
-GpuShadowInstance packShadowInstance(const Mat4& tileMatrix, const Mat4& model) {
-    GpuShadowInstance instance{};
-    writeColumnMajor(tileMatrix * model, instance.transform);
-    return instance;
+// Column-major like every matrix the shaders read, for vkCmdPushConstants.
+GpuShadowView packShadowView(const Mat4& tileMatrix) {
+    GpuShadowView view{};
+    writeColumnMajor(tileMatrix, view.matrix);
+    return view;
 }
 
 // The atlas never changes size, so its texel is a constant; it rides along here because the shader wants it per pixel.
-GpuFrameData makeFrameData(const GpuLights& lights) {
+GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin) {
     GpuFrameData frame{};
+    writeColumnMajor(relativeViewProjection, frame.relativeViewProjection);
+    frame.cameraOrigin[0] = cameraOrigin.x;
+    frame.cameraOrigin[1] = cameraOrigin.y;
+    frame.cameraOrigin[2] = cameraOrigin.z;
     std::copy(lights.ambient, lights.ambient + 4, frame.ambient);
     std::copy(lights.counts, lights.counts + 4, frame.counts);
     frame.atlasTexel[0] = 1.0f / static_cast<float>(shadowAtlasWidth);

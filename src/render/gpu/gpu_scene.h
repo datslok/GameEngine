@@ -15,52 +15,56 @@
 
 /*
 * The GPU scene: the frame's objects, materials and lights as arrays in storage buffers, written once per frame, which
-* the shaders index themselves (an object by its instance number, its material by the number the object carries, its
-* textures by the numbers the material carries). A draw then names only a mesh and a run of instances, so every object
-* with the same mesh is one instanced draw, and nothing is bound per object. These are the parts that do not touch the
+* the shaders index themselves: every object of the frame once (its instance), then a draw list of instance numbers, one
+* run per view and mesh, each vertex shader reading draw list entry gl_InstanceIndex; an instance carries its material's
+* number, a material its textures' numbers. A draw then names only a mesh and a run of the draw list, so every object
+* with the same mesh is one instanced draw in each view, and nothing is bound per object. These are the parts that do not touch the
 * graphics API: the records' layouts (std430, mirrored in the shaders) and how the frame's draws are grouped.
 */
 
 /*
-* One object as triangle.vert reads it from the instance buffer: what each draw used to push as its vertex uniform block
-* (the camera-relative transform and model matrix, the normal matrix and the handedness, all column-major), and the
-* number of its material in the frame's material table.
+* One object as the scene's vertex shaders read it from the instance buffer, the same for every view (the camera's and
+* every shadow tile's), so it is written once per frame: the world model matrix, the normal matrix and the handedness
+* (all column-major), and the number of its material in the frame's material table. Each view multiplies in its own
+* matrix on the GPU. Ray tracing's instances (6d) and GPU culling will read the same records.
 */
 struct GpuInstance {
-    float transform[16];    // the camera-relative view-projection times the camera-relative model matrix
-    float model[16];        // places the vertex relative to the camera
+    float model[16];        // places the vertex in the world
     float normalMatrix[16]; // inverse transpose of the model's 3x3 part (zero if squashed flat)
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1
     std::uint32_t material[4]; // x: the material's number in the frame's material buffer
 };
 
-static_assert(sizeof(GpuInstance) == 224, "GpuInstance must match the shader's InstanceData struct");
+static_assert(sizeof(GpuInstance) == 160, "GpuInstance must match the shader's InstanceData struct");
 
-// One shadow caster in one shadow tile, as shadow.vert reads it: the tile's view-projection times the model matrix.
-struct GpuShadowInstance {
-    float transform[16];
+// A shadow tile's view-projection (column-major, world space), pushed before its casters are drawn.
+struct GpuShadowView {
+    float matrix[16];
 };
 
-static_assert(sizeof(GpuShadowInstance) == 64, "GpuShadowInstance must match the shader's ShadowInstanceData struct");
+static_assert(sizeof(GpuShadowView) == 64, "GpuShadowView must match shadow.vert's push constants");
 
 /*
-* The frame's small uniform block, the same for every pixel (std140): the ambient light, how many lights of each kind
-* the light buffers hold this frame, and the size of one shadow atlas texel.
+* The frame's small uniform block (std140): for the vertex shader the camera's view-projection measured from the camera
+* and the camera's position, which make each instance camera-relative (render/gpu/camera_relative.h); for every pixel
+* the ambient light, how many lights of each kind the light buffers hold this frame, and the size of one shadow atlas texel.
 */
 struct GpuFrameData {
+    float relativeViewProjection[16];
+    float cameraOrigin[4];  // xyz
     float ambient[4];
     std::int32_t counts[4]; // x: directional lights, y: point lights, z: spotlights
     float atlasTexel[4];    // xy: one texel's size in atlas coordinates
 };
 
-static_assert(sizeof(GpuFrameData) == 48, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 128, "GpuFrameData must match the shader's FrameData block");
 
-// The instance record for one draw, worked out exactly as the per-draw uniforms were (so the picture stays the same).
-GpuInstance packInstance(const DrawItem& draw, const Mat4& relativeViewProjection, const Vec3& cameraOrigin, std::uint32_t material);
+// One object's instance, with the number its material got in the frame's MaterialTable.
+GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
-GpuShadowInstance packShadowInstance(const Mat4& tileMatrix, const Mat4& model);
+GpuShadowView packShadowView(const Mat4& tileMatrix);
 
-GpuFrameData makeFrameData(const GpuLights& lights);
+GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin);
 
 /*
 * The frame's materials, one entry per different material: draws carry their materials by value, and many share one (a

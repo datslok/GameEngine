@@ -16,7 +16,8 @@
 * The descriptor layout of the scene's pipelines (the main pass, the shadow pass and its tile reset), which left
 * SDL_GPU's four sets behind with the GPU scene: set 0 is every texture (BindlessTextures, made once), set 1 the frame's
 * scene (made once per frame and bound once per pass): its uniform block, the storage buffers of instances, materials,
-* lights, shadow tiles and shadow instances, and the shadow atlas and BRDF table. Nothing is bound per draw.
+* lights, shadow tiles and the draw list, and the shadow atlas and BRDF table. Nothing is bound per draw; each shadow
+* tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded straight into the command buffer.
 */
 inline constexpr std::uint32_t bindlessTextureSet = 0;
 inline constexpr std::uint32_t sceneFrameSet = 1;
@@ -33,12 +34,12 @@ enum SceneBinding : std::uint32_t {
     ShadowAtlasBinding = 7,
     ShadowDepthsBinding = 8,
     BrdfTableBinding = 9,
-    ShadowInstancesBinding = 10,
+    DrawListBinding = 10,
     SceneBindingCount = 11
 };
 
-// Set 1's layout and the pipeline layout of both sets, shared by every scene pipeline, so the sets bound for one stay
-// bound for the next.
+// Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
+// so the sets bound for one stay bound for the next.
 class SceneLayout {
 public:
     SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout);
@@ -94,7 +95,7 @@ struct SceneBuffers {
     UploadArray pointLights;
     UploadArray spotLights;
     UploadArray shadowTiles;
-    UploadArray shadowInstances;
+    UploadArray drawList;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, and the BRDF table.

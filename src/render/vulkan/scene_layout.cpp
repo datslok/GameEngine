@@ -1,4 +1,5 @@
 #include "render/vulkan/scene_layout.h"
+#include "render/gpu/gpu_scene.h"
 #include "render/vulkan/vulkan_check.h"
 
 #include <algorithm>
@@ -13,7 +14,7 @@ namespace {
 
     // What each binding of set 1 holds and which stages read it, in SceneBinding order.
     constexpr std::array<BindingKind, SceneBindingCount> sceneBindings{{
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // frame data
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT}, // frame data
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT},           // instances
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // materials
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // directional lights
@@ -23,7 +24,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, // shadow atlas, compared
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, // shadow atlas, raw depths
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, // BRDF table
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT},           // shadow instances
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT},           // draw list
     }};
 }
 
@@ -48,10 +49,15 @@ SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout) 
 
     const std::array<VkDescriptorSetLayout, 2> setLayouts{bindlessLayout, createdLayout};
 
+    // Only the shadow pass pushes anything: each tile's view, for its vertex shader.
+    const VkPushConstantRange shadowView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
+
     VkPipelineLayoutCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
     pipelineInfo.pSetLayouts = setLayouts.data();
+    pipelineInfo.pushConstantRangeCount = 1;
+    pipelineInfo.pPushConstantRanges = &shadowView;
 
     VkPipelineLayout createdPipelineLayout = VK_NULL_HANDLE;
     vulkanCheck(vkCreatePipelineLayout(device, &pipelineInfo, nullptr, &createdPipelineLayout), "Scene pipeline layout creation failed");
@@ -97,7 +103,7 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     pointLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     spotLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     shadowTiles(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    shadowInstances(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -115,7 +121,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
-        buffers.shadowInstances.describe(),
+        buffers.drawList.describe(),
     };
 
     std::array<VkDescriptorImageInfo, SceneBindingCount> imageInfos{};
