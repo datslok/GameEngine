@@ -15,12 +15,12 @@ inline constexpr int maxPointLights = 1024;
 inline constexpr int maxSpotLights = 256;
 
 /*
-* How many lights get a seat in the shader by default (LightPrioritySettings), well below the buffers' room: until
-* clustered shading, every pixel loops over every seated light, so the cost grows with lights times pixels. A light out
-* of a pixel's range costs only a distance check, so dozens are cheap; hundreds wait for clustering.
+* How many lights get a seat in the shader by default (LightPrioritySettings): all the buffers hold. With clustered
+* shading (render/gpu/clusters.h) each pixel loops only over the lights listed for its cluster, so a light costs only
+* where it reaches, not on every pixel of the screen. Light priority then mostly hands out the shadows.
 */
-inline constexpr int defaultPointSeats = 64;
-inline constexpr int defaultSpotSeats = 8;
+inline constexpr int defaultPointSeats = maxPointLights;
+inline constexpr int defaultSpotSeats = maxSpotLights;
 
 /*
 * The light records triangle.frag reads, one storage buffer per kind (std430, the layout of storage buffers: a scalar

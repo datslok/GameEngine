@@ -55,7 +55,12 @@ namespace {
     // The engine gives every seated point light a shadow, so a light can only lose its shadow by losing its seat. The
     // tests of shadow-only handovers use a cap below the seats, as a game could.
     constexpr int shadowCap = 16;
-    const LightPrioritySettings fewShadows{.shadowedPoints = shadowCap};
+    // The seats these tests hand out: fewer than the buffers hold (every light is seated by default), so there are more
+    // lights than seats to choose between.
+    constexpr int testPointSeats = 64;
+    constexpr int testSpotSeats = 8;
+    const LightPrioritySettings seated{.pointSeats = testPointSeats, .spotSeats = testSpotSeats};
+    const LightPrioritySettings fewShadows{.pointSeats = testPointSeats, .spotSeats = testSpotSeats, .shadowedPoints = shadowCap};
 
     bool isShadowed(const std::vector<PlacedPointLight>& lights, std::uint32_t entityIndex) {
         return std::any_of(lights.begin(), lights.end(), [&](const PlacedPointLight& placed) {
@@ -86,31 +91,31 @@ namespace {
     void testNearestPointLightsGetTheSeats() {
         FrameLighting lighting;
 
-        const std::uint32_t lightCount = defaultPointSeats + 6;
+        const std::uint32_t lightCount = testPointSeats + 6;
 
         for (std::uint32_t i = 0; i < lightCount; ++i) {
             // Further from the focus the earlier they are collected.
             lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, -10.0f - static_cast<float>(lightCount - i)}, i + 1));
         }
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
-        assert(static_cast<int>(result.lighting.pointLights.size()) == defaultPointSeats);
+        assert(static_cast<int>(result.lighting.pointLights.size()) == testPointSeats);
 
         for (std::uint32_t i = 0; i < 6; ++i) {
             assert(!containsLight(result.lighting.pointLights, i + 1));
         }
 
         assert(containsLight(result.lighting.pointLights, lightCount));
-        assert(result.history.points.size() == static_cast<std::size_t>(defaultPointSeats));
+        assert(result.history.points.size() == static_cast<std::size_t>(testPointSeats));
     }
 
-    // The shader's light buffer holds far more lights than are seated by default: each pixel still loops over every
-    // seated light until clustered shading, so 64 point and 8 spot seats stay the default, and more can be asked for, up
-    // to the buffer's capacity.
-    void testSeatsCanGrowToTheBuffersCapacity() {
+    // Since clustered shading each pixel loops only over the lights listed for its cluster, so a seated light costs
+    // only where it reaches, and every light the buffers hold is seated by default. Fewer can be asked for, and more
+    // are clamped to the buffers' capacity.
+    void testSeatsDefaultToTheBuffersCapacity() {
         assert(LightPrioritySettings{}.pointSeats == defaultPointSeats && LightPrioritySettings{}.spotSeats == defaultSpotSeats);
-        assert(defaultPointSeats < maxPointLights && defaultSpotSeats < maxSpotLights);
+        assert(defaultPointSeats == maxPointLights && defaultSpotSeats == maxSpotLights);
 
         FrameLighting lighting;
         const std::uint32_t lightCount = static_cast<std::uint32_t>(maxPointLights) + 6;
@@ -119,11 +124,12 @@ namespace {
             lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, -10.0f - 0.01f * static_cast<float>(i)}, i + 1));
         }
 
-        LightPrioritySettings more;
-        more.pointSeats = 100;
-        const PrioritizedLighting hundred = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, more);
+        LightPrioritySettings fewer;
+        fewer.pointSeats = 100;
+        const PrioritizedLighting hundred = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, fewer);
         assert(hundred.lighting.pointLights.size() == 100);
 
+        LightPrioritySettings more;
         more.pointSeats = 100000;
         const PrioritizedLighting all = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, more);
         assert(all.lighting.pointLights.size() == static_cast<std::size_t>(maxPointLights));
@@ -137,7 +143,7 @@ namespace {
         lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, 3.0f}, 2));   // behind, but its range reaches into view
         lighting.spotLights.push_back(spotLight(Vec3{0.0f, 0.0f, 10.0f}, 3));
 
-        const PrioritizedLighting result = prioritizeLights(lighting, Vec3{0.0f, 0.0f, 8.0f}, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, Vec3{0.0f, 0.0f, 8.0f}, makeTestView(), LightHistory{}, frame, seated);
 
         assert(result.lighting.pointLights.size() == 1);
         assert(result.lighting.pointLights[0].entity.index == 2);
@@ -155,7 +161,7 @@ namespace {
         lighting.pointLights.push_back(noRange);
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, 0.0f, 0.0f}});
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
         assert(result.lighting.pointLights.empty());
         assert(result.lighting.directionalLights.empty());
@@ -245,18 +251,18 @@ namespace {
     void testLitLightKeepsItsSeatAgainstSimilarRivals() {
         FrameLighting lighting;
 
-        const std::uint32_t newcomer = defaultPointSeats + 1;
+        const std::uint32_t newcomer = testPointSeats + 1;
 
-        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(defaultPointSeats); ++i) {
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(testPointSeats); ++i) {
             lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, -10.0f}, i + 1, 1.0f));
         }
 
         lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, -10.0f}, newcomer, 0.5f));
-        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
         assert(!containsLight(before.lighting.pointLights, newcomer));
 
         lighting.pointLights.back().light.intensity = 1.1f;
-        const PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame);
+        const PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame, seated);
         assert(!containsLight(after.lighting.pointLights, newcomer));
     }
 
@@ -276,7 +282,7 @@ namespace {
         LightHistory history;
         history.points.push_back(LightFade{Entity{}, 1.0f, 1.0f});
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), history, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), history, frame, seated);
 
         for (const PlacedPointLight& placed : result.lighting.pointLights) {
             assert(placed.light.castsShadows == (placed.entity != Entity{}));
@@ -292,17 +298,17 @@ namespace {
             lighting.spotLights.push_back(spotLight(Vec3{0.0f, 0.0f, -10.0f - 1.5f * static_cast<float>(i)}, i + 1));
         }
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
-        assert(static_cast<int>(result.lighting.spotLights.size()) == defaultSpotSeats);
+        assert(static_cast<int>(result.lighting.spotLights.size()) == testSpotSeats);
 
         for (const PlacedSpotLight& placed : result.lighting.spotLights) {
             assert(placed.entity.index >= 1 && placed.entity.index <= 8);
             assert(placed.light.castsShadows);
         }
 
-        assert(result.history.spots.size() == static_cast<std::size_t>(defaultSpotSeats));
-        assert(countHeldShadows(result.history.spots) == static_cast<std::size_t>(defaultSpotSeats));
+        assert(result.history.spots.size() == static_cast<std::size_t>(testSpotSeats));
+        assert(countHeldShadows(result.history.spots) == static_cast<std::size_t>(testSpotSeats));
     }
 
     // Directional lights have no position, so the brightest ones win.
@@ -313,7 +319,7 @@ namespace {
             lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, -1.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, static_cast<float>(i)});
         }
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
         assert(static_cast<int>(result.lighting.directionalLights.size()) == maxDirectionalLights);
 
@@ -327,7 +333,7 @@ namespace {
         FrameLighting lighting;
         lighting.ambient = Vec3{0.1f, 0.2f, 0.3f};
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
         assert(result.lighting.ambient.x == 0.1f && result.lighting.ambient.y == 0.2f && result.lighting.ambient.z == 0.3f);
     }
@@ -338,7 +344,7 @@ namespace {
     void testHigherPriorityWinsASeat() {
         FrameLighting lighting;
 
-        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(defaultPointSeats); ++i) {
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(testPointSeats); ++i) {
             lighting.pointLights.push_back(pointLight(focus, i + 1));
         }
 
@@ -346,9 +352,9 @@ namespace {
         marked.light.priority = 1;
         lighting.pointLights.push_back(marked);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
-        assert(static_cast<int>(result.lighting.pointLights.size()) == defaultPointSeats);
+        assert(static_cast<int>(result.lighting.pointLights.size()) == testPointSeats);
         assert(containsLight(result.lighting.pointLights, 100));
     }
 
@@ -378,17 +384,17 @@ namespace {
             lighting.pointLights.push_back(pointLight(focus, i + 1));
         }
 
-        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting before = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
         PlacedPointLight marked = pointLight(focus, 100, 0.5f);
         marked.light.priority = 1;
         lighting.pointLights.push_back(marked);
 
         // It gets the shadow as soon as one of the others has faded out, within one fade.
-        PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame);
+        PrioritizedLighting after = prioritizeLights(lighting, focus, makeTestView(), before.history, frame, seated);
 
         for (float elapsed = frame; elapsed < LightPrioritySettings{}.fadeSeconds + 5.0f * frame; elapsed += frame) {
-            after = prioritizeLights(lighting, focus, makeTestView(), after.history, frame);
+            after = prioritizeLights(lighting, focus, makeTestView(), after.history, frame, seated);
         }
 
         assert(isShadowed(after.lighting.pointLights, 100));
@@ -405,7 +411,7 @@ namespace {
         spotBehind.light.priority = 5;
         lighting.spotLights.push_back(spotBehind);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
         assert(result.lighting.pointLights.empty());
         assert(result.lighting.spotLights.empty());
     }
@@ -414,7 +420,7 @@ namespace {
     void testSpotLightPriority() {
         FrameLighting lighting;
 
-        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(defaultSpotSeats); ++i) {
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(testSpotSeats); ++i) {
             lighting.spotLights.push_back(spotLight(focus, i + 1));
         }
 
@@ -422,9 +428,9 @@ namespace {
         marked.light.priority = 1;
         lighting.spotLights.push_back(marked);
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
-        assert(static_cast<int>(result.lighting.spotLights.size()) == defaultSpotSeats);
+        assert(static_cast<int>(result.lighting.spotLights.size()) == testSpotSeats);
         assert(result.lighting.spotLights[0].entity.index == 100); // most important first
     }
 
@@ -453,7 +459,7 @@ namespace {
         lighting.pointLights.push_back(pointLight(focus, 1));
         lighting.spotLights.push_back(spotLight(focus, 2));
 
-        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        const PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
         assert(result.lighting.pointLights[0].fade == 1.0f && result.lighting.pointLights[0].shadowFade == 1.0f);
         assert(result.lighting.spotLights[0].fade == 1.0f && result.lighting.spotLights[0].shadowFade == 1.0f);
@@ -503,44 +509,44 @@ namespace {
     // Seats hand over the same way: the displaced light dims to nothing before the newcomer fades in.
     void testSeatHandoverFades() {
         FrameLighting lighting;
-        const std::uint32_t newcomer = defaultPointSeats + 1;
+        const std::uint32_t newcomer = testPointSeats + 1;
 
-        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(defaultPointSeats); ++i) {
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(testPointSeats); ++i) {
             lighting.pointLights.push_back(pointLight(focus, i + 1));
         }
 
         lighting.pointLights.push_back(pointLight(focus, newcomer, 0.5f));
-        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
         assert(findLight(result.lighting.pointLights, newcomer) == nullptr);
 
         lighting.pointLights.back().light.intensity = 2.0f;
-        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
-        assert(static_cast<int>(result.lighting.pointLights.size()) == defaultPointSeats);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f, seated);
+        assert(static_cast<int>(result.lighting.pointLights.size()) == testPointSeats);
         assert(findLight(result.lighting.pointLights, newcomer) == nullptr);
-        assert(std::abs(findLight(result.lighting.pointLights, defaultPointSeats)->fade - 0.6f) < 1e-4f);
+        assert(std::abs(findLight(result.lighting.pointLights, testPointSeats)->fade - 0.6f) < 1e-4f);
 
-        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
-        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
-        assert(findLight(result.lighting.pointLights, defaultPointSeats) == nullptr);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f, seated);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f, seated);
+        assert(findLight(result.lighting.pointLights, testPointSeats) == nullptr);
         assert(std::abs(findLight(result.lighting.pointLights, newcomer)->fade - 0.4f) < 1e-4f);
-        assert(static_cast<int>(result.lighting.pointLights.size()) == defaultPointSeats);
+        assert(static_cast<int>(result.lighting.pointLights.size()) == testPointSeats);
     }
 
     // A light that leaves the view goes at once (it lights nothing on screen), and a light waiting for a seat takes it,
     // fading in, since it was in view and unlit until now.
     void testLeavingTheViewFreesASeatAtOnce() {
         FrameLighting lighting;
-        const std::uint32_t waiting = defaultPointSeats + 1;
+        const std::uint32_t waiting = testPointSeats + 1;
 
-        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(defaultPointSeats); ++i) {
+        for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(testPointSeats); ++i) {
             lighting.pointLights.push_back(pointLight(focus, i + 1));
         }
 
         lighting.pointLights.push_back(pointLight(focus, waiting, 0.5f));
-        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
 
         lighting.pointLights[0].position = Vec3{0.0f, 0.0f, 50.0f}; // behind the camera
-        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, 0.1f, seated);
 
         assert(findLight(result.lighting.pointLights, 1) == nullptr);
         assert(std::abs(findLight(result.lighting.pointLights, waiting)->fade - 0.4f) < 1e-4f);
@@ -550,11 +556,11 @@ namespace {
     void testEnteringTheViewStartsFull() {
         FrameLighting lighting;
         lighting.pointLights.push_back(pointLight(Vec3{0.0f, 0.0f, 50.0f}, 1));
-        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame);
+        PrioritizedLighting result = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, seated);
         assert(result.lighting.pointLights.empty());
 
         lighting.pointLights[0].position = focus;
-        result = prioritizeLights(lighting, focus, makeTestView(), result.history, frame);
+        result = prioritizeLights(lighting, focus, makeTestView(), result.history, frame, seated);
         assert(result.lighting.pointLights[0].fade == 1.0f);
         assert(result.lighting.pointLights[0].shadowFade == 1.0f);
     }
@@ -585,7 +591,7 @@ namespace {
 }
 
 void testLightPriority() {
-    testSeatsCanGrowToTheBuffersCapacity();
+    testSeatsDefaultToTheBuffersCapacity();
     testNewLightsStartAtFullStrength();
     testShadowHandoverFades();
     testSeatHandoverFades();
