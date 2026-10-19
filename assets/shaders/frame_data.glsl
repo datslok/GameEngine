@@ -9,12 +9,13 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 ambient;
     ivec4 counts;                // x: directional lights used, y: point lights used, z: spotlights used
     vec4 atlasTexel;             // xy: one shadow atlas texel's size in atlas coordinates
-    ivec4 clusterTiles;          // x: tiles across, y: tiles down, z: depth slices, w: 1 shades from the clusters' lists
+    ivec4 clusterTiles;          // x: tiles across, y: tiles down, z: depth slices
     vec4 clusterScreen;          // xy: the screen in pixels, z: half the view's width at depth 1, w: its half height
     vec4 clusterSlicing;         // x: slice scale, y: slice bias
     vec4 viewRight;              // xyz: the view's axes in the world
     vec4 viewUp;
     vec4 viewForward;
+    ivec4 shadingOptions;        // x: 1 shades from the clusters' lists, y: 1 shows their light counts (the heatmap)
 };
 
 #endif

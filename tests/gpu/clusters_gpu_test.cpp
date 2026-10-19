@@ -210,6 +210,22 @@ namespace {
             report.check("coneTouchesSphere", exactTolerance, touches ? 1.0f : 0.0f, coneOutputs[i][0]);
         }
     }
+
+    // Every light count from none to past the full scale.
+    void checkHeatColour(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const ClusterGrid grid = testGrid();
+        std::vector<GpuVec4> inputs;
+
+        for (int lights = 0; lights <= 2 * clusterHeatmapLights; ++lights) {
+            addCase(inputs, grid, gpuVec4(static_cast<float>(lights)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLUSTER_HEAT_COLOUR, inputs, inputsPerCase, 1);
+
+        for (std::size_t i = 0; i < caseCount(inputs); ++i) {
+            report.check("clusterHeatColour", arithmeticTolerance, clusterHeatColour(static_cast<int>(i)), vec3From(outputs[i]));
+        }
+    }
 }
 
 void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -219,4 +235,5 @@ void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkClusterOfPixel(runner, report);
     checkClusterBounds(runner, report);
     checkTouchTests(runner, report);
+    checkHeatColour(runner, report);
 }

@@ -29,6 +29,7 @@ inline constexpr int clusterSpotWords = CLUSTER_SPOT_WORDS;
 inline constexpr int clusterWords = CLUSTER_WORDS;
 inline constexpr float clusterBoundsMargin = static_cast<float>(CLUSTER_BOUNDS_MARGIN);
 inline constexpr std::uint32_t clusterGroupSize = CLUSTER_GROUP_SIZE;
+inline constexpr int clusterHeatmapLights = CLUSTER_HEATMAP_LIGHTS;
 
 static_assert(clusterPointWords * 32 == maxPointLights, "a cluster needs one bit per point light");
 static_assert(clusterSpotWords * 32 == maxSpotLights, "a cluster needs one bit per spotlight");
@@ -118,3 +119,11 @@ struct ClusterMasks {
 
 // What cluster_lights.comp computes, for the frame's lights as the shader gets them (positions measured from the camera).
 ClusterMasks buildClusterMasks(const ClusterGrid& grid, const GpuLights& lights);
+
+/*
+* The heatmap debug view's colour ramp over 0..1: blue, green, yellow, red at 0, 1/3, 2/3 and 1, each channel a
+* clamped straight line, so it has no branches and the stops are exact. clusterHeatColour turns a cluster's light count
+* into it, black for none and red from clusterHeatmapLights up.
+*/
+Vec3 clusterHeatRamp(float fraction);
+Vec3 clusterHeatColour(int lights);

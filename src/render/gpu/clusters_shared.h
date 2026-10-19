@@ -20,6 +20,9 @@
 // into a neighbouring cluster still finds every light that reaches it.
 #define CLUSTER_BOUNDS_MARGIN 0.001
 
+// The heatmap debug view's full scale: a cluster listing this many lights or more is red.
+#define CLUSTER_HEATMAP_LIGHTS 16
+
 // Invocations per workgroup of cluster_lights.comp: 32 clusters, each testing one word's 32 lights at a time.
 #define CLUSTER_GROUP_SIZE 32
 

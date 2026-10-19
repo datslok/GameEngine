@@ -36,7 +36,7 @@ namespace {
 }
 
 GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
-                           const ClusterGrid& clusters, bool clusteredShading) {
+                           const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap) {
     GpuFrameData frame{};
     writeColumnMajor(relativeViewProjection, frame.relativeViewProjection);
     frame.cameraOrigin[0] = cameraOrigin.x;
@@ -49,7 +49,6 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
     frame.clusterTiles[0] = clusters.tilesX;
     frame.clusterTiles[1] = clusters.tilesY;
     frame.clusterTiles[2] = clusters.slices;
-    frame.clusterTiles[3] = clusteredShading ? 1 : 0;
     frame.clusterScreen[0] = static_cast<float>(clusters.screenWidth);
     frame.clusterScreen[1] = static_cast<float>(clusters.screenHeight);
     frame.clusterScreen[2] = clusters.tanHalfWidth;
@@ -59,6 +58,8 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
     writeAxis(clusters.right, frame.viewRight);
     writeAxis(clusters.up, frame.viewUp);
     writeAxis(clusters.forward, frame.viewForward);
+    frame.shadingOptions[0] = clusteredShading ? 1 : 0;
+    frame.shadingOptions[1] = clusterHeatmap ? 1 : 0;
     return frame;
 }
 

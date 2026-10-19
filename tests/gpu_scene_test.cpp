@@ -191,7 +191,7 @@ namespace {
         const Vec3 cameraOrigin{998.0f, 1.0f, -4.0f};
         const Camera camera{cameraOrigin, cameraOrigin + Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 1.5f, 0.1f, 100.0f};
         const GpuFrameData frame = makeFrameData(packLighting(lighting, cameraOrigin), relativeViewProjection, cameraOrigin,
-                                                 makeClusterGrid(camera, 1200, 800), true);
+                                                 makeClusterGrid(camera, 1200, 800), true, false);
 
         float expected[16]{};
         writeColumnMajor(relativeViewProjection, expected);
@@ -207,16 +207,16 @@ namespace {
 
     /*
     * The cluster grid reaches the shaders in the same block, laid out as clusters.glsl's ClusterGrid (tile counts and
-    * slices, the screen and lens, the slicing, the view's axes), with w of the tile counts saying whether the main pass
-    * shades from the clusters' lists or loops over every light.
+    * slices, the screen and lens, the slicing, the view's axes), and the shading options: whether the main pass shades
+    * from the clusters' lists or loops over every light, and whether it shows the clusters' light counts instead.
     */
     void testFrameDataCarriesTheClusterGrid() {
         const Camera camera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{-4.0f, 0.0f, -2.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.1f, 1.6f, 0.1f, 100.0f};
         const ClusterGrid grid = makeClusterGrid(camera, 1280, 800);
-        const GpuFrameData clustered = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true);
+        const GpuFrameData clustered = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false);
 
         assert(clustered.clusterTiles[0] == 20 && clustered.clusterTiles[1] == 13 && clustered.clusterTiles[2] == clusterDepthSlices);
-        assert(clustered.clusterTiles[3] == 1);
+        assert(clustered.shadingOptions[0] == 1 && clustered.shadingOptions[1] == 0);
         assert(clustered.clusterScreen[0] == 1280.0f && clustered.clusterScreen[1] == 800.0f);
         assert(clustered.clusterScreen[2] == grid.tanHalfWidth && clustered.clusterScreen[3] == grid.tanHalfHeight);
         assert(clustered.clusterSlicing[0] == grid.sliceScale && clustered.clusterSlicing[1] == grid.sliceBias);
@@ -224,8 +224,8 @@ namespace {
         assert(clustered.viewUp[0] == grid.up.x && clustered.viewUp[1] == grid.up.y && clustered.viewUp[2] == grid.up.z);
         assert(clustered.viewForward[0] == grid.forward.x && clustered.viewForward[1] == grid.forward.y && clustered.viewForward[2] == grid.forward.z);
 
-        const GpuFrameData looped = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, false);
-        assert(looped.clusterTiles[3] == 0);
+        const GpuFrameData looped = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, false, true);
+        assert(looped.shadingOptions[0] == 0 && looped.shadingOptions[1] == 1);
     }
 }
 

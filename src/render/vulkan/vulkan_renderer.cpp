@@ -762,7 +762,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, settings.clusteredShading);
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, settings);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -770,7 +770,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DebugUi);
     }
 
-    if (settings.clusteredShading) {
+    // The lists feed both clustered shading and its heatmap.
+    if (settings.clusteredShading || settings.clusterHeatmap) {
         beginGpuPass(frame, GpuPass::Clusters);
         buildClusterLists(frame, sceneSet);
         endGpuPass(frame, GpuPass::Clusters);
@@ -808,7 +809,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           bool clusteredShading) {
+                                           const RenderSettings& settings) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
     instances.reserve(description.draws.size());
@@ -828,7 +829,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
-    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, clusteredShading);
+    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
+                                                 settings.clusterHeatmap);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());

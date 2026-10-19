@@ -226,3 +226,19 @@ ClusterMasks buildClusterMasks(const ClusterGrid& grid, const GpuLights& lights)
 
     return masks;
 }
+
+Vec3 clusterHeatRamp(float fraction) {
+    const float scaled = 3.0f * fraction;
+    const float red = std::clamp(scaled - 1.0f, 0.0f, 1.0f);
+    const float green = std::clamp(scaled, 0.0f, 1.0f) - std::clamp(scaled - 2.0f, 0.0f, 1.0f);
+    const float blue = 1.0f - std::clamp(scaled, 0.0f, 1.0f);
+    return Vec3{red, green, blue};
+}
+
+Vec3 clusterHeatColour(int lights) {
+    if (lights <= 0) {
+        return Vec3{0.0f, 0.0f, 0.0f};
+    }
+
+    return clusterHeatRamp(std::min(static_cast<float>(lights) / static_cast<float>(clusterHeatmapLights), 1.0f));
+}

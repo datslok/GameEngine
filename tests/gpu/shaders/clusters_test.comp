@@ -32,5 +32,7 @@ void main() {
         testOutput(0, vec4(sphereTouchesBox(a.xyz, a.w, b.xyz, c.xyz) ? 1.0 : 0.0));
     } else if (function == GPU_TEST_CONE_TOUCHES_SPHERE) {
         testOutput(0, vec4(coneTouchesSphere(a.xyz, b.xyz, a.w, b.w, c.xyz, c.w) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_CLUSTER_HEAT_COLOUR) {
+        testOutput(0, vec4(clusterHeatColour(int(a.x)), 0.0));
     }
 }

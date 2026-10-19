@@ -428,6 +428,45 @@ namespace {
         assert(warnings.empty());
         assert(!settings.clusteredShading);
     }
+
+    /*
+    * The heatmap's colours: black for a cluster with no lights, then blue, green, yellow and red as the count grows to
+    * clusterHeatmapLights, and red beyond. Each stop is a pure colour, and the ramp moves through them in order.
+    */
+    void testHeatmapColours() {
+        const auto same = [](const Vec3& actual, const Vec3& expected) {
+            return nearlyEqual(actual.x, expected.x, 1e-6f) && nearlyEqual(actual.y, expected.y, 1e-6f) && nearlyEqual(actual.z, expected.z, 1e-6f);
+        };
+
+        const float third = static_cast<float>(clusterHeatmapLights) / 3.0f;
+        assert(same(clusterHeatColour(0), Vec3{0.0f, 0.0f, 0.0f}));
+        assert(same(clusterHeatColour(clusterHeatmapLights), Vec3{1.0f, 0.0f, 0.0f}));
+        assert(same(clusterHeatColour(clusterHeatmapLights * 4), Vec3{1.0f, 0.0f, 0.0f}));
+
+        // One light is nearly pure blue, a third of the scale green, two thirds yellow.
+        assert(clusterHeatColour(1).z > 0.8f && clusterHeatColour(1).x == 0.0f);
+        assert(same(clusterHeatColour(static_cast<int>(third)), clusterHeatRamp(static_cast<float>(static_cast<int>(third)) / static_cast<float>(clusterHeatmapLights))));
+        assert(same(clusterHeatRamp(1.0f / 3.0f), Vec3{0.0f, 1.0f, 0.0f}));
+        assert(same(clusterHeatRamp(2.0f / 3.0f), Vec3{1.0f, 1.0f, 0.0f}));
+        assert(same(clusterHeatRamp(0.0f), Vec3{0.0f, 0.0f, 1.0f}));
+
+        // Red rises before green falls: from green to yellow red grows, from yellow to red green shrinks.
+        assert(clusterHeatRamp(0.5f).x > 0.0f && clusterHeatRamp(0.5f).y == 1.0f);
+        assert(clusterHeatRamp(0.8f).x == 1.0f && clusterHeatRamp(0.8f).y < 1.0f);
+    }
+
+    // The heatmap is a debug view: off by default, switchable live.
+    void testHeatmapIsOffByDefault() {
+        assert(!RenderSettings{}.clusterHeatmap);
+
+        RenderSettings settings;
+        const SettingsWalk walk = [&settings](SettingsVisitor& visitor) {
+            visit(settings, visitor);
+        };
+        const std::vector<std::string> warnings = applySettings({{"passes.clusterHeatmap", "true"}}, walk, StartupFields::Keep);
+        assert(warnings.empty());
+        assert(settings.clusterHeatmap);
+    }
 }
 
 void testClusters() {
@@ -444,4 +483,6 @@ void testClusters() {
     testOnlyCountedLightsAreListed();
     testMaskBufferSize();
     testClusteredShadingIsOnByDefaultAndSwitchesLive();
+    testHeatmapColours();
+    testHeatmapIsOffByDefault();
 }

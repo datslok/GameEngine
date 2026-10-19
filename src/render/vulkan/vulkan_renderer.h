@@ -253,7 +253,7 @@ private:
     };
 
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
-                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, bool clusteredShading);
+                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const RenderSettings& settings);
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);

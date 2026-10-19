@@ -98,4 +98,22 @@ bool coneTouchesSphere(vec3 apex, vec3 axis, float cosOuter, float range, vec3 c
     return fromEdge <= radius && along <= range + radius && along >= -radius;
 }
 
+// The heatmap debug view's colour ramp over 0..1: blue, green, yellow, red at 0, 1/3, 2/3 and 1.
+vec3 clusterHeatRamp(float fraction) {
+    float scaled = 3.0 * fraction;
+    float red = clamp(scaled - 1.0, 0.0, 1.0);
+    float green = clamp(scaled, 0.0, 1.0) - clamp(scaled - 2.0, 0.0, 1.0);
+    float blue = 1.0 - clamp(scaled, 0.0, 1.0);
+    return vec3(red, green, blue);
+}
+
+// A cluster's light count as a heatmap colour: black for none, red from CLUSTER_HEATMAP_LIGHTS up.
+vec3 clusterHeatColour(int lights) {
+    if (lights <= 0) {
+        return vec3(0.0);
+    }
+
+    return clusterHeatRamp(min(float(lights) / float(CLUSTER_HEATMAP_LIGHTS), 1.0));
+}
+
 #endif

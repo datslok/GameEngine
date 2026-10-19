@@ -304,6 +304,27 @@ uint lightsOfTheWave(uint bits) {
     return subgroupOr(bits);
 }
 
+// Where this pixel's cluster's bits start in the cluster masks.
+int firstClusterWord() {
+    return clusterOfPixel(frameClusterGrid(), gl_FragCoord.xy, dot(relativePosition, viewForward.xyz)) * CLUSTER_WORDS;
+}
+
+// How many lights this pixel's cluster lists, for the heatmap debug view.
+int clusterLightCount() {
+    int firstWord = firstClusterWord();
+    int lights = 0;
+
+    for (int word = 0; word * 32 < counts.y; ++word) {
+        lights += bitCount(clusterMasks[firstWord + word]);
+    }
+
+    for (int word = 0; word * 32 < counts.z; ++word) {
+        lights += bitCount(clusterMasks[firstWord + CLUSTER_POINT_WORDS + word]);
+    }
+
+    return lights;
+}
+
 void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
@@ -362,11 +383,11 @@ void main() {
             addLight(radiance, directional[i].toLight.xyz, point, diffuse, specular);
         }
 
-        if (clusterTiles.w != 0) {
+        if (shadingOptions.x != 0) {
             // Only the lights listed for this pixel's cluster (cluster_lights.comp), lowest bit first, which is slot
             // order: every light that reaches this point is listed, so these are the lights the loops below would add,
             // in the same order, and the picture is the same to the last bit.
-            int firstWord = clusterOfPixel(frameClusterGrid(), gl_FragCoord.xy, dot(relativePosition, viewForward.xyz)) * CLUSTER_WORDS;
+            int firstWord = firstClusterWord();
 
             for (int word = 0; word * 32 < counts.y; ++word) {
                 uint bits = lightsOfTheWave(clusterMasks[firstWord + word]);
@@ -401,4 +422,9 @@ void main() {
     // Emitted light is added as is.
     vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
     outputColour = vec4(ambientReflected + diffuse + specular + material.emissive.rgb, albedo.a);
+
+    // The heatmap debug view: the picture mostly covered by the colour of how many lights this pixel's cluster lists.
+    if (shadingOptions.y != 0) {
+        outputColour.rgb = mix(outputColour.rgb, clusterHeatColour(clusterLightCount()), 0.75);
+    }
 }
