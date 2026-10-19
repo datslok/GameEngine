@@ -30,6 +30,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // BRDF table
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // draw list
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // cluster masks
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe irradiance (compute for probe rays' hits)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe distances
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, compute},                     // the lights probe rays' hits may need
     }};
 }
 
@@ -112,7 +115,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     pointLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     spotLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     shadowTiles(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -133,12 +137,18 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.drawList.describe(),
         VkDescriptorBufferInfo{clusterMasks.get(), 0, VK_WHOLE_SIZE},
+        VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
+        buffers.probeHitLights.describe(),
     };
 
+    const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
     std::array<VkDescriptorImageInfo, SceneBindingCount> imageInfos{};
-    imageInfos[ShadowAtlasBinding] = {images.shadowAtlas.sampler, images.shadowAtlas.view, images.shadowAtlas.layout};
-    imageInfos[ShadowDepthsBinding] = {images.shadowDepths.sampler, images.shadowDepths.view, images.shadowDepths.layout};
-    imageInfos[BrdfTableBinding] = {images.brdfTable.sampler, images.brdfTable.view, images.brdfTable.layout};
+    imageInfos[ShadowAtlasBinding] = imageInfo(images.shadowAtlas);
+    imageInfos[ShadowDepthsBinding] = imageInfo(images.shadowDepths);
+    imageInfos[BrdfTableBinding] = imageInfo(images.brdfTable);
+    imageInfos[ProbeIrradianceBinding] = imageInfo(images.probeIrradiance);
+    imageInfos[ProbeDistanceBinding] = imageInfo(images.probeDistance);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

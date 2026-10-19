@@ -281,7 +281,8 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
 
 /*
 * The loop's steps without real time: the game is set up and simulated to the view's time, the assets it loaded are
-* uploaded, and the frame is drawn at alpha 1 (on the last tick) off screen at the golden size.
+* uploaded, and the frame is drawn at alpha 1 (on the last tick) off screen at the golden size, after the light probes'
+* warm-up frames (each a tick long) if it has probes.
 */
 CapturedFrame Application::captureGoldenView(const GoldenView& view) {
     advanceToGoldenView(game, world, view, settings.ticksPerSecond);
@@ -289,7 +290,7 @@ CapturedFrame Application::captureGoldenView(const GoldenView& view) {
 
     const float tickSeconds = static_cast<float>(1.0 / static_cast<double>(settings.ticksPerSecond));
     const FrameDescription frame = describeFrame(1.0f, tickSeconds);
-    return renderer.capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr));
+    return renderer.capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr), goldenProbeWarmUpFrames);
 }
 
 std::string Application::getRendererName() const {

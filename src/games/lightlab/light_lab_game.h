@@ -14,7 +14,8 @@
 * Where and when the light lab's sun shines (scene/sun) and how bright the day is. The solar time is the clock: it moves
 * on by itself at hoursPerSecond (0, still, by default), so its slider shows the time of day as it passes.
 * The brightness values are picked by eye for daylight through the default tone mapping, since lights have no physical
-* units yet; the sky is a flat ambient stand-in until a real sky (phase 6d) and bounce light (DDGI) replace it.
+* units yet. The sky is uniform until a real sky (phase 6d) replaces it; the light probes see it and carry its light
+* round the level, and the flat ambient light (where there are no probes) is the light that same sky gives.
 */
 struct LightLabSunSettings {
     float latitudeDegrees = 45.0f;
@@ -22,8 +23,7 @@ struct LightLabSunSettings {
     float solarHours = 15.5f;      // mid-afternoon: the sun low in the west-south-west, long shadows, the window lit
     float hoursPerSecond = 0.0f;   // 0.1 runs a whole day in 4 minutes
     float sunIntensity = 3.0f;
-    float skyAmbient = 0.2f;       // at full daylight; it dims with the sun's height towards dusk
-    float skyBrightness = 1.0f;    // the sky seen behind everything, at full daylight, dimming with the ambient
+    float skyBrightness = 1.0f;    // the sky at full daylight, seen behind everything and lighting it; it dims towards dusk
 
     // The sun disc in the sky against its real size (0.53 degrees across), for looks only: shadows keep the real size,
     // and a bigger disc glows dimmer by as much, so it gives the same light.
@@ -37,8 +37,9 @@ float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);
 
 /*
 * The day's light for the sun in a direction: sunlight travelling away from it, fading out as the sun sinks below the
-* horizon and warmer the lower it stands (a stand-in for the atmosphere's reddening), and the sky's ambient light and
-* the sky seen behind everything, both blue, dimming towards dusk but never quite black.
+* horizon and warmer the lower it stands (a stand-in for the atmosphere's reddening), and the sky seen behind everything
+* with the ambient light it gives (the same value: a uniform sky drawn at B gives a surface facing it the irradiance B),
+* blue, dimming towards dusk but never quite black.
 */
 struct Daylight {
     DirectionalLight sun;

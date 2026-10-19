@@ -40,6 +40,7 @@ void main() {
         testOutput(0, vec4(diffuse, 0.0));
         testOutput(1, vec4(specular, 0.0));
         testOutput(2, vec4(shadeAmbient(point, radiance), 0.0));
+        testOutput(3, vec4(shadeProbeAmbient(point, radiance, radiance.zyx), 0.0)); // the probe light as diffuse, reversed as specular
     } else if (function == GPU_TEST_FACES_LIGHT) {
         testOutput(0, vec4(facesLight(shadingPoint(), testInput(5).xyz) ? 1.0 : 0.0));
     }

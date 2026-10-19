@@ -192,6 +192,13 @@ namespace {
         // The sky behind everything dims with it, and is blue: more blue than red.
         assert(noon.background.colour.y > evening.background.colour.y && evening.background.colour.y > night.background.colour.y);
         assert(noon.background.colour.z > noon.background.colour.x);
+
+        // The flat ambient is the irradiance the drawn sky gives (a sky drawn at B lights a surface facing it with B), so
+        // it matches the light probes, which see the drawn sky itself.
+        for (const Daylight* daylight : {&night, &evening, &noon}) {
+            assert(daylight->sky.colour.x == daylight->background.colour.x && daylight->sky.colour.y == daylight->background.colour.y &&
+                   daylight->sky.colour.z == daylight->background.colour.z);
+        }
     }
 
     // The clock runs at its speed, wraps round midnight, and stands still at speed 0.

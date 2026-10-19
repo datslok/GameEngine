@@ -37,6 +37,13 @@ layout(location = 4) flat in uint materialIndex;
 // The frame's lights (shared with cluster_lights.comp).
 #include "scene_lights.glsl"
 
+// The light probes' bounced light (global illumination), when the frame has probes.
+#include "scene_probes.glsl"
+
+// Whether this pipeline samples the probes: a specialization constant, so the pipelines without probes hold none of their
+// code (with it merely skipped by a branch, the driver compiled the rest a little differently, and a few pixels moved).
+layout(constant_id = DDGI_SAMPLE_PROBES_CONSTANT) const bool probesOn = false;
+
 // Which lights may reach each cluster, one bit per light (cluster_lights.comp writes them before this pass).
 layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
     uint clusterMasks[];
@@ -478,8 +485,19 @@ void main() {
         }
     }
 
-    // Emitted light is added as is.
+    // The light from all around: the probes' bounced light where they reach (their visibility tested along the
+    // geometric normal, steadier than the normal map's; the light read along the shaded normal, and in the mirror
+    // direction as the specular part's stand-in until reflections exist), the flat ambient elsewhere. Without probes,
+    // the flat ambient alone.
     vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
+
+    if (probesOn) {
+        vec3 reflected = reflect(-toCamera, shadingNormal);
+        ProbeLight probeLight = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, probeOrigin.xyz, true);
+        ambientReflected = shadeProbeAmbient(point, probeLight.diffuse, probeLight.specular);
+    }
+
+    // Emitted light is added as is.
     outputColour = vec4(ambientReflected + diffuse + specular + material.emissive.rgb, albedo.a);
 
     // The heatmap debug view: the picture mostly covered by the colour of how many lights this pixel's cluster lists.

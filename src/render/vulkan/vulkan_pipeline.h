@@ -72,6 +72,11 @@ struct VertexLayout {
 struct PipelineDescription {
     const char* vertexShader = nullptr;
     const char* fragmentShader = nullptr; // none: depth only, with no colour target
+
+    // The fragment shader's specialization constants, constant_id 0 onwards, each 32 bits (a bool is 0 or 1): fixed when
+    // the driver compiles the pipeline, so code a constant switches off is not in it at all.
+    std::vector<std::uint32_t> fragmentConstants;
+
     ShaderResources resources;
 
     // A pipeline layout made elsewhere and shared (the scene's, render/vulkan/scene_layout.h), used instead of building

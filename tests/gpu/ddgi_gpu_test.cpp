@@ -3,6 +3,7 @@
 
 #include "core/half_float.h"
 #include "render/gpu/ddgi.h"
+#include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/vulkan/bindless_textures.h"
@@ -285,8 +286,10 @@ namespace {
             return MeshHandle{static_cast<std::uint32_t>(meshes.size() - 1)};
         }
 
-        // The frame's set 1 for these draws (all one white matte material) and lights.
-        VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting) {
+        // The frame's set 1 for these draws (all one white matte material), lights and probes, as the renderer writes it
+        // with the camera at the origin.
+        VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting, const ProbeVolume& volume,
+                                   const VulkanDdgi& ddgi, const GlobalIlluminationSettings& settings) {
             MaterialTable materials;
             std::vector<GpuInstance> instances;
 
@@ -296,15 +299,22 @@ namespace {
 
             const GpuLights lights = packLighting(lighting, Vec3{});
             const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 100.0f};
-            const GpuFrameData frameData = makeFrameData(lights, Mat4::identity(), Vec3{}, makeClusterGrid(camera, 64, 64), false, false);
+            GpuFrameData frameData = makeFrameData(lights, Mat4::identity(), Vec3{}, makeClusterGrid(camera, 64, 64), false, false);
+            const ProbeHitLights hitLights = probeHitLights(lights, Vec3{}, volume);
+            packProbeSampling(frameData, ProbeSampling{volume, Vec3{}, settings.selfShadowBias, settings.bounceEnergy, settings.lightsPerHit,
+                                                       hitLights.points, hitLights.spots});
 
             buffers.frameData.write(&frameData, sizeof(frameData));
             buffers.instances.write(instances);
             buffers.materials.write(materials.getEntries());
             buffers.directionalLights.write(lights.directional);
+            buffers.pointLights.write(lights.points);
+            buffers.spotLights.write(lights.spots);
+            buffers.probeHitLights.write(hitLights.lights);
 
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-            return writeSceneSet(descriptors, sceneLayout, buffers, SceneImages{dummy, dummy, dummy}, clusterMasks);
+            return writeSceneSet(descriptors, sceneLayout, buffers, SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance()},
+                                 clusterMasks);
         }
     };
 
@@ -460,7 +470,8 @@ namespace {
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
         scene.descriptors.reset();
-        const VkDescriptorSet frame = scene.writeFrame(draws, lighting);
+        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume); });
+        const VkDescriptorSet frame = scene.writeFrame(draws, lighting, volume, ddgi, settings);
 
         scene.commands.run([&](VkCommandBuffer recording) {
             scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
@@ -486,8 +497,11 @@ namespace {
     * - the furnace: probes under an empty sky drawn at B store B in every texel, and the longest distance;
     * - a probe sealed in a box sees only back faces: no light, and a fifth of each wall's distance;
     * - a probe over a white floor lit straight down by a sun of radiance R: rays that go down bring back R, rays that
-    *   go up the sky (black), and their distances the floor's.
-    * Each scene also holds a speck far below, since a top-level structure needs something in it.
+    *   go up the sky (black), and their distances the floor's;
+    * - the same floor lit by two lamps a little above it instead, one kept per hit: each ray that goes down brings back
+    *   the brighter lamp's light where it lands (pointLightAtHit), checked by a shadow ray that nothing blocks.
+    * The atlases start empty, so the light bounced from them (last frame's probes) adds nothing on a first update. Each
+    * scene also holds a speck far below, since a top-level structure needs something in it.
     */
     void checkProbePasses(const VulkanDevice& device, GpuCheckReport& report) {
         ProbeTestScene scene{device};
@@ -544,6 +558,54 @@ namespace {
             }
 
             checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sunlit floor", report);
+        }
+
+        {
+            const float height = 1.0f;
+            const ProbeVolume volume{Vec3{0.0f, height, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}};
+            FrameLighting lighting;
+
+            for (const auto& [position, intensity] : {std::pair{Vec3{0.3f, 0.4f, 0.2f}, 3.0f}, std::pair{Vec3{-0.8f, 0.6f, -0.5f}, 2.0f}}) {
+                PlacedPointLight lamp;
+                lamp.position = position;
+                lamp.light.intensity = intensity;
+                lamp.light.range = 6.0f;
+                lamp.light.sourceRadius = 0.2f;
+                lighting.pointLights.push_back(lamp);
+            }
+
+            GlobalIlluminationSettings onePerHit = settings;
+            onePerHit.lightsPerHit = 1;
+            const auto [irradiance, distance] = runProbes(scene, {speck, drawOf(floor, Mat4::identity())}, lighting, volume, onePerHit);
+
+            const GpuLights packed = packLighting(lighting, Vec3{});
+            const Vec3 up{0.0f, 1.0f, 0.0f};
+            std::vector<RayResult> results;
+
+            for (const Vec3& ray : rays) {
+                if (ray.y >= 0.0f) {
+                    results.push_back(RayResult{Vec3{0.0f, 0.0f, 0.0f}, static_cast<float>(DDGI_RAY_REACH)});
+                    continue;
+                }
+
+                const float along = height / -ray.y;
+                const Vec3 hit = volume.origin + ray * along;
+                Vec3 brightest{0.0f, 0.0f, 0.0f};
+
+                for (const GpuPointLight& light : packed.points) {
+                    const Vec3 offset = Vec3{light.positionRange[0], light.positionRange[1], light.positionRange[2]} - hit;
+                    const Vec3 lit = pointLightAtHit(offset, light.positionRange[3], vec3From(GpuVec4{light.radiance[0], light.radiance[1],
+                                                                                                      light.radiance[2], 0.0f}),
+                                                     light.radiance[3], up);
+                    if (hitLightStrength(lit) > hitLightStrength(brightest)) {
+                        brightest = lit;
+                    }
+                }
+
+                results.push_back(RayResult{brightest, along});
+            }
+
+            checkProbe(irradiance, distance, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "lamp-lit floor", report);
         }
     }
 }

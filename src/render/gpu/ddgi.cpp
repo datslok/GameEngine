@@ -33,6 +33,9 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Rays per probe", settings.raysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
     visitor.field("Irradiance time constant", settings.irradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "s"});
     visitor.field("Distance time constant", settings.distanceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 4.0f, .unit = "s"});
+    visitor.field("Self-shadow bias", settings.selfShadowBias, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
+    visitor.field("Bounce energy", settings.bounceEnergy, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Lights per hit", settings.lightsPerHit, {.min = 0, .max = DDGI_MAX_HIT_LIGHTS});
     visitor.field("Show probes", settings.showProbes);
     visitor.field("Probe ball radius", settings.probeBallRadius, {.min = 0.01f, .max = 1.0f, .sliderMax = 0.4f, .unit = "m"});
 }

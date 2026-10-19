@@ -129,6 +129,23 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     stages[1].module = fragmentShader.get();
     stages[1].pName = "main";
 
+    // The fragment shader's specialization constants: constant_id i takes value i, each 32 bits.
+    std::vector<VkSpecializationMapEntry> constantEntries;
+
+    for (std::uint32_t id = 0; id < description.fragmentConstants.size(); ++id) {
+        constantEntries.push_back(VkSpecializationMapEntry{id, id * static_cast<std::uint32_t>(sizeof(std::uint32_t)), sizeof(std::uint32_t)});
+    }
+
+    VkSpecializationInfo fragmentSpecialization{};
+    fragmentSpecialization.mapEntryCount = static_cast<std::uint32_t>(constantEntries.size());
+    fragmentSpecialization.pMapEntries = constantEntries.data();
+    fragmentSpecialization.dataSize = description.fragmentConstants.size() * sizeof(std::uint32_t);
+    fragmentSpecialization.pData = description.fragmentConstants.data();
+
+    if (!constantEntries.empty()) {
+        stages[1].pSpecializationInfo = &fragmentSpecialization;
+    }
+
     VkVertexInputBindingDescription vertexBinding{};
     vertexBinding.binding = 0;
     vertexBinding.stride = description.vertices.stride;

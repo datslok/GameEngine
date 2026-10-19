@@ -68,6 +68,7 @@ void testSoftShadow();
 void testCascades();
 void testDepthRange();
 void testDdgi();
+void testDdgiSampling();
 void testRayTracing();
 void testVideoMemory();
 void testSkyObject();
@@ -183,6 +184,7 @@ int main(){
     testCascades();
     testDepthRange();
     testDdgi();
+    testDdgiSampling();
     testRayTracing();
     testVideoMemory();
     testSkyObject();

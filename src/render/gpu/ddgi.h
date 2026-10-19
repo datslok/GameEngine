@@ -55,6 +55,19 @@ struct GlobalIlluminationSettings {
     float irradianceTimeConstant = 0.5f;
     float distanceTimeConstant = 1.0f;
 
+    // How far the point tested for visibility moves off the surface, in units of 0.75 of the smallest spacing [2021].
+    // Too little leaves blotches where surfaces meet the probes' distances; too much lets light leak round corners.
+    // Raise it when tracing fewer rays (noisier distances).
+    float selfShadowBias = 0.3f;
+
+    // The share of last frame's probe light that a probe ray's hit passes on (each frame adds one more bounce). 1 is
+    // physically right, since albedo below 1 already makes the bounces die out; a little less hides faint leaks, which
+    // repeated bounces would otherwise build up and the eye sees in dark rooms (the 2019 code's 0.85).
+    float bounceEnergy = 0.85f;
+
+    // The point and spot lights each probe ray's hit adds, the brightest there, each checked by a shadow ray.
+    int lightsPerHit = 4;
+
     // A debug view: each probe drawn as a small ball showing the light it stores, in the direction of the ball's surface.
     bool showProbes = false;
     float probeBallRadius = 0.1f;

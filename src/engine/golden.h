@@ -18,6 +18,13 @@
 inline constexpr std::uint32_t goldenImageWidth = 1280;
 inline constexpr std::uint32_t goldenImageHeight = 720;
 
+/*
+* Frames drawn before a view with light probes is captured, each one tick (1/120 s) long, so the probes have gathered
+* their light: 2 s is four of the irradiance's time constants (2% of the start left) and two of the distances' (14%),
+* and a bounce more each frame. More would cost time in every golden run for no visible change.
+*/
+inline constexpr int goldenProbeWarmUpFrames = 240;
+
 // Lower-case letters, digits and dashes, not empty: safe as a file name everywhere.
 bool isGoldenViewName(const std::string& name);
 

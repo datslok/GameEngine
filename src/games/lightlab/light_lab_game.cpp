@@ -40,7 +40,7 @@ namespace {
     const Vec3 highSunColour{1.0f, 0.96f, 0.9f};
     const Vec3 lowSunColour{1.0f, 0.55f, 0.3f};
 
-    // The sky's ambient light: blue, full from this height up, dimming through dusk (civil twilight ends with the sun
+    // The sky: blue, full from this height up, dimming through dusk (civil twilight ends with the sun
     // 6 degrees down) to a small night share, not black.
     const Vec3 skyTint{0.6f, 0.75f, 1.0f};
     constexpr float skyDarkBelowDegrees = -6.0f;
@@ -107,7 +107,8 @@ namespace {
     /*
     * The golden image views (engine/golden.h), each from the free camera at a fixed time of day: the towers and fence from
     * the start (sun shadows in four cascades out to 200 m), the field from above, the sunlit room's beam on its
-    * floor (the rest lit only by the flat sky ambient until bounce light), the towers again at sunset in HDR (a low,
+    * floor (the rest of the room lit by the light probes: sunlight bounced off the floor, and the sky through the
+    * window), the towers again at sunset in HDR (a low,
     * red sun and long shadows), and the sun itself, its disc and the glow bloom spreads round it.
     */
     struct LabGoldenView {
@@ -135,7 +136,6 @@ void visit(LightLabSunSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Solar hours", settings.solarHours, {.min = 0.0f, .max = hoursPerDay, .unit = "h"});
     visitor.field("Hours per second", settings.hoursPerSecond, {.min = 0.0f, .max = hoursPerDay, .sliderMax = 1.0f, .unit = "h/s"});
     visitor.field("Sun intensity", settings.sunIntensity, {.min = 0.0f, .sliderMax = 10.0f});
-    visitor.field("Sky ambient", settings.skyAmbient, {.min = 0.0f, .sliderMax = 1.0f});
     visitor.field("Sky brightness", settings.skyBrightness, {.min = 0.0f, .sliderMax = 5.0f});
     visitor.field("Sun disc size", settings.sunDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
 }
@@ -161,8 +161,8 @@ Daylight daylightFor(const Vec3& towardsSun, const LightLabSunSettings& settings
     daylight.sun.intensity = settings.sunIntensity * sunUp;
     daylight.sun.castsShadows = true;
     const float skyShare = nightSkyShare + (1.0f - nightSkyShare) * skyUp;
-    daylight.sky.colour = skyTint * (settings.skyAmbient * skyShare);
     daylight.background.colour = skyTint * (settings.skyBrightness * skyShare);
+    daylight.sky.colour = daylight.background.colour;
     return daylight;
 }
 
