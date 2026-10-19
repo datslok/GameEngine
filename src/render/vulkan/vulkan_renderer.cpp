@@ -743,6 +743,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats = RenderStats{};
     stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
 
+    // Video memory as this frame begins: the driver's figures are fetched again once per frame number.
+    device.startMemoryFrame(++memoryFrameNumber);
+    stats.videoMemory = summariseVideoMemory(device.getHeapMemory(), device.reportsMemoryBudget());
+
     Camera camera = description.camera;
     camera.setAspectRatio(getFrameAspectRatio());
 

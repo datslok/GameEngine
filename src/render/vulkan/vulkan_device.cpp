@@ -159,6 +159,10 @@ void VulkanDevice::selectPhysicalDevice() {
     }
 
     physicalDevice = selected.value();
+
+    // Optional: the driver's own count of each memory heap's use and budget, for the F4 readout. Every current desktop
+    // driver has it; without it VMA estimates from what it allocated itself.
+    memoryBudget = physicalDevice.enable_extension_if_present(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 }
 
 /*
@@ -210,6 +214,7 @@ void VulkanDevice::createAllocator() {
     info.device = device.device;
     info.instance = instance.instance;
     info.pVulkanFunctions = &functions;
+    info.flags = memoryBudget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0;
 
     vulkanCheck(vmaCreateAllocator(&info, &allocator), "Memory allocator creation failed");
 }
@@ -300,6 +305,36 @@ const VkPhysicalDeviceLimits& VulkanDevice::getLimits() const {
 
 const std::string& VulkanDevice::getName() const {
     return physicalDevice.name;
+}
+
+bool VulkanDevice::reportsMemoryBudget() const {
+    return memoryBudget;
+}
+
+/*
+* VMA keeps each heap's figures: the bytes it took from Vulkan in blocks (the engine's share, buffers and images packed
+* inside), and with the budget extension the driver's count of everything this program uses there and its budget.
+*/
+std::vector<HeapMemory> VulkanDevice::getHeapMemory() const {
+    const VkPhysicalDeviceMemoryProperties* properties = nullptr;
+    vmaGetMemoryProperties(allocator, &properties);
+
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS]{};
+    vmaGetHeapBudgets(allocator, budgets);
+
+    std::vector<HeapMemory> heaps;
+
+    for (std::uint32_t heap = 0; heap < properties->memoryHeapCount; ++heap) {
+        const bool deviceLocal = (properties->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+        heaps.push_back(HeapMemory{deviceLocal, budgets[heap].statistics.blockBytes, budgets[heap].usage, budgets[heap].budget});
+    }
+
+    return heaps;
+}
+
+// VMA asks the driver for fresh budget figures when the frame number changes (and otherwise only every so many allocations).
+void VulkanDevice::startMemoryFrame(std::uint32_t frameNumber) const {
+    vmaSetCurrentFrameIndex(allocator, frameNumber);
 }
 
 bool VulkanDevice::hasSwapchainColourSpaces() const {

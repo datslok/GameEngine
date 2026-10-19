@@ -187,6 +187,9 @@ private:
     std::uint32_t frameHeight = 0;
 
     // Shadows: every shadow view in one depth atlas, kept between frames (tiles are redrawn only when they change).
+    // Counts frames for the memory allocator, which refreshes the driver's memory figures when it changes.
+    std::uint32_t memoryFrameNumber = 0;
+
     VulkanImage shadowAtlas;
     ShadowAtlasLayout shadowLayout;
     ShadowTileMemory shadowMemory;

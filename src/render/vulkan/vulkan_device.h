@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/video_memory.h"
 #include "render/vulkan/owned_handle.h"
 
 #include "vk-bootstrap/VkBootstrap.h"
@@ -10,6 +11,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 /*
 * The engine's connection to the GPU through Vulkan 1.3: the instance (Vulkan itself, with the validation layers in
@@ -40,6 +42,14 @@ public:
 
     // The instance can describe swapchain colour spaces other than plain sRGB (scRGB, for HDR output).
     bool hasSwapchainColourSpaces() const;
+
+    // Whether the driver reports each memory heap's use and budget (VK_EXT_memory_budget, on when the GPU has it).
+    bool reportsMemoryBudget() const;
+
+    // Each memory heap's numbers from VMA (see render/gpu/video_memory.h). The driver's figures are fetched again when
+    // startMemoryFrame is called, once a frame.
+    std::vector<HeapMemory> getHeapMemory() const;
+    void startMemoryFrame(std::uint32_t frameNumber) const;
 
     // Whether images of this format, laid out for the GPU (optimal tiling), support all of these features.
     bool supportsFormat(VkFormat format, VkFormatFeatureFlags2 features) const;
@@ -85,6 +95,7 @@ private:
     std::uint32_t queueFamily = 0;
     VmaAllocator allocator = VK_NULL_HANDLE;
     bool swapchainColourSpaces = false;
+    bool memoryBudget = false;
     bool debugUtils = false;
     std::uint32_t timestampValidBits = 0;
     std::atomic<std::uint32_t> validationErrors{0};

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/gpu_timing.h"
+#include "render/gpu/video_memory.h"
 
 #include <cstddef>
 
@@ -32,4 +33,7 @@ struct RenderStats {
     // How long each pass took on the GPU, from timestamps. They can only be read once the GPU has finished a frame, so
     // these are an earlier frame's (as many back as there are frames in flight); not valid until one has been measured.
     GpuTimings gpu;
+
+    // The video memory in use and the driver's budget, read as this frame began (render/gpu/video_memory.h).
+    VideoMemory videoMemory;
 };
