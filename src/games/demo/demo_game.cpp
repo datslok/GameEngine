@@ -72,7 +72,7 @@ namespace {
 
     // The golden image views (engine/golden.h), each seen from the free camera: the start (spinners, gold teapot, duck,
     // normal map gallery, the flashlight's soft shadows) in SDR and HDR, the gallery close up, the lamp field (more
-    // lamps than seats, so light priority chooses), the floodlights over the course (soft spotlight shadows), and the
+    // lamps than shadows, so light priority chooses), the floodlights over the course (soft spotlight shadows), and the
     // moon (bloom). Times are long enough for the spinners and lamps to have moved.
     struct DemoGoldenView {
         GoldenView view;
@@ -108,7 +108,7 @@ namespace {
 
     // The lamp field (L): a grid of 10 x 11 places, 3.5 units apart, covering the ground up to the obstacle course, minus
     // the 10 places in a keep-clear box around the spinning objects, the duck and the first-person start: 100 lamps, well
-    // past the shader's 64 point light seats, so light priority has to choose (and fade seats and shadows between lamps).
+    // past the 64 point light shadows, so light priority has to choose (and fade shadows between lamps).
     constexpr int lampColumns = 10;
     constexpr int lampRows = 11;
     constexpr float lampSpacing = 3.5f;
