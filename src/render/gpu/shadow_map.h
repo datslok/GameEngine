@@ -115,7 +115,8 @@ static_assert(sizeof(ShadowTileData) == 112, "ShadowTileData must match the shad
 // One shadow view: its view-projection, and the square of the atlas it is drawn into (pixels, top-left corner). Size 0
 // means no square: a point light's cube face that sees nothing on screen, which is not drawn and which the shader counts as lit.
 // reach is the sphere its light lights (centre at the light, the range as radius; negative for a directional light,
-// which reaches everywhere): nothing wholly outside it can cast a shadow the light shows.
+// which reaches everywhere): nothing wholly outside it can block the light where it shines, so the shadow pass skips
+// those casters (a soft shadow's wide filter could reach them only where the light has faded to almost nothing).
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;

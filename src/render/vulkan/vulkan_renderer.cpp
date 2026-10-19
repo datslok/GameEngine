@@ -771,11 +771,19 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
 /*
 * Which shadow tiles to redraw, and what goes into each. A tile whose view and casters are what was drawn into it last
-* time keeps its contents (shadow caching). Casters are those inside the tile's frustum. Each redrawn tile's casters
-* are batched by mesh, their instances (the tile's view times the caster's model matrix) one tile after another.
+* time keeps its contents (shadow caching). Casters are found in two steps: first the ones the tile's light can reach at
+* all (one sphere test each, shared by a point light's six faces, which come one after another), then those inside the
+* tile's own frustum. Each redrawn tile's casters are batched by mesh, their instances (the tile's view times the
+* caster's model matrix) one tile after another.
 */
 VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles) {
     ShadowDraws prepared;
+    std::vector<std::size_t> inReach;
+    const BoundingSphere* reachOfList = nullptr;
+
+    const auto sameReach = [](const BoundingSphere& a, const BoundingSphere& b) {
+        return a.radius == b.radius && a.centre.x == b.centre.x && a.centre.y == b.centre.y && a.centre.z == b.centre.z;
+    };
 
     for (const ShadowTile& tile : tiles) {
         if (tile.size == 0) {
@@ -783,7 +791,13 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
             continue;
         }
 
-        const std::vector<std::size_t> casters = shadowCasters(description.draws, Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero));
+        if (reachOfList == nullptr || !sameReach(*reachOfList, tile.reach)) {
+            inReach = castersInReach(description.draws, tile.reach);
+            reachOfList = &tile.reach;
+        }
+
+        const std::vector<std::size_t> casters =
+            shadowCasters(description.draws, inReach, Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero));
         const std::uint64_t signature = shadowCasterSignature(description.draws, casters);
 
         if (shadowMemory.isCurrent(tile, signature)) {

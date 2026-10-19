@@ -177,7 +177,8 @@ namespace {
 
     // A light only reaches as far as its range, so nothing wholly outside that sphere can block it where it shines: one
     // sphere test per caster and light, before the six face frustums. A blocker sits between the light and a lit point,
-    // and the lit point is within range, so so is the blocker: dropping the rest changes no shadow.
+    // and the lit point is within range, so so is the blocker. (Only a soft shadow's filter, which reads texels around the
+    // point, could still meet a dropped caster, where the light has faded to almost nothing at the end of its range.)
     void testCastersOutsideTheLightsReachAreDropped() {
         std::vector<DrawItem> draws = {
             drawAt(0.0f, 0.0f, -5.0f, 0),
