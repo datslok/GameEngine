@@ -336,7 +336,9 @@ std::vector<GoldenView> LightLabGame::goldenViews() const {
 void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
     for (const LabGoldenView& golden : labGoldenViews) {
         if (golden.view.name == view.name) {
+            // The clock stands still, so the view's ticks do not move the sun off its hour.
             sunSettings.solarHours = golden.solarHours;
+            sunSettings.hoursPerSecond = 0.0f;
             updateDaylight(world);
             const Vec3 target = golden.facingSun
                 ? golden.cameraPosition + directionTowardsSunOn(sunSettings.latitudeDegrees, sunSettings.dayOfYear, sunSettings.solarHours)

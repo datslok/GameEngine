@@ -43,16 +43,17 @@ struct GlobalIlluminationSettings {
     bool enabled = true;
 
     // Rays each probe traces per frame. More converge faster and flicker less; the time constants below average over
-    // rays per second of history, so a slower GPU can trace fewer with longer time constants.
-    int raysPerProbe = 64;
+    // rays per second of history, so a slower GPU can trace fewer with longer time constants. 256 (with 0.5 s below)
+    // was chosen by eye in the light lab with the sun moving at 0.1 h/s, for the Ultra preset.
+    int raysPerProbe = 256;
 
     // How long the stored light takes to follow a change: after this many seconds, 1/e (37%) of a step change is left,
-    // at any frame rate. Shorter reacts faster and flickers more: noise goes as 1/sqrt(rays x time constant). 2 s was
-    // chosen by eye in the light lab's dark back room, where 0.5 s crawled visibly; the price is lag, a light switched
-    // on or off bringing its bounce light in over a few seconds, and moving lights and objects trailing theirs (scene
-    // events, planned, will speed probes up for such changes). Distances are kept steadier, since flickering visibility
-    // is worse than slightly late visibility [2021].
-    float irradianceTimeConstant = 2.0f;
+    // at any frame rate. Shorter reacts faster and flickers more: noise goes as 1/sqrt(rays x time constant). 2 s at 64
+    // rays was first chosen by eye in the light lab's dark back room, where 0.5 s crawled visibly at 64; 0.5 s at 256
+    // rays has the same rays x time constant, so the same noise, and follows a moving sun with a quarter of the lag
+    // (moving lights and objects still trail theirs a little; scene events, planned, will speed probes up for such
+    // changes). Distances are kept steadier, since flickering visibility is worse than slightly late visibility [2021].
+    float irradianceTimeConstant = 0.5f;
     float distanceTimeConstant = 1.0f;
 
     /*

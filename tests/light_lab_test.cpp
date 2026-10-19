@@ -1,3 +1,4 @@
+#include "engine/golden.h"
 #include "games/lightlab/light_lab_game.h"
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
@@ -215,6 +216,16 @@ namespace {
         int ticks = 0;
         runTicks(lab.game, lab.world, static_cast<int>(std::lround(1.0f / tickSeconds)), ticks);
         assert(near(lab.game.getSunSettings().solarHours, 16.5f, 1e-3f));
+
+        // The sun moves by default, a day in 4 minutes, but golden views hold it at their hour.
+        assert(Lab{}.game.getSunSettings().hoursPerSecond == 0.1f);
+        for (const GoldenView& view : Lab{}.game.goldenViews()) {
+            Lab golden;
+            golden.game.prepareGoldenView(golden.world, view);
+            const float preparedHours = golden.game.getSunSettings().solarHours;
+            advanceToGoldenView(golden.game, golden.world, view, EngineSettings{}.ticksPerSecond);
+            assert(golden.game.getSunSettings().solarHours == preparedHours);
+        }
     }
     // The disc's direction from the camera and its angular radius as the camera sees it.
     float discAngularRadius(const Transform& pose, const Vec3& camera) {
