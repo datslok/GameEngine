@@ -1,0 +1,90 @@
+#include "app/game_registry.h"
+
+#include "games/demo/demo_game.h"
+#include "games/lightlab/light_lab_game.h"
+
+#include <array>
+#include <stdexcept>
+
+namespace {
+    // Both start in first person, the way a player meets them; F2 and F3 switch views.
+    std::unique_ptr<Game> makeDemo() {
+        return std::make_unique<DemoGame>(ControlMode::FirstPerson, true);
+    }
+
+    std::unique_ptr<Game> makeLightLab() {
+        return std::make_unique<LightLabGame>(ControlMode::FirstPerson, true);
+    }
+
+    // Adding a game is one line here. Plain function pointers: the entries capture nothing, so the table is built at
+    // compile time.
+    constexpr std::array<GameEntry, 2> games{{
+        {"demo", makeDemo},
+        {"lightlab", makeLightLab}
+    }};
+}
+
+std::span<const GameEntry> registeredGames() {
+    return games;
+}
+
+const GameEntry& defaultGame() {
+    return games.front();
+}
+
+const GameEntry* findGame(std::string_view name) {
+    for (const GameEntry& entry : games) {
+        if (name == entry.name) {
+            return &entry;
+        }
+    }
+
+    return nullptr;
+}
+
+std::string gameNames() {
+    std::string names;
+
+    for (const GameEntry& entry : games) {
+        names += (names.empty() ? "" : ", ") + std::string{entry.name};
+    }
+
+    return names;
+}
+
+/*
+* Options may come in any order, each at most once, so "--golden-check --game lightlab" and the reverse mean the same.
+*/
+LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments) {
+    LaunchOptions options;
+    bool gameNamed = false;
+
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        const std::string& argument = arguments[index];
+
+        if (argument == "--game") {
+            if (gameNamed || index + 1 >= arguments.size()) {
+                throw std::invalid_argument("--game takes one game name, once: " + gameNames());
+            }
+
+            const std::string& name = arguments[++index];
+            options.game = findGame(name);
+            gameNamed = true;
+
+            if (options.game == nullptr) {
+                throw std::invalid_argument("No game called \"" + name + "\". The games are: " + gameNames());
+            }
+        } else if (argument == "--golden-save" || argument == "--golden-check") {
+            if (options.golden) {
+                throw std::invalid_argument("Give --golden-save or --golden-check, not both");
+            }
+
+            options.golden = argument == "--golden-save" ? GoldenMode::Save : GoldenMode::Check;
+        } else {
+            throw std::invalid_argument("Unknown option \"" + argument + "\". Options: --game <" + gameNames() +
+                                        ">, --golden-save, --golden-check");
+        }
+    }
+
+    return options;
+}

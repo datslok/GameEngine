@@ -1,5 +1,6 @@
 #include "core/hash.h"
 #include "engine/state_hash.h"
+#include "games/lightlab/light_lab_game.h"
 #include "math/transform.h"
 
 #include "demo_helpers.h"
@@ -45,6 +46,25 @@ namespace {
         again.add(1.0f);
         again.add(2.0f);
         assert(first.value == again.value);
+    }
+
+    /*
+    * Consecutive numbers mixed give top bits spread evenly: their top 4 bits fill 16 bins about equally. (FNV-1a alone
+    * of small consecutive numbers changes the top bits too little, which once laid a random forest out along curves.)
+    */
+    void testMixSpreadsConsecutiveNumbers() {
+        constexpr int samples = 16000;
+        int bins[16] = {};
+
+        for (std::uint64_t value = 0; value < static_cast<std::uint64_t>(samples); ++value) {
+            ++bins[mixBits(value) >> 60];
+        }
+
+        for (const int count : bins) {
+            assert(count > 900 && count < 1100);
+        }
+
+        assert(mixBits(1) != mixBits(2));
     }
 
     // The world hash sees a change in the last bit of one position, and an entity that only differs by handle.
@@ -163,11 +183,77 @@ namespace {
 
         assert(first.hash() != different.hash());
     }
+
+    /*
+    * The light lab played the same way twice: walking towards the building in first person with the sun's clock running,
+    * jumping, turning, then dropping in again from the free camera's start. leaveOutOneJump changes a single press.
+    */
+    class ScriptedLightLab {
+    public:
+        explicit ScriptedLightLab(bool leaveOutOneJump): game(ControlMode::FirstPerson, true), leaveOutOneJump(leaveOutOneJump) {
+            game.getSunSettings().hoursPerSecond = 0.5f;
+            game.onInit(world, assets);
+        }
+
+        void playFrame(int frame) {
+            Input input = firstPersonInput({});
+            if (frame < 150) {
+                input.pressKey(Key::S);
+                input.pressKey(Key::A);
+                input.addMouseMotion(frame < 75 ? 3.0f : -2.0f, 0.0f);
+            }
+            if (frame == 20 || (frame == 130 && !leaveOutOneJump)) {
+                input.pressKey(Key::Space);
+            }
+            if (frame == 200) {
+                input.pressKey(Key::F3);
+            }
+            if (frame == 230) {
+                input.pressKey(Key::F1);
+            }
+
+            runFrame(game, world, input, ticks);
+        }
+
+        std::uint64_t hash() const {
+            return hashSimulationState(world);
+        }
+
+    private:
+        World world;
+        AssetManager assets;
+        LightLabGame game;
+        int ticks = 0;
+        bool leaveOutOneJump;
+    };
+
+    /*
+    * As for the demo; the one-jump-short run is compared just before the free camera, since dropping in from it puts
+    * every run's body in the same place.
+    */
+    void testLightLabIsDeterministic() {
+        ScriptedLightLab first{false};
+        ScriptedLightLab second{false};
+        ScriptedLightLab different{true};
+
+        for (int frame = 0; frame < 360; ++frame) {
+            first.playFrame(frame);
+            second.playFrame(frame);
+            different.playFrame(frame);
+            assert(first.hash() == second.hash());
+
+            if (frame == 199) {
+                assert(first.hash() != different.hash());
+            }
+        }
+    }
 }
 
 void testDeterminism() {
     testHashMatchesThePublishedValues();
     testHashIsBitExact();
+    testMixSpreadsConsecutiveNumbers();
     testStateHashSeesTheSmallestChange();
     testDemoIsDeterministic();
+    testLightLabIsDeterministic();
 }

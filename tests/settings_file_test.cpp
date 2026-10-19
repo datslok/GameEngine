@@ -1,3 +1,4 @@
+#include "app/game_registry.h"
 #include "core/settings_visitor.h"
 #include "engine/engine_settings.h"
 #include "engine/settings_file.h"
@@ -9,6 +10,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -260,12 +262,67 @@ namespace {
         assert(keys.count("engine.render.bloom.strength") == 1);
         assert(keys.count("engine.render.toneMapping.curve") == 1);
         assert(keys.count("engine.render.display.paperWhite") == 1);
-        assert(keys.count("game.grenade.throwSpeed") == 1);
+        assert(keys.count("demo.grenade.throwSpeed") == 1);
+        assert(keys.count("demo.freeCamera.moveSpeed") == 1);
         assert(valueOf(entries, "engine.render.toneMapping.curve") == "AgX");
 
         // A round trip through the file text with nothing changed writes nothing but the header.
         const std::string text = formatSettingsText(entries, entries);
         assert(parseSettingsText(text).entries.empty());
+    }
+
+    // Every game's settings within their limits, under a section named after the game, distinct from the others'.
+    void testEveryGameHasItsOwnSection() {
+        std::set<std::string> sections;
+
+        for (const GameEntry& entry : registeredGames()) {
+            EngineSettings settings;
+            const std::unique_ptr<Game> game = entry.make();
+            const SettingsWalk walk = engineAndGameSettings(settings, *game);
+            assert(findLimitProblems(walk).empty());
+
+            const std::string section = settingKey(game->title());
+            assert(sections.insert(section).second);
+
+            bool any = false;
+            for (const SettingEntry& setting : captureSettings(walk)) {
+                const bool engine = setting.key.starts_with("engine.");
+                assert(engine || setting.key.starts_with(section + "."));
+                any = any || !engine;
+            }
+            assert(any);
+        }
+
+        assert(sections.count("lightLab") == 1);
+    }
+
+    /*
+    * One file shared by every game: loading keeps the sections this game lacks apart (no warnings, nothing applied), and
+    * saving writes them back unchanged after this game's own changes.
+    */
+    void testOtherGamesSectionsAreKept() {
+        Sample sample;
+        const SettingsWalk walk = [&sample](SettingsVisitor& visitor) {
+            visitor.group("Engine", [&] { visit(sample, visitor); });
+        };
+
+        const std::vector<SettingEntry> saved{
+            {"engine.strength", "0.1"}, {"lightLab.sun.solarHours", "9"}, {"stray", "1"}, {"demo.grenade.throwSpeed", "20"}
+        };
+        const SectionedSettings sectioned = separateSections(saved, walk);
+        assert(sectioned.own.size() == 2);
+        assert(sectioned.own[0].key == "engine.strength" && sectioned.own[1].key == "stray");
+        assert(sectioned.others.size() == 2);
+        assert(sectioned.others[0].key == "lightLab.sun.solarHours" && sectioned.others[1].key == "demo.grenade.throwSpeed");
+
+        const std::vector<SettingEntry> defaults = captureSettings(walk);
+        sample.count = 7;
+        const std::string text = formatSettingsText(captureSettings(walk), defaults, sectioned.others);
+        const ParsedSettings parsed = parseSettingsText(text);
+        assert(parsed.entries.size() == 3);
+        assert(valueOf(parsed.entries, "engine.count") == "7");
+        assert(valueOf(parsed.entries, "lightLab.sun.solarHours") == "9");
+        assert(valueOf(parsed.entries, "demo.grenade.throwSpeed") == "20");
     }
 
     // The hard limits agree with the renderer's own checks: their ends are accepted.
@@ -297,5 +354,7 @@ void testSettingsFile() {
     testLimitProblemsAreFound();
     testUnboundedSliderIsAProblem();
     testEngineAndDemoDefaults();
+    testEveryGameHasItsOwnSection();
+    testOtherGamesSectionsAreKept();
     testLimitsAgreeWithValidation();
 }

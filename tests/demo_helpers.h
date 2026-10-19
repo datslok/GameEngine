@@ -8,8 +8,8 @@
 #include <initializer_list>
 
 /*
-* Driving the demo game headless, shared by the tests that play it (demo_game_test, determinism_test), so each does
-* not grow its own copy.
+* Driving a game headless, shared by the tests that play one (demo_game_test, determinism_test, light_lab_test), so
+* each does not grow its own copy.
 */
 
 // The engine's own tick length, so the demo is tested at the rate it runs at.
@@ -38,15 +38,15 @@ inline Input firstPersonInput(std::initializer_list<Key> held) {
 }
 
 // Ticks through the engine's own runFixedUpdate, counting the simulation time as the engine does.
-inline void runTicks(DemoGame& game, World& world, int count, int& ticksSoFar) {
+inline void runTicks(Game& game, World& world, int count, int& ticksSoFar) {
     for (int i = 0; i < count; ++i) {
         ++ticksSoFar;
         runFixedUpdate(game, world, tickSeconds, ticksSoFar * static_cast<double>(tickSeconds));
     }
 }
 
-// One frame of the engine loop for a demo game: input, the ticks that fall in it, then the per-frame update.
-inline void runFrame(DemoGame& game, World& world, const Input& input, int& ticks) {
+// One frame of the engine loop for a game: input, the ticks that fall in it, then the per-frame update.
+inline void runFrame(Game& game, World& world, const Input& input, int& ticks) {
     game.onInput(world, input);
     runTicks(game, world, 1, ticks);
     game.onUpdate(world, input, tickSeconds, 1.0f);

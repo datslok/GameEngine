@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -63,7 +64,11 @@ namespace {
 * A fresh game and engine per view, so no view sees what an earlier one switched on, and each starts with a cold shadow
 * cache and no light history, exactly like the game's first frame.
 */
-int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, GoldenMode mode) {
+int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, const std::string& gameFolder, GoldenMode mode) {
+    if (!isGoldenViewName(gameFolder)) {
+        throw std::invalid_argument("Golden game folders must be lower-case letters, digits and dashes: " + gameFolder);
+    }
+
     const std::vector<GoldenView> views = makeGame()->goldenViews();
     int failures = 0;
 
@@ -77,8 +82,8 @@ int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, Gold
         const CapturedFrame captured = application.captureGoldenView(view);
 
         const std::string gpuFolder = goldenFolderName(application.getRendererName());
-        const std::filesystem::path referenceFolder = std::filesystem::path{goldenReferenceRoot} / gpuFolder;
-        const std::filesystem::path outputFolder = std::filesystem::path{goldenCheckRoot} / gpuFolder;
+        const std::filesystem::path referenceFolder = std::filesystem::path{goldenReferenceRoot} / gpuFolder / gameFolder;
+        const std::filesystem::path outputFolder = std::filesystem::path{goldenCheckRoot} / gpuFolder / gameFolder;
         const NamedImage images[] = {{view.name + "-scene", &captured.scene}, {view.name + "-final", &captured.final}};
 
         if (mode == GoldenMode::Save) {
@@ -94,7 +99,7 @@ int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, Gold
         }
 
         std::filesystem::create_directories(outputFolder);
-        std::cout << view.name << (view.hdr ? " (HDR)" : "") << ":\n";
+        std::cout << gameFolder << '/' << view.name << (view.hdr ? " (HDR)" : "") << ":\n";
 
         for (const NamedImage& image : images) {
             failures += checkImage(image, referenceFolder, outputFolder) ? 0 : 1;
@@ -102,7 +107,7 @@ int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, Gold
     }
 
     if (mode == GoldenMode::Check) {
-        std::cout << (failures == 0 ? "All golden images match.\n" : std::to_string(failures) + " golden images differ.\n");
+        std::cout << gameFolder << ": " << (failures == 0 ? "all golden images match.\n" : std::to_string(failures) + " golden images differ.\n");
     }
 
     return failures;

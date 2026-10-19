@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 5 and phase 6's physically based materials, 6c's GPU scene (storage buffers and std430, bindless textures and nonuniform indexing, instancing and the draw list, culling shadow casters by a light's reach, why changing the order of a product changes pixels), depth prepass (overdraw, early depth testing, equal-depth shading and invariant positions) and clustered shading (exponential depth slices, conservative sphere and cone tests, one bit per light in slot order and why that keeps every pixel the same, shared memory and workgroup barriers, buffer barriers, waves and subgroupOr, the heatmap), all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps) and all of 6b (the Vulkan renderer: volk, vk-bootstrap and VMA, command buffers, fences and semaphores, uniforms as dynamic offsets, validation layers, barriers and image states, GPU timestamps and debug labels, frames in flight, compute shaders; golden images and the GPU test tier: shader libraries of pure functions, float tolerances and condition numbers; normal maps: tangent frames, handedness and MikkTSpace; quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps, the debug UI and settings file (visitors, presets, the overlay), gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
+**Covers:** phases 0 to 5, several games on one engine (the game registry, shared controls by composition, a settings section per game), the sun's place in the sky (declination, hour angle, latitude) and phase 6's physically based materials, 6c's GPU scene (storage buffers and std430, bindless textures and nonuniform indexing, instancing and the draw list, culling shadow casters by a light's reach, why changing the order of a product changes pixels), depth prepass (overdraw, early depth testing, equal-depth shading and invariant positions) and clustered shading (exponential depth slices, conservative sphere and cone tests, one bit per light in slot order and why that keeps every pixel the same, shared memory and workgroup barriers, buffer barriers, waves and subgroupOr, the heatmap), all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps) and all of 6b (the Vulkan renderer: volk, vk-bootstrap and VMA, command buffers, fences and semaphores, uniforms as dynamic offsets, validation layers, barriers and image states, GPU timestamps and debug labels, frames in flight, compute shaders; golden images and the GPU test tier: shader libraries of pure functions, float tolerances and condition numbers; normal maps: tangent frames, handedness and MikkTSpace; quaternions and slerp; collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build; lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps, the debug UI and settings file (visitors, presets, the overlay), gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows).
 
 ---
 
@@ -16,7 +16,7 @@ The source is split into layers, and **a layer may only use the layers below it*
 
 ```
 app/            picks a game and starts the engine
-games/          one folder per game (games/demo)
+games/          one folder per game (games/demo, games/lightlab)
 engine/         the main loop and the Game interface
 platform/  render/          the window and SDL input / the GPU renderer
 gameplay/       movement, camera controllers
@@ -32,7 +32,17 @@ Why bother? Because each rule buys something concrete:
 - **`render/` only receives plain data** (meshes by handle, matrices, materials, lights). So the renderer could be swapped (for example for a ray-tracing backend) without touching game code.
 - **`input/` has no SDL types.** Game code asks "is W held?" with an engine `Key`, never an SDL scancode.
 
-At start-up, `main` creates a `DemoGame` and an `Application` (the engine). The engine owns the window, the renderer, the input snapshot, the `World` of entities and the `AssetManager`, and drives the game through a few hooks.
+At start-up, `main` makes a game and an `Application` (the engine). The engine owns the window, the renderer, the input snapshot, the `World` of entities and the `AssetManager`, and drives the game through a few hooks.
+
+### Several games on one engine
+
+There are two games so far: the **demo** (a night scene of lamps, floodlights and an obstacle course) and the **light lab** (a sunlit test ground built for judging shadows and, later, bounce light). `game.exe` runs the demo; `game.exe --game lightlab` runs the other. The second game is also a test of the first rule above: if the engine really knows nothing about the demo, a second game should need no engine changes, and it needed only a title and a settings section of its own.
+
+**Choosing one: a registry.** `app/game_registry` keeps one table of `{name, function that makes the game}`. The command line, the golden image runner and the tests all read that table, so adding a game is one line rather than an `if` chain copied into three places. The table holds *how to make* a game, not a game, because the golden images need a brand-new game for every view (nothing one view switched on may leak into the next). Each entry is a plain function pointer, which captures nothing, so the whole table is a compile-time constant.
+
+**Sharing controls: composition, not inheritance.** Both games want the same F1 first person, F2 MOBA and F3 free camera, the same body and the same tuning. One way would be a base class, `class FpsMobaGame : public Game`, that both inherit from. The trouble is that a base class makes every child carry all of its choices: the dressmaking game, which wants an orbit camera and no body, would inherit machinery it has to fight, and any change in the parent silently changes every child (the "fragile base class" problem). Instead, the controls are an object, `PlayerControls`, that a game *holds as a member* and forwards to. A game that wants them holds one; a game that wants something else holds something else. What a mode change means for the game's own things (the demo's duck forgets its orders) stays in that game. Most engines build gameplay this way, from parts a game puts together rather than a family tree of classes.
+
+**Settings for each.** All games share one `settings.cfg`. Each game's values live under its own section, named after its title (`demo.grenade.throwSpeed`, `lightLab.sun.solarHours`), and when one game saves, the other games' lines are read back from the file and written out untouched, so neither can wipe the other's.
 
 ---
 
@@ -660,7 +670,25 @@ To watch it work, press **L** in the demo: it adds 100 coloured lamps, each flyi
 
 The real moon is so far away that it shows no **parallax**: walk a hundred metres and it is still in the same direction and the same size. A sky object that should behave like that is kept at a fixed offset from the camera every frame, so its direction and size never change; that is the trick skyboxes use. Its light would be a `DirectionalLight`, with the same direction everywhere.
 
-The demo deliberately does the opposite for the sphere: it is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds. As you move, it shifts and grows like any nearby object, while the moonlight, a `DirectionalLight`, keeps the same direction everywhere, so up close the sphere is no longer exactly where the light seems to come from. (For a while the moonlight was a `PointLight` inside the sphere, which made the light really come from it, but a lamp 64 units away dims across the scene, needs a huge intensity, and gets blurry shadows.)
+The demo deliberately does the opposite for the moon sphere: it is a fixed object 64 units from where the free camera starts, so you can fly to it in F3 mode in about 20 seconds. As you move, it shifts and grows like any nearby object, while the moonlight, a `DirectionalLight`, keeps the same direction everywhere, so up close the sphere is no longer exactly where the light seems to come from. (For a while the moonlight was a `PointLight` inside the sphere, which made the light really come from it, but a lamp 64 units away dims across the scene, needs a huge intensity, and gets blurry shadows.)
+
+### Where the sun stands: a sundial in reverse
+
+The light lab places its sun with the same spherical trigonometry a sundial uses, so one "time of day" slider moves it along a real arc: low in the east in the morning, highest at noon, setting in the west, higher in summer and lower towards the poles.
+
+Picture Earth from outside: it spins once a day about an axis tilted 23.44° from its orbit. Seen from the ground, that spin makes the sun circle the **celestial pole** once a day, and the tilt sets how far the circle sits from the celestial equator. That angle is the sun's **declination** δ: +23.44° at the June solstice, -23.44° at the December one, 0 at the equinoxes. Over the year it follows a cosine closely enough for lighting, δ ≈ -23.44° · cos(2π (day - 355) / 365). How far Earth has turned since local noon is the **hour angle** H, 15° an hour (360° in 24 hours). And where you stand is your **latitude** φ.
+
+The sun's direction is then one rotation away. In Earth's turning frame it points at (cos δ cos H, cos δ sin H, sin δ); tilting that by your latitude into local east, north and up gives
+
+- east = -cos δ sin H (negative after noon: the sun is in the west)
+- north = sin δ cos φ - cos δ cos H sin φ
+- up = sin δ sin φ + cos δ cos H cos φ, the sine of the sun's height above the horizon.
+
+Squared and added, these give 1, so the direction comes out as a unit vector with no normalising. Two checks you can do in your head: at noon (H = 0) the height is 90° - |φ - δ|, so at the equator at an equinox the sun is straight overhead; and at the north pole (φ = 90°) the height is δ all day long, the midnight sun. The tests check exactly these, plus sunrise and sunset where the height is zero, at cos H = -tan φ tan δ.
+
+Two simplifications, both too small to see in lighting: the clock is local *solar* time (12:00 is when the sun crosses the meridian, which differs from a wall clock by the time zone and up to 16 minutes over the year, the "equation of time"), and the atmosphere's refraction, which lifts the sun about half a degree near the horizon, is left out.
+
+The time of day is a setting that the ticks move on (0 hours per second by default, so the sun holds still), so it depends only on how long the game has run, never on the frame rate. From the sun's height the light lab picks the day's light by eye until a real sky arrives in phase 6d: sunlight fading in over the last degrees of sunrise and reddening below about 30° (low light crosses more air, which scatters the blue out of it, the same scattering that makes the sky blue), and a blue sky ambient and background that dim through dusk. The background is a `SkyBackground` component: the colour the renderer clears the picture to before drawing, so it shows wherever nothing is drawn. It lights nothing; it is only what you see behind everything.
 
 ---
 

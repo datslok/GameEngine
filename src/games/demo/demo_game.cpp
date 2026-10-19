@@ -50,6 +50,18 @@ namespace {
     // The moon is a place you can fly to: this far from where the free camera starts (inside the camera's far plane of 100).
     // At the free camera's 3 units per second, reaching its surface takes about 20 seconds.
     const Vec3 freeCameraStart{2.0f, 1.0f, 0.0f};
+
+    // The views' starts: the free camera looking down the path, the MOBA view centred where the duck stands, the body at
+    // the origin; the far plane well past the moon.
+    const PlayerControlsSetup demoViews{
+        .freeCameraPosition = freeCameraStart,
+        .freeCameraTarget = Vec3{0.0f, 0.0f, -5.0f},
+        .mobaLookPoint = Vec3{0.0f, 0.0f, -6.0f},
+        .firstPersonFeet = Vec3{0.0f, 0.0f, 0.0f},
+        .verticalFovDegrees = 70.0f,
+        .nearPlane = 0.1f,
+        .farPlane = 100.0f
+    };
     constexpr float moonDistance = 64.0f;
     constexpr float moonRadius = 4.0f;
 
@@ -242,26 +254,19 @@ namespace {
 }
 
 DemoGame::DemoGame(ControlMode startMode, bool debugModeSwitching):
-    camera(
-        Vec3{2.0f, 1.0f, 0.0f},
-        Vec3{0.0f, 0.0f, -5.0f},
-        Vec3{0.0f, 1.0f, 0.0f},
-        radiansFromDegrees(70.0f), // FoV
-        16.0f / 9.0f, // Replaced by the engine with the real frame's aspect ratio.
-        0.1f,
-        100.0f
-    ),
-    // The camera controllers start with their default settings; change them through getSettings().
-    controlMode(startMode),
-    enableDebugModeSwitching(debugModeSwitching)
+    controls(demoViews, startMode, debugModeSwitching)
 {
+}
+
+const char* DemoGame::title() const {
+    return "Demo";
 }
 
 void DemoGame::onInit(World& world, AssetManager& assets) {
     createScene(world, assets);
 
     // Start from the mode's predictable camera pose.
-    setControlMode(world, controlMode);
+    setControlMode(world, controls.getMode());
 }
 
 void DemoGame::createScene(World& world, AssetManager& assets) {
@@ -371,7 +376,7 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     world.add(ground, makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass));
 
     // The player's own body for first person: an invisible capsule standing where the first-person view starts.
-    firstPersonBody = spawnFirstPersonBody(world, Vec3{0.0f, 0.0f, 0.0f});
+    controls.spawnBody(world);
 
     // The obstacle course: plain stone blocks for the character controller to walk on, climb and bump into.
     Material courseStone;
@@ -484,9 +489,8 @@ void DemoGame::prepareGoldenView(World& world, const GoldenView& view) {
             continue;
         }
 
-        setControlMode(world, ControlMode::FreeCamera);
-        camera.setPose(golden.cameraPosition, golden.cameraTarget, Vec3{0.0f, 1.0f, 0.0f});
-        freeFlyCamera.takeOver(camera);
+        dropMobaOrders(world);
+        controls.poseFreeCamera(world, golden.cameraPosition, golden.cameraTarget);
 
         if (golden.lampsOn) {
             toggleLamps(world);
@@ -503,15 +507,7 @@ void DemoGame::prepareGoldenView(World& world, const GoldenView& view) {
 }
 
 void DemoGame::visitSettings(SettingsVisitor& visitor) {
-    visitor.group("First person camera", [&] {
-        visit(firstPersonCamera.getSettings(), visitor);
-    });
-    visitor.group("MOBA camera", [&] {
-        visit(mobaCamera.getSettings(), visitor);
-    });
-    visitor.group("Free camera", [&] {
-        visit(freeFlyCamera.getSettings(), visitor);
-    });
+    controls.visitSettings(visitor);
     visitor.group("Grenade", [&] {
         visit(grenadeSettings, visitor);
     });
@@ -707,10 +703,11 @@ void DemoGame::toggleLamps(World& world) {
 * It needs no PreviousTransform: it is already placed exactly where things are drawn this frame.
 */
 void DemoGame::updateFlashlight(World& world, float alpha) {
+    const Camera& camera = controls.getCamera();
     Vec3 position = camera.getPosition() + camera.getRight() * flashlightHandRight - camera.getUp() * flashlightHandDown;
     Vec3 direction = camera.getPosition() + camera.getForward() * flashlightAimDistance - position;
 
-    if (controlMode == ControlMode::Moba && world.isAlive(player)) {
+    if (controls.getMode() == ControlMode::Moba && world.isAlive(player)) {
         // Held above the ground, out in front, and tilted down so the beam lands a few steps ahead.
         const Vec3 facing = getCharacterFacing(world, player, alpha);
         position = getRenderTransform(world, player, alpha).position + Vec3{0.0f, flashlightHeight, 0.0f} + facing * flashlightReach;
@@ -748,11 +745,16 @@ void DemoGame::onFixedUpdate(World& world, float tickSeconds, double simulationS
 * The camera is the player's view, not game state, so it updates every rendered frame. Mouse look in particular must not be limited to the tick rate.
 */
 void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, float alpha) {
-    const bool modeChanged = updateModeSwitching(world, input);
-
     // Motion from the previous mode must not rotate the new camera pose.
-    if (!modeChanged) {
-        updateCamera(world, input, frameSeconds, alpha);
+    if (controls.updateModeSwitching(world, input)) {
+        dropMobaOrders(world);
+    } else {
+        // The MOBA camera, when locked, follows where the duck is drawn.
+        std::optional<Vec3> duck;
+        if (world.isAlive(player)) {
+            duck = getCharacterVisualCentre(world, player, alpha);
+        }
+        controls.updateCamera(world, input, frameSeconds, alpha, duck);
     }
 
     updateFlashlight(world, alpha);
@@ -765,23 +767,15 @@ void DemoGame::onUpdate(World& world, const Input& input, float frameSeconds, fl
 }
 
 Camera& DemoGame::getCamera() {
-    return camera;
+    return controls.getCamera();
 }
 
 bool DemoGame::wantsMouseLook() const {
-    return controlMode != ControlMode::Moba;
+    return controls.wantsMouseLook();
 }
 
-/*
-* The MOBA camera floats about 16 units from the ground it shows, beyond the reach of a torch-sized light, so lights are
-* ranked by their brightness at the ground point in the middle of the screen. The other modes see from among the lights.
-*/
 Vec3 DemoGame::getLightFocus() {
-    if (controlMode == ControlMode::Moba) {
-        return mobaCamera.getLookPoint(camera);
-    }
-
-    return camera.getPosition();
+    return controls.getLightFocus();
 }
 
 Entity DemoGame::getPlayer() const {
@@ -809,100 +803,19 @@ Entity DemoGame::getHovered() const {
 }
 
 void DemoGame::setControlMode(World& world, ControlMode mode) {
-    const Vec3 worldUp{0.0f, 1.0f, 0.0f};
+    controls.setControlMode(world, mode);
+    dropMobaOrders(world);
+}
 
-    // Each selection starts from a predictable test position.
-    switch (mode) {
-    case ControlMode::FirstPerson:
-        // From the free camera, drop the body where the camera is (it falls onto whatever is below) and keep looking the
-        // same way; otherwise look straight ahead from wherever the body stands.
-        if (controlMode == ControlMode::FreeCamera) {
-            const float eyeHeight = world.get<FirstPersonBody>(firstPersonBody).settings.standingEyeHeight;
-            placeFirstPersonBody(world, firstPersonBody, camera.getPosition() - Vec3{0.0f, eyeHeight, 0.0f});
-        } else {
-            const Vec3 eye = firstPersonEyePosition(world, firstPersonBody, 1.0f);
-            camera.setPose(eye, eye + Vec3{0.0f, 0.0f, -1.0f}, worldUp);
-        }
-        firstPersonCamera.takeOver(camera);
-        break;
-
-    case ControlMode::Moba:
-        mobaCamera.centreOn(camera, Vec3{0.0f, 0.0f, -6.0f});
-        break;
-
-    case ControlMode::FreeCamera:
-        camera.setPose(
-            freeCameraStart,
-            Vec3{0.0f, 0.0f, -5.0f},
-            worldUp
-        );
-        freeFlyCamera.takeOver(camera);
-        break;
-
-    default:
-        throw std::invalid_argument("Unknown control mode");
-    }
-
-    controlMode = mode;
+/*
+* Each view starts afresh: the duck stops, its marker goes, and a held right-click no longer steers it.
+*/
+void DemoGame::dropMobaOrders(World& world) {
     groundSteeringActive = false;
     if (world.isAlive(player)) {
         world.get<CharacterMovement>(player).stop();
     }
     world.get<ModelRenderer>(destinationMarker).visible = false;
-}
-
-bool DemoGame::updateModeSwitching(World& world, const Input& input) {
-    if (!enableDebugModeSwitching || !input.hasKeyboardFocus()) {
-        return false;
-    }
-
-    if (input.wasKeyPressed(Key::F1)) {
-        setControlMode(world, ControlMode::FirstPerson);
-        return true;
-    }
-
-    if (input.wasKeyPressed(Key::F2)) {
-        setControlMode(world, ControlMode::Moba);
-        return true;
-    }
-
-    if (input.wasKeyPressed(Key::F3)) {
-        setControlMode(world, ControlMode::FreeCamera);
-        return true;
-    }
-
-    return false;
-}
-
-/*
-* Each mode hands the camera to its own controller. Toggles such as the MOBA lock are the demo's rules, so they stay here.
-*/
-void DemoGame::updateCamera(const World& world, const Input& input, float frameSeconds, float alpha) {
-    switch (controlMode) {
-    case ControlMode::FirstPerson:
-        firstPersonCamera.update(camera, input, frameSeconds);
-        camera.setPosition(firstPersonEyePosition(world, firstPersonBody, alpha));
-        break;
-
-    case ControlMode::FreeCamera:
-        freeFlyCamera.update(camera, input, frameSeconds);
-        break;
-
-    case ControlMode::Moba: {
-        if (input.isCursorConfined() && input.wasKeyPressed(Key::Space)) {
-            mobaCameraLocked = !mobaCameraLocked;
-        }
-
-        // Follow where the character is drawn, not where the latest tick put it, so the camera and the character move together smoothly.
-        std::optional<Vec3> followTarget;
-        if (mobaCameraLocked && world.isAlive(player)) {
-            followTarget = getCharacterVisualCentre(world, player, alpha);
-        }
-
-        mobaCamera.update(camera, input, frameSeconds, followTarget);
-        break;
-    }
-    }
 }
 
 /*
@@ -961,7 +874,7 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
 * that merely brings the window back into focus does not also order the duck around.
 */
 bool DemoGame::mobaPointerActive(const Input& input) const {
-    return controlMode == ControlMode::Moba && input.hasKeyboardFocus() && input.isCursorConfined();
+    return controls.getMode() == ControlMode::Moba && input.hasKeyboardFocus() && input.isCursorConfined();
 }
 
 /*
@@ -976,7 +889,7 @@ std::optional<Ray> DemoGame::rayThroughPixel(const Input& input, const Vec2& pix
         return std::nullopt;
     }
 
-    return makeCameraRay(camera, pixel.x / size.x, pixel.y / size.y, size.x / size.y);
+    return makeCameraRay(controls.getCamera(), pixel.x / size.x, pixel.y / size.y, size.x / size.y);
 }
 
 /*
@@ -1115,34 +1028,16 @@ void DemoGame::toggleFloodlights(World& world) {
 }
 
 Entity DemoGame::getFirstPersonBody() const {
-    return firstPersonBody;
+    return controls.getFirstPersonBody();
 }
 
 /*
-* Once a frame, the movement keys become commands for the body's next tick: WASD a wished velocity turned by where the
-* camera faces, Shift sprints, Ctrl crouches, and a fresh press of Space jumps (holding it does not jump again on
-* landing). A fresh press of G throws a grenade from the eyes along the view. Outside first person, or with the mouse
-* released, the body is told to stand still.
+* Once a frame: the movement keys become the body's commands for its next tick (PlayerControls), and a fresh press of G
+* throws a grenade from the eyes along the view, while first-person input counts.
 */
 void DemoGame::updateFirstPersonCommands(World& world, const Input& input) {
-    CharacterController& controller = world.get<CharacterController>(firstPersonBody);
-    FirstPersonBody& body = world.get<FirstPersonBody>(firstPersonBody);
-
-    if (controlMode != ControlMode::FirstPerson || !input.isMouseCaptured()) {
-        controller.wishVelocity = Vec3{};
-        controller.wantsJump = false;
-        body.wantsCrouch = false;
-        return;
-    }
-
-    body.wantsCrouch = input.isKeyHeld(Key::LeftCtrl) || input.isKeyHeld(Key::RightCtrl);
-    const bool sprinting = input.isKeyHeld(Key::LeftShift) || input.isKeyHeld(Key::RightShift);
-    controller.wishVelocity = firstPersonWishVelocity(getMoveAxes(input), firstPersonCamera.getAngles().yaw, body.crouching,
-                                                      sprinting, body.settings);
-    if (input.wasKeyPressed(Key::Space)) {
-        controller.wantsJump = true;
-    }
-    if (input.wasKeyPressed(Key::G)) {
+    if (controls.updateFirstPersonCommands(world, input) && input.wasKeyPressed(Key::G)) {
+        const Camera& camera = controls.getCamera();
         throwGrenade(world, camera.getPosition(), camera.getForward(), grenadeLooks, grenadeSettings);
     }
 }

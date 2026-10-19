@@ -56,7 +56,9 @@ README_TEXT = """{title}
 How to run
 ----------
 1. Extract the whole zip into a folder (do not run it from inside the zip).
-2. Double-click {exe_name}.
+2. Double-click {exe_name} for the demo.
+3. Or double-click {light_lab} for the light lab: a sunlit test ground whose
+   sun moves with the time of day (F5, Light lab, Sun).
 
 Keep the exe next to its DLLs and the assets folder. A console window opens
 alongside the game; if something goes wrong, the error is shown there.
@@ -70,6 +72,9 @@ support (any reasonably recent NVIDIA, AMD or Intel GPU with up-to-date drivers)
 Controls
 --------
 {controls}"""
+
+# Starts the light lab (app/game_registry.h) from the packaged exe.
+LIGHT_LAB_LAUNCHER = "LightLab.bat"
 
 # The zip's README is plain text read in Notepad, so lines are wrapped to this width.
 README_WIDTH = 78
@@ -383,9 +388,14 @@ def main() -> int:
         loaded_at_runtime = path in decoders
         print(f"  {path.name}{'  (loaded at runtime by SDL3_image)' if loaded_at_runtime else ''}")
 
+    # The second game is the same exe with a command-line option; a batch file gives it a double-click of its own.
+    light_lab = stage / LIGHT_LAB_LAUNCHER
+    light_lab.write_text(f'@echo off\r\n"%~dp0{exe.name}" --game lightlab\r\n', encoding="ascii", newline="")
+
     controls = readme_controls((REPO_ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n"), brief=arguments.anonymous)
     title = ANONYMOUS_NAME if arguments.anonymous else "GameEngine demo"
-    readme = README_TEXT.format(title=title, underline="=" * len(title), exe_name=exe.name, controls=controls)
+    readme = README_TEXT.format(title=title, underline="=" * len(title), exe_name=exe.name, light_lab=light_lab.name,
+                                controls=controls)
     (stage / "README.txt").write_text(readme.replace("\n", "\r\n"), encoding="utf-8", newline="")
 
     print("Checking every DLL resolves inside the package or Windows...")

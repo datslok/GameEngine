@@ -71,3 +71,9 @@ struct SpotLight {
 struct AmbientLight {
     Vec3 colour{0.2f, 0.2f, 0.2f};
 };
+
+// Component: what shows where nothing is drawn, a flat colour standing in for the sky (linear, like light, and may pass
+// 1). It lights nothing. Several add up; with none the background is black.
+struct SkyBackground {
+    Vec3 colour{0.0f, 0.0f, 0.0f};
+};

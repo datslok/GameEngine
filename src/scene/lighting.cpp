@@ -15,6 +15,10 @@ FrameLighting collectLighting(World& world, float alpha) {
         lighting.ambient = lighting.ambient + ambient.colour;
     });
 
+    world.each<SkyBackground>([&](Entity, SkyBackground& sky) {
+        lighting.background = lighting.background + sky.colour;
+    });
+
     world.each<DirectionalLight>([&](Entity, DirectionalLight& light) {
         lighting.directionalLights.push_back(light);
     });

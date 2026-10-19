@@ -144,19 +144,26 @@ tests/gpu/shaders/%.spv: tests/gpu/shaders/% $(MAKEFILE_PATH)
 
 -include $(patsubst tests/gpu/shaders/%,$(GPU_TEST_SHADER_DEPENDENCY_DIR)/%.d,$(GPU_TEST_SHADER_BINARIES))
 
+# GAME picks the game for run and the golden targets (make run GAME=lightlab, make run-release GAME=lightlab; the names
+# are in src/app/game_registry.cpp). Empty: run starts the demo, the golden targets cover every game. Variables given on
+# the command line reach the release targets' inner make too.
+GAME ?=
+GAME_OPTION := $(if $(GAME),--game $(GAME))
+
 run: $(TARGET) shaders
-	./$(TARGET)
+	./$(TARGET) $(GAME_OPTION)
 
 test: $(TEST_TARGET) shaders
 	./$(TEST_TARGET)
 
-# Golden images (src/engine/golden.h): golden-save renders the demo's fixed views as the references in tests/golden/<GPU>/,
-# golden compares fresh captures with them (captures and difference heatmaps go to build/golden/<GPU>/). They need a GPU.
+# Golden images (src/engine/golden.h): golden-save renders every game's fixed views as the references in
+# tests/golden/<GPU>/<game>/, golden compares fresh captures with them (captures and difference heatmaps go to
+# build/golden/<GPU>/<game>/). They need a GPU.
 golden: $(TARGET) shaders
-	./$(TARGET) --golden-check
+	./$(TARGET) --golden-check $(GAME_OPTION)
 
 golden-save: $(TARGET) shaders
-	./$(TARGET) --golden-save
+	./$(TARGET) --golden-save $(GAME_OPTION)
 
 # The GPU test tier (tests/gpu): every shader library's functions run in compute shaders on fixed inputs and compared
 # with their C++ mirrors, then the golden images. Needs a GPU, so it is not part of make test.

@@ -21,8 +21,20 @@ namespace {
         const FrameLighting lighting = collectLighting(world, 0.0f);
 
         assert(nearlyEqual(lighting.ambient, Vec3{0.0f, 0.0f, 0.0f}));
+        assert(nearlyEqual(lighting.background, Vec3{0.0f, 0.0f, 0.0f}));
         assert(lighting.directionalLights.empty());
         assert(lighting.pointLights.empty());
+    }
+
+    // What shows where nothing is drawn: black by default, the sky's colour when a game sets one (several add up).
+    void testSkyBackgroundIsCollected() {
+        World world;
+        world.add(world.create(), SkyBackground{Vec3{0.5f, 0.6f, 0.9f}});
+        world.add(world.create(), SkyBackground{Vec3{0.1f, 0.1f, 0.1f}});
+
+        const FrameLighting lighting = collectLighting(world, 0.0f);
+
+        assert(nearlyEqual(lighting.background, Vec3{0.6f, 0.7f, 1.0f}));
     }
 
     void testAmbientLightsAddUp() {
@@ -111,6 +123,7 @@ void testLighting() {
     testSpotLightIsCollectedWithItsPosition();
     testEmptyWorldHasNoLight();
     testAmbientLightsAddUp();
+    testSkyBackgroundIsCollected();
     testDirectionalLightsAreCopied();
     testPointLightPositionIsInterpolated();
 }
