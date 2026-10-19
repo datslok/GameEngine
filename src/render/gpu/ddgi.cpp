@@ -31,6 +31,7 @@ namespace {
 void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
     visitor.field("Rays per probe", settings.raysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
+    visitor.field("Probe updates per second", settings.probeUpdatesPerSecond, {.min = 0.0f, .max = 1000.0f, .sliderMax = 240.0f, .unit = "(0: every frame)"});
     visitor.field("Irradiance time constant", settings.irradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "s"});
     visitor.field("Distance time constant", settings.distanceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 4.0f, .unit = "s"});
     visitor.field("Fast irradiance time constant", settings.fastIrradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 0.5f, .unit = "s"});
@@ -313,10 +314,45 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
     return packed;
 }
 
-// The fast blend counts a frame as at most fastBlendMaxFrameSeconds.
+int probeRayDivisor(int currentDivisor, float framesPerSecond, float updatesPerSecond, int raysPerProbe) {
+    if (!(updatesPerSecond > 0.0f) || !(framesPerSecond > 0.0f)) {
+        return 1;
+    }
+
+    int largest = 1;
+
+    while (raysPerProbe / (largest * 2) >= minRaysPerProbe) {
+        largest *= 2;
+    }
+
+    const float budgets = framesPerSecond / updatesPerSecond;
+    int divisor = std::clamp(currentDivisor, 1, largest);
+
+    while (divisor * 2 <= largest && budgets >= static_cast<float>(divisor * 2) * (1.0f - rayBudgetStepUpShare)) {
+        divisor *= 2;
+    }
+
+    while (divisor > 1 && budgets < static_cast<float>(divisor) * (1.0f - rayBudgetStepDownShare)) {
+        divisor /= 2;
+    }
+
+    return divisor;
+}
+
+/*
+* The fast blend counts a frame as at most fastBlendMaxFrameSeconds. The ray budget reads the frame time smoothed by the
+* same exponential blend as the probes, so the ladder follows the frame rate, not single frames.
+*/
 ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationSettings& settings, float frameSeconds, bool fastLights, bool fresh) {
+    const float smoothing = schedule.smoothedFrameSeconds > 0.0f ? hysteresisForTimeConstant(frameSeconds, rayBudgetSmoothingSeconds) : 0.0f;
+    schedule.smoothedFrameSeconds = frameSeconds + (schedule.smoothedFrameSeconds - frameSeconds) * smoothing;
+
+    const int stillRays = std::clamp(settings.raysPerProbe, minRaysPerProbe, maxRaysPerProbe);
+    const float framesPerSecond = schedule.smoothedFrameSeconds > 0.0f ? 1.0f / schedule.smoothedFrameSeconds : 0.0f;
+    schedule.rayDivisor = probeRayDivisor(schedule.rayDivisor, framesPerSecond, settings.probeUpdatesPerSecond, stillRays);
+
     ProbeFrame frame;
-    frame.raysPerProbe = std::clamp(settings.raysPerProbe, minRaysPerProbe, maxRaysPerProbe);
+    frame.raysPerProbe = stillRays / schedule.rayDivisor;
     frame.fastRaysPerProbe = fastLights ? std::clamp(settings.fastRaysPerProbe, minRaysPerProbe, maxRaysPerProbe) : frame.raysPerProbe;
 
     const ProbeRayFrame rays = probeRayFrame(schedule.frameNumber++);
