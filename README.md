@@ -68,7 +68,7 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | Command | What it does |
 |---|---|
 | `make` | Builds `build/game.exe` and compiles the shaders to `.spv`. Only changed files are recompiled, in parallel on every core. This is the unoptimised debug build, best for a debugger |
-| `make run` | Builds, then starts the game (the demo; `./build/game.exe --game lightlab` starts the light lab) |
+| `make run` | Builds, then starts the game (the demo; `make run GAME=lightlab` starts the light lab, and `GAME=` works for `make run-release`, `make golden` and `make golden-save` too) |
 | `make test` | Builds and runs the tests (`build/tests.exe`) |
 | `make release` | Builds the optimised release (`-O2`) into `build/release/`. Physics runs about 7 times faster than in the debug build; use it to play and to measure |
 | `make run-release` | Builds the release, then starts it |
