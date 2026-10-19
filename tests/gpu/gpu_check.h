@@ -121,3 +121,7 @@ void gpuTestDepthRange(const VulkanDevice& device, GpuCheckReport& report);
 // Ray tracing's library, then real acceleration structures traced on the GPU against the CPU's raycast (skipped on a
 // GPU without ray queries).
 void gpuTestRayTracing(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);
+
+// The light probes' library, then the real probe passes on scenes the CPU works out ray by ray (skipped on a GPU without
+// ray queries).
+void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);

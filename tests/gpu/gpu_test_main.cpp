@@ -30,6 +30,7 @@ int main() {
             gpuTestCascades(runner, report);
             gpuTestDepthRange(device, report);
             gpuTestRayTracing(device, runner, report);
+            gpuTestDdgi(device, runner, report);
             report.print();
         }
 

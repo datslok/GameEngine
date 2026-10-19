@@ -41,16 +41,18 @@ ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipeli
     sharedLayout = description.sharedLayout;
 }
 
-// The set layout of the storage buffers and sampled images, and the pipeline layout of that set and the push constants,
-// kept by this pipeline.
+// The set layout of the storage buffers, sampled images and storage images, and the pipeline layout of that set and the
+// push constants, kept by this pipeline.
 VkPipelineLayout ComputePipeline::createLayout(VkDevice handle, const ComputePipelineDescription& description) {
-    const std::uint32_t bindingCount = description.storageBuffers + description.sampledImages;
+    const std::uint32_t firstStorageImage = description.storageBuffers + description.sampledImages;
+    const std::uint32_t bindingCount = firstStorageImage + description.storageImages;
     std::vector<VkDescriptorSetLayoutBinding> bindings(bindingCount);
 
     for (std::uint32_t binding = 0; binding < bindingCount; ++binding) {
         bindings[binding].binding = binding;
-        bindings[binding].descriptorType =
-            binding < description.storageBuffers ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[binding].descriptorType = binding < description.storageBuffers ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                                           : binding < firstStorageImage       ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                                                               : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         bindings[binding].descriptorCount = 1;
         bindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     }

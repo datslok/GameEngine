@@ -2,6 +2,7 @@
 
 #include "math/aabb.h"
 #include "math/vec3.h"
+#include "scene/probe_volume.h"
 
 #include <array>
 #include <vector>
@@ -88,6 +89,14 @@ inline const Aabb labBackRoom{Vec3{-22.7f, labFloorTop, 5.3f}, Vec3{-17.3f, labR
 inline const Aabb labWindow{Vec3{-23.0f, 1.0f, 11.75f}, Vec3{-22.7f, 2.2f, 13.25f}};
 inline const Aabb labInnerDoorway{Vec3{-20.5f, labFloorTop, 9.85f}, Vec3{-19.5f, 2.1f, 10.15f}};
 inline const Aabb labFrontDoor{Vec3{-17.3f, labFloorTop, 7.0f}, Vec3{-17.0f, 2.1f, 8.2f}};
+
+/*
+* Light probes for global illumination round the building, 1 m apart, on half-metre marks so that every wall, the floor
+* and the roof fall between two layers of probes (none is buried in a wall, until probes can move themselves out), and
+* each room holds full cells of 8. Three layers reach out beyond the walls and two above the roof, so the outside of
+* the building is lit too: 12 x 5 x 16 probes.
+*/
+inline const ProbeVolume labProbeVolume{Vec3{-25.5f, 0.5f, 2.5f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{12, 5, 16}};
 
 // The level's parts, each group drawn as one entity and all of it solid.
 struct LightLabLayout {

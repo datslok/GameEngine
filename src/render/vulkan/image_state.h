@@ -17,8 +17,11 @@ enum class ImageState {
     ColourTarget,        // drawn into (and blended onto) by a render pass
     DepthTarget,         // depth tested and written by a render pass
     FragmentRead,        // sampled by fragment shaders
+    SurfaceRead,         // sampled by fragment and compute shaders alike (the scene's textures, which probe rays read too)
     DepthFragmentRead,   // a depth image sampled (and compared) by fragment shaders
     DepthComputeRead,    // a depth image read by compute shaders (the scene's depth, measured for the sun's cascades)
+    ComputeRead,         // sampled by compute shaders (the light probes, read by the next frame's probe rays)
+    ComputeStorage,      // read and written in place by compute shaders as a storage image (the light probes' update)
     TransferSource,      // copied or blitted from
     TransferDestination, // copied or blitted into
     Present              // handed to the screen

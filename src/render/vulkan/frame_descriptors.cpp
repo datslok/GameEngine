@@ -14,6 +14,9 @@ namespace {
 
     // Only the scene's set holds a plain uniform buffer (its frame data), once per frame.
     constexpr std::uint32_t uniformBuffersPerPool = 16;
+
+    // Only the light probes' update writes images in place: one per atlas, once per frame.
+    constexpr std::uint32_t storageImagesPerPool = 16;
 }
 
 FrameDescriptors::FrameDescriptors(VkDevice device):
@@ -23,10 +26,11 @@ FrameDescriptors::FrameDescriptors(VkDevice device):
 }
 
 void FrameDescriptors::addPool() {
-    const std::array<VkDescriptorPoolSize, 3> sizes{{
+    const std::array<VkDescriptorPoolSize, 4> sizes{{
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, texturesPerPool},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storageBuffersPerPool},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffersPerPool},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, storageImagesPerPool},
     }};
 
     VkDescriptorPoolCreateInfo info{};

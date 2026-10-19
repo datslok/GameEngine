@@ -3,6 +3,7 @@
 #include "ecs/world.h"
 #include "math/vec3.h"
 #include "scene/light.h"
+#include "scene/probe_volume.h"
 
 #include <vector>
 
@@ -37,6 +38,7 @@ struct FrameLighting {
     std::vector<DirectionalLight> directionalLights;
     std::vector<PlacedPointLight> pointLights;
     std::vector<PlacedSpotLight> spotLights;
+    std::vector<ProbeVolume> probeVolumes; // where global illumination measures bounced light
 };
 
 // Gather the World's lights for drawing at alpha (0..1) between the last two ticks.

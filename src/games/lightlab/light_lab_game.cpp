@@ -207,6 +207,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     sky = world.create();
     world.add(sky, AmbientLight{});
     world.add(sky, SkyBackground{});
+    world.add(world.create(), labProbeVolume);
 
     // The sun disc: a glowing sphere with no colour of its own. It stands for the sunlight's source, so it must not
     // block that light. It teleports with the camera every frame, so it has no PreviousTransform to blend from.

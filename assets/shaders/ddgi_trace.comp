@@ -1,0 +1,98 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The light probes' rays (render/gpu/ddgi.h): one invocation per ray, each traced from its probe against the frame's
+* solid instances (the glowing stand-ins for lights are left out, since their light is counted directly), and what it
+* brings back written for the update: the light leaving the surface it hit, towards the probe, and its distance.
+* - a miss brings back the sky behind everything, at the ray's whole reach;
+* - a back face (the probe sees the inside of something) brings back no light, its distance recorded negative;
+* - a front face brings back its own glow plus the direct light of every directional light that reaches it, found by a
+*   shadow ray (the shadow atlas only holds what the camera sees, so it cannot answer for hits off screen). Matte only:
+*   the probes' cosine averaging blurs away gloss, so the whole base colour reflects [2019].
+* Light bounced more than once (last frame's probes, read at the hit) comes once probes are sampled.
+*/
+#include "ray_scene.glsl"
+#include "materials.glsl"
+#include "instances.glsl"
+#include "frame_data.glsl"
+#include "scene_lights.glsl"
+#include "ddgi.glsl"
+#include "ddgi_volume.glsl"
+
+layout(local_size_x = DDGI_TRACE_GROUP_SIZE) in;
+
+// One vec4 per ray, probe by probe: rgb the light brought back, a the distance (negative for a back face).
+layout(std430, set = 3, binding = 0) writeonly buffer ProbeRays {
+    vec4 probeRays[];
+};
+
+// Whether nothing solid lies between a point and a directional light: the first hit anywhere along the way settles it.
+bool reachesLight(vec3 from, vec3 toLight) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SOLID, from, 0.0, toLight,
+                          DDGI_RAY_REACH);
+
+    while (rayQueryProceedEXT(query)) {
+    }
+
+    return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
+void main() {
+    int rays = volume.counts.w;
+    int index = int(gl_GlobalInvocationID.x);
+    int probe = index / rays;
+
+    if (probe >= volumeProbeCount()) {
+        return;
+    }
+
+    vec3 origin = volumeProbePosition(probe);
+    vec3 direction = volumeRayDirection(index % rays);
+
+    // No minimum distance: a probe cannot hit itself, and skipping near hits lets rays slip through walls [2021].
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_SOLID, origin, 0.0, direction, DDGI_RAY_REACH);
+
+    while (rayQueryProceedEXT(query)) {
+    }
+
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        probeRays[index] = vec4(volume.sky.rgb, DDGI_RAY_REACH);
+        return;
+    }
+
+    float distance = rayQueryGetIntersectionTEXT(query, true);
+
+    if (!rayQueryGetIntersectionFrontFaceEXT(query, true)) {
+        probeRays[index] = vec4(0.0, 0.0, 0.0, -distance);
+        return;
+    }
+
+    InstanceData instance = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
+    MeshSurface surface = meshSurfaceAt(instance.material.y, rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
+                                        rayQueryGetIntersectionBarycentricsEXT(query, true));
+    vec3 normal = normalize(mat3(instance.normalMatrix) * surface.normal);
+
+    // The face was met from its front, so its shading normal should face the ray too; smoothing can tip it past.
+    if (dot(normal, direction) > 0.0) {
+        normal = -normal;
+    }
+
+    MaterialData material = materials[instance.material.x];
+    vec3 albedo = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
+    vec3 shadowFrom = origin + direction * distance + normal * DDGI_SHADOW_RAY_OFFSET;
+    vec3 light = material.emissive.rgb;
+
+    for (int i = 0; i < counts.x; ++i) {
+        vec3 toLight = directional[i].toLight.xyz;
+        float facing = dot(normal, toLight);
+
+        if (facing > 0.0 && reachesLight(shadowFrom, toLight)) {
+            light += albedo * directional[i].radiance.rgb * facing;
+        }
+    }
+
+    probeRays[index] = vec4(light, distance);
+}

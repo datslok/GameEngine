@@ -83,14 +83,14 @@ VulkanTexture::VulkanTexture(const VulkanDevice& device, ImmediateCommands& uplo
                            1, &blit, VK_FILTER_LINEAR);
 
             recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferSource,
-                                                      ImageState::FragmentRead, ImageContents::Keep, source, 1));
+                                                      ImageState::SurfaceRead, ImageContents::Keep, source, 1));
         }
 
         recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
-                                                  ImageState::FragmentRead, ImageContents::Keep, levels - 1, 1));
+                                                  ImageState::SurfaceRead, ImageContents::Keep, levels - 1, 1));
     });
 
-    image.setState(ImageState::FragmentRead);
+    image.setState(ImageState::SurfaceRead);
 }
 
 VkImageView VulkanTexture::getView() const {

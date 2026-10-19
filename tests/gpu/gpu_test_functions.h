@@ -65,4 +65,12 @@
 // ray_tracing_test.comp
 #define GPU_TEST_CAMERA_RAY 0
 
+// ddgi_test.comp
+#define GPU_TEST_OCTAHEDRAL 0
+#define GPU_TEST_PROBE_TEXELS 1
+#define GPU_TEST_PROBE_RAYS 2
+#define GPU_TEST_PROBE_WEIGHTS 3
+#define GPU_TEST_PROBE_BLENDING 4
+#define GPU_TEST_PROBE_GRID 5
+
 #endif

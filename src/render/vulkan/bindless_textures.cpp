@@ -21,7 +21,7 @@ BindlessTextures::BindlessTextures(const VulkanDevice& device, std::uint32_t req
     binding.binding = 0;
     binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     binding.descriptorCount = capacity;
-    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // compute: the light probes' rays
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;

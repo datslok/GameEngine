@@ -23,6 +23,7 @@
 #include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
+#include "render/vulkan/vulkan_ddgi.h"
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/vulkan/vulkan_depth_range.h"
 #include "render/vulkan/vulkan_device.h"
@@ -210,6 +211,9 @@ private:
     OwnedHandle<VkPipelineLayout> rayDebugLayout;
     std::unique_ptr<VulkanPipeline> rayDebugPipeline;
 
+    // Global illumination's light probes (render/gpu/ddgi.h), traced with ray queries: null without them.
+    std::unique_ptr<VulkanDdgi> ddgi;
+
     std::unique_ptr<VulkanBloom> bloom;
     std::unique_ptr<VulkanDebugLines> debugLines;
     std::unique_ptr<VulkanOverlay> overlay;
@@ -281,6 +285,7 @@ private:
                       const Vec3& background);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
+    void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     void measureDepthsBeforeCapture(const FrameDescription& description, const RenderSettings& settings);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
