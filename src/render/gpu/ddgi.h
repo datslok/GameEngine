@@ -46,6 +46,16 @@ struct GlobalIlluminationSettings {
     // rays per second of history, so a slower GPU can trace fewer with longer time constants.
     int raysPerProbe = 64;
 
+    /*
+    * A ray budget: the still probes trace raysPerProbe rays this many times a second at most, so above that frame rate
+    * each frame traces a share of them (raysPerProbe halved or quartered, on a ladder, probeRayDivisor), and the probe
+    * work stops growing with the frame rate. Noise goes with rays a second, so 240 fps on a budget of 60 flickers like
+    * 60 fps does without one (the dark room texel of ddgi_test: 0.95% against 0.96%, and 0.33% at 240 fps with all 64),
+    * and the light settles as fast either way, since each frame still blends by its own time. Probes near fast lights
+    * keep fastRaysPerProbe. 0 traces raysPerProbe every frame.
+    */
+    float probeUpdatesPerSecond = 0.0f;
+
     // How long the stored light takes to follow a change: after this many seconds, 1/e (37%) of a step change is left,
     // at any frame rate. Shorter reacts faster and flickers more: noise goes as 1/sqrt(rays x time constant). 2 s was
     // chosen by eye in the light lab's dark back room, where 0.5 s crawled visibly; the price is lag, a light switched
@@ -263,14 +273,36 @@ int probeRayStride(const ProbeFrame& frame);
 
 GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& frame);
 
-// What the probes carry from frame to frame beside their atlases: the number of the next frame, for its rays.
+// The ray budget's frame time is smoothed over this long, so one quick or slow frame does not move the ladder.
+inline constexpr float rayBudgetSmoothingSeconds = 0.25f;
+
+// A step up the ladder is taken this share short of it, so a frame rate jittering round a step (a 240 Hz cap) settles
+// on it, at most this share under the budget's rays a second; a step down waits for the frame rate to fall the larger
+// share below the step, so the count cannot flip every frame.
+inline constexpr float rayBudgetStepUpShare = 0.05f;
+inline constexpr float rayBudgetStepDownShare = 0.1f;
+
+/*
+* What the still probes' rays are divided by this frame, for a ray budget of updatesPerSecond (0: none, 1): about the
+* largest power of two not above framesPerSecond / updatesPerSecond, so the rays a second stay at or near the budget's,
+* and never so large that raysPerProbe / divisor falls below minRaysPerProbe. The steps up and down are apart
+* (rayBudgetStepUpShare, rayBudgetStepDownShare).
+*/
+int probeRayDivisor(int currentDivisor, float framesPerSecond, float updatesPerSecond, int raysPerProbe);
+
+/*
+* What the probes carry from frame to frame beside their atlases: the number of the next frame, for its rays, and the
+* ray budget's smoothed frame time (0 before the first frame) and divisor.
+*/
 struct ProbeSchedule {
     std::uint64_t frameNumber = 0;
+    float smoothedFrameSeconds = 0.0f;
+    int rayDivisor = 1;
 };
 
 /*
 * This frame's rays and blending (all of ProbeFrame but the sky), moving the schedule on a frame: ray counts clamped to
-* what a probe may trace, the frame's place in the ray cycle, and the shares kept from the time constants, the fast
+* what a probe may trace, the still count divided for the ray budget, the frame's place in the ray cycle, and the shares kept from the time constants, the fast
 * one's frame time capped. Without fast lights near the volume (fastLights false) every probe traces the still count.
 * fresh: atlases just made, which keep nothing.
 */

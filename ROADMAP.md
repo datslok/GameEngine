@@ -192,9 +192,9 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
   - [ ] An RTX quality preset beside Low to Ultra, once DDGI has settings for it to set
   - [x] Probe update in compute: 64 rays a probe on a turned Fibonacci spiral, back faces, sunlight at hits by shadow rays (`ddgi-probes`)
   - [x] Every light and infinite bounces at probe hits: the brightest point and spot lights by shadow rays, last frame's probes read at each hit (`ddgi-sampling`)
-  - [x] Hysteresis blending: time constants, fifth-root irradiance, per-texel speed-ups (`ddgi-probes`)
+  - [x] Hysteresis blending: time constants (`ddgi-probes`), irradiance blended linearly (`ddgi-sampling`)
   - [x] Fast lights without trails: their bounce in a second irradiance atlas with a 0.05 s memory, 256 rays for probes within their reach (`ddgi-fast-lights`)
-  - [ ] Optional: cap probe updates per second (update at most N times a second, blending with the time since the last update), since at 240 fps the probes cost four times what they do at 60 for mostly the same averaged light
+  - [x] Ray budget: probe updates per second, above which each frame traces half or a quarter of the still rays (`ddgi-ray-budget`)
   - [ ] Scene events: the game signals big changes (a light switched on, a jump in the time of day, a ceiling caving in) to speed up every probe for a moment
   - [x] Leak prevention: Chebyshev visibility from each probe's distance moments (`ddgi-sampling`)
   - [ ] Probe relocation and probe states: a grid ignores the level's shape, so some probes land inside geometry, where most rays hit back faces, or a hair from a surface. Over a few start-up iterations move each one (less than half a cell) out through the nearest back face or away from a too-close surface, against the static level only. Then give each a state: off (still buried, or sees no surface), vigilant (a static surface within about a cell: always updated, even off screen, because it carries bounce light), sleeping (nothing nearby: not traced) or awake (a sleeping probe inside a moving object's grown box, checked every frame). Sleeping saved 30-50% of the probe work in the 2021 paper. Mark off, sleeping and vigilant probes by colour in the probe debug view

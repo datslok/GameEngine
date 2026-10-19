@@ -359,6 +359,73 @@ namespace {
         assert(hitch.irradianceHysteresis == hysteresisForTimeConstant(0.5f, settings.irradianceTimeConstant));
     }
 
+    /*
+    * The ray budget's ladder: the still rays are divided by a power of two, about the largest that keeps the rays a
+    * second at the budget's (frames a second over updates a second, rounded down to a power of two), never below the
+    * least a probe may trace; off (0) it is always 1. A step up is taken 5% short of it (114 fps for 2 on a budget of
+    * 60, so a jittery 240 settles on 4), a step down a tenth below it, so a frame rate hovering on a step does not flip
+    * the count back and forth.
+    */
+    void testTheRayBudgetsLadder() {
+        assert(probeRayDivisor(1, 240.0f, 0.0f, 64) == 1);
+        assert(probeRayDivisor(4, 240.0f, 0.0f, 64) == 1);
+
+        assert(probeRayDivisor(1, 60.0f, 60.0f, 64) == 1);
+        assert(probeRayDivisor(1, 30.0f, 60.0f, 64) == 1);
+        assert(probeRayDivisor(1, 100.0f, 60.0f, 64) == 1);
+        assert(probeRayDivisor(1, 120.0f, 60.0f, 64) == 2);
+        assert(probeRayDivisor(1, 240.0f, 60.0f, 64) == 4);
+        assert(probeRayDivisor(4, 240.0f, 60.0f, 64) == 4);
+
+        // Never under the least a probe may trace (16): 64 rays divide by 4 at most, 32 by 2, 16 not at all.
+        assert(probeRayDivisor(1, 1000.0f, 60.0f, 64) == 4);
+        assert(probeRayDivisor(1, 240.0f, 60.0f, 32) == 2);
+        assert(probeRayDivisor(4, 240.0f, 60.0f, 32) == 2);
+        assert(probeRayDivisor(1, 240.0f, 60.0f, 16) == 1);
+
+        // Hysteresis: from 1, 112 fps (1.87 budgets) stays 1 and 115 (1.92) steps up; at 2, 110 (1.83) keeps 2 and 105
+        // (1.75) drops to 1; a jittery 235 or 245 is 4 either way.
+        assert(probeRayDivisor(1, 112.0f, 60.0f, 64) == 1);
+        assert(probeRayDivisor(1, 115.0f, 60.0f, 64) == 2);
+        assert(probeRayDivisor(2, 110.0f, 60.0f, 64) == 2);
+        assert(probeRayDivisor(2, 105.0f, 60.0f, 64) == 1);
+        assert(probeRayDivisor(4, 200.0f, 60.0f, 64) == 2);
+        assert(probeRayDivisor(2, 235.0f, 60.0f, 64) == 4 && probeRayDivisor(4, 245.0f, 60.0f, 64) == 4);
+    }
+
+    /*
+    * The schedule with a budget of 60 updates a second at a steady 240 frames a second: once the smoothed frame time
+    * has settled the still probes trace 16 rays (a quarter of 64), probes near a fast light still 256, on the same ray
+    * cycle; the shares kept still come from the frame's own time, so the light settles as fast as without the budget.
+    */
+    void testTheScheduleWithARayBudget() {
+        GlobalIlluminationSettings settings;
+        settings.probeUpdatesPerSecond = 60.0f;
+        const float frameSeconds = 1.0f / 240.0f;
+        ProbeSchedule schedule;
+        ProbeFrame frame;
+
+        for (std::uint64_t number = 0; number < 480; ++number) {
+            frame = scheduleProbeFrame(schedule, settings, frameSeconds, false, number == 0);
+            const ProbeRayFrame expected = probeRayFrame(number);
+            assert(frame.rayPhase == expected.phase && sameRotation(frame.rotation, expected.rotation));
+        }
+
+        assert(frame.raysPerProbe == 16 && frame.fastRaysPerProbe == 16 && probeRayStride(frame) == 16);
+        assert(frame.irradianceHysteresis == hysteresisForTimeConstant(frameSeconds, settings.irradianceTimeConstant));
+        assert(frame.distanceHysteresis == hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant));
+
+        const ProbeFrame withFastLight = scheduleProbeFrame(schedule, settings, frameSeconds, true, false);
+        assert(withFastLight.raysPerProbe == 16 && withFastLight.fastRaysPerProbe == 256);
+
+        // At 30 frames a second the budget is not reached: every probe traces all 64, as without it.
+        for (int frames = 0; frames < 120; ++frames) {
+            frame = scheduleProbeFrame(schedule, settings, 1.0f / 30.0f, false, false);
+        }
+
+        assert(frame.raysPerProbe == 64);
+    }
+
     // Irradiance weighs a ray by the cosine between it and the texel (none from behind); distances by a far narrower
     // lobe, the cosine to the 50th power.
     void testUpdateWeights() {
@@ -513,8 +580,7 @@ namespace {
         double crawl = 0.0;
     };
 
-    SparseTexel sparselyLitTexel(float timeConstant, bool interleaved, int rayCount = 64) {
-        const float framesPerSecond = 240.0f;
+    SparseTexel sparselyLitTexel(float timeConstant, bool interleaved, int rayCount = 64, float framesPerSecond = 240.0f) {
         const float hysteresis = hysteresisForTimeConstant(1.0f / framesPerSecond, timeConstant);
         const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
         const float patchCosine = std::cos(radiansFromDegrees(15.0f));
@@ -595,6 +661,13 @@ namespace {
         // Measured: 2.4% for random rotations, 1.3% interleaved, 0.33% interleaved at the 2 s default.
         assert(interleaved.crawl < 0.7 * random.crawl);
         assert(chosen.crawl < 0.01);
+
+        // A ray budget of 60 updates a second at 240 fps (16 rays a frame) crawls like 64 rays at 60 fps, since noise goes
+        // with rays a second: measured 0.95% against 0.96%, and 0.33% at 240 fps with all 64.
+        const SparseTexel budget = sparselyLitTexel(settings.irradianceTimeConstant, true, 16, 240.0f);
+        const SparseTexel sixty = sparselyLitTexel(settings.irradianceTimeConstant, true, 64, 60.0f);
+        assert(std::abs(budget.settled / budget.truth - 1.0) < 0.02);
+        assert(budget.crawl < 1.1 * sixty.crawl && budget.crawl > 2.0 * chosen.crawl);
     }
 
     // Probes are numbered x first, then y, then z, and sit on the grid's corners from the origin.
@@ -712,6 +785,8 @@ void testDdgi() {
     testProbesWithinReachOfALight();
     testTheScheduleWithoutFastLights();
     testTheScheduleWithFastLights();
+    testTheRayBudgetsLadder();
+    testTheScheduleWithARayBudget();
     testUpdateWeights();
     testDistancesForTheUpdate();
     testHysteresisFollowsATimeConstant();
