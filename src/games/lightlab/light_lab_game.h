@@ -24,6 +24,10 @@ struct LightLabSunSettings {
     float sunIntensity = 3.0f;
     float skyAmbient = 0.2f;       // at full daylight; it dims with the sun's height towards dusk
     float skyBrightness = 1.0f;    // the sky seen behind everything, at full daylight, dimming with the ambient
+
+    // The sun disc in the sky against its real size (0.53 degrees across), for looks only: shadows keep the real size,
+    // and a bigger disc glows dimmer by as much, so it gives the same light.
+    float sunDiscScale = 1.0f;
 };
 
 void visit(LightLabSunSettings& settings, SettingsVisitor& visitor);
@@ -70,17 +74,21 @@ public:
     const StaticLevel& getLevel() const;
     LightLabSunSettings& getSunSettings();
     Entity getSun() const;
+
+    // The glowing disc in the sky where the sunlight comes from (scene/sky_object.h).
+    Entity getSunDisc() const;
     Entity getFirstPersonBody() const;
     PlayerControls& getControls();
 
 private:
-    // Point the sun and set the sky for the current settings.
+    // Point the sun, set the sky and place the sun disc for the current settings and camera.
     void updateDaylight(World& world);
 
     PlayerControls controls;
     LightLabSunSettings sunSettings;
 
     Entity sun;
+    Entity sunDisc;
     Entity sky;
 
     // The ground and every block: built once in onInit, never rebuilt.
