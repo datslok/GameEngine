@@ -36,7 +36,7 @@ namespace {
 }
 
 GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
-                           const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap) {
+                           const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap, const ShadowSettings& shadows) {
     GpuFrameData frame{};
     writeColumnMajor(relativeViewProjection, frame.relativeViewProjection);
     frame.cameraOrigin[0] = cameraOrigin.x;
@@ -44,8 +44,9 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
     frame.cameraOrigin[2] = cameraOrigin.z;
     std::copy(lights.ambient, lights.ambient + 4, frame.ambient);
     std::copy(lights.counts, lights.counts + 4, frame.counts);
-    frame.atlasTexel[0] = 1.0f / static_cast<float>(shadowAtlasWidth);
-    frame.atlasTexel[1] = 1.0f / static_cast<float>(shadowAtlasHeight);
+    const ShadowAtlasSize atlas = shadowAtlasSizeFor(shadows);
+    frame.atlasTexel[0] = 1.0f / static_cast<float>(atlas.width);
+    frame.atlasTexel[1] = 1.0f / static_cast<float>(atlas.height);
     frame.clusterTiles[0] = clusters.tilesX;
     frame.clusterTiles[1] = clusters.tilesY;
     frame.clusterTiles[2] = clusters.slices;
@@ -60,6 +61,8 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
     writeAxis(clusters.forward, frame.viewForward);
     frame.shadingOptions[0] = clusteredShading ? 1 : 0;
     frame.shadingOptions[1] = clusterHeatmap ? 1 : 0;
+    frame.cascadeOptions[0] = shadows.cascadeBlendBand;
+    frame.cascadeOptions[1] = shadows.cascadeTransition == CascadeTransition::Dither ? 1.0f : 0.0f;
     return frame;
 }
 

@@ -203,7 +203,7 @@ namespace {
     // Planned frame after frame, lights keep their tiles, so their contents can be kept too.
     void testPlansKeepTilesBetweenFrames() {
         const Camera camera{Vec3{5.0f, 40.0f, 0.0f}, Vec3{5.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 1.5f, 1.5f, 0.1f, 200.0f};
-        ShadowAtlasLayout layout;
+        ShadowAtlasLayout layout{shadowAtlasSizeFor(ShadowSettings{})};
 
         FrameLighting lighting;
         lighting.pointLights = {lampAt(0.0f, 1), lampAt(5.0f, 2), lampAt(10.0f, 3)};
@@ -211,7 +211,9 @@ namespace {
 
         const ShadowPlan first = planShadows(lighting, camera, layout);
         const ShadowPlan second = planShadows(lighting, camera, layout);
-        assert(first.tiles.size() == 1 + 18 && second.tiles.size() == first.tiles.size());
+        // The sun's cascades first, then six faces per lamp.
+        const std::size_t sunTiles = maxShadowCascades;
+        assert(first.tiles.size() == sunTiles + 18 && second.tiles.size() == first.tiles.size());
 
         for (std::size_t i = 0; i < first.tiles.size(); ++i) {
             assert(first.tiles[i].x == second.tiles[i].x && first.tiles[i].y == second.tiles[i].y);
@@ -221,17 +223,49 @@ namespace {
         // The first lamp goes out: the last lamp moves up a slot (its tiles are numbered earlier), but keeps its squares.
         lighting.pointLights.erase(lighting.pointLights.begin());
         const ShadowPlan third = planShadows(lighting, camera, layout);
-        assert(third.tiles.size() == 1 + 12);
+        assert(third.tiles.size() == sunTiles + 12);
 
         for (std::size_t face = 0; face < 6; ++face) {
-            const ShadowTile& before = first.tiles[1 + 12 + face];
-            const ShadowTile& after = third.tiles[1 + 6 + face];
+            const ShadowTile& before = first.tiles[sunTiles + 12 + face];
+            const ShadowTile& after = third.tiles[sunTiles + 6 + face];
             assert(before.x == after.x && before.y == after.y && before.size == after.size);
+        }
+    }
+    // The Ultra atlas (8192 x 12288) starts as six squares of 4096, which a 4096 request takes whole, and smaller ones
+    // split; freed, the quarters merge back up to 4096.
+    void testUltraAtlasHandsOutLargeSquares() {
+        const ShadowAtlasSize ultra{8192, 12288, 4096};
+        ShadowAtlasAllocator allocator{ultra};
+        const std::uint64_t texels = 8192ull * 12288ull;
+        assert(allocator.freeTexels() == texels);
+
+        std::vector<AtlasSquare> squares;
+
+        for (int i = 0; i < 5; ++i) {
+            squares.push_back(*allocator.allocate(4096));
+        }
+
+        squares.push_back(*allocator.allocate(256));
+        assert(!allocator.allocate(4096));
+
+        for (const AtlasSquare& square : squares) {
+            assert(square.x + square.size <= ultra.width && square.y + square.size <= ultra.height);
+        }
+
+        for (const AtlasSquare& square : squares) {
+            allocator.release(square);
+        }
+
+        assert(allocator.freeTexels() == texels);
+
+        for (int i = 0; i < 6; ++i) {
+            assert(allocator.allocate(4096));
         }
     }
 }
 
 void testShadowAtlas() {
+    testUltraAtlasHandsOutLargeSquares();
     testSquaresAreHandedOut();
     testFreedSquaresMerge();
     testSquaresStayPut();

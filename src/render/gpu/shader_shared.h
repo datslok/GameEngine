@@ -13,4 +13,7 @@
 #define MAX_SHADOW_FILTER_TEXELS 12.0
 #define MAX_BLOCKER_SEARCH_TEXELS 12.0
 
+// Sun shadows: the steepest slope (tangent of the angle between a surface's normal and the sun) the bias grows with.
+#define MAX_SUN_BIAS_SLOPE 10.0
+
 #endif

@@ -58,6 +58,41 @@ namespace {
         assert(nearlyEqual(medium, 0.0004f * 3.9f / 0.4f / 0.001f));
     }
 
+    // A box's depth is a straight ramp from 1 at its near side (towards the light) to 0 at the far side.
+    void testBoxDepthTurnsBackIntoDistance() {
+        assert(nearlyEqual(boxShadowDistance(1.0f, 40.0f), 0.0f));
+        assert(nearlyEqual(boxShadowDistance(0.25f, 40.0f), 30.0f));
+        assert(nearlyEqual(boxShadowDistance(0.0f, 40.0f), 40.0f));
+    }
+
+    /*
+    * The sun's rays are parallel apart from its own size: from a point, its disc spans an angle (its angular radius
+    * either side of its centre), so behind a blocker the penumbra widens by tan(angular radius) per metre between them.
+    * Measured in world units, then turned into texels of whichever cascade is shadowing the point: a coarser cascade sees
+    * the same width as fewer texels, so a shadow keeps its softness across a cascade boundary.
+    */
+    void testSunPenumbraFollowsItsAngularSize() {
+        // 4 m behind the blocker with tan = 0.01: 0.04 m, where a texel covers 0.01 m.
+        assert(nearlyEqual(sunPenumbraTexels(0.01f, 10.0f, 6.0f, 0.01f), 4.0f));
+        assert(nearlyEqual(sunPenumbraTexels(0.01f, 10.0f, 6.0f, 0.02f), 2.0f));
+
+        // A blocker touching the receiver throws a sharp shadow; far behind it the width is capped.
+        assert(nearlyEqual(sunPenumbraTexels(0.01f, 10.0f, 10.0f, 0.01f), minShadowFilterTexels));
+        assert(nearlyEqual(sunPenumbraTexels(0.01f, 100.0f, 1.0f, 0.01f), maxShadowFilterTexels));
+    }
+
+    // The widest penumbra a blocker could throw comes from one at the box's near side, a receiver's whole distance away.
+    void testSunBlockerSearchReachesTheBoxsNearSide() {
+        assert(nearlyEqual(sunBlockerSearchTexels(0.01f, 5.0f, 0.01f), 5.0f));
+        assert(nearlyEqual(sunBlockerSearchTexels(0.01f, 500.0f, 0.01f), maxBlockerSearchTexels));
+        assert(nearlyEqual(sunBlockerSearchTexels(0.0f, 5.0f, 0.01f), minShadowFilterTexels));
+    }
+
+    // A directional light is the sun by default: its disc is about half a degree across (0.267 degrees in radius).
+    void testDirectionalLightsAreTheSunsSize() {
+        assert(nearlyEqual(DirectionalLight{}.angularRadius, 0.00465f, 0.00001f));
+    }
+
     // Lights have a real glowing size for their shadows, separate from the falloff's sourceRadius.
     void testEmittersAreSmallByDefault() {
         assert(nearlyEqual(PointLight{}.emitterRadius, 0.05f));
@@ -65,7 +100,8 @@ namespace {
     }
 
     // The shader learns each perspective tile's near and far planes and how much world one texel covers per unit of
-    // distance, and each shadowed light's emitter size. Directional boxes keep plain filtering (all zeros).
+    // distance, and each shadowed light's emitter size. A sun's cascade boxes have no near plane (lens x 0, which tells
+    // them apart), their depth, one texel's fixed world size and their radius, and the sun's size as tan of its angle.
     void testTilesCarryWhatSoftShadowsNeed() {
         FrameLighting lighting;
         lighting.directionalLights.push_back(DirectionalLight{});
@@ -83,7 +119,9 @@ namespace {
         const ShadowPlan plan = planShadows(lighting, camera);
 
         const ShadowTileData& box = plan.tileData[static_cast<std::size_t>(plan.directional[0].firstTile)];
-        assert(box.lens[0] == 0.0f && box.lens[1] == 0.0f && box.lens[2] == 0.0f);
+        assert(box.lens[0] == 0.0f && box.lens[1] > 0.0f && box.lens[2] > 0.0f && box.lens[3] > 0.0f);
+        assert(nearlyEqual(box.lens[2], 2.0f * box.lens[3] / static_cast<float>(plan.tiles[static_cast<std::size_t>(plan.directional[0].firstTile)].size), 0.00001f));
+        assert(nearlyEqual(plan.directional[0].emitterRadius, std::tan(DirectionalLight{}.angularRadius), 0.000001f));
 
         const std::size_t firstFace = static_cast<std::size_t>(plan.points[0].firstTile);
         const ShadowTileData& face = plan.tileData[firstFace];
@@ -106,6 +144,10 @@ void testSoftShadow() {
     testDepthTurnsBackIntoDistance();
     testPenumbraFollowsTheGeometry();
     testBlockerSearchCoversTheCone();
+    testBoxDepthTurnsBackIntoDistance();
+    testSunPenumbraFollowsItsAngularSize();
+    testSunBlockerSearchReachesTheBoxsNearSide();
+    testDirectionalLightsAreTheSunsSize();
     testEmittersAreSmallByDefault();
     testTilesCarryWhatSoftShadowsNeed();
 }

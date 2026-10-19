@@ -1,18 +1,19 @@
 #include "render/gpu/quality_preset.h"
 #include "render/gpu/render_settings.h"
+#include "render/gpu/shadow_map.h"
 
 #include <cassert>
 #include <optional>
 
 namespace {
-    // High is the engine as it is tuned: its defaults.
-    void testHighIsTheDefaults() {
+    // Ultra is the engine as it is tuned: its defaults.
+    void testUltraIsTheDefaults() {
         const RenderSettings defaults;
-        assert(matchingQualityPreset(defaults) == QualityPreset::High);
+        assert(matchingQualityPreset(defaults) == QualityPreset::Ultra);
 
         RenderSettings settings;
         settings.shadows.texelTarget = 0.5f;
-        applyQualityPreset(settings, QualityPreset::High);
+        applyQualityPreset(settings, QualityPreset::Ultra);
         assert(settings.shadows.texelTarget == defaults.shadows.texelTarget);
     }
 
@@ -38,6 +39,13 @@ namespace {
         assert(low.shadows.spotTexelTarget > medium.shadows.spotTexelTarget);
         assert(medium.shadows.spotTexelTarget > high.shadows.spotTexelTarget);
         assert(low.shadows.directionalDistance <= medium.shadows.directionalDistance);
+        assert(medium.shadows.directionalDistance <= high.shadows.directionalDistance);
+        assert(low.shadows.cascadeCount <= medium.shadows.cascadeCount);
+        assert(medium.shadows.cascadeCount <= high.shadows.cascadeCount);
+        assert(high.shadows.cascadeCount <= maxShadowCascades);
+        assert(cascadeTilePixels(low.shadows.cascadeResolution) <= cascadeTilePixels(medium.shadows.cascadeResolution));
+        assert(cascadeTilePixels(medium.shadows.cascadeResolution) <= cascadeTilePixels(high.shadows.cascadeResolution));
+        assert(cascadeTilePixels(high.shadows.cascadeResolution) < cascadeTilePixels(RenderSettings{}.shadows.cascadeResolution));
 
         assert(low.bloom.maxLevels < medium.bloom.maxLevels);
         assert(medium.bloom.maxLevels < high.bloom.maxLevels);
@@ -68,13 +76,25 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
+    // High is Ultra with the sun's cascades at 2048, in the usual atlas (128 MB instead of 384), for typical GPUs.
+    void testHighIsUltraWithSmallerCascades() {
+        RenderSettings high;
+        applyQualityPreset(high, QualityPreset::High);
+        assert(high.shadows.cascadeResolution == CascadeResolution::Pixels2048);
+        assert(matchingQualityPreset(high) == QualityPreset::High);
+
+        high.shadows.cascadeResolution = RenderSettings{}.shadows.cascadeResolution;
+        assert(matchingQualityPreset(high) == QualityPreset::Ultra);
+    }
+
     void testPresetNames() {
-        assert(qualityPresetNames.size() == static_cast<std::size_t>(QualityPreset::High) + 1);
+        assert(qualityPresetNames.size() == static_cast<std::size_t>(QualityPreset::Ultra) + 1);
     }
 }
 
 void testQualityPreset() {
-    testHighIsTheDefaults();
+    testHighIsUltraWithSmallerCascades();
+    testUltraIsTheDefaults();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();
     testChangedValuesAreCustom();

@@ -220,7 +220,8 @@ private:
     void createPipelines();
     void createScreenPipelines(VkFormat format);
     std::unique_ptr<VulkanPipeline> createToneMapPipeline(VkFormat format);
-    void createShadowAtlas();
+    void createShadowAtlas(const ShadowAtlasSize& size);
+    void ensureShadowAtlas(const ShadowAtlasSize& size);
     void createFixedTextures();
     void ensureFrameTextures(std::uint32_t width, std::uint32_t height);
 

@@ -65,6 +65,7 @@ void testFrameDescription();
 void testShadowMap();
 void testShadowAtlas();
 void testSoftShadow();
+void testCascades();
 void testLightPriority();
 void testDebugDraw();
 void testCulling();
@@ -174,6 +175,7 @@ int main(){
     testShadowMap();
     testShadowAtlas();
     testSoftShadow();
+    testCascades();
     testLightPriority();
     testDebugDraw();
     testCulling();

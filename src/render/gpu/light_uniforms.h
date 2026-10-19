@@ -32,8 +32,10 @@ inline constexpr int defaultSpotSeats = maxSpotLights;
 struct GpuDirectionalLight {
     float toLight[4];  // xyz: unit direction towards the light
     float radiance[4]; // rgb: colour times intensity
-    std::int32_t shadowTile = -1;
-    float unused[3]{};
+    std::int32_t shadowTile = -1; // the first of its cascades' tiles
+    std::int32_t cascadeCount = 0;
+    float tanAngularRadius = 0.0f; // its size as seen from the ground, for soft shadows
+    float unused = 0.0f;
 };
 
 struct GpuPointLight {

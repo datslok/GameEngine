@@ -90,7 +90,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     createSamplers();
     createSceneLayout();
     createPipelines();
-    createShadowAtlas();
+    createShadowAtlas(shadowLayout.size());
     createFixedTextures();
 
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
@@ -313,11 +313,11 @@ std::unique_ptr<VulkanPipeline> VulkanRenderer::createToneMapPipeline(VkFormat f
 * The atlas is drawn into as a depth target and read as a texture, and kept between frames. It starts cleared to the
 * far depth ("nothing in the way") and readable, which is the state every frame leaves it in.
 */
-void VulkanRenderer::createShadowAtlas() {
+void VulkanRenderer::createShadowAtlas(const ShadowAtlasSize& size) {
     ImageDescription description;
     description.format = depthFormat;
-    description.width = shadowAtlasWidth;
-    description.height = shadowAtlasHeight;
+    description.width = size.width;
+    description.height = size.height;
     description.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     description.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     description.name = "Shadow atlas";
@@ -335,6 +335,22 @@ void VulkanRenderer::createShadowAtlas() {
 
         shadowAtlas.transition(commands, ImageState::DepthFragmentRead);
     });
+}
+
+/*
+* The atlas the shadow settings need (Ultra cascades grow it from 128 to 384 MB). When that changes, a new atlas replaces
+* the old one once the GPU has finished with it, and the layout and the memory of what was drawn start again, so every
+* shadow is redrawn on this frame.
+*/
+void VulkanRenderer::ensureShadowAtlas(const ShadowAtlasSize& size) {
+    if (shadowLayout.size() == size) {
+        return;
+    }
+
+    device.waitIdle();
+    createShadowAtlas(size);
+    shadowLayout = ShadowAtlasLayout{size};
+    shadowMemory.forgetAll();
 }
 
 /*
@@ -748,6 +764,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
     GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
+    ensureShadowAtlas(shadowAtlasSizeFor(settings.shadows));
     const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
     attachShadows(lights, shadows);
 
@@ -830,7 +847,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
-                                                 settings.clusterHeatmap);
+                                                 settings.clusterHeatmap, settings.shadows);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
@@ -938,7 +955,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
     shadowAtlas.transition(commands, ImageState::DepthTarget);
 
     const DepthAttachment atlas{shadowAtlas.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {shadowAtlasWidth, shadowAtlasHeight}, nullptr, &atlas);
+    beginRendering(commands, {shadowLayout.size().width, shadowLayout.size().height}, nullptr, &atlas);
     renderingOpen = true;
 
     // The reset and the shadow pipelines share the scene's layout, so the sets stay bound across both.

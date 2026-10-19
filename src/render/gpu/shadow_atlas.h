@@ -11,6 +11,25 @@
 * drawn into them can be reused (shadow caching).
 */
 
+// The usual atlas: 8192 x 4096 depth texels (128 MB), room for 8 tiles of the largest size, 32 of the standard size or
+// 512 of the smallest. A sun's cascades get the largest size (a quarter of the atlas for the four), point light faces at
+// most the standard size, and spotlights, few and usually still (so their cached tiles cost nothing to keep), may grow
+// to the largest. With Ultra cascades (4096) the atlas grows to hold them (shadowAtlasSizeFor, shadow_map.h).
+inline constexpr std::uint32_t shadowAtlasWidth = 8192;
+inline constexpr std::uint32_t shadowAtlasHeight = 4096;
+inline constexpr std::uint32_t largestShadowTileSize = 2048;
+inline constexpr std::uint32_t standardShadowTileSize = 1024;
+inline constexpr std::uint32_t smallestShadowTileSize = 256;
+
+// How big the atlas is and the largest square it hands out (the squares it starts as). The defaults are the usual atlas.
+struct ShadowAtlasSize {
+    std::uint32_t width = shadowAtlasWidth;
+    std::uint32_t height = shadowAtlasHeight;
+    std::uint32_t largestSquare = largestShadowTileSize;
+
+    bool operator==(const ShadowAtlasSize& other) const = default;
+};
+
 // A square of the atlas, in pixels from its top-left corner.
 struct AtlasSquare {
     std::uint32_t x = 0;
@@ -21,13 +40,13 @@ struct AtlasSquare {
 };
 
 /*
-* Hands out power-of-two squares from 256 to 2048 pixels (a "buddy" allocator on a quadtree). The atlas starts as a grid
-* of 2048 squares; a request takes the smallest free square that fits, splitting a bigger one into quarters as needed.
+* Hands out power-of-two squares from 256 pixels up to the atlas's largest (a "buddy" allocator on a quadtree). The atlas
+* starts as a grid of its largest squares; a request takes the smallest free square that fits, splitting a bigger one into quarters as needed.
 * A released square joins its three siblings again once all four are free, so the atlas does not crumble into pieces.
 */
 class ShadowAtlasAllocator {
 public:
-    ShadowAtlasAllocator();
+    explicit ShadowAtlasAllocator(const ShadowAtlasSize& size = {});
 
     // Nothing when no free square is big enough, even if enough small ones are free.
     std::optional<AtlasSquare> allocate(std::uint32_t size);
@@ -38,7 +57,10 @@ public:
 
     std::uint64_t freeTexels() const;
 
+    const ShadowAtlasSize& getSize() const;
+
 private:
+    ShadowAtlasSize size;
     std::vector<AtlasSquare> freeSquares;
 };
 
@@ -65,6 +87,11 @@ struct ShadowSquareRequest {
 */
 class ShadowAtlasLayout {
 public:
+    explicit ShadowAtlasLayout(const ShadowAtlasSize& size = {});
+
+    // The atlas it lays out.
+    const ShadowAtlasSize& size() const;
+
     // One square per request, in the same order.
     std::vector<AtlasSquare> place(const std::vector<ShadowSquareRequest>& requests);
 

@@ -24,4 +24,17 @@ float penumbraTexels(float emitterRadius, float receiverDepth, float blockerDept
     return clamp(worldWidth / (receiverDepth * texelPerUnit), minShadowFilterTexels, maxShadowFilterTexels);
 }
 
+float boxShadowDistance(float depth, float depthRange) {
+    return (1.0 - depth) * depthRange;
+}
+
+float sunBlockerSearchTexels(float tanAngularRadius, float receiverDistance, float texelSize) {
+    return clamp(tanAngularRadius * receiverDistance / texelSize, minShadowFilterTexels, maxBlockerSearchTexels);
+}
+
+float sunPenumbraTexels(float tanAngularRadius, float receiverDistance, float blockerDistance, float texelSize) {
+    float worldWidth = tanAngularRadius * max(receiverDistance - blockerDistance, 0.0);
+    return clamp(worldWidth / texelSize, minShadowFilterTexels, maxShadowFilterTexels);
+}
+
 #endif

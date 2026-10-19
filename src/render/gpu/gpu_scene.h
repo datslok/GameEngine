@@ -5,6 +5,7 @@
 #include "render/gpu/clusters.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/shadow_map.h"
 #include "scene/asset_handles.h"
 #include "scene/frame_description.h"
 #include "scene/material.h"
@@ -64,9 +65,10 @@ struct GpuFrameData {
     float viewUp[4];
     float viewForward[4];
     std::int32_t shadingOptions[4]; // x: 1 shades from the clusters' lists, y: 1 shows their light counts (the heatmap)
+    float cascadeOptions[4];        // x: the sun cascades' blend band (a share of a radius), y: 1 dithers between them instead
 };
 
-static_assert(sizeof(GpuFrameData) == 240, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 256, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
@@ -74,7 +76,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 GpuShadowView packShadowView(const Mat4& tileMatrix);
 
 GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
-                           const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap);
+                           const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap, const ShadowSettings& shadows = {});
 
 /*
 * The frame's materials, one entry per different material: draws carry their materials by value, and many share one (a
