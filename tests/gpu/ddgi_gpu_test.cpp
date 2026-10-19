@@ -156,50 +156,26 @@ namespace {
         }
     }
 
-    // A change in a channel, kept clear of the thresholds so rounding cannot put the two sides in different bands.
-    float changeAwayFromThresholds(CaseRandom& random) {
-        for (;;) {
-            const float change = random.between(-1.2f, 1.2f);
-            const float size = std::abs(change);
-
-            if (std::abs(size - irradianceChangeThreshold) > 1e-3f && std::abs(size - irradianceResetThreshold) > 1e-3f) {
-                return change;
-            }
-        }
-    }
-
     void checkBlending(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{63};
         std::vector<GpuVec4> inputs;
 
         for (int i = 0; i < 500; ++i) {
-            const Vec3 value{random.between(0.0f, 40.0f), random.between(0.0f, 2.0f), random.between(0.0f, 0.01f)};
-            const Vec3 old{random.between(0.0f, 3.0f), random.between(0.0f, 3.0f), random.between(0.0f, 3.0f)};
-            // The largest change in one channel, smaller ones in the others.
-            const float largest = changeAwayFromThresholds(random);
-            const Vec3 fresh = old + Vec3{largest, largest * random.between(-0.9f, 0.9f), largest * random.between(-0.9f, 0.9f)};
-            inputs.push_back(gpuVec4(value));
-            inputs.push_back(gpuVec4(old));
-            inputs.push_back(gpuVec4(fresh));
-            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 40.0f), random.between(0.0f, 3.0f), random.between(0.0f, 0.01f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 40.0f), random.between(0.0f, 3.0f), random.between(0.0f, 0.01f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_BLENDING, inputs, 4, 4);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_BLENDING, inputs, 3, 2);
 
-        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
-            const Vec3 value = vec3From(inputs[i * 4]);
-            const Vec3 old = vec3From(inputs[i * 4 + 1]);
-            const Vec3 fresh = vec3From(inputs[i * 4 + 2]);
-            const float hysteresis = inputs[i * 4 + 3][0];
-            const float share = inputs[i * 4 + 3][1];
-            const GpuVec4* out = &outputs[i * 4];
+        for (std::size_t i = 0; i < inputs.size() / 3; ++i) {
+            const Vec3 old = vec3From(inputs[i * 3]);
+            const Vec3 fresh = vec3From(inputs[i * 3 + 1]);
+            const float share = inputs[i * 3 + 2][0];
             const Vec2 blended2 = blendProbeValue(Vec2{old.x, old.y}, Vec2{fresh.x, fresh.y}, share);
-
-            report.check("encodeIrradiance", transcendentalTolerance, encodeIrradiance(value), vec3From(out[0]));
-            report.check("decodeIrradiance", transcendentalTolerance, decodeIrradiance(value), vec3From(out[1]));
-            report.check("irradianceTexelHysteresis", arithmeticTolerance, irradianceTexelHysteresis(hysteresis, old, fresh), out[0][3]);
-            report.check("blendProbeValue", arithmeticTolerance, blendProbeValue(old, fresh, share), vec3From(out[2]));
-            report.check("blendProbeValue (2)", arithmeticTolerance, Vec3{blended2.x, blended2.y, 0.0f}, Vec3{out[3][0], out[3][1], 0.0f});
+            report.check("blendProbeValue", arithmeticTolerance, blendProbeValue(old, fresh, share), vec3From(outputs[i * 2]));
+            report.check("blendProbeValue (2)", arithmeticTolerance, Vec3{blended2.x, blended2.y, 0.0f},
+                         Vec3{outputs[i * 2 + 1][0], outputs[i * 2 + 1][1], 0.0f});
         }
     }
 
@@ -410,11 +386,10 @@ namespace {
 
     /*
     * Half floats keep 11 significant bits, and Vulkan lets a GPU round toward zero when it stores one, so a stored value
-    * may sit a whole step (up to 2^-10 of it) below the true one, not just half; irradiance is stored as its fifth
-    * root, so decoding (the fifth power) multiplies that by five, to about 5e-3. The rays' hits differ from the CPU's by
-    * the hardware's rounding.
+    * may sit a whole step (up to 2^-10 of it) below the true one, not just half. The rays' hits differ from the CPU's
+    * by the hardware's rounding.
     */
-    constexpr FloatTolerance storedIrradianceTolerance{.absolute = 1e-4f, .relative = 6e-3f};
+    constexpr FloatTolerance storedIrradianceTolerance{.absolute = 1e-4f, .relative = 2e-3f};
     constexpr FloatTolerance storedDistanceTolerance{.absolute = 1e-3f, .relative = 2e-3f};
 
     /*
@@ -428,7 +403,7 @@ namespace {
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
             const GpuVec4 stored = irradiance.texel(irradianceOrigin.x + 1 + texel % probeIrradianceTexels, irradianceOrigin.y + 1 + texel / probeIrradianceTexels);
             report.check(name + ": irradiance", storedIrradianceTolerance, expected.irradiance[static_cast<std::size_t>(texel)],
-                         decodeIrradiance(vec3From(stored)));
+                         vec3From(stored));
         }
 
         const TexelCoord distanceOrigin = probeTileOrigin(counts, probe, probeDistanceTexels);

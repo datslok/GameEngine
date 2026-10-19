@@ -96,23 +96,25 @@ float probeCornerWeight(const Vec3& normal, const Vec3& toProbe, float distance,
 float probeVolumeWeight(const ProbeVolume& volume, const Vec3& point);
 
 /*
-* The blend of the corners: each stored (encoded) irradiance decoded only to its square root and weighted, then the sum
-* divided by the summed weights and squared [2019, 2021]. Averaging square roots gives one bright probe less pull.
+* The blend of the corners: the square root of each stored irradiance, weighted, then the sum divided by the summed
+* weights and squared [2019, 2021]. Averaging square roots gives one bright probe less pull. This is interpolation
+* between probes, each holding a settled value, not averaging noisy samples over time, so it does not darken the way the
+* fifth-root update did (render/gpu/ddgi.h, blendProbeValue).
 */
 struct ProbeBlend {
     Vec3 sum{0.0f, 0.0f, 0.0f};
     float weight = 0.0f;
 };
 
-void addProbeSample(ProbeBlend& blend, const Vec3& encodedIrradiance, float weight);
+void addProbeSample(ProbeBlend& blend, const Vec3& irradiance, float weight);
 Vec3 finishProbeBlend(const ProbeBlend& blend);
 
 /*
-* What sampling reads from the atlases, as the GPU reads it filtered: a probe's stored irradiance (encoded) and its
-* distances' mean and mean square, each in a direction.
+* What sampling reads from the atlases, as the GPU reads it filtered: a probe's stored irradiance and its distances'
+* mean and mean square, each in a direction.
 */
 struct ProbeLookup {
-    std::function<Vec3(int probe, const Vec3& direction)> encodedIrradiance;
+    std::function<Vec3(int probe, const Vec3& direction)> irradiance;
     std::function<Vec2(int probe, const Vec3& direction)> moments;
 };
 

@@ -8,9 +8,6 @@
 #include <cmath>
 
 namespace {
-    // Square roots are blended: the stored fifth root raised to this power.
-    constexpr float blendPower = irradiancePower / 2.0f;
-
     float component(const Vec3& value, int axis) {
         return axis == 0 ? value.x : axis == 1 ? value.y : value.z;
     }
@@ -118,8 +115,9 @@ float probeVolumeWeight(const ProbeVolume& volume, const Vec3& point) {
     return weight;
 }
 
-void addProbeSample(ProbeBlend& blend, const Vec3& encodedIrradiance, float weight) {
-    const Vec3 root{std::pow(encodedIrradiance.x, blendPower), std::pow(encodedIrradiance.y, blendPower), std::pow(encodedIrradiance.z, blendPower)};
+// Never below zero first, so a value a filter rounded a hair negative has a square root.
+void addProbeSample(ProbeBlend& blend, const Vec3& irradiance, float weight) {
+    const Vec3 root{std::sqrt(std::max(irradiance.x, 0.0f)), std::sqrt(std::max(irradiance.y, 0.0f)), std::sqrt(std::max(irradiance.z, 0.0f))};
     blend.sum = blend.sum + root * weight;
     blend.weight += weight;
 }
@@ -150,8 +148,8 @@ ProbeLight sampleProbes(const ProbeVolume& volume, float selfShadowBias, const V
 
         const float weight = probeCornerWeight(normal, probe - point, distance, lookup.moments(index, direction),
                                                probeTrilinearWeight(cell.alpha, corner));
-        addProbeSample(diffuse, lookup.encodedIrradiance(index, lookupNormal), weight);
-        addProbeSample(specular, lookup.encodedIrradiance(index, reflected), weight);
+        addProbeSample(diffuse, lookup.irradiance(index, lookupNormal), weight);
+        addProbeSample(specular, lookup.irradiance(index, reflected), weight);
     }
 
     return ProbeLight{finishProbeBlend(diffuse), finishProbeBlend(specular)};

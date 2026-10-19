@@ -26,10 +26,6 @@ inline constexpr int minRaysPerProbe = DDGI_MIN_RAYS;
 inline constexpr int maxRaysPerProbe = DDGI_MAX_RAYS;
 inline constexpr float probeDistanceSharpness = static_cast<float>(DDGI_DISTANCE_SHARPNESS);
 inline constexpr float backFaceDistanceShare = static_cast<float>(DDGI_BACK_FACE_DISTANCE_SHARE);
-inline constexpr float irradiancePower = static_cast<float>(DDGI_IRRADIANCE_POWER);
-inline constexpr float irradianceChangeThreshold = static_cast<float>(DDGI_CHANGE_THRESHOLD);
-inline constexpr float irradianceChangeHysteresisDrop = static_cast<float>(DDGI_CHANGE_HYSTERESIS_DROP);
-inline constexpr float irradianceResetThreshold = static_cast<float>(DDGI_RESET_THRESHOLD);
 inline constexpr float minProbeTexelWeight = static_cast<float>(DDGI_MIN_TEXEL_WEIGHT);
 inline constexpr float maxDistanceDiagonals = static_cast<float>(DDGI_MAX_DISTANCE_DIAGONALS);
 inline constexpr int maxProbeAtlasSide = DDGI_MAX_ATLAS_SIDE;
@@ -146,10 +142,6 @@ float distanceForUpdate(float rayDistance, float maxDistance);
 // The longest distance a probe's distances record: maxDistanceDiagonals of its cell's diagonal.
 float probeMaxDistance(const Vec3& spacing);
 
-// Irradiance as stored (its irradiancePower-th root, which like a logarithm compresses bright values) and back.
-Vec3 encodeIrradiance(const Vec3& irradiance);
-Vec3 decodeIrradiance(const Vec3& encoded);
-
 /*
 * Keeping a share h of the old value each frame relaxes exponentially, like a capacitor charging, with time constant
 * tau = -frameSeconds / ln h; so the share for a time constant is exp(-frameSeconds / tau). A time constant of 0 keeps
@@ -158,12 +150,11 @@ Vec3 decodeIrradiance(const Vec3& encoded);
 float hysteresisForTimeConstant(float frameSeconds, float timeConstant);
 
 /*
-* An irradiance texel's hysteresis this frame, from the frame's and the change between its old and new stored values
-* (the largest change of any channel): lowered by the drop past the change threshold, 0 past the reset threshold.
+* Keep hysteresis of the old value and take the rest from the new. Irradiance is blended as it is, linearly, not as
+* 2021's fifth roots with per-texel speed-ups: with few rays reaching light (a dark room seeing a sunlit doorway), the
+* mean of the roots of noisy estimates settled at half the true light, and the noise tripped the speed-ups, which
+* passed it straight to the screen as flicker (ddgi_test, the sparsely lit texel).
 */
-float irradianceTexelHysteresis(float hysteresis, const Vec3& oldEncoded, const Vec3& newEncoded);
-
-// Keep hysteresis of the old value and take the rest from the new.
 Vec3 blendProbeValue(const Vec3& oldValue, const Vec3& newValue, float hysteresis);
 Vec2 blendProbeValue(const Vec2& oldValue, const Vec2& newValue, float hysteresis);
 

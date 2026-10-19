@@ -26,10 +26,9 @@ namespace {
         return Vec2{farAway, farAway * farAway};
     }
 
-    // Every probe storing the same irradiance (encoded), seeing open space all round.
+    // Every probe storing the same irradiance, seeing open space all round.
     ProbeLookup uniformProbes(const Vec3& irradiance) {
-        const Vec3 encoded = encodeIrradiance(irradiance);
-        return ProbeLookup{[encoded](int, const Vec3&) { return encoded; }, [](int, const Vec3&) { return openMoments(); }};
+        return ProbeLookup{[irradiance](int, const Vec3&) { return irradiance; }, [](int, const Vec3&) { return openMoments(); }};
     }
 
     void testSelfShadowBiasLeansTowardsTheViewer() {
@@ -190,14 +189,14 @@ namespace {
 
     void testTheBlendAveragesSquareRoots() {
         ProbeBlend same;
-        addProbeSample(same, encodeIrradiance(Vec3{0.8f, 2.0f, 0.1f}), 0.3f);
-        addProbeSample(same, encodeIrradiance(Vec3{0.8f, 2.0f, 0.1f}), 2.0f);
+        addProbeSample(same, Vec3{0.8f, 2.0f, 0.1f}, 0.3f);
+        addProbeSample(same, Vec3{0.8f, 2.0f, 0.1f}, 2.0f);
         assert(nearlyEqual(finishProbeBlend(same), Vec3{0.8f, 2.0f, 0.1f}, 1e-4f));
 
         // Equal weights on 0 and 4: the mean of the square roots (1), squared.
         ProbeBlend two;
-        addProbeSample(two, encodeIrradiance(Vec3{0.0f, 0.0f, 0.0f}), 1.0f);
-        addProbeSample(two, encodeIrradiance(Vec3{4.0f, 4.0f, 4.0f}), 1.0f);
+        addProbeSample(two, Vec3{0.0f, 0.0f, 0.0f}, 1.0f);
+        addProbeSample(two, Vec3{4.0f, 4.0f, 4.0f}, 1.0f);
         assert(nearlyEqual(finishProbeBlend(two), Vec3{1.0f, 1.0f, 1.0f}, 1e-4f));
     }
 
@@ -221,7 +220,7 @@ namespace {
     // The specular stand-in is the same blend read in the mirror direction: probes brighter from above give an upward
     // reflection more light than a downward one, with the same weights.
     void testSpecularReadsTheMirrorDirection() {
-        const ProbeLookup skyAbove{[](int, const Vec3& direction) { return encodeIrradiance(direction.y > 0.0f ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.1f, 0.1f, 0.1f}); },
+        const ProbeLookup skyAbove{[](int, const Vec3& direction) { return direction.y > 0.0f ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.1f, 0.1f, 0.1f}; },
                                    [](int, const Vec3&) { return openMoments(); }};
         const Vec3 point{1.5f, 1.5f, 1.5f};
         const Vec3 side{1.0f, 0.0f, 0.0f};
@@ -247,7 +246,7 @@ namespace {
         const auto probeX = [](int probe) { return static_cast<float>(probe % unitVolume.counts.x); };
 
         const ProbeLookup walled{
-            [&](int probe, const Vec3&) { return encodeIrradiance(probeX(probe) < wall ? lit : dark); },
+            [&](int probe, const Vec3&) { return probeX(probe) < wall ? lit : dark; },
             [&](int probe, const Vec3& direction) {
                 const float x = probeX(probe);
                 const bool facesWall = (x < wall) != (direction.x < 0.0f) && std::abs(direction.x) > 1e-4f;
@@ -260,7 +259,7 @@ namespace {
                 return Vec2{distance, distance * distance + 1e-4f};
             }};
 
-        const ProbeLookup open{walled.encodedIrradiance, [](int, const Vec3&) { return openMoments(); }};
+        const ProbeLookup open{walled.irradiance, [](int, const Vec3&) { return openMoments(); }};
 
         const Vec3 point{wall, 1.5f, 1.5f};
         const Vec3 normal{-1.0f, 0.0f, 0.0f};

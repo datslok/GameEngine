@@ -38,5 +38,5 @@ void main() {
     gl_FragDepth = clip.z / clip.w;
 
     vec2 uv = probeAtlasUv(volume.counts.xyz, probe, normal, DDGI_IRRADIANCE_TEXELS);
-    colour = vec4(decodeIrradiance(texture(irradianceAtlas, uv).rgb), 1.0);
+    colour = vec4(texture(irradianceAtlas, uv).rgb, 1.0);
 }

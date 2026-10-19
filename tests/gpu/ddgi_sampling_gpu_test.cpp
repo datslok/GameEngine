@@ -158,7 +158,7 @@ namespace {
         for (int i = 0; i < 300; ++i) {
             for (int sample = 0; sample < 3; ++sample) {
                 const Vec3 irradiance{random.between(0.0f, 20.0f), random.between(0.0f, 2.0f), random.between(0.0f, 0.05f)};
-                inputs.push_back(gpuVec4(encodeIrradiance(irradiance), random.between(1e-4f, 1.0f)));
+                inputs.push_back(gpuVec4(irradiance, random.between(1e-4f, 1.0f)));
             }
         }
 
@@ -172,7 +172,7 @@ namespace {
                 addProbeSample(blend, vec3From(in), in[3]);
             }
 
-            report.check("addProbeSample, finishProbeBlend", transcendentalTolerance, finishProbeBlend(blend), vec3From(outputs[i]));
+            report.check("addProbeSample, finishProbeBlend", arithmeticTolerance, finishProbeBlend(blend), vec3From(outputs[i]));
         }
     }
 

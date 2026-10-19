@@ -111,29 +111,6 @@ float distanceForUpdate(float rayDistance, float maxDistance) {
     return min(distance, maxDistance);
 }
 
-vec3 encodeIrradiance(vec3 irradiance) {
-    return pow(irradiance, vec3(1.0 / DDGI_IRRADIANCE_POWER));
-}
-
-vec3 decodeIrradiance(vec3 encoded) {
-    return pow(encoded, vec3(DDGI_IRRADIANCE_POWER));
-}
-
-float irradianceTexelHysteresis(float hysteresis, vec3 oldEncoded, vec3 newEncoded) {
-    vec3 change = abs(newEncoded - oldEncoded);
-    float largest = max(change.x, max(change.y, change.z));
-
-    if (largest > DDGI_RESET_THRESHOLD) {
-        return 0.0;
-    }
-
-    if (largest > DDGI_CHANGE_THRESHOLD) {
-        return max(0.0, hysteresis - DDGI_CHANGE_HYSTERESIS_DROP);
-    }
-
-    return hysteresis;
-}
-
 vec3 blendProbeValue(vec3 oldValue, vec3 newValue, float hysteresis) {
     return newValue + (oldValue - newValue) * hysteresis;
 }

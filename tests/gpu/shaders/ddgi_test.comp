@@ -30,11 +30,8 @@ void main() {
         testOutput(0, vec4(irradianceRayWeight(first.xyz, second.xyz), distanceRayWeight(first.xyz, second.xyz),
                            distanceForUpdate(third.x, third.y), 0.0));
     } else if (function == GPU_TEST_PROBE_BLENDING) {
-        float hysteresis = irradianceTexelHysteresis(fourth.x, second.xyz, third.xyz);
-        testOutput(0, vec4(encodeIrradiance(first.xyz), hysteresis));
-        testOutput(1, vec4(decodeIrradiance(first.xyz), 0.0));
-        testOutput(2, vec4(blendProbeValue(second.xyz, third.xyz, fourth.y), 0.0));
-        testOutput(3, vec4(blendProbeValue(second.xy, third.xy, fourth.y), 0.0, 0.0));
+        testOutput(0, vec4(blendProbeValue(first.xyz, second.xyz, third.x), 0.0));
+        testOutput(1, vec4(blendProbeValue(first.xy, second.xy, third.x), 0.0, 0.0));
     } else if (function == GPU_TEST_PROBE_GRID) {
         ivec3 counts = ivec3(third.xyz);
         int index = int(third.w);

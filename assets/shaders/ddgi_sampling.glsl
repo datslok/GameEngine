@@ -82,8 +82,8 @@ struct ProbeBlend {
     float weight;
 };
 
-void addProbeSample(inout ProbeBlend blend, vec3 encodedIrradiance, float weight) {
-    blend.sum += pow(encodedIrradiance, vec3(DDGI_IRRADIANCE_POWER / 2.0)) * weight;
+void addProbeSample(inout ProbeBlend blend, vec3 irradiance, float weight) {
+    blend.sum += sqrt(max(irradiance, vec3(0.0))) * weight;
     blend.weight += weight;
 }
 

@@ -1,4 +1,5 @@
 #include "render/gpu/ddgi.h"
+#include "math/angles.h"
 
 #include <algorithm>
 #include <cassert>
@@ -259,15 +260,6 @@ namespace {
         assert(nearlyEqual(probeMaxDistance(Vec3{1.0f, 2.0f, 2.0f}), 1.5f * 3.0f));
     }
 
-    // Stored as the fifth root and back: 0 and 1 stay put, 32 is stored as 2, and the round trip loses nothing.
-    void testIrradianceEncoding() {
-        assert(nearlyEqual(encodeIrradiance(Vec3{0.0f, 1.0f, 32.0f}), Vec3{0.0f, 1.0f, 2.0f}));
-
-        for (const Vec3& value : {Vec3{0.001f, 0.25f, 3.0f}, Vec3{40.0f, 0.0f, 7.5f}}) {
-            assert(nearlyEqual(decodeIrradiance(encodeIrradiance(value)), value, value.length() * 1e-5f));
-        }
-    }
-
     /*
     * Hysteresis as a time constant: after tau seconds of frames, 1/e of a step change is left, whether those were 60 or
     * 240 frames a second. A time constant of 0 keeps nothing.
@@ -294,21 +286,8 @@ namespace {
         assert(hysteresisForTimeConstant(0.0f, 0.5f) == 1.0f);
     }
 
-    /*
-    * Big changes speed a texel up: past the change threshold its hysteresis drops by 0.15 (never below 0), past the
-    * reset threshold it takes the new value outright. The largest change of any channel counts, whichever way it goes:
-    * green falling a lot while red rises a little is caught.
-    */
-    void testBigChangesLowerATexelsHysteresis() {
-        const float base = 0.97f;
-        const Vec3 old{1.0f, 1.0f, 1.0f};
-
-        assert(irradianceTexelHysteresis(base, old, Vec3{1.1f, 0.9f, 1.2f}) == base);
-        assert(nearlyEqual(irradianceTexelHysteresis(base, old, Vec3{1.3f, 1.0f, 1.0f}), base - irradianceChangeHysteresisDrop));
-        assert(nearlyEqual(irradianceTexelHysteresis(base, old, Vec3{1.05f, 0.6f, 1.0f}), base - irradianceChangeHysteresisDrop));
-        assert(irradianceTexelHysteresis(base, old, Vec3{1.0f, 1.0f, 0.1f}) == 0.0f);
-        assert(irradianceTexelHysteresis(0.1f, old, Vec3{1.4f, 1.0f, 1.0f}) == 0.0f);
-
+    void testBlendingKeepsTheOldShare() {
+        assert(nearlyEqual(blendProbeValue(Vec3{2.0f, 4.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, 0.75f), Vec3{1.75f, 3.25f, 0.25f}));
         assert(nearlyEqual(blendProbeValue(Vec2{2.0f, 4.0f}, Vec2{1.0f, 1.0f}, 0.75f), Vec2{1.75f, 3.25f}));
     }
 
@@ -384,6 +363,83 @@ namespace {
             const float expected = (1.0f + direction.y) * 0.5f;
             assert(nearlyEqual(sums[static_cast<std::size_t>(texel)] / static_cast<float>(frames), expected, 0.03f));
         }
+    }
+
+    /*
+    * A dark room's probe: a small bright patch (a sunlit wall seen through a doorway, 2.0 within 15 degrees of +x, under
+    * 2% of the sphere) in near darkness (0.005). Each frame's 64 turned rays catch the patch or miss it, so the texel
+    * facing it gets a noisy estimate, which the update blends in at 240 frames a second with the default time constant.
+    * The stored value must settle on the estimates' true average, and wander little over a tenth of a second (what the
+    * eye sees as crawling). Linear blending settles within 0.1% and moves 1.5% in a tenth of a second. Blending fifth
+    * roots with 2021's per-texel speed-ups, as the first version did, failed both: it settled at 51% of the truth (the
+    * mean of roots is below the root of the mean) and moved 8.7%, since noise tripped the speed-ups, which passed it on.
+    */
+    void testASparselyLitTexelSettlesOnItsTrueMean() {
+        const float framesPerSecond = 240.0f;
+        const GlobalIlluminationSettings settings;
+        const float hysteresis = hysteresisForTimeConstant(1.0f / framesPerSecond, settings.irradianceTimeConstant);
+        const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
+        const float patchCosine = std::cos(radiansFromDegrees(15.0f));
+
+        // The texel whose direction is nearest the patch.
+        TexelCoord facing;
+        float best = -2.0f;
+
+        for (int y = 0; y < probeIrradianceTexels; ++y) {
+            for (int x = 0; x < probeIrradianceTexels; ++x) {
+                const float along = probeTexelDirection(TexelCoord{x, y}, probeIrradianceTexels).dot(towardsPatch);
+
+                if (along > best) {
+                    best = along;
+                    facing = TexelCoord{x, y};
+                }
+            }
+        }
+
+        const Vec3 texel = probeTexelDirection(facing, probeIrradianceTexels);
+        const int warmUp = 2000;
+        const int frames = 30000;
+        const int tenthOfASecond = static_cast<int>(framesPerSecond / 10.0f);
+        float stored = 0.0f;
+        double estimates = 0.0;
+        double storedSum = 0.0;
+        double changeSquares = 0.0;
+        int changes = 0;
+        std::vector<float> history;
+
+        for (int frame = 0; frame < warmUp + frames; ++frame) {
+            const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(static_cast<std::uint64_t>(frame)));
+            std::vector<Vec3> directions;
+            std::vector<Vec3> radiance;
+
+            for (int ray = 0; ray < settings.raysPerProbe; ++ray) {
+                const Vec3 direction = probeRayDirection(ray, settings.raysPerProbe, rows);
+                const float light = direction.dot(towardsPatch) > patchCosine ? 2.0f : 0.005f;
+                directions.push_back(direction);
+                radiance.push_back(Vec3{light, light, light});
+            }
+
+            const float estimate = irradianceEstimate(texel, directions, radiance).x;
+            stored = blendProbeValue(Vec3{stored, 0.0f, 0.0f}, Vec3{estimate, 0.0f, 0.0f}, frame == 0 ? 0.0f : hysteresis).x;
+
+            if (frame >= warmUp) {
+                estimates += estimate;
+                storedSum += stored;
+                history.push_back(stored);
+
+                if (history.size() > static_cast<std::size_t>(tenthOfASecond)) {
+                    const double change = stored - history[history.size() - 1 - static_cast<std::size_t>(tenthOfASecond)];
+                    changeSquares += change * change;
+                    ++changes;
+                }
+            }
+        }
+
+        const double truth = estimates / frames;
+        const double settled = storedSum / frames;
+        const double crawl = std::sqrt(changeSquares / changes) / truth;
+        assert(std::abs(settled / truth - 1.0) < 0.02);
+        assert(crawl < 0.04);
     }
 
     // Probes are numbered x first, then y, then z, and sit on the grid's corners from the origin.
@@ -494,11 +550,11 @@ void testDdgi() {
     testRayDirectionsAreTurnedByTheFramesRotation();
     testUpdateWeights();
     testDistancesForTheUpdate();
-    testIrradianceEncoding();
     testHysteresisFollowsATimeConstant();
-    testBigChangesLowerATexelsHysteresis();
+    testBlendingKeepsTheOldShare();
     testAUniformSkyGivesItsOwnValue();
     testAHalfSkyGivesTheCosineLaw();
+    testASparselyLitTexelSettlesOnItsTrueMean();
     testProbePositionsFollowTheGrid();
     testProbeAtlasLayout();
     testImpossibleVolumesAreRejected();

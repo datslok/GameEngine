@@ -22,16 +22,6 @@
 // as close and hidden, so nothing is lit through it [2021].
 #define DDGI_BACK_FACE_DISTANCE_SHARE 0.2
 
-// Irradiance is stored as its fifth root and blended in that space, so bright-to-dark changes do not lag [2021].
-#define DDGI_IRRADIANCE_POWER 5.0
-
-// Per-texel speed-ups on the stored (encoded) irradiance [2021]: a change larger than the first threshold lowers the
-// texel's hysteresis by the drop; one larger than the second means the scene changed entirely, and the new value is
-// taken outright.
-#define DDGI_CHANGE_THRESHOLD 0.25
-#define DDGI_CHANGE_HYSTERESIS_DROP 0.15
-#define DDGI_RESET_THRESHOLD 0.8
-
 // A texel whose rays' summed weight is below this keeps its old value (no ray came near its direction).
 #define DDGI_MIN_TEXEL_WEIGHT 1e-6
 

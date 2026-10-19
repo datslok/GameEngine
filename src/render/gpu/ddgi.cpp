@@ -185,36 +185,12 @@ float probeMaxDistance(const Vec3& spacing) {
     return maxDistanceDiagonals * spacing.length();
 }
 
-Vec3 encodeIrradiance(const Vec3& irradiance) {
-    const float power = 1.0f / irradiancePower;
-    return Vec3{std::pow(irradiance.x, power), std::pow(irradiance.y, power), std::pow(irradiance.z, power)};
-}
-
-Vec3 decodeIrradiance(const Vec3& encoded) {
-    return Vec3{std::pow(encoded.x, irradiancePower), std::pow(encoded.y, irradiancePower), std::pow(encoded.z, irradiancePower)};
-}
-
 float hysteresisForTimeConstant(float frameSeconds, float timeConstant) {
     if (timeConstant <= 0.0f) {
         return 0.0f;
     }
 
     return std::exp(-frameSeconds / timeConstant);
-}
-
-float irradianceTexelHysteresis(float hysteresis, const Vec3& oldEncoded, const Vec3& newEncoded) {
-    const Vec3 change = newEncoded - oldEncoded;
-    const float largest = std::max({std::abs(change.x), std::abs(change.y), std::abs(change.z)});
-
-    if (largest > irradianceResetThreshold) {
-        return 0.0f;
-    }
-
-    if (largest > irradianceChangeThreshold) {
-        return std::max(0.0f, hysteresis - irradianceChangeHysteresisDrop);
-    }
-
-    return hysteresis;
 }
 
 Vec3 blendProbeValue(const Vec3& oldValue, const Vec3& newValue, float hysteresis) {
