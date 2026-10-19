@@ -249,12 +249,13 @@ Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float ou
 * gives each tile a square, the same one as last frame when it can (see ShadowAtlasLayout). Tiles are numbered in
 * request order, so the numbering does not depend on sizes or places.
 */
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings) {
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings, float fittedSunDistance) {
     ShadowAtlasLayout freshLayout{shadowAtlasSizeFor(settings)};
-    return planShadows(lighting, camera, freshLayout, settings);
+    return planShadows(lighting, camera, freshLayout, settings, fittedSunDistance);
 }
 
-ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout, const ShadowSettings& settings) {
+ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout, const ShadowSettings& settings,
+                       float fittedSunDistance) {
     const ShadowAtlasSize& atlas = layout.size();
 
     if (atlas != shadowAtlasSizeFor(settings)) {
@@ -344,7 +345,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             const DirectionalLight& light = selected.directionalLights[request.slot];
             plan.directional[request.slot] = LightShadow{firstTile, 1.0f, std::tan(light.angularRadius), request.tileCount};
 
-            const float shadowDistance = std::min(settings.directionalDistance, camera.getFarPlane());
+            const float shadowDistance = std::min({settings.directionalDistance, camera.getFarPlane(), fittedSunDistance});
             const std::vector<float> splits = cascadeSplits(camera.getNearPlane(), shadowDistance, request.tileCount, settings.cascadeSplitLambda);
 
             for (int cascade = 0; cascade < request.tileCount; ++cascade) {
@@ -456,6 +457,7 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Spot texel target", settings.spotTexelTarget, {.min = 0.001f, .sliderMin = 0.005f, .sliderMax = 0.2f, .unit = "m"});
     visitor.field("Directional distance", settings.directionalDistance, {.min = 1.0f, .sliderMax = 1000.0f, .unit = "m"});
     visitor.field("Directional caster reach", settings.directionalCasterReach, {.min = 0.0f, .sliderMax = 1000.0f, .unit = "m"});
+    visitor.field("Fit cascades to depth", settings.fitCascadesToDepth);
     visitor.field("Cascades", settings.cascadeCount, {.min = 1, .max = maxShadowCascades});
     visitor.field("Cascade split blend", settings.cascadeSplitLambda, {.min = 0.0f, .max = 1.0f, .unit = "(0 even, 1 logarithmic)"});
     visitor.field("Cascade blend band", settings.cascadeBlendBand, {.min = 0.0f, .max = 0.5f, .unit = "of a radius"});

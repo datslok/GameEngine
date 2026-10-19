@@ -96,6 +96,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
+    depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
         swapchainFramesInFlight = framesInFlight;
@@ -128,8 +129,9 @@ void VulkanRenderer::checkFormats() const {
         throw std::runtime_error("This GPU cannot sample a 16-bit two-channel image, which physically based shading needs");
     }
 
-    // Clustered shading's pixels share their light lists across the wave (subgroupOr in triangle.frag). Every desktop
-    // GPU with Vulkan 1.3 has it, but it is not required by the standard, so ask.
+    // Clustered shading's pixels share their light lists across the wave (subgroupOr in triangle.frag), and the depth
+    // measurement combines its invocations' depths the same way (depth_range.comp). Every desktop GPU with Vulkan 1.3
+    // has it, but it is not required by the standard for fragment shaders, so ask.
     VkPhysicalDeviceSubgroupProperties subgroups{};
     subgroups.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
     VkPhysicalDeviceProperties2 properties{};
@@ -137,9 +139,9 @@ void VulkanRenderer::checkFormats() const {
     properties.pNext = &subgroups;
     vkGetPhysicalDeviceProperties2(device.getPhysicalDevice(), &properties);
 
-    if ((subgroups.supportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) == 0 ||
+    if ((subgroups.supportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) == 0 || (subgroups.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) == 0 ||
         (subgroups.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) == 0) {
-        throw std::runtime_error("This GPU cannot combine values across a group of pixels (subgroup arithmetic), which clustered shading needs");
+        throw std::runtime_error("This GPU cannot combine values across a group of pixels (subgroup arithmetic), which clustered shading and the cascades' fit need");
     }
 }
 
@@ -389,7 +391,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     depthDescription.format = depthFormat;
     depthDescription.width = width;
     depthDescription.height = height;
-    depthDescription.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depthDescription.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT; // sampled: measured for the cascades
     depthDescription.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     depthDescription.name = "Scene depth";
     VulkanImage depthReplacement{device, depthDescription};
@@ -498,6 +500,12 @@ FrameContext VulkanRenderer::beginFrame() {
                 "Waiting for the previous frame failed");
 
     readGpuTimings(frame);
+
+    // The surfaces this frame's last use measured, for fitting the next shadows (kept until used).
+    if (const std::optional<ScreenDepthRange> measured = depthRange->collect(frameIndex)) {
+        unusedDepthRange = measured;
+    }
+
     frame.descriptors->reset();
     frame.uniforms->reset();
     vulkanCheck(vkResetCommandPool(device.getDevice(), frame.commandPool.get(), 0), "Frame command pool reset failed");
@@ -769,8 +777,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
     ensureShadowAtlas(shadowAtlasSizeFor(settings.shadows));
-    const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
+    updateSunShadowFit(settings.shadows, camera);
+    const float fittedSunDistance = fittedShadowDistance(sunShadowFit);
+    const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows, fittedSunDistance);
     attachShadows(lights, shadows);
+
+    if (!shadows.directional.empty() && shadows.directional[0].cascades > 0) {
+        stats.sunShadowDistance = std::min({settings.shadows.directionalDistance, camera.getFarPlane(), fittedSunDistance});
+    }
 
     // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
@@ -810,15 +824,41 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthPrepass);
     }
 
+    const bool measureDepths = settings.shadows.fitCascadesToDepth;
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, description.lighting.background);
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths, description.lighting.background);
     endGpuPass(frame, GpuPass::Main);
+
+    // The surfaces this frame shows, for fitting a later frame's cascades: the CPU reads them once this frame is done.
+    if (measureDepths) {
+        beginGpuPass(frame, GpuPass::DepthRange);
+        depthRange->measure(frame.commands, frame.descriptors, frame.frameIndex, depth);
+        endGpuPass(frame, GpuPass::DepthRange);
+    }
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
     beginGpuPass(frame, GpuPass::Bloom);
     const BloomComposite bloomMix = bloom->draw(frame, sceneColour, frameWidth, frameHeight, settings.bloom);
     endGpuPass(frame, GpuPass::Bloom);
     return bloomMix;
+}
+
+/*
+* Where the sun's cascades end (cascades.h): moved along its ladder whenever a new measurement of the screen's depths has
+* come back, and otherwise left where it was. The depths are turned into distances with this frame's lens, the same as
+* the measured frame's unless the near or far plane changed in between. With fitting off, nothing is fitted and stale
+* measurements are dropped, so turning it on starts from the full shadow distance.
+*/
+void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Camera& camera) {
+    if (!settings.fitCascadesToDepth) {
+        sunShadowFit = ShadowDistanceFit{};
+        unusedDepthRange.reset();
+        return;
+    }
+
+    if (const std::optional<ScreenDepthRange> measured = std::exchange(unusedDepthRange, std::nullopt)) {
+        sunShadowFit = fitShadowDistance(sunShadowFit, farthestSurfaceDistance(*measured, camera.getNearPlane(), camera.getFarPlane()));
+    }
 }
 
 /*
@@ -1014,17 +1054,19 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 * waits for last frame's reads of it to finish first) to the sky's background colour, which stays wherever nothing is
 * drawn. The depth image starts cleared too, or after the depth prepass
 * keeps the prepass's depths: the barrier between them (depth target to depth target) makes the prepass's writes
-* visible to this pass's depth tests. Afterwards the scene image becomes readable for bloom and tone mapping.
+* visible to this pass's depth tests. Its depths are stored only when keepDepth (they are measured afterwards).
+* Afterwards the scene image becomes readable for bloom and tone mapping.
 */
 void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
-                                  const Vec3& background) {
+                                  bool keepDepth, const Vec3& background) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
 
     const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {background.x, background.y, background.z, 1.0f}};
     const VkAttachmentLoadOp depthLoad = afterPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
-    const DepthAttachment depthTarget{depth.getView(), depthLoad, VK_ATTACHMENT_STORE_OP_DONT_CARE, gpuFarDepth};
+    const VkAttachmentStoreOp depthStore = keepDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    const DepthAttachment depthTarget{depth.getView(), depthLoad, depthStore, gpuFarDepth};
     beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
     renderingOpen = true;
 
@@ -1102,6 +1144,11 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     VulkanBuffer readback{device.getAllocator(), sceneBytes + finalBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
 
     ensureFrameTextures(width, height);
+
+    if (settings.shadows.fitCascadesToDepth) {
+        measureDepthsBeforeCapture(description, settings);
+    }
+
     FrameContext frame = beginFrame();
     displayOutput = output;
 
@@ -1162,6 +1209,40 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     captured.scene = readImage(readback, 0, width, height, PixelFormat::RgbaHalf);
     captured.final = readImage(readback, sceneBytes, width, height, finalFormat);
     return captured;
+}
+
+/*
+* A golden image is a single frame from cold, so no earlier frame has measured the screen's depths for the sun's cascades
+* to be fitted to. This draws the same frame once first, as the frame before it would have, waits for it and takes its
+* measurement, so the capture shows the cascades as play does. Everything else that frame leaves behind is undone, so the
+* capture is still a first frame: the light history (a warm one changed which lamps held shadows in the lamp field), the
+* atlas layout and the shadow cache.
+*/
+void VulkanRenderer::measureDepthsBeforeCapture(const FrameDescription& description, const RenderSettings& settings) {
+    const LightHistory coldHistory = lightHistory;
+    const ShadowAtlasLayout coldLayout = shadowLayout;
+    FrameContext frame = beginFrame();
+
+    try {
+        drawScene(frame, description, settings, nullptr);
+        finishGpuTimings(frame);
+        submitFrame(frame, false);
+    }
+    catch (...) {
+        shadowMemory.forgetAll();
+        abandonFrame();
+        device.waitIdle();
+        throw;
+    }
+
+    device.waitIdle();
+    lightHistory = coldHistory;
+    shadowLayout = coldLayout;
+    shadowMemory.forgetAll();
+
+    if (const std::optional<ScreenDepthRange> measured = depthRange->collect(frame.frameIndex)) {
+        unusedDepthRange = measured;
+    }
 }
 
 std::string VulkanRenderer::getDeviceName() const {
@@ -1310,6 +1391,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     framesInFlight = count;
     createFrames();
     debugLines->setFramesInFlight(count);
+    depthRange->setFramesInFlight(count);
     return framesInFlight;
 }
 

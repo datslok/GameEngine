@@ -8,12 +8,14 @@
 
 class VulkanDevice;
 
-// What a compute shader reads and writes: storage buffers at set 0, bindings 0.. storageBuffers - 1, and a few bytes
-// of push constants (written into the command buffer itself, the cheapest way to pass a handful of numbers).
+// What a compute shader reads and writes: storage buffers at set 0, bindings 0.. storageBuffers - 1, then images it
+// samples (combined image samplers) at the next sampledImages bindings, and a few bytes of push constants (written into
+// the command buffer itself, the cheapest way to pass a handful of numbers).
 struct ComputePipelineDescription {
     const char* shader = nullptr;
     std::uint32_t storageBuffers = 0;
     std::uint32_t pushConstantBytes = 0;
+    std::uint32_t sampledImages = 0;
 
     // A pipeline layout made elsewhere and shared (the scene's, render/vulkan/scene_layout.h), used instead of building
     // one from storageBuffers and pushConstantBytes, so the shader reads the frame's scene set as the passes do. Not

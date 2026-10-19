@@ -2,8 +2,10 @@
 #include "render/gpu/soft_shadow.h"
 #include "scene/camera.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -243,9 +245,73 @@ namespace {
         assert(nearlyEqual(sunShadowBias(0.01f, -0.5f), 0.01f * (1.0f + maxSunBiasSlope)));
         assert(sunShadowBias(0.01f, 0.3f) > sunShadowBias(0.01f, 0.6f));
     }
+
+    ShadowDistanceFit fitFrom(float farthestSurface) {
+        return fitShadowDistance(ShadowDistanceFit{}, farthestSurface);
+    }
+
+    // Before anything was measured, or with no surface on screen, nothing is fitted: the settings' distance applies.
+    void testNothingMeasuredIsNotFitted() {
+        assert(!ShadowDistanceFit{}.step.has_value());
+        assert(std::isinf(fittedShadowDistance(ShadowDistanceFit{})));
+        assert(!fitShadowDistance(fitFrom(7.0f), std::nullopt).step.has_value());
+    }
+
+    /*
+    * The fitted distance is the farthest surface plus the margin, rounded up to the next step of the ladder (each step
+    * shadowDistanceStep times the last, from 1 m): never short of the margin, and never a whole step past it.
+    */
+    void testTheFitRoundsUpToTheLadder() {
+        for (float farthest : {0.3f, 1.0f, 2.2f, 7.0f, 7.45f, 38.0f, 150.0f, 199.0f}) {
+            const float distance = fittedShadowDistance(fitFrom(farthest));
+            const float needed = std::max(farthest * shadowDistanceMargin, 1.0f);
+
+            assert(distance >= needed);
+            assert(distance < needed * shadowDistanceStep * 1.0001f);
+
+            const float steps = std::log(distance) / std::log(shadowDistanceStep);
+            assert(nearlyEqual(steps, std::round(steps), 0.001f));
+        }
+
+        // A surface nearer than a metre still gets the first step.
+        assert(fitFrom(0.01f).step == 0);
+        assert(nearlyEqual(fittedShadowDistance(fitFrom(0.01f)), 1.0f));
+    }
+
+    // Small changes in the farthest surface stay on one step, so the cascades keep their size and stay cached.
+    void testSmallChangesKeepTheStep() {
+        const ShadowDistanceFit fit = fitFrom(7.0f);
+        assert(fitShadowDistance(fit, 7.3f).step == fit.step);
+        assert(fitShadowDistance(fit, 6.6f).step == fit.step);
+    }
+
+    /*
+    * More to see moves out at once, so nothing on screen is left without a shadow; less moves in only once the need is
+    * shadowDistanceShrinkSteps steps lower, so a view hovering at a step's edge does not flip between two sizes.
+    */
+    void testTheFitGrowsAtOnceAndShrinksLate() {
+        const ShadowDistanceFit fit = fitFrom(7.0f);
+        const int step = *fit.step;
+
+        const ShadowDistanceFit grown = fitShadowDistance(fit, 20.0f);
+        assert(*grown.step > step + 1);
+        assert(fittedShadowDistance(grown) >= 20.0f * shadowDistanceMargin);
+
+        // One step lower is not enough to shrink; two are.
+        const float oneLower = std::pow(shadowDistanceStep, static_cast<float>(step - 1)) / shadowDistanceMargin * 0.999f;
+        assert(*fitFrom(oneLower).step == step - 1);
+        assert(fitShadowDistance(fit, oneLower).step == fit.step);
+
+        const float twoLower = std::pow(shadowDistanceStep, static_cast<float>(step - 2)) / shadowDistanceMargin * 0.999f;
+        assert(*fitShadowDistance(fit, twoLower).step == step - 2);
+    }
 }
 
 void testCascades() {
+    testNothingMeasuredIsNotFitted();
+    testTheFitRoundsUpToTheLadder();
+    testSmallChangesKeepTheStep();
+    testTheFitGrowsAtOnceAndShrinksLate();
     testMovingTowardsTheSunKeepsThePlaceInEveryCascade();
     testSunBiasGrowsWithTheSlope();
     testSplitsRunFromNearToFar();

@@ -7,6 +7,7 @@
 #include "scene/frame_description.h"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 /*
@@ -43,6 +44,33 @@ std::vector<float> cascadeSplits(float nearDistance, float farDistance, int coun
 * nearer (a wide, shallow slice).
 */
 BoundingSphere cascadeSphere(const Camera& camera, float nearDistance, float farDistance);
+
+/*
+* Sample distribution shadow maps (Lauritzen 2011): the cascades end at the farthest surface on screen instead of at the
+* shadow distance, so in a room they share out their texels over metres, not the 200 m the view could reach. The
+* farthest surface comes from the depth image a frame or two late (render/gpu/depth_range.h), and every cascade's box
+* is sized by where its slice ends, so if the fitted distance followed every small change, every shadow texel would change
+* size every frame: shadow edges would shimmer, and no cascade could stay cached. So the distance moves on a ladder of
+* fixed steps, each shadowDistanceStep times the last from 1 m: it climbs at once when more comes into view (rounded up,
+* after a margin for the frames it is late), but comes down only once the need is shadowDistanceShrinkSteps lower, so a
+* view hovering at a step's edge does not flip between two sizes. Only the far end is fitted: starting the splits at the
+* nearest surface instead of the camera's near plane pushes them all outwards, which makes the nearest surfaces coarser.
+*/
+inline constexpr float shadowDistanceStep = 1.25f;
+inline constexpr float shadowDistanceMargin = 1.1f;
+inline constexpr int shadowDistanceShrinkSteps = 2;
+
+// Which step of the ladder the cascades end at (shadowDistanceStep to its power, in metres); none when not fitted.
+struct ShadowDistanceFit {
+    std::optional<int> step;
+};
+
+// The fit after a new measurement of the farthest surface's distance along the view: none (no surface on screen)
+// leaves the cascades unfitted, as before anything was measured.
+ShadowDistanceFit fitShadowDistance(const ShadowDistanceFit& previous, std::optional<float> farthestSurface);
+
+// Where the fitted cascades end: infinity when not fitted, so the shadow distance applies.
+float fittedShadowDistance(const ShadowDistanceFit& fit);
 
 // Any up direction works for a shadow view, as long as it is not parallel to the way the view looks.
 Vec3 shadowViewUp(const Vec3& forward);
