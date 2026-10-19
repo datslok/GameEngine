@@ -129,14 +129,18 @@ Vec3 finishProbeBlend(const ProbeBlend& blend) {
 
 /*
 * Visibility is tested from each probe towards the biased point; which side of the surface a probe lies on is judged
-* from the surface point itself. Both parts share each corner's weight.
+* from the surface point itself. All four blends (each atlas, diffuse and specular) share each corner's weight. Without
+* a fast lookup the fast part reads nothing.
 */
-ProbeLight sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
-                        const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup) {
+ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
+                         const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup) {
     const Vec3 biased = point + probeSelfShadowBias(normal, toViewer, volume.spacing, selfShadowBias);
     const ProbeCell cell = probeCell(volume, biased);
+    const Vec3 none{0.0f, 0.0f, 0.0f};
     ProbeBlend diffuse;
     ProbeBlend specular;
+    ProbeBlend fastDiffuse;
+    ProbeBlend fastSpecular;
 
     for (int corner = 0; corner < 8; ++corner) {
         const ProbeGridCoord grid = probeCellCorner(cell, volume.counts, corner);
@@ -150,9 +154,12 @@ ProbeLight sampleProbes(const ProbeVolume& volume, float selfShadowBias, const V
                                                probeTrilinearWeight(cell.alpha, corner));
         addProbeSample(diffuse, lookup.irradiance(index, lookupNormal), weight);
         addProbeSample(specular, lookup.irradiance(index, reflected), weight);
+        addProbeSample(fastDiffuse, lookup.fastIrradiance ? lookup.fastIrradiance(index, lookupNormal) : none, weight);
+        addProbeSample(fastSpecular, lookup.fastIrradiance ? lookup.fastIrradiance(index, reflected) : none, weight);
     }
 
-    return ProbeLight{finishProbeBlend(diffuse), finishProbeBlend(specular)};
+    return ProbeLights{ProbeLight{finishProbeBlend(diffuse), finishProbeBlend(specular)},
+                       ProbeLight{finishProbeBlend(fastDiffuse), finishProbeBlend(fastSpecular)}};
 }
 
 Vec3 pointLightAtHit(const Vec3& offsetToLight, float range, const Vec3& radiance, float sourceRadius, const Vec3& normal) {
@@ -226,16 +233,22 @@ ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin,
         return sphereTouchesBox(Vec3{positionRange[0], positionRange[1], positionRange[2]}, positionRange[3], box);
     };
 
+    const auto list = [&](std::size_t slot, const std::vector<bool>& fastFlags) {
+        const bool fast = slot < fastFlags.size() && fastFlags[slot];
+        listed.lights.push_back(GpuProbeHitLight{static_cast<std::int32_t>(slot), fast ? 1 : 0});
+        listed.fast += fast ? 1 : 0;
+    };
+
     for (std::size_t i = 0; i < lights.points.size(); ++i) {
         if (touches(lights.points[i].positionRange)) {
-            listed.lights.push_back(static_cast<std::int32_t>(i));
+            list(i, lights.fastPoints);
             ++listed.points;
         }
     }
 
     for (std::size_t i = 0; i < lights.spots.size(); ++i) {
         if (touches(lights.spots[i].positionRange)) {
-            listed.lights.push_back(static_cast<std::int32_t>(i));
+            list(i, lights.fastSpots);
             ++listed.spots;
         }
     }

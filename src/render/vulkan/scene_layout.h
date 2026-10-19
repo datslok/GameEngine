@@ -17,7 +17,7 @@
 * which left SDL_GPU's four sets behind with the GPU scene: set 0 is every texture (BindlessTextures, made once), set 1
 * the frame's scene (made once per frame and bound once per pass): its uniform block, the storage buffers of instances,
 * materials, lights, shadow tiles, the draw list, the clusters' light masks and the lights probe rays' hits may need,
-* and the shadow atlas, the BRDF table and the light probes' two atlases.
+* and the shadow atlas, the BRDF table and the light probes' three atlases.
 * Nothing is bound per draw; each shadow tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded
 * straight into the command buffer.
 */
@@ -41,7 +41,8 @@ enum SceneBinding : std::uint32_t {
     ProbeIrradianceBinding = 12,
     ProbeDistanceBinding = 13,
     ProbeHitLightsBinding = 14,
-    SceneBindingCount = 15
+    ProbeFastIrradianceBinding = 15,
+    SceneBindingCount = 16
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -109,13 +110,14 @@ struct SceneBuffers {
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
-// probes' atlases (or a stand-in while there are none).
+// probes' three atlases (or a stand-in while there are none).
 struct SceneImages {
     SampledImage shadowAtlas;
     SampledImage shadowDepths;
     SampledImage brdfTable;
     SampledImage probeIrradiance;
     SampledImage probeDistance;
+    SampledImage probeFastIrradiance;
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

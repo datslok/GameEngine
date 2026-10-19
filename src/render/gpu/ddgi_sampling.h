@@ -110,12 +110,14 @@ void addProbeSample(ProbeBlend& blend, const Vec3& irradiance, float weight);
 Vec3 finishProbeBlend(const ProbeBlend& blend);
 
 /*
-* What sampling reads from the atlases, as the GPU reads it filtered: a probe's stored irradiance and its distances'
-* mean and mean square, each in a direction.
+* What sampling reads from the atlases, as the GPU reads it filtered: a probe's stored irradiance from still and from
+* fast lights (ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant) and its distances' mean and mean square,
+* each in a direction.
 */
 struct ProbeLookup {
     std::function<Vec3(int probe, const Vec3& direction)> irradiance;
     std::function<Vec2(int probe, const Vec3& direction)> moments;
+    std::function<Vec3(int probe, const Vec3& direction)> fastIrradiance;
 };
 
 /*
@@ -129,12 +131,21 @@ struct ProbeLight {
 };
 
 /*
+* The light of both atlases, each blended on its own with the same corner weights: the screen adds them, and a probe
+* ray's hit passes each on into its own atlas, so a fast light's later bounces keep its short memory.
+*/
+struct ProbeLights {
+    ProbeLight still;
+    ProbeLight fast;
+};
+
+/*
 * The probes' light at a surface point with this normal seen from toViewer: the whole of sampling, as
 * scene_probes.glsl's sampleProbes does it. normal moves the test point and weighs the probes; lookupNormal is the
 * direction the irradiance is read in (the normal-mapped normal on screen), reflected the mirror direction.
 */
-ProbeLight sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
-                        const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup);
+ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
+                         const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup);
 
 /*
 * The light a point or spot light gives a matte surface at a probe ray's hit, before its shadow ray: the irradiance on the
@@ -164,12 +175,21 @@ void keepBrightestLight(BrightestLights& kept, int capacity, int light, float st
 /*
 * The frame's point and spot lights a probe ray's hit may need: those whose range reaches the probes' box grown by the
 * longest distance the probes record (probeMaxDistance), as numbers into the frame's light buffers, the point lights'
-* first. Lights beyond that still light the screen; only their light on far surfaces the probes see is left out.
+* first, each marked fast or not (GpuLights::fastPoints). Lights beyond that still light the screen; only their light on
+* far surfaces the probes see is left out.
 */
+struct GpuProbeHitLight {
+    std::int32_t light = 0;
+    std::int32_t fast = 0; // 1 for a fast light
+};
+
+static_assert(sizeof(GpuProbeHitLight) == 8, "GpuProbeHitLight must match ddgi_trace.comp's ProbeHitLights");
+
 struct ProbeHitLights {
-    std::vector<std::int32_t> lights;
+    std::vector<GpuProbeHitLight> lights;
     int points = 0;
     int spots = 0;
+    int fast = 0; // how many of them are fast
 };
 
 ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume);

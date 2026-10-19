@@ -33,6 +33,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe irradiance (compute for probe rays' hits)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe distances
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, compute},                     // the lights probe rays' hits may need
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe irradiance from fast lights
     }};
 }
 
@@ -140,6 +141,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         buffers.probeHitLights.describe(),
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -149,6 +151,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[BrdfTableBinding] = imageInfo(images.brdfTable);
     imageInfos[ProbeIrradianceBinding] = imageInfo(images.probeIrradiance);
     imageInfos[ProbeDistanceBinding] = imageInfo(images.probeDistance);
+    imageInfos[ProbeFastIrradianceBinding] = imageInfo(images.probeFastIrradiance);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

@@ -14,6 +14,10 @@
 *     what the camera sees, so it cannot answer for hits off screen;
 *   - the light from all around as last frame's probes hold it (the flat ambient beyond the volume), times the bounce
 *     energy setting: each frame passes on one more bounce, so a still scene gathers every bounce over time.
+* Light from fast lights (flashlights) is kept apart for the fast atlas: their direct light at the hit, and their light
+* as last frame's fast atlas holds it, so their later bounces keep its short memory too. Probes within reach of a fast
+* light trace the fast count of rays (render/gpu/ddgi.h, probeNearLight); the dispatch has room for the most any probe
+* traces (the stride), and the rest of a probe's room is skipped.
 */
 #include "ray_scene.glsl"
 #include "materials.glsl"
@@ -26,14 +30,26 @@
 
 layout(local_size_x = DDGI_TRACE_GROUP_SIZE) in;
 
-// One vec4 per ray, probe by probe: rgb the light brought back, a the distance (negative for a back face).
+// One vec4 per ray, stride rays a probe: rgb the light brought back from still lights, a the distance (negative for a
+// back face).
 layout(std430, set = 3, binding = 0) writeonly buffer ProbeRays {
     vec4 probeRays[];
 };
 
-// The point lights, then the spotlights, whose light may reach the probes' rays' hits: numbers into the light buffers.
+// The light brought back from fast lights, the same layout, packed as half floats (packFastRayLight).
+layout(std430, set = 3, binding = 1) writeonly buffer FastProbeRays {
+    uvec2 fastProbeRays[];
+};
+
+// Per probe, 1 if a fast light is within reach this frame: the update reads which rays it traced from it.
+layout(std430, set = 3, binding = 2) writeonly buffer ProbeNearFastLights {
+    int probeNearFastLight[];
+};
+
+// The point lights, then the spotlights, whose light may reach the probes' rays' hits: x numbers into the light buffers,
+// y 1 for a fast light (render/gpu/ddgi_sampling.h, GpuProbeHitLight).
 layout(std430, set = 1, binding = 14) readonly buffer ProbeHitLights {
-    int probeHitLights[];
+    ivec2 probeHitLights[];
 };
 
 // Whether nothing solid lies between a point and a light along toLight within reach: the first hit anywhere settles it.
@@ -47,16 +63,37 @@ bool reachesLight(vec3 from, vec3 toLight, float reach) {
     return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
-// Listed light number of the hit lights, measured from the camera (as the light buffers are): its offset from the surface.
+// Listed light number of the hit lights: its position and range, measured from the camera (as the light buffers are).
+vec4 hitLightPositionRange(int listed) {
+    int light = probeHitLights[listed].x;
+    return listed < probeLights.x ? points[light].positionRange : spots[light].positionRange;
+}
+
+// Listed light number of the hit lights' offset from a surface, both measured from the camera.
 vec3 hitLightOffset(int listed, vec3 relativeHit) {
-    int light = probeHitLights[listed];
-    vec3 position = listed < probeLights.x ? points[light].positionRange.xyz : spots[light].positionRange.xyz;
-    return position - relativeHit;
+    return hitLightPositionRange(listed).xyz - relativeHit;
+}
+
+// Whether a fast light listed for the hits is within reach of the probe (probeNearLight), in this pass's world space.
+bool anyFastLightNear(vec3 probe) {
+    for (int listed = 0; listed < probeLights.x + probeLights.y; ++listed) {
+        if (probeHitLights[listed].y == 0) {
+            continue;
+        }
+
+        vec4 light = hitLightPositionRange(listed);
+
+        if (probeNearLight(probe, light.xyz + cameraOrigin.xyz, light.w, volume.spacing.w)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // The irradiance listed light number gives the surface, before its shadow ray.
 vec3 hitLightIrradiance(int listed, vec3 relativeHit, vec3 normal) {
-    int light = probeHitLights[listed];
+    int light = probeHitLights[listed].x;
     vec3 offset = hitLightOffset(listed, relativeHit);
 
     if (listed < probeLights.x) {
@@ -70,16 +107,28 @@ vec3 hitLightIrradiance(int listed, vec3 relativeHit, vec3 normal) {
 }
 
 void main() {
-    int rays = volume.counts.w;
+    int stride = volume.counts.w;
     int index = int(gl_GlobalInvocationID.x);
-    int probe = index / rays;
+    int probe = index / stride;
+    int ray = index % stride;
 
     if (probe >= volumeProbeCount()) {
         return;
     }
 
     vec3 origin = volumeProbePosition(probe);
-    vec3 direction = volumeRayDirection(index % rays);
+    bool nearFastLight = anyFastLightNear(origin);
+    int rays = volumeRayCount(nearFastLight);
+
+    if (ray == 0) {
+        probeNearFastLight[probe] = nearFastLight ? 1 : 0;
+    }
+
+    if (ray >= rays) {
+        return;
+    }
+
+    vec3 direction = volumeRayDirection(ray, rays);
 
     // No minimum distance: a probe cannot hit itself, and skipping near hits lets rays slip through walls [2021].
     rayQueryEXT query;
@@ -90,6 +139,7 @@ void main() {
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
         probeRays[index] = vec4(volume.sky.rgb, DDGI_RAY_REACH);
+        fastProbeRays[index] = packFastRayLight(vec3(0.0));
         return;
     }
 
@@ -97,6 +147,7 @@ void main() {
 
     if (!rayQueryGetIntersectionFrontFaceEXT(query, true)) {
         probeRays[index] = vec4(0.0, 0.0, 0.0, -distance);
+        fastProbeRays[index] = packFastRayLight(vec3(0.0));
         return;
     }
 
@@ -134,18 +185,27 @@ void main() {
         keepBrightestLight(kept, probeLights.z, listed, hitLightStrength(hitLightIrradiance(listed, relativeHit, normal)));
     }
 
+    vec3 fastIrradiance = vec3(0.0);
+
     for (int slot = 0; slot < kept.count; ++slot) {
         int listed = kept.lights[slot];
         vec3 offset = hitLightOffset(listed, relativeHit + normal * DDGI_SHADOW_RAY_OFFSET);
         float lightDistance = length(offset);
 
         if (lightDistance > 0.0 && reachesLight(shadowFrom, offset / lightDistance, lightDistance)) {
-            irradiance += hitLightIrradiance(listed, relativeHit, normal);
+            if (probeHitLights[listed].y != 0) {
+                fastIrradiance += hitLightIrradiance(listed, relativeHit, normal);
+            } else {
+                irradiance += hitLightIrradiance(listed, relativeHit, normal);
+            }
         }
     }
 
-    // The probes are read in this pass's own space, the world.
-    irradiance += probeAmbient(hit, normal, normal, normal, -direction, volume.origin.xyz, false).diffuse * probeSpacing.w;
+    // The probes are read in this pass's own space, the world; each atlas's light passed on into its own.
+    ProbeLights bounced = probeAmbient(hit, normal, normal, normal, -direction, volume.origin.xyz, false);
+    irradiance += bounced.still.diffuse * probeSpacing.w;
+    fastIrradiance += bounced.fast.diffuse * probeSpacing.w;
 
     probeRays[index] = vec4(material.emissive.rgb + albedo * irradiance, distance);
+    fastProbeRays[index] = packFastRayLight(albedo * fastIrradiance);
 }

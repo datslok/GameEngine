@@ -5,6 +5,7 @@
 #include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <set>
@@ -115,6 +116,24 @@ namespace {
 
         assert(frame.lighting.pointLights.size() > static_cast<std::size_t>(maxShadowedPointLights));
     }
+
+    /*
+    * Fast lights' bounce light (the light probes' fast atlas) is in a golden image: the light lab's back room lit by the
+    * flashlight, which is on there (and off in every other view, which keep the sunlit picture).
+    */
+    void testAViewShowsAFastLightsBounce() {
+        const GameEntry& lab = *findGame("lightlab");
+        const std::vector<GoldenView> views = viewsOf(lab);
+
+        for (const GoldenView& view : views) {
+            PreparedView prepared{lab, view};
+            const FrameDescription frame = buildFrame(prepared.world, prepared.game->getCamera(), 1.0f);
+            const bool fastLight = std::any_of(frame.lighting.spotLights.begin(), frame.lighting.spotLights.end(),
+                                               [](const PlacedSpotLight& placed) { return placed.light.fast; });
+            assert(fastLight == (view.name == "flashlight"));
+            assert(frame.lighting.probeVolumes.size() == 1);
+        }
+    }
 }
 
 void testGoldenViews() {
@@ -122,4 +141,5 @@ void testGoldenViews() {
     testSomeViewIsHdr();
     testViewsAreDeterministic();
     testLampFieldHasMoreLightsThanShadows();
+    testAViewShowsAFastLightsBounce();
 }

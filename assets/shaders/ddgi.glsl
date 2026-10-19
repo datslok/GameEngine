@@ -98,6 +98,10 @@ vec3 probeRayDirection(int ray, int count, int phase, vec3 rotation[3]) {
     return vec3(dot(rotation[0], point), dot(rotation[1], point), dot(rotation[2], point));
 }
 
+bool probeNearLight(vec3 probe, vec3 light, float range, float reach) {
+    return length(light - probe) < range + reach;
+}
+
 float irradianceRayWeight(vec3 texelDirection, vec3 rayDirection) {
     return max(0.0, dot(texelDirection, rayDirection));
 }

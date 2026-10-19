@@ -41,6 +41,9 @@ namespace {
         const SpotLight& beam = world.get<SpotLight>(entity);
         assert(beam.intensity == flashlightBeam.intensity && beam.range == flashlightBeam.range);
 
+        // Swung around with the view, so its bounce light must follow it (global illumination's fast lights).
+        assert(beam.fast);
+
         flashlight.toggle(world);
         assert(!flashlight.isOn(world) && world.isAlive(entity));
 

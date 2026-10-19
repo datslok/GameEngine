@@ -17,6 +17,11 @@ namespace {
                nearlyEqual(actual.z, expected.z, tolerance);
     }
 
+    // Bit for bit the same.
+    bool identical(const Vec3& a, const Vec3& b) {
+        return a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+
     const ProbeVolume unitVolume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{4, 4, 4}};
 
     // Moments of a probe that sees nothing nearby: every surface far beyond any point it is asked about.
@@ -26,9 +31,9 @@ namespace {
         return Vec2{farAway, farAway * farAway};
     }
 
-    // Every probe storing the same irradiance, seeing open space all round.
+    // Every probe storing the same irradiance (and none from fast lights), seeing open space all round.
     ProbeLookup uniformProbes(const Vec3& irradiance) {
-        return ProbeLookup{[irradiance](int, const Vec3&) { return irradiance; }, [](int, const Vec3&) { return openMoments(); }};
+        return ProbeLookup{[irradiance](int, const Vec3&) { return irradiance; }, [](int, const Vec3&) { return openMoments(); }, nullptr};
     }
 
     void testSelfShadowBiasLeansTowardsTheViewer() {
@@ -211,23 +216,54 @@ namespace {
             const Vec3 normal = sphericalFibonacci(i, 50);
             const Vec3 toViewer = (normal + sphericalFibonacci(49 - i, 50)).normalized();
             const Vec3 reflected = sphericalFibonacci((i * 7) % 50, 50);
-            const ProbeLight light = sampleProbes(unitVolume, 0.3f, point, normal, normal, reflected, toViewer, lookup);
-            assert(nearlyEqual(light.diffuse, sky, 1e-3f));
-            assert(nearlyEqual(light.specular, sky, 1e-3f));
+            const ProbeLights light = sampleProbes(unitVolume, 0.3f, point, normal, normal, reflected, toViewer, lookup);
+            assert(nearlyEqual(light.still.diffuse, sky, 1e-3f));
+            assert(nearlyEqual(light.still.specular, sky, 1e-3f));
+
+            // No fast lights: nothing at all in their part.
+            assert(identical(light.fast.diffuse, Vec3{}) && identical(light.fast.specular, Vec3{}));
         }
+    }
+
+    /*
+    * The fast lights' atlas is blended on its own with the same corner weights: each part is exactly what sampling that
+    * atlas alone gives, so with the fast atlas empty the still part is the whole light, as before fast lights.
+    */
+    void testFastLightIsBlendedApart() {
+        const auto stillLight = [](int probe, const Vec3& direction) {
+            return Vec3{0.2f + 0.1f * static_cast<float>(probe % 4), 0.5f, direction.y > 0.0f ? 1.0f : 0.3f};
+        };
+        const auto fastLight = [](int probe, const Vec3&) { return Vec3{0.05f * static_cast<float>(probe % 7), 0.0f, 0.4f}; };
+        const auto moments = [](int probe, const Vec3&) { return Vec2{0.8f + 0.05f * static_cast<float>(probe % 5), 1.0f}; };
+
+        const ProbeLookup both{stillLight, moments, fastLight};
+        const ProbeLookup stillAlone{stillLight, moments, nullptr};
+        const ProbeLookup fastAlone{fastLight, moments, nullptr};
+
+        const Vec3 point{1.3f, 1.6f, 0.7f};
+        const Vec3 normal = Vec3{0.3f, 1.0f, -0.2f}.normalized();
+        const Vec3 reflected = Vec3{-0.5f, 0.6f, 0.4f}.normalized();
+        const Vec3 toViewer = Vec3{0.1f, 0.7f, 0.7f}.normalized();
+
+        const ProbeLights split = sampleProbes(unitVolume, 0.3f, point, normal, normal, reflected, toViewer, both);
+        const ProbeLights still = sampleProbes(unitVolume, 0.3f, point, normal, normal, reflected, toViewer, stillAlone);
+        const ProbeLights fast = sampleProbes(unitVolume, 0.3f, point, normal, normal, reflected, toViewer, fastAlone);
+
+        assert(identical(split.still.diffuse, still.still.diffuse) && identical(split.still.specular, still.still.specular));
+        assert(identical(split.fast.diffuse, fast.still.diffuse) && identical(split.fast.specular, fast.still.specular));
     }
 
     // The specular stand-in is the same blend read in the mirror direction: probes brighter from above give an upward
     // reflection more light than a downward one, with the same weights.
     void testSpecularReadsTheMirrorDirection() {
         const ProbeLookup skyAbove{[](int, const Vec3& direction) { return direction.y > 0.0f ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.1f, 0.1f, 0.1f}; },
-                                   [](int, const Vec3&) { return openMoments(); }};
+                                   [](int, const Vec3&) { return openMoments(); }, nullptr};
         const Vec3 point{1.5f, 1.5f, 1.5f};
         const Vec3 side{1.0f, 0.0f, 0.0f};
         const Vec3 up{0.0f, 1.0f, 0.0f};
 
-        const ProbeLight upwards = sampleProbes(unitVolume, 0.3f, point, side, side, up, side, skyAbove);
-        const ProbeLight downwards = sampleProbes(unitVolume, 0.3f, point, side, side, up * -1.0f, side, skyAbove);
+        const ProbeLight upwards = sampleProbes(unitVolume, 0.3f, point, side, side, up, side, skyAbove).still;
+        const ProbeLight downwards = sampleProbes(unitVolume, 0.3f, point, side, side, up * -1.0f, side, skyAbove).still;
         assert(nearlyEqual(upwards.specular, Vec3{1.0f, 1.0f, 1.0f}, 1e-3f));
         assert(nearlyEqual(downwards.specular, Vec3{0.1f, 0.1f, 0.1f}, 1e-3f));
         assert(nearlyEqual(upwards.diffuse, downwards.diffuse));
@@ -257,14 +293,15 @@ namespace {
 
                 const float distance = std::abs(wall - x) / std::abs(direction.x);
                 return Vec2{distance, distance * distance + 1e-4f};
-            }};
+            },
+            nullptr};
 
-        const ProbeLookup open{walled.irradiance, [](int, const Vec3&) { return openMoments(); }};
+        const ProbeLookup open{walled.irradiance, [](int, const Vec3&) { return openMoments(); }, nullptr};
 
         const Vec3 point{wall, 1.5f, 1.5f};
         const Vec3 normal{-1.0f, 0.0f, 0.0f};
-        const Vec3 withWall = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, walled).diffuse;
-        const Vec3 withoutWall = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, open).diffuse;
+        const Vec3 withWall = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, walled).still.diffuse;
+        const Vec3 withoutWall = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, open).still.diffuse;
 
         assert(withWall.x > 0.99f);
         assert(withoutWall.x < 0.9f);
@@ -326,7 +363,8 @@ namespace {
 
     /*
     * The lights a probe ray's hit may need: those whose range reaches the probes' box grown by the longest distance the
-    * probes record, numbered as in the frame's buffers (positions there are measured from the camera), points first.
+    * probes record, numbered as in the frame's buffers (positions there are measured from the camera), points first,
+    * each marked fast or not by its slot's flag (none past the flags' end).
     */
     void testTheLightsNearTheProbesAreListed() {
         const Vec3 cameraOrigin{10.0f, 0.0f, 0.0f};
@@ -354,9 +392,21 @@ namespace {
         spot.positionRange[0] = -cameraOrigin.x;
         lights.spots.push_back(spot);
 
+        lights.fastPoints = {false, true, true};
+        lights.fastSpots = {true, true};
+
         const ProbeHitLights listed = probeHitLights(lights, cameraOrigin, unitVolume);
-        assert(listed.points == 2 && listed.spots == 1);
-        assert((listed.lights == std::vector<std::int32_t>{0, 2, 1}));
+        assert(listed.points == 2 && listed.spots == 1 && listed.fast == 2);
+        assert(listed.lights.size() == 3);
+        assert(listed.lights[0].light == 0 && listed.lights[0].fast == 0);
+        assert(listed.lights[1].light == 2 && listed.lights[1].fast == 1);
+        assert(listed.lights[2].light == 1 && listed.lights[2].fast == 1);
+
+        // Without flags, nothing is fast.
+        lights.fastPoints.clear();
+        lights.fastSpots.clear();
+        const ProbeHitLights unflagged = probeHitLights(lights, cameraOrigin, unitVolume);
+        assert(unflagged.fast == 0 && unflagged.lights[1].fast == 0 && unflagged.lights[2].fast == 0);
     }
 
     void testProbeSamplingIsPacked() {
@@ -414,6 +464,7 @@ void testDdgiSampling() {
     testTheVolumeFadesBeyondItsProbes();
     testTheBlendAveragesSquareRoots();
     testUniformProbesGiveTheirOwnValue();
+    testFastLightIsBlendedApart();
     testSpecularReadsTheMirrorDirection();
     testAWallKeepsTheDarkSidesProbesOut();
     testTheBrightestLightsAreKept();

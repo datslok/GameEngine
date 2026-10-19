@@ -11,6 +11,7 @@
 #include "engine/settings_file.h"
 #include "input/input.h"
 #include "platform/window.h"
+#include "engine/golden.h"
 #include "engine/golden_view.h"
 #include "render/captured_frame.h"
 #include "render/vulkan/vulkan_renderer.h"
@@ -43,8 +44,10 @@ public:
     EngineSettings& getSettings();
 
     // Bring the game (fresh from onInit, nothing run yet) to a golden view and capture it off screen at the golden size
-    // (engine/golden.h). Call it instead of run(), once per Application.
-    CapturedFrame captureGoldenView(const GoldenView& view);
+    // (engine/golden.h). Call it instead of run(), once per Application. probeWarmUpFrames: the light probes' frames
+    // before the capture; the probes are deterministic, so two captures some frames apart show how much their light
+    // flickers between those frames (measuring tools).
+    CapturedFrame captureGoldenView(const GoldenView& view, int probeWarmUpFrames = goldenProbeWarmUpFrames);
 
     // The GPU's name, for keeping golden images per GPU.
     std::string getRendererName() const;

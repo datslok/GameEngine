@@ -33,6 +33,9 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Rays per probe", settings.raysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
     visitor.field("Irradiance time constant", settings.irradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "s"});
     visitor.field("Distance time constant", settings.distanceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 4.0f, .unit = "s"});
+    visitor.field("Fast irradiance time constant", settings.fastIrradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 0.5f, .unit = "s"});
+    visitor.field("Fast rays per probe", settings.fastRaysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
+    visitor.field("Fast blend frame cap", settings.fastBlendMaxFrameSeconds, {.min = 0.001f, .max = 1.0f, .sliderMax = 0.1f, .unit = "s"});
     visitor.field("Self-shadow bias", settings.selfShadowBias, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
     visitor.field("Bounce energy", settings.bounceEnergy, {.min = 0.0f, .max = 1.0f});
     visitor.field("Lights per hit", settings.lightsPerHit, {.min = 0, .max = DDGI_MAX_HIT_LIGHTS});
@@ -173,6 +176,10 @@ Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& r
     return Vec3{rotation.rows[0].dot(point), rotation.rows[1].dot(point), rotation.rows[2].dot(point)};
 }
 
+bool probeNearLight(const Vec3& probe, const Vec3& light, float range, float reach) {
+    return (light - probe).length() < range + reach;
+}
+
 float irradianceRayWeight(const Vec3& texelDirection, const Vec3& rayDirection) {
     return std::max(0.0f, texelDirection.dot(rayDirection));
 }
@@ -267,11 +274,16 @@ Vec2 probeAtlasUv(const ProbeCounts& counts, int index, const Vec3& direction, i
                 (static_cast<float>(origin.y + 1) + (square.y * 0.5f + 0.5f) * inner) / static_cast<float>(size.height)};
 }
 
+int probeRayStride(const ProbeFrame& frame) {
+    return std::max(frame.raysPerProbe, frame.fastRaysPerProbe);
+}
+
 GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& frame) {
     GpuProbeVolume packed{};
     packed.origin[0] = volume.origin.x;
     packed.origin[1] = volume.origin.y;
     packed.origin[2] = volume.origin.z;
+    packed.origin[3] = frame.fastIrradianceHysteresis;
     packed.spacing[0] = volume.spacing.x;
     packed.spacing[1] = volume.spacing.y;
     packed.spacing[2] = volume.spacing.z;
@@ -279,7 +291,7 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
     packed.counts[0] = volume.counts.x;
     packed.counts[1] = volume.counts.y;
     packed.counts[2] = volume.counts.z;
-    packed.counts[3] = frame.raysPerProbe;
+    packed.counts[3] = probeRayStride(frame);
 
     const ProbeRotationRows rows = probeRotationRows(frame.rotation);
 
@@ -289,6 +301,8 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
         packed.rotation[row][2] = rows.rows[row].z;
     }
 
+    packed.rotation[0][3] = static_cast<float>(frame.raysPerProbe);
+    packed.rotation[1][3] = static_cast<float>(frame.fastRaysPerProbe);
     packed.sky[0] = frame.sky.x;
     packed.sky[1] = frame.sky.y;
     packed.sky[2] = frame.sky.z;
@@ -297,4 +311,22 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
     packed.hysteresis[2] = frame.ballRadius;
     packed.hysteresis[3] = static_cast<float>(frame.rayPhase);
     return packed;
+}
+
+// The fast blend counts a frame as at most fastBlendMaxFrameSeconds.
+ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationSettings& settings, float frameSeconds, bool fastLights, bool fresh) {
+    ProbeFrame frame;
+    frame.raysPerProbe = std::clamp(settings.raysPerProbe, minRaysPerProbe, maxRaysPerProbe);
+    frame.fastRaysPerProbe = fastLights ? std::clamp(settings.fastRaysPerProbe, minRaysPerProbe, maxRaysPerProbe) : frame.raysPerProbe;
+
+    const ProbeRayFrame rays = probeRayFrame(schedule.frameNumber++);
+    frame.rotation = rays.rotation;
+    frame.rayPhase = rays.phase;
+
+    const float fastFrameSeconds = std::min(frameSeconds, settings.fastBlendMaxFrameSeconds);
+    frame.irradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.irradianceTimeConstant);
+    frame.fastIrradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(fastFrameSeconds, settings.fastIrradianceTimeConstant);
+    frame.distanceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant);
+    frame.ballRadius = settings.probeBallRadius;
+    return frame;
 }

@@ -10,9 +10,11 @@
 
 #include "volk/volk.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 
 class VulkanDevice;
 
@@ -24,13 +26,14 @@ struct ProbeSceneSets {
 };
 
 /*
-* Global illumination's light probes on the GPU (render/gpu/ddgi.h): the two atlases (irradiance, RGBA16F, and distances,
-* RG16F, written by compute as storage images, the renderer's first), the buffer of the frame's probe rays, and the
-* passes that fill them: ddgi_trace.comp traces every probe's rays, then ddgi_update_irradiance.comp and
-* ddgi_update_distance.comp blend them into the atlases, one workgroup per probe. Between updates the atlases are
-* sampled (SurfaceRead): by the main pass, the debug balls and the next frame's trace (last frame's probes, for the light
-* that bounced more than once). They are shared by the frames in flight: barriers order each frame's update after the
-* last frame's reads. Also draws the probes' debug balls. Needs ray queries.
+* Global illumination's light probes on the GPU (render/gpu/ddgi.h): the three atlases (irradiance from still lights and
+* from fast lights, RGBA16F, and distances, RG16F, written by compute as storage images, the renderer's first), the
+* buffers of the frame's probe rays (still light and distance, fast light as half floats, and which probes a fast light
+* reached), and the passes that fill them: ddgi_trace.comp traces every probe's rays, then ddgi_update_irradiance.comp
+* (both irradiance atlases) and ddgi_update_distance.comp blend them into the atlases, one workgroup per probe. Between
+* updates the atlases are sampled (SurfaceRead): by the main pass, the debug balls and the next frame's trace (last
+* frame's probes, for the light that bounced more than once). They are shared by the frames in flight: barriers order
+* each frame's update after the last frame's reads. Also draws the probes' debug balls. Needs ray queries.
 */
 class VulkanDdgi {
 public:
@@ -48,10 +51,11 @@ public:
 
     /*
     * Record this frame's probe update for the volume prepare() readied: trace, then blend, leaving the atlases readable
-    * for the frame's later passes. Outside any rendering block.
+    * for the frame's later passes. fastLights: the frame lists a fast light for the probe rays' hits (ProbeHitLights::
+    * fast), so probes within its reach trace more rays. Outside any rendering block.
     */
     void update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume,
-                const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds);
+                const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds, bool fastLights);
 
     // Draw the last updated volume's probes as balls into the open rendering block (colour and depth bound, the
     // viewport set), with the scene's set 1 for the camera. Nothing before the first update.
@@ -62,10 +66,12 @@ public:
     // The atlases as the scene set samples them (valid after prepare()).
     SampledImage sampledIrradiance() const;
     SampledImage sampledDistance() const;
+    SampledImage sampledFastIrradiance() const;
 
     // The atlases, for tests: valid after the first update.
     VulkanImage& getIrradianceAtlas();
     VulkanImage& getDistanceAtlas();
+    VulkanImage& getFastIrradianceAtlas();
 
 private:
     const VulkanDevice& device;
@@ -83,9 +89,14 @@ private:
 
     std::optional<ProbeVolume> currentVolume;
     VulkanImage irradiance;
+    VulkanImage fastIrradiance;
     VulkanImage distance;
     VulkanBuffer rays;
-    std::uint64_t frameNumber = 0;
+    VulkanBuffer fastRays;
+    VulkanBuffer nearFastLight;
+
+    // The frame time, ray cycles and rays' clock, carried from frame to frame.
+    ProbeSchedule schedule;
 
     // Set by prepare() when the atlases are new: the next update keeps nothing of them.
     bool freshAtlases = false;
@@ -100,6 +111,10 @@ private:
     // New atlases for a new volume, cleared to zero (no light, no distance) in this frame's commands.
     void createAtlases(VkCommandBuffer commands, const ProbeVolume& volume);
 
-    void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int raysPerProbe);
-    void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, VulkanImage& atlas, int probes);
+    void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int rayStride);
+    void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
+               int probes);
+
+    // The ray buffers, in their bindings' order (rays, fast rays, which probes a fast light reached).
+    std::array<const VulkanBuffer*, 3> rayBuffers() const;
 };

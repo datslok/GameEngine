@@ -62,13 +62,17 @@ static_assert(sizeof(GpuPointLight) == 48, "GpuPointLight must match the shader'
 static_assert(sizeof(GpuSpotLight) == 64, "GpuSpotLight must match the shader's SpotLightData");
 
 // A frame's lights as the shader gets them: the ambient light and the counts (which go into the frame's uniform block,
-// gpu_scene.h), and one record per light, in slot order.
+// gpu_scene.h), and one record per light, in slot order. Beside them, which point and spot lights are fast
+// (PointLight::fast), by slot, for the light probes (render/gpu/ddgi_sampling.h, probeHitLights): not in the records,
+// which the main pass reads. A slot past the end of these lists is not fast.
 struct GpuLights {
     float ambient[4]{};
     std::int32_t counts[4]{}; // x: directional lights used, y: point lights used, z: spotlights used
     std::vector<GpuDirectionalLight> directional;
     std::vector<GpuPointLight> points;
     std::vector<GpuSpotLight> spots;
+    std::vector<bool> fastPoints;
+    std::vector<bool> fastSpots;
 };
 
 // Whether the shader can use a light at all: a zero direction cannot be normalised, and the falloff divides by the range.
