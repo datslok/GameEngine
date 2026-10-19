@@ -8,6 +8,7 @@
 #include "physics/character_controller.h"
 #include "physics/overlap.h"
 #include "render/gpu/ddgi.h"
+#include "render/gpu/ddgi_sampling.h"
 #include "scene/lighting.h"
 #include "scene/model_renderer.h"
 #include "scene/sky_object.h"
@@ -316,6 +317,46 @@ namespace {
         assert(lighting.probeVolumes[0].counts.x == labProbeVolume.counts.x);
         assert(lighting.probeVolumes[0].origin.z == labProbeVolume.origin.z);
     }
+
+    /*
+    * The dense probes, a test of finer bounce light: 20 cm apart, inside the building only. They must stay within what
+    * the renderer can hold (validateProbeVolume throws otherwise), and light every corner of both rooms at the volume's
+    * full weight, so no part of a room falls back on the flat ambient.
+    */
+    void testDenseProbes() {
+        validateProbeVolume(labDenseProbeVolume);
+        assert(labDenseProbeVolume.spacing.x == 0.2f && labDenseProbeVolume.spacing.y == 0.2f && labDenseProbeVolume.spacing.z == 0.2f);
+        assert(probeCount(labDenseProbeVolume.counts) <= maxProbesPerVolume);
+
+        for (const Aabb& room : {labSunlitRoom, labBackRoom}) {
+            for (int corner = 0; corner < 8; ++corner) {
+                const Vec3 point{(corner & 1) != 0 ? room.maximum.x : room.minimum.x, (corner & 2) != 0 ? room.maximum.y : room.minimum.y,
+                                 (corner & 4) != 0 ? room.maximum.z : room.minimum.z};
+                assert(probeVolumeWeight(labDenseProbeVolume, point) > 0.999f);
+            }
+        }
+
+        // Off by default; switched on, the lab's volume becomes the dense one at the next frame, and back again.
+        Lab lab;
+        assert(!lab.game.getProbeSettings().denseProbes);
+
+        const auto volumeNow = [&] {
+            Input idle;
+            idle.beginFrame();
+            lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+            const FrameLighting lighting = collectLighting(lab.world, 1.0f);
+            assert(lighting.probeVolumes.size() == 1);
+            return lighting.probeVolumes[0];
+        };
+
+        assert(volumeNow().counts.x == labProbeVolume.counts.x);
+        lab.game.getProbeSettings().denseProbes = true;
+        const ProbeVolume dense = volumeNow();
+        assert(dense.counts.x == labDenseProbeVolume.counts.x && dense.counts.z == labDenseProbeVolume.counts.z);
+        assert(dense.spacing.y == labDenseProbeVolume.spacing.y && dense.origin.x == labDenseProbeVolume.origin.x);
+        lab.game.getProbeSettings().denseProbes = false;
+        assert(volumeNow().spacing.x == labProbeVolume.spacing.x);
+    }
 }
 
 namespace {
@@ -350,6 +391,7 @@ namespace {
 void testLightLab() {
     testTheLabsFlashlight();
     testProbeVolume();
+    testDenseProbes();
     testSunDisc();
     testTowersDoubleAndFanOut();
     testFence();
