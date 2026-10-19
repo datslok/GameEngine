@@ -33,6 +33,14 @@ struct LightLabSunSettings {
 
 void visit(LightLabSunSettings& settings, SettingsVisitor& visitor);
 
+// The light probes' grid: the usual one round the building, 1 m apart, or a test of finer bounce light inside it
+// (labDenseProbeVolume, 20 cm apart, about 20 times the probe work). Read every frame; changing it rebuilds the probes.
+struct LightLabProbeSettings {
+    bool denseProbes = false;
+};
+
+void visit(LightLabProbeSettings& settings, SettingsVisitor& visitor);
+
 // The solar time after some seconds pass at the given speed, kept within one day (0 to 24 hours).
 float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);
 
@@ -75,6 +83,7 @@ public:
     // For tests.
     const StaticLevel& getLevel() const;
     LightLabSunSettings& getSunSettings();
+    LightLabProbeSettings& getProbeSettings();
     Entity getSun() const;
 
     // The glowing disc in the sky where the sunlight comes from (scene/sky_object.h).
@@ -89,6 +98,10 @@ private:
 
     PlayerControls controls;
     LightLabSunSettings sunSettings;
+    LightLabProbeSettings probeSettings;
+
+    // The entity holding the frame's ProbeVolume, set from probeSettings every frame.
+    Entity probes;
 
     Entity sun;
     Entity sunDisc;
