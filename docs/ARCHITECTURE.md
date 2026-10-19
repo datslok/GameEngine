@@ -1,6 +1,6 @@
 # Architecture reference
 
-The detailed reference for how each system is built today: names, files, numbers and the reasons behind them. `CLAUDE.md` holds the rules and a short summary and points here; `docs/ENGINE_GUIDE.md` explains the concepts for a human reader. Read the section for a system before changing it, and keep it in sync in the branch that changes it.
+The detailed reference for how each system is built today: names, files, numbers and the reasons behind them. `CLAUDE.md` holds the rules and a short summary and points here; `docs/ENGINE_GUIDE.md` explains the concepts for a human reader; `docs/BUILDLOG.md` keeps the history (when each part was built, what was measured then, what was tried and dropped). Read the section for a system before changing it, and keep it in sync in the branch that changes it.
 
 Live path: `main` picks a game from the game registry (`app/game_registry`: the demo, or another named with `--game`), makes it, then creates an `Application` (the engine), which drives the game through the `Game` hooks, fills `Input` from the `Window`, and draws the `World` with the renderer (`VulkanRenderer`, the engine's own Vulkan 1.3 renderer).
 
