@@ -6,9 +6,11 @@
 #include <cstring>
 
 /*
-* After the copies, one barrier makes the copied data visible to the stages that read it: vertex attribute fetching
-* and index reading. Waiting for the upload to finish (ImmediateCommands does) orders it in time, but only a barrier
-* makes the GPU's own writes visible to its later reads.
+* After the copies, one barrier makes the copied data visible to everything that reads it later: vertex attribute
+* fetching and index reading, shaders reading the buffers through their addresses (a ray's hit rebuilding its surface),
+* and, with ray tracing, building the mesh's acceleration structure. Waiting for the upload to finish (ImmediateCommands
+* does) orders it in time, but only a barrier makes the GPU's own writes visible to its later reads, including those in
+* later submissions.
 */
 VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh) {
     checkMeshUpload(mesh);
@@ -16,10 +18,18 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
     const std::uint32_t vertexSize = vertexBytes(mesh);
     const std::uint32_t indexSize = indexBytes(mesh);
     indexCount = static_cast<std::uint32_t>(mesh.indices.size());
+    vertexCount = static_cast<std::uint32_t>(mesh.vertices.size());
+
+    // Every mesh can be reached by address; with ray tracing it is also what acceleration structures are built from.
+    VkBufferUsageFlags shared = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+    if (device.supportsRayQueries()) {
+        shared |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    }
 
     const VmaAllocator allocator = device.getAllocator();
-    vertices = VulkanBuffer{allocator, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
-    indices = VulkanBuffer{allocator, indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
+    vertices = VulkanBuffer{allocator, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | shared, BufferMemory::Gpu};
+    indices = VulkanBuffer{allocator, indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | shared, BufferMemory::Gpu};
 
     VulkanBuffer staging{allocator, VkDeviceSize{vertexSize} + indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
     auto* destination = static_cast<std::byte*>(staging.getMapped());
@@ -38,8 +48,14 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
         barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
         barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
         barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT | VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
+                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+
+        if (device.supportsRayQueries()) {
+            barrier.dstStageMask |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+            barrier.dstAccessMask |= VK_ACCESS_2_SHADER_READ_BIT;
+        }
 
         VkDependencyInfo dependency{};
         dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
@@ -59,4 +75,16 @@ VkBuffer VulkanMesh::getIndexBuffer() const {
 
 std::uint32_t VulkanMesh::getIndexCount() const {
     return indexCount;
+}
+
+std::uint32_t VulkanMesh::getVertexCount() const {
+    return vertexCount;
+}
+
+VkDeviceAddress VulkanMesh::getVertexAddress() const {
+    return vertices.getDeviceAddress();
+}
+
+VkDeviceAddress VulkanMesh::getIndexAddress() const {
+    return indices.getDeviceAddress();
 }

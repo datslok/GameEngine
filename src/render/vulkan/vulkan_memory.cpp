@@ -87,6 +87,16 @@ VkDeviceSize VulkanBuffer::getSize() const {
     return size;
 }
 
+VkDeviceAddress VulkanBuffer::getDeviceAddress() const {
+    VmaAllocatorInfo allocatorInfo{};
+    vmaGetAllocatorInfo(allocator, &allocatorInfo);
+
+    VkBufferDeviceAddressInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    info.buffer = buffer;
+    return vkGetBufferDeviceAddress(allocatorInfo.device, &info);
+}
+
 void* VulkanBuffer::getMapped() const {
     return mapped;
 }

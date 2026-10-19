@@ -98,6 +98,10 @@ namespace {
 
         assert(instance.handedness[0] == 1.0f);
         assert(instance.material[0] == 7);
+
+        // The mesh's number, so a ray that hits the instance can find the triangle's corners.
+        assert(instance.material[1] == draw.mesh.index);
+        assert(packInstance(drawOf(41), 7).material[1] == 41);
     }
 
     // A mirrored object turns its tangent frame inside out, which the vertex shader undoes with the handedness.

@@ -37,6 +37,10 @@ public:
     VkBuffer get() const;
     VkDeviceSize getSize() const;
 
+    // Where the buffer starts in the GPU's address space, for shaders that follow it as a pointer and for building
+    // acceleration structures. The buffer must have been made with VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
+    VkDeviceAddress getDeviceAddress() const;
+
     // The CPU's view of an upload or read-back buffer (null for GPU memory).
     void* getMapped() const;
 

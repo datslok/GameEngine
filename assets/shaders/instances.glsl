@@ -8,7 +8,7 @@ struct InstanceData {
     mat4 model;        // places the vertex in the world
     mat4 normalMatrix; // inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if squashed flat)
     vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
-    uvec4 material;    // x: the material's number in the material buffer
+    uvec4 material;    // x: the material's number in the material buffer, y: the mesh's (for ray hits)
 };
 
 // Every object in the frame: instance i is the frame's draw i.

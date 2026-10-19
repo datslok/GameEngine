@@ -46,6 +46,11 @@ public:
     // Whether the driver reports each memory heap's use and budget (VK_EXT_memory_budget, on when the GPU has it).
     bool reportsMemoryBudget() const;
 
+    // Whether shaders can trace rays (VK_KHR_ray_query with acceleration structures, on when the GPU has them), and the
+    // alignment a build's scratch memory needs. Ray tracing is optional: without it, everything ray-traced stays off.
+    bool supportsRayQueries() const;
+    std::uint32_t getScratchAlignment() const;
+
     // Each memory heap's numbers from VMA (see render/gpu/video_memory.h). The driver's figures are fetched again when
     // startMemoryFrame is called, once a frame.
     std::vector<HeapMemory> getHeapMemory() const;
@@ -96,6 +101,8 @@ private:
     VmaAllocator allocator = VK_NULL_HANDLE;
     bool swapchainColourSpaces = false;
     bool memoryBudget = false;
+    bool rayQueries = false;
+    std::uint32_t scratchAlignment = 1;
     bool debugUtils = false;
     std::uint32_t timestampValidBits = 0;
     std::atomic<std::uint32_t> validationErrors{0};

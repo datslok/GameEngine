@@ -29,6 +29,7 @@ int main() {
             gpuTestClusters(runner, report);
             gpuTestCascades(runner, report);
             gpuTestDepthRange(device, report);
+            gpuTestRayTracing(device, runner, report);
             report.print();
         }
 

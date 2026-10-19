@@ -117,3 +117,7 @@ class VulkanDevice;
 
 // The cascades' depth reduction, run as the renderer runs it, on depth images of known values.
 void gpuTestDepthRange(const VulkanDevice& device, GpuCheckReport& report);
+
+// Ray tracing's library, then real acceleration structures traced on the GPU against the CPU's raycast (skipped on a
+// GPU without ray queries).
+void gpuTestRayTracing(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);

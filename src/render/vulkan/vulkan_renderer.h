@@ -30,6 +30,7 @@
 #include "render/vulkan/vulkan_mesh.h"
 #include "render/vulkan/vulkan_overlay.h"
 #include "render/vulkan/vulkan_pipeline.h"
+#include "render/vulkan/vulkan_ray_tracing.h"
 #include "render/vulkan/vulkan_swapchain.h"
 #include "render/vulkan/vulkan_texture.h"
 #include "scene/asset_handles.h"
@@ -202,6 +203,13 @@ private:
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
 
+    // Hardware ray tracing (null on a GPU without ray queries): every mesh's acceleration structure and each frame's
+    // scene, and the debug view drawn from them (the scene's two sets plus the ray tracing set, and its camera as push
+    // constants).
+    std::unique_ptr<VulkanRayTracing> rayTracing;
+    OwnedHandle<VkPipelineLayout> rayDebugLayout;
+    std::unique_ptr<VulkanPipeline> rayDebugPipeline;
+
     std::unique_ptr<VulkanBloom> bloom;
     std::unique_ptr<VulkanDebugLines> debugLines;
     std::unique_ptr<VulkanOverlay> overlay;
@@ -272,6 +280,8 @@ private:
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
                       const Vec3& background);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
+    void createRayTracing();
+    void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     void measureDepthsBeforeCapture(const FrameDescription& description, const RenderSettings& settings);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);

@@ -97,6 +97,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
+    createRayTracing();
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
         swapchainFramesInFlight = framesInFlight;
@@ -287,6 +288,40 @@ void VulkanRenderer::createPipelines() {
     clusterLights.shader = "assets/shaders/cluster_lights.comp.spv";
     clusterLights.sharedLayout = sceneLayout->getPipelineLayout(); // the frame's lights and grid, as the main pass reads them
     clusterLightsPipeline = std::make_unique<ComputePipeline>(device, clusterLights);
+}
+
+/*
+* Ray tracing, when the GPU has ray queries: the acceleration structures, and the debug view's pipeline, the full-screen
+* triangle with ray_debug.frag, whose layout is the scene's two sets (textures, the frame's instances and materials),
+* then the ray tracing set, and its camera as fragment push constants.
+*/
+void VulkanRenderer::createRayTracing() {
+    if (!device.supportsRayQueries()) {
+        return;
+    }
+
+    rayTracing = std::make_unique<VulkanRayTracing>(device, framesInFlight);
+
+    const std::array<VkDescriptorSetLayout, 3> sets{bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), rayTracing->getSetLayout()};
+    const VkPushConstantRange camera{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GpuRayDebugView)};
+
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = static_cast<std::uint32_t>(sets.size());
+    layoutInfo.pSetLayouts = sets.data();
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &camera;
+
+    VkPipelineLayout created = VK_NULL_HANDLE;
+    vulkanCheck(vkCreatePipelineLayout(device.getDevice(), &layoutInfo, nullptr, &created), "Ray debug view layout creation failed");
+    rayDebugLayout = OwnedHandle<VkPipelineLayout>{device.getDevice(), created, vkDestroyPipelineLayout};
+
+    PipelineDescription description;
+    description.vertexShader = "assets/shaders/fullscreen_triangle.vert.spv";
+    description.fragmentShader = "assets/shaders/ray_debug.frag.spv";
+    description.sharedLayout = rayDebugLayout.get();
+    description.colourFormat = sceneColourFormat;
+    rayDebugPipeline = std::make_unique<VulkanPipeline>(device, layouts, description);
 }
 
 // The pipelines that draw into the screen image are built for its format, which changes with HDR output.
@@ -805,6 +840,16 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DebugUi);
     }
 
+    // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays (for now
+    // the debug view).
+    const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
+
+    if (rayDebug) {
+        beginGpuPass(frame, GpuPass::RayScene);
+        rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
+        endGpuPass(frame, GpuPass::RayScene);
+    }
+
     // The lists feed both clustered shading and its heatmap.
     if (settings.clusteredShading || settings.clusterHeatmap) {
         beginGpuPass(frame, GpuPass::Clusters);
@@ -828,6 +873,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     beginGpuPass(frame, GpuPass::Main);
     drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths, description.lighting.background);
     endGpuPass(frame, GpuPass::Main);
+
+    if (rayDebug) {
+        beginGpuPass(frame, GpuPass::RayDebug);
+        drawRayDebugView(frame, sceneSet, camera, settings.rayDebugView);
+        endGpuPass(frame, GpuPass::RayDebug);
+    }
 
     // The surfaces this frame shows, for fitting a later frame's cascades: the CPU reads them once this frame is done.
     if (measureDepths) {
@@ -1081,6 +1132,34 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
 }
 
 /*
+* The ray tracing debug view, over the lit scene: the scene image becomes a colour target again (the main pass's picture
+* discarded, since every pixel is drawn), the full-screen triangle traces one ray per pixel (ray_debug.frag), and the
+* image goes back to being read for bloom and tone mapping. The frame's top-level structure was built earlier this frame,
+* and its barrier made it readable here.
+*/
+void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view) {
+    const VkCommandBuffer commands = frame.commands;
+    sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
+
+    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, {}};
+    beginRendering(commands, {frameWidth, frameHeight}, &colour, nullptr);
+    renderingOpen = true;
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, rayDebugPipeline->get());
+    const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, rayDebugLayout.get(), 0, static_cast<std::uint32_t>(sets.size()),
+                            sets.data(), 0, nullptr);
+
+    const GpuRayDebugView rays = packRayDebugView(camera, view, frameWidth, frameHeight);
+    vkCmdPushConstants(commands, rayDebugLayout.get(), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(rays), &rays);
+    drawFullScreenTriangle(commands);
+
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+    sceneColour.transition(commands, ImageState::FragmentRead);
+}
+
+/*
 * One instanced draw per batch: the mesh's buffers bound, and every instance of it drawn at once (gl_InstanceIndex counts
 * from firstInstance, the batch's first entry in the draw list, which names each instance). Returns how many draw calls
 * that took.
@@ -1281,12 +1360,17 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
 
 // Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
 // in the bindless array at once (slots in-flight frames do not read may change while they run).
+// With ray tracing, each mesh also gets its acceleration structure, numbered like the mesh.
 void VulkanRenderer::uploadMesh(const IndexedMesh& mesh) {
     if (recording) {
         throw std::logic_error("Upload meshes before beginning a frame");
     }
 
     meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh));
+
+    if (rayTracing) {
+        rayTracing->addMesh(uploads, *meshes.back());
+    }
 }
 
 void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding) {
@@ -1392,6 +1476,10 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     createFrames();
     debugLines->setFramesInFlight(count);
     depthRange->setFramesInFlight(count);
+
+    if (rayTracing) {
+        rayTracing->setFramesInFlight(count);
+    }
     return framesInFlight;
 }
 

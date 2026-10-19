@@ -126,7 +126,9 @@ void VulkanDevice::createInstance(bool validation) {
 * and far planes are clamped instead of clipped), and descriptor indexing for bindless textures: one array of every texture,
 * indexed per object in the shader (runtimeDescriptorArray, nonuniform indexing), with slots that may be empty
 * (partially bound) and filled while frames using other slots are still in flight (update after bind, unused while
-* pending). Every desktop GPU with Vulkan 1.3 drivers has these. A discrete GPU is preferred over an integrated one.
+* pending), and buffer device addresses (a buffer's place in the GPU's memory, which shaders can follow like a pointer
+* and acceleration structures are built from). Every desktop GPU with Vulkan 1.3 drivers has these. A discrete GPU is
+* preferred over an integrated one.
 */
 void VulkanDevice::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
@@ -145,6 +147,7 @@ void VulkanDevice::selectPhysicalDevice() {
     features12.descriptorBindingPartiallyBound = VK_TRUE;
     features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
     features12.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+    features12.bufferDeviceAddress = VK_TRUE; // required by Vulkan 1.3 itself, so every GPU here has it
 
     vkb::PhysicalDeviceSelector selector{instance, surface};
     auto selected = selector.set_minimum_version(1, 3)
@@ -163,6 +166,34 @@ void VulkanDevice::selectPhysicalDevice() {
     // Optional: the driver's own count of each memory heap's use and budget, for the F4 readout. Every current desktop
     // driver has it; without it VMA estimates from what it allocated itself.
     memoryBudget = physicalDevice.enable_extension_if_present(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
+    // Optional: hardware ray tracing through ray queries (any shader asks what a ray hits), with the acceleration
+    // structures it searches. Without them everything ray-traced stays off.
+    const std::vector<const char*> rayExtensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
+                                                 VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
+
+    if (physicalDevice.enable_extensions_if_present(rayExtensions)) {
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR structures{};
+        structures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+        structures.accelerationStructure = VK_TRUE;
+
+        VkPhysicalDeviceRayQueryFeaturesKHR queries{};
+        queries.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+        queries.rayQuery = VK_TRUE;
+
+        rayQueries = physicalDevice.enable_extension_features_if_present(structures) &&
+                     physicalDevice.enable_extension_features_if_present(queries);
+    }
+
+    if (rayQueries) {
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR structureProperties{};
+        structureProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+        VkPhysicalDeviceProperties2 properties{};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &structureProperties;
+        vkGetPhysicalDeviceProperties2(physicalDevice.physical_device, &properties);
+        scratchAlignment = structureProperties.minAccelerationStructureScratchOffsetAlignment;
+    }
 }
 
 /*
@@ -214,7 +245,7 @@ void VulkanDevice::createAllocator() {
     info.device = device.device;
     info.instance = instance.instance;
     info.pVulkanFunctions = &functions;
-    info.flags = memoryBudget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0;
+    info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | (memoryBudget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0);
 
     vulkanCheck(vmaCreateAllocator(&info, &allocator), "Memory allocator creation failed");
 }
@@ -309,6 +340,14 @@ const std::string& VulkanDevice::getName() const {
 
 bool VulkanDevice::reportsMemoryBudget() const {
     return memoryBudget;
+}
+
+bool VulkanDevice::supportsRayQueries() const {
+    return rayQueries;
+}
+
+std::uint32_t VulkanDevice::getScratchAlignment() const {
+    return scratchAlignment;
 }
 
 /*

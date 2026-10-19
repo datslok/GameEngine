@@ -67,6 +67,7 @@ void testShadowAtlas();
 void testSoftShadow();
 void testCascades();
 void testDepthRange();
+void testRayTracing();
 void testVideoMemory();
 void testSkyObject();
 void testLightPriority();
@@ -180,6 +181,7 @@ int main(){
     testSoftShadow();
     testCascades();
     testDepthRange();
+    testRayTracing();
     testVideoMemory();
     testSkyObject();
     testLightPriority();

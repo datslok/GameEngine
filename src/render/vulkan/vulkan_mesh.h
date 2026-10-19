@@ -20,9 +20,15 @@ public:
     VkBuffer getVertexBuffer() const;
     VkBuffer getIndexBuffer() const;
     std::uint32_t getIndexCount() const;
+    std::uint32_t getVertexCount() const;
+
+    // The buffers' GPU addresses, for building acceleration structures and for shaders reading a ray hit's corners.
+    VkDeviceAddress getVertexAddress() const;
+    VkDeviceAddress getIndexAddress() const;
 
 private:
     VulkanBuffer vertices;
     VulkanBuffer indices;
     std::uint32_t indexCount = 0;
+    std::uint32_t vertexCount = 0;
 };

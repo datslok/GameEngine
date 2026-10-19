@@ -77,6 +77,9 @@ public:
     // The whole buffer, for a descriptor (shaders read only as many elements as the frame says there are).
     VkDescriptorBufferInfo describe() const;
 
+    // The buffer's GPU address (made with VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT), after the last write: growing moves it.
+    VkDeviceAddress getDeviceAddress() const;
+
 private:
     // Room for a few dozen records of any kind before the first growth.
     static constexpr std::size_t smallestBytes = 4096;

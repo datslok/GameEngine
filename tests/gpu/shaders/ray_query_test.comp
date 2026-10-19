@@ -1,0 +1,67 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Traces the rays ray_tracing_gpu_test.cpp sends against its acceleration structures, through the ray tracing set
+* bound at set 0, and writes what each hit first: (distance or -1, instance, triangle, 1 for a front face) and the
+* mesh's interpolated normal there. Its buffers come by address in the push constants.
+*/
+#define RAY_SCENE_SET 0
+#include "ray_scene.glsl"
+#include "gpu_test_functions.h"
+
+layout(local_size_x = GPU_TEST_GROUP_SIZE) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer TestRays {
+    vec4 values[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 16) writeonly buffer TestHits {
+    vec4 values[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer TestMeshes {
+    uint values[];
+};
+
+layout(push_constant) uniform RayQueryTest {
+    uvec2 rays;
+    uvec2 hits;
+    uvec2 meshOfInstance;
+    uint count;
+} test;
+
+void main() {
+    uint ray = gl_GlobalInvocationID.x;
+
+    if (ray >= test.count) {
+        return;
+    }
+
+    TestRays rays = TestRays(test.rays);
+    TestHits hits = TestHits(test.hits);
+    vec4 originAndReach = rays.values[ray * 2];
+    vec4 directionAndMask = rays.values[ray * 2 + 1];
+
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, uint(directionAndMask.w), originAndReach.xyz, 0.0, directionAndMask.xyz,
+                          originAndReach.w);
+
+    while (rayQueryProceedEXT(query)) {
+    }
+
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        hits.values[ray * 2] = vec4(-1.0, 0.0, 0.0, 0.0);
+        hits.values[ray * 2 + 1] = vec4(0.0);
+        return;
+    }
+
+    uint instance = rayQueryGetIntersectionInstanceCustomIndexEXT(query, true);
+    uint triangle = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
+    MeshSurface surface = meshSurfaceAt(TestMeshes(test.meshOfInstance).values[instance], triangle,
+                                        rayQueryGetIntersectionBarycentricsEXT(query, true));
+
+    hits.values[ray * 2] = vec4(rayQueryGetIntersectionTEXT(query, true), float(instance), float(triangle),
+                                rayQueryGetIntersectionFrontFaceEXT(query, true) ? 1.0 : 0.0);
+    hits.values[ray * 2 + 1] = vec4(surface.normal, 0.0);
+}
