@@ -13,12 +13,13 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - An asset manager that loads each file once and hands out typed handles
 - Fixed 120 Hz simulation with interpolated rendering, so movement is smooth at any frame rate (orientations are quaternions, blended along the shortest turn); deterministic (the same commands give a bit-identical result, checked by a test that plays the demo twice), ready for replays and networking
 - Event-based input with engine-owned key codes, no SDL types in game code
-- Three camera modes: first person (a body that walks, jumps, crouches and sprints through the level with Overwatch-like movement), MOBA-style top-down with click-to-move, and a free debug camera
+- Three camera modes: first person (a body that walks, jumps, crouches and sprints through the level with Overwatch-like movement), MOBA-style top-down with click-to-move, and a free debug camera, shared by every game that wants them
+- Several games on one engine, picked at start-up (`--game`): the demo (a night scene with lamps, floodlights, a gallery of normal-mapped models and an obstacle course) and the light lab (a sunlit test ground 800 m across: towers at doubling distances, a thin fence running to the horizon, a forest and a two-room building lit through one window, under a sun placed by real astronomy, from latitude, day of the year and time of day, that can run through a day)
 - A software rasterizer kept as a tested reference (lines, triangles, clipping, depth buffer)
 - Collision shapes: spheres, capsules and axis-aligned boxes with exact overlap tests between every pair, built on closest-point queries between points, segments and boxes; raycasts against the shapes and against triangle meshes, with hit distance, point and surface normal; `Collider` components (a shape plus optional exact triangles) and mouse picking that finds the nearest collider under the cursor in two stages, shapes first and triangles to confirm; a uniform grid broad phase so queries only test colliders near them; static level collision: the level's triangles in their own grid, built once, with raycasts and capsule contacts (how deep, and which way out); a kinematic character controller tuned to feel like Overwatch: walls slide, steps and ramps are climbed, the ground is followed down, gravity has air drag up to a terminal speed, and jumps and air steering use Overwatch's measured numbers; sphere sweeps (the first touch of a moving ball, so nothing fast can pass through a wall) and particles: balls that fly on exact parabolas, bounce with restitution and Coulomb friction, slide to a stop and rest without jitter (the demo throws them as grenades)
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity, grenade physics) lives in a settings struct owned by its system and is described once by a `visit()` next to it (label, limits, unit), which drives everything else: a debug UI (F5, Dear ImGui: a slider, checkbox or list for every setting, quality presets Low, Medium and High, Save and Reset buttons, drawn over the image in its own layer so it looks right in HDR too), a settings file (`settings.cfg`, only the values changed from the defaults, loaded at start-up, forgiving of hand edits) and tests that every default lies within its limits; numbers the shaders share with C++ are written once
 - Profiling: frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second, plus the GPU's own time for each render pass (cluster light lists, shadows, depth prepass, main, bloom, tone mapping, debug lines, debug UI) measured with GPU timestamps, in the F4 view; render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
-- Unit tests that run without a GPU or window, and golden images: fixed demo views rendered once as references (the scene image in half floats and the final image, SDR and HDR) that later captures must match pixel for pixel, with a difference heatmap when they do not
+- Unit tests that run without a GPU or window, and golden images: fixed views of each game rendered once as references (the scene image in half floats and the final image, SDR and HDR) that later captures must match pixel for pixel, with a difference heatmap when they do not
 - A GPU test tier: the shaders' maths lives in libraries of pure functions that the render passes and small compute shaders share, and `make gputest` runs those functions on the GPU over thousands of fixed inputs and compares them with their tested C++ mirrors, within tolerances sized for how GPUs round (and, for sharp highlights, for how sensitive the maths itself is), reporting how much of each tolerance the worst value used; then the golden images
 
 ## Requirements
@@ -67,12 +68,12 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | Command | What it does |
 |---|---|
 | `make` | Builds `build/game.exe` and compiles the shaders to `.spv`. Only changed files are recompiled, in parallel on every core. This is the unoptimised debug build, best for a debugger |
-| `make run` | Builds, then starts the game |
+| `make run` | Builds, then starts the game (the demo; `./build/game.exe --game lightlab` starts the light lab) |
 | `make test` | Builds and runs the tests (`build/tests.exe`) |
 | `make release` | Builds the optimised release (`-O2`) into `build/release/`. Physics runs about 7 times faster than in the debug build; use it to play and to measure |
 | `make run-release` | Builds the release, then starts it |
 | `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides |
-| `make golden` | Renders the demo's golden views and compares them with the references in `tests/golden/<GPU>/` (needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/`) |
+| `make golden` | Renders every game's golden views and compares them with the references in `tests/golden/<GPU>/<game>/` (needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/<game>/`) |
 | `make gputest` | Runs every shader library's functions in compute shaders on the GPU and compares them with their C++ mirrors (`build/gputests.exe`), then the golden images (needs a GPU; `make gputest-release` for the optimised build) |
 | `make golden-save` | Renders the golden views and saves them as the new references (only on purpose: after a change that is meant to alter the picture) |
 | `make clean` | Removes the compiled objects, executables and shaders |
@@ -98,11 +99,13 @@ To send the demo to someone without MSYS2, run:
 python tools/package_demo.py
 ```
 
-It builds the game, then creates `build/GameEngineDemo.zip` with the exe, every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. To share it anonymously, add `--anonymous`: it makes `build/Demo.zip` with a neutral name, a README with only short control names (nothing that matches this repo's text), every zip entry dated 1 January 1980 and the exe's build time zeroed. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
+It builds the game, then creates `build/GameEngineDemo.zip` with the exe, `LightLab.bat` (starts the exe with `--game lightlab`), every DLL it needs (found automatically, including the image decoders SDL3_image loads at runtime), the assets and a short README with controls (copied from the Controls section below, so it never falls behind). Before zipping it checks that every DLL resolves inside the package or Windows itself. Use `--no-build` to package the existing build. To share it anonymously, add `--anonymous`: it makes `build/Demo.zip` with a neutral name, a README with only short control names (nothing that matches this repo's text), every zip entry dated 1 January 1980 and the exe's build time zeroed. It needs a real Python 3 (standard library only; `winget install Python.Python.3.13`; the `python` in `WindowsApps` is only the Microsoft Store placeholder) and MSYS2 in `C:\msys64` (or pass `--msys-root`).
 
 ## Controls
 
 The game starts in first-person mode. F1-F3 switch modes at any time.
+
+The light lab (`--game lightlab`, or LightLab.bat in the zip) has the same controls for moving and looking (F1-F5); the keys for lights and grenades are the demo's. Its sun is under Light lab, Sun in the settings window (F5): latitude, day of the year, solar time, and hours per second to run the clock.
 
 | Input | Action |
 |---|---|
@@ -145,15 +148,15 @@ The game starts in first-person mode. F1-F3 switch modes at any time.
 
 ```
 src/            Engine and game source, in layers (lower ones never include higher ones):
-  app/          main: picks a game and starts the engine
-  games/        Games built on the engine (games/demo is the current demo)
+  app/          main and the game registry: picks a game by name and starts the engine
+  games/        Games built on the engine: games/demo (the demo) and games/lightlab (the sunlit test ground)
   engine/       The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
-  gameplay/     Character movement, spinners, fireflies, grenades and camera controllers
+  gameplay/     Character movement, spinners, fireflies, grenades, camera controllers and the player controls games share (F1-F3)
   platform/     The window and SDL input translation
   render/gpu/   The renderer's parts that do not call Vulkan: physically based shading and normal mapping (and their tested CPU mirrors), shadow atlas and caching, soft shadows, light priority, debug lines, the overlay the debug UI is drawn into, quality presets, the GPU scene: the instance, material and light records the shaders read, and draws batched by mesh, the depth tests of the depth prepass and main pass, and clustered shading's grid, light tests and heatmap colours
   render/vulkan/ The engine's own Vulkan 1.3 renderer: device (with or without a window), swapchain, barriers, graphics and compute pipelines, per-frame uniforms and descriptors, the bindless texture array and the scene's buffers and layout, and every pass (the clusters' light lists, a compute pass; shadows, depth prepass, main, bloom, tone mapping, debug lines, the debug UI)
   render/software/  Software rasterizer, kept as a tested reference
-  scene/        Meshes (with tangents for normal maps), models, materials, lights, the camera, render components, interpolation and the frame description
+  scene/        Meshes (with tangents for normal maps), models, materials, lights, the sun's position in the sky, the camera, render components, interpolation and the frame description
   assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
@@ -161,7 +164,7 @@ src/            Engine and game source, in layers (lower ones never include high
   physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision, sphere sweeps, particles and the character controller
   math/         Vectors, matrices, quaternions, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
-  golden/       Golden image references, one folder per GPU (see tests/golden/README.md)
+  golden/       Golden image references, one folder per GPU and in it one per game (see tests/golden/README.md)
   gpu/          The GPU test tier (make gputest): the runner, one test per shader library, and their compute shaders in gpu/shaders
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
                 ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)

@@ -26,6 +26,9 @@ class Game {
 public:
     virtual ~Game() = default;
 
+    // The game's name for people ("Light lab"): the window's title, and its settings' section ("lightLab").
+    virtual const char* title() const = 0;
+
     // Called once before the first frame: load assets and create entities.
     // The AssetManager belongs to the engine and lives as long as it; a game may keep a pointer to load more later.
     virtual void onInit(World& world, AssetManager& assets) = 0;
@@ -65,8 +68,8 @@ public:
         return false;
     }
 
-    // The game's own tunable values (its settings structs' visit()), optional: the debug UI shows them under "Game" and
-    // the settings file saves and loads them with the engine's. Visiting must not change anything by itself.
+    // The game's own tunable values (its settings structs' visit()), optional: the debug UI shows them under the game's
+    // title and the settings file saves and loads them with the engine's. Visiting must not change anything by itself.
     virtual void visitSettings(SettingsVisitor& visitor) {
         (void)visitor;
     }

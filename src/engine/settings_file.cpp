@@ -323,7 +323,8 @@ std::vector<std::string> applySettings(const std::vector<SettingEntry>& entries,
 * A value is saved when its text differs from the default's. Comparing text rather than numbers is exact here, because
 * each value has exactly one text (the shortest that reads back as it).
 */
-std::string formatSettingsText(const std::vector<SettingEntry>& current, const std::vector<SettingEntry>& defaults) {
+std::string formatSettingsText(const std::vector<SettingEntry>& current, const std::vector<SettingEntry>& defaults,
+                               const std::vector<SettingEntry>& kept) {
     std::map<std::string, std::string> defaultValues;
 
     for (const SettingEntry& entry : defaults) {
@@ -342,7 +343,38 @@ std::string formatSettingsText(const std::vector<SettingEntry>& current, const s
         }
     }
 
+    for (const SettingEntry& entry : kept) {
+        text += entry.key + " = " + entry.value + "\n";
+    }
+
     return text;
+}
+
+namespace {
+    // A key's first part, its top-level section ("engine" of "engine.render.bloom.strength"), or nothing for a key with
+    // no dot.
+    std::string sectionOf(const std::string& key) {
+        const std::size_t dot = key.find('.');
+        return dot == std::string::npos ? std::string{} : key.substr(0, dot);
+    }
+}
+
+SectionedSettings separateSections(const std::vector<SettingEntry>& entries, const SettingsWalk& walk) {
+    std::set<std::string> walkedSections;
+
+    for (const SettingEntry& field : captureSettings(walk)) {
+        walkedSections.insert(sectionOf(field.key));
+    }
+
+    SectionedSettings sectioned;
+
+    for (const SettingEntry& entry : entries) {
+        const std::string section = sectionOf(entry.key);
+        const bool own = section.empty() || walkedSections.count(section) > 0;
+        (own ? sectioned.own : sectioned.others).push_back(entry);
+    }
+
+    return sectioned;
 }
 
 ParsedSettings parseSettingsText(std::string_view text) {
@@ -391,7 +423,7 @@ SettingsWalk engineAndGameSettings(EngineSettings& settings, Game& game) {
         visitor.group("Engine", [&] {
             visit(settings, visitor);
         });
-        visitor.group("Game", [&] {
+        visitor.group(game.title(), [&] {
             game.visitSettings(visitor);
         });
     };

@@ -1,6 +1,6 @@
 # Golden images
 
-Reference renders of the demo's fixed views, one folder per GPU (the name the driver reports). `make golden` renders the views again and compares them with the folder for this GPU; `make golden-save` replaces the references. See `docs/ARCHITECTURE.md`, section "Golden images".
+Reference renders of each game's fixed views, one folder per GPU (the name the driver reports) and in it one per game (`demo`, `lightlab`: the names `--game` takes). `make golden` renders every game's views again and compares them with the folders for this GPU; `make golden-save` replaces the references (`build/game.exe --golden-save --game <name>` for one game only). See `docs/ARCHITECTURE.md`, section "Golden images".
 
 Each view has two images:
 

@@ -790,7 +790,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass);
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, description.lighting.background);
     endGpuPass(frame, GpuPass::Main);
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
@@ -990,16 +990,18 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 /*
 * The camera's view into the scene image: one instanced draw per mesh, every object's matrices, material, textures and
 * lights read from the scene's buffers. The scene image starts cleared, its old contents discarded (the barrier still
-* waits for last frame's reads of it to finish first). The depth image starts cleared too, or after the depth prepass
+* waits for last frame's reads of it to finish first) to the sky's background colour, which stays wherever nothing is
+* drawn. The depth image starts cleared too, or after the depth prepass
 * keeps the prepass's depths: the barrier between them (depth target to depth target) makes the prepass's writes
 * visible to this pass's depth tests. Afterwards the scene image becomes readable for bloom and tone mapping.
 */
-void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass) {
+void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
+                                  const Vec3& background) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
 
-    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {0.0f, 0.0f, 0.0f, 1.0f}};
+    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {background.x, background.y, background.z, 1.0f}};
     const VkAttachmentLoadOp depthLoad = afterPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
     const DepthAttachment depthTarget{depth.getView(), depthLoad, VK_ATTACHMENT_STORE_OP_DONT_CARE, gpuFarDepth};
     beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);

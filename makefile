@@ -150,8 +150,9 @@ run: $(TARGET) shaders
 test: $(TEST_TARGET) shaders
 	./$(TEST_TARGET)
 
-# Golden images (src/engine/golden.h): golden-save renders the demo's fixed views as the references in tests/golden/<GPU>/,
-# golden compares fresh captures with them (captures and difference heatmaps go to build/golden/<GPU>/). They need a GPU.
+# Golden images (src/engine/golden.h): golden-save renders every game's fixed views as the references in
+# tests/golden/<GPU>/<game>/, golden compares fresh captures with them (captures and difference heatmaps go to
+# build/golden/<GPU>/<game>/). They need a GPU.
 golden: $(TARGET) shaders
 	./$(TARGET) --golden-check
 

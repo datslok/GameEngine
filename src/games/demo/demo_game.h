@@ -3,11 +3,9 @@
 #include "core/profiler.h"
 #include "ecs/world.h"
 #include "engine/game.h"
-#include "gameplay/camera/first_person_camera_controller.h"
-#include "gameplay/camera/free_fly_camera_controller.h"
-#include "gameplay/camera/moba_camera_controller.h"
-#include "games/demo/control_mode.h"
+#include "gameplay/control_mode.h"
 #include "gameplay/grenade.h"
+#include "gameplay/player_controls.h"
 #include "input/input.h"
 #include "math/ray.h"
 #include "physics/collider.h"
@@ -47,6 +45,7 @@ class DemoGame final : public Game {
 public:
     explicit DemoGame(ControlMode startMode = ControlMode::FreeCamera, bool debugModeSwitching = true);
 
+    const char* title() const override;
     void onInit(World& world, AssetManager& assets) override;
     void onInput(World& world, const Input& input) override;
     void onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) override;
@@ -86,12 +85,15 @@ public:
 
 private:
     void createScene(World& world, AssetManager& assets);
+
+    // Switch the view (PlayerControls) and drop the duck's orders, which belong to the MOBA view it was given in.
     void setControlMode(World& world, ControlMode mode);
+    void dropMobaOrders(World& world);
 
     // Turn right-clicks into move commands for the player.
     void updatePlayerCommands(World& world, const Input& input);
 
-    // Turn the first-person movement keys into commands for the body.
+    // Turn the first-person keys into commands: moving the body (PlayerControls) and throwing grenades.
     void updateFirstPersonCommands(World& world, const Input& input);
 
     // Turn left-clicks into a selection: the nearest collider under the cursor, or none.
@@ -113,21 +115,8 @@ private:
     // The camera ray through a window pixel, or nothing outside the window.
     std::optional<Ray> rayThroughPixel(const Input& input, const Vec2& pixel) const;
 
-    // Returns true when the mode changed, so this frame's mouse motion is not applied to the new camera pose.
-    bool updateModeSwitching(World& world, const Input& input);
-
-    // Run the controller for the current mode.
-    void updateCamera(const World& world, const Input& input, float frameSeconds, float alpha);
-
-    Camera camera;
-
-    // A real game would use just one of these. The demo keeps all three and switches with F1-F3.
-    FirstPersonCameraController firstPersonCamera;
-    MobaCameraController mobaCamera;
-    FreeFlyCameraController freeFlyCamera;
-
-    ControlMode controlMode;
-    bool enableDebugModeSwitching;
+    // The camera and its three views, switched with F1-F3 (a real game would use just one), and the first-person body.
+    PlayerControls controls;
 
     // Entity{} means "none" until onInit creates them.
     Entity player;
@@ -170,9 +159,6 @@ private:
     bool groundSteeringActive = false;
 
     // What the last left-click picked (Entity{} for nothing), outlined every frame.
-    // The player's body in first person (always there; it only takes commands in first person).
-    Entity firstPersonBody;
-
     Entity selected;
 
     // What the cursor is over (Entity{} for nothing), outlined faintly, and what finding it cost (for the F4 readout).
@@ -191,9 +177,6 @@ private:
 
     // F4: show bounding boxes, the culling readout, light markers and the walk target.
     bool debugViewEnabled = false;
-
-    // Space toggles following the player in MOBA mode.
-    bool mobaCameraLocked = false;
 
     // The simulation time of the latest tick, so things created between ticks (the lamps) can start mid-flight.
     double latestSimulationSeconds = 0.0;

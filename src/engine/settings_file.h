@@ -40,8 +40,10 @@ enum class StartupFields {
 // Set the walked fields named in entries. Returns a warning for each value clamped or skipped and each unknown key.
 std::vector<std::string> applySettings(const std::vector<SettingEntry>& entries, const SettingsWalk& walk, StartupFields startup);
 
-// The file's text: a comment explaining it, then each current value whose text differs from its default.
-std::string formatSettingsText(const std::vector<SettingEntry>& current, const std::vector<SettingEntry>& defaults);
+// The file's text: a comment explaining it, then each current value whose text differs from its default, then the
+// kept entries as they are (other games' sections, see separateSections).
+std::string formatSettingsText(const std::vector<SettingEntry>& current, const std::vector<SettingEntry>& defaults,
+                               const std::vector<SettingEntry>& kept = {});
 
 struct ParsedSettings {
     std::vector<SettingEntry> entries;
@@ -51,10 +53,22 @@ struct ParsedSettings {
 // Lines of "key = value"; blank lines and lines starting with # are skipped. Accepts \n and \r\n line ends.
 ParsedSettings parseSettingsText(std::string_view text);
 
+/*
+* Saved entries split by their first key part: own are in a section the walk has (or have no section at all, so a
+* stray key is still reported), others in a section it lacks, which in one shared file means another game's. Loading
+* applies own and keeps others untouched, and saving writes them back, so each game's settings survive the other's saves.
+*/
+struct SectionedSettings {
+    std::vector<SettingEntry> own;
+    std::vector<SettingEntry> others;
+};
+SectionedSettings separateSections(const std::vector<SettingEntry>& entries, const SettingsWalk& walk);
+
 // Every field whose value is outside its hard limits, or whose slider range is not finite, ordered and inside them.
 std::vector<std::string> findLimitProblems(const SettingsWalk& walk);
 
-// The engine's settings under "engine" and the game's own (Game::visitSettings) under "game", as one tree.
+// The engine's settings under "engine" and the game's own (Game::visitSettings) under its title ("demo", "lightLab"),
+// as one tree. Each game has a section of its own, so one game's saved settings never land on another's.
 SettingsWalk engineAndGameSettings(EngineSettings& settings, Game& game);
 
 // The whole file, or nothing when it does not exist (no settings saved yet). Throws std::runtime_error when an

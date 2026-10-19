@@ -33,6 +33,7 @@ struct PlacedSpotLight {
 // Every light the renderer needs for one frame, with no GPU types.
 struct FrameLighting {
     Vec3 ambient{0.0f, 0.0f, 0.0f};
+    Vec3 background{0.0f, 0.0f, 0.0f}; // the SkyBackground, where nothing is drawn
     std::vector<DirectionalLight> directionalLights;
     std::vector<PlacedPointLight> pointLights;
     std::vector<PlacedSpotLight> spotLights;

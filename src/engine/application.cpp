@@ -107,7 +107,8 @@ SettingsWalk Application::allSettings() {
 
 /*
 * The game's settings are read the same way, so the game must exist already (it does: it is borrowed). A file that
-* cannot be read or holds mistakes never stops the game; each problem is logged and the rest is used.
+* cannot be read or holds mistakes never stops the game; each problem is logged and the rest is used. Other games'
+* sections of the shared file are left alone (separateSections).
 */
 std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved) {
     const SettingsWalk walk = engineAndGameSettings(settings, game);
@@ -125,11 +126,12 @@ std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& se
         }
 
         const ParsedSettings parsed = parseSettingsText(*text);
+        const std::vector<SettingEntry> own = separateSections(parsed.entries, walk).own;
         std::vector<std::string> warnings = parsed.warnings;
-        const std::vector<std::string> applyWarnings = applySettings(parsed.entries, walk, StartupFields::Apply);
+        const std::vector<std::string> applyWarnings = applySettings(own, walk, StartupFields::Apply);
         warnings.insert(warnings.end(), applyWarnings.begin(), applyWarnings.end());
 
-        const std::string loaded = "Loaded " + std::to_string(parsed.entries.size()) + " saved settings from " + savedSettingsPath;
+        const std::string loaded = "Loaded " + std::to_string(own.size()) + " saved settings from " + savedSettingsPath;
         SDL_Log("%s", loaded.c_str());
 
         for (const std::string& warning : warnings) {
@@ -144,7 +146,8 @@ std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& se
 }
 
 /*
-* Saving writes only what differs from the defaults. Resetting leaves the start-up fields alone, since the running
+* Saving writes only what differs from the defaults, plus the other games' sections as the file holds them now (read
+* afresh, so nothing saved since the start is lost). Resetting leaves the start-up fields alone, since the running
 * engine was built from them.
 */
 ImDrawData* Application::updateDebugUi() {
@@ -158,9 +161,14 @@ ImDrawData* Application::updateDebugUi() {
 
     if (requests.save) {
         try {
-            const std::string text = formatSettingsText(captureSettings(walk), defaultSettings);
+            std::vector<SettingEntry> otherGames;
+            if (const std::optional<std::string> saved = readSettingsFile(savedSettingsPath)) {
+                otherGames = separateSections(parseSettingsText(*saved).entries, walk).others;
+            }
+
+            const std::string text = formatSettingsText(captureSettings(walk), defaultSettings, otherGames);
             writeSettingsFile(savedSettingsPath, text);
-            const std::size_t changed = parseSettingsText(text).entries.size();
+            const std::size_t changed = parseSettingsText(text).entries.size() - otherGames.size();
             debugUi.setStatus("Saved " + std::to_string(changed) + " changed settings to " + savedSettingsPath);
         }
         catch (const std::exception& error) {

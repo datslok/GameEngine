@@ -1,0 +1,217 @@
+#include "games/lightlab/light_lab_game.h"
+#include "games/lightlab/light_lab_level.h"
+#include "gameplay/first_person_body.h"
+#include "math/angles.h"
+#include "math/transform.h"
+#include "physics/character_controller.h"
+#include "physics/overlap.h"
+#include "scene/lighting.h"
+#include "scene/sun.h"
+
+#include "demo_helpers.h"
+#include "test_levels.h"
+
+#include <cassert>
+#include <cmath>
+#include <vector>
+
+namespace {
+    // A fresh light lab, initialised headless.
+    struct Lab {
+        World world;
+        AssetManager assets;
+        LightLabGame game{ControlMode::FreeCamera, true};
+
+        Lab() {
+            game.onInit(world, assets);
+        }
+    };
+
+    bool inside(const Vec3& point, const Aabb& box) {
+        return point.x >= box.minimum.x && point.x <= box.maximum.x && point.y >= box.minimum.y && point.y <= box.maximum.y &&
+               point.z >= box.minimum.z && point.z <= box.maximum.z;
+    }
+
+    // The box grown by a margin on every side.
+    Aabb grown(const Aabb& box, float margin) {
+        return Aabb{box.minimum - Vec3{margin, margin, margin}, box.maximum + Vec3{margin, margin, margin}};
+    }
+
+    // Each tower stands at its doubling distance, sized in proportion to it, and no tower overlaps another's bearing.
+    void testTowersDoubleAndFanOut() {
+        const LightLabLayout layout = buildLightLabLayout();
+        assert(layout.towers.size() == labTowerDistances.size());
+        float previousRightEdge = -fullTurnRadians;
+
+        for (std::size_t index = 0; index < layout.towers.size(); ++index) {
+            const LabBlock& tower = layout.towers[index];
+            const float distance = labTowerDistances[index];
+            const float horizontal = std::sqrt(tower.centre.x * tower.centre.x + tower.centre.z * tower.centre.z);
+            assert(near(horizontal, distance, 1e-3f * distance));
+            assert(near(tower.halfSize.x * 2.0f, distance * labTowerWidthPerMetre, 1e-5f * distance));
+            assert(near(tower.halfSize.y * 2.0f, distance * labTowerHeightPerMetre, 1e-5f * distance));
+            assert(near(tower.centre.y, tower.halfSize.y, 1e-4f));
+
+            // Its bearing from north (-z), east positive, and how wide it looks.
+            const float bearing = std::atan2(tower.centre.x, -tower.centre.z);
+            const float halfAngle = std::atan(tower.halfSize.x * std::sqrt(2.0f) / distance);
+            assert(bearing - halfAngle > previousRightEdge);
+            previousRightEdge = bearing + halfAngle;
+        }
+    }
+
+    // The fence: evenly spaced thin posts along one line, and a rail joining them.
+    void testFence() {
+        const LightLabLayout layout = buildLightLabLayout();
+        const int posts = static_cast<int>(std::lround((labFirstPostZ - labLastPostZ) / labPostSpacing)) + 1;
+        assert(static_cast<int>(layout.fence.size()) == posts + 1);
+
+        for (int index = 0; index < posts; ++index) {
+            const LabBlock& post = layout.fence[static_cast<std::size_t>(index)];
+            assert(post.centre.x == labFenceX);
+            assert(near(post.centre.z, labFirstPostZ - labPostSpacing * static_cast<float>(index), 1e-3f));
+            assert(post.halfSize.x == labPostHalfWidth);
+        }
+
+        const Aabb rail = layout.fence.back().bounds();
+        assert(near(rail.maximum.z, labFirstPostZ, 0.1f));
+        assert(near(rail.minimum.z, labLastPostZ, 0.1f));
+    }
+
+    // The forest is the same every time, all of it on the ground, outside the keep-clear areas.
+    void testForest() {
+        const LightLabLayout first = buildLightLabLayout();
+        const LightLabLayout second = buildLightLabLayout();
+        assert(first.trees.size() == static_cast<std::size_t>(labTreeCount) * 2);
+        assert(first.trees.size() == second.trees.size());
+
+        const float keepClearSlope = std::tan(radiansFromDegrees(labViewKeepClearHalfAngleDegrees));
+
+        for (std::size_t index = 0; index < first.trees.size(); ++index) {
+            const LabBlock& block = first.trees[index];
+            assert(block.centre.x == second.trees[index].centre.x && block.centre.z == second.trees[index].centre.z);
+
+            const float distance = std::sqrt(block.centre.x * block.centre.x + block.centre.z * block.centre.z);
+            assert(distance >= labForestInnerRadius && distance <= labForestOuterRadius);
+            assert(!(block.centre.z < 0.0f && std::abs(block.centre.x) < keepClearSlope * -block.centre.z + labViewKeepClearMargin));
+            assert(!overlaps(block.bounds(), grown(labSunlitRoom, labBuildingKeepClear)));
+            assert(!overlaps(block.bounds(), grown(labBackRoom, labBuildingKeepClear)));
+        }
+
+        // Trunks and crowns alternate.
+        assert(first.trees[0].surface == LabSurface::Bark && first.trees[1].surface == LabSurface::Leaves);
+    }
+
+    // The rooms are empty inside and the openings go through the walls: no block in any of them.
+    void testBuildingOpenings() {
+        const LightLabLayout layout = buildLightLabLayout();
+        const float shrink = -0.01f;
+
+        for (const LabBlock& block : layout.building) {
+            for (const Aabb& space : {labSunlitRoom, labBackRoom, labWindow, labInnerDoorway, labFrontDoor}) {
+                assert(!overlaps(block.bounds(), grown(space, shrink)));
+            }
+        }
+
+        // Just one red panel, inside the sunlit room's east wall.
+        int redPanels = 0;
+        for (const LabBlock& block : layout.building) {
+            if (block.surface == LabSurface::RedPaint) {
+                ++redPanels;
+                assert(near(block.bounds().maximum.x, labSunlitRoom.maximum.x + labRedPanelThickness, 1e-4f));
+            }
+        }
+        assert(redPanels == 1);
+    }
+
+    // At the default afternoon, the sunbeam through the middle of the window lands on the sunlit room's floor.
+    void testSunbeamThroughTheWindow() {
+        Lab lab;
+        const LightLabSunSettings& settings = lab.game.getSunSettings();
+        const Vec3 towardsSun = directionTowardsSunOn(settings.latitudeDegrees, settings.dayOfYear, settings.solarHours);
+        assert(towardsSun.x < -0.5f && towardsSun.y > 0.2f);
+
+        const Vec3 windowMiddle = labWindow.centre();
+        const Ray beam{windowMiddle + towardsSun * 5.0f, towardsSun * -1.0f};
+        const std::optional<LevelHit> hit = raycast(lab.game.getLevel(), beam);
+        assert(hit);
+        assert(near(hit->hit.point.y, labFloorTop, 1e-3f));
+        assert(inside(hit->hit.point, grown(labSunlitRoom, 1e-3f)));
+
+        // The sun component follows the settings, and the sky shows behind everything.
+        assert(collectLighting(lab.world, 1.0f).background.y > 0.0f);
+        const DirectionalLight& sun = lab.world.get<DirectionalLight>(lab.game.getSun());
+        assert(near(sun.direction.normalized().dot(towardsSun), -1.0f, 1e-5f));
+        assert(sun.castsShadows);
+    }
+
+    // Walk the body west for some seconds from a start, through the level; returns where its feet end up.
+    Vec3 walkWest(Lab& lab, const Vec3& start, float seconds) {
+        const Entity body = lab.game.getFirstPersonBody();
+        placeFirstPersonBody(lab.world, body, start);
+        const int ticks = static_cast<int>(seconds / tickSeconds);
+
+        for (int tick = 0; tick < ticks; ++tick) {
+            lab.world.get<CharacterController>(body).wishVelocity = Vec3{-4.0f, 0.0f, 0.0f};
+            updateFirstPersonBodies(lab.world, lab.game.getLevel(), tickSeconds);
+        }
+
+        return lab.world.get<Transform>(body).position;
+    }
+
+    // The front door lets you in, the far wall stops you; a wall without a door stops you outside.
+    void testWalkingIn() {
+        Lab lab;
+        const float doorZ = labFrontDoor.centre().z;
+
+        const Vec3 throughDoor = walkWest(lab, Vec3{-14.0f, 0.0f, doorZ}, 4.0f);
+        assert(inside(throughDoor, grown(labBackRoom, 0.01f)));
+        assert(throughDoor.x > labBackRoom.minimum.x);
+
+        const Vec3 blocked = walkWest(lab, Vec3{-14.0f, 0.0f, labSunlitRoom.centre().z}, 4.0f);
+        assert(blocked.x > labSunlitRoom.maximum.x);
+    }
+
+    // Day and night: no sunlight once the sun is well below the horizon, a redder sun low down, a brighter one high up.
+    void testDaylight() {
+        const LightLabSunSettings settings;
+        const Daylight night = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 0.0f), settings);
+        const Daylight evening = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 17.5f), settings);
+        const Daylight noon = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 12.0f), settings);
+
+        assert(night.sun.intensity == 0.0f);
+        assert(night.sky.colour.y > 0.0f);
+        assert(noon.sun.intensity == settings.sunIntensity);
+        assert(evening.sun.intensity > 0.0f);
+        assert(evening.sun.colour.z / evening.sun.colour.x < noon.sun.colour.z / noon.sun.colour.x);
+        assert(noon.sky.colour.y > evening.sky.colour.y && evening.sky.colour.y > night.sky.colour.y);
+
+        // The sky behind everything dims with it, and is blue: more blue than red.
+        assert(noon.background.colour.y > evening.background.colour.y && evening.background.colour.y > night.background.colour.y);
+        assert(noon.background.colour.z > noon.background.colour.x);
+    }
+
+    // The clock runs at its speed, wraps round midnight, and stands still at speed 0.
+    void testClock() {
+        assert(near(advanceSolarHours(10.0f, 0.5f, 4.0f), 12.0f, 1e-5f));
+        assert(near(advanceSolarHours(23.5f, 1.0f, 1.0f), 0.5f, 1e-5f));
+        assert(advanceSolarHours(15.5f, 0.0f, 100.0f) == 15.5f);
+
+        Lab lab;
+        lab.game.getSunSettings().hoursPerSecond = 1.0f;
+        int ticks = 0;
+        runTicks(lab.game, lab.world, static_cast<int>(std::lround(1.0f / tickSeconds)), ticks);
+        assert(near(lab.game.getSunSettings().solarHours, 16.5f, 1e-3f));
+    }
+}
+
+void testLightLab() {
+    testTowersDoubleAndFanOut();
+    testFence();
+    testForest();
+    testBuildingOpenings();
+    testSunbeamThroughTheWindow();
+    testWalkingIn();
+    testDaylight();
+    testClock();
+}
