@@ -6,6 +6,8 @@
 #include "physics/character_controller.h"
 #include "physics/overlap.h"
 #include "scene/lighting.h"
+#include "scene/model_renderer.h"
+#include "scene/sky_object.h"
 #include "scene/sun.h"
 
 #include "demo_helpers.h"
@@ -203,9 +205,58 @@ namespace {
         runTicks(lab.game, lab.world, static_cast<int>(std::lround(1.0f / tickSeconds)), ticks);
         assert(near(lab.game.getSunSettings().solarHours, 16.5f, 1e-3f));
     }
+    // The disc's direction from the camera and its angular radius as the camera sees it.
+    float discAngularRadius(const Transform& pose, const Vec3& camera) {
+        return std::asin(pose.scale.x / (pose.position - camera).length());
+    }
+
+    /*
+    * A glowing disc in the sky where the sunlight comes from: along the sun's direction from the camera wherever it goes,
+    * inside its far plane, at the sun's real angular size times the disc size setting, casting no shadow (it stands for
+    * the light's own source), and glowing with the sunlight spread over its solid angle (capped). Gone at night.
+    */
+    void testSunDisc() {
+        Lab lab;
+        const Entity disc = lab.game.getSunDisc();
+        const DirectionalLight& sun = lab.world.get<DirectionalLight>(lab.game.getSun());
+
+        const auto check = [&](float sizeTimes) {
+            const Vec3 camera = lab.game.getCamera().getPosition();
+            const Transform& pose = lab.world.get<Transform>(disc);
+            const Vec3 offset = pose.position - camera;
+            assert(near(offset.normalized().dot(sun.direction.normalized()), -1.0f, 1e-5f));
+            assert(offset.length() < lab.game.getCamera().getFarPlane());
+            assert(near(discAngularRadius(pose, camera), sun.angularRadius * sizeTimes, 1e-6f));
+
+            const ModelRenderer& renderer = lab.world.get<ModelRenderer>(disc);
+            const Vec3 expected = discRadiance(sun.colour * sun.intensity, sun.angularRadius * sizeTimes);
+            const Vec3& glow = renderer.parts[0].material.emissive;
+            assert(renderer.visible && !renderer.castsShadows);
+            assert(near(glow.x, expected.x, 1e-3f) && near(glow.y, expected.y, 1e-3f) && near(glow.z, expected.z, 1e-3f));
+        };
+
+        check(1.0f);
+
+        // It follows the camera, frame by frame.
+        const Input noInput;
+        lab.game.getCamera().setPosition(Vec3{120.0f, 30.0f, -260.0f});
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        check(1.0f);
+
+        // Larger for looks, and dimmer per pixel by as much, so it gives the same light.
+        lab.game.getSunSettings().sunDiscScale = 2.0f;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        check(2.0f);
+
+        // Midnight: the sun is below the ground, and so is its disc, hidden.
+        lab.game.getSunSettings().solarHours = 0.0f;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        assert(!lab.world.get<ModelRenderer>(disc).visible);
+    }
 }
 
 void testLightLab() {
+    testSunDisc();
     testTowersDoubleAndFanOut();
     testFence();
     testForest();

@@ -5,6 +5,7 @@
 #include "math/angles.h"
 #include "math/transform.h"
 #include "scene/model_renderer.h"
+#include "scene/sky_object.h"
 #include "scene/sun.h"
 
 #include <algorithm>
@@ -12,6 +13,10 @@
 #include <utility>
 
 namespace {
+    // How far out the sun disc is drawn, as a share of the camera's far plane: beyond the ground's edge (400 m) and every
+    // tower, but inside the far plane so it is not clipped away.
+    constexpr float sunDiscDistanceShare = 0.9f;
+
     // The views' starts: the free camera behind the start looking north along the towers, the MOBA view just ahead of
     // the start, the body at the origin; the far plane past the furthest tower (320 m) and the ground's corners.
     const PlayerControlsSetup labViews{
@@ -102,21 +107,25 @@ namespace {
     /*
     * The golden image views (engine/golden.h), each from the free camera at a fixed time of day: the towers and fence from
     * the start (sun shadows in four cascades out to 200 m), the field from above, the sunlit room's beam on its
-    * floor (the rest lit only by the flat sky ambient until bounce light), and the towers again at sunset in HDR (a low,
-    * red sun and long shadows).
+    * floor (the rest lit only by the flat sky ambient until bounce light), the towers again at sunset in HDR (a low,
+    * red sun and long shadows), and the sun itself, its disc and the glow bloom spreads round it.
     */
     struct LabGoldenView {
         GoldenView view;
         Vec3 cameraPosition;
         Vec3 cameraTarget;
         float solarHours;
+
+        // Look straight at the sun instead of at the target (which then is ignored), wherever it stands at that hour.
+        bool facingSun = false;
     };
 
     const LabGoldenView labGoldenViews[] = {
         {{"towers", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 15.5f},
         {{"overview", 0.5, false}, Vec3{40.0f, 45.0f, 50.0f}, Vec3{-10.0f, 0.0f, -30.0f}, 15.5f},
         {{"sunlit-room", 0.5, false}, Vec3{-22.3f, 2.2f, 14.4f}, Vec3{-18.6f, 0.3f, 10.6f}, 15.5f},
-        {{"sunset-hdr", 0.5, true}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 17.6f}
+        {{"sunset-hdr", 0.5, true}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 17.6f},
+        {{"sun-disc", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 15.5f, true}
     };
 }
 
@@ -128,6 +137,7 @@ void visit(LightLabSunSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Sun intensity", settings.sunIntensity, {.min = 0.0f, .sliderMax = 10.0f});
     visitor.field("Sky ambient", settings.skyAmbient, {.min = 0.0f, .sliderMax = 1.0f});
     visitor.field("Sky brightness", settings.skyBrightness, {.min = 0.0f, .sliderMax = 5.0f});
+    visitor.field("Sun disc size", settings.sunDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
 }
 
 float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds) {
@@ -197,10 +207,21 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     sky = world.create();
     world.add(sky, AmbientLight{});
     world.add(sky, SkyBackground{});
-    updateDaylight(world);
 
-    // Start from the mode's predictable camera pose.
+    // The sun disc: a glowing sphere with no colour of its own. It stands for the sunlight's source, so it must not
+    // block that light. It teleports with the camera every frame, so it has no PreviousTransform to blend from.
+    Material sunGlow;
+    sunGlow.colour = Pixel{0, 0, 0};
+    sunGlow.roughness = 1.0f;
+    ModelRenderer discRenderer = makeMeshRenderer(assets.addMesh(Mesh::sphere()), sunGlow);
+    discRenderer.castsShadows = false;
+    sunDisc = world.create();
+    world.add(sunDisc, Transform{});
+    world.add(sunDisc, std::move(discRenderer));
+
+    // Start from the mode's predictable camera pose, then light the day around it.
     controls.setControlMode(world, controls.getMode());
+    updateDaylight(world);
 }
 
 void LightLabGame::onInput(World& world, const Input& input) {
@@ -236,6 +257,21 @@ void LightLabGame::updateDaylight(World& world) {
     world.get<DirectionalLight>(sun) = daylight.sun;
     world.get<AmbientLight>(sky) = daylight.sky;
     world.get<SkyBackground>(sky) = daylight.background;
+
+    // The disc where the sunlight comes from, just inside the far plane, glowing with that light over its patch of sky.
+    // Hidden once the sun has set (its light has faded to nothing).
+    const Camera& camera = controls.getCamera();
+    const float discAngularRadius = daylight.sun.angularRadius * sunSettings.sunDiscScale;
+    world.get<Transform>(sunDisc) = skyObjectPose(camera.getPosition(), towardsSun, sunDiscDistanceShare * camera.getFarPlane(),
+                                                  discAngularRadius);
+
+    ModelRenderer& disc = world.get<ModelRenderer>(sunDisc);
+    disc.visible = daylight.sun.intensity > 0.0f && discAngularRadius > 0.0f;
+    disc.parts[0].material.emissive = discRadiance(daylight.sun.colour * daylight.sun.intensity, discAngularRadius);
+}
+
+Entity LightLabGame::getSunDisc() const {
+    return sunDisc;
 }
 
 Camera& LightLabGame::getCamera() {
@@ -276,7 +312,11 @@ void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
         if (golden.view.name == view.name) {
             sunSettings.solarHours = golden.solarHours;
             updateDaylight(world);
-            controls.poseFreeCamera(world, golden.cameraPosition, golden.cameraTarget);
+            const Vec3 target = golden.facingSun
+                ? golden.cameraPosition + directionTowardsSunOn(sunSettings.latitudeDegrees, sunSettings.dayOfYear, sunSettings.solarHours)
+                : golden.cameraTarget;
+            controls.poseFreeCamera(world, golden.cameraPosition, target);
+            updateDaylight(world);
         }
     }
 }
