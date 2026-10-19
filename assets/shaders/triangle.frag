@@ -306,6 +306,11 @@ void main() {
 
     if (normalLength > 0.0) {
         for (int i = 0; i < counts.x; ++i) {
+            // A light from behind gives nothing, so its shadow lookups would be wasted.
+            if (!facesLight(point, directional[i].toLight.xyz)) {
+                continue;
+            }
+
             vec3 radiance = directional[i].radiance.rgb;
             int tile = directional[i].shadowTile;
 
@@ -326,6 +331,12 @@ void main() {
                 continue;
             }
 
+            vec3 toLight = offset / distance;
+
+            if (!facesLight(point, toLight)) {
+                continue;
+            }
+
             vec3 radiance = points[i].radiance.rgb * distanceFalloff(distance, range, points[i].radiance.w);
 
             int firstTile = points[i].firstShadowTile;
@@ -334,7 +345,7 @@ void main() {
                 radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius), points[i].shadowStrength);
             }
 
-            addLight(radiance, offset / distance, point, diffuse, specular);
+            addLight(radiance, toLight, point, diffuse, specular);
         }
 
         for (int i = 0; i < counts.z; ++i) {
@@ -351,7 +362,7 @@ void main() {
             float alongBeam = dot(-toLight, spots[i].directionCosOuter.xyz);
             float cone = spotCone(alongBeam, spots[i].directionCosOuter.w, spots[i].radianceCosInner.w);
 
-            if (cone <= 0.0) {
+            if (cone <= 0.0 || !facesLight(point, toLight)) {
                 continue;
             }
 

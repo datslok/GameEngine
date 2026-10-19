@@ -361,6 +361,20 @@ namespace {
     }
 
     /*
+    * A light reaches the surface only from in front of it: grazing along the surface (a cosine of exactly 0) or from
+    * behind gives nothing. The shader asks this before a light's shadow lookups, which a light giving nothing anyway
+    * would waste; shadeLight asks the same, so the two can never disagree.
+    */
+    void testFacesLightOnlyFromInFront() {
+        const ShadingPoint point = prepareShading(SurfaceProperties{}, up, viewAt(0.7f), table());
+        assert(facesLight(point, Vec3{0.6f, 0.8f, 0.0f}));
+        assert(facesLight(point, up));
+        assert(!facesLight(point, Vec3{1.0f, 0.0f, 0.0f}));
+        assert(!facesLight(point, Vec3{0.0f, -1.0f, 0.0f}));
+        assert(!facesLight(point, Vec3{0.6f, -0.8f, 0.0f}));
+    }
+
+    /*
     * Ambient light is the same from every direction, so what a surface sends back is its albedo: a white non-metal
     * returns all of it, and a metal, which has no diffuse part, still reflects its colour instead of turning black.
     */
@@ -411,6 +425,7 @@ void testBrdf() {
     testMetalsReflectTheirColour();
     testDiffuseKeepsTheLightUnits();
     testLightBehindGivesNothing();
+    testFacesLightOnlyFromInFront();
     testAmbient();
     testGrazingViewStaysFinite();
 }

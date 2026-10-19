@@ -13,6 +13,7 @@
 #define GPU_TEST_SCHLICK_FRESNEL 2
 #define GPU_TEST_PREPARE_SHADING 3
 #define GPU_TEST_ADD_LIGHT 4
+#define GPU_TEST_FACES_LIGHT 5
 
 // normal_mapping_test.comp
 #define GPU_TEST_DECODE_NORMAL_TEXEL 0

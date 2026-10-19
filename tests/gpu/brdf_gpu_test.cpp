@@ -4,6 +4,7 @@
 #include "render/gpu/brdf.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -199,6 +200,34 @@ namespace {
             report.check("shadeAmbient", arithmeticTolerance, shadeAmbient(point, cases[i].radiance), vec3From(actual[2]));
         }
     }
+
+    /*
+    * Outputs per case: (1 if the light faces the surface, else 0). A yes or no must match exactly, except within a few
+    * float steps of grazing, where the GPU's fused dot product may round to the other side of zero; the light gives
+    * almost nothing there either way. The random cases add a light exactly along the surface (a cosine of exactly 0).
+    */
+    void checkFacesLight(GpuFunctionRunner& runner, GpuCheckReport& report, std::vector<ShadingCase> cases, const BrdfTable& table) {
+        ShadingCase grazing = cases.front();
+        grazing.normal = Vec3{0.0f, 1.0f, 0.0f};
+        grazing.toCamera = Vec3{0.0f, 1.0f, 0.0f};
+        grazing.toLight = Vec3{1.0f, 0.0f, 0.0f};
+        cases.push_back(grazing);
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FACES_LIGHT, shadingInputs(cases, table), 6, 1);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            const ShadingPoint point = prepareShading(cases[i].surface, cases[i].normal, cases[i].toCamera, table);
+
+            if (std::abs(point.normal.dot(cases[i].toLight)) < 1e-6f) {
+                if (cases[i].toLight.dot(cases[i].normal) == 0.0f) {
+                    report.check("facesLight grazing", exactTolerance, 0.0f, outputs[i][0]);
+                }
+                continue;
+            }
+
+            report.check("facesLight", exactTolerance, facesLight(point, cases[i].toLight) ? 1.0f : 0.0f, outputs[i][0]);
+        }
+    }
 }
 
 void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -211,4 +240,5 @@ void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report) {
     const std::vector<ShadingCase> cases = shadingCases();
     checkPrepareShading(runner, report, cases, table);
     checkAddLight(runner, report, cases, table);
+    checkFacesLight(runner, report, cases, table);
 }

@@ -162,7 +162,10 @@ private:
     std::unique_ptr<BindlessTextures> bindlessTextures;
     std::unique_ptr<SceneLayout> sceneLayout;
 
+    // The main pass alone (finding the nearest surface itself) and after the depth prepass (shading only it), and the prepass.
     std::unique_ptr<VulkanPipeline> mainPipeline;
+    std::unique_ptr<VulkanPipeline> mainAfterPrepassPipeline;
+    std::unique_ptr<VulkanPipeline> depthPrepassPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
     std::unique_ptr<VulkanPipeline> toneMapPipeline;
@@ -244,7 +247,8 @@ private:
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws);
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
-    void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
+    void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
+    void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 

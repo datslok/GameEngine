@@ -18,6 +18,10 @@ struct RenderSettings {
     BloomSettings bloom;
     ToneMappingSettings toneMapping;
     DisplaySettings display;
+
+    // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
+    // depth test as it is drawn, for comparing the two in the GPU timings.
+    bool depthPrepass = true;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

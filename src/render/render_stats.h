@@ -12,7 +12,8 @@ struct RenderStats {
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 
-    // Draw calls those took: one per mesh per view, each drawing every instance of that mesh at once.
+    // Draw calls those took: one per mesh per view, each drawing every instance of that mesh at once. The camera's
+    // include the depth prepass's, which draws the same meshes again.
     std::size_t drawCalls = 0;
     std::size_t shadowDrawCalls = 0;
 
