@@ -2,6 +2,7 @@
 
 #include "math/mat4.h"
 #include "render/gpu/bloom.h"
+#include "render/gpu/clusters.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_priority.h"
@@ -21,6 +22,7 @@
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_bloom.h"
+#include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/vulkan/vulkan_device.h"
 #include "render/vulkan/vulkan_memory.h"
@@ -171,6 +173,13 @@ private:
     std::unique_ptr<VulkanPipeline> toneMapPipeline;
     VkFormat screenFormat = VK_FORMAT_UNDEFINED;
 
+    // Clustered shading (render/gpu/clusters.h): the compute pass that lists which lights may reach each cluster, its
+    // grid for this frame, and the lists, one bit per light per cluster, sized for the frame like the images. Only the
+    // GPU writes and reads them, within a frame, so there is one copy, ordered by barriers rather than one per frame.
+    std::unique_ptr<ComputePipeline> clusterLightsPipeline;
+    ClusterGrid clusterGrid;
+    VulkanBuffer clusterMasks;
+
     // The main pass draws into these, the size of the frame: the lit scene in 16-bit floats, and its depth.
     VulkanImage sceneColour;
     VulkanImage depth;
@@ -244,7 +253,8 @@ private:
     };
 
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
-                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws);
+                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, bool clusteredShading);
+    void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);

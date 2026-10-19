@@ -1,14 +1,18 @@
 #include "render/gpu/clusters.h"
 
+#include "engine/settings_file.h"
 #include "math/angles.h"
 #include "math/mat4.h"
 #include "math/vec4.h"
+#include "render/gpu/render_settings.h"
 #include "scene/camera.h"
 
 #include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace {
     bool nearlyEqual(float actual, float expected, float tolerance) {
@@ -403,6 +407,27 @@ namespace {
         assert(!masks.hasPointLight(cluster, 1));
         assert(!masks.hasSpotLight(cluster, 0));
     }
+
+    // One word per 32 lights for every cluster: 160 bytes each, about 3.5 MB at 2560 x 1440.
+    void testMaskBufferSize() {
+        const ClusterGrid grid = makeClusterGrid(tiltedCamera(16.0f / 9.0f), 2560, 1440);
+        assert(clusterMaskBytes(grid) == static_cast<std::size_t>(40 * 23 * 24 * 40 * 4));
+        assert(clusterMaskBytes(2560, 1440) == clusterMaskBytes(grid));
+    }
+
+    // Shading from the clusters is on by default and switchable while the game runs, to compare the two in the GPU timings.
+    void testClusteredShadingIsOnByDefaultAndSwitchesLive() {
+        const RenderSettings defaults;
+        assert(defaults.clusteredShading);
+
+        RenderSettings settings;
+        const SettingsWalk walk = [&settings](SettingsVisitor& visitor) {
+            visit(settings, visitor);
+        };
+        const std::vector<std::string> warnings = applySettings({{"passes.clusteredShading", "false"}}, walk, StartupFields::Keep);
+        assert(warnings.empty());
+        assert(!settings.clusteredShading);
+    }
 }
 
 void testClusters() {
@@ -417,4 +442,6 @@ void testClusters() {
     testEveryReachingLightIsListed();
     testLightsAreListedOnlyNearby();
     testOnlyCountedLightsAreListed();
+    testMaskBufferSize();
+    testClusteredShadingIsOnByDefaultAndSwitchesLive();
 }

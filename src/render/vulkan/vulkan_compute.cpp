@@ -9,6 +9,7 @@
 * Three objects, each built from the one before: the descriptor set layout (which kinds of resource sit at which
 * binding), the pipeline layout (that set plus the push constant range), and the pipeline (the compiled shader against
 * that layout). The shader module is only needed while the driver compiles, so it is dropped at the end.
+* With a shared layout the first two are made elsewhere (the scene's) and only the pipeline is built here.
 */
 ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipelineDescription& description):
     pushConstantBytes(description.pushConstantBytes)
@@ -18,7 +19,30 @@ ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipeli
     }
 
     const VkDevice handle = device.getDevice();
+    VkPipelineLayout pipelineLayout = description.sharedLayout;
 
+    if (pipelineLayout == VK_NULL_HANDLE) {
+        pipelineLayout = createLayout(handle, description);
+    }
+
+    const OwnedHandle<VkShaderModule> shader = device.loadShader(description.shader);
+
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipelineInfo.stage.module = shader.get();
+    pipelineInfo.stage.pName = "main";
+    pipelineInfo.layout = pipelineLayout;
+
+    VkPipeline createdPipeline = VK_NULL_HANDLE;
+    vulkanCheck(vkCreateComputePipelines(handle, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &createdPipeline), description.shader);
+    pipeline = OwnedHandle<VkPipeline>{handle, createdPipeline, vkDestroyPipeline};
+    sharedLayout = description.sharedLayout;
+}
+
+// The storage buffers' set layout and the pipeline layout of that set and the push constants, kept by this pipeline.
+VkPipelineLayout ComputePipeline::createLayout(VkDevice handle, const ComputePipelineDescription& description) {
     std::vector<VkDescriptorSetLayoutBinding> bindings(description.storageBuffers);
 
     for (std::uint32_t binding = 0; binding < description.storageBuffers; ++binding) {
@@ -52,20 +76,7 @@ ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipeli
     VkPipelineLayout createdLayout = VK_NULL_HANDLE;
     vulkanCheck(vkCreatePipelineLayout(handle, &layoutInfo, nullptr, &createdLayout), "Compute pipeline layout creation failed");
     layout = OwnedHandle<VkPipelineLayout>{handle, createdLayout, vkDestroyPipelineLayout};
-
-    const OwnedHandle<VkShaderModule> shader = device.loadShader(description.shader);
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    pipelineInfo.stage.module = shader.get();
-    pipelineInfo.stage.pName = "main";
-    pipelineInfo.layout = createdLayout;
-
-    VkPipeline createdPipeline = VK_NULL_HANDLE;
-    vulkanCheck(vkCreateComputePipelines(handle, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &createdPipeline), description.shader);
-    pipeline = OwnedHandle<VkPipeline>{handle, createdPipeline, vkDestroyPipeline};
+    return createdLayout;
 }
 
 VkPipeline ComputePipeline::get() const {
@@ -73,7 +84,7 @@ VkPipeline ComputePipeline::get() const {
 }
 
 VkPipelineLayout ComputePipeline::getLayout() const {
-    return layout.get();
+    return sharedLayout != VK_NULL_HANDLE ? sharedLayout : layout.get();
 }
 
 VkDescriptorSetLayout ComputePipeline::getResourceLayout() const {

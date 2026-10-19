@@ -1,10 +1,12 @@
 #include "math/mat4.h"
 #include "render/gpu/camera_relative.h"
+#include "render/gpu/clusters.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_map.h"
+#include "scene/camera.h"
 #include "scene/frame_description.h"
 
 #include <cassert>
@@ -187,7 +189,9 @@ namespace {
 
         const Mat4 relativeViewProjection = Mat4::perspective(1.2f, 1.5f, 0.1f, 100.0f) * Mat4::rotationX(0.2f);
         const Vec3 cameraOrigin{998.0f, 1.0f, -4.0f};
-        const GpuFrameData frame = makeFrameData(packLighting(lighting, cameraOrigin), relativeViewProjection, cameraOrigin);
+        const Camera camera{cameraOrigin, cameraOrigin + Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 1.5f, 0.1f, 100.0f};
+        const GpuFrameData frame = makeFrameData(packLighting(lighting, cameraOrigin), relativeViewProjection, cameraOrigin,
+                                                 makeClusterGrid(camera, 1200, 800), true);
 
         float expected[16]{};
         writeColumnMajor(relativeViewProjection, expected);
@@ -199,6 +203,29 @@ namespace {
         assert(frame.counts[0] == 1 && frame.counts[1] == 2 && frame.counts[2] == 0);
         assert(frame.atlasTexel[0] == 1.0f / static_cast<float>(shadowAtlasWidth));
         assert(frame.atlasTexel[1] == 1.0f / static_cast<float>(shadowAtlasHeight));
+    }
+
+    /*
+    * The cluster grid reaches the shaders in the same block, laid out as clusters.glsl's ClusterGrid (tile counts and
+    * slices, the screen and lens, the slicing, the view's axes), with w of the tile counts saying whether the main pass
+    * shades from the clusters' lists or loops over every light.
+    */
+    void testFrameDataCarriesTheClusterGrid() {
+        const Camera camera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{-4.0f, 0.0f, -2.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.1f, 1.6f, 0.1f, 100.0f};
+        const ClusterGrid grid = makeClusterGrid(camera, 1280, 800);
+        const GpuFrameData clustered = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true);
+
+        assert(clustered.clusterTiles[0] == 20 && clustered.clusterTiles[1] == 13 && clustered.clusterTiles[2] == clusterDepthSlices);
+        assert(clustered.clusterTiles[3] == 1);
+        assert(clustered.clusterScreen[0] == 1280.0f && clustered.clusterScreen[1] == 800.0f);
+        assert(clustered.clusterScreen[2] == grid.tanHalfWidth && clustered.clusterScreen[3] == grid.tanHalfHeight);
+        assert(clustered.clusterSlicing[0] == grid.sliceScale && clustered.clusterSlicing[1] == grid.sliceBias);
+        assert(clustered.viewRight[0] == grid.right.x && clustered.viewRight[1] == grid.right.y && clustered.viewRight[2] == grid.right.z);
+        assert(clustered.viewUp[0] == grid.up.x && clustered.viewUp[1] == grid.up.y && clustered.viewUp[2] == grid.up.z);
+        assert(clustered.viewForward[0] == grid.forward.x && clustered.viewForward[1] == grid.forward.y && clustered.viewForward[2] == grid.forward.z);
+
+        const GpuFrameData looped = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, false);
+        assert(looped.clusterTiles[3] == 0);
     }
 }
 
@@ -214,4 +241,5 @@ void testGpuScene() {
     testIdenticalMaterialsShareAnEntry();
     testTexturesTellMaterialsApart();
     testFrameDataCarriesCameraLightsAndAtlasTexel();
+    testFrameDataCarriesTheClusterGrid();
 }

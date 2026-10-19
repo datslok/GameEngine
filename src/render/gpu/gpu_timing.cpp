@@ -6,6 +6,8 @@ const char* gpuPassName(GpuPass pass) {
     switch (pass) {
     case GpuPass::DebugUi:
         return "UI";
+    case GpuPass::Clusters:
+        return "CLUSTERS";
     case GpuPass::Shadows:
         return "SHADOW";
     case GpuPass::DepthPrepass:

@@ -11,6 +11,7 @@
 */
 enum class GpuPass {
     DebugUi,
+    Clusters,
     Shadows,
     DepthPrepass,
     Main,

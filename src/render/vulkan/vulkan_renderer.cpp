@@ -4,10 +4,12 @@
 #include "render/gpu/depth_shared.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/compute_dispatch.h"
 #include "render/gpu/depth_prepass.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_map_uniforms.h"
+#include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/vulkan_check.h"
 #include "render/window_display.h"
@@ -124,6 +126,20 @@ void VulkanRenderer::checkFormats() const {
 
     if (!device.supportsFormat(VK_FORMAT_R16G16_UNORM, VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
         throw std::runtime_error("This GPU cannot sample a 16-bit two-channel image, which physically based shading needs");
+    }
+
+    // Clustered shading's pixels share their light lists across the wave (subgroupOr in triangle.frag). Every desktop
+    // GPU with Vulkan 1.3 has it, but it is not required by the standard, so ask.
+    VkPhysicalDeviceSubgroupProperties subgroups{};
+    subgroups.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceProperties2 properties{};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.pNext = &subgroups;
+    vkGetPhysicalDeviceProperties2(device.getPhysicalDevice(), &properties);
+
+    if ((subgroups.supportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) == 0 ||
+        (subgroups.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) == 0) {
+        throw std::runtime_error("This GPU cannot combine values across a group of pixels (subgroup arithmetic), which clustered shading needs");
     }
 }
 
@@ -264,6 +280,11 @@ void VulkanRenderer::createPipelines() {
     reset.vertices = {};
     reset.depthCompare = VK_COMPARE_OP_ALWAYS;
     shadowClearPipeline = std::make_unique<VulkanPipeline>(device, layouts, reset);
+
+    ComputePipelineDescription clusterLights;
+    clusterLights.shader = "assets/shaders/cluster_lights.comp.spv";
+    clusterLights.sharedLayout = sceneLayout->getPipelineLayout(); // the frame's lights and grid, as the main pass reads them
+    clusterLightsPipeline = std::make_unique<ComputePipeline>(device, clusterLights);
 }
 
 // The pipelines that draw into the screen image are built for its format, which changes with HDR output.
@@ -340,8 +361,8 @@ void VulkanRenderer::createFixedTextures() {
 }
 
 /*
-* The scene image and its depth follow the frame's size. The GPU may still read the old pair, so it is waited for
-* before they go (only on a resize, or around a golden capture).
+* The scene image and its depth follow the frame's size, and so do the clusters' light lists. The GPU may still read
+* the old ones, so it is waited for before they go (only on a resize, or around a golden capture).
 */
 void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t height) {
     if (depth && frameWidth == width && frameHeight == height) {
@@ -365,9 +386,13 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     sceneDescription.name = "Scene colour";
     VulkanImage sceneReplacement{device, sceneDescription};
 
+    VulkanBuffer masksReplacement{device.getAllocator(), clusterMaskBytes(static_cast<int>(width), static_cast<int>(height)),
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+
     device.waitIdle();
     depth = std::move(depthReplacement);
     sceneColour = std::move(sceneReplacement);
+    clusterMasks = std::move(masksReplacement);
     frameWidth = width;
     frameHeight = height;
 }
@@ -708,6 +733,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
     relativeViewProjection = cameraRelativeViewProjection(camera);
     cameraOrigin = camera.getPosition();
+    clusterGrid = makeClusterGrid(camera, static_cast<int>(frameWidth), static_cast<int>(frameHeight));
     const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
     const PrioritizedLighting prioritized = prioritizeLights(description.lighting, description.lightFocus, cameraFrustum, lightHistory,
@@ -736,12 +762,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws);
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, settings.clusteredShading);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
         overlay->drawUi(frame, ui, frameWidth, frameHeight);
         endGpuPass(frame, GpuPass::DebugUi);
+    }
+
+    if (settings.clusteredShading) {
+        beginGpuPass(frame, GpuPass::Clusters);
+        buildClusterLists(frame, sceneSet);
+        endGpuPass(frame, GpuPass::Clusters);
     }
 
     if (!shadows.tiles.empty()) {
@@ -775,7 +807,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 * per pass.
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
-                                           const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws) {
+                                           const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
+                                           bool clusteredShading) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
     instances.reserve(description.draws.size());
@@ -795,7 +828,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
-    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin);
+    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, clusteredShading);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
@@ -811,7 +844,29 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         sampled(*brdfTable),
     };
 
-    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images);
+    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks);
+}
+
+/*
+* Clustered shading's light lists, written by cluster_lights.comp from this frame's lights and grid (in the frame's
+* scene set, bound at the compute bind point, which keeps its own sets apart from the graphics passes'), one invocation
+* per cluster. Two barriers order the lists between the passes, since only the GPU touches them:
+* - before: last frame's main pass may still be reading them (frames in flight), so those reads must finish before
+*   this pass overwrites them. A write after a read needs only that order, no caches made visible: no source access.
+* - after: this frame's main pass reads what this pass wrote, so the compute writes are made visible to fragment shader
+*   reads (written back from the compute units' caches, and the reading caches invalidated).
+*/
+void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet) {
+    const VkCommandBuffer commands = frame.commands;
+    bufferBarrier(commands, clusterMasks.get(), {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_NONE},
+                  {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, clusterLightsPipeline->get());
+    bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet, VK_PIPELINE_BIND_POINT_COMPUTE);
+    vkCmdDispatch(commands, workgroupCount(static_cast<std::uint32_t>(clusterCount(clusterGrid)), clusterGroupSize), 1, 1);
+
+    bufferBarrier(commands, clusterMasks.get(), {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
+                  {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT});
 }
 
 /*

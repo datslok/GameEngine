@@ -6,6 +6,7 @@
 #include "render/gpu/light_uniforms.h"
 #include "scene/camera.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -27,6 +28,7 @@ inline constexpr int clusterPointWords = CLUSTER_POINT_WORDS;
 inline constexpr int clusterSpotWords = CLUSTER_SPOT_WORDS;
 inline constexpr int clusterWords = CLUSTER_WORDS;
 inline constexpr float clusterBoundsMargin = static_cast<float>(CLUSTER_BOUNDS_MARGIN);
+inline constexpr std::uint32_t clusterGroupSize = CLUSTER_GROUP_SIZE;
 
 static_assert(clusterPointWords * 32 == maxPointLights, "a cluster needs one bit per point light");
 static_assert(clusterSpotWords * 32 == maxSpotLights, "a cluster needs one bit per spotlight");
@@ -62,6 +64,11 @@ struct ClusterGrid {
 ClusterGrid makeClusterGrid(const Camera& camera, int screenWidth, int screenHeight);
 
 int clusterCount(const ClusterGrid& grid);
+
+// The bytes of one bit per light for every cluster (clusterWords words each): the size of the masks buffer, which
+// depends only on the screen's size.
+std::size_t clusterMaskBytes(const ClusterGrid& grid);
+std::size_t clusterMaskBytes(int screenWidth, int screenHeight);
 
 // A point measured from the camera (camera-relative) in cluster view space.
 Vec3 toClusterView(const ClusterGrid& grid, const Vec3& relativePosition);

@@ -7,6 +7,11 @@
 #include <stdexcept>
 
 namespace {
+    // Tiles to cover a screen side, the last one cut off by the edge.
+    int tilesToCover(int pixels) {
+        return (pixels + clusterTilePixels - 1) / clusterTilePixels;
+    }
+
     // The first pixel past a tile's last one, which is the screen's edge for the last tile of a row or column.
     int tileEnd(int tile, int screenSize) {
         return std::min((tile + 1) * clusterTilePixels, screenSize);
@@ -49,8 +54,8 @@ ClusterGrid makeClusterGrid(const Camera& camera, int screenWidth, int screenHei
     ClusterGrid grid;
     grid.screenWidth = screenWidth;
     grid.screenHeight = screenHeight;
-    grid.tilesX = (screenWidth + clusterTilePixels - 1) / clusterTilePixels;
-    grid.tilesY = (screenHeight + clusterTilePixels - 1) / clusterTilePixels;
+    grid.tilesX = tilesToCover(screenWidth);
+    grid.tilesY = tilesToCover(screenHeight);
     grid.slices = clusterDepthSlices;
 
     grid.nearDepth = camera.getNearPlane();
@@ -71,6 +76,15 @@ ClusterGrid makeClusterGrid(const Camera& camera, int screenWidth, int screenHei
 
 int clusterCount(const ClusterGrid& grid) {
     return grid.tilesX * grid.tilesY * grid.slices;
+}
+
+std::size_t clusterMaskBytes(const ClusterGrid& grid) {
+    return clusterMaskBytes(grid.screenWidth, grid.screenHeight);
+}
+
+std::size_t clusterMaskBytes(int screenWidth, int screenHeight) {
+    const std::size_t clusters = static_cast<std::size_t>(tilesToCover(screenWidth) * tilesToCover(screenHeight) * clusterDepthSlices);
+    return clusters * clusterWords * sizeof(std::uint32_t);
 }
 
 Vec3 toClusterView(const ClusterGrid& grid, const Vec3& relativePosition) {

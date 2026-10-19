@@ -13,16 +13,17 @@
 #include <vector>
 
 /*
-* The descriptor layout of the scene's pipelines (the main pass, the shadow pass and its tile reset), which left
-* SDL_GPU's four sets behind with the GPU scene: set 0 is every texture (BindlessTextures, made once), set 1 the frame's
-* scene (made once per frame and bound once per pass): its uniform block, the storage buffers of instances, materials,
-* lights, shadow tiles and the draw list, and the shadow atlas and BRDF table. Nothing is bound per draw; each shadow
-* tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded straight into the command buffer.
+* The descriptor layout of the scene's pipelines (the main pass, the shadow pass and its tile reset, the cluster pass),
+* which left SDL_GPU's four sets behind with the GPU scene: set 0 is every texture (BindlessTextures, made once), set 1
+* the frame's scene (made once per frame and bound once per pass): its uniform block, the storage buffers of instances,
+* materials, lights, shadow tiles, the draw list and the clusters' light masks, and the shadow atlas and BRDF table.
+* Nothing is bound per draw; each shadow tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded
+* straight into the command buffer.
 */
 inline constexpr std::uint32_t bindlessTextureSet = 0;
 inline constexpr std::uint32_t sceneFrameSet = 1;
 
-// Set 1's bindings, as triangle.vert, triangle.frag and shadow.vert declare them.
+// Set 1's bindings, as triangle.vert, triangle.frag, shadow.vert and cluster_lights.comp declare them.
 enum SceneBinding : std::uint32_t {
     FrameDataBinding = 0,
     InstancesBinding = 1,
@@ -35,7 +36,8 @@ enum SceneBinding : std::uint32_t {
     ShadowDepthsBinding = 8,
     BrdfTableBinding = 9,
     DrawListBinding = 10,
-    SceneBindingCount = 11
+    ClusterMasksBinding = 11,
+    SceneBindingCount = 12
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -106,7 +108,10 @@ struct SceneImages {
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).
-VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images);
+VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images,
+                              const VulkanBuffer& clusterMasks);
 
-// Bind both scene sets. Before a pass's draws: other passes' pipelines (the debug UI's) bind sets of their own.
-void bindScene(VkCommandBuffer commands, const SceneLayout& layout, VkDescriptorSet textures, VkDescriptorSet frameSet);
+// Bind both scene sets. Before a pass's draws: other passes' pipelines (the debug UI's) bind sets of their own. Graphics
+// and compute pipelines each have their own bound sets, so the cluster pass binds them at the compute bind point.
+void bindScene(VkCommandBuffer commands, const SceneLayout& layout, VkDescriptorSet textures, VkDescriptorSet frameSet,
+               VkPipelineBindPoint bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS);

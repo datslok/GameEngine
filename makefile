@@ -31,6 +31,8 @@ DEPFLAGS := -MMD -MP
 LDLIBS := -lSDL3_image -lSDL3
 
 GLSLC := glslc
+# The renderer is Vulkan 1.3, so its shaders may use what that guarantees (SPIR-V 1.6; subgroup operations need 1.3).
+GLSLC_TARGET := --target-env=vulkan1.3
 
 # The renderer's Vulkan validation layers (debug builds): MSYS2 installs them beside its DLLs, where the Vulkan loader
 # does not look on its own, so every program make runs is told the folder.
@@ -70,7 +72,7 @@ GPU_TEST_OBJECTS := $(call objects_for,$(GPU_TEST_SOURCES))
 ALL_OBJECTS := $(ENGINE_OBJECTS) $(MAIN_OBJECT) $(TEST_OBJECTS) $(GPU_TEST_OBJECTS)
 
 # Find shader source files and their compiled output names.
-SHADER_SOURCES := $(wildcard assets/shaders/*.vert assets/shaders/*.frag)
+SHADER_SOURCES := $(wildcard assets/shaders/*.vert assets/shaders/*.frag assets/shaders/*.comp)
 SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
 # The GPU tests' compute shaders, which include the real shader libraries from assets/shaders.
 GPU_TEST_SHADER_SOURCES := $(wildcard tests/gpu/shaders/*.comp)
@@ -129,7 +131,7 @@ shaders: $(SHADER_BINARIES)
 
 assets/shaders/%.spv: assets/shaders/% $(MAKEFILE_PATH)
 	@mkdir -p $(SHADER_DEPENDENCY_DIR)
-	$(GLSLC) -Isrc -MD -MF $(SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
+	$(GLSLC) $(GLSLC_TARGET) -Isrc -MD -MF $(SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
 
 -include $(patsubst assets/shaders/%,$(SHADER_DEPENDENCY_DIR)/%.d,$(SHADER_BINARIES))
 
@@ -138,7 +140,7 @@ GPU_TEST_SHADER_DEPENDENCY_DIR := $(SHADER_DEPENDENCY_DIR)/gpu_tests
 
 tests/gpu/shaders/%.spv: tests/gpu/shaders/% $(MAKEFILE_PATH)
 	@mkdir -p $(GPU_TEST_SHADER_DEPENDENCY_DIR)
-	$(GLSLC) -Isrc -Iassets/shaders -Itests/gpu -MD -MF $(GPU_TEST_SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
+	$(GLSLC) $(GLSLC_TARGET) -Isrc -Iassets/shaders -Itests/gpu -MD -MF $(GPU_TEST_SHADER_DEPENDENCY_DIR)/$(notdir $@).d $< -o $@
 
 -include $(patsubst tests/gpu/shaders/%,$(GPU_TEST_SHADER_DEPENDENCY_DIR)/%.d,$(GPU_TEST_SHADER_BINARIES))
 

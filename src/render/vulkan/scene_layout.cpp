@@ -13,18 +13,23 @@ namespace {
     };
 
     // What each binding of set 1 holds and which stages read it, in SceneBinding order.
+    constexpr VkShaderStageFlags vertex = VK_SHADER_STAGE_VERTEX_BIT;
+    constexpr VkShaderStageFlags fragment = VK_SHADER_STAGE_FRAGMENT_BIT;
+    constexpr VkShaderStageFlags compute = VK_SHADER_STAGE_COMPUTE_BIT;
+
     constexpr std::array<BindingKind, SceneBindingCount> sceneBindings{{
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT}, // frame data
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT},           // instances
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // materials
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // directional lights
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // point lights
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // spotlights
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},         // shadow tiles
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, // shadow atlas, compared
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, // shadow atlas, raw depths
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT}, // BRDF table
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT},           // draw list
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, vertex | fragment | compute}, // frame data
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // instances
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // materials
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // directional lights
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // point lights
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // spotlights
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // shadow tiles
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // shadow atlas, compared
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // shadow atlas, raw depths
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // BRDF table
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // draw list
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // cluster masks
     }};
 }
 
@@ -107,7 +112,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
 {
 }
 
-VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images) {
+VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images,
+                              const VulkanBuffer& clusterMasks) {
     const VkDescriptorSet set = descriptors.allocate(layout.getFrameLayout());
 
     const std::array<VkDescriptorBufferInfo, SceneBindingCount> bufferInfos{
@@ -122,6 +128,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         buffers.drawList.describe(),
+        VkDescriptorBufferInfo{clusterMasks.get(), 0, VK_WHOLE_SIZE},
     };
 
     std::array<VkDescriptorImageInfo, SceneBindingCount> imageInfos{};
@@ -151,8 +158,9 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     return set;
 }
 
-void bindScene(VkCommandBuffer commands, const SceneLayout& layout, VkDescriptorSet textures, VkDescriptorSet frameSet) {
+void bindScene(VkCommandBuffer commands, const SceneLayout& layout, VkDescriptorSet textures, VkDescriptorSet frameSet,
+                VkPipelineBindPoint bindPoint) {
     const std::array<VkDescriptorSet, 2> sets{textures, frameSet};
-    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.getPipelineLayout(), bindlessTextureSet,
+    vkCmdBindDescriptorSets(commands, bindPoint, layout.getPipelineLayout(), bindlessTextureSet,
                             static_cast<std::uint32_t>(sets.size()), sets.data(), 0, nullptr);
 }
