@@ -49,12 +49,45 @@ std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const 
     return visible;
 }
 
+// Every caster is a candidate: a reach without a radius limits nothing.
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const Frustum& lightFrustum) {
+    return shadowCasters(draws, castersInReach(draws, BoundingSphere{}), lightFrustum);
+}
+/*
+* Two spheres touch when their centres are closer than their radii added up; squared, so there is no square root.
+* Unknown sizes are kept, as everywhere in culling.
+*/
+std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach) {
     std::vector<std::size_t> casters;
 
     for (std::size_t i = 0; i < draws.size(); ++i) {
-        if (draws[i].castsShadows && mightBeSeen(draws[i], lightFrustum)) {
-            casters.push_back(i);
+        const DrawItem& draw = draws[i];
+
+        if (!draw.castsShadows) {
+            continue;
+        }
+
+        if (reach.radius >= 0.0f && draw.bounds.radius >= 0.0f) {
+            const float touching = reach.radius + draw.bounds.radius;
+
+            if ((draw.bounds.centre - reach.centre).lengthSquared() >= touching * touching) {
+                continue;
+            }
+        }
+
+        casters.push_back(i);
+    }
+
+    return casters;
+}
+
+std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,
+                                       const Frustum& lightFrustum) {
+    std::vector<std::size_t> casters;
+
+    for (std::size_t index : candidates) {
+        if (mightBeSeen(draws[index], lightFrustum)) {
+            casters.push_back(index);
         }
     }
 

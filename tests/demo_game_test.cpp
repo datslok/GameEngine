@@ -364,7 +364,7 @@ namespace {
         pressL.pressKey(Key::L);
         game.onInput(world, pressL);
         assert(countPointLights(world) == 100);
-        assert(countPointLights(world) > static_cast<std::size_t>(maxPointLights)); // more than the seats, so some must wait
+        assert(countPointLights(world) > static_cast<std::size_t>(defaultPointSeats)); // more than the seats, so some must wait
 
         // Every lamp is drawn too: a glowing bulb that does not block its own light.
         std::size_t bulbs = 0;

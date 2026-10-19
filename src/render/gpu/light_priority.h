@@ -61,11 +61,12 @@ float lightImportance(const Vec3& lightPosition, const Vec3& colour, float inten
 
 // The tunable part of light priority, read every frame.
 struct LightPrioritySettings {
-    // How many lights of each kind get a seat in the shader, and how many of those a shadow. The defaults are the
-    // engine's limits; lower values cap below them (shadows below the seats: then lights can lose their shadow but keep
-    // shining), and higher values are clamped to them.
-    int pointSeats = maxPointLights;
-    int spotSeats = maxSpotLights;
+    // How many lights of each kind get a seat in the shader, and how many of those a shadow. Seats default to 64 point
+    // and 8 spot lights (light_uniforms.h: each pixel loops over every seated light until clustered shading) and may grow
+    // to the light buffers' room; shadows default to their limits (shadow_map.h). Lower values cap below the defaults
+    // (shadows below the seats: then lights can lose their shadow but keep shining), higher ones are clamped to the limits.
+    int pointSeats = defaultPointSeats;
+    int spotSeats = defaultSpotSeats;
     int shadowedPoints = maxShadowedPointLights;
     int shadowedSpots = maxShadowedSpotLights;
 

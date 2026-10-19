@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_nonuniform_qualifier : require
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
@@ -20,62 +21,69 @@ layout(location = 1) in vec2 textureUv;
 layout(location = 2) in vec3 relativePosition;
 // The surface's tangent (direction of increasing u) and in w the side of it the normal map's "up" is on.
 layout(location = 3) in vec4 worldTangent;
+// Which entry of the material buffer shades this object (from its instance; the same across the triangle).
+layout(location = 4) flat in uint materialIndex;
 
-layout(set = 2, binding = 0) uniform sampler2D colourTexture;
+// Every texture there is, in one array (bindless, render/vulkan/bindless_textures.h): slot 0 is white, which a missing
+// texture multiplies by, and each uploaded texture sits at its handle plus one. Neighbouring pixels may belong to
+// different objects, so an index into it is marked nonuniformEXT: without that, the GPU may assume one texture for a
+// whole group of pixels shaded together.
+layout(set = 0, binding = 0) uniform sampler2D textures[];
 
-// The shadow atlas: every light's depth images in square tiles of 256 to 2048 texels, packed into one texture. A shadow sampler compares a depth we give it
-// with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
-layout(set = 2, binding = 1) uniform sampler2DShadow shadowAtlas;
+// The frame's uniform block: ambient light, light counts and the atlas texel size are what this shader reads of it.
+#include "frame_data.glsl"
 
-// The same atlas read as plain numbers, the stored depths themselves, which soft shadows need to find how far away the
-// things blocking a light are (a comparison only says whether something is in the way).
-layout(set = 2, binding = 2) uniform sampler2D shadowDepths;
-
-// Per-texel metallic (blue) and roughness (green), linear numbers that multiply the material's own (white when none).
-layout(set = 2, binding = 3) uniform sampler2D metallicRoughnessTexture;
-
-// The specular albedo table (render/gpu/brdf.h): scale and bias for the reflectance head-on, over n.v and roughness.
-layout(set = 2, binding = 4) uniform sampler2D brdfTable;
-
-// Per-texel tilts of the surface normal, linear numbers: x along the tangent, y up the picture, z out of the surface,
-// each stored as 0..1 (white when there is none, which a normal scale of 0 ignores).
-layout(set = 2, binding = 5) uniform sampler2D normalTexture;
-
-// Must match MaterialUniformData in render/gpu/material_uniforms.h.
-layout(std140, set = 3, binding = 0) uniform MaterialData {
+// Must match GpuMaterial in render/gpu/material_uniforms.h.
+struct MaterialData {
     vec4 baseColour;
     vec4 surfaceParameters; // x: metallic, y: roughness, z: normal map scale (0 without a normal map)
     vec4 emissive;          // rgb: light the surface gives off itself
+    uvec4 textureSlots;     // in the texture array: x colour, y metallic-roughness (linear), z normal map (linear)
 };
 
-// Must match the sizes and layout of LightUniformData in render/gpu/light_uniforms.h.
+layout(std430, set = 1, binding = 2) readonly buffer Materials {
+    MaterialData materials[];
+};
+
+// Must match GpuDirectionalLight, GpuPointLight and GpuSpotLight in render/gpu/light_uniforms.h. Tile numbers are -1
+// for a light without a shadow; a point light's six cube faces are six tiles in a row from its first one.
 struct DirectionalLightData {
     vec4 toLight;  // xyz: unit direction towards the light
     vec4 radiance; // rgb: colour times intensity
+    int shadowTile;
 };
 
 struct PointLightData {
     vec4 positionRange; // xyz: position relative to the camera, w: range
     vec4 radiance;      // rgb: colour times intensity, w: radius of the glowing source
+    int firstShadowTile;
+    float shadowStrength; // 0..1 while shadows fade between lights
+    float emitterRadius;  // the size of its glowing part, for soft shadows
 };
 
 struct SpotLightData {
     vec4 positionRange;     // xyz: position relative to the camera, w: range
     vec4 directionCosOuter; // xyz: unit beam direction, w: cosine of the outer cone angle
     vec4 radianceCosInner;  // rgb: colour times intensity, w: cosine of the inner cone angle
-    vec4 sourceRadius;      // x: radius of the glowing source, for the falloff
+    float sourceRadius;     // radius of the glowing source, for the falloff
+    int shadowTile;
+    float shadowStrength;
+    float emitterRadius;
 };
 
-layout(std140, set = 3, binding = 1) uniform LightData {
-    vec4 ambient;
-    ivec4 counts;        // x: directional lights used, y: point lights used, z: spotlights used
-    DirectionalLightData directional[MAX_DIRECTIONAL_LIGHTS];
-    PointLightData points[MAX_POINT_LIGHTS];
-    SpotLightData spots[MAX_SPOT_LIGHTS];
+layout(std430, set = 1, binding = 3) readonly buffer DirectionalLights {
+    DirectionalLightData directional[];
 };
 
-// Must match ShadowTileData in render/gpu/shadow_map.h. Over a hundred tiles do not fit in a uniform block (the shader
-// can read only 4 KB of one), so they are in a storage buffer: set 2, after the six samplers.
+layout(std430, set = 1, binding = 4) readonly buffer PointLights {
+    PointLightData points[];
+};
+
+layout(std430, set = 1, binding = 5) readonly buffer SpotLights {
+    SpotLightData spots[];
+};
+
+// Must match ShadowTileData in render/gpu/shadow_map.h.
 struct ShadowTileData {
     mat4 matrix; // the shadow pass's view-projection, for points measured from the camera
     vec4 offset; // normal offset against acne: x per unit of distance from the light, y fixed
@@ -83,21 +91,20 @@ struct ShadowTileData {
     vec4 lens;   // perspective tiles only (else zeros): x near, y far plane, z world size of a texel per unit of distance
 };
 
-layout(std430, set = 2, binding = 6) readonly buffer ShadowTiles {
+layout(std430, set = 1, binding = 6) readonly buffer ShadowTiles {
     ShadowTileData shadowTiles[];
 };
 
-// Must match ShadowUniformData in render/gpu/shadow_map.h. Tile numbers are -1 for a light without a shadow.
-layout(std140, set = 3, binding = 2) uniform ShadowData {
-    ivec4 pointTiles[(MAX_POINT_LIGHTS + 3) / 4];  // first of six tiles for point light i at [i / 4][i % 4]
-    ivec4 spotTiles[(MAX_SPOT_LIGHTS + 3) / 4];    // tile for spotlight i at [i / 4][i % 4]
-    ivec4 directionalTiles;
-    vec4 atlasTexel;       // xy: one texel's size in atlas coordinates
-    vec4 pointShadowStrengths[(MAX_POINT_LIGHTS + 3) / 4]; // how strong point light i's shadow is, 0..1, at [i / 4][i % 4] (fades between lights)
-    vec4 spotShadowStrengths[(MAX_SPOT_LIGHTS + 3) / 4];
-    vec4 pointEmitterRadii[(MAX_POINT_LIGHTS + 3) / 4];    // the size of point light i's glowing part, at [i / 4][i % 4], for soft shadows
-    vec4 spotEmitterRadii[(MAX_SPOT_LIGHTS + 3) / 4];
-};
+// The shadow atlas: every light's depth images in square tiles of 256 to 2048 texels, packed into one texture. A shadow sampler compares a depth we give it
+// with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
+layout(set = 1, binding = 7) uniform sampler2DShadow shadowAtlas;
+
+// The same atlas read as plain numbers, the stored depths themselves, which soft shadows need to find how far away the
+// things blocking a light are (a comparison only says whether something is in the way).
+layout(set = 1, binding = 8) uniform sampler2D shadowDepths;
+
+// The specular albedo table (render/gpu/brdf.h): scale and bias for the reflectance head-on, over n.v and roughness.
+layout(set = 1, binding = 9) uniform sampler2D brdfTable;
 
 layout(location = 0) out vec4 outputColour;
 
@@ -260,11 +267,13 @@ void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
 
+    MaterialData material = materials[materialIndex];
+
     // Read the textures at this fragment's interpolated UV coordinate. glTF packs roughness in green and metallic in blue.
-    vec4 albedo = texture(colourTexture, textureUv) * baseColour;
-    vec3 packedSurface = texture(metallicRoughnessTexture, textureUv).rgb;
-    float metallic = clamp(surfaceParameters.x * packedSurface.b, 0.0, 1.0);
-    float roughness = clamp(surfaceParameters.y * packedSurface.g, BRDF_SMALLEST_ROUGHNESS, 1.0);
+    vec4 albedo = texture(textures[nonuniformEXT(material.textureSlots.x)], textureUv) * material.baseColour;
+    vec3 packedSurface = texture(textures[nonuniformEXT(material.textureSlots.y)], textureUv).rgb;
+    float metallic = clamp(material.surfaceParameters.x * packedSurface.b, 0.0, 1.0);
+    float roughness = clamp(material.surfaceParameters.y * packedSurface.g, BRDF_SMALLEST_ROUGHNESS, 1.0);
 
     // Light adds up: each light adds its share to these sums.
     vec3 diffuse = vec3(0.0);
@@ -282,7 +291,7 @@ void main() {
     vec3 normal = geometricNormal;
 
     if (normalLength > 0.0) {
-        vec3 tilt = decodeNormalTexel(texture(normalTexture, textureUv).rgb, surfaceParameters.z);
+        vec3 tilt = decodeNormalTexel(texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv).rgb, material.surfaceParameters.z);
         vec3 bumped = perturbNormal(worldNormal, worldTangent, tilt);
 
         if (dot(bumped, bumped) > 0.0) {
@@ -298,7 +307,7 @@ void main() {
     if (normalLength > 0.0) {
         for (int i = 0; i < counts.x; ++i) {
             vec3 radiance = directional[i].radiance.rgb;
-            int tile = directionalTiles[i];
+            int tile = directional[i].shadowTile;
 
             if (tile >= 0) {
                 radiance *= shadowFromTile(tile, offsetForShadow(tile, geometricNormal, 0.0));
@@ -319,10 +328,10 @@ void main() {
 
             vec3 radiance = points[i].radiance.rgb * distanceFalloff(distance, range, points[i].radiance.w);
 
-            int firstTile = pointTiles[i / 4][i % 4];
+            int firstTile = points[i].firstShadowTile;
 
             if (firstTile >= 0) {
-                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, pointEmitterRadii[i / 4][i % 4]), pointShadowStrengths[i / 4][i % 4]);
+                radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius), points[i].shadowStrength);
             }
 
             addLight(radiance, offset / distance, point, diffuse, specular);
@@ -346,11 +355,11 @@ void main() {
                 continue;
             }
 
-            vec3 radiance = spots[i].radianceCosInner.rgb * distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius.x) * cone;
-            int tile = spotTiles[i / 4][i % 4];
+            vec3 radiance = spots[i].radianceCosInner.rgb * distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone;
+            int tile = spots[i].shadowTile;
 
             if (tile >= 0) {
-                radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spotEmitterRadii[i / 4][i % 4]), spotShadowStrengths[i / 4][i % 4]);
+                radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius), spots[i].shadowStrength);
             }
             addLight(radiance, toLight, point, diffuse, specular);
         }
@@ -358,5 +367,5 @@ void main() {
 
     // Emitted light is added as is.
     vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
-    outputColour = vec4(ambientReflected + diffuse + specular + emissive.rgb, albedo.a);
+    outputColour = vec4(ambientReflected + diffuse + specular + material.emissive.rgb, albedo.a);
 }

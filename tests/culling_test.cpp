@@ -174,6 +174,32 @@ namespace {
         draws[0].castsShadows = false;
         assert(shadowCasters(draws, light).empty());
     }
+
+    // A light only reaches as far as its range, so nothing wholly outside that sphere can block it where it shines: one
+    // sphere test per caster and light, before the six face frustums. A blocker sits between the light and a lit point,
+    // and the lit point is within range, so so is the blocker. (Only a soft shadow's filter, which reads texels around the
+    // point, could still meet a dropped caster, where the light has faded to almost nothing at the end of its range.)
+    void testCastersOutsideTheLightsReachAreDropped() {
+        std::vector<DrawItem> draws = {
+            drawAt(0.0f, 0.0f, -5.0f, 0),
+            drawAt(0.0f, 0.0f, -30.0f, 0),
+            drawAt(0.0f, 0.0f, -11.5f, 0), // its sphere (radius sqrt 3) pokes into the reach
+            drawAt(0.0f, 0.0f, -30.0f, 9), // no known bounds: always kept
+            drawAt(0.0f, 0.0f, -5.0f, 0),
+        };
+        attachBoundingSpheres(draws, {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
+        draws[4].castsShadows = false;
+
+        const BoundingSphere reach{Vec3{0.0f, 0.0f, 0.0f}, 10.0f};
+        assert((castersInReach(draws, reach) == std::vector<std::size_t>{0, 2, 3}));
+
+        // A directional light reaches everywhere (negative radius): every caster.
+        assert((castersInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{0, 1, 2, 3}));
+
+        // The faces then test only those candidates against their frustums, keeping their order.
+        const Frustum face = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne);
+        assert((shadowCasters(draws, std::vector<std::size_t>{1, 0, 3}, face) == std::vector<std::size_t>{0, 3}));
+    }
 }
 
 void testCulling() {
@@ -184,4 +210,5 @@ void testCulling() {
     testDrawsGetSpheres();
     testCameraSkipsWhatItCannotSee();
     testOffScreenObjectsStillCastShadows();
+    testCastersOutsideTheLightsReachAreDropped();
 }

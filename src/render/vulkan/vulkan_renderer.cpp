@@ -5,6 +5,7 @@
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/shadow_cache.h"
 #include "render/gpu/tone_map_uniforms.h"
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/vulkan_check.h"
@@ -27,6 +28,9 @@ namespace {
     // far brighter than white, at half the memory of 32-bit floats. Alpha is unused, but there is no 3-channel format.
     constexpr VkFormat sceneColourFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
     constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+
+    // The most textures the bindless array holds (see createSceneLayout).
+    constexpr std::uint32_t maxBindlessTextures = 16384;
 
     // Golden captures write what the screen would get: 8-bit sRGB (as the SDR swapchain) or scRGB half floats.
     VkFormat captureFormat(bool hdr) {
@@ -81,6 +85,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     checkFormats();
     createFrames();
     createSamplers();
+    createSceneLayout();
     createPipelines();
     createShadowAtlas();
     createFixedTextures();
@@ -122,9 +127,9 @@ void VulkanRenderer::checkFormats() const {
 }
 
 /*
-* Each frame in flight gets its own command buffer, fence, acquire semaphore, descriptor sets, uniform buffer, shadow
-* tile buffer and timestamp pool, so the CPU can fill one while the GPU still reads another. The fence starts signalled: no frame is
-* pending yet. The shadow tile buffer holds every tile there can be, so it never grows. Images only the GPU writes (the
+* Each frame in flight gets its own command buffer, fence, acquire semaphore, descriptor sets, uniform buffer, scene
+* buffers and timestamp pool, so the CPU can fill one while the GPU still reads another. The fence starts signalled: no frame is
+* pending yet. The scene buffers grow to fit the busiest frame they have held. Images only the GPU writes (the
 * scene, depth, bloom, the shadow atlas, the overlay) are shared: the GPU runs submissions in order, and each pass's
 * barriers also wait for the previous frame's use of them.
 */
@@ -139,8 +144,7 @@ void VulkanRenderer::createFrames() {
         frame.imageAcquired = device.createSemaphore();
         frame.descriptors = std::make_unique<FrameDescriptors>(device.getDevice());
         frame.uniforms = std::make_unique<FrameUniforms>(device, layouts);
-        frame.shadowTiles = VulkanBuffer{device.getAllocator(), maxShadowTiles * sizeof(ShadowTileData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                         BufferMemory::Upload};
+        frame.scene = std::make_unique<SceneBuffers>(device.getAllocator());
 
         VkCommandBufferAllocateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -185,6 +189,15 @@ void VulkanRenderer::createSamplers() {
 }
 
 /*
+* Room for 16,384 textures (or the GPU's limit, if lower): the demo loads a few dozen, so a level with hundreds of
+* materials still fits. Empty slots cost only their descriptors (a few dozen bytes each).
+*/
+void VulkanRenderer::createSceneLayout() {
+    bindlessTextures = std::make_unique<BindlessTextures>(device, maxBindlessTextures);
+    sceneLayout = std::make_unique<SceneLayout>(device.getDevice(), bindlessTextures->getLayout());
+}
+
+/*
 * The main pass: back faces culled (counter-clockwise is the front, as SDL_GPU set it with its flipped viewport), depth
 * tested and written with GREATER (reversed-Z: nearer is larger). The shadow pass draws depth only, both sides of every
 * triangle so open meshes still cast shadows, with no depth bias (the shader's normal offset handles acne). The tile
@@ -194,7 +207,7 @@ void VulkanRenderer::createPipelines() {
     PipelineDescription main;
     main.vertexShader = "assets/shaders/triangle.vert.spv";
     main.fragmentShader = "assets/shaders/triangle.frag.spv";
-    main.resources = {1, 6, 1, 3}; // the transforms; six textures and the shadow tiles; material, lights, shadows
+    main.sharedLayout = sceneLayout->getPipelineLayout(); // everything from the scene's sets
     main.vertices = meshVertices();
     main.cullMode = VK_CULL_MODE_BACK_BIT;
     main.colourFormat = sceneColourFormat;
@@ -207,7 +220,7 @@ void VulkanRenderer::createPipelines() {
     PipelineDescription shadow;
     shadow.vertexShader = "assets/shaders/shadow.vert.spv";
     shadow.fragmentShader = "assets/shaders/shadow.frag.spv";
-    shadow.resources.vertexUniforms = 1;
+    shadow.sharedLayout = sceneLayout->getPipelineLayout();
     shadow.vertices.stride = sizeof(MeshVertex);
     shadow.vertices.attributes = {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, position))}};
     shadow.depthFormat = depthFormat;
@@ -218,7 +231,6 @@ void VulkanRenderer::createPipelines() {
 
     PipelineDescription reset = shadow;
     reset.vertexShader = "assets/shaders/fullscreen_triangle.vert.spv";
-    reset.resources.vertexUniforms = 0;
     reset.vertices = {};
     reset.depthCompare = VK_COMPARE_OP_ALWAYS;
     shadowClearPipeline = std::make_unique<VulkanPipeline>(device, layouts, reset);
@@ -281,6 +293,7 @@ void VulkanRenderer::createShadowAtlas() {
 void VulkanRenderer::createFixedTextures() {
     const std::array<std::uint8_t, 4> white{255, 255, 255, 255};
     whiteTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, white, surfaceTexture(TextureEncoding::Srgb));
+    bindlessTextures->write(whiteTextureSlot, whiteTexture->getView(), surfaceSampler.get());
 
     const BrdfTable table = buildBrdfTable();
     const std::vector<std::uint16_t> texels = brdfTableTexels(table);
@@ -678,17 +691,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
         [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
-    const LightUniformData lights = packLighting(prioritized.lighting, cameraOrigin);
+    GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
     const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows);
+    attachShadows(lights, shadows);
+
+    // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
+    // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
+    const std::vector<std::size_t> visible = visibleDraws(description.draws, cameraFrustum);
+    const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
+    stats.drawn = visible.size();
+    stats.culled = description.draws.size() - visible.size();
+
+    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-
-    if (!shadows.tileData.empty()) {
-        VulkanBuffer& tiles = frames[frame.frameIndex].shadowTiles;
-        std::memcpy(tiles.getMapped(), shadows.tileData.data(), shadows.tileData.size() * sizeof(ShadowTileData));
-        tiles.flush();
-    }
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -698,12 +716,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (!shadows.tiles.empty()) {
         beginGpuPass(frame, GpuPass::Shadows);
-        drawShadows(frame, description, shadows.tiles);
+        drawShadows(frame, shadowDraws, sceneSet);
         endGpuPass(frame, GpuPass::Shadows);
     }
 
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, description, lights, shadows, cameraFrustum);
+    drawMainPass(frame, mainDraws, sceneSet);
     endGpuPass(frame, GpuPass::Main);
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
@@ -714,21 +732,68 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 }
 
 /*
-* The shadow maps, one tile per view (the viewport picks the tile), depth only. The atlas keeps its contents, so a tile
-* whose view and casters have not changed is left alone (shadow caching), and a redrawn tile is first reset to the far
-* depth. When nothing changed there is no pass at all.
-*
-* Barriers: the atlas goes from being read by last frame's fragment shaders to being a depth target (its contents kept:
-* only some tiles are redrawn), and back to being read once the tiles are drawn, before the main pass samples it.
+* The frame's GPU scene, into its upload buffers: the frame's uniform block, one instance per draw in the frame (instance
+* i is draw i, whichever views draw it) with its material numbered in the frame's material table, the lights with their
+* shadows, the shadow tiles, and the draw list: the main pass's instance numbers in batch order (so each batch is a run),
+* then the shadow tiles'. Returns the scene's set 1, pointing at them and at the shadow atlas and BRDF table, bound once
+* per pass.
 */
-void VulkanRenderer::drawShadows(FrameContext& frame, const FrameDescription& description, const std::vector<ShadowTile>& tiles) {
-    struct TileToDraw {
-        const ShadowTile* tile;
-        std::vector<std::size_t> casters;
-        std::uint64_t signature;
+VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
+                                           const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws) {
+    MaterialTable materials;
+    std::vector<GpuInstance> instances;
+    instances.reserve(description.draws.size());
+
+    for (const DrawItem& draw : description.draws) {
+        checkTexturesUploaded(draw.material);
+        instances.push_back(packInstance(draw, materials.add(draw.material)));
+    }
+
+    std::vector<std::uint32_t> drawList;
+    drawList.reserve(mainDraws.order.size() + shadowDraws.drawList.size());
+
+    for (std::size_t index : mainDraws.order) {
+        drawList.push_back(static_cast<std::uint32_t>(index));
+    }
+
+    drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
+
+    SceneBuffers& buffers = *frames[frame.frameIndex].scene;
+    const GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin);
+    buffers.frameData.write(&frameData, sizeof(frameData));
+    buffers.instances.write(instances);
+    buffers.materials.write(materials.getEntries());
+    buffers.directionalLights.write(lights.directional);
+    buffers.pointLights.write(lights.points);
+    buffers.spotLights.write(lights.spots);
+    buffers.shadowTiles.write(shadows.tileData);
+    buffers.drawList.write(drawList);
+
+    const SceneImages images{
+        SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
+        SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
+        sampled(*brdfTable),
     };
 
-    std::vector<TileToDraw> toDraw;
+    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images);
+}
+
+/*
+* Which shadow tiles to redraw, and what goes into each. A tile whose view and casters are what was drawn into it last
+* time keeps its contents (shadow caching). Casters are found in two steps: first the ones the tile's light can reach at
+* all (one sphere test each, shared by a point light's six faces, which come one after another), then those inside the
+* tile's own frustum. Each redrawn tile's casters are batched by mesh, their instance numbers (instance i is draw i)
+* listed one tile after another, from entry firstEntry of the draw list.
+*/
+VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
+                                                               std::uint32_t firstEntry) {
+    ShadowDraws prepared;
+    std::vector<std::size_t> inReach;
+    const BoundingSphere* reachOfList = nullptr;
+
+    const auto sameReach = [](const BoundingSphere& a, const BoundingSphere& b) {
+        return a.radius == b.radius && a.centre.x == b.centre.x && a.centre.y == b.centre.y && a.centre.z == b.centre.z;
+    };
 
     for (const ShadowTile& tile : tiles) {
         if (tile.size == 0) {
@@ -736,7 +801,13 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const FrameDescription& de
             continue;
         }
 
-        std::vector<std::size_t> casters = shadowCasters(description.draws, Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero));
+        if (reachOfList == nullptr || !sameReach(*reachOfList, tile.reach)) {
+            inReach = castersInReach(description.draws, tile.reach);
+            reachOfList = &tile.reach;
+        }
+
+        const std::vector<std::size_t> casters =
+            shadowCasters(description.draws, inReach, Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero));
         const std::uint64_t signature = shadowCasterSignature(description.draws, casters);
 
         if (shadowMemory.isCurrent(tile, signature)) {
@@ -744,10 +815,29 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const FrameDescription& de
             continue;
         }
 
-        toDraw.push_back(TileToDraw{&tile, std::move(casters), signature});
+        BatchedDraws batched = batchByMesh(description.draws, casters, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()));
+
+        for (std::size_t index : batched.order) {
+            prepared.drawList.push_back(static_cast<std::uint32_t>(index));
+        }
+
+        stats.shadowDrawn += casters.size();
+        stats.shadowCulled += description.draws.size() - casters.size();
+        prepared.tiles.push_back(ShadowTileDraw{&tile, std::move(batched), signature});
     }
 
-    if (toDraw.empty()) {
+    return prepared;
+}
+
+/*
+* The shadow maps, one tile per view (the viewport picks the tile), depth only: each redrawn tile is first reset to the
+* far depth, then its casters drawn, one instanced draw per mesh. When nothing changed there is no pass at all.
+*
+* Barriers: the atlas goes from being read by last frame's fragment shaders to being a depth target (its contents kept:
+* only some tiles are redrawn), and back to being read once the tiles are drawn, before the main pass samples it.
+*/
+void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet) {
+    if (shadowDraws.tiles.empty()) {
         return;
     }
 
@@ -758,7 +848,10 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const FrameDescription& de
     beginRendering(commands, {shadowAtlasWidth, shadowAtlasHeight}, nullptr, &atlas);
     renderingOpen = true;
 
-    for (const TileToDraw& drawing : toDraw) {
+    // The reset and the shadow pipelines share the scene's layout, so the sets stay bound across both.
+    bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+
+    for (const ShadowTileDraw& drawing : shadowDraws.tiles) {
         const ShadowTile& tile = *drawing.tile;
         ++stats.shadowTilesDrawn;
 
@@ -768,22 +861,10 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const FrameDescription& de
         drawFullScreenTriangle(commands);
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline->get());
 
-        stats.shadowDrawn += drawing.casters.size();
-        stats.shadowCulled += description.draws.size() - drawing.casters.size();
+        const GpuShadowView view = packShadowView(tile.matrix);
+        vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
-        for (std::size_t index : drawing.casters) {
-            const DrawItem& draw = description.draws[index];
-            std::uint32_t indexCount = 0;
-            bindMesh(commands, draw.mesh, indexCount);
-
-            float transform[16]{};
-            writeColumnMajor(tile.matrix * draw.model, transform);
-            frame.uniforms.push(VK_SHADER_STAGE_VERTEX_BIT, 0, transform, sizeof(transform));
-            frame.uniforms.bind(commands, *shadowPipeline);
-
-            vkCmdDrawIndexed(commands, indexCount, 1, 0, 0, 0);
-        }
-
+        stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches);
         shadowMemory.remember(tile, drawing.signature);
     }
 
@@ -793,12 +874,12 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const FrameDescription& de
 }
 
 /*
-* The camera's view into the scene image. Both targets start cleared, so their old contents are discarded (the barrier
-* still waits for last frame's reads of the scene image to finish first). The lights and shadow data are pushed once:
-* they stay in effect for every draw. Afterwards the scene image becomes readable for bloom and tone mapping.
+* The camera's view into the scene image: one instanced draw per mesh, every object's matrices, material, textures and
+* lights read from the scene's buffers. Both targets start cleared, so their old contents are discarded (the barrier
+* still waits for last frame's reads of the scene image to finish first). Afterwards the scene image becomes readable
+* for bloom and tone mapping.
 */
-void VulkanRenderer::drawMainPass(FrameContext& frame, const FrameDescription& description, const LightUniformData& lights,
-                                  const ShadowPlan& shadows, const Frustum& cameraFrustum) {
+void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
@@ -809,17 +890,8 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const FrameDescription& d
     renderingOpen = true;
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipeline->get());
-    frame.uniforms.push(VK_SHADER_STAGE_FRAGMENT_BIT, 1, &lights, sizeof(lights));
-    frame.uniforms.push(VK_SHADER_STAGE_FRAGMENT_BIT, 2, &shadows.uniforms, sizeof(shadows.uniforms));
-
-    const std::vector<std::size_t> visible = visibleDraws(description.draws, cameraFrustum);
-
-    for (std::size_t index : visible) {
-        drawMesh(frame, description.draws[index]);
-    }
-
-    stats.drawn = visible.size();
-    stats.culled = description.draws.size() - visible.size();
+    bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+    stats.drawCalls = drawBatches(commands, mainDraws.batches);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -827,42 +899,18 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const FrameDescription& d
 }
 
 /*
-* One object: the three matrices (camera-relative transform, camera-relative model, normal matrix) and the model's
-* handedness for the vertex shader, its material for the fragment shader, and its textures: colour, the shadow atlas
-* compared and raw, metallic-roughness, the BRDF table and the normal map, then the shadow tiles' storage buffer.
+* One instanced draw per batch: the mesh's buffers bound, and every instance of it drawn at once (gl_InstanceIndex counts
+* from firstInstance, the batch's first entry in the draw list, which names each instance). Returns how many draw calls
+* that took.
 */
-void VulkanRenderer::drawMesh(FrameContext& frame, const DrawItem& draw) {
-    const VkCommandBuffer commands = frame.commands;
-    std::uint32_t indexCount = 0;
-    bindMesh(commands, draw.mesh, indexCount);
+std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const {
+    for (const DrawBatch& batch : batches) {
+        std::uint32_t indexCount = 0;
+        bindMesh(commands, batch.mesh, indexCount);
+        vkCmdDrawIndexed(commands, indexCount, batch.instanceCount, 0, 0, batch.firstInstance);
+    }
 
-    const Mat4 relativeModel = relativeTo(draw.model, cameraOrigin);
-    const Mat4 transform = relativeViewProjection * relativeModel;
-    const Mat4 normals = normalMatrix(draw.model);
-
-    float matrixData[52]{};
-    writeColumnMajor(transform, matrixData);
-    writeColumnMajor(relativeModel, matrixData + 16);
-    writeColumnMajor(normals, matrixData + 32);
-    matrixData[48] = handedness(draw.model);
-    frame.uniforms.push(VK_SHADER_STAGE_VERTEX_BIT, 0, matrixData, sizeof(matrixData));
-
-    const MaterialUniformData material = packMaterial(draw.material);
-    frame.uniforms.push(VK_SHADER_STAGE_FRAGMENT_BIT, 0, &material, sizeof(material));
-    frame.uniforms.bind(commands, *mainPipeline);
-
-    const std::array<SampledImage, 6> images{
-        sampled(textureOrWhite(draw.material.texture)),
-        SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
-        SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
-        sampled(textureOrWhite(draw.material.metallicRoughnessTexture)),
-        sampled(*brdfTable),
-        sampled(textureOrWhite(draw.material.normalTexture)),
-    };
-    const VkDescriptorBufferInfo tiles{frames[frame.frameIndex].shadowTiles.get(), 0, VK_WHOLE_SIZE};
-    bindFragmentResources(commands, frame.descriptors, *mainPipeline, images, {&tiles, 1});
-
-    vkCmdDrawIndexed(commands, indexCount, 1, 0, 0, 0);
+    return batches.size();
 }
 
 /*
@@ -996,17 +1044,13 @@ void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, s
     indexCount = mesh.getIndexCount();
 }
 
-// No texture means plain colour or plain factors: the shader multiplies them by white.
-const VulkanTexture& VulkanRenderer::textureOrWhite(TextureHandle handle) const {
-    if (!handle.isValid()) {
-        return *whiteTexture;
+// The shader would read an empty slot of the texture array for a texture that was never uploaded; better to stop here.
+void VulkanRenderer::checkTexturesUploaded(const Material& material) const {
+    for (TextureHandle handle : {material.texture, material.metallicRoughnessTexture, material.normalTexture}) {
+        if (handle.isValid() && handle.index >= textures.size()) {
+            throw std::out_of_range("Material texture handle has not been uploaded");
+        }
     }
-
-    if (handle.index >= textures.size()) {
-        throw std::out_of_range("drawMesh: texture handle has not been uploaded");
-    }
-
-    return *textures[handle.index];
 }
 
 SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
@@ -1014,7 +1058,8 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
-// Uploads wait for the GPU with their own command buffer, so they must happen between frames.
+// Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
+// in the bindless array at once (slots in-flight frames do not read may change while they run).
 void VulkanRenderer::uploadMesh(const IndexedMesh& mesh) {
     if (recording) {
         throw std::logic_error("Upload meshes before beginning a frame");
@@ -1029,6 +1074,8 @@ void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const 
     }
 
     textures.push_back(std::make_unique<VulkanTexture>(device, uploads, width, height, pixels, surfaceTexture(encoding)));
+    const TextureHandle handle{static_cast<std::uint32_t>(textures.size() - 1)};
+    bindlessTextures->write(bindlessTextureSlot(handle), textures.back()->getView(), surfaceSampler.get());
 }
 
 std::size_t VulkanRenderer::getMeshCount() const {

@@ -70,22 +70,25 @@ FrameLighting selectDrawableLights(const FrameLighting& lighting) {
 * direction (the shader's N dot L needs the direction towards the light), and measuring positions from the camera, which
 * is where the shader's origin is.
 */
-LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition) {
+GpuLights packLighting(const FrameLighting& lighting, const Vec3& cameraPosition) {
     const FrameLighting selected = selectDrawableLights(lighting);
-    LightUniformData data{};
+    GpuLights data;
+    data.directional.resize(selected.directionalLights.size());
+    data.points.resize(selected.pointLights.size());
+    data.spots.resize(selected.spotLights.size());
 
     writeVector(data.ambient, selected.ambient, 0.0f);
 
     for (std::size_t i = 0; i < selected.directionalLights.size(); ++i) {
         const DirectionalLight& light = selected.directionalLights[i];
-        DirectionalLightUniform& slot = data.directional[i];
+        GpuDirectionalLight& slot = data.directional[i];
         writeVector(slot.toLight, light.direction.normalized() * -1.0f, 0.0f);
         writeVector(slot.radiance, light.colour * light.intensity, 0.0f);
     }
 
     for (std::size_t i = 0; i < selected.pointLights.size(); ++i) {
         const PlacedPointLight& placed = selected.pointLights[i];
-        PointLightUniform& slot = data.points[i];
+        GpuPointLight& slot = data.points[i];
         writeVector(slot.positionRange, placed.position - cameraPosition, placed.light.range);
 
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive falls back to 1.
@@ -102,13 +105,13 @@ LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraP
         const float cosOuter = std::cos(light.outerAngle);
         const float cosInner = std::cos(std::min(light.innerAngle, light.outerAngle));
 
-        SpotLightUniform& slot = data.spots[i];
+        GpuSpotLight& slot = data.spots[i];
         writeVector(slot.positionRange, selected.spotLights[i].position - cameraPosition, light.range);
         writeVector(slot.directionCosOuter, light.direction.normalized(), cosOuter);
         writeVector(slot.radianceCosInner, light.colour * (light.intensity * selected.spotLights[i].fade), cosInner);
 
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive would allow a division by zero at the light.
-        slot.sourceRadius[0] = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;
+        slot.sourceRadius = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;
     }
 
     data.counts[0] = static_cast<std::int32_t>(selected.directionalLights.size());

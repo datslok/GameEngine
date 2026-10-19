@@ -73,6 +73,10 @@ struct PipelineDescription {
     const char* vertexShader = nullptr;
     const char* fragmentShader = nullptr;
     ShaderResources resources;
+
+    // A pipeline layout made elsewhere and shared (the scene's, render/vulkan/scene_layout.h), used instead of building
+    // one from resources in SDL_GPU's four sets. Not owned: it must outlive the pipeline.
+    VkPipelineLayout sharedLayout = VK_NULL_HANDLE;
     VertexLayout vertices;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
@@ -104,7 +108,8 @@ public:
 private:
     ShaderResources resources;
     VkDescriptorSetLayout fragmentResourceLayout = VK_NULL_HANDLE;
-    OwnedHandle<VkPipelineLayout> layout;
+    OwnedHandle<VkPipelineLayout> ownedLayout;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
     OwnedHandle<VkPipeline> pipeline;
 };
 

@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL_vulkan.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -122,7 +123,10 @@ void VulkanDevice::createInstance(bool validation) {
 * A GPU qualifies if it runs Vulkan 1.3, can present to the window (when there is one), and has the features the renderer uses: dynamic
 * rendering (draw into images named when a pass begins, no render pass objects), synchronization2 (the clearer barrier
 * API), anisotropic filtering, and depth clamping (SDL_GPU's default, kept so the pictures match: depths past the near
-* and far planes are clamped instead of clipped). A discrete GPU is preferred over an integrated one.
+* and far planes are clamped instead of clipped), and descriptor indexing for bindless textures: one array of every texture,
+* indexed per object in the shader (runtimeDescriptorArray, nonuniform indexing), with slots that may be empty
+* (partially bound) and filled while frames using other slots are still in flight (update after bind, unused while
+* pending). Every desktop GPU with Vulkan 1.3 drivers has these. A discrete GPU is preferred over an integrated one.
 */
 void VulkanDevice::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
@@ -134,10 +138,19 @@ void VulkanDevice::selectPhysicalDevice() {
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.runtimeDescriptorArray = VK_TRUE;
+    features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    features12.descriptorBindingPartiallyBound = VK_TRUE;
+    features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    features12.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+
     vkb::PhysicalDeviceSelector selector{instance, surface};
     auto selected = selector.set_minimum_version(1, 3)
         .prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
         .set_required_features(features)
+        .set_required_features_12(features12)
         .set_required_features_13(features13)
         .select();
 
@@ -311,6 +324,24 @@ std::uint32_t VulkanDevice::getTimestampValidBits() const {
 
 double VulkanDevice::getTimestampPeriod() const {
     return physicalDevice.properties.limits.timestampPeriod;
+}
+
+/*
+* A combined image sampler counts as both a sampler and a sampled image, against the per-stage and the per-set limits for
+* update-after-bind sets (at least 500,000 each on GPUs with descriptor indexing, far beyond what the renderer asks).
+*/
+std::uint32_t VulkanDevice::getBindlessTextureLimit() const {
+    VkPhysicalDeviceVulkan12Properties properties12{};
+    properties12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 properties{};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.pNext = &properties12;
+    vkGetPhysicalDeviceProperties2(physicalDevice.physical_device, &properties);
+
+    return std::min({properties12.maxPerStageDescriptorUpdateAfterBindSamplers, properties12.maxPerStageDescriptorUpdateAfterBindSampledImages,
+                     properties12.maxDescriptorSetUpdateAfterBindSamplers, properties12.maxDescriptorSetUpdateAfterBindSampledImages,
+                     properties12.maxPerStageUpdateAfterBindResources});
 }
 
 /*

@@ -1,4 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "frame_data.glsl"
+#include "instances.glsl"
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
@@ -10,21 +14,23 @@ layout(location = 0) out vec3 worldNormal;
 layout(location = 1) out vec2 textureUv;
 layout(location = 2) out vec3 relativePosition;
 layout(location = 3) out vec4 worldTangent;
-
-// Camera-relative rendering (render/gpu/camera_relative.h): positions are measured from the camera along the world's
-// axes, so the numbers stay small and precise however far from the world's origin the camera is.
-layout(std140, set = 1, binding = 0) uniform TransformData {
-    mat4 transform;    // the camera-relative view-projection times the camera-relative model matrix
-    mat4 model;        // places the vertex relative to the camera
-    mat4 normalMatrix; // Inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if the object is squashed flat).
-    vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
-};
+// Which entry of the material buffer shades this object: the same for every fragment of a triangle (flat, not interpolated).
+layout(location = 4) flat out uint materialIndex;
 
 void main() {
-    gl_Position = transform * vec4(position, 1.0);
+    InstanceData instance = instances[drawList[gl_InstanceIndex]];
+    mat4 normalMatrix = instance.normalMatrix;
+    vec4 handedness = instance.handedness;
+    materialIndex = instance.material.x;
 
-    // Point lights need to know where each fragment is, relative to the camera like the lights themselves.
+    // Camera-relative rendering (render/gpu/camera_relative.h): the camera is subtracted from the model matrix's
+    // translation before any product, as relativeTo does, so positions are measured from the camera along the world's
+    // axes and the numbers stay small and precise however far from the world's origin the camera is. Point lights
+    // need to know where each fragment is, relative to the camera like the lights themselves.
+    mat4 model = instance.model;
+    model[3].xyz -= cameraOrigin.xyz;
     relativePosition = (model * vec4(position, 1.0)).xyz;
+    gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;

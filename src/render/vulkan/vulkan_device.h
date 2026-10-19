@@ -49,6 +49,10 @@ public:
     std::uint32_t getTimestampValidBits() const;
     double getTimestampPeriod() const;
 
+    // The most textures one bindless array may hold (combined image samplers in an update-after-bind set, for the
+    // fragment stage): the smallest of the limits that apply.
+    std::uint32_t getBindlessTextureLimit() const;
+
     // Debug labels and object names (VK_EXT_debug_utils) for RenderDoc and Nsight. Do nothing when the extension is missing.
     void beginLabel(VkCommandBuffer commands, const char* name) const;
     void endLabel(VkCommandBuffer commands) const;
