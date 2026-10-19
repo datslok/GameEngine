@@ -25,10 +25,10 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 }
 
 /*
-* Four lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
+* Five lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
-* lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), and the
-* shadow tiles drawn and point light cube faces skipped as unseen.
+* lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
+* tiles drawn and point light cube faces skipped as unseen, and the video memory.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
@@ -46,9 +46,33 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     debugText(debug, debugReadoutLine(1), debugReadoutTextHeight, shadows, boundingBoxColour);
     debugText(debug, debugReadoutLine(2), debugReadoutTextHeight, lights, boundingBoxColour);
     debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
+    debugText(debug, debugReadoutLine(videoMemoryReadoutLine), debugReadoutTextHeight, videoMemoryText(stats.videoMemory), boundingBoxColour);
 }
 /*
-* One line so the numbers can be compared at a glance. Milliseconds rather than seconds, because frames and systems
+* Megabytes rounded to the nearest: memory is reserved in blocks of megabytes, so finer would only flicker.
+*/
+std::string videoMemoryText(const VideoMemory& memory) {
+    if (!memory.valid) {
+        return "VRAM -";
+    }
+
+    const auto megabytes = [](std::uint64_t bytes) {
+        constexpr std::uint64_t megabyte = 1024ull * 1024ull;
+        return std::to_string((bytes + megabyte / 2) / megabyte);
+    };
+
+    const std::string engine = "ENGINE " + megabytes(memory.engineBytes) + " MB";
+
+    if (!memory.driverReported) {
+        return "VRAM " + engine + "  NO DRIVER BUDGET";
+    }
+
+    return "VRAM " + megabytes(memory.usedBytes) + " / " + megabytes(memory.budgetBytes) + " MB  " + engine;
+}
+
+/*
+* One line so the numbers can be compared at a glance.
+ Milliseconds rather than seconds, because frames and systems
 * cost thousandths of a second; the stroke font has no micro sign, so small costs get more decimals instead.
 */
 std::string profileText(const Profiler& profiler, int decimals, bool withWorst) {

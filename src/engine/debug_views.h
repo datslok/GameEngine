@@ -3,6 +3,7 @@
 #include "core/profiler.h"
 #include "ecs/world.h"
 #include "render/render_stats.h"
+#include "render/gpu/video_memory.h"
 #include "scene/debug_draw.h"
 #include "scene/frame_description.h"
 #include "scene/model.h"
@@ -20,21 +21,28 @@
 void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug);
 
 // The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts, so a game
-// can put its own lines below the engine's (drawRenderStats uses lines 0 to 3).
+// can put its own lines below the engine's (drawRenderStats uses lines 0 to 4).
 constexpr float debugReadoutTextHeight = 14.0f;
 Vec2 debugReadoutLine(int line);
 
 // The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame.
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
 
+// The readout line drawRenderStats writes the video memory on (videoMemoryText).
+constexpr int videoMemoryReadoutLine = 4;
+
 // The readout line drawRenderStats leaves for the engine's timings (drawProfile).
-constexpr int engineProfileReadoutLine = 4;
+constexpr int engineProfileReadoutLine = 5;
 
 // The readout line for the GPU's timings per pass (a profiler from makeGpuProfiler).
-constexpr int gpuProfileReadoutLine = 5;
+constexpr int gpuProfileReadoutLine = 6;
 
-// The engine's readout uses lines 0 to 5; a game's own lines start here.
-constexpr int firstGameReadoutLine = 6;
+// The engine's readout uses lines 0 to 6; a game's own lines start here.
+constexpr int firstGameReadoutLine = 7;
+
+// The video memory line: "VRAM used / budget MB  ENGINE n MB" (megabytes of 2^20 bytes), or the engine's share alone
+// when the driver gives no budget, or "VRAM -" before anything was measured.
+std::string videoMemoryText(const VideoMemory& memory);
 
 // A profiler for the GPU's timings: "GPU" (the whole frame) as section 0, then one section per pass in GpuPass order.
 Profiler makeGpuProfiler();
