@@ -11,6 +11,7 @@
 #include "normal_mapping.glsl"
 #include "lighting.glsl"
 #include "soft_shadow.glsl"
+#include "cascades.glsl"
 #include "clusters.glsl"
 
 // Per-pixel noise, which turns each pixel's soft shadow samples.
@@ -59,9 +60,11 @@ layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
 // Must match ShadowTileData in render/gpu/shadow_map.h.
 struct ShadowTileData {
     mat4 matrix; // the shadow pass's view-projection, for points measured from the camera
-    vec4 offset; // normal offset against acne: x per unit of distance from the light, y fixed
+    vec4 offset; // against acne: x per unit of distance from the light, y fixed (a sun cascade's: its base bias towards the sun)
     vec4 rect;   // where the tile is in the atlas, 0..1: xy corner, zw size
-    vec4 lens;   // perspective tiles only (else zeros): x near, y far plane, z world size of a texel per unit of distance
+    // Perspective tiles: x near, y far plane, z world size of a texel per unit of distance. A sun's cascade boxes: x 0
+    // (no near plane), y the box's depth, z one texel's world size, w the cascade's radius.
+    vec4 lens;
 };
 
 layout(std430, set = 1, binding = 6) readonly buffer ShadowTiles {
@@ -152,8 +155,10 @@ vec3 atlasPoint(int tile, vec3 position) {
 }
 
 /*
-* Percentage-closer soft shadows (PCSS) for a perspective tile: how much of a glowing area of radius emitterRadius the
-* point sees. Directional boxes, and lights without an emitter size, use the plain 3x3 filter.
+* Percentage-closer soft shadows (PCSS): how much of a glowing area the point sees. For a perspective tile the area is a
+* bulb of radius emitterSize, distances are measured from the light and the penumbra spreads like a cone from it; for a
+* sun's cascade box (no near plane) emitterSize is tan of the sun's angular radius, distances are measured from the box's
+* near side and the penumbra widens by the same angle at any distance. Lights without a size use the plain 3x3 filter.
 * 1. Blocker search: look around the point for stored depths nearer the light than it (larger, with reversed-Z), and average their distances.
 * 2. Penumbra: from that, how wide the soft edge is here (wider the further the point is behind the blocker).
 * 3. Filter: average sixteen depth comparisons spread over that width.
@@ -162,14 +167,15 @@ vec3 atlasPoint(int tile, vec3 position) {
 * (receiver plane depth bias), worked out from how the point moves in the tile from one screen pixel to the next.
 * The sample pattern is turned by a different angle in every pixel, which trades banding for fine grain.
 */
-float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
+float softShadowFromTile(int tile, vec3 position, float emitterSize) {
     if (shadowTiles[tile].rect.z <= 0.0) {
         return 1.0;
     }
 
     vec4 lens = shadowTiles[tile].lens;
+    bool box = lens.x <= 0.0;
 
-    if (lens.y <= 0.0 || emitterRadius <= 0.0) {
+    if (lens.y <= 0.0 || emitterSize <= 0.0) {
         return shadowFromTile(tile, position);
     }
 
@@ -199,8 +205,9 @@ float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
     float angle = 6.2831853 * interleavedGradientNoise(gl_FragCoord.xy);
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
 
-    float receiverDistance = linearShadowDepth(here.z, lens.x, lens.y);
-    float searchRadius = blockerSearchTexels(emitterRadius, receiverDistance, lens.x, lens.z);
+    float receiverDistance = box ? boxShadowDistance(here.z, lens.y) : linearShadowDepth(here.z, lens.x, lens.y);
+    float searchRadius = box ? sunBlockerSearchTexels(emitterSize, receiverDistance, lens.z)
+                             : blockerSearchTexels(emitterSize, receiverDistance, lens.x, lens.z);
     float blockerDistances = 0.0;
     float blockers = 0.0;
 
@@ -209,7 +216,7 @@ float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
         float stored = textureLod(shadowDepths, uv, 0.0).r;
 
         if (stored > here.z + dot(depthSlope, uv - here.xy)) {
-            blockerDistances += linearShadowDepth(stored, lens.x, lens.y);
+            blockerDistances += box ? boxShadowDistance(stored, lens.y) : linearShadowDepth(stored, lens.x, lens.y);
             blockers += 1.0;
         }
     }
@@ -219,7 +226,9 @@ float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
         return 1.0;
     }
 
-    float filterRadius = penumbraTexels(emitterRadius, receiverDistance, blockerDistances / blockers, lens.z);
+    float blockerDistance = blockerDistances / blockers;
+    float filterRadius = box ? sunPenumbraTexels(emitterSize, receiverDistance, blockerDistance, lens.z)
+                             : penumbraTexels(emitterSize, receiverDistance, blockerDistance, lens.z);
     float lit = 0.0;
 
     for (int i = 0; i < 16; ++i) {
@@ -228,6 +237,71 @@ float softShadowFromTile(int tile, vec3 position, float emitterRadius) {
     }
 
     return lit / 16.0;
+}
+
+// How far a point is inside a sun cascade's box, in units of its radius (see cascadeEdgeDistance): negative outside.
+float sunCascadeEdge(int tile, vec3 position) {
+    vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
+    vec4 lens = shadowTiles[tile].lens;
+    return cascadeEdgeDistance(clip.xyz / clip.w, lens.y / lens.w);
+}
+
+/*
+* The sun's shadow from its cascades (render/gpu/cascades.h), tiles in a row from firstTile, finest first. The point is
+* shadowed by the finest cascade whose box holds it, each moving the point towards the sun by its own bias (sunShadowBias:
+* along the rays, so every cascade still finds the shadow's edges in the same place). Within
+* the blend band near that box's edge, the next cascade takes over gradually: both are looked up and mixed, or with the
+* dithered switch each pixel takes one of them, the next more often nearer the edge. Past the last cascade's edge the
+* shadow fades to lit, and a point no box holds is lit.
+*/
+float sunShadow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius) {
+    float band = cascadeOptions.x;
+    bool dither = cascadeOptions.y != 0.0;
+    float nDotL = dot(normal, toLight);
+
+    for (int cascade = 0; cascade < cascades; ++cascade) {
+        int tile = firstTile + cascade;
+        vec3 position = relativePosition + toLight * sunShadowBias(shadowTiles[tile].offset.y, nDotL);
+        float edge = sunCascadeEdge(tile, position);
+
+        if (edge <= 0.0) {
+            continue;
+        }
+
+        float weight = cascadeBlendWeight(edge, band);
+
+        if (weight >= 1.0) {
+            return softShadowFromTile(tile, position, tanAngularRadius);
+        }
+
+        // In the band: the next cascade's share comes from it, or past the last one from plain light. A point the next
+        // box misses (only at its corners) stays wholly with this one.
+        bool last = cascade + 1 == cascades;
+        int nextTile = tile + 1;
+        vec3 nextPosition = position;
+
+        if (!last) {
+            nextPosition = relativePosition + toLight * sunShadowBias(shadowTiles[nextTile].offset.y, nDotL);
+
+            if (sunCascadeEdge(nextTile, nextPosition) <= 0.0) {
+                return softShadowFromTile(tile, position, tanAngularRadius);
+            }
+        }
+
+        if (dither) {
+            // Noise of its own, offset from the soft shadow's, so the choice does not follow the samples' turn.
+            if (cascadeDitherKeeps(weight, interleavedGradientNoise(gl_FragCoord.xy + vec2(23.0, 41.0)))) {
+                return softShadowFromTile(tile, position, tanAngularRadius);
+            }
+
+            return last ? 1.0 : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
+        }
+
+        float beyond = last ? 1.0 : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
+        return mix(beyond, softShadowFromTile(tile, position, tanAngularRadius), weight);
+    }
+
+    return 1.0;
 }
 
 // A point light has six tiles in a row, one per cube face; the face is picked from the direction to the point.
@@ -377,7 +451,7 @@ void main() {
             int tile = directional[i].shadowTile;
 
             if (tile >= 0) {
-                radiance *= shadowFromTile(tile, offsetForShadow(tile, geometricNormal, 0.0));
+                radiance *= sunShadow(tile, directional[i].cascadeCount, geometricNormal, directional[i].toLight.xyz, directional[i].tanAngularRadius);
             }
 
             addLight(radiance, directional[i].toLight.xyz, point, diffuse, specular);

@@ -6,8 +6,9 @@
 #include <algorithm>
 #include <numeric>
 
-// Every seated directional light can have a shadow, so only point lights and spotlights need a separate shadow choice.
-static_assert(maxShadowedDirectionalLights >= maxDirectionalLights, "every seated directional light is expected to fit in the shadow atlas");
+// Only the brightest directional light (the first, as they are ranked) gets a shadow, its cascades; point lights and
+// spotlights need a separate shadow choice.
+static_assert(maxShadowedDirectionalLights >= 1, "the brightest directional light is expected to have its cascades");
 
 namespace {
     float brightestChannel(const Vec3& colour) {

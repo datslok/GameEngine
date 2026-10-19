@@ -64,6 +64,48 @@ namespace {
             report.check("penumbraTexels", arithmeticTolerance, penumbraTexels(in[0], in[1], in[2], in[3]), outputs[i][0]);
         }
     }
+    // Box depths over boxes of different depth: (depth, depth range).
+    void checkBoxDistance(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        std::vector<GpuVec4> inputs;
+
+        for (float range : {10.0f, 150.0f, 600.0f}) {
+            for (int i = 0; i <= 20; ++i) {
+                inputs.push_back(gpuVec4(static_cast<float>(i) / 20.0f, range));
+            }
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_BOX_SHADOW_DISTANCE, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            report.check("boxShadowDistance", arithmeticTolerance, boxShadowDistance(inputs[i][0], inputs[i][1]), outputs[i][0]);
+        }
+    }
+
+    // Suns from none to a few degrees, receivers and blockers anywhere in a box, cascades' texels from 1 cm to 1 m:
+    // (tan of the angular radius, receiver distance, blocker distance, texel size).
+    std::vector<GpuVec4> sunCases(std::uint32_t seed) {
+        CaseRandom random{seed};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 300; ++i) {
+            const float receiver = random.between(0.5f, 400.0f);
+            inputs.push_back(gpuVec4(random.between(0.0f, 0.05f), receiver, random.between(0.0f, receiver), random.between(0.01f, 1.0f)));
+        }
+
+        return inputs;
+    }
+
+    void checkSunShadow(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const std::vector<GpuVec4> inputs = sunCases(7);
+        const std::vector<GpuVec4> search = runner.run(shader, GPU_TEST_SUN_BLOCKER_SEARCH_TEXELS, inputs, 1, 1);
+        const std::vector<GpuVec4> penumbra = runner.run(shader, GPU_TEST_SUN_PENUMBRA_TEXELS, inputs, 1, 1);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const GpuVec4& in = inputs[i];
+            report.check("sunBlockerSearchTexels", arithmeticTolerance, sunBlockerSearchTexels(in[0], in[1], in[3]), search[i][0]);
+            report.check("sunPenumbraTexels", arithmeticTolerance, sunPenumbraTexels(in[0], in[1], in[2], in[3]), penumbra[i][0]);
+        }
+    }
 }
 
 void gpuTestSoftShadow(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -71,4 +113,6 @@ void gpuTestSoftShadow(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkLinearDepth(runner, report);
     checkBlockerSearch(runner, report);
     checkPenumbra(runner, report);
+    checkBoxDistance(runner, report);
+    checkSunShadow(runner, report);
 }

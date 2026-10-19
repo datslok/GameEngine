@@ -13,8 +13,14 @@ struct DirectionalLight {
     Vec3 colour{1.0f, 1.0f, 1.0f};
     float intensity = 1.0f;
 
-    // Whether objects block this light. Its shadow covers the renderer's ShadowSettings::directionalDistance in front of the camera.
+    // Whether objects block this light. Its shadow covers the renderer's ShadowSettings::directionalDistance in front of the
+    // camera, in cascades; only the brightest directional light gets one.
     bool castsShadows = true;
+
+    // Half the angle its disc spans as seen from the ground, in radians, which decides how soft its shadows are: behind a
+    // blocker the soft edge widens by tan(angularRadius) per metre. The sun's (and, nearly, the full moon's) by default:
+    // 0.267 degrees, a disc about half a degree across. 0 gives the sharpest shadows.
+    float angularRadius = 0.00465f;
 };
 
 // Component: a light that shines in every direction from its entity's Transform position and fades out with distance.

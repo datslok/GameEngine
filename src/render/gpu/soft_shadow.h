@@ -33,3 +33,20 @@ float blockerSearchTexels(float emitterRadius, float receiverDepth, float nearPl
 
 // The penumbra's width at the receiver, R (d - z) / z, measured in the texels that cover d * texelPerUnit each there.
 float penumbraTexels(float emitterRadius, float receiverDepth, float blockerDepth, float texelPerUnit);
+
+/*
+* The sun's version, in a cascade's box. Its rays are parallel apart from the sun's own size: from a point, the disc
+* spans its angular radius either side of its centre, so behind a blocker the penumbra widens by tan(angular radius) per
+* unit of distance between them, the same at any distance from the sun. Distances are measured in the box, from its near
+* side (towards the sun); texelSize is one texel's world size in the cascade, which converts the world width to texels,
+* so a shadow keeps its softness across a cascade boundary wherever the coarser cascade can still show it.
+*/
+
+// A box's depth is a straight ramp, 1 at its near side to 0 at the far one: the distance from the near side.
+float boxShadowDistance(float depth, float depthRange);
+
+// The widest penumbra a blocker could throw at the receiver: from one at the box's near side.
+float sunBlockerSearchTexels(float tanAngularRadius, float receiverDistance, float texelSize);
+
+// The penumbra's width at the receiver, tan(angular radius) * (receiver - blocker), in the cascade's texels.
+float sunPenumbraTexels(float tanAngularRadius, float receiverDistance, float blockerDistance, float texelSize);

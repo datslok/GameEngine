@@ -8,6 +8,8 @@ namespace {
         float texelTarget = 0.0f;
         float spotTexelTarget = 0.0f;
         float directionalDistance = 0.0f;
+        int cascadeCount = 0;
+        CascadeResolution cascadeResolution = CascadeResolution::Pixels2048;
         std::uint32_t bloomLevels = 0;
 
         bool operator==(const QualityValues&) const = default;
@@ -20,20 +22,29 @@ namespace {
             .texelTarget = settings.shadows.texelTarget,
             .spotTexelTarget = settings.shadows.spotTexelTarget,
             .directionalDistance = settings.shadows.directionalDistance,
+            .cascadeCount = settings.shadows.cascadeCount,
+            .cascadeResolution = settings.shadows.cascadeResolution,
             .bloomLevels = settings.bloom.maxLevels
         };
     }
 
-    // High is read from the defaults, so retuning a default retunes High with it.
+    // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra with 2048 cascades.
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
+            case QualityPreset::High: {
+                QualityValues high = valuesOf(RenderSettings{});
+                high.cascadeResolution = CascadeResolution::Pixels2048;
+                return high;
+            }
             case QualityPreset::Low:
                 return {.shadowedPoints = 8, .shadowedSpots = 4, .texelTarget = 0.1f, .spotTexelTarget = 0.05f,
-                        .directionalDistance = 20.0f, .bloomLevels = 4};
+                        .directionalDistance = 60.0f, .cascadeCount = 2,
+                        .cascadeResolution = CascadeResolution::Pixels1024, .bloomLevels = 4};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
-                        .directionalDistance = 30.0f, .bloomLevels = 5};
-            case QualityPreset::High:
+                        .directionalDistance = 120.0f, .cascadeCount = 3,
+                        .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5};
+            case QualityPreset::Ultra:
                 break;
         }
 
@@ -48,13 +59,15 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.shadows.texelTarget = values.texelTarget;
     settings.shadows.spotTexelTarget = values.spotTexelTarget;
     settings.shadows.directionalDistance = values.directionalDistance;
+    settings.shadows.cascadeCount = values.cascadeCount;
+    settings.shadows.cascadeResolution = values.cascadeResolution;
     settings.bloom.maxLevels = values.bloomLevels;
 }
 
 std::optional<QualityPreset> matchingQualityPreset(const RenderSettings& settings) {
     const QualityValues current = valuesOf(settings);
 
-    for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High}) {
+    for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
         if (presetValues(preset) == current) {
             return preset;
         }

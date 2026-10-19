@@ -8,7 +8,9 @@
 struct DirectionalLightData {
     vec4 toLight;  // xyz: unit direction towards the light
     vec4 radiance; // rgb: colour times intensity
-    int shadowTile;
+    int shadowTile;         // the first of its cascades' tiles
+    int cascadeCount;
+    float tanAngularRadius; // its size as seen from the ground, for soft shadows
 };
 
 struct PointLightData {

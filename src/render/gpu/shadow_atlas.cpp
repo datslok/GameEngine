@@ -4,16 +4,16 @@
 #include <algorithm>
 #include <stdexcept>
 
-ShadowAtlasAllocator::ShadowAtlasAllocator() {
+ShadowAtlasAllocator::ShadowAtlasAllocator(const ShadowAtlasSize& size) : size(size) {
     reset();
 }
 
 void ShadowAtlasAllocator::reset() {
     freeSquares.clear();
 
-    for (std::uint32_t y = 0; y < shadowAtlasHeight; y += largestShadowTileSize) {
-        for (std::uint32_t x = 0; x < shadowAtlasWidth; x += largestShadowTileSize) {
-            freeSquares.push_back(AtlasSquare{x, y, largestShadowTileSize});
+    for (std::uint32_t y = 0; y < size.height; y += size.largestSquare) {
+        for (std::uint32_t x = 0; x < size.width; x += size.largestSquare) {
+            freeSquares.push_back(AtlasSquare{x, y, size.largestSquare});
         }
     }
 }
@@ -56,7 +56,7 @@ std::optional<AtlasSquare> ShadowAtlasAllocator::allocate(std::uint32_t size) {
 void ShadowAtlasAllocator::release(const AtlasSquare& released) {
     AtlasSquare square = released;
 
-    while (square.size < largestShadowTileSize) {
+    while (square.size < size.largestSquare) {
         const std::uint32_t parentSize = square.size * 2;
         const std::uint32_t parentX = square.x - square.x % parentSize;
         const std::uint32_t parentY = square.y - square.y % parentSize;
@@ -108,10 +108,21 @@ std::uint64_t ShadowAtlasAllocator::freeTexels() const {
     return total;
 }
 
+const ShadowAtlasSize& ShadowAtlasAllocator::getSize() const {
+    return size;
+}
+
 /*
 * Biggest first, ties in request order: then the quarters of a split square are used up before another is split, so
 * on an empty atlas everything fits whenever the total area does.
 */
+ShadowAtlasLayout::ShadowAtlasLayout(const ShadowAtlasSize& size) : allocator(size) {
+}
+
+const ShadowAtlasSize& ShadowAtlasLayout::size() const {
+    return allocator.getSize();
+}
+
 bool ShadowAtlasLayout::placeLargestFirst(const std::vector<ShadowSquareRequest>& requests, const std::vector<std::size_t>& indices,
                                           std::vector<AtlasSquare>& squares) {
     std::vector<std::size_t> order = indices;

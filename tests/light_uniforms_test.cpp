@@ -1,4 +1,6 @@
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/shadow_map.h"
+#include "scene/camera.h"
 #include "scene/lighting.h"
 
 #include <cassert>
@@ -248,9 +250,26 @@ namespace {
         assert(data.points[0].firstShadowTile == -1 && data.points[0].shadowStrength == 0.0f && data.points[0].emitterRadius == 0.0f);
         assert(data.spots[0].shadowTile == -1 && data.spots[0].shadowStrength == 0.0f && data.spots[0].emitterRadius == 0.0f);
     }
+    // attachShadows gives the sun its cascades: the first tile, how many follow it, and its size as tan of its angle.
+    void testSunGetsItsCascades() {
+        FrameLighting lighting;
+        DirectionalLight sun;
+        sun.angularRadius = 0.01f;
+        lighting.directionalLights.push_back(sun);
+
+        GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        ShadowSettings settings;
+        settings.cascadeCount = 3;
+        attachShadows(data, planShadows(lighting, Camera{Vec3{0.0f, 2.0f, 0.0f}, Vec3{0.0f, 2.0f, -5.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 1.5f, 0.1f, 100.0f}, settings));
+
+        assert(data.directional[0].shadowTile == 0);
+        assert(data.directional[0].cascadeCount == 3);
+        assert(nearlyEqual(data.directional[0].tanAngularRadius, std::tan(0.01f)));
+    }
 }
 
 void testLightUniforms() {
+    testSunGetsItsCascades();
     testLightsStartUnshadowed();
     testFadeScalesRadiance();
     testPointLightSourceRadiusIsPacked();

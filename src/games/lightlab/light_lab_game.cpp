@@ -101,7 +101,7 @@ namespace {
 
     /*
     * The golden image views (engine/golden.h), each from the free camera at a fixed time of day: the towers and fence from
-    * the start (sun shadows ending about 30 m out, before cascades), the field from above, the sunlit room's beam on its
+    * the start (sun shadows in four cascades out to 200 m), the field from above, the sunlit room's beam on its
     * floor (the rest lit only by the flat sky ambient until bounce light), and the towers again at sunset in HDR (a low,
     * red sun and long shadows).
     */

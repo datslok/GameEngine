@@ -2,9 +2,11 @@
 #include "scene/camera.h"
 #include "scene/lighting.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace {
     bool nearlyEqual(float actual, float expected, float tolerance = 0.0001f) {
@@ -121,55 +123,116 @@ namespace {
         assert(landsInside(project(down, Vec3{0.0f, 0.0f, 0.0f})));
     }
 
-    // A directional light has parallel rays, so its shadow is a box (orthographic view) around what the camera sees nearby.
-    void testDirectionalShadowCoversTheViewNearTheCamera() {
+    // The sun gets one tile per cascade, in a row from its first tile: box views, the near ones finer, each the largest size.
+    void testSunGetsOneTilePerCascade() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
         const Camera camera = makeTestCamera(Vec3{2.0f, 5.0f, 4.0f});
-        const Vec3 sunlight{0.4f, -1.0f, -0.6f};
-        const Mat4 view = directionalShadowMatrix(sunlight, camera);
+        const ShadowSettings settings;
+        const ShadowPlan plan = planShadows(lighting, camera, settings);
 
-        const Vec3 centre = camera.getPosition() + camera.getForward() * (ShadowSettings{}.directionalDistance * 0.5f);
-        const float reach = ShadowSettings{}.directionalDistance * 0.45f;
-        const Vec3 offsets[6] = {
-            Vec3{reach, 0.0f, 0.0f}, Vec3{-reach, 0.0f, 0.0f},
-            Vec3{0.0f, reach, 0.0f}, Vec3{0.0f, -reach, 0.0f},
-            Vec3{0.0f, 0.0f, reach}, Vec3{0.0f, 0.0f, -reach}
-        };
+        assert(settings.cascadeCount == maxShadowCascades);
+        assert(plan.directional[0].firstTile == 0);
+        assert(plan.directional[0].cascades == settings.cascadeCount);
+        assert(plan.tiles.size() == static_cast<std::size_t>(settings.cascadeCount));
 
-        assert(landsInside(project(view, centre)));
+        for (std::size_t cascade = 0; cascade < plan.tiles.size(); ++cascade) {
+            assert(plan.tiles[cascade].size == cascadeTilePixels(settings.cascadeResolution));
 
-        for (const Vec3& offset : offsets) {
-            assert(landsInside(project(view, centre + offset)));
+            if (cascade > 0) {
+                assert(plan.tileData[cascade].lens[2] > plan.tileData[cascade - 1].lens[2]);
+            }
         }
 
-        // Things between the view and the sun still cast into it, even well outside the view.
-        assert(landsInside(project(view, centre - sunlight.normalized() * 40.0f)));
-
-        // Further from the sun means a smaller depth (reversed-Z).
-        assert(project(view, centre).z > project(view, centre + sunlight.normalized() * 5.0f).z);
-
-        // How far the box reaches is a setting: twice the distance covers a point the default box leaves out.
-        const Vec3 farAhead = camera.getPosition() + camera.getForward() * 50.0f;
-        const ShadowSettings longer{.directionalDistance = 2.0f * ShadowSettings{}.directionalDistance};
-        assert(!landsInside(project(view, farAhead)));
-        assert(landsInside(project(directionalShadowMatrix(sunlight, camera, longer), farAhead)));
+        ShadowSettings two;
+        two.cascadeCount = 2;
+        const ShadowPlan twoCascades = planShadows(lighting, camera, two);
+        assert(twoCascades.tiles.size() == 2 && twoCascades.directional[0].cascades == 2);
     }
 
-    // The box moves with the camera in whole shadow texels, so shadow edges do not crawl and shimmer as the camera moves.
-    void testDirectionalShadowMovesInWholeTexels() {
-        const Vec3 sunlight{0.4f, -1.0f, -0.6f};
+    /*
+    * Up close is where shadow texels show most. With a typical view (70 degrees high, 16:9) and the default splits, the
+    * first cascade reaches only a few metres and one of its texels covers under a centimetre, while the last still ends
+    * at the shadow distance.
+    */
+    void testNearShadowsAreFine() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+        const Camera camera{Vec3{0.0f, 1.7f, 0.0f}, Vec3{0.0f, 1.7f, -10.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2217f, 16.0f / 9.0f, 0.1f, 1000.0f};
+        const ShadowSettings settings;
+        const ShadowPlan plan = planShadows(lighting, camera, settings);
+
+        const std::vector<float> splits = cascadeSplits(camera.getNearPlane(), settings.directionalDistance, settings.cascadeCount, settings.cascadeSplitLambda);
+        assert(splits[1] < 4.0f);
+        assert(plan.tileData[0].lens[2] < 0.01f);
+    }
+
+    // Every point the camera sees, out to the shadow distance (or its far plane, if nearer), lands inside some cascade's box.
+    void testCascadesCoverTheViewToTheShadowDistance() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+        const Camera camera = makeTestCamera(Vec3{2.0f, 5.0f, 4.0f});
+        const ShadowSettings settings;
+        const ShadowPlan plan = planShadows(lighting, camera, settings);
+
+        const float halfHeight = std::tan(camera.getVerticalFov() * 0.5f);
+        const float halfWidth = halfHeight * camera.getAspectRatio();
+        const Vec3 viewUp = camera.getRight().cross(camera.getForward());
+
+        for (int step = 1; step <= 40; ++step) {
+            const float distance = std::min(settings.directionalDistance, camera.getFarPlane()) * static_cast<float>(step) / 40.0f;
+
+            for (float x : {-0.99f, 0.0f, 0.99f}) {
+                for (float y : {-0.99f, 0.0f, 0.99f}) {
+                    const Vec3 point = camera.getPosition() + camera.getForward() * distance +
+                                       camera.getRight() * (x * halfWidth * distance) + viewUp * (y * halfHeight * distance);
+                    bool covered = false;
+
+                    for (const ShadowTile& tile : plan.tiles) {
+                        const Vec3 projected = project(tile.matrix, point);
+                        covered = covered || (std::abs(projected.x) <= 1.0f && std::abs(projected.y) <= 1.0f &&
+                                              projected.z > 0.0f && projected.z < 1.0f);
+                    }
+
+                    assert(covered);
+                }
+            }
+        }
+    }
+
+    // Only the brightest directional light (the first slot) gets cascades; the others still light, unshadowed.
+    void testOnlyTheFirstDirectionalLightCastsShadows() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{});
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{1.0f, -1.0f, 0.0f}});
+        const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{2.0f, 5.0f, 4.0f}));
+
+        assert(maxShadowedDirectionalLights == 1);
+        assert(plan.directional[0].firstTile == 0);
+        assert(plan.directional[1].firstTile == -1 && plan.directional[1].cascades == 0);
+    }
+
+    // Each cascade follows the camera in whole texels of its own, so shadow edges do not crawl as the camera moves.
+    void testCascadesMoveInWholeTexels() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
         const Vec3 fixedPoint{1.0f, 0.0f, -3.0f};
-        const float texelsPerUnit = static_cast<float>(standardShadowTileSize) * 0.5f; // projected units -1..1 span the tile
+        const ShadowPlan before = planShadows(lighting, makeTestCamera(Vec3{2.0f, 5.0f, 4.0f}));
 
         for (int step = 1; step < 6; ++step) {
             const float nudge = 0.013f * static_cast<float>(step);
-            const Vec3 before = project(directionalShadowMatrix(sunlight, makeTestCamera(Vec3{2.0f, 5.0f, 4.0f})), fixedPoint);
-            const Vec3 after = project(directionalShadowMatrix(sunlight, makeTestCamera(Vec3{2.0f + nudge, 5.0f, 4.0f - nudge})), fixedPoint);
+            const ShadowPlan after = planShadows(lighting, makeTestCamera(Vec3{2.0f + nudge, 5.0f, 4.0f - nudge}));
 
-            const float shiftX = (after.x - before.x) * texelsPerUnit;
-            const float shiftY = (after.y - before.y) * texelsPerUnit;
+            for (std::size_t cascade = 0; cascade < before.tiles.size(); ++cascade) {
+                const float texelsPerUnit = static_cast<float>(before.tiles[cascade].size) * 0.5f;
+                const Vec3 then = project(before.tiles[cascade].matrix, fixedPoint);
+                const Vec3 now = project(after.tiles[cascade].matrix, fixedPoint);
+                const float shiftX = (now.x - then.x) * texelsPerUnit;
+                const float shiftY = (now.y - then.y) * texelsPerUnit;
 
-            assert(nearlyEqual(shiftX, std::round(shiftX), 0.01f));
-            assert(nearlyEqual(shiftY, std::round(shiftY), 0.01f));
+                assert(nearlyEqual(shiftX, std::round(shiftX), 0.02f));
+                assert(nearlyEqual(shiftY, std::round(shiftY), 0.02f));
+            }
         }
     }
 
@@ -229,7 +292,10 @@ namespace {
 
     // Every tile lies inside the atlas, none overlaps another, and the shader is told the same rectangles in atlas coordinates.
     // Tiles left out (size 0) take no room and tell the shader an empty rectangle.
-    void assertTilesFitTheAtlas(const ShadowPlan& plan) {
+    void assertTilesFitTheAtlas(const ShadowPlan& plan, const ShadowAtlasSize& atlas = shadowAtlasSizeFor(ShadowSettings{})) {
+        const float width = static_cast<float>(atlas.width);
+        const float height = static_cast<float>(atlas.height);
+
         assert(plan.tileData.size() == plan.tiles.size());
 
         for (std::size_t i = 0; i < plan.tiles.size(); ++i) {
@@ -240,17 +306,17 @@ namespace {
                 continue;
             }
 
-            assert(tile.x + tile.size <= shadowAtlasWidth && tile.y + tile.size <= shadowAtlasHeight);
-            assert(tile.size == 256 || tile.size == 512 || tile.size == 1024 || tile.size == 2048);
+            assert(tile.x + tile.size <= atlas.width && tile.y + tile.size <= atlas.height);
+            assert(tile.size == 256 || tile.size == 512 || tile.size == 1024 || tile.size == 2048 || tile.size == 4096);
 
             for (std::size_t j = i + 1; j < plan.tiles.size(); ++j) {
                 assert(!overlap(tile, plan.tiles[j]));
             }
 
-            assert(nearlyEqual(plan.tileData[i].rect[0], static_cast<float>(tile.x) / static_cast<float>(shadowAtlasWidth)));
-            assert(nearlyEqual(plan.tileData[i].rect[1], static_cast<float>(tile.y) / static_cast<float>(shadowAtlasHeight)));
-            assert(nearlyEqual(plan.tileData[i].rect[2], static_cast<float>(tile.size) / static_cast<float>(shadowAtlasWidth)));
-            assert(nearlyEqual(plan.tileData[i].rect[3], static_cast<float>(tile.size) / static_cast<float>(shadowAtlasHeight)));
+            assert(nearlyEqual(plan.tileData[i].rect[0], static_cast<float>(tile.x) / width));
+            assert(nearlyEqual(plan.tileData[i].rect[1], static_cast<float>(tile.y) / height));
+            assert(nearlyEqual(plan.tileData[i].rect[2], static_cast<float>(tile.size) / width));
+            assert(nearlyEqual(plan.tileData[i].rect[3], static_cast<float>(tile.size) / height));
         }
     }
 
@@ -325,8 +391,11 @@ namespace {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
         }
 
-        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
-        assertTilesFitTheAtlas(plan);
+        // In the usual atlas (High's), which these lights overflow.
+        ShadowSettings high;
+        high.cascadeResolution = CascadeResolution::Pixels2048;
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera(), high);
+        assertTilesFitTheAtlas(plan, shadowAtlasSizeFor(high));
 
         for (int slot = 0; slot < 40; ++slot) {
             const std::size_t first = static_cast<std::size_t>(plan.points[static_cast<std::size_t>(slot)].firstTile);
@@ -361,34 +430,37 @@ namespace {
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(plan.directional[0].firstTile == 0);
-        assert(plan.spots.size() == 1 && plan.spots[0].firstTile == 1);
+        // The sun's cascades take the first tiles.
+        const int spotTile = maxShadowCascades;
+        assert(plan.spots.size() == 1 && plan.spots[0].firstTile == spotTile);
         assert(plan.points.size() == 3);
-        assert(plan.points[0].firstTile == 2);
+        assert(plan.points[0].firstTile == spotTile + 1);
         assert(plan.points[1].firstTile == -1);
-        assert(plan.points[2].firstTile == 8);
-        assert(plan.tiles.size() == 14);
+        assert(plan.points[2].firstTile == spotTile + 7);
+        assert(plan.tiles.size() == static_cast<std::size_t>(spotTile + 13));
         assertTilesFitTheAtlas(plan);
 
         // The shadow pass draws with the face's world matrix. The shader gets the same view of the light placed relative
         // to the camera (the shader's origin), column-major.
+        const std::size_t secondFaceTile = static_cast<std::size_t>(spotTile) + 2;
         const Vec3 light{1.0f, 0.0f, 0.0f};
-        const Mat4 secondFace = pointShadowFaceMatrix(light, 1, 20.0f, plan.tiles[3].size);
-        const Mat4 secondFaceForShader = pointShadowFaceMatrix(light - makeOverviewCamera().getPosition(), 1, 20.0f, plan.tiles[3].size);
+        const Mat4 secondFace = pointShadowFaceMatrix(light, 1, 20.0f, plan.tiles[secondFaceTile].size);
+        const Mat4 secondFaceForShader = pointShadowFaceMatrix(light - makeOverviewCamera().getPosition(), 1, 20.0f, plan.tiles[secondFaceTile].size);
 
         for (int row = 0; row < 4; ++row) {
             for (int column = 0; column < 4; ++column) {
-                assert(nearlyEqual(plan.tiles[3].matrix.values[row][column], secondFace.values[row][column]));
-                assert(nearlyEqual(plan.tileData[3].matrix[column * 4 + row], secondFaceForShader.values[row][column]));
+                assert(nearlyEqual(plan.tiles[secondFaceTile].matrix.values[row][column], secondFace.values[row][column]));
+                assert(nearlyEqual(plan.tileData[secondFaceTile].matrix[column * 4 + row], secondFaceForShader.values[row][column]));
             }
         }
 
-        // Perspective tiles offset by distance from the light; the directional tile by a fixed amount.
-        assert(plan.tileData[2].offset[0] > 0.0f);
-        assert(plan.tileData[1].offset[0] > 0.0f);
+        // Perspective tiles offset by distance from the light; the cascade boxes by a fixed amount.
+        assert(plan.tileData[secondFaceTile].offset[0] > 0.0f);
+        assert(plan.tileData[static_cast<std::size_t>(spotTile)].offset[0] > 0.0f);
         assert(plan.tileData[0].offset[0] == 0.0f && plan.tileData[0].offset[1] > 0.0f);
 
-        // A directional light's box always gets a standard-size tile.
-        assert(plan.tiles[0].size == standardShadowTileSize);
+        // A sun's cascades get the largest tiles while there is room.
+        assert(plan.tiles[0].size == cascadeTilePixels(ShadowSettings{}.cascadeResolution));
     }
 
     // The 64 most important point lights can have a shadow; lights past that still shine, unshadowed.
@@ -438,8 +510,9 @@ namespace {
         assert(plan.tiles.size() == 4 + 8 + 96);
         assertTilesFitTheAtlas(plan);
 
-        for (int i = 0; i < 4; ++i) {
-            assert(plan.tiles[static_cast<std::size_t>(plan.directional[static_cast<std::size_t>(i)].firstTile)].size == standardShadowTileSize);
+        // The brightest sun's cascades keep their size while point lights can still shrink; the other suns get no shadow.
+        for (int cascade = 0; cascade < maxShadowCascades; ++cascade) {
+            assert(plan.tiles[static_cast<std::size_t>(plan.directional[0].firstTile + cascade)].size == cascadeTilePixels(ShadowSettings{}.cascadeResolution));
         }
 
         std::uint32_t previousSize = standardShadowTileSize;
@@ -456,14 +529,15 @@ namespace {
             previousSize = size;
         }
 
-        // The most important point light keeps the size it asked for; the least important was shrunk.
-        assert(plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)].size == standardShadowTileSize);
+        // The most important point light keeps more of the size it asked for than the least important.
+        assert(plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)].size > previousSize);
         assert(previousSize < standardShadowTileSize);
     }
 
     // The worst case: every shadowed light there can be, all asking for the largest tiles. Everything still fits, with
-    // the directional boxes at full size and every point light's faces down to the smallest.
-    void testEveryShadowFits() {
+    // every point light's faces down to the smallest and, as the last resort, the sun's cascades down to the standard size.
+    // Every shadowed light there can be, all asking for the largest tiles.
+    FrameLighting everyShadowedLight() {
         FrameLighting lighting;
 
         for (int i = 0; i < maxShadowedDirectionalLights; ++i) {
@@ -478,12 +552,95 @@ namespace {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
         }
 
-        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+        return lighting;
+    }
+
+    void testEveryShadowFits() {
+        // In the usual atlas (High's 2048 cascades), where the cascades must give way last.
+        ShadowSettings high;
+        high.cascadeResolution = CascadeResolution::Pixels2048;
+        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), high);
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
-        assertTilesFitTheAtlas(plan);
-        assert(plan.tiles[static_cast<std::size_t>(plan.directional[3].firstTile)].size == standardShadowTileSize);
+        assertTilesFitTheAtlas(plan, shadowAtlasSizeFor(high));
+        assert(plan.tiles[static_cast<std::size_t>(plan.directional[0].firstTile)].size == standardShadowTileSize);
         assert(plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)].size == smallestShadowTileSize);
+    }
+
+    /*
+    * The atlas holds the sun's cascades at up to 2048 pixels in its usual 8192 x 4096 (128 MB of depth). At 4096 (the
+    * default, the Ultra preset) they need four times the room, so it grows by exactly their 4 x 4096^2 texels:
+    * 8192 x 12288, 384 MB, with squares of up to 4096.
+    */
+    void testAtlasGrowsForUltraCascades() {
+        ShadowSettings settings;
+        assert(settings.cascadeResolution == CascadeResolution::Pixels4096);
+        assert(cascadeTilePixels(CascadeResolution::Pixels1024) == 1024);
+        assert(cascadeTilePixels(CascadeResolution::Pixels2048) == 2048);
+        assert(cascadeTilePixels(CascadeResolution::Pixels4096) == 4096);
+        assert(shadowAtlasSizeFor(settings) == (ShadowAtlasSize{8192, 12288, 4096}));
+
+        const ShadowAtlasSize standard{8192, 4096, 2048};
+        assert(ShadowAtlasSize{} == standard);
+
+        settings.cascadeResolution = CascadeResolution::Pixels2048;
+        assert(shadowAtlasSizeFor(settings) == standard);
+
+        settings.cascadeResolution = CascadeResolution::Pixels1024;
+        assert(shadowAtlasSizeFor(settings) == standard);
+    }
+
+    // The cascades get the tiles the setting asks for: 1024 on Low, 4096 on Ultra in the grown atlas.
+    void testCascadesFollowTheirResolution() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+
+        for (CascadeResolution resolution : {CascadeResolution::Pixels1024, CascadeResolution::Pixels4096}) {
+            ShadowSettings settings;
+            settings.cascadeResolution = resolution;
+            ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
+            const ShadowPlan plan = planShadows(lighting, makeTestCamera(Vec3{2.0f, 5.0f, 4.0f}), layout, settings);
+
+            assertTilesFitTheAtlas(plan, layout.size());
+
+            for (const ShadowTile& tile : plan.tiles) {
+                assert(tile.size == cascadeTilePixels(resolution));
+            }
+        }
+    }
+
+    // On Ultra the worst case fits too, and the grown atlas leaves the cascades their full 4096.
+    void testEveryShadowFitsOnUltra() {
+        ShadowSettings settings;
+        settings.cascadeResolution = CascadeResolution::Pixels4096;
+        ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
+        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), layout, settings);
+
+        assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
+        assertTilesFitTheAtlas(plan, layout.size());
+
+        for (int cascade = 0; cascade < maxShadowCascades; ++cascade) {
+            assert(plan.tiles[static_cast<std::size_t>(plan.directional[0].firstTile + cascade)].size == 4096);
+        }
+    }
+
+    // A layout for another atlas size than the settings ask for is the caller's mistake (the renderer remakes both).
+    void testLayoutMustMatchTheSettings() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{});
+        ShadowSettings ultra;
+        ultra.cascadeResolution = CascadeResolution::Pixels4096;
+        ShadowAtlasLayout standard;
+        bool threw = false;
+
+        try {
+            planShadows(lighting, makeTestCamera(Vec3{2.0f, 5.0f, 4.0f}), standard, ultra);
+        }
+        catch (const std::invalid_argument&) {
+            threw = true;
+        }
+
+        assert(threw);
     }
 
     // Small lights get small tiles, so sixteen lamps take a small corner of the atlas.
@@ -621,17 +778,18 @@ namespace {
         GpuLights lights = packLighting(lighting, camera.getPosition());
         attachShadows(lights, plan);
 
-        assert(lights.directional[0].shadowTile == 0);
-        assert(lights.spots[0].shadowTile == 1);
+        // The sun's cascades come first, then the spotlight, then the point light's faces.
+        assert(lights.directional[0].shadowTile == 0 && lights.directional[0].cascadeCount == maxShadowCascades);
+        assert(lights.spots[0].shadowTile == maxShadowCascades);
         assert(nearlyEqual(lights.spots[0].shadowStrength, 0.7f) && nearlyEqual(lights.spots[0].emitterRadius, 0.03f));
-        assert(lights.points[0].firstShadowTile == 2);
+        assert(lights.points[0].firstShadowTile == maxShadowCascades + 1);
         assert(nearlyEqual(lights.points[0].shadowStrength, 0.3f) && nearlyEqual(lights.points[0].emitterRadius, 0.2f));
         assert(lights.points[1].firstShadowTile == -1 && lights.points[1].shadowStrength == 0.0f);
     }
 
     // Each tile knows how far its light reaches (a sphere round the light, the range as radius), so the shadow pass can
     // drop casters that light never reaches with one sphere test before the face's frustum. A directional light's box
-    // has no such limit (negative radius).
+    // has no such limit (negative radius), nor do a sun's cascade boxes.
     void testTilesKnowTheirLightsReach() {
         FrameLighting lighting;
         lighting.directionalLights.push_back(DirectionalLight{});
@@ -640,11 +798,16 @@ namespace {
 
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
-        assert(plan.tiles.size() == 8);
-        assert(plan.tiles[0].reach.radius < 0.0f);
-        assert(nearlyEqual(plan.tiles[1].reach.radius, 10.0f) && nearlyEqual(plan.tiles[1].reach.centre.y, 3.0f));
+        const std::size_t spotTile = maxShadowCascades;
+        assert(plan.tiles.size() == spotTile + 7);
 
-        for (std::size_t face = 2; face < 8; ++face) {
+        for (std::size_t cascade = 0; cascade < spotTile; ++cascade) {
+            assert(plan.tiles[cascade].reach.radius < 0.0f);
+        }
+
+        assert(nearlyEqual(plan.tiles[spotTile].reach.radius, 10.0f) && nearlyEqual(plan.tiles[spotTile].reach.centre.y, 3.0f));
+
+        for (std::size_t face = spotTile + 1; face < spotTile + 7; ++face) {
             assert(nearlyEqual(plan.tiles[face].reach.radius, 20.0f));
             assert(nearlyEqual(plan.tiles[face].reach.centre.x, 1.0f) && nearlyEqual(plan.tiles[face].reach.centre.y, 0.0f));
         }
@@ -713,6 +876,10 @@ namespace {
 }
 
 void testShadowMap() {
+    testAtlasGrowsForUltraCascades();
+    testCascadesFollowTheirResolution();
+    testEveryShadowFitsOnUltra();
+    testLayoutMustMatchTheSettings();
     testFacesInViewGetTiles();
     testFacesOutOfViewAreLeftOut();
     testShadowStrengthIsPassed();
@@ -725,8 +892,11 @@ void testShadowMap() {
     testDepthShrinksWithDistance();
     testOrthographic();
     testSpotShadowCoversTheCone();
-    testDirectionalShadowCoversTheViewNearTheCamera();
-    testDirectionalShadowMovesInWholeTexels();
+    testSunGetsOneTilePerCascade();
+    testNearShadowsAreFine();
+    testCascadesCoverTheViewToTheShadowDistance();
+    testOnlyTheFirstDirectionalLightCastsShadows();
+    testCascadesMoveInWholeTexels();
     testLightsCastShadowsByDefault();
     testTileSizeFollowsTheLightsReach();
     testSpotlightsGetFinerTiles();

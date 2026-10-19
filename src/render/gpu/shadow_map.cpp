@@ -13,16 +13,36 @@ namespace {
     // wider than needed, so every point they are meant to cover stays this many texels inside its tile.
     constexpr float edgeMarginTexels = 2.0f;
 
-    // Even with every light at its largest size cut down to the smallest (directional lights never shrink), all tiles fit.
+    // Even with every light at its largest size cut down to the smallest (a sun's cascades only to the standard size), all
+    // tiles fit.
     constexpr std::uint32_t areaInSmallestTiles(std::uint32_t size) {
         return (size / smallestShadowTileSize) * (size / smallestShadowTileSize);
     }
 
-    constexpr std::uint32_t atlasCapacity = (shadowAtlasWidth / smallestShadowTileSize) * (shadowAtlasHeight / smallestShadowTileSize);
+    constexpr std::uint32_t capacityOf(const ShadowAtlasSize& atlas) {
+        return (atlas.width / smallestShadowTileSize) * (atlas.height / smallestShadowTileSize);
+    }
 
-    static_assert(maxShadowedDirectionalLights * areaInSmallestTiles(standardShadowTileSize) +
-                  maxShadowedSpotLights + maxShadowedPointLights * 6 <= atlasCapacity,
+    // The atlas for cascades of the given size: the usual one while they fit in a quarter of it (2048 and below), else
+    // one grown by the rows their extra room takes, with squares as large as a cascade.
+    constexpr ShadowAtlasSize atlasForCascades(std::uint32_t cascadeSize) {
+        if (cascadeSize <= largestShadowTileSize) {
+            return ShadowAtlasSize{};
+        }
+
+        const std::uint32_t extraRows = maxShadowCascades * cascadeSize * cascadeSize / shadowAtlasWidth;
+        return ShadowAtlasSize{shadowAtlasWidth, shadowAtlasHeight + extraRows, cascadeSize};
+    }
+
+    constexpr std::uint32_t otherShadowsAtTheirSmallest = maxShadowedSpotLights + maxShadowedPointLights * 6;
+
+    static_assert(maxShadowedDirectionalLights * maxShadowCascades * areaInSmallestTiles(standardShadowTileSize) +
+                  otherShadowsAtTheirSmallest <= capacityOf(ShadowAtlasSize{}),
                   "the smallest shadow tiles for every shadowed light must fit in the atlas");
+
+    static_assert(maxShadowedDirectionalLights * maxShadowCascades * areaInSmallestTiles(4096) +
+                  otherShadowsAtTheirSmallest <= capacityOf(atlasForCascades(4096)),
+                  "Ultra cascades must fit at full size beside every other shadow at its smallest");
 
     // Widen a view (given as tan of its half-angle) so its contents stay edgeMarginTexels from the edge of its tile.
     float withEdgeMargin(float halfWidth, std::uint32_t tileSize) {
@@ -33,11 +53,6 @@ namespace {
     Mat4 squarePerspective(float halfWidth, float farPlane) {
         const float fieldOfView = 2.0f * std::atan(halfWidth);
         return toGpuDepthRange(Mat4::perspective(fieldOfView, 1.0f, shadowNearPlane, std::max(farPlane, 2.0f * shadowNearPlane)));
-    }
-
-    // Any up direction works for a shadow view, as long as it is not parallel to the way the view looks.
-    Vec3 upFor(const Vec3& forward) {
-        return std::abs(forward.normalized().y) > 0.99f ? Vec3{0.0f, 0.0f, -1.0f} : Vec3{0.0f, 1.0f, 0.0f};
     }
 
     // One texel of a perspective view covers 2 * distance * halfWidth / tileSize of world, so the offset is stored per unit of distance.
@@ -87,10 +102,11 @@ namespace {
 
     /*
     * While the requests need more room than the atlas has, halve the tiles of the least important light that can still
-    * shrink: requests are in order of importance (directional lights, then spotlights and point lights in slot order),
-    * so the last ones lose detail first. Directional boxes keep their size, since their texel snapping is built on it.
+    * shrink: requests are in order of importance (the sun, then spotlights and point lights in slot order), so the last
+    * ones lose detail first. The sun's cascades shrink only when nothing else can, and never below the standard size:
+    * they are its shadows everywhere on screen, and every point light's faces at their smallest leave them that much room.
     */
-    void shrinkToFit(std::vector<ShadowRequest>& requests) {
+    void shrinkToFit(std::vector<ShadowRequest>& requests, std::uint32_t atlasCapacity) {
         std::uint32_t used = 0;
 
         for (const ShadowRequest& request : requests) {
@@ -98,9 +114,15 @@ namespace {
         }
 
         while (used > atlasCapacity) {
-            const auto shrinkable = std::find_if(requests.rbegin(), requests.rend(), [](const ShadowRequest& request) {
+            auto shrinkable = std::find_if(requests.rbegin(), requests.rend(), [](const ShadowRequest& request) {
                 return request.kind != ShadowKind::Directional && request.size > smallestShadowTileSize;
             });
+
+            if (shrinkable == requests.rend()) {
+                shrinkable = std::find_if(requests.rbegin(), requests.rend(), [](const ShadowRequest& request) {
+                    return request.kind == ShadowKind::Directional && request.size > standardShadowTileSize;
+                });
+            }
 
             // The static_assert above guarantees everything fits at the smallest size.
             if (shrinkable == requests.rend()) {
@@ -135,7 +157,7 @@ namespace {
 
     // drawMatrix is the world-space view the shadow pass draws with; shaderMatrix the same view for points measured from
     // the camera, which is how the main shader sees them. reach is the sphere the light lights (see ShadowTile).
-    void addTile(ShadowPlan& plan, ShadowTile tile, const Mat4& drawMatrix, const Mat4& shaderMatrix, float offsetPerDistance,
+    void addTile(ShadowPlan& plan, const ShadowAtlasSize& atlas, ShadowTile tile, const Mat4& drawMatrix, const Mat4& shaderMatrix, float offsetPerDistance,
                  float fixedOffset, const BoundingSphere& reach) {
         tile.matrix = drawMatrix;
         tile.reach = reach;
@@ -152,10 +174,10 @@ namespace {
         data.offset[0] = offsetPerDistance;
         data.offset[1] = fixedOffset;
 
-        data.rect[0] = static_cast<float>(tile.x) / static_cast<float>(shadowAtlasWidth);
-        data.rect[1] = static_cast<float>(tile.y) / static_cast<float>(shadowAtlasHeight);
-        data.rect[2] = static_cast<float>(tile.size) / static_cast<float>(shadowAtlasWidth);
-        data.rect[3] = static_cast<float>(tile.size) / static_cast<float>(shadowAtlasHeight);
+        data.rect[0] = static_cast<float>(tile.x) / static_cast<float>(atlas.width);
+        data.rect[1] = static_cast<float>(tile.y) / static_cast<float>(atlas.height);
+        data.rect[2] = static_cast<float>(tile.size) / static_cast<float>(atlas.width);
+        data.rect[3] = static_cast<float>(tile.size) / static_cast<float>(atlas.height);
         plan.tileData.push_back(data);
     }
 }
@@ -206,7 +228,7 @@ Mat4 pointShadowFaceMatrix(const Vec3& lightPosition, int face, float farPlane, 
     };
 
     const Vec3 forward = forwards[face];
-    const Mat4 view = Mat4::lookAt(lightPosition, lightPosition + forward, upFor(forward));
+    const Mat4 view = Mat4::lookAt(lightPosition, lightPosition + forward, shadowViewUp(forward));
 
     return squarePerspective(withEdgeMargin(1.0f, tileSize), farPlane) * view;
 }
@@ -215,40 +237,9 @@ Mat4 pointShadowFaceMatrix(const Vec3& lightPosition, int face, float farPlane, 
 * A square camera at the light looking down the beam. Its half-width reaches the outer cone, since nothing outside it is lit.
 */
 Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float outerAngle, float range, std::uint32_t tileSize) {
-    const Mat4 view = Mat4::lookAt(lightPosition, lightPosition + direction.normalized(), upFor(direction));
+    const Mat4 view = Mat4::lookAt(lightPosition, lightPosition + direction.normalized(), shadowViewUp(direction));
 
     return squarePerspective(withEdgeMargin(spotHalfWidth(outerAngle), tileSize), range) * view;
-}
-
-/*
-* Parallel rays need no perspective: a box, looking along the light, centred halfway along the stretch of the camera's
-* view that gets shadows. The box reaches back towards the light so tall things outside the view still cast into it.
-* Its centre is snapped to whole shadow texels, measured across the light's direction: as the camera moves, the box
-* jumps a whole texel at a time, so every shadow edge falls on the same texels instead of crawling and shimmering.
-* Directional lights always get the largest tile.
-*/
-Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const ShadowSettings& settings) {
-    const Vec3 along = direction.lengthSquared() > 1e-12f ? direction.normalized() : Vec3{0.0f, -1.0f, 0.0f};
-    const float radius = settings.directionalDistance * 0.5f;
-    const Vec3 centre = camera.getPosition() + camera.getForward() * radius;
-
-    // The light's orientation only: a view at the origin looking along the light.
-    const Mat4 rotation = Mat4::lookAt(Vec3{0.0f, 0.0f, 0.0f}, along, upFor(along));
-    const Vec4 centreInLight = rotation * Vec4{centre.x, centre.y, centre.z, 1.0f};
-
-    const float texel = 2.0f * radius / static_cast<float>(standardShadowTileSize);
-    const float snappedX = std::round(centreInLight.x / texel) * texel;
-    const float snappedY = std::round(centreInLight.y / texel) * texel;
-
-    // The view looks down -z, so a point's distance along the light is -z.
-    const float centreDistance = -centreInLight.z;
-    const Mat4 box = Mat4::orthographic(
-        snappedX - radius, snappedX + radius,
-        snappedY - radius, snappedY + radius,
-        centreDistance - radius - settings.directionalCasterReach, centreDistance + radius
-    );
-
-    return toGpuDepthRange(box) * rotation;
 }
 
 /*
@@ -259,11 +250,17 @@ Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const 
 * request order, so the numbering does not depend on sizes or places.
 */
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings) {
-    ShadowAtlasLayout freshLayout;
+    ShadowAtlasLayout freshLayout{shadowAtlasSizeFor(settings)};
     return planShadows(lighting, camera, freshLayout, settings);
 }
 
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout, const ShadowSettings& settings) {
+    const ShadowAtlasSize& atlas = layout.size();
+
+    if (atlas != shadowAtlasSizeFor(settings)) {
+        throw std::invalid_argument("planShadows: the atlas layout is not for the atlas these settings need");
+    }
+
     const FrameLighting selected = selectDrawableLights(lighting);
     const Vec3 origin = camera.getPosition();
     ShadowPlan plan;
@@ -275,7 +272,8 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
     for (std::size_t slot = 0; slot < selected.directionalLights.size(); ++slot) {
         if (selected.directionalLights[slot].castsShadows && static_cast<int>(slot) < maxShadowedDirectionalLights) {
-            requests.push_back(ShadowRequest{ShadowKind::Directional, slot, 1, standardShadowTileSize, {}});
+            const int cascades = std::clamp(settings.cascadeCount, 1, maxShadowCascades);
+            requests.push_back(ShadowRequest{ShadowKind::Directional, slot, cascades, cascadeTilePixels(settings.cascadeResolution), {}});
         }
     }
 
@@ -310,14 +308,14 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         }
     }
 
-    shrinkToFit(requests);
+    shrinkToFit(requests, capacityOf(atlas));
 
     // Every tile asks the layout for a square by its lasting name, so it gets last frame's square back when it can.
     std::vector<ShadowSquareRequest> squareRequests;
 
     for (const ShadowRequest& request : requests) {
         for (int face = 0; face < 6; ++face) {
-            const bool wanted = request.kind == ShadowKind::Point ? request.facesInView[static_cast<std::size_t>(face)] : face == 0;
+            const bool wanted = request.kind == ShadowKind::Point ? request.facesInView[static_cast<std::size_t>(face)] : face < request.tileCount;
 
             if (wanted) {
                 squareRequests.push_back(ShadowSquareRequest{tileKey(request, face), request.size});
@@ -339,14 +337,29 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         const std::int32_t firstTile = static_cast<std::int32_t>(plan.tiles.size());
 
         if (request.kind == ShadowKind::Directional) {
-            // A box texel is the same size everywhere, so its offset is fixed rather than growing with distance.
-            // The box is snapped to texels in world space (see directionalShadowMatrix), so the shader's version is the
-            // same box shifted to the camera, rather than one snapped around the camera, which would crawl as it moves.
+            // The view from the camera's near plane to the shadow distance, cut into slices, each in its own box around
+            // its bounding sphere (see cascades.h). A box texel is the same size everywhere, so its offset is fixed
+            // rather than growing with distance. The box is snapped to texels in world space, so the shader's version
+            // is the same box shifted to the camera, rather than one snapped around the camera, which would crawl as it moves.
             const DirectionalLight& light = selected.directionalLights[request.slot];
-            plan.directional[request.slot].firstTile = firstTile;
-            const Mat4 box = directionalShadowMatrix(light.direction, camera, settings);
-            addTile(plan, request.tiles[0], box, box * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
-                    settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(standardShadowTileSize), BoundingSphere{});
+            plan.directional[request.slot] = LightShadow{firstTile, 1.0f, std::tan(light.angularRadius), request.tileCount};
+
+            const float shadowDistance = std::min(settings.directionalDistance, camera.getFarPlane());
+            const std::vector<float> splits = cascadeSplits(camera.getNearPlane(), shadowDistance, request.tileCount, settings.cascadeSplitLambda);
+
+            for (int cascade = 0; cascade < request.tileCount; ++cascade) {
+                const std::size_t index = static_cast<std::size_t>(cascade);
+                const BoundingSphere sphere = cascadeSphere(camera, splits[index], splits[index + 1]);
+                const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
+
+                addTile(plan, atlas, request.tiles[index], box.matrix, box.matrix * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
+                        settings.normalOffsetTexels * box.texelSize, BoundingSphere{});
+
+                float* lens = plan.tileData.back().lens;
+                lens[1] = box.depthRange;
+                lens[2] = box.texelSize;
+                lens[3] = sphere.radius;
+            }
         }
         else if (request.kind == ShadowKind::Spot) {
             const PlacedSpotLight& placed = selected.spotLights[request.slot];
@@ -355,7 +368,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             const float halfWidth = withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size);
             // Built again from the light's offset from the camera, so the subtraction happens once, on positions, before
             // any matrix (see camera_relative.h).
-            addTile(plan, request.tiles[0],
+            addTile(plan, atlas, request.tiles[0],
                     spotShadowMatrix(placed.position, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
                     spotShadowMatrix(placed.position - origin, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
                     perspectiveOffset(halfWidth, request.size, settings.normalOffsetTexels), 0.0f,
@@ -375,7 +388,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
                     ? request.tiles[placedFaces++]
                     : ShadowTile{Mat4::identity(), 0, 0, 0, BoundingSphere{}};
 
-                addTile(plan, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
+                addTile(plan, atlas, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
                         pointShadowFaceMatrix(placed.position - origin, face, placed.light.range, request.size),
                         perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size, settings.normalOffsetTexels), 0.0f,
                         BoundingSphere{placed.position, placed.light.range});
@@ -388,8 +401,8 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 }
 
 /*
-* Both lists come from the same selectDrawableLights, so slot i of the plan is slot i of the lights. A directional light's
-* shadow never fades (it has no rival for its tile), so only its tile goes across.
+* Both lists come from the same selectDrawableLights, so slot i of the plan is slot i of the lights. A sun's shadow never
+* fades (it has no rival for its tiles), so only its tiles and its size go across.
 */
 void attachShadows(GpuLights& lights, const ShadowPlan& plan) {
     if (plan.directional.size() != lights.directional.size() || plan.spots.size() != lights.spots.size() ||
@@ -399,6 +412,8 @@ void attachShadows(GpuLights& lights, const ShadowPlan& plan) {
 
     for (std::size_t slot = 0; slot < plan.directional.size(); ++slot) {
         lights.directional[slot].shadowTile = plan.directional[slot].firstTile;
+        lights.directional[slot].cascadeCount = plan.directional[slot].cascades;
+        lights.directional[slot].tanAngularRadius = plan.directional[slot].emitterRadius;
     }
 
     for (std::size_t slot = 0; slot < plan.spots.size(); ++slot) {
@@ -414,10 +429,37 @@ void attachShadows(GpuLights& lights, const ShadowPlan& plan) {
     }
 }
 
+std::uint32_t cascadeTilePixels(CascadeResolution resolution) {
+    switch (resolution) {
+        case CascadeResolution::Pixels1024:
+            return 1024;
+        case CascadeResolution::Pixels4096:
+            return 4096;
+        case CascadeResolution::Pixels2048:
+            break;
+    }
+
+    return 2048;
+}
+
+ShadowAtlasSize shadowAtlasSizeFor(const ShadowSettings& settings) {
+    return atlasForCascades(cascadeTilePixels(settings.cascadeResolution));
+}
+
+namespace {
+    constexpr std::array<const char*, 2> cascadeTransitionNames{"Blend", "Dither"};
+    constexpr std::array<const char*, 3> cascadeResolutionNames{"1024", "2048", "4096"};
+}
+
 void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Texel target", settings.texelTarget, {.min = 0.001f, .sliderMin = 0.005f, .sliderMax = 0.2f, .unit = "m"});
     visitor.field("Spot texel target", settings.spotTexelTarget, {.min = 0.001f, .sliderMin = 0.005f, .sliderMax = 0.2f, .unit = "m"});
-    visitor.field("Directional distance", settings.directionalDistance, {.min = 1.0f, .sliderMax = 200.0f, .unit = "m"});
-    visitor.field("Directional caster reach", settings.directionalCasterReach, {.min = 0.0f, .sliderMax = 200.0f, .unit = "m"});
+    visitor.field("Directional distance", settings.directionalDistance, {.min = 1.0f, .sliderMax = 1000.0f, .unit = "m"});
+    visitor.field("Directional caster reach", settings.directionalCasterReach, {.min = 0.0f, .sliderMax = 1000.0f, .unit = "m"});
+    visitor.field("Cascades", settings.cascadeCount, {.min = 1, .max = maxShadowCascades});
+    visitor.field("Cascade split blend", settings.cascadeSplitLambda, {.min = 0.0f, .max = 1.0f, .unit = "(0 even, 1 logarithmic)"});
+    visitor.field("Cascade blend band", settings.cascadeBlendBand, {.min = 0.0f, .max = 0.5f, .unit = "of a radius"});
+    visitor.choice("Cascade transition", settings.cascadeTransition, cascadeTransitionNames);
+    visitor.choice("Cascade resolution", settings.cascadeResolution, cascadeResolutionNames);
     visitor.field("Normal offset", settings.normalOffsetTexels, {.min = 0.0f, .sliderMax = 6.0f, .unit = "texels"});
 }

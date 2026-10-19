@@ -201,8 +201,10 @@ namespace {
 
         assert(frame.ambient[0] == 0.1f && frame.ambient[1] == 0.2f && frame.ambient[2] == 0.3f);
         assert(frame.counts[0] == 1 && frame.counts[1] == 2 && frame.counts[2] == 0);
-        assert(frame.atlasTexel[0] == 1.0f / static_cast<float>(shadowAtlasWidth));
-        assert(frame.atlasTexel[1] == 1.0f / static_cast<float>(shadowAtlasHeight));
+        // One texel of the atlas the default settings need.
+        const ShadowAtlasSize atlas = shadowAtlasSizeFor(ShadowSettings{});
+        assert(frame.atlasTexel[0] == 1.0f / static_cast<float>(atlas.width));
+        assert(frame.atlasTexel[1] == 1.0f / static_cast<float>(atlas.height));
     }
 
     /*
@@ -227,9 +229,29 @@ namespace {
         const GpuFrameData looped = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, false, true);
         assert(looped.shadingOptions[0] == 0 && looped.shadingOptions[1] == 1);
     }
+    // The cascades' blend band and whether to dither between them instead reach the shader through the frame's block.
+    void testFrameDataCarriesTheCascadeTransition() {
+        const Camera camera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{-4.0f, 0.0f, -2.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.1f, 1.6f, 0.1f, 100.0f};
+        const ClusterGrid grid = makeClusterGrid(camera, 1280, 800);
+
+        ShadowSettings shadows;
+        shadows.cascadeBlendBand = 0.2f;
+        const GpuFrameData blended = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false, shadows);
+        assert(blended.cascadeOptions[0] == 0.2f && blended.cascadeOptions[1] == 0.0f);
+
+        shadows.cascadeTransition = CascadeTransition::Dither;
+        const GpuFrameData dithered = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false, shadows);
+        assert(dithered.cascadeOptions[1] == 1.0f);
+
+        // The atlas grows for Ultra cascades, and with it the size of one of its texels.
+        shadows.cascadeResolution = CascadeResolution::Pixels4096;
+        const GpuFrameData ultra = makeFrameData(GpuLights{}, Mat4::identity(), camera.getPosition(), grid, true, false, shadows);
+        assert(ultra.atlasTexel[0] == 1.0f / 8192.0f && ultra.atlasTexel[1] == 1.0f / 12288.0f);
+    }
 }
 
 void testGpuScene() {
+    testFrameDataCarriesTheCascadeTransition();
     testDrawsAreBatchedByMesh();
     testOnlyChosenDrawsAreBatchedInTheirOrder();
     testBatchesStartAtTheFirstInstance();

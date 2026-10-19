@@ -16,6 +16,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 viewUp;
     vec4 viewForward;
     ivec4 shadingOptions;        // x: 1 shades from the clusters' lists, y: 1 shows their light counts (the heatmap)
+    vec4 cascadeOptions;         // x: the sun cascades' blend band (a share of a radius), y: 1 dithers between them instead
 };
 
 #endif
