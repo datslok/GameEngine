@@ -11,6 +11,9 @@ namespace {
     constexpr std::uint32_t setsPerPool = 1024;
     constexpr std::uint32_t texturesPerPool = 8 * setsPerPool;
     constexpr std::uint32_t storageBuffersPerPool = setsPerPool;
+
+    // Only the scene's set holds a plain uniform buffer (its frame data), once per frame.
+    constexpr std::uint32_t uniformBuffersPerPool = 16;
 }
 
 FrameDescriptors::FrameDescriptors(VkDevice device):
@@ -20,9 +23,10 @@ FrameDescriptors::FrameDescriptors(VkDevice device):
 }
 
 void FrameDescriptors::addPool() {
-    const std::array<VkDescriptorPoolSize, 2> sizes{{
+    const std::array<VkDescriptorPoolSize, 3> sizes{{
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, texturesPerPool},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storageBuffersPerPool},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffersPerPool},
     }};
 
     VkDescriptorPoolCreateInfo info{};

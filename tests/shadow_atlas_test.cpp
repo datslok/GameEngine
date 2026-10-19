@@ -164,7 +164,7 @@ namespace {
     }
 
     ShadowTile tileAt(std::uint32_t x, std::uint32_t y, std::uint32_t size, float shift = 0.0f) {
-        return ShadowTile{Mat4::translation(shift, 0.0f, 0.0f), x, y, size};
+        return ShadowTile{Mat4::translation(shift, 0.0f, 0.0f), x, y, size, BoundingSphere{}};
     }
 
     // A tile is still good when the same view of the same casters was the last thing drawn into its square.

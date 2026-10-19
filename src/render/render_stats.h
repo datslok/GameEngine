@@ -12,6 +12,10 @@ struct RenderStats {
     std::size_t shadowDrawn = 0;
     std::size_t shadowCulled = 0;
 
+    // Draw calls those took: one per mesh per view, each drawing every instance of that mesh at once.
+    std::size_t drawCalls = 0;
+    std::size_t shadowDrawCalls = 0;
+
     // Shadow views drawn this frame, kept from an earlier frame because nothing in them changed (cached), and point
     // light cube faces left out because they see nothing on screen. Shadow drawn/culled above count only drawn views.
     std::size_t shadowTilesDrawn = 0;

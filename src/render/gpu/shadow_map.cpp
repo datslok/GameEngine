@@ -134,10 +134,11 @@ namespace {
     }
 
     // drawMatrix is the world-space view the shadow pass draws with; shaderMatrix the same view for points measured from
-    // the camera, which is how the main shader sees them.
+    // the camera, which is how the main shader sees them. reach is the sphere the light lights (see ShadowTile).
     void addTile(ShadowPlan& plan, ShadowTile tile, const Mat4& drawMatrix, const Mat4& shaderMatrix, float offsetPerDistance,
-                 float fixedOffset) {
+                 float fixedOffset, const BoundingSphere& reach) {
         tile.matrix = drawMatrix;
+        tile.reach = reach;
         plan.tiles.push_back(tile);
 
         ShadowTileData data{};
@@ -265,14 +266,10 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, cons
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout, const ShadowSettings& settings) {
     const FrameLighting selected = selectDrawableLights(lighting);
     const Vec3 origin = camera.getPosition();
-    ShadowPlan plan{};
-
-    std::fill(&plan.uniforms.pointTiles[0][0], &plan.uniforms.pointTiles[0][0] + pointLightVec4s * 4, -1);
-    std::fill(&plan.uniforms.spotTiles[0][0], &plan.uniforms.spotTiles[0][0] + spotLightVec4s * 4, -1);
-    std::fill(plan.uniforms.directionalTiles, plan.uniforms.directionalTiles + maxDirectionalLights, -1);
-
-    plan.uniforms.atlasTexel[0] = 1.0f / static_cast<float>(shadowAtlasWidth);
-    plan.uniforms.atlasTexel[1] = 1.0f / static_cast<float>(shadowAtlasHeight);
+    ShadowPlan plan;
+    plan.directional.resize(selected.directionalLights.size());
+    plan.spots.resize(selected.spotLights.size());
+    plan.points.resize(selected.pointLights.size());
 
     std::vector<ShadowRequest> requests;
 
@@ -334,7 +331,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
     for (ShadowRequest& request : requests) {
         for (int tile = 0; tile < request.tileCount; ++tile) {
             const AtlasSquare& square = squares[nextSquare++];
-            request.tiles.push_back(ShadowTile{Mat4::identity(), square.x, square.y, square.size});
+            request.tiles.push_back(ShadowTile{Mat4::identity(), square.x, square.y, square.size, BoundingSphere{}});
         }
     }
 
@@ -346,16 +343,14 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             // The box is snapped to texels in world space (see directionalShadowMatrix), so the shader's version is the
             // same box shifted to the camera, rather than one snapped around the camera, which would crawl as it moves.
             const DirectionalLight& light = selected.directionalLights[request.slot];
-            plan.uniforms.directionalTiles[request.slot] = firstTile;
+            plan.directional[request.slot].firstTile = firstTile;
             const Mat4 box = directionalShadowMatrix(light.direction, camera, settings);
             addTile(plan, request.tiles[0], box, box * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
-                    settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(standardShadowTileSize));
+                    settings.normalOffsetTexels * settings.directionalDistance / static_cast<float>(standardShadowTileSize), BoundingSphere{});
         }
         else if (request.kind == ShadowKind::Spot) {
             const PlacedSpotLight& placed = selected.spotLights[request.slot];
-            plan.uniforms.spotTiles[request.slot / 4][request.slot % 4] = firstTile;
-            plan.uniforms.spotShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
-            plan.uniforms.spotEmitterRadii[request.slot / 4][request.slot % 4] = placed.light.emitterRadius;
+            plan.spots[request.slot] = LightShadow{firstTile, placed.shadowFade, placed.light.emitterRadius};
 
             const float halfWidth = withEdgeMargin(spotHalfWidth(placed.light.outerAngle), request.size);
             // Built again from the light's offset from the camera, so the subtraction happens once, on positions, before
@@ -363,14 +358,13 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             addTile(plan, request.tiles[0],
                     spotShadowMatrix(placed.position, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
                     spotShadowMatrix(placed.position - origin, placed.light.direction, placed.light.outerAngle, placed.light.range, request.size),
-                    perspectiveOffset(halfWidth, request.size, settings.normalOffsetTexels), 0.0f);
+                    perspectiveOffset(halfWidth, request.size, settings.normalOffsetTexels), 0.0f,
+                    BoundingSphere{placed.position, placed.light.range});
             setLens(plan, halfWidth, placed.light.range, request.size);
         }
         else {
             const PlacedPointLight& placed = selected.pointLights[request.slot];
-            plan.uniforms.pointTiles[request.slot / 4][request.slot % 4] = firstTile;
-            plan.uniforms.pointShadowStrengths[request.slot / 4][request.slot % 4] = placed.shadowFade;
-            plan.uniforms.pointEmitterRadii[request.slot / 4][request.slot % 4] = placed.light.emitterRadius;
+            plan.points[request.slot] = LightShadow{firstTile, placed.shadowFade, placed.light.emitterRadius};
 
             // Faces out of view keep their place in the list, so the shader still finds face f at firstTile + f, but get
             // an empty square: nothing is drawn into it, and the shader counts it as lit.
@@ -379,17 +373,45 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             for (int face = 0; face < 6; ++face) {
                 const ShadowTile tile = request.facesInView[static_cast<std::size_t>(face)]
                     ? request.tiles[placedFaces++]
-                    : ShadowTile{Mat4::identity(), 0, 0, 0};
+                    : ShadowTile{Mat4::identity(), 0, 0, 0, BoundingSphere{}};
 
                 addTile(plan, tile, pointShadowFaceMatrix(placed.position, face, placed.light.range, request.size),
                         pointShadowFaceMatrix(placed.position - origin, face, placed.light.range, request.size),
-                        perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size, settings.normalOffsetTexels), 0.0f);
+                        perspectiveOffset(withEdgeMargin(1.0f, request.size), request.size, settings.normalOffsetTexels), 0.0f,
+                        BoundingSphere{placed.position, placed.light.range});
                 setLens(plan, withEdgeMargin(1.0f, request.size), placed.light.range, request.size);
             }
         }
     }
 
     return plan;
+}
+
+/*
+* Both lists come from the same selectDrawableLights, so slot i of the plan is slot i of the lights. A directional light's
+* shadow never fades (it has no rival for its tile), so only its tile goes across.
+*/
+void attachShadows(GpuLights& lights, const ShadowPlan& plan) {
+    if (plan.directional.size() != lights.directional.size() || plan.spots.size() != lights.spots.size() ||
+        plan.points.size() != lights.points.size()) {
+        throw std::invalid_argument("attachShadows: the shadow plan and the lights must come from the same lights");
+    }
+
+    for (std::size_t slot = 0; slot < plan.directional.size(); ++slot) {
+        lights.directional[slot].shadowTile = plan.directional[slot].firstTile;
+    }
+
+    for (std::size_t slot = 0; slot < plan.spots.size(); ++slot) {
+        lights.spots[slot].shadowTile = plan.spots[slot].firstTile;
+        lights.spots[slot].shadowStrength = plan.spots[slot].strength;
+        lights.spots[slot].emitterRadius = plan.spots[slot].emitterRadius;
+    }
+
+    for (std::size_t slot = 0; slot < plan.points.size(); ++slot) {
+        lights.points[slot].firstShadowTile = plan.points[slot].firstTile;
+        lights.points[slot].shadowStrength = plan.points[slot].strength;
+        lights.points[slot].emitterRadius = plan.points[slot].emitterRadius;
+    }
 }
 
 void visit(ShadowSettings& settings, SettingsVisitor& visitor) {

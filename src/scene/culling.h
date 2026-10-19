@@ -21,3 +21,11 @@ std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const 
 // The draws that can block a light: shadow casters inside the light's own view. Never use the camera's frustum here:
 // something behind the camera can still throw a shadow into view.
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const Frustum& lightFrustum);
+
+// The shadow casters a light can reach: those whose sphere touches its reach (its range around it; a negative radius
+// reaches everything, as for a directional light). One cheap test per caster before a point light's six face frustums.
+std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach);
+
+// The candidates (draw indices, such as castersInReach gives) inside a light view's frustum, in the candidates' order.
+std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,
+                                       const Frustum& lightFrustum);

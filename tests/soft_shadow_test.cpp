@@ -82,10 +82,10 @@ namespace {
         const Camera camera{Vec3{0.0f, 40.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 1.5f, 1.5f, 0.1f, 200.0f};
         const ShadowPlan plan = planShadows(lighting, camera);
 
-        const ShadowTileData& box = plan.tileData[static_cast<std::size_t>(plan.uniforms.directionalTiles[0])];
+        const ShadowTileData& box = plan.tileData[static_cast<std::size_t>(plan.directional[0].firstTile)];
         assert(box.lens[0] == 0.0f && box.lens[1] == 0.0f && box.lens[2] == 0.0f);
 
-        const std::size_t firstFace = static_cast<std::size_t>(plan.uniforms.pointTiles[0][0]);
+        const std::size_t firstFace = static_cast<std::size_t>(plan.points[0].firstTile);
         const ShadowTileData& face = plan.tileData[firstFace];
         const float size = static_cast<float>(plan.tiles[firstFace].size);
         assert(nearlyEqual(face.lens[0], shadowNearPlane));
@@ -94,11 +94,11 @@ namespace {
         // A face is a little wider than 90 degrees (tan 1 plus the edge margin), split into size texels.
         assert(face.lens[2] > 2.0f / size && face.lens[2] < 2.1f / size);
 
-        const ShadowTileData& beam = plan.tileData[static_cast<std::size_t>(plan.uniforms.spotTiles[0][0])];
+        const ShadowTileData& beam = plan.tileData[static_cast<std::size_t>(plan.spots[0].firstTile)];
         assert(nearlyEqual(beam.lens[1], spot.light.range));
 
-        assert(nearlyEqual(plan.uniforms.pointEmitterRadii[0][0], 0.2f));
-        assert(nearlyEqual(plan.uniforms.spotEmitterRadii[0][0], 0.03f));
+        assert(nearlyEqual(plan.points[0].emitterRadius, 0.2f));
+        assert(nearlyEqual(plan.spots[0].emitterRadius, 0.03f));
     }
 }
 

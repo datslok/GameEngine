@@ -1,55 +1,73 @@
 #pragma once
 
-#include "render/gpu/shader_shared.h"
-#include "render/gpu/uniform_limits.h"
 #include "scene/lighting.h"
 
 #include <cstdint>
+#include <vector>
 
-// The most lights the shader can use, from the header triangle.frag shares, so its array sizes always match.
-// Each pixel loops over every light it gets, but a light out of range costs only a distance check, so dozens are cheap.
-// Hundreds would need clustered shading (each pixel only looks at the lights that reach its part of the view).
-inline constexpr int maxDirectionalLights = MAX_DIRECTIONAL_LIGHTS;
-inline constexpr int maxPointLights = MAX_POINT_LIGHTS;
-inline constexpr int maxSpotLights = MAX_SPOT_LIGHTS;
+/*
+* How many lights of each kind the shader's light buffers hold. They are storage buffers (runtime arrays), so these
+* are the renderer's choice rather than a limit of the GPU: 1024 point lights take 48 KB. Directional lights stay few,
+* since each one always gets a shadow tile (light_priority.cpp checks that every seat fits the atlas).
+*/
+inline constexpr int maxDirectionalLights = 4;
+inline constexpr int maxPointLights = 1024;
+inline constexpr int maxSpotLights = 256;
 
-// Per-light shadow values are packed four to a vec4 (std140 pads single floats to 16 bytes), so slot i is at [i / 4][i % 4].
-inline constexpr int pointLightVec4s = (maxPointLights + 3) / 4;
-inline constexpr int spotLightVec4s = (maxSpotLights + 3) / 4;
+/*
+* How many lights get a seat in the shader by default (LightPrioritySettings), well below the buffers' room: until
+* clustered shading, every pixel loops over every seated light, so the cost grows with lights times pixels. A light out
+* of a pixel's range costs only a distance check, so dozens are cheap; hundreds wait for clustering.
+*/
+inline constexpr int defaultPointSeats = 64;
+inline constexpr int defaultSpotSeats = 8;
 
-struct DirectionalLightUniform {
+/*
+* The light records triangle.frag reads, one storage buffer per kind (std430, the layout of storage buffers: a scalar
+* takes 4 bytes and a vec4 16, with no padding of array elements to 16 bytes as uniform blocks need). Each light carries
+* its own shadow: the shadow plan's tile numbers, its strength while it fades between lights, and the glowing size
+* that softens it. Tile numbers are -1 for a light without a shadow. Positions are measured from the camera
+* (camera-relative rendering, render/gpu/camera_relative.h), so the viewer is at the shader's origin.
+*/
+struct GpuDirectionalLight {
     float toLight[4];  // xyz: unit direction towards the light
     float radiance[4]; // rgb: colour times intensity
+    std::int32_t shadowTile = -1;
+    float unused[3]{};
 };
 
-struct PointLightUniform {
+struct GpuPointLight {
     float positionRange[4]; // xyz: position relative to the camera, w: range
     float radiance[4];      // rgb: colour times intensity, w: radius of the glowing source, for the falloff
+    std::int32_t firstShadowTile = -1; // the first of its six cube faces' tiles
+    float shadowStrength = 0.0f;
+    float emitterRadius = 0.0f;
+    float unused = 0.0f;
 };
 
-struct SpotLightUniform {
+struct GpuSpotLight {
     float positionRange[4];     // xyz: position relative to the camera, w: range
     float directionCosOuter[4]; // xyz: unit beam direction, w: cosine of the outer cone angle
     float radianceCosInner[4];  // rgb: colour times intensity, w: cosine of the inner cone angle
-    float sourceRadius[4];      // x: radius of the glowing source, for the falloff
+    float sourceRadius = 1.0f;  // radius of the glowing source, for the falloff
+    std::int32_t shadowTile = -1;
+    float shadowStrength = 0.0f;
+    float emitterRadius = 0.0f;
 };
 
-/*
-* Mirrors the LightData block in triangle.frag byte for byte.
-* std140 pads a vec3 to 16 bytes, so every member is a 4-component vector and nothing is padded behind our back.
-* Positions are measured from the camera (camera-relative rendering, render/gpu/camera_relative.h), so the viewer is at
-* the shader's origin and needs no field of its own.
-*/
-struct LightUniformData {
-    float ambient[4];
-    std::int32_t counts[4]; // x: directional lights used, y: point lights used, z: spotlights used
-    DirectionalLightUniform directional[maxDirectionalLights];
-    PointLightUniform points[maxPointLights];
-    SpotLightUniform spots[maxSpotLights];
-};
+static_assert(sizeof(GpuDirectionalLight) == 48, "GpuDirectionalLight must match the shader's DirectionalLightData");
+static_assert(sizeof(GpuPointLight) == 48, "GpuPointLight must match the shader's PointLightData");
+static_assert(sizeof(GpuSpotLight) == 64, "GpuSpotLight must match the shader's SpotLightData");
 
-static_assert(sizeof(LightUniformData) == 2720, "LightUniformData must match the shader's LightData block");
-static_assert(sizeof(LightUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
+// A frame's lights as the shader gets them: the ambient light and the counts (which go into the frame's uniform block,
+// gpu_scene.h), and one record per light, in slot order.
+struct GpuLights {
+    float ambient[4]{};
+    std::int32_t counts[4]{}; // x: directional lights used, y: point lights used, z: spotlights used
+    std::vector<GpuDirectionalLight> directional;
+    std::vector<GpuPointLight> points;
+    std::vector<GpuSpotLight> spots;
+};
 
 // Whether the shader can use a light at all: a zero direction cannot be normalised, and the falloff divides by the range.
 bool canBeDrawn(const DirectionalLight& light);
@@ -61,5 +79,5 @@ bool canBeDrawn(const PlacedSpotLight& placed);
 FrameLighting selectDrawableLights(const FrameLighting& lighting);
 
 // Convert a frame's lights into the shader's layout, positions measured from the camera, dropping lights past the limits
-// or that cannot be drawn.
-LightUniformData packLighting(const FrameLighting& lighting, const Vec3& cameraPosition);
+// or that cannot be drawn. Every light starts without a shadow; attachShadows (shadow_map.h) adds the plan's.
+GpuLights packLighting(const FrameLighting& lighting, const Vec3& cameraPosition);

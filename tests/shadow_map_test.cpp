@@ -298,8 +298,8 @@ namespace {
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         assert(plan.tiles.size() == 2);
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[0][0])].size == 2048);
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[0][1])].size == 512);
+        assert(plan.tiles[static_cast<std::size_t>(plan.spots[0].firstTile)].size == 2048);
+        assert(plan.tiles[static_cast<std::size_t>(plan.spots[1].firstTile)].size == 512);
         assertTilesFitTheAtlas(plan);
 
         // The shader and the shadow pass agree on the large tile's matrix.
@@ -329,17 +329,17 @@ namespace {
         assertTilesFitTheAtlas(plan);
 
         for (int slot = 0; slot < 40; ++slot) {
-            const std::size_t first = static_cast<std::size_t>(plan.uniforms.pointTiles[slot / 4][slot % 4]);
+            const std::size_t first = static_cast<std::size_t>(plan.points[static_cast<std::size_t>(slot)].firstTile);
             assert(plan.tiles[first].size == smallestShadowTileSize);
         }
 
         std::uint32_t previousSize = largestShadowTileSize;
         for (int slot = 0; slot < 6; ++slot) {
-            const std::uint32_t size = plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[slot / 4][slot % 4])].size;
+            const std::uint32_t size = plan.tiles[static_cast<std::size_t>(plan.spots[static_cast<std::size_t>(slot)].firstTile)].size;
             assert(size <= previousSize);
             previousSize = size;
         }
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.spotTiles[0][0])].size == largestShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.spots[0].firstTile)].size == largestShadowTileSize);
         assert(previousSize < largestShadowTileSize);
     }
 
@@ -360,13 +360,12 @@ namespace {
 
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
-        assert(plan.uniforms.directionalTiles[0] == 0);
-        assert(plan.uniforms.spotTiles[0][0] == 1);
-        assert(plan.uniforms.spotTiles[0][1] == -1);
-        assert(plan.uniforms.pointTiles[0][0] == 2);
-        assert(plan.uniforms.pointTiles[0][1] == -1);
-        assert(plan.uniforms.pointTiles[0][2] == 8);
-        assert(plan.uniforms.pointTiles[0][3] == -1);
+        assert(plan.directional[0].firstTile == 0);
+        assert(plan.spots.size() == 1 && plan.spots[0].firstTile == 1);
+        assert(plan.points.size() == 3);
+        assert(plan.points[0].firstTile == 2);
+        assert(plan.points[1].firstTile == -1);
+        assert(plan.points[2].firstTile == 8);
         assert(plan.tiles.size() == 14);
         assertTilesFitTheAtlas(plan);
 
@@ -392,7 +391,7 @@ namespace {
         assert(plan.tiles[0].size == standardShadowTileSize);
     }
 
-    // Every one of the 64 point light seats in the shader can have a shadow; lights past the seats get neither.
+    // The 64 most important point lights can have a shadow; lights past that still shine, unshadowed.
     void testShadowedLightsAreCapped() {
         FrameLighting lighting;
 
@@ -404,8 +403,15 @@ namespace {
 
         assert(maxShadowedPointLights == 64 && maxShadowedSpotLights == 8);
         assert(plan.tiles.size() == 64 * 6);
-        assert(plan.uniforms.pointTiles[0][0] == 0);
-        assert(plan.uniforms.pointTiles[15][3] == 63 * 6);
+        assert(plan.points[0].firstTile == 0);
+        assert(plan.points[63].firstTile == 63 * 6);
+
+        // One shadow record per light the shader gets, so the lights past the shadow cap say "none".
+        assert(plan.points.size() == 70);
+
+        for (std::size_t slot = 64; slot < 70; ++slot) {
+            assert(plan.points[slot].firstTile == -1);
+        }
         assertTilesFitTheAtlas(plan);
     }
 
@@ -433,13 +439,13 @@ namespace {
         assertTilesFitTheAtlas(plan);
 
         for (int i = 0; i < 4; ++i) {
-            assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[i])].size == standardShadowTileSize);
+            assert(plan.tiles[static_cast<std::size_t>(plan.directional[static_cast<std::size_t>(i)].firstTile)].size == standardShadowTileSize);
         }
 
         std::uint32_t previousSize = standardShadowTileSize;
 
         for (int slot = 0; slot < 16; ++slot) {
-            const std::size_t first = static_cast<std::size_t>(plan.uniforms.pointTiles[slot / 4][slot % 4]);
+            const std::size_t first = static_cast<std::size_t>(plan.points[static_cast<std::size_t>(slot)].firstTile);
             const std::uint32_t size = plan.tiles[first].size;
 
             for (std::size_t face = 1; face < 6; ++face) {
@@ -451,7 +457,7 @@ namespace {
         }
 
         // The most important point light keeps the size it asked for; the least important was shrunk.
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == standardShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)].size == standardShadowTileSize);
         assert(previousSize < standardShadowTileSize);
     }
 
@@ -476,8 +482,8 @@ namespace {
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
         assertTilesFitTheAtlas(plan);
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.directionalTiles[3])].size == standardShadowTileSize);
-        assert(plan.tiles[static_cast<std::size_t>(plan.uniforms.pointTiles[0][0])].size == smallestShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.directional[3].firstTile)].size == standardShadowTileSize);
+        assert(plan.tiles[static_cast<std::size_t>(plan.points[0].firstTile)].size == smallestShadowTileSize);
     }
 
     // Small lights get small tiles, so sixteen lamps take a small corner of the atlas.
@@ -498,15 +504,15 @@ namespace {
         }
     }
 
-    // With nothing casting shadows there is nothing to draw and every slot says "none".
+    // With no lights there is nothing to draw and no slot to describe.
     void testNoShadowsWithoutLights() {
         const ShadowPlan plan = planShadows(FrameLighting{}, makeOverviewCamera());
 
         assert(plan.tiles.empty());
-        assert(plan.uniforms.spotTiles[1][3] == -1 && plan.uniforms.directionalTiles[3] == -1 && plan.uniforms.pointTiles[15][3] == -1);
+        assert(plan.directional.empty() && plan.spots.empty() && plan.points.empty());
     }
 
-    // A slot's tiles are found at [slot / 4][slot % 4] however far down the list it is.
+    // A slot's tiles are found in its own record however far down the list it is.
     void testShadowsAreFoundForAnySlot() {
         FrameLighting lighting;
 
@@ -521,12 +527,12 @@ namespace {
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
         // Spot slot 0 casts none; slots 1 to 7 take one tile each.
-        assert(plan.uniforms.spotTiles[0][0] == -1);
-        assert(plan.uniforms.spotTiles[0][1] == 0);
-        assert(plan.uniforms.spotTiles[1][3] == 6);
+        assert(plan.spots[0].firstTile == -1);
+        assert(plan.spots[1].firstTile == 0);
+        assert(plan.spots[7].firstTile == 6);
 
-        assert(plan.uniforms.pointTiles[4][3] == 7);
-        assert(plan.uniforms.pointTiles[4][2] == -1);
+        assert(plan.points[19].firstTile == 7);
+        assert(plan.points[18].firstTile == -1);
         assert(plan.tiles.size() == 13);
     }
 }
@@ -559,7 +565,7 @@ namespace {
 
         const ShadowPlan plan = planShadows(lighting, makeForwardCamera());
 
-        assert(plan.uniforms.pointTiles[0][0] == 0);
+        assert(plan.points[0].firstTile == 0);
         assert(plan.tiles.size() == 6);
         assertTilesFitTheAtlas(plan);
 
@@ -588,9 +594,60 @@ namespace {
 
         const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
 
-        assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][0], 0.3f));
-        assert(nearlyEqual(plan.uniforms.pointShadowStrengths[0][1], 0.0f));
-        assert(nearlyEqual(plan.uniforms.spotShadowStrengths[0][0], 0.7f));
+        assert(nearlyEqual(plan.points[0].strength, 0.3f));
+        assert(nearlyEqual(plan.points[1].strength, 0.0f));
+        assert(nearlyEqual(plan.spots[0].strength, 0.7f));
+    }
+
+    // The shader reads each light's shadow from the light's own record: its first tile, how strong the shadow is while it
+    // fades, and the glowing size that softens it. Lights the plan gave no tiles keep "none".
+    void testShadowsAreAttachedToLights() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{});
+
+        PlacedPointLight shadowed = pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, true);
+        shadowed.shadowFade = 0.3f;
+        shadowed.light.emitterRadius = 0.2f;
+        lighting.pointLights.push_back(shadowed);
+        lighting.pointLights.push_back(pointLightAt(Vec3{1.0f, 0.0f, 0.0f}, false));
+
+        PlacedSpotLight spot = spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true);
+        spot.shadowFade = 0.7f;
+        spot.light.emitterRadius = 0.03f;
+        lighting.spotLights.push_back(spot);
+
+        const Camera camera = makeOverviewCamera();
+        const ShadowPlan plan = planShadows(lighting, camera);
+        GpuLights lights = packLighting(lighting, camera.getPosition());
+        attachShadows(lights, plan);
+
+        assert(lights.directional[0].shadowTile == 0);
+        assert(lights.spots[0].shadowTile == 1);
+        assert(nearlyEqual(lights.spots[0].shadowStrength, 0.7f) && nearlyEqual(lights.spots[0].emitterRadius, 0.03f));
+        assert(lights.points[0].firstShadowTile == 2);
+        assert(nearlyEqual(lights.points[0].shadowStrength, 0.3f) && nearlyEqual(lights.points[0].emitterRadius, 0.2f));
+        assert(lights.points[1].firstShadowTile == -1 && lights.points[1].shadowStrength == 0.0f);
+    }
+
+    // Each tile knows how far its light reaches (a sphere round the light, the range as radius), so the shadow pass can
+    // drop casters that light never reaches with one sphere test before the face's frustum. A directional light's box
+    // has no such limit (negative radius).
+    void testTilesKnowTheirLightsReach() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{});
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true, 10.0f));
+        lighting.pointLights.push_back(pointLightAt(Vec3{1.0f, 0.0f, 0.0f}, true, 20.0f));
+
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+
+        assert(plan.tiles.size() == 8);
+        assert(plan.tiles[0].reach.radius < 0.0f);
+        assert(nearlyEqual(plan.tiles[1].reach.radius, 10.0f) && nearlyEqual(plan.tiles[1].reach.centre.y, 3.0f));
+
+        for (std::size_t face = 2; face < 8; ++face) {
+            assert(nearlyEqual(plan.tiles[face].reach.radius, 20.0f));
+            assert(nearlyEqual(plan.tiles[face].reach.centre.x, 1.0f) && nearlyEqual(plan.tiles[face].reach.centre.y, 0.0f));
+        }
     }
 
     // A tile's shader matrix, from the column-major numbers the shader reads.
@@ -659,6 +716,8 @@ void testShadowMap() {
     testFacesInViewGetTiles();
     testFacesOutOfViewAreLeftOut();
     testShadowStrengthIsPassed();
+    testShadowsAreAttachedToLights();
+    testTilesKnowTheirLightsReach();
     testShaderMatricesAreCameraRelative();
     testFaceFollowsTheLargestAxis();
     testEachFaceLooksAlongItsAxis();

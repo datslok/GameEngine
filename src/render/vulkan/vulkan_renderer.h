@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/display_output.h"
+#include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/shadow_atlas.h"
@@ -13,10 +14,12 @@
 #include "render/frames_in_flight.h"
 #include "render/present_mode.h"
 #include "render/render_stats.h"
+#include "render/vulkan/bindless_textures.h"
 #include "render/vulkan/frame_context.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/immediate_commands.h"
+#include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_debug_lines.h"
 #include "render/vulkan/vulkan_device.h"
@@ -122,7 +125,7 @@ private:
         OwnedHandle<VkSemaphore> imageAcquired;
         std::unique_ptr<FrameDescriptors> descriptors;
         std::unique_ptr<FrameUniforms> uniforms;
-        VulkanBuffer shadowTiles; // each shadow tile's matrix and place in the atlas, read by the main pass
+        std::unique_ptr<SceneBuffers> scene; // the GPU scene: instances, materials, lights, shadow tiles and casters
 
         // GPU timestamps around each pass (none without timestamp support): how many this frame's commands have
         // written so far, and whether the last submission wrote them all, so they can be read once its fence passes.
@@ -153,6 +156,11 @@ private:
     OwnedHandle<VkSampler> linearSampler;      // bilinear, clamped, one level (bloom)
     OwnedHandle<VkSampler> shadowSampler;      // compares depths, blending the four nearest results
     OwnedHandle<VkSampler> shadowDepthSampler; // raw depths, exact texels (the soft shadow blocker search)
+
+    // The scene pipelines' descriptors: every texture in one array, and the layout of the frame's scene set. Before the
+    // pipelines, which use the layout, so they go first.
+    std::unique_ptr<BindlessTextures> bindlessTextures;
+    std::unique_ptr<SceneLayout> sceneLayout;
 
     std::unique_ptr<VulkanPipeline> mainPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
@@ -196,6 +204,7 @@ private:
     void checkFormats() const;
     void createFrames();
     void createSamplers();
+    void createSceneLayout();
     void createPipelines();
     void createScreenPipelines(VkFormat format);
     std::unique_ptr<VulkanPipeline> createToneMapPipeline(VkFormat format);
@@ -218,13 +227,27 @@ private:
     void finishGpuTimings(FrameContext& frame);
 
     BloomComposite drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings, ImDrawData* ui);
-    void drawShadows(FrameContext& frame, const FrameDescription& description, const std::vector<ShadowTile>& tiles);
-    void drawMainPass(FrameContext& frame, const FrameDescription& description, const LightUniformData& lights, const ShadowPlan& shadows,
-                      const Frustum& cameraFrustum);
-    void drawMesh(FrameContext& frame, const DrawItem& draw);
+    // The shadow tiles to redraw this frame, each with its casters batched by mesh, and every caster's instance.
+    struct ShadowTileDraw {
+        const ShadowTile* tile = nullptr;
+        BatchedDraws casters;
+        std::uint64_t signature = 0;
+    };
+
+    struct ShadowDraws {
+        std::vector<ShadowTileDraw> tiles;
+        std::vector<GpuShadowInstance> instances;
+    };
+
+    VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
+                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws);
+    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles);
+    void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
+    void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
+    std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 
     void bindMesh(VkCommandBuffer commands, MeshHandle mesh, std::uint32_t& indexCount) const;
-    const VulkanTexture& textureOrWhite(TextureHandle handle) const;
+    void checkTexturesUploaded(const Material& material) const;
     SampledImage sampled(const VulkanTexture& texture) const;
 };

@@ -26,13 +26,16 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 
 /*
 * Four lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
-* shadow tile counts each mesh once), the point lights (all of them, those that reach into view, and those that got
-* a seat in the shader and a shadow), and the shadow tiles drawn and point light cube faces skipped as unseen.
+* shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
+* lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), and the
+* shadow tiles drawn and point light cube faces skipped as unseen.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
-    const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled);
-    const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled);
+    const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled) +
+                               "  CALLS " + std::to_string(stats.drawCalls);
+    const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled) +
+                                "  CALLS " + std::to_string(stats.shadowDrawCalls);
     const std::string tiles = "TILES DRAWN " + std::to_string(stats.shadowTilesDrawn) + "  CACHED " + std::to_string(stats.shadowTilesCached) +
                               "  SKIPPED " + std::to_string(stats.shadowTilesSkipped);
 

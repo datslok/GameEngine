@@ -10,17 +10,32 @@ layout(location = 0) out vec3 worldNormal;
 layout(location = 1) out vec2 textureUv;
 layout(location = 2) out vec3 relativePosition;
 layout(location = 3) out vec4 worldTangent;
+// Which entry of the material buffer shades this object: the same for every fragment of a triangle (flat, not interpolated).
+layout(location = 4) flat out uint materialIndex;
 
-// Camera-relative rendering (render/gpu/camera_relative.h): positions are measured from the camera along the world's
-// axes, so the numbers stay small and precise however far from the world's origin the camera is.
-layout(std140, set = 1, binding = 0) uniform TransformData {
+// One object of the GPU scene (render/gpu/gpu_scene.h, GpuInstance). Camera-relative rendering (render/gpu/camera_relative.h):
+// positions are measured from the camera along the world's axes, so the numbers stay small and precise however far from
+// the world's origin the camera is.
+struct InstanceData {
     mat4 transform;    // the camera-relative view-projection times the camera-relative model matrix
     mat4 model;        // places the vertex relative to the camera
     mat4 normalMatrix; // Inverse transpose of the model's 3x3 part, computed once per object on the CPU (zero if the object is squashed flat).
     vec4 handedness;   // x: -1 if the model matrix mirrors space, else +1
+    uvec4 material;    // x: the material's number in the material buffer
+};
+
+// Every object drawn this frame, in batch order: an instanced draw's gl_InstanceIndex counts from its batch's first one.
+layout(std430, set = 1, binding = 1) readonly buffer Instances {
+    InstanceData instances[];
 };
 
 void main() {
+    mat4 transform = instances[gl_InstanceIndex].transform;
+    mat4 model = instances[gl_InstanceIndex].model;
+    mat4 normalMatrix = instances[gl_InstanceIndex].normalMatrix;
+    vec4 handedness = instances[gl_InstanceIndex].handedness;
+    materialIndex = instances[gl_InstanceIndex].material.x;
+
     gl_Position = transform * vec4(position, 1.0);
 
     // Point lights need to know where each fragment is, relative to the camera like the lights themselves.

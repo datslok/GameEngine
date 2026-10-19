@@ -21,7 +21,7 @@ namespace {
         FrameLighting lighting;
         lighting.ambient = Vec3{0.2f, 0.2f, 0.2f};
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(nearlyEqual(data.ambient, 0.2f, 0.2f, 0.2f, 0.0f));
         assert(data.counts[0] == 0 && data.counts[1] == 0 && data.counts[2] == 0 && data.counts[3] == 0);
@@ -32,7 +32,7 @@ namespace {
         FrameLighting lighting;
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, -2.0f, 0.0f}, Vec3{1.0f, 0.5f, 0.5f}, 2.0f});
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[0] == 1);
         assert(nearlyEqual(data.directional[0].toLight, 0.0f, 1.0f, 0.0f, 0.0f));
@@ -45,7 +45,7 @@ namespace {
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, 1.0f});
         lighting.directionalLights.push_back(DirectionalLight{Vec3{1.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, 1.0f});
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[0] == 1);
         assert(nearlyEqual(data.directional[0].toLight, -1.0f, 0.0f, 0.0f, 0.0f));
@@ -55,7 +55,7 @@ namespace {
         FrameLighting lighting;
         lighting.pointLights.push_back(PlacedPointLight{Vec3{1.0f, 2.0f, 3.0f}, PointLight{Vec3{1.0f, 1.0f, 1.0f}, 3.0f, 6.0f}});
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[1] == 1);
         assert(nearlyEqual(data.points[0].positionRange, 1.0f, 2.0f, 3.0f, 6.0f));
@@ -68,7 +68,7 @@ namespace {
         lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 0.0f));
         lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, -1.0f));
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[1] == 0);
     }
@@ -85,7 +85,7 @@ namespace {
         spot.light.range = 8.0f;
         lighting.spotLights.push_back(spot);
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.5f, 1.0f, -2.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.5f, 1.0f, -2.0f});
 
         assert(nearlyEqual(data.points[0].positionRange, 0.5f, 1.0f, 5.0f, 5.0f));
         assert(nearlyEqual(data.spots[0].positionRange, -4.5f, 5.0f, 2.0f, 8.0f));
@@ -100,16 +100,18 @@ namespace {
             lighting.directionalLights.push_back(DirectionalLight{});
         }
 
-        for (int i = 0; i < 70; ++i) {
+        for (int i = 0; i < maxPointLights + 6; ++i) {
             lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, 5.0f));
         }
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
-        assert(maxPointLights == 64);
+        // The storage buffer has room for far more lights than the 64 seated by default (light_priority.h).
+        assert(maxPointLights == 1024 && defaultPointSeats == 64);
         assert(data.counts[0] == maxDirectionalLights);
         assert(data.counts[1] == maxPointLights);
-        assert(nearlyEqual(data.points[maxPointLights - 1].positionRange, 63.0f, 0.0f, 0.0f, 5.0f));
+        assert(data.points.size() == static_cast<std::size_t>(maxPointLights));
+        assert(nearlyEqual(data.points[maxPointLights - 1].positionRange, 1023.0f, 0.0f, 0.0f, 5.0f));
     }
 }
 
@@ -123,7 +125,7 @@ namespace {
         FrameLighting lighting;
         lighting.spotLights.push_back(spotLightAt(Vec3{1.0f, 2.0f, 3.0f}, Vec3{0.0f, 0.0f, -4.0f}, 20.0f, 0.2f, 0.4f));
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[2] == 1);
         assert(nearlyEqual(data.spots[0].positionRange, 1.0f, 2.0f, 3.0f, 20.0f));
@@ -137,7 +139,7 @@ namespace {
         lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, 20.0f, 0.2f, 0.4f));
         lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 0.0f, 0.2f, 0.4f));
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(data.counts[2] == 0);
     }
@@ -147,7 +149,7 @@ namespace {
         FrameLighting lighting;
         lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.6f, 0.3f));
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(nearlyEqual(data.spots[0].radianceCosInner[3], std::cos(0.3f)));
         assert(nearlyEqual(data.spots[0].directionCosOuter[3], std::cos(0.3f)));
@@ -156,15 +158,16 @@ namespace {
     void testSpotLightsAreCapped() {
         FrameLighting lighting;
 
-        for (int i = 0; i < 10; ++i) {
+        for (int i = 0; i < maxSpotLights + 2; ++i) {
             lighting.spotLights.push_back(spotLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.2f, 0.4f));
         }
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
-        assert(maxSpotLights == 8);
+        assert(maxSpotLights == 256 && defaultSpotSeats == 8);
         assert(data.counts[2] == maxSpotLights);
-        assert(nearlyEqual(data.spots[maxSpotLights - 1].positionRange, 7.0f, 0.0f, 0.0f, 20.0f));
+        assert(data.spots.size() == static_cast<std::size_t>(maxSpotLights));
+        assert(nearlyEqual(data.spots[maxSpotLights - 1].positionRange, 255.0f, 0.0f, 0.0f, 20.0f));
     }
 }
 
@@ -181,10 +184,10 @@ namespace {
         broken.light.sourceRadius = 0.0f;
         lighting.spotLights.push_back(broken);
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
-        assert(nearlyEqual(data.spots[0].sourceRadius[0], 3.0f));
-        assert(nearlyEqual(data.spots[1].sourceRadius[0], 1.0f));
+        assert(nearlyEqual(data.spots[0].sourceRadius, 3.0f));
+        assert(nearlyEqual(data.spots[1].sourceRadius, 1.0f));
         assert(nearlyEqual(SpotLight{}.sourceRadius, 1.0f));
     }
 }
@@ -202,7 +205,7 @@ namespace {
         broken.light.sourceRadius = -2.0f;
         lighting.pointLights.push_back(broken);
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(nearlyEqual(data.points[0].radiance[3], 4.0f));
         assert(nearlyEqual(data.points[1].radiance[3], 1.0f));
@@ -221,7 +224,7 @@ namespace {
         spot.fade = 0.5f;
         lighting.spotLights.push_back(spot);
 
-        const LightUniformData data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
 
         assert(nearlyEqual(data.points[0].radiance[0], 0.25f));
         assert(nearlyEqual(data.spots[0].radianceCosInner[0], 1.0f)); // colour 1 x intensity 2 x fade 0.5
@@ -229,7 +232,26 @@ namespace {
     }
 }
 
+namespace {
+    // packLighting knows nothing of shadows: every light starts with none (tile -1, strength 0), and attachShadows
+    // (shadow_map.h) fills in the ones the shadow plan gave tiles. One record per light the shader gets, no padding.
+    void testLightsStartUnshadowed() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{});
+        lighting.pointLights.push_back(pointLightAt(Vec3{0.0f, 0.0f, 0.0f}, 5.0f));
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, 20.0f, 0.2f, 0.4f));
+
+        const GpuLights data = packLighting(lighting, Vec3{0.0f, 0.0f, 0.0f});
+
+        assert(data.directional.size() == 1 && data.points.size() == 1 && data.spots.size() == 1);
+        assert(data.directional[0].shadowTile == -1);
+        assert(data.points[0].firstShadowTile == -1 && data.points[0].shadowStrength == 0.0f && data.points[0].emitterRadius == 0.0f);
+        assert(data.spots[0].shadowTile == -1 && data.spots[0].shadowStrength == 0.0f && data.spots[0].emitterRadius == 0.0f);
+    }
+}
+
 void testLightUniforms() {
+    testLightsStartUnshadowed();
     testFadeScalesRadiance();
     testPointLightSourceRadiusIsPacked();
     testSpotLightSourceRadiusIsPacked();

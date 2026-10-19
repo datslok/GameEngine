@@ -5,8 +5,8 @@
 #include "math/vec3.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/shadow_atlas.h"
-#include "render/gpu/uniform_limits.h"
 #include "scene/camera.h"
+#include "scene/frame_description.h"
 #include "scene/lighting.h"
 
 #include <cstdint>
@@ -86,27 +86,15 @@ Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float ou
 Mat4 directionalShadowMatrix(const Vec3& direction, const Camera& camera, const ShadowSettings& settings = {});
 
 /*
-* Mirrors the ShadowData uniform block in triangle.frag (std140, every member a multiple of 16 bytes): which tiles
-* belong to which light. Tile numbers are -1 for a light without a shadow. A point light's six faces are six tiles in
-* a row from its first one.
+* One light's shadow as the plan hands it out: its first tile (-1 for none; a point light's six faces are six tiles in a
+* row from it), how strong it is while shadows fade between lights (0..1), and the glowing size that softens it.
+* attachShadows copies these into the light records the shader reads.
 */
-struct ShadowUniformData {
-    std::int32_t pointTiles[pointLightVec4s][4]; // first tile of point light i at [i / 4][i % 4], one per light slot
-    std::int32_t spotTiles[spotLightVec4s][4];   // tile of spotlight i at [i / 4][i % 4]
-    std::int32_t directionalTiles[maxDirectionalLights];
-    float atlasTexel[4];            // xy: one texel's size in atlas coordinates
-
-    // How strong each light slot's shadow is, 0..1, while shadows fade between lights (0 for a slot without one).
-    float pointShadowStrengths[pointLightVec4s][4];
-    float spotShadowStrengths[spotLightVec4s][4];
-
-    // Each shadowed light's emitterRadius, which sizes its soft shadows.
-    float pointEmitterRadii[pointLightVec4s][4];
-    float spotEmitterRadii[spotLightVec4s][4];
+struct LightShadow {
+    std::int32_t firstTile = -1;
+    float strength = 0.0f;
+    float emitterRadius = 0.0f;
 };
-
-static_assert(sizeof(ShadowUniformData) == 896, "ShadowUniformData must match the shader's ShadowData block");
-static_assert(sizeof(ShadowUniformData) <= maxUniformBlockBytes, "the shader can only read the first 4 KB of a uniform block");
 
 /*
 * One tile as the shader reads it, from the ShadowTiles storage buffer (std430). There can be up to maxShadowTiles (396) of
@@ -126,17 +114,23 @@ static_assert(sizeof(ShadowTileData) == 112, "ShadowTileData must match the shad
 
 // One shadow view: its view-projection, and the square of the atlas it is drawn into (pixels, top-left corner). Size 0
 // means no square: a point light's cube face that sees nothing on screen, which is not drawn and which the shader counts as lit.
+// reach is the sphere its light lights (centre at the light, the range as radius; negative for a directional light,
+// which reaches everywhere): nothing wholly outside it can cast a shadow the light shows.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;
     std::uint32_t y = 0;
     std::uint32_t size = standardShadowTileSize;
+    BoundingSphere reach;
 };
 
-// What the shadow pass draws (one tile per view, in tile order) and what the shader reads (the uniforms, and tileData
-// for the storage buffer, in the same order as tiles).
+// What the shadow pass draws (one tile per view, in tile order) and what the shader reads: each light's shadow, one record
+// per light the shader gets in slot order (as packLighting gives them), and tileData for the storage buffer, in the same
+// order as tiles.
 struct ShadowPlan {
-    ShadowUniformData uniforms;
+    std::vector<LightShadow> directional;
+    std::vector<LightShadow> spots;
+    std::vector<LightShadow> points;
     std::vector<ShadowTile> tiles;
     std::vector<ShadowTileData> tileData;
 };
@@ -149,3 +143,6 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
 // The same, packed into an empty atlas (for one-off plans and tests).
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings = {});
+
+// Give each light record the shadow the plan handed out for its slot (the plan and the lights from the same frame's lights).
+void attachShadows(GpuLights& lights, const ShadowPlan& plan);

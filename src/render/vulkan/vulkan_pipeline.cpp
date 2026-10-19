@@ -91,22 +91,28 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
 {
     const VkDevice handle = device.getDevice();
 
-    fragmentResourceLayout = layouts.fragmentResources(resources.fragmentSamplers, resources.fragmentStorageBuffers);
-    const std::array<VkDescriptorSetLayout, 4> setLayouts{
-        layouts.empty(),
-        layouts.uniforms(VK_SHADER_STAGE_VERTEX_BIT, resources.vertexUniforms),
-        fragmentResourceLayout,
-        layouts.uniforms(VK_SHADER_STAGE_FRAGMENT_BIT, resources.fragmentUniforms),
-    };
+    if (description.sharedLayout != VK_NULL_HANDLE) {
+        layout = description.sharedLayout;
+    }
+    else {
+        fragmentResourceLayout = layouts.fragmentResources(resources.fragmentSamplers, resources.fragmentStorageBuffers);
+        const std::array<VkDescriptorSetLayout, 4> setLayouts{
+            layouts.empty(),
+            layouts.uniforms(VK_SHADER_STAGE_VERTEX_BIT, resources.vertexUniforms),
+            fragmentResourceLayout,
+            layouts.uniforms(VK_SHADER_STAGE_FRAGMENT_BIT, resources.fragmentUniforms),
+        };
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
-    layoutInfo.pSetLayouts = setLayouts.data();
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
+        layoutInfo.pSetLayouts = setLayouts.data();
 
-    VkPipelineLayout createdLayout = VK_NULL_HANDLE;
-    vulkanCheck(vkCreatePipelineLayout(handle, &layoutInfo, nullptr, &createdLayout), "Pipeline layout creation failed");
-    layout = OwnedHandle<VkPipelineLayout>{handle, createdLayout, vkDestroyPipelineLayout};
+        VkPipelineLayout createdLayout = VK_NULL_HANDLE;
+        vulkanCheck(vkCreatePipelineLayout(handle, &layoutInfo, nullptr, &createdLayout), "Pipeline layout creation failed");
+        ownedLayout = OwnedHandle<VkPipelineLayout>{handle, createdLayout, vkDestroyPipelineLayout};
+        layout = createdLayout;
+    }
 
     const OwnedHandle<VkShaderModule> vertexShader = device.loadShader(description.vertexShader);
     const OwnedHandle<VkShaderModule> fragmentShader = device.loadShader(description.fragmentShader);
@@ -210,7 +216,7 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     info.pDepthStencilState = &depthStencil;
     info.pColorBlendState = &colourBlend;
     info.pDynamicState = &dynamic;
-    info.layout = layout.get();
+    info.layout = layout;
 
     VkPipeline created = VK_NULL_HANDLE;
     vulkanCheck(vkCreateGraphicsPipelines(handle, VK_NULL_HANDLE, 1, &info, nullptr, &created), description.fragmentShader);
@@ -222,7 +228,7 @@ VkPipeline VulkanPipeline::get() const {
 }
 
 VkPipelineLayout VulkanPipeline::getLayout() const {
-    return layout.get();
+    return layout;
 }
 
 const ShaderResources& VulkanPipeline::getResources() const {

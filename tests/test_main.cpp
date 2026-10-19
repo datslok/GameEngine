@@ -36,6 +36,7 @@ void testIndexedMesh();
 void testLighting();
 void testLightUniforms();
 void testMaterialUniforms();
+void testGpuScene();
 void testDeferredChanges();
 void testDeterminism();
 void testEngineSettings();
@@ -138,6 +139,7 @@ int main(){
     testLighting();
     testLightUniforms();
     testMaterialUniforms();
+    testGpuScene();
     testDeferredChanges();
     testDeterminism();
     testEngineSettings();

@@ -30,13 +30,13 @@ namespace {
         Material material;
         material.colour = Pixel{255, 128, 0};
 
-        const MaterialUniformData data = packMaterial(material);
+        const GpuMaterial data = packMaterial(material);
 
         assert(nearlyEqual(data.baseColour, 1.0f, 0.2158f, 0.0f, 1.0f));
     }
 
     void testDefaultSurfaceIsPacked() {
-        const MaterialUniformData data = packMaterial(Material{});
+        const GpuMaterial data = packMaterial(Material{});
 
         assert(nearlyEqual(data.surface, 0.0f, 0.5f, 0.0f, 0.0f));
     }
@@ -47,7 +47,7 @@ namespace {
         material.metallic = 1.0f;
         material.roughness = 0.3f;
 
-        const MaterialUniformData data = packMaterial(material);
+        const GpuMaterial data = packMaterial(material);
 
         assert(nearlyEqual(data.surface, 1.0f, 0.3f, 0.0f, 0.0f));
     }
@@ -58,7 +58,7 @@ namespace {
         material.metallic = 2.0f;
         material.roughness = -1.0f;
 
-        const MaterialUniformData data = packMaterial(material);
+        const GpuMaterial data = packMaterial(material);
 
         assert(nearlyEqual(data.surface, 1.0f, 0.0f, 0.0f, 0.0f));
     }
@@ -79,7 +79,7 @@ namespace {
 namespace {
     // Surfaces do not glow unless asked to: the default emissive colour is black.
     void testDefaultMaterialDoesNotGlow() {
-        const MaterialUniformData data = packMaterial(Material{});
+        const GpuMaterial data = packMaterial(Material{});
 
         assert(nearlyEqual(data.emissive, 0.0f, 0.0f, 0.0f, 0.0f));
     }
@@ -89,13 +89,35 @@ namespace {
         Material moon;
         moon.emissive = Vec3{0.85f, 0.9f, 1.0f};
 
-        const MaterialUniformData data = packMaterial(moon);
+        const GpuMaterial data = packMaterial(moon);
 
         assert(nearlyEqual(data.emissive, 0.85f, 0.9f, 1.0f, 0.0f));
     }
 }
 
+namespace {
+    // Textures are read from one big array (bindless): slot 0 holds the white stand-in that "no texture" multiplies by,
+    // and a texture's slot is its handle plus one, so the numbering follows the AssetManager's.
+    void testTexturesBecomeArraySlots() {
+        assert(whiteTextureSlot == 0);
+        assert(bindlessTextureSlot(TextureHandle{}) == whiteTextureSlot);
+        assert(bindlessTextureSlot(TextureHandle{0}) == 1);
+        assert(bindlessTextureSlot(TextureHandle{5}) == 6);
+
+        const GpuMaterial plain = packMaterial(Material{});
+        assert(plain.textures[0] == whiteTextureSlot && plain.textures[1] == whiteTextureSlot && plain.textures[2] == whiteTextureSlot);
+
+        Material textured;
+        textured.texture = TextureHandle{2};
+        textured.metallicRoughnessTexture = TextureHandle{7};
+        textured.normalTexture = TextureHandle{9};
+        const GpuMaterial packed = packMaterial(textured);
+        assert(packed.textures[0] == 3 && packed.textures[1] == 8 && packed.textures[2] == 10);
+    }
+}
+
 void testMaterialUniforms() {
+    testTexturesBecomeArraySlots();
     testDefaultMaterialDoesNotGlow();
     testEmissiveIsPacked();
     testDefaultMaterialIsRoughPlastic();

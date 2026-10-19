@@ -102,7 +102,7 @@ namespace {
         PreparedView lamps{viewNamed(views, "lamp-field")};
         const FrameDescription frame = buildFrame(lamps.world, lamps.game.getCamera(), 1.0f);
 
-        assert(frame.lighting.pointLights.size() > static_cast<std::size_t>(maxPointLights));
+        assert(frame.lighting.pointLights.size() > static_cast<std::size_t>(defaultPointSeats));
     }
 }
 
