@@ -2,7 +2,7 @@
 
 A game engine written from scratch in C++20, as a learning project. The long-term goal is an engine that can run both an **FPS** and a **MOBA**, and eventually a dressmaking game with real cloth physics: the core stays genre-agnostic, and genre-specific code (camera styles, weapons, abilities, netcode) sits on top.
 
-It began life as a software rasterizer drawing pixels on the CPU and now renders on the GPU with its own Vulkan 1.3 renderer. See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
+It began life as a software rasterizer drawing pixels on the CPU and now renders on the GPU with its own Vulkan 1.3 renderer. See [ROADMAP.md](ROADMAP.md) for what has been built and what comes next, [docs/BUILDLOG.md](docs/BUILDLOG.md) for how each step went, and [docs/ENGINE_GUIDE.md](docs/ENGINE_GUIDE.md) for how it all works.
 
 ## Features
 
@@ -168,6 +168,7 @@ tests/          Unit tests (one test function per file, registered in tests/test
   gpu/          The GPU test tier (make gputest): the runner, one test per shader library, and their compute shaders in gpu/shaders
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
                 ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)
+                BUILDLOG.md: the history of finished roadmap items (when, why, measurements, dead ends)
                 ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
                 RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
 tools/          package_demo.py (the shareable zip), make_glb_demo.py

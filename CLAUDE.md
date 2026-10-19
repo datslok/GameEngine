@@ -73,7 +73,7 @@ Software renderer (reference path, used only by tests): `Renderer`, `Display`, `
 
 ## Planned work
 
-`ROADMAP.md` is the single source of truth for planned work, grouped into phases with milestones. Tick items off there (`- [x]`) as part of the feature branch that completes them, keep `docs/ARCHITECTURE.md` in sync with the code, and update this file's summary when a rule or the big picture changes.
+`ROADMAP.md` is the single source of truth for planned work, grouped into phases with milestones. Tick items off there (`- [x]`) as part of the feature branch that completes them, cutting each finished item to one line (its name and branch); its story (why, what was decided, measured, tried and dropped) goes into `docs/BUILDLOG.md` in the same branch, and how it works into `docs/ARCHITECTURE.md`. Keep `docs/ARCHITECTURE.md` in sync with the code, and update this file's summary when a rule or the big picture changes.
 
 Documentation habits (part of the work, not optional):
 
