@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "engine/game.h"
 #include "gameplay/control_mode.h"
+#include "gameplay/flashlight.h"
 #include "gameplay/player_controls.h"
 #include "physics/static_level.h"
 #include "scene/light.h"
@@ -79,6 +80,7 @@ public:
     // The glowing disc in the sky where the sunlight comes from (scene/sky_object.h).
     Entity getSunDisc() const;
     Entity getFirstPersonBody() const;
+    Entity getFlashlight() const;
     PlayerControls& getControls();
 
 private:
@@ -94,6 +96,10 @@ private:
 
     // The ground and every block: built once in onInit, never rebuilt.
     StaticLevel staticLevel;
+
+    // F toggles it, held in the right hand (off at the start, so the golden views keep the sunlit picture): for seeing
+    // how a moving light's bounce follows it.
+    Flashlight flashlight;
 
     // F4: the engine's bounding boxes and culling readout.
     bool debugViewEnabled = false;

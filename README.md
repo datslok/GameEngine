@@ -105,7 +105,7 @@ It builds the game, then creates `build/GameEngineDemo.zip` with the exe, `Light
 
 The game starts in first-person mode. F1-F3 switch modes at any time.
 
-The light lab (`--game lightlab`, or LightLab.bat in the zip) has the same controls for moving and looking (F1-F5); the keys for lights and grenades are the demo's. Its sun is under Light lab, Sun in the settings window (F5): latitude, day of the year, solar time, hours per second to run the clock, and the sun disc's size (1 is the real half degree).
+The light lab (`--game lightlab`, or LightLab.bat in the zip) has the same controls for moving and looking (F1-F5) and the flashlight (F, off at the start, held in your right hand in every mode: shine it into the dark back room to watch its bounce light follow it); the lamps (L) and grenades (G) are the demo's only. Its sun is under Light lab, Sun in the settings window (F5): latitude, day of the year, solar time, hours per second to run the clock, and the sun disc's size (1 is the real half degree).
 
 | Input | Action |
 |---|---|

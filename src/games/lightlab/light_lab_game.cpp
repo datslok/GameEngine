@@ -208,6 +208,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     world.add(sky, AmbientLight{});
     world.add(sky, SkyBackground{});
     world.add(world.create(), labProbeVolume);
+    flashlight.create(world, false);
 
     // The sun disc: a glowing sphere with no colour of its own. It stands for the sunlight's source, so it must not
     // block that light. It teleports with the camera every frame, so it has no PreviousTransform to blend from.
@@ -231,6 +232,10 @@ void LightLabGame::onInput(World& world, const Input& input) {
     if (input.wasKeyPressed(Key::F4)) {
         debugViewEnabled = !debugViewEnabled;
     }
+
+    if (input.wasKeyPressed(Key::F)) {
+        flashlight.toggle(world);
+    }
 }
 
 /*
@@ -242,7 +247,8 @@ void LightLabGame::onFixedUpdate(World& world, float tickSeconds, double simulat
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 
-// The daylight follows the settings every frame, so dragging a slider moves the sun at once.
+// The daylight follows the settings every frame, so dragging a slider moves the sun at once; the flashlight follows the
+// camera that just moved.
 void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds, float alpha) {
     // Motion from the previous mode must not rotate the new camera pose.
     if (!controls.updateModeSwitching(world, input)) {
@@ -250,6 +256,7 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
     }
 
     updateDaylight(world);
+    flashlight.place(world, flashlightInHand(controls.getCamera()));
 }
 
 void LightLabGame::updateDaylight(World& world) {
@@ -273,6 +280,10 @@ void LightLabGame::updateDaylight(World& world) {
 
 Entity LightLabGame::getSunDisc() const {
     return sunDisc;
+}
+
+Entity LightLabGame::getFlashlight() const {
+    return flashlight.getEntity();
 }
 
 Camera& LightLabGame::getCamera() {

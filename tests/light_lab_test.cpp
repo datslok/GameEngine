@@ -1,6 +1,8 @@
 #include "games/lightlab/light_lab_game.h"
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
+#include "gameplay/flashlight.h"
+#include "input/input.h"
 #include "math/angles.h"
 #include "math/transform.h"
 #include "physics/character_controller.h"
@@ -316,7 +318,37 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The flashlight (gameplay/flashlight): off at the start, so the golden views keep the sunlit picture; F switches it
+    * on and off; and every frame it is held in the right hand of the current camera, so it follows the view.
+    */
+    void testTheLabsFlashlight() {
+        Lab lab;
+        const Entity flashlight = lab.game.getFlashlight();
+        assert(lab.world.isAlive(flashlight) && !lab.world.has<SpotLight>(flashlight));
+
+        Input pressF;
+        pressF.beginFrame();
+        pressF.pressKey(Key::F);
+        lab.game.onInput(lab.world, pressF);
+        assert(lab.world.has<SpotLight>(flashlight));
+
+        Input idle;
+        idle.beginFrame();
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        const FlashlightPose held = flashlightInHand(lab.game.getCamera());
+        const Vec3 position = lab.world.get<Transform>(flashlight).position;
+        assert(near(position.x, held.position.x, 1e-5f) && near(position.y, held.position.y, 1e-5f) && near(position.z, held.position.z, 1e-5f));
+        assert(lab.world.get<SpotLight>(flashlight).direction.normalized().dot(held.direction.normalized()) > 0.99999f);
+
+        lab.game.onInput(lab.world, pressF);
+        assert(!lab.world.has<SpotLight>(flashlight));
+    }
+}
+
 void testLightLab() {
+    testTheLabsFlashlight();
     testProbeVolume();
     testSunDisc();
     testTowersDoubleAndFanOut();

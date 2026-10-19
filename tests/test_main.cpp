@@ -55,6 +55,7 @@ void testSun();
 void testGameRegistry();
 void testPlayerControls();
 void testLightLab();
+void testFlashlight();
 void testRawImagePng();
 void testTangents();
 void testGpuDepthRange();
@@ -171,6 +172,7 @@ int main(){
     testGameRegistry();
     testPlayerControls();
     testLightLab();
+    testFlashlight();
     testRawImagePng();
     testTangents();
     testGpuDepthRange();

@@ -38,12 +38,6 @@ namespace {
     // does not block its own light now that every light casts shadows.
     constexpr float flashlightReach = 1.2f;
 
-    // Away from MOBA mode the flashlight is in the right hand: this far right of and below the eye, aimed at the point this
-    // far straight ahead. Being off to the side, it throws shadows you can see beside things, not hidden behind them.
-    constexpr float flashlightHandRight = 0.4f;
-    constexpr float flashlightHandDown = 0.3f;
-    constexpr float flashlightAimDistance = 8.0f;
-
     // Which way the moon is from where the free camera starts: up, to the left and behind. The moonlight travels the opposite way.
     const Vec3 towardsMoon{-0.4f, 1.0f, 0.6f};
 
@@ -358,10 +352,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // The sphere mesh has radius 1, so a unit sphere collider scaled with it fits exactly; it needs no triangles.
     world.add(moon, Collider{Sphere{Vec3{0.0f, 0.0f, 0.0f}, 1.0f}, nullptr});
 
-    // The flashlight. updateFlashlight places it every frame, at the camera or (in MOBA mode) in the duck's hands.
-    flashlight = world.create();
-    world.add(flashlight, Transform{});
-    world.add(flashlight, flashlightBeam);
+    // The flashlight. updateFlashlight places it every frame, in the right hand or (in MOBA mode) in the duck's.
+    flashlight.create(world, true);
 
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
@@ -448,7 +440,7 @@ void DemoGame::onInput(World& world, const Input& input) {
     updateSelection(world, input);
 
     if (input.wasKeyPressed(Key::F)) {
-        toggleFlashlight(world);
+        flashlight.toggle(world);
     }
 
     if (input.wasKeyPressed(Key::L)) {
@@ -497,7 +489,7 @@ void DemoGame::prepareGoldenView(World& world, const GoldenView& view) {
         }
 
         if (!golden.flashlightOn) {
-            toggleFlashlight(world);
+            flashlight.toggle(world);
         }
 
         return;
@@ -597,18 +589,6 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
 }
 
 /*
-* Switching off removes the light rather than dimming it to zero, so the renderer does not spend a slot on it.
-*/
-void DemoGame::toggleFlashlight(World& world) {
-    if (world.has<SpotLight>(flashlight)) {
-        world.remove<SpotLight>(flashlight);
-    }
-    else {
-        world.add(flashlight, flashlightBeam);
-    }
-}
-
-/*
 * The lamps are whole entities, created and destroyed together, so off means truly gone: no seats, no draws.
 * Four colours in turn make it easy to see which lamps are lit: an unseated lamp's bulb still glows (it is emissive),
 * but the ground around it stays dark. Each lamp flies round its pillar (a Firefly), so it has a PreviousTransform and is
@@ -697,28 +677,20 @@ void DemoGame::toggleLamps(World& world) {
 }
 
 /*
-* Runs every frame, after the camera moves, because the camera moves per frame: updating per tick would make the beam lag behind mouse look.
-* Normally it is held in the right hand and aimed at the middle of the view.
-* In MOBA mode the duck holds it, so it uses the duck's drawn (interpolated) pose, keeping the beam in step with the model.
-* It needs no PreviousTransform: it is already placed exactly where things are drawn this frame.
+* Every frame (gameplay/flashlight): normally held in the right hand. In MOBA mode the duck holds it, so it uses the
+* duck's drawn (interpolated) pose, keeping the beam in step with the model.
 */
 void DemoGame::updateFlashlight(World& world, float alpha) {
-    const Camera& camera = controls.getCamera();
-    Vec3 position = camera.getPosition() + camera.getRight() * flashlightHandRight - camera.getUp() * flashlightHandDown;
-    Vec3 direction = camera.getPosition() + camera.getForward() * flashlightAimDistance - position;
+    FlashlightPose pose = flashlightInHand(controls.getCamera());
 
     if (controls.getMode() == ControlMode::Moba && world.isAlive(player)) {
         // Held above the ground, out in front, and tilted down so the beam lands a few steps ahead.
         const Vec3 facing = getCharacterFacing(world, player, alpha);
-        position = getRenderTransform(world, player, alpha).position + Vec3{0.0f, flashlightHeight, 0.0f} + facing * flashlightReach;
-        direction = facing * std::cos(flashlightTilt) - Vec3{0.0f, std::sin(flashlightTilt), 0.0f};
+        pose.position = getRenderTransform(world, player, alpha).position + Vec3{0.0f, flashlightHeight, 0.0f} + facing * flashlightReach;
+        pose.direction = facing * std::cos(flashlightTilt) - Vec3{0.0f, std::sin(flashlightTilt), 0.0f};
     }
 
-    world.get<Transform>(flashlight).position = position;
-
-    if (SpotLight* beam = world.tryGet<SpotLight>(flashlight)) {
-        beam->direction = direction;
-    }
+    flashlight.place(world, pose);
 }
 
 /*
@@ -787,7 +759,7 @@ Entity DemoGame::getDestinationMarker() const {
 }
 
 Entity DemoGame::getFlashlight() const {
-    return flashlight;
+    return flashlight.getEntity();
 }
 
 Entity DemoGame::getMoon() const {

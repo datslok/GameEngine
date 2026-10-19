@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "engine/game.h"
 #include "gameplay/control_mode.h"
+#include "gameplay/flashlight.h"
 #include "gameplay/grenade.h"
 #include "gameplay/player_controls.h"
 #include "input/input.h"
@@ -122,16 +123,8 @@ private:
     Entity player;
     Entity destinationMarker;
 
-    // F toggles it. Held at the camera, or by the duck in MOBA mode.
-    Entity flashlight;
-    // A large source radius keeps it gentle up close; the higher intensity carries it further.
-    SpotLight flashlightBeam{
-        .colour = Vec3{1.0f, 0.89f, 0.69f},
-        .intensity = 12.0f,
-        .range = 50.0f,
-        .sourceRadius = 4.5f
-    };
-    void toggleFlashlight(World& world);
+    // F toggles it. Held in the right hand, or by the duck in MOBA mode.
+    Flashlight flashlight;
     void updateFlashlight(World& world, float alpha);
 
     // A glowing sphere in the direction the moonlight comes from, at a fixed place you can fly to in free camera mode.
