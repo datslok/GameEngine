@@ -25,7 +25,7 @@ void main() {
     } else if (function == GPU_TEST_PROBE_RAYS) {
         vec3 rotation[3] = vec3[3](second.xyz, third.xyz, fourth.xyz);
         testOutput(0, vec4(sphericalFibonacci(int(first.x), int(first.y)), 0.0));
-        testOutput(1, vec4(probeRayDirection(int(first.x), int(first.y), rotation), 0.0));
+        testOutput(1, vec4(probeRayDirection(int(first.x), int(first.y), int(first.z), rotation), 0.0));
     } else if (function == GPU_TEST_PROBE_WEIGHTS) {
         testOutput(0, vec4(irradianceRayWeight(first.xyz, second.xyz), distanceRayWeight(first.xyz, second.xyz),
                            distanceForUpdate(third.x, third.y), 0.0));

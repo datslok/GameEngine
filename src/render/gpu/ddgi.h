@@ -24,6 +24,7 @@ inline constexpr int probeIrradianceTexels = DDGI_IRRADIANCE_TEXELS;
 inline constexpr int probeDistanceTexels = DDGI_DISTANCE_TEXELS;
 inline constexpr int minRaysPerProbe = DDGI_MIN_RAYS;
 inline constexpr int maxRaysPerProbe = DDGI_MAX_RAYS;
+inline constexpr int probeRayCycle = DDGI_RAY_CYCLE;
 inline constexpr float probeDistanceSharpness = static_cast<float>(DDGI_DISTANCE_SHARPNESS);
 inline constexpr float backFaceDistanceShare = static_cast<float>(DDGI_BACK_FACE_DISTANCE_SHARE);
 inline constexpr float minProbeTexelWeight = static_cast<float>(DDGI_MIN_TEXEL_WEIGHT);
@@ -46,9 +47,12 @@ struct GlobalIlluminationSettings {
     int raysPerProbe = 64;
 
     // How long the stored light takes to follow a change: after this many seconds, 1/e (37%) of a step change is left,
-    // at any frame rate. Shorter reacts faster and flickers more. Distances are kept steadier, since flickering
-    // visibility is worse than slightly late visibility [2021].
-    float irradianceTimeConstant = 0.5f;
+    // at any frame rate. Shorter reacts faster and flickers more: noise goes as 1/sqrt(rays x time constant). 2 s was
+    // chosen by eye in the light lab's dark back room, where 0.5 s crawled visibly; the price is lag, a light switched
+    // on or off bringing its bounce light in over a few seconds, and moving lights and objects trailing theirs (scene
+    // events, planned, will speed probes up for such changes). Distances are kept steadier, since flickering visibility
+    // is worse than slightly late visibility [2021].
+    float irradianceTimeConstant = 2.0f;
     float distanceTimeConstant = 1.0f;
 
     // How far the point tested for visibility moves off the surface, in units of 0.75 of the smallest spacing [2021].
@@ -109,8 +113,9 @@ TexelCoord probeBorderTexel(int number, int side);
 Vec3 sphericalFibonacci(int index, int count);
 
 /*
-* A rotation drawn uniformly from all rotations (Shoemake 1992), the same for the same frame number: every probe's rays
-* are turned by it, so a fixed pattern's gaps move every frame and the samples add up to the whole sphere over time.
+* A rotation drawn uniformly from all rotations (Shoemake 1992), the same for the same number: every probe's rays are
+* turned by it (one per ray cycle, probeRayFrame), so the spiral's gaps move and the samples add up to the whole sphere
+* over time, with no direction favoured.
 */
 Quat randomProbeRotation(std::uint64_t frameNumber);
 
@@ -121,8 +126,21 @@ struct ProbeRotationRows {
 
 ProbeRotationRows probeRotationRows(const Quat& rotation);
 
-// Ray ray of a probe's count this frame: the Fibonacci point turned by the frame's rotation.
-Vec3 probeRayDirection(int ray, int count, const ProbeRotationRows& rotation);
+/*
+* Which rays a frame traces: frames take turns through one spiral of count x probeRayCycle points, frame number f taking
+* phase f mod probeRayCycle, and a cycle's frames share one rotation (randomProbeRotation of the cycle's number), so
+* together they cover the sphere evenly rather than as unevenly as independent random rotations would. In a room lit by
+* a small bright patch, how many rays find it then barely varies from cycle to cycle, which is what flickered.
+*/
+struct ProbeRayFrame {
+    Quat rotation;
+    int phase = 0;
+};
+
+ProbeRayFrame probeRayFrame(std::uint64_t frameNumber);
+
+// Ray ray of a probe's count in a frame of this phase: spiral point ray x probeRayCycle + phase, turned by the rotation.
+Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation);
 
 /*
 * The update's weights for one ray seen from one texel: irradiance weights rays by the cosine between the two (Lambert's
@@ -195,7 +213,7 @@ struct GpuProbeVolume {
     std::int32_t counts[4]; // xyz probes along each axis, w rays per probe this frame
     float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz
     float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything)
-    float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius
+    float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
 };
 
 static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_volume.glsl and fit in 128 bytes of push constants");
@@ -204,6 +222,7 @@ static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_vol
 struct ProbeFrame {
     int raysPerProbe = 64;
     Quat rotation;
+    int rayPhase = 0; // the frame's place in its ray cycle (ProbeRayFrame)
     Vec3 sky{0.0f, 0.0f, 0.0f};
     float irradianceHysteresis = 0.0f;
     float distanceHysteresis = 0.0f;

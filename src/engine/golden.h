@@ -20,12 +20,11 @@ inline constexpr std::uint32_t goldenImageHeight = 720;
 
 /*
 * Frames drawn before a view with light probes is captured, each one tick (1/120 s) long, so the probes have gathered
-* most of their light: 2 s is four of the irradiance's time constants and two of the distances'. Light bounced several
-* times needs a time constant per bounce, so the dimmest corners are still settling (they move a few percent more over
-* the next frames than after 8 s); the capture is the same every run, which is what a reference needs, and 960 frames
-* would make the light lab's check four times slower.
+* their light: 8 s is four of the irradiance's default time constants (2 s; 2% of the start left) and eight of the
+* distances'. Light bounced several times needs a time constant per bounce, so the dimmest corners are the last to
+* settle; the capture is the same every run either way, which is what a reference needs.
 */
-inline constexpr int goldenProbeWarmUpFrames = 240;
+inline constexpr int goldenProbeWarmUpFrames = 960;
 
 // Lower-case letters, digits and dashes, not empty: safe as a file name everywhere.
 bool isGoldenViewName(const std::string& name);

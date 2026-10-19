@@ -92,9 +92,9 @@ vec3 sphericalFibonacci(int index, int count) {
     return vec3(radius * cos(angle), radius * sin(angle), z);
 }
 
-// rotation: the frame's rotation matrix's rows.
-vec3 probeRayDirection(int ray, int count, vec3 rotation[3]) {
-    vec3 point = sphericalFibonacci(ray, count);
+// phase: the frame's place in its ray cycle; rotation: the cycle's rotation matrix's rows.
+vec3 probeRayDirection(int ray, int count, int phase, vec3 rotation[3]) {
+    vec3 point = sphericalFibonacci(ray * DDGI_RAY_CYCLE + phase, count * DDGI_RAY_CYCLE);
     return vec3(dot(rotation[0], point), dot(rotation[1], point), dot(rotation[2], point));
 }
 

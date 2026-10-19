@@ -14,6 +14,12 @@
 #define DDGI_MIN_RAYS 16
 #define DDGI_MAX_RAYS 256
 
+// Frames that take turns through one spiral of rays: frame f of a cycle traces every DDGI_RAY_CYCLE-th point of a
+// spiral DDGI_RAY_CYCLE times as long, from point f, so each cycle covers the sphere evenly between them. Measured in the
+// light lab's back room (lit by a small sunlit patch through a doorway), 16 left the least flicker: about a third of
+// independent random rotations each frame, as good as three times the rays; 8 and 64 were slightly worse.
+#define DDGI_RAY_CYCLE 16
+
 // How sharply a distance texel favours rays near its own direction (a cosine raised to this power), so distances stay
 // crisp at the edges of walls [2019].
 #define DDGI_DISTANCE_SHARPNESS 50.0

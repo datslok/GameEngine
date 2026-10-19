@@ -178,7 +178,9 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     const bool fresh = std::exchange(freshAtlases, false);
     ProbeFrame frame;
     frame.raysPerProbe = std::clamp(settings.raysPerProbe, minRaysPerProbe, maxRaysPerProbe);
-    frame.rotation = randomProbeRotation(frameNumber++);
+    const ProbeRayFrame rays = probeRayFrame(frameNumber++);
+    frame.rotation = rays.rotation;
+    frame.rayPhase = rays.phase;
     frame.sky = sky;
     frame.irradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.irradianceTimeConstant);
     frame.distanceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant);

@@ -100,7 +100,7 @@ namespace {
         }
     }
 
-    // Every ray of a few counts, each turned by a different frame's rotation.
+    // Every ray of a few counts, at every phase of the ray cycle in turn, each turned by a different frame's rotation.
     void checkRays(GpuFunctionRunner& runner, GpuCheckReport& report) {
         std::vector<GpuVec4> inputs;
         std::vector<ProbeRotationRows> rotations;
@@ -108,7 +108,8 @@ namespace {
         for (int count : {minRaysPerProbe, 64, 100, maxRaysPerProbe}) {
             for (int ray = 0; ray < count; ++ray) {
                 const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(static_cast<std::uint64_t>(ray * 7 + count)));
-                inputs.push_back(gpuVec4(static_cast<float>(ray), static_cast<float>(count)));
+                const int phase = (ray * 3 + count) % probeRayCycle;
+                inputs.push_back(gpuVec4(static_cast<float>(ray), static_cast<float>(count), static_cast<float>(phase)));
 
                 for (const Vec3& row : rows.rows) {
                     inputs.push_back(gpuVec4(row));
@@ -123,8 +124,9 @@ namespace {
         for (std::size_t i = 0; i < rotations.size(); ++i) {
             const int ray = static_cast<int>(inputs[i * 4][0]);
             const int count = static_cast<int>(inputs[i * 4][1]);
+            const int phase = static_cast<int>(inputs[i * 4][2]);
             report.check("sphericalFibonacci", trigonometryTolerance, sphericalFibonacci(ray, count), vec3From(outputs[i * 2]));
-            report.check("probeRayDirection", trigonometryTolerance, probeRayDirection(ray, count, rotations[i]), vec3From(outputs[i * 2 + 1]));
+            report.check("probeRayDirection", trigonometryTolerance, probeRayDirection(ray, count, phase, rotations[i]), vec3From(outputs[i * 2 + 1]));
         }
     }
 
@@ -426,13 +428,14 @@ namespace {
         }
     }
 
-    // The first update's ray directions: a fresh VulkanDdgi turns its rays by frame 0's rotation.
+    // The first update's ray directions: a fresh VulkanDdgi traces frame 0's (phase 0 of the first cycle's rotation).
     std::vector<Vec3> firstFrameRays(int count) {
-        const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(0));
+        const ProbeRayFrame first = probeRayFrame(0);
+        const ProbeRotationRows rows = probeRotationRows(first.rotation);
         std::vector<Vec3> directions;
 
         for (int ray = 0; ray < count; ++ray) {
-            directions.push_back(probeRayDirection(ray, count, rows));
+            directions.push_back(probeRayDirection(ray, count, first.phase, rows));
         }
 
         return directions;

@@ -163,8 +163,13 @@ ProbeRotationRows probeRotationRows(const Quat& rotation) {
     return rows;
 }
 
-Vec3 probeRayDirection(int ray, int count, const ProbeRotationRows& rotation) {
-    const Vec3 point = sphericalFibonacci(ray, count);
+ProbeRayFrame probeRayFrame(std::uint64_t frameNumber) {
+    const std::uint64_t cycle = static_cast<std::uint64_t>(probeRayCycle);
+    return ProbeRayFrame{randomProbeRotation(frameNumber / cycle), static_cast<int>(frameNumber % cycle)};
+}
+
+Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation) {
+    const Vec3 point = sphericalFibonacci(ray * probeRayCycle + phase, count * probeRayCycle);
     return Vec3{rotation.rows[0].dot(point), rotation.rows[1].dot(point), rotation.rows[2].dot(point)};
 }
 
@@ -290,5 +295,6 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
     packed.hysteresis[0] = frame.irradianceHysteresis;
     packed.hysteresis[1] = frame.distanceHysteresis;
     packed.hysteresis[2] = frame.ballRadius;
+    packed.hysteresis[3] = static_cast<float>(frame.rayPhase);
     return packed;
 }

@@ -215,18 +215,76 @@ namespace {
         assert(std::abs(first.dot(second)) < 0.999f);
     }
 
-    // The shaders turn rays by the rotation's matrix rows: the same as turning by the quaternion. A ray's direction is
-    // its Fibonacci point turned so.
+    /*
+    * The shaders turn rays by the rotation's matrix rows: the same as turning by the quaternion. A ray's direction is
+    * its point of the long spiral (every probeRayCycle-th from the frame's phase) turned so.
+    */
     void testRayDirectionsAreTurnedByTheFramesRotation() {
         const Quat rotation = randomProbeRotation(77);
         const ProbeRotationRows rows = probeRotationRows(rotation);
 
-        for (int ray = 0; ray < 64; ++ray) {
-            const Vec3 point = sphericalFibonacci(ray, 64);
-            const Vec3 turned = rotation.rotate(point);
-            assert(nearlyEqual(Vec3{rows.rows[0].dot(point), rows.rows[1].dot(point), rows.rows[2].dot(point)}, turned));
-            assert(nearlyEqual(probeRayDirection(ray, 64, rows), turned));
+        for (int phase : {0, 5, probeRayCycle - 1}) {
+            for (int ray = 0; ray < 64; ++ray) {
+                const Vec3 point = sphericalFibonacci(ray * probeRayCycle + phase, 64 * probeRayCycle);
+                const Vec3 turned = rotation.rotate(point);
+                assert(nearlyEqual(Vec3{rows.rows[0].dot(point), rows.rows[1].dot(point), rows.rows[2].dot(point)}, turned));
+                assert(nearlyEqual(probeRayDirection(ray, 64, phase, rows), turned));
+            }
         }
+    }
+
+    /*
+    * Frames take turns through one spiral: a cycle's frames share its rotation and take the phases in order, the next
+    * cycle turns anew, and together a cycle's frames trace every point of the long spiral once, so they cover the
+    * sphere as evenly as count x probeRayCycle rays would (every direction within 1.6 of that many rays' share radii),
+    * far more evenly than one frame does.
+    */
+    void testFramesTakeTurnsThroughOneSpiral() {
+        const int count = 64;
+        const std::uint64_t firstFrame = 3 * probeRayCycle;
+        const ProbeRayFrame start = probeRayFrame(firstFrame);
+        std::vector<Vec3> cycleRays;
+        std::vector<Vec3> frameRays;
+
+        for (int step = 0; step < probeRayCycle; ++step) {
+            const ProbeRayFrame frame = probeRayFrame(firstFrame + static_cast<std::uint64_t>(step));
+            assert(frame.phase == step);
+            assert(frame.rotation.x == start.rotation.x && frame.rotation.y == start.rotation.y && frame.rotation.z == start.rotation.z &&
+                   frame.rotation.w == start.rotation.w);
+
+            const ProbeRotationRows rows = probeRotationRows(frame.rotation);
+
+            for (int ray = 0; ray < count; ++ray) {
+                cycleRays.push_back(probeRayDirection(ray, count, frame.phase, rows));
+
+                if (step == 0) {
+                    frameRays.push_back(cycleRays.back());
+                }
+            }
+        }
+
+        const ProbeRayFrame next = probeRayFrame(firstFrame + probeRayCycle);
+        assert(next.phase == 0 && std::abs(next.rotation.dot(start.rotation)) < 0.999f);
+
+        const auto widestGap = [](const std::vector<Vec3>& rays) {
+            float widest = 0.0f;
+
+            for (const Vec3& direction : manyDirections()) {
+                float nearest = -1.0f;
+
+                for (const Vec3& ray : rays) {
+                    nearest = std::max(nearest, ray.dot(direction));
+                }
+
+                widest = std::max(widest, std::acos(std::min(nearest, 1.0f)));
+            }
+
+            return widest;
+        };
+
+        const float shareRadius = std::acos(1.0f - 2.0f / static_cast<float>(count * probeRayCycle));
+        assert(widestGap(cycleRays) < 1.6f * shareRadius);
+        assert(widestGap(cycleRays) < 0.5f * widestGap(frameRays));
     }
 
     // Irradiance weighs a ray by the cosine between it and the texel (none from behind); distances by a far narrower
@@ -314,11 +372,12 @@ namespace {
         const Vec3 sky{0.6f, 0.75f, 1.0f};
 
         for (std::uint64_t frame : {0u, 5u, 99u}) {
-            const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(frame));
+            const ProbeRayFrame rays = probeRayFrame(frame);
+            const ProbeRotationRows rows = probeRotationRows(rays.rotation);
             std::vector<Vec3> directions;
 
             for (int ray = 0; ray < 64; ++ray) {
-                directions.push_back(probeRayDirection(ray, 64, rows));
+                directions.push_back(probeRayDirection(ray, 64, rays.phase, rows));
             }
 
             const std::vector<Vec3> radiance(directions.size(), sky);
@@ -342,12 +401,13 @@ namespace {
         std::vector<float> sums(static_cast<std::size_t>(probeIrradianceTexels * probeIrradianceTexels), 0.0f);
 
         for (int frame = 0; frame < frames; ++frame) {
-            const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(static_cast<std::uint64_t>(frame)));
+            const ProbeRayFrame rays = probeRayFrame(static_cast<std::uint64_t>(frame));
+            const ProbeRotationRows rows = probeRotationRows(rays.rotation);
             std::vector<Vec3> directions;
             std::vector<Vec3> radiance;
 
             for (int ray = 0; ray < 64; ++ray) {
-                const Vec3 direction = probeRayDirection(ray, 64, rows);
+                const Vec3 direction = probeRayDirection(ray, 64, rays.phase, rows);
                 directions.push_back(direction);
                 radiance.push_back(direction.y > 0.0f ? Vec3{1.0f, 1.0f, 1.0f} : Vec3{0.0f, 0.0f, 0.0f});
             }
@@ -370,14 +430,21 @@ namespace {
     * 2% of the sphere) in near darkness (0.005). Each frame's 64 turned rays catch the patch or miss it, so the texel
     * facing it gets a noisy estimate, which the update blends in at 240 frames a second with the default time constant.
     * The stored value must settle on the estimates' true average, and wander little over a tenth of a second (what the
-    * eye sees as crawling). Linear blending settles within 0.1% and moves 1.5% in a tenth of a second. Blending fifth
-    * roots with 2021's per-texel speed-ups, as the first version did, failed both: it settled at 51% of the truth (the
-    * mean of roots is below the root of the mean) and moved 8.7%, since noise tripped the speed-ups, which passed it on.
+    * eye sees as crawling). Blending fifth roots with 2021's per-texel speed-ups, as the first version did, failed both
+    * (at a 0.5 s time constant it settled at 51% of the truth, since the mean of roots is below the root of the mean, and
+    * moved 8.7%, since noise tripped the speed-ups); linear blending settles within 0.1%. Frames taking turns through one
+    * spiral (probeRayFrame) must also crawl clearly less than frames each turned at random, as measured on screen.
     */
-    void testASparselyLitTexelSettlesOnItsTrueMean() {
+    struct SparseTexel {
+        double truth = 0.0;
+        double settled = 0.0;
+        double crawl = 0.0;
+    };
+
+    SparseTexel sparselyLitTexel(float timeConstant, bool interleaved) {
         const float framesPerSecond = 240.0f;
         const GlobalIlluminationSettings settings;
-        const float hysteresis = hysteresisForTimeConstant(1.0f / framesPerSecond, settings.irradianceTimeConstant);
+        const float hysteresis = hysteresisForTimeConstant(1.0f / framesPerSecond, timeConstant);
         const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
         const float patchCosine = std::cos(radiansFromDegrees(15.0f));
 
@@ -408,12 +475,14 @@ namespace {
         std::vector<float> history;
 
         for (int frame = 0; frame < warmUp + frames; ++frame) {
-            const ProbeRotationRows rows = probeRotationRows(randomProbeRotation(static_cast<std::uint64_t>(frame)));
+            const std::uint64_t number = static_cast<std::uint64_t>(frame);
+            const ProbeRayFrame rays = interleaved ? probeRayFrame(number) : ProbeRayFrame{randomProbeRotation(number), 0};
+            const ProbeRotationRows rows = probeRotationRows(rays.rotation);
             std::vector<Vec3> directions;
             std::vector<Vec3> radiance;
 
             for (int ray = 0; ray < settings.raysPerProbe; ++ray) {
-                const Vec3 direction = probeRayDirection(ray, settings.raysPerProbe, rows);
+                const Vec3 direction = probeRayDirection(ray, settings.raysPerProbe, rays.phase, rows);
                 const float light = direction.dot(towardsPatch) > patchCosine ? 2.0f : 0.005f;
                 directions.push_back(direction);
                 radiance.push_back(Vec3{light, light, light});
@@ -436,10 +505,21 @@ namespace {
         }
 
         const double truth = estimates / frames;
-        const double settled = storedSum / frames;
-        const double crawl = std::sqrt(changeSquares / changes) / truth;
-        assert(std::abs(settled / truth - 1.0) < 0.02);
-        assert(crawl < 0.04);
+        return SparseTexel{truth, storedSum / frames, std::sqrt(changeSquares / changes) / truth};
+    }
+
+    void testASparselyLitTexelSettlesOnItsTrueMean() {
+        const GlobalIlluminationSettings settings;
+        const SparseTexel random = sparselyLitTexel(0.5f, false);
+        const SparseTexel interleaved = sparselyLitTexel(0.5f, true);
+        const SparseTexel chosen = sparselyLitTexel(settings.irradianceTimeConstant, true);
+        for (const SparseTexel* texel : {&random, &interleaved, &chosen}) {
+            assert(std::abs(texel->settled / texel->truth - 1.0) < 0.02);
+        }
+
+        // Measured: 2.4% for random rotations, 1.3% interleaved, 0.33% interleaved at the 2 s default.
+        assert(interleaved.crawl < 0.7 * random.crawl);
+        assert(chosen.crawl < 0.01);
     }
 
     // Probes are numbered x first, then y, then z, and sit on the grid's corners from the origin.
@@ -517,6 +597,7 @@ namespace {
         ProbeFrame frame;
         frame.raysPerProbe = 96;
         frame.rotation = randomProbeRotation(3);
+        frame.rayPhase = 7;
         frame.sky = Vec3{0.2f, 0.3f, 0.4f};
         frame.irradianceHysteresis = 0.97f;
         frame.distanceHysteresis = 0.98f;
@@ -535,7 +616,7 @@ namespace {
         }
 
         assert(packed.sky[0] == 0.2f && packed.sky[1] == 0.3f && packed.sky[2] == 0.4f);
-        assert(packed.hysteresis[0] == 0.97f && packed.hysteresis[1] == 0.98f && packed.hysteresis[2] == 0.15f);
+        assert(packed.hysteresis[0] == 0.97f && packed.hysteresis[1] == 0.98f && packed.hysteresis[2] == 0.15f && packed.hysteresis[3] == 7.0f);
     }
 }
 
@@ -548,6 +629,7 @@ void testDdgi() {
     testFibonacciDirectionsCoverTheSphere();
     testRandomRotationsAreUniformAndRepeatable();
     testRayDirectionsAreTurnedByTheFramesRotation();
+    testFramesTakeTurnsThroughOneSpiral();
     testUpdateWeights();
     testDistancesForTheUpdate();
     testHysteresisFollowsATimeConstant();
