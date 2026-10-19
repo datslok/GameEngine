@@ -15,10 +15,6 @@ namespace {
 VulkanDevice::VulkanDevice(SDL_Window* window, bool validation):
     window(window)
 {
-    if (window == nullptr) {
-        throw std::invalid_argument("VulkanDevice requires a window");
-    }
-
     try {
         createInstance(validation);
         selectPhysicalDevice();
@@ -43,16 +39,12 @@ VulkanDevice::~VulkanDevice() {
 * SDL loads the library too, since it makes the window's surface and knows which instance extensions that needs.
 * vk-bootstrap builds the instance: Vulkan 1.3, SDL's extensions, the colour space extension when present (for scRGB
 * HDR output), and in debug builds the validation layers, whose messages come back through onValidationMessage.
+* Without a window (the GPU tests) SDL is left out entirely: no surface, no surface extensions (vk-bootstrap's
+* headless mode), so the GPU is chosen without asking whether it can present.
 */
 void VulkanDevice::createInstance(bool validation) {
     static const VkResult volkLoaded = volkInitialize();
     vulkanCheck(volkLoaded, "Vulkan library loading failed");
-
-    if (!SDL_Vulkan_LoadLibrary(nullptr)) {
-        throw std::runtime_error(std::string{"Vulkan library loading failed: "} + SDL_GetError());
-    }
-
-    sdlVulkanLoaded = true;
 
     const auto systemInfo = vkb::SystemInfo::get_system_info(vkGetInstanceProcAddr);
 
@@ -60,19 +52,29 @@ void VulkanDevice::createInstance(bool validation) {
         throw bootstrapError("Vulkan system query failed", systemInfo.error());
     }
 
-    Uint32 sdlExtensionCount = 0;
-    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
-
-    if (sdlExtensions == nullptr) {
-        throw std::runtime_error(std::string{"Vulkan surface extensions unavailable: "} + SDL_GetError());
-    }
-
     vkb::InstanceBuilder builder{vkGetInstanceProcAddr};
     builder.set_app_name("GameEngine")
         .require_api_version(1, 3, 0)
-        .enable_extensions(sdlExtensionCount, sdlExtensions);
+        .set_headless(window == nullptr);
 
-    swapchainColourSpaces = systemInfo->is_extension_available(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+    if (window != nullptr) {
+        if (!SDL_Vulkan_LoadLibrary(nullptr)) {
+            throw std::runtime_error(std::string{"Vulkan library loading failed: "} + SDL_GetError());
+        }
+
+        sdlVulkanLoaded = true;
+
+        Uint32 sdlExtensionCount = 0;
+        const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+
+        if (sdlExtensions == nullptr) {
+            throw std::runtime_error(std::string{"Vulkan surface extensions unavailable: "} + SDL_GetError());
+        }
+
+        builder.enable_extensions(sdlExtensionCount, sdlExtensions);
+    }
+
+    swapchainColourSpaces = window != nullptr && systemInfo->is_extension_available(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
 
     if (swapchainColourSpaces) {
         builder.enable_extension(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
@@ -111,13 +113,13 @@ void VulkanDevice::createInstance(bool validation) {
     volkLoadInstanceOnly(instance.instance);
     debugUtils = systemInfo->debug_utils_available && vkCmdBeginDebugUtilsLabelEXT != nullptr;
 
-    if (!SDL_Vulkan_CreateSurface(window, instance.instance, nullptr, &surface)) {
+    if (window != nullptr && !SDL_Vulkan_CreateSurface(window, instance.instance, nullptr, &surface)) {
         throw std::runtime_error(std::string{"Vulkan surface creation failed: "} + SDL_GetError());
     }
 }
 
 /*
-* A GPU qualifies if it runs Vulkan 1.3, can present to the window, and has the features the renderer uses: dynamic
+* A GPU qualifies if it runs Vulkan 1.3, can present to the window (when there is one), and has the features the renderer uses: dynamic
 * rendering (draw into images named when a pass begins, no render pass objects), synchronization2 (the clearer barrier
 * API), anisotropic filtering, and depth clamping (SDL_GPU's default, kept so the pictures match: depths past the near
 * and far planes are clamped instead of clipped). A discrete GPU is preferred over an integrated one.
@@ -170,12 +172,14 @@ void VulkanDevice::createDevice() {
     queue = graphics->first;
     queueFamily = graphics->second;
 
-    VkBool32 presents = VK_FALSE;
-    vulkanCheck(vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.physical_device, queueFamily, surface, &presents),
-                "Present support query failed");
+    if (surface != VK_NULL_HANDLE) {
+        VkBool32 presents = VK_FALSE;
+        vulkanCheck(vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.physical_device, queueFamily, surface, &presents),
+                    "Present support query failed");
 
-    if (presents != VK_TRUE) {
-        throw std::runtime_error("The GPU's drawing queue cannot present to the window");
+        if (presents != VK_TRUE) {
+            throw std::runtime_error("The GPU's drawing queue cannot present to the window");
+        }
     }
 
     timestampValidBits = device.queue_families.at(queueFamily).timestampValidBits;

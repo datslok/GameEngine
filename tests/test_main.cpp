@@ -97,6 +97,9 @@ void testOverlayComposite();
 void testSwapchainChoice();
 void testImageState();
 void testUniformRing();
+void testFloatTolerance();
+void testLightFalloff();
+void testComputeDispatch();
 
 int main(){
     testPixelBuffer();
@@ -196,6 +199,9 @@ int main(){
     testSwapchainChoice();
     testImageState();
     testUniformRing();
+    testFloatTolerance();
+    testLightFalloff();
+    testComputeDispatch();
 
     std::cout << "All tests passed!\n";
     return 0;

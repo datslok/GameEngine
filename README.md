@@ -19,6 +19,7 @@ It began life as a software rasterizer drawing pixels on the CPU and now renders
 - Settings in one place: every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity, grenade physics) lives in a settings struct owned by its system and is described once by a `visit()` next to it (label, limits, unit), which drives everything else: a debug UI (F5, Dear ImGui: a slider, checkbox or list for every setting, quality presets Low, Medium and High, Save and Reset buttons, drawn over the image in its own layer so it looks right in HDR too), a settings file (`settings.cfg`, only the values changed from the defaults, loaded at start-up, forgiving of hand edits) and tests that every default lies within its limits; numbers the shaders share with C++ are written once
 - Profiling: frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second, plus the GPU's own time for each render pass (shadows, main, bloom, tone mapping, debug lines, debug UI) measured with GPU timestamps, in the F4 view; render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
 - Unit tests that run without a GPU or window, and golden images: fixed demo views rendered once as references (the scene image in half floats and the final image, SDR and HDR) that later captures must match pixel for pixel, with a difference heatmap when they do not
+- A GPU test tier: the shaders' maths lives in libraries of pure functions that the render passes and small compute shaders share, and `make gputest` runs those functions on the GPU over thousands of fixed inputs and compares them with their tested C++ mirrors, within tolerances sized for how GPUs round (and, for sharp highlights, for how sensitive the maths itself is), reporting how much of each tolerance the worst value used; then the golden images
 
 ## Requirements
 
@@ -72,6 +73,7 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | `make run-release` | Builds the release, then starts it |
 | `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides |
 | `make golden` | Renders the demo's golden views and compares them with the references in `tests/golden/<GPU>/` (needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/`) |
+| `make gputest` | Runs every shader library's functions in compute shaders on the GPU and compares them with their C++ mirrors (`build/gputests.exe`), then the golden images (needs a GPU; `make gputest-release` for the optimised build) |
 | `make golden-save` | Renders the golden views and saves them as the new references (only on purpose: after a change that is meant to alter the picture) |
 | `make clean` | Removes the compiled objects, executables and shaders |
 
@@ -149,17 +151,18 @@ src/            Engine and game source, in layers (lower ones never include high
   gameplay/     Character movement, spinners, fireflies, grenades and camera controllers
   platform/     The window and SDL input translation
   render/gpu/   The renderer's parts that do not call Vulkan: physically based shading and normal mapping (and their tested CPU mirrors), shadow atlas and caching, soft shadows, light priority, debug lines, the overlay the debug UI is drawn into, quality presets, and the packing of lights and materials for the shaders
-  render/vulkan/ The engine's own Vulkan 1.3 renderer: device, swapchain, barriers, pipelines, per-frame uniforms and descriptors, and every pass (shadows, main, bloom, tone mapping, debug lines, the debug UI)
+  render/vulkan/ The engine's own Vulkan 1.3 renderer: device (with or without a window), swapchain, barriers, graphics and compute pipelines, per-frame uniforms and descriptors, and every pass (shadows, main, bloom, tone mapping, debug lines, the debug UI)
   render/software/  Software rasterizer, kept as a tested reference
   scene/        Meshes (with tangents for normal maps), models, materials, lights, the camera, render components, interpolation and the frame description
   assets/       The asset manager, and OBJ, glTF and image loaders
   input/        Engine keys and the input snapshot (no SDL)
   ecs/          Entities, component storage and the World
-  core/         Fixed timestep, profiler, sRGB conversions, the settings visitor and small shared types
+  core/         Fixed timestep, profiler, sRGB conversions, the settings visitor, float tolerances and small shared types
   physics/      Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid, static level collision, sphere sweeps, particles and the character controller
   math/         Vectors, matrices, quaternions, transforms, rays, boxes, closest points
 tests/          Unit tests (one test function per file, registered in tests/test_main.cpp)
   golden/       Golden image references, one folder per GPU (see tests/golden/README.md)
+  gpu/          The GPU test tier (make gputest): the runner, one test per shader library, and their compute shaders in gpu/shaders
 docs/           ENGINE_GUIDE.md: how the engine works and why, for people learning it
                 ARCHITECTURE.md: the detailed reference of every system (names, files, numbers)
                 ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
@@ -167,7 +170,7 @@ docs/           ENGINE_GUIDE.md: how the engine works and why, for people learni
 tools/          package_demo.py (the shareable zip), make_glb_demo.py
 assets/
   models/       OBJ and glTF test models (the normal map gallery: Khronos's CompareNormal, NormalTangentTest and NormalTangentMirrorTest)
-  shaders/      GLSL shaders (compiled to .spv by make)
+  shaders/      GLSL shaders (compiled to .spv by make) and the shader libraries they include (.glsl: BRDF, normal mapping, lighting, soft shadows, tone mapping, bloom, dither, overlay)
   textures/     Images
 external/cgltf  Vendored glTF loader
 external/imgui  Vendored Dear ImGui (the debug UI), with its SDL3 and Vulkan backends

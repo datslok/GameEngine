@@ -1,0 +1,19 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs normal_mapping.glsl's functions on the cases normal_mapping_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "normal_mapping.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_DECODE_NORMAL_TEXEL) {
+        vec4 a = testInput(0);
+        testOutput(0, vec4(decodeNormalTexel(a.xyz, a.w), 0.0));
+    } else if (function == GPU_TEST_PERTURB_NORMAL) {
+        testOutput(0, vec4(perturbNormal(testInput(0).xyz, testInput(1), testInput(2).xyz), 0.0));
+    }
+}

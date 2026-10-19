@@ -1,8 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// The filter's numbers, shared with render/gpu/bloom.cpp, which mirrors this shader and tests the maths.
-#include "render/gpu/bloom_shared.h"
+// The filter's numbers and the Karis weight, shared with render/gpu/bloom.cpp, which mirrors this shader and tests the maths.
+#include "bloom.glsl"
 
 // The level above: the lit scene for level 0, otherwise the previous level. Read with a linear sampler, so each read
 // where four texels meet is their average.
@@ -15,10 +15,6 @@ layout(std140, set = 3, binding = 0) uniform BloomPassData {
 };
 
 layout(location = 0) out vec4 outputColour;
-
-float karisWeight(vec3 colour) {
-    return 1.0 / (1.0 + dot(colour, vec3(BLOOM_LUMA_RED, BLOOM_LUMA_GREEN, BLOOM_LUMA_BLUE)));
-}
 
 // A read the given number of source texels from this texel's centre. Nothing below black, so a stray negative value
 // cannot spread.
