@@ -48,7 +48,7 @@ struct GlobalIlluminationSettings {
 
     // Rays each probe traces per frame. More converge faster and flicker less; the time constants below average over
     // rays per second of history, so a slower GPU can trace fewer with longer time constants.
-    int raysPerProbe = 64;
+    int raysPerProbe = 128;
 
     /*
     * A ray budget: the still probes trace raysPerProbe rays this many times a second at most, so above that frame rate
@@ -58,7 +58,7 @@ struct GlobalIlluminationSettings {
     * and the light settles as fast either way, since each frame still blends by its own time. Probes near fast lights
     * keep fastRaysPerProbe. 0 traces raysPerProbe every frame.
     */
-    float probeUpdatesPerSecond = 0.0f;
+    float probeUpdatesPerSecond = 60.0f;
 
     // How long the stored light takes to follow a change: after this many seconds, 1/e (37%) of a step change is left,
     // at any frame rate. Shorter reacts faster and flickers more: noise goes as 1/sqrt(rays x time constant). 2 s was
@@ -80,9 +80,9 @@ struct GlobalIlluminationSettings {
     * the long memory to fade) is only followed by the long memory, slower than 2 s, and so is a slow drift. Fast
     * lights' atlas and the distances keep their fixed memories.
     */
-    bool adaptiveMemory = false;
+    bool adaptiveMemory = true;
     float changeWindowSeconds = 0.2f;
-    float changeThreshold = 5.0f;
+    float changeThreshold = 8.0f;
 
     /*
     * Sharing between neighbouring probes: each probe's irradiance (still and fast) is read as its own light weighted 1
@@ -93,7 +93,7 @@ struct GlobalIlluminationSettings {
     * and sharing would remove nothing. The probes keep accumulating their own unshared light; only what is read (the
     * main pass, the debug balls, the next frame's bounce) is shared. 0: off, everything exactly as before.
     */
-    float probeSharing = 0.0f;
+    float probeSharing = 0.5f;
 
     /*
     * Fast lights (PointLight::fast, SpotLight::fast: flashlights, headlights) keep their light in a second irradiance
@@ -105,7 +105,7 @@ struct GlobalIlluminationSettings {
     * raysPerProbe); 64 flickered over three times as much. In the dense probe test every probe is within the
     * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64.
     */
-    float fastIrradianceTimeConstant = 0.05f;
+    float fastIrradianceTimeConstant = 0.1f;
     int fastRaysPerProbe = 256;
 
     // Keep fast lights apart as above. Off, they are lights like any other: their bounce goes into the still atlas under
@@ -366,7 +366,7 @@ static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_vol
 
 // What changes per frame beside the volume itself.
 struct ProbeFrame {
-    int raysPerProbe = 64;     // probes that no fast light reaches
+    int raysPerProbe = 128;     // probes that no fast light reaches
     int fastRaysPerProbe = 64; // probes within reach of a fast light
     Quat rotation;
     int rayPhase = 0; // the frame's place in its ray cycle (ProbeRayFrame)

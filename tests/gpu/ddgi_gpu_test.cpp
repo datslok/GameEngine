@@ -699,7 +699,13 @@ namespace {
         const MeshHandle floor = scene.addMesh(Mesh::plane(1000.0f));
         const DrawItem speck = drawOf(cube, Mat4::translation(0.0f, -10000.0f, 0.0f) * Mat4::scaling(0.001f, 0.001f, 0.001f));
 
+        // The probes' plain rules, which these scenes check ray by ray: 64 rays in the frame's shared directions, every
+        // frame, the fixed memory (the ray budget, the adaptive memory and sharing, on by default, are checked apart).
         GlobalIlluminationSettings settings;
+        settings.raysPerProbe = 64;
+        settings.probeUpdatesPerSecond = 0.0f;
+        settings.adaptiveMemory = false;
+        settings.probeSharing = 0.0f;
         const std::vector<Vec3> rays = firstFrameRays(settings.raysPerProbe);
         const std::vector<Vec3> fastRays = firstFrameRays(settings.fastRaysPerProbe);
 
