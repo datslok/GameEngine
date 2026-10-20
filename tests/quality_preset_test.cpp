@@ -110,6 +110,16 @@ namespace {
         assert(matchingQualityPreset(ultra) == QualityPreset::High);
     }
 
+    /*
+    * Low's sun cascades are 2048, like Medium's: 1024 saved no memory (the atlas is 128 MB for any cascade up to 2048)
+    * and left the light lab's 30 cm walls a texel or two thick, with ragged sunlight along their edges.
+    */
+    void testLowKeepsSharpEnoughCascades() {
+        RenderSettings low;
+        applyQualityPreset(low, QualityPreset::Low);
+        assert(low.shadows.cascadeResolution == CascadeResolution::Pixels2048);
+    }
+
     void testPresetNames() {
         assert(qualityPresetNames.size() == static_cast<std::size_t>(QualityPreset::Ultra) + 1);
     }
@@ -122,5 +132,6 @@ void testQualityPreset() {
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();
     testChangedValuesAreCustom();
+    testLowKeepsSharpEnoughCascades();
     testPresetNames();
 }
