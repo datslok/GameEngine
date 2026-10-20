@@ -56,9 +56,9 @@ namespace {
     }
 
     /*
-    * The light probes' cascades per preset: High (the defaults) a densest of 31 x 17 x 31 from half a metre and three of
-    * 21 x 13 x 21, Ultra the same, Medium a densest of 25 x 15 x 25 and three of 17 x 11 x 17, Low a densest of
-    * 19 x 11 x 19 and two of 15 x 9 x 15 from a metre; each lower one holds fewer probes.
+    * The light probes' cascades per preset: High (the defaults) six from half a metre to 16 m, a densest of 31 x 17 x 31
+    * and five of 21 x 13 x 21, Ultra the same, Medium five (to 8 m), a densest of 25 x 15 x 25 and four of 17 x 11 x 17,
+    * Low four from a metre (to 8 m), a densest of 19 x 11 x 19 and three of 15 x 9 x 15; each lower one holds fewer probes.
     */
     void testPresetsSetTheProbeCascades() {
         struct Cascades {
@@ -70,8 +70,8 @@ namespace {
             int high;
         };
 
-        const std::array<Cascades, 4> expected{Cascades{3, 1.0f, 19, 11, 15, 9}, Cascades{4, 0.5f, 25, 15, 17, 11}, Cascades{4, 0.5f, 31, 17, 21, 13},
-                                               Cascades{4, 0.5f, 31, 17, 21, 13}};
+        const std::array<Cascades, 4> expected{Cascades{4, 1.0f, 19, 11, 15, 9}, Cascades{5, 0.5f, 25, 15, 17, 11}, Cascades{6, 0.5f, 31, 17, 21, 13},
+                                               Cascades{6, 0.5f, 31, 17, 21, 13}};
         int probesAbove = 0;
 
         for (QualityPreset preset : {QualityPreset::Ultra, QualityPreset::High, QualityPreset::Medium, QualityPreset::Low}) {
@@ -91,7 +91,7 @@ namespace {
         }
 
         const GlobalIlluminationSettings defaults;
-        assert(defaults.probeCascades == 4 && defaults.probeSpacing == 0.5f && defaults.cascadeProbesAcross == 21 && defaults.cascadeProbesHigh == 13);
+        assert(defaults.probeCascades == 6 && defaults.probeSpacing == 0.5f && defaults.cascadeProbesAcross == 21 && defaults.cascadeProbesHigh == 13);
         assert(defaults.densestProbesAcross == 31 && defaults.densestProbesHigh == 17);
     }
 

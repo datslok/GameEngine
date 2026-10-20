@@ -61,13 +61,13 @@ namespace {
                 return {.shadowedPoints = 8, .shadowedSpots = 4, .texelTarget = 0.1f, .spotTexelTarget = 0.05f,
                         .directionalDistance = 60.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32, .probeSharing = 0.5f,
-                        .probeCascades = 3, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
+                        .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
                         .cascadeProbesAcross = 15, .cascadeProbesHigh = 9};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
-                        .probeCascades = 4, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
+                        .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
                         .cascadeProbesAcross = 17, .cascadeProbesHigh = 11};
             case QualityPreset::High:
                 break;

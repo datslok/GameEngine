@@ -58,11 +58,13 @@ struct GlobalIlluminationSettings {
     * the one made larger. Each lights points at full weight out to a little over a third of its width from the camera
     * (probeCascadeReach), so the densest, 31 x 17 probes half a metre apart, covers 6.1 m round the camera at full
     * weight and 2.6 m up and down (a room round the camera, and its floor and ceiling from eye height; 21 x 13 covered
-    * 3.6 m and 1.6 m), the next 7.3 m and 3.4 m, the fourth 29 m and 13 m. Finer probes see light through doorways that
-    * coarser ones miss; each cascade costs memory (about 8 KB a probe: 33,500 probes, about 270 MB) and tracing (only
-    * probes near surfaces trace). Odd counts centre the camera best. Changing any of them rebuilds the probes (a hitch).
+    * 3.6 m and 1.6 m), the next 7.3 m and 3.4 m, the fourth 29 m and 13 m, and the two far ones, 8 m and 16 m apart,
+    * 58 m and 116 m (terrain-scale bounce and some sky blocking: valleys, forests, the shady side of big buildings;
+    * beyond them only the flat sky ambient). Finer probes see light through doorways that coarser ones miss; each
+    * cascade costs memory (about 9 KB a probe: 45,000 probes, about 400 MB) and tracing (only probes near surfaces
+    * trace, so the far cascades' few near the ground cost little). Odd counts centre the camera best. Changing any of them rebuilds the probes (a hitch).
     */
-    int probeCascades = 4;
+    int probeCascades = 6;
     float probeSpacing = 0.5f;
     int densestProbesAcross = 31;
     int densestProbesHigh = 17;
