@@ -205,6 +205,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
   - [x] Sky and atmosphere (Hillaire 2020): a physically based sky and air lit by the sun, which probes' escaping rays see (`sky-atmosphere`)
   - [x] Night sky: the moon in its real place and phase (a second sky lit by it, its shadows) and the real stars (`night-sky`)
   - [x] Eye adaptation: an exposure that follows the scene's brightness, measured as a histogram on the GPU (`eye-adaptation`)
+  - [x] The light lab's street: 60 shadowed lamps and lit windows, on at dusk or with K, the test ground for many lights at night (`light-lab-street`)
   - [x] Cascades for large worlds: nested grids following the camera, scrolled as circular buffers, scrolled-in probes seeded from the coarser cascades (`ddgi-cascades`)
   - [ ] A software tracer for GPUs without ray tracing, as the lower quality setting: a coarse voxel grid of the scene built in compute (simpler than distance fields and handles moving objects), checked against the ray-traced result; probes only need blurry diffuse light, so coarse geometry is enough
 
