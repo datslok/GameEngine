@@ -3,6 +3,8 @@
 #include "math/aabb.h"
 #include "math/vec3.h"
 
+#include <span>
+
 // How many probes a volume has along each axis.
 struct ProbeCounts {
     int x = 1;
@@ -74,3 +76,6 @@ struct ProbeEvent {
 
 // An event for the probes within reach of a point along each axis, such as a light's range round it.
 ProbeEvent probeEventAround(ProbeEventKind kind, const Vec3& centre, float reach);
+
+// One event for lights switched together (at least one point): the box round every point's reach.
+ProbeEvent probeEventAround(ProbeEventKind kind, std::span<const Vec3> centres, float reach);
