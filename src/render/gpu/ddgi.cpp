@@ -391,6 +391,10 @@ AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Ve
     AdaptiveProbeTexel own = texel;
     own.history = std::abs(texel.history);
 
+    if (texel.history < 0.0f && framesSinceEvent == 0) {
+        return restartProbeTexel(estimate);
+    }
+
     if (texel.history < 0.0f && framesSinceEvent > 0) {
         const float keep = restartedProbeKeep(longKeep, 0.0f, check.growth, own.history);
         AdaptiveProbeTexel next = own.history < historyForShare(windowKeep) ? restartedProbeBlend(own, estimate, keep)
@@ -404,6 +408,10 @@ AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Ve
     }
 
     return adaptiveProbeBlend(own, estimate, longKeep, windowKeep, threshold);
+}
+
+float eventCheckFrames(float checkSeconds, float frameSeconds) {
+    return frameSeconds > 0.0f ? std::max(checkSeconds / frameSeconds, minEventCheckFrames) : minEventCheckFrames;
 }
 
 float restartedProbeKeep(float longKeep, float shortKeep, float growth, float frames) {
@@ -581,28 +589,25 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
     frame.restartHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.eventMemorySeconds);
     frame.restartGrowth = settings.eventMemoryGrowth;
     frame.restartThreshold = settings.eventChangeThreshold;
-    frame.restartCheckFrames = fresh || !(frameSeconds > 0.0f) ? 0.0f : settings.eventCheckSeconds / frameSeconds;
+    frame.restartCheckFrames = fresh ? 0.0f : eventCheckFrames(settings.eventCheckSeconds, frameSeconds);
     frame.changeThreshold = settings.adaptiveMemory ? settings.changeThreshold : 0.0f;
     frame.ballRadius = settings.probeBallRadius;
     return frame;
 }
 
-namespace {
-    // One more frame since the restart, or none once its ramp has reached the share kept.
-    std::int32_t advanceRestart(std::int32_t frames, float keep, const ProbeFrame& frame) {
-        if (frames < 0) {
-            return frames;
-        }
-
-        const std::int32_t next = frames + 1;
-        const float sinceCheck = static_cast<float>(next) - std::ceil(frame.restartCheckFrames);
-
-        if (sinceCheck < 0.0f) {
-            return next;
-        }
-
-        return restartedProbeKeep(keep, frame.restartHysteresis, frame.restartGrowth, sinceCheck) >= keep ? -1 : next;
+std::int32_t advanceRestartFrames(std::int32_t frames, float keep, const ProbeFrame& frame) {
+    if (frames < 0) {
+        return frames;
     }
+
+    const std::int32_t next = frames + 1;
+    const float sinceCheck = static_cast<float>(next) - std::ceil(frame.restartCheckFrames);
+
+    if (sinceCheck < 0.0f) {
+        return next;
+    }
+
+    return restartedProbeKeep(keep, frame.restartHysteresis, frame.restartGrowth, sinceCheck) >= keep ? -1 : next;
 }
 
 void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame) {
@@ -613,8 +618,8 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
     }
 
     for (GpuProbeRestart& restart : restarts) {
-        restart.irradianceFrames = advanceRestart(restart.irradianceFrames, frame.irradianceHysteresis, frame);
-        restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis, frame);
+        restart.irradianceFrames = advanceRestartFrames(restart.irradianceFrames, frame.irradianceHysteresis, frame);
+        restart.distanceFrames = advanceRestartFrames(restart.distanceFrames, frame.distanceHysteresis, frame);
     }
 
     const bool keepsIrradiance = frame.irradianceHysteresis > 0.0f;

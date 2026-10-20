@@ -403,6 +403,17 @@ AdaptiveProbeTexel restartedProbeBlend(const AdaptiveProbeTexel& texel, const Ve
 */
 AdaptiveProbeTexel eventCheckBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, int framesSinceEvent, float eventThreshold);
 
+/*
+* The event check lasts at least this many frames, however short eventCheckSeconds is at the frame rate: a sparsely lit
+* texel whose light goes out needs about (threshold x noise / light)^2 = (4 x 0.9)^2, 13, frames to tell it from its
+* noise, so at 15 fps a 0.5 s check (7 frames) never decided, and the light took the long memory, 18 s in the dark room
+* model, to go dark.
+*/
+inline constexpr float minEventCheckFrames = 16.0f;
+
+// The event check's length in frames for its length in seconds at a frame time: at least minEventCheckFrames.
+float eventCheckFrames(float checkSeconds, float frameSeconds);
+
 // What the event check and a restart need, per probe (GpuProbeRestart::check, the shader's vec4).
 struct ProbeEventCheck {
     float threshold = 0.0f; // eventChangeThreshold: noise units a change must pass
@@ -415,9 +426,12 @@ struct ProbeEventCheck {
 * (negative: none running). A texel this event restarted (history negative) blends with the restart's growing memory
 * (restartedProbeKeep of its own frames since, with no soft restart: it restarted from a mean of frames, and keeping its
 * first frame longer only kept that frame's noise longer, 24.2% against 22.8% in the dark room model): restartedProbeBlend while its frames since are fewer than the change
-* window holds, then adaptiveProbeBlend with that memory. Any other texel runs the event check (eventCheckBlend) for
-* check.frames frames after the event (a new event checks restarted texels again), then adaptiveProbeBlend. With no event
-* running, adaptiveProbeBlend, a restarted texel's marker dropped.
+* window holds, then adaptiveProbeBlend with that memory. A new event restarts such a texel at once, unchecked: the light
+* an event changed is most likely switched back by the next (a lamp switched on and off again), and its noise, measured
+* over the few frames since its restart, is no basis for a check; checked, a sparsely lit texel toggled faster than its
+* check could decide never restarted, and the lamp took the long memory to go dark (13-16 s in the dark room model). Any
+* other texel runs the event check (eventCheckBlend) for check.frames frames after the event, then adaptiveProbeBlend.
+* With no event running, adaptiveProbeBlend, a restarted texel's marker dropped.
 */
 AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold,
                                        int framesSinceEvent, const ProbeEventCheck& check);
@@ -568,3 +582,7 @@ static_assert(sizeof(GpuProbeRestart) == 32, "GpuProbeRestart must match ProbeRe
 * none running.
 */
 void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame);
+
+// One restart's frames since its event, a frame on (keep: the share its atlas keeps this frame), or -1 once it has
+// ended (advanceProbeRestarts' rule); negative stays negative.
+std::int32_t advanceRestartFrames(std::int32_t frames, float keep, const ProbeFrame& frame);

@@ -263,6 +263,10 @@ AdaptiveProbeTexel adaptiveProbeUpdate(AdaptiveProbeTexel texel, vec3 estimate, 
     AdaptiveProbeTexel own = texel;
     own.history = abs(texel.history);
 
+    if (texel.history < 0.0 && framesSinceEvent == 0) {
+        return restartProbeTexel(estimate);
+    }
+
     if (texel.history < 0.0 && framesSinceEvent > 0) {
         float keep = restartedProbeKeep(longKeep, 0.0, check.y, own.history);
         AdaptiveProbeTexel next = own.history < historyForShare(windowKeep) ? restartedProbeBlend(own, estimate, keep)
