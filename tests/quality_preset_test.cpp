@@ -35,6 +35,20 @@ namespace {
         assert(RenderSettings{}.globalIllumination.raysPerProbe == 128 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 128);
     }
 
+    // Sharing between probes per preset: more where there are fewer rays, none on Ultra; High's 0.1 is the default.
+    void testPresetsSetProbeSharing() {
+        const std::array<float, 4> sharing{0.5f, 0.3f, 0.1f, 0.0f};
+
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            RenderSettings settings;
+            applyQualityPreset(settings, preset);
+            assert(settings.globalIllumination.probeSharing == sharing[static_cast<std::size_t>(preset)]);
+            assert(matchingQualityPreset(settings) == preset);
+        }
+
+        assert(RenderSettings{}.globalIllumination.probeSharing == 0.1f);
+    }
+
     // Each step down from High costs less on every axis a preset sets: fewer shadowed lights, coarser shadow texels,
     // shorter sun shadows, fewer bloom levels and probe rays. None ever asks for more than the engine's limits.
     void testLowerPresetsCostLess() {
@@ -98,7 +112,7 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // Ultra is High with more light probe rays, nothing else: the same 4096 cascades and everything else as tuned.
+    // Ultra is High with more light probe rays and no sharing, nothing else: the same 4096 cascades and the rest as tuned.
     void testUltraIsHighWithMoreProbeRays() {
         RenderSettings ultra;
         applyQualityPreset(ultra, QualityPreset::Ultra);
@@ -107,6 +121,7 @@ namespace {
 
         ultra.globalIllumination.raysPerProbe = RenderSettings{}.globalIllumination.raysPerProbe;
         ultra.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
+        ultra.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
         assert(matchingQualityPreset(ultra) == QualityPreset::High);
     }
 
@@ -134,6 +149,7 @@ void testQualityPreset() {
     testUltraIsHighWithMoreProbeRays();
     testHighIsTheDefaults();
     testPresetsSetTheProbeRays();
+    testPresetsSetProbeSharing();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();
     testChangedValuesAreCustom();

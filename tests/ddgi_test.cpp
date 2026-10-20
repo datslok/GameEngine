@@ -999,7 +999,7 @@ namespace {
         assert(nearlyEqual(sharedProbeValue(own, uniform, allVisible, 0.7f), own));
 
         const GlobalIlluminationSettings settings;
-        assert(settings.probeSharing == 0.5f);
+        assert(settings.probeSharing == 0.1f);
     }
 
     /*

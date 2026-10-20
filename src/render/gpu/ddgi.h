@@ -93,7 +93,7 @@ struct GlobalIlluminationSettings {
     * and sharing would remove nothing. The probes keep accumulating their own unshared light; only what is read (the
     * main pass, the debug balls, the next frame's bounce) is shared. 0: off, everything exactly as before.
     */
-    float probeSharing = 0.5f;
+    float probeSharing = 0.1f;
 
     /*
     * Fast lights (PointLight::fast, SpotLight::fast: flashlights, headlights) keep their light in a second irradiance
