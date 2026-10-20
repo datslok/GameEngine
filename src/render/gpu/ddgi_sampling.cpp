@@ -216,7 +216,7 @@ void keepBrightestLight(BrightestLights& kept, int capacity, int light, float st
     kept.lights[slot] = light;
 }
 
-ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume) {
+ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume, bool keepFastApart) {
     const float reach = probeMaxDistance(volume.spacing);
     const Vec3 far = volume.origin + Vec3{volume.spacing.x * static_cast<float>(volume.counts.x - 1), volume.spacing.y * static_cast<float>(volume.counts.y - 1),
                                           volume.spacing.z * static_cast<float>(volume.counts.z - 1)};
@@ -231,7 +231,7 @@ ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin,
     };
 
     const auto list = [&](std::size_t slot, const std::vector<bool>& fastFlags) {
-        const bool fast = slot < fastFlags.size() && fastFlags[slot];
+        const bool fast = keepFastApart && slot < fastFlags.size() && fastFlags[slot];
         listed.lights.push_back(GpuProbeHitLight{static_cast<std::int32_t>(slot), fast ? 1 : 0});
         listed.fast += fast ? 1 : 0;
     };

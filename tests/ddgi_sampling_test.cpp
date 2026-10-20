@@ -402,6 +402,16 @@ namespace {
         assert(listed.lights[1].light == 2 && listed.lights[1].fast == 1);
         assert(listed.lights[2].light == 1 && listed.lights[2].fast == 1);
 
+        // With fast lights not kept apart (GlobalIlluminationSettings::fastLights off), the same lights, none fast.
+        const ProbeHitLights merged = probeHitLights(lights, cameraOrigin, unitVolume, false);
+        assert(merged.points == 2 && merged.spots == 1 && merged.fast == 0 && merged.lights.size() == 3);
+
+        for (std::size_t i = 0; i < merged.lights.size(); ++i) {
+            assert(merged.lights[i].light == listed.lights[i].light && merged.lights[i].fast == 0);
+        }
+
+        assert(GlobalIlluminationSettings{}.fastLights);
+
         // Without flags, nothing is fast.
         lights.fastPoints.clear();
         lights.fastSpots.clear();

@@ -192,7 +192,9 @@ struct ProbeHitLights {
     int fast = 0; // how many of them are fast
 };
 
-ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume);
+// keepFastApart false (GlobalIlluminationSettings::fastLights off): every light is listed as still, its bounce kept with
+// the rest.
+ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume, bool keepFastApart = true);
 
 // What the frame's shaders need to sample the probes and light their rays' hits, into the frame's uniform block.
 struct ProbeSampling {
