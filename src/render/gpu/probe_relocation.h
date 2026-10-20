@@ -32,6 +32,7 @@ inline constexpr float probeEscapeMargin = static_cast<float>(DDGI_ESCAPE_MARGIN
 inline constexpr float probeMinFrontFaceShare = static_cast<float>(DDGI_MIN_FRONT_FACE_SHARE);
 inline constexpr float probeFrontFaceNudge = static_cast<float>(DDGI_FRONT_FACE_NUDGE);
 inline constexpr float sameSurfaceCosine = static_cast<float>(DDGI_SAME_SURFACE_COSINE);
+inline constexpr float probeRelocationMinDistance = static_cast<float>(DDGI_RELOCATION_MIN_DISTANCE);
 
 // The distance a ray that met nothing reports (the trace's whole reach).
 inline constexpr float probeRayMiss = static_cast<float>(DDGI_RAY_REACH);
@@ -114,7 +115,8 @@ static_assert(sizeof(GpuProbeRelocation) == 32, "GpuProbeRelocation must match P
 // The record for the final rays, traced at offset (stuck: a step found it could not get out).
 GpuProbeRelocation finishProbeRelocation(const ProbeRayTally& tally, const Vec3& offset, bool stuck);
 
-// One ray from origin along a unit direction against the static level: its distance as tallyProbeRay takes it.
+// One ray from origin along a unit direction against the static level: its distance as tallyProbeRay takes it, hits
+// nearer than probeRelocationMinDistance skipped as the GPU's relocation rays skip them.
 using ProbeRayTrace = std::function<float(const Vec3& origin, const Vec3& direction)>;
 
 /*

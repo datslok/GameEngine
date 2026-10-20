@@ -124,6 +124,13 @@
 #define DDGI_RELOCATION_RAYS 256
 #define DDGI_RELOCATION_ITERATIONS 5
 
+// Relocation rays skip hits nearer than this, in metres. A probe whose grid point lies exactly on a surface, or on the
+// seam where two solids touch (two faces on top of each other inside them), would otherwise meet those faces at
+// distance 0 from either side, take itself for a probe in the open beside a surface and stay buried; looking past them
+// it meets the solid's real inside and leaves. Small against any wall or spacing, large against float rounding at
+// world coordinates of kilometres.
+#define DDGI_RELOCATION_MIN_DISTANCE 0.001
+
 // Invocations per workgroup of the relocation pass, one workgroup per probe.
 #define DDGI_RELOCATION_GROUP_SIZE 64
 

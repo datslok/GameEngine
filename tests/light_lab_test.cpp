@@ -10,12 +10,15 @@
 #include "physics/overlap.h"
 #include "render/gpu/ddgi.h"
 #include "render/gpu/ddgi_sampling.h"
+#include "render/gpu/probe_cascades.h"
+#include "render/gpu/probe_relocation.h"
 #include "scene/lighting.h"
 #include "scene/model_renderer.h"
 #include "scene/sky_object.h"
 #include "scene/sun.h"
 
 #include "demo_helpers.h"
+#include "probe_helpers.h"
 #include "test_levels.h"
 
 #include <cassert>
@@ -139,6 +142,53 @@ namespace {
             }
         }
         assert(redPanels == 1);
+    }
+
+    /*
+    * The densest cascade's lattice puts a layer of probes inside the window wall (0.3 m thick) and two columns exactly
+    * on the planes of the window's sides, where the wall's boxes touch: two faces on top of each other inside the solid.
+    * Relocated against the level's own triangles, as the GPU does it, every probe in and round that wall either ends
+    * outside every block or is off. Rays starting on such a seam used to meet its faces at distance 0, so the probe
+    * took itself for one in the open beside a surface and stayed buried, lending the wall dark and sunlit patches.
+    */
+    void testProbesLeaveTheWindowWall() {
+        Lab lab;
+        const LightLabLayout layout = buildLightLabLayout();
+        const ProbeCascadeLayout cascades = probeCascadeLayout(GlobalIlluminationSettings{});
+        const float spacing = cascades.spacing;
+        const float offset = probeLatticeOffset(cascades);
+        const Vec3 spacings{spacing, spacing, spacing};
+        const ProbeRayTrace trace = [&](const Vec3& origin, const Vec3& direction) {
+            return traceRelocationRay(lab.game.getLevel(), origin, direction);
+        };
+
+        // The wall's slab grown by a cell each way, so every probe whose cells it reaches is checked.
+        const Aabb region = grown(Aabb{Vec3{labBackRoom.minimum.x - labWallThickness, 0.0f, labBackRoom.minimum.z - labWallThickness},
+                                       Vec3{labBackRoom.minimum.x, labRoomHeight, labSunlitRoom.maximum.z + labWallThickness}},
+                                  spacing);
+        const auto firstPlane = [&](float minimum) { return std::ceil((minimum - offset) / spacing) * spacing + offset; };
+        int checked = 0;
+
+        for (float x = firstPlane(region.minimum.x); x <= region.maximum.x; x += spacing) {
+            for (float y = firstPlane(std::max(region.minimum.y, 0.0f)); y <= region.maximum.y; y += spacing) {
+                for (float z = firstPlane(region.minimum.z); z <= region.maximum.z; z += spacing) {
+                    const Vec3 grid{x, y, z};
+                    const GpuProbeRelocation relocation = relocateProbe(grid, spacings, probeRelocationIterations, trace);
+                    ++checked;
+
+                    if (relocation.off != 0.0f) {
+                        continue;
+                    }
+
+                    const Vec3 probe = grid + Vec3{relocation.offset[0], relocation.offset[1], relocation.offset[2]};
+                    for (const LabBlock& block : layout.building) {
+                        assert(!grown(block.bounds(), -probeRelocationMinDistance).contains(probe));
+                    }
+                }
+            }
+        }
+
+        assert(checked > 300);
     }
 
     // At the default afternoon, the sunbeam through the middle of the window lands on the sunlit room's floor.
@@ -467,6 +517,7 @@ void testLightLab() {
     testFence();
     testForest();
     testBuildingOpenings();
+    testProbesLeaveTheWindowWall();
     testSunbeamThroughTheWindow();
     testWalkingIn();
     testDaylight();
