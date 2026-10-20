@@ -493,7 +493,7 @@ void main() {
 
     if (probesOn) {
         vec3 reflected = reflect(-toCamera, shadingNormal);
-        ProbeLights probeLights = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, probeOrigin.xyz, true);
+        ProbeLights probeLights = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, 0, true);
         ambientReflected = shadeProbeAmbient(point, probeLights.still.diffuse + probeLights.fast.diffuse,
                                              probeLights.still.specular + probeLights.fast.specular);
     }

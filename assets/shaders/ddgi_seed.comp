@@ -1,0 +1,44 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Seeds for the light probes that start this frame (render/gpu/probe_cascades.h, chooseProbeSeeds: brought in by a
+* cascade's scroll, woken or newly vigilant): one workgroup per seed, one invocation per texel of the probe's square,
+* each reading the coarser cascades' light (last frame's, as the main pass reads it: scene_probes.glsl) where the probe
+* stands, in its texel's direction: the irradiance a surface there facing that way would get, which is what the texel
+* holds. The update (ddgi_update.glsl) starts the probe from it, as a few frames of its own history, so a probe read
+* soon after it comes in is not left to its first few noisy frames.
+*/
+#include "frame_data.glsl"
+#include "ddgi.glsl"
+#include "ddgi_volume.glsl"
+#include "scene_probes.glsl"
+
+layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEXELS) in;
+
+// The probe each seed slot is for.
+layout(std430, set = 3, binding = 0) readonly buffer ProbeSeedProbes {
+    int seedProbes[];
+};
+
+// Each seed's still and fast light per texel (ProbeSeedTexel in ddgi_update.glsl).
+struct ProbeSeedTexel {
+    vec4 still;
+    vec4 fast;
+};
+
+layout(std430, set = 3, binding = 1) writeonly buffer ProbeSeeds {
+    ProbeSeedTexel probeSeeds[];
+};
+
+void main() {
+    int seed = int(gl_WorkGroupID.x);
+    int probe = seedProbes[seed];
+    int cascade = volumeCascadeOf(probe);
+    vec3 position = cascadeProbePosition(probeCascades[cascade], volume.counts.xyz, probe) + probeStates[probe].offset;
+    vec3 direction = probeTexelDirection(ivec2(gl_LocalInvocationID.xy), DDGI_IRRADIANCE_TEXELS);
+
+    ProbeLights light = probeAmbient(position, direction, direction, direction, direction, cascade + 1, false);
+    probeSeeds[seed * DDGI_IRRADIANCE_TEXELS * DDGI_IRRADIANCE_TEXELS + int(gl_LocalInvocationIndex)] =
+        ProbeSeedTexel(vec4(light.still.diffuse, 0.0), vec4(light.fast.diffuse, 0.0));
+}

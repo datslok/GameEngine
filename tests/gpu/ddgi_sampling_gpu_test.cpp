@@ -11,10 +11,6 @@
 namespace {
     const std::string libraryShader = gpuTestShader("ddgi_sampling_test");
 
-    ProbeCounts countsFrom(const GpuVec4& value) {
-        return ProbeCounts{static_cast<int>(value[0]), static_cast<int>(value[1]), static_cast<int>(value[2])};
-    }
-
     void checkBias(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{71};
         std::vector<GpuVec4> inputs;
@@ -130,24 +126,26 @@ namespace {
         }
     }
 
-    void checkVolumeWeight(GpuFunctionRunner& runner, GpuCheckReport& report) {
+    // Points in, across and beyond a cascade's fade, round random centres.
+    void checkCascadeWeight(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{74};
-        const ProbeVolume volume{Vec3{-3.5f, 0.25f, 7.0f}, Vec3{1.0f, 0.75f, 1.5f}, ProbeCounts{5, 1, 4}};
         std::vector<GpuVec4> inputs;
 
         for (int i = 0; i < 400; ++i) {
-            const Vec3 point = volume.origin + Vec3{random.between(-2.0f, 7.0f), random.between(-1.5f, 1.5f), random.between(-2.0f, 7.0f)};
-            inputs.push_back(gpuVec4(volume.origin));
-            inputs.push_back(gpuVec4(volume.spacing));
-            inputs.push_back(gpuVec4(static_cast<float>(volume.counts.x), static_cast<float>(volume.counts.y), static_cast<float>(volume.counts.z)));
-            inputs.push_back(gpuVec4(point));
+            const Vec3 centre{random.between(-20.0f, 20.0f), random.between(-5.0f, 5.0f), random.between(-20.0f, 20.0f)};
+            const Vec3 reach{random.between(1.0f, 10.0f), random.between(1.0f, 5.0f), random.between(1.0f, 10.0f)};
+            const Vec3 fade{random.between(0.2f, 1.0f), random.between(0.2f, 1.0f), random.between(0.2f, 1.0f)};
+            inputs.push_back(gpuVec4(centre));
+            inputs.push_back(gpuVec4(reach));
+            inputs.push_back(gpuVec4(fade));
+            inputs.push_back(gpuVec4(centre + Vec3{random.between(-12.0f, 12.0f), random.between(-6.0f, 6.0f), random.between(-12.0f, 12.0f)}));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_VOLUME_WEIGHT, inputs, 4, 1);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_CASCADE_WEIGHT, inputs, 4, 1);
 
         for (std::size_t i = 0; i < outputs.size(); ++i) {
-            const ProbeVolume read{vec3From(inputs[i * 4]), vec3From(inputs[i * 4 + 1]), countsFrom(inputs[i * 4 + 2])};
-            report.check("probeVolumeWeight", arithmeticTolerance, probeVolumeWeight(read, vec3From(inputs[i * 4 + 3])), outputs[i][0]);
+            const float expected = probeCascadeWeight(vec3From(inputs[i * 4]), vec3From(inputs[i * 4 + 1]), vec3From(inputs[i * 4 + 2]), vec3From(inputs[i * 4 + 3]));
+            report.check("probeCascadeWeight", arithmeticTolerance, expected, outputs[i][0]);
         }
     }
 
@@ -258,7 +256,7 @@ void gpuTestDdgiSampling(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkBias(runner, report);
     checkCell(runner, report);
     checkCornerWeights(runner, report);
-    checkVolumeWeight(runner, report);
+    checkCascadeWeight(runner, report);
     checkBlend(runner, report);
     checkHitLights(runner, report);
     checkBrightestLights(runner, report);

@@ -1,10 +1,13 @@
 // The light probes' atlases in set 1 (render/gpu/ddgi_sampling.h), and sampling them at a surface: the corner loop that
-// reads the atlases around ddgi_sampling.glsl's weights. Included by triangle.frag and ddgi_trace.comp, after
-// frame_data.glsl (the volume's numbers are in the frame's uniform block). Mirrored by sampleProbes in C++.
+// reads the atlases around ddgi_sampling.glsl's weights, and the blend of the cascades (render/gpu/probe_cascades.h)
+// densest first. Included by triangle.frag, ddgi_trace.comp and ddgi_seed.comp, after frame_data.glsl (the probes'
+// numbers are in the frame's uniform block). Mirrored by sampleProbes and sampleProbeCascades in C++. Points are
+// measured from the camera, as the cascades are.
 #ifndef SCENE_PROBES_GLSL
 #define SCENE_PROBES_GLSL
 
 #include "ddgi_sampling.glsl"
+#include "scene_probe_cascades.glsl"
 #include "scene_probe_states.glsl"
 #include "scene_sky.glsl"
 
@@ -26,18 +29,25 @@ struct ProbeLights {
     ProbeLight fast;
 };
 
+// The grid the atlases are laid out as: the cascades one after another along z.
+ivec3 probeAtlasGrid() {
+    return ivec3(probeCounts.xy, probeCounts.z * probeCounts.w);
+}
+
 /*
-* The probes' light at a point with this normal, seen from toViewer (for a probe ray's hit, back along the ray): the 8
-* corner probes of the cell round the biased point, each read in the right direction and weighted. lookupNormal is the
-* direction the irradiance is read in, reflected the mirror direction (read only withSpecular, a constant at each call,
-* so a matte caller pays nothing for it). origin is the first probe in the point's own space (measured from the camera
-* on screen, the world for probe rays). Only traced probes count, each where relocation moved it; a point with none
-* round it gets the flat ambient light.
+* Cascade number cascade's light at a point with this normal, seen from toViewer (for a probe ray's hit, back along the
+* ray): the 8 corner probes of the cell round the biased point, each read in the right direction and weighted.
+* lookupNormal is the direction the irradiance is read in, reflected the mirror direction (read only withSpecular, a
+* constant at each call, so a matte caller pays nothing for it). Only traced probes count, each where relocation moved
+* it; traced is false when none round the point is.
 */
-ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflected, vec3 toViewer, vec3 origin, bool withSpecular) {
-    vec3 spacing = probeSpacing.xyz;
+ProbeLights sampleProbes(int cascade, vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflected, vec3 toViewer, bool withSpecular, out bool traced) {
+    ProbeCascade window = probeCascades[cascade];
+    vec3 origin = window.origin.xyz;
+    vec3 spacing = window.spacing.xyz;
     ivec3 counts = probeCounts.xyz;
-    vec3 biased = point + probeSelfShadowBias(normal, toViewer, spacing, probeOrigin.w);
+    ivec3 atlas = probeAtlasGrid();
+    vec3 biased = point + probeSelfShadowBias(normal, toViewer, spacing, probeShading.x);
     ProbeCell cell = probeCell(origin, spacing, counts, biased);
     ProbeBlend diffuse = ProbeBlend(vec3(0.0), 0.0);
     ProbeBlend specular = ProbeBlend(vec3(0.0), 0.0);
@@ -46,7 +56,7 @@ ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
 
     for (int corner = 0; corner < 8; ++corner) {
         ivec3 grid = probeCellCorner(cell, counts, corner);
-        int index = grid.x + counts.x * (grid.y + counts.y * grid.z);
+        int index = cascadeProbeNumber(window, counts, grid);
         ProbeState state = probeStates[index];
 
         if (!probeTraced(state.state)) {
@@ -58,21 +68,23 @@ ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
         float distance = length(fromProbe);
         vec3 direction = distance > 0.0 ? fromProbe / distance : normal;
 
-        vec2 moments = textureLod(probeDistanceAtlas, probeAtlasUv(counts, index, direction, DDGI_DISTANCE_TEXELS), 0.0).rg;
+        vec2 moments = textureLod(probeDistanceAtlas, probeAtlasUv(atlas, index, direction, DDGI_DISTANCE_TEXELS), 0.0).rg;
         float weight = probeCornerWeight(normal, probe - point, distance, moments, probeTrilinearWeight(cell.alpha, corner));
-        vec2 lookupUv = probeAtlasUv(counts, index, lookupNormal, DDGI_IRRADIANCE_TEXELS);
+        vec2 lookupUv = probeAtlasUv(atlas, index, lookupNormal, DDGI_IRRADIANCE_TEXELS);
         addProbeSample(diffuse, textureLod(probeIrradianceAtlas, lookupUv, 0.0).rgb, weight);
         addProbeSample(fastDiffuse, textureLod(probeFastIrradianceAtlas, lookupUv, 0.0).rgb, weight);
 
         if (withSpecular) {
-            vec2 reflectedUv = probeAtlasUv(counts, index, reflected, DDGI_IRRADIANCE_TEXELS);
+            vec2 reflectedUv = probeAtlasUv(atlas, index, reflected, DDGI_IRRADIANCE_TEXELS);
             addProbeSample(specular, textureLod(probeIrradianceAtlas, reflectedUv, 0.0).rgb, weight);
             addProbeSample(fastSpecular, textureLod(probeFastIrradianceAtlas, reflectedUv, 0.0).rgb, weight);
         }
     }
 
-    if (diffuse.weight <= 0.0) {
-        return ProbeLights(ProbeLight(flatAmbient(), flatAmbient()), ProbeLight(vec3(0.0), vec3(0.0)));
+    traced = diffuse.weight > 0.0;
+
+    if (!traced) {
+        return ProbeLights(ProbeLight(vec3(0.0), vec3(0.0)), ProbeLight(vec3(0.0), vec3(0.0)));
     }
 
     ProbeLight still = ProbeLight(finishProbeBlend(diffuse), withSpecular ? finishProbeBlend(specular) : vec3(0.0));
@@ -81,21 +93,39 @@ ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
 }
 
 /*
-* The light from all around at a point: the probes' where the volume reaches, blended into the flat ambient across the
-* volume's edge, and the flat ambient alone beyond it. The flat ambient stands in for still light; the fast lights'
-* part fades out across the edge.
+* The light from all around at a point: the cascades' from fromCascade on, densest first, each weighted by its weight
+* times what the denser ones left, until that reaches 1; a cascade with no traced probe round the point leaves its share
+* to the coarser ones; the flat ambient takes whatever is left for still light, and fast light fades out with the
+* cascades. Frames without probes never get here (the main pass's probe pipelines only).
 */
-ProbeLights probeAmbient(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflected, vec3 toViewer, vec3 origin, bool withSpecular) {
-    float inVolume = probeVolumeWeight(origin, probeSpacing.xyz, probeCounts.xyz, point);
+ProbeLights probeAmbient(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflected, vec3 toViewer, int fromCascade, bool withSpecular) {
+    ProbeLights sum = ProbeLights(ProbeLight(vec3(0.0), vec3(0.0)), ProbeLight(vec3(0.0), vec3(0.0)));
+    float total = 0.0;
 
-    if (inVolume <= 0.0) {
-        return ProbeLights(ProbeLight(flatAmbient(), flatAmbient()), ProbeLight(vec3(0.0), vec3(0.0)));
+    for (int cascade = fromCascade; cascade < probeCounts.w && total < 1.0; ++cascade) {
+        float weight = cascadeWeight(probeCascades[cascade], point) * (1.0 - total);
+
+        if (weight <= 0.0) {
+            continue;
+        }
+
+        bool traced;
+        ProbeLights light = sampleProbes(cascade, point, normal, lookupNormal, reflected, toViewer, withSpecular, traced);
+
+        if (!traced) {
+            continue;
+        }
+
+        sum.still.diffuse += light.still.diffuse * weight;
+        sum.still.specular += light.still.specular * weight;
+        sum.fast.diffuse += light.fast.diffuse * weight;
+        sum.fast.specular += light.fast.specular * weight;
+        total += weight;
     }
 
-    ProbeLights probes = sampleProbes(point, normal, lookupNormal, reflected, toViewer, origin, withSpecular);
-    ProbeLight still = ProbeLight(mix(flatAmbient(), probes.still.diffuse, inVolume), mix(flatAmbient(), probes.still.specular, inVolume));
-    ProbeLight fast = ProbeLight(probes.fast.diffuse * inVolume, probes.fast.specular * inVolume);
-    return ProbeLights(still, fast);
+    sum.still.diffuse += flatAmbient() * (1.0 - total);
+    sum.still.specular += flatAmbient() * (1.0 - total);
+    return sum;
 }
 
 #endif

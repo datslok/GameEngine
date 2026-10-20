@@ -439,6 +439,7 @@ void VulkanRenderer::createFixedTextures() {
     noProbes.surface = false;
     noProbesTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, black, noProbes);
     noProbeStates = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    noProbeCascades = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeCascade), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -868,16 +869,24 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
-    // The light probes (the frame's first probe volume): their atlases readied first, since the scene set points at them.
+    // The light probes, in cascades round what the game's ProbeCascades follows (the camera): their atlases readied
+    // first, since the scene set points at them.
     const GlobalIlluminationSettings& illumination = settings.globalIllumination;
     const bool traceProbes = tracesProbes(description, settings);
-    const ProbeVolume* probes = traceProbes ? &description.lighting.probeVolumes.front() : nullptr;
-
-    // The lights the probe rays' hits may need, and whether any of them is fast.
-    const ProbeHitLights hitLights = traceProbes ? probeHitLights(lights, cameraOrigin, *probes, illumination.fastLights) : ProbeHitLights{};
+    std::vector<ProbeCascade> probes;
 
     if (traceProbes) {
-        ddgi->prepare(frame.commands, *probes, illumination, description.draws, frame.frameIndex);
+        const ProbeCascades& followed = *description.lighting.probeCascades;
+        probes = probeCascadesAround(followed.followCamera ? cameraOrigin : followed.centre, probeCascadeLayout(illumination),
+                                     illumination.selfShadowBias);
+    }
+
+    // The lights the probe rays' hits may need (those reaching the coarsest cascade, which holds the rest), and whether
+    // any of them is fast.
+    const ProbeHitLights hitLights = traceProbes ? probeHitLights(lights, cameraOrigin, probes.back().volume, illumination.fastLights) : ProbeHitLights{};
+
+    if (traceProbes) {
+        ddgi->prepare(frame.commands, probes, illumination, description.draws, cameraOrigin, frame.frameIndex);
         stats.probes = countProbeStates(ddgi->getProbeStates());
     }
 
@@ -913,7 +922,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         const ProbeSceneSets probeSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
         const std::span<const ProbeEvent> events = illumination.sceneEvents ? std::span<const ProbeEvent>{description.lighting.probeEvents}
                                                                             : std::span<const ProbeEvent>{};
-        ddgi->update(frame.commands, frame.descriptors, probeSets, *probes, illumination, description.lighting.background, description.frameSeconds,
+        ddgi->update(frame.commands, frame.descriptors, probeSets, illumination, description.lighting.background, description.frameSeconds,
                      hitLights.fast > 0, events, frame.frameIndex);
         endGpuPass(frame, GpuPass::Probes);
     }
@@ -947,7 +956,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (showProbes) {
         beginGpuPass(frame, GpuPass::ProbeBalls);
-        drawProbeBalls(frame, sceneSet);
+        drawProbeBalls(frame, sceneSet, illumination.shownProbeCascade);
         endGpuPass(frame, GpuPass::ProbeBalls);
     }
 
@@ -999,7 +1008,7 @@ void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Ca
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           const RenderSettings& settings, const ProbeVolume* probes, const ProbeHitLights& hitLights) {
+                                           const RenderSettings& settings, std::span<const ProbeCascade> probes, const ProbeHitLights& hitLights) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
     instances.reserve(description.draws.size());
@@ -1021,10 +1030,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
                                            settings.clusterHeatmap, settings.shadows);
-    if (probes != nullptr) {
+    if (!probes.empty()) {
         const GlobalIlluminationSettings& illumination = settings.globalIllumination;
-        packProbeSampling(frameData, ProbeSampling{*probes, cameraOrigin, illumination.selfShadowBias, illumination.bounceEnergy,
-                                                   illumination.lightsPerHit, hitLights.points, hitLights.spots});
+        packProbeSampling(frameData, ProbeSampling{probes.front().volume.counts, static_cast<int>(probes.size()), illumination.selfShadowBias,
+                                                   illumination.bounceEnergy, illumination.lightsPerHit, hitLights.points, hitLights.spots});
     }
 
     buffers.frameData.write(&frameData, sizeof(frameData));
@@ -1044,14 +1053,15 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         SampledImage{shadowAtlas.getView(), shadowDepthSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         sampled(*brdfTable),
-        probes != nullptr ? ddgi->sampledIrradiance() : sampled(*noProbesTexture),
-        probes != nullptr ? ddgi->sampledDistance() : sampled(*noProbesTexture),
-        probes != nullptr ? ddgi->sampledFastIrradiance() : sampled(*noProbesTexture),
+        !probes.empty() ? ddgi->sampledIrradiance() : sampled(*noProbesTexture),
+        !probes.empty() ? ddgi->sampledDistance() : sampled(*noProbesTexture),
+        !probes.empty() ? ddgi->sampledFastIrradiance() : sampled(*noProbesTexture),
         description.lighting.atmosphere ? atmosphere->sampledSkyView() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
-    views.probeStates = probes != nullptr ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
+    views.probeStates = !probes.empty() ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
+    views.probeCascades = !probes.empty() ? ddgi->describeProbeCascades(frame.frameIndex) : VkDescriptorBufferInfo{noProbeCascades.get(), 0, VK_WHOLE_SIZE};
     views.skyLight = description.lighting.atmosphere ? atmosphere->describeSkyLight() : buffers.skyLight.describe();
     return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
 }
@@ -1262,7 +1272,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
 * The light probes' debug balls, over the finished main pass: the scene image and its depth are drawn into again, both
 * kept (the balls are tested against the depth, and write their own), then the image goes back to being read.
 */
-void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet) {
+void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget);
     depth.transition(commands, ImageState::DepthTarget);
@@ -1272,7 +1282,7 @@ void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSe
     beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
     renderingOpen = true;
 
-    ddgi->drawProbes(commands, frame.descriptors, bindlessTextures->getSet(), sceneSet);
+    ddgi->drawProbes(commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, cascade);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -1490,7 +1500,7 @@ void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description
 }
 
 bool VulkanRenderer::tracesProbes(const FrameDescription& description, const RenderSettings& settings) const {
-    return ddgi && settings.globalIllumination.enabled && !description.lighting.probeVolumes.empty();
+    return ddgi && settings.globalIllumination.enabled && description.lighting.probeCascades.has_value();
 }
 
 std::string VulkanRenderer::getDeviceName() const {
@@ -1649,6 +1659,12 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     if (rayTracing) {
         rayTracing->setFramesInFlight(count);
     }
+
+    // A frame in flight that is no more would never come round to read the probes' relocation it asked for.
+    if (ddgi) {
+        ddgi->collectAllRelocations();
+    }
+
     return framesInFlight;
 }
 

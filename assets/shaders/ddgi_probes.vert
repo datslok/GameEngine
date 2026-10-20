@@ -6,23 +6,27 @@
 * probe, drawn as a square through the ball's centre square-on to the line from the camera, just covering the ball's
 * outline; ddgi_probes.frag finds the ball's surface within it. No vertex buffer: the six corners of the square's two triangles come from the vertex number.
 * Camera-relative like the main pass: positions are measured from the camera. Each ball sits where relocation moved its
-* probe.
+* probe, every cascade's, each cascade's balls as much larger than the densest's as its spacing is.
 */
 #include "frame_data.glsl"
 #include "ddgi.glsl"
 #include "ddgi_volume.glsl"
+#include "scene_probe_cascades.glsl"
 #include "scene_probe_states.glsl"
 
 layout(location = 0) out vec3 relativePosition;
 layout(location = 1) flat out int probe;
+layout(location = 2) flat out vec4 ball; // xyz its centre, w its radius
 
 const vec2 squareCorners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
 
 void main() {
     probe = gl_InstanceIndex;
-    vec3 centre = volumeProbePosition(probe) + probeStates[probe].offset - cameraOrigin.xyz;
-    float radius = volume.hysteresis.z;
+    ProbeCascade cascade = probeCascades[volumeCascadeOf(probe)];
+    vec3 centre = cascadeProbePosition(cascade, volume.counts.xyz, probe) + probeStates[probe].offset;
+    float radius = volume.hysteresis.z * cascade.spacing.x / probeCascades[0].spacing.x;
     float distance = length(centre);
+    ball = vec4(centre, radius);
 
     // A ball seen from distance d fills a cone whose edge crosses the plane through its centre, square-on to the cone's
     // axis, r d / sqrt(d^2 - r^2) from the centre, a little more than r. (A square facing the camera's forward axis

@@ -46,7 +46,8 @@ enum SceneBinding : std::uint32_t {
     SkyLightBinding = 17,
     SkyViewBinding = 18,
     AtmosphereBinding = 19,
-    SceneBindingCount = 20
+    ProbeCascadesBinding = 20,
+    SceneBindingCount = 21
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -130,11 +131,12 @@ struct SceneImages {
     SampledImage skyView; // the atmosphere's sky view table, or a stand-in without one
 };
 
-// The buffers set 1 points at that the frame does not write itself: the light probes' states and the flat ambient light
-// (each a stand-in without probes or an atmosphere).
+// The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light
+// and the probes' cascades (each a stand-in without probes or an atmosphere).
 struct SceneBufferViews {
     VkDescriptorBufferInfo probeStates{};
     VkDescriptorBufferInfo skyLight{};
+    VkDescriptorBufferInfo probeCascades{};
 };
 
 // Write this frame's set 1 (from the frame's pools, so it goes when they are reset).

@@ -35,8 +35,11 @@ inline constexpr float maxDistanceDiagonals = static_cast<float>(DDGI_MAX_DISTAN
 inline constexpr int maxProbeAtlasSide = DDGI_MAX_ATLAS_SIDE;
 inline constexpr float probeChangeFloorShare = static_cast<float>(DDGI_CHANGE_FLOOR_SHARE);
 inline constexpr int maxProbeHistory = DDGI_MAX_HISTORY;
+inline constexpr float probeSeedFrames = static_cast<float>(DDGI_SEED_FRAMES);
+inline constexpr int maxProbeSeeds = DDGI_MAX_SEEDS;
 
-// The most probes one volume may hold: one workgroup per probe, and every GPU runs at least 65,535 groups in a row.
+// The most probes the atlases may hold, every cascade together: one workgroup per probe, and every GPU runs at least
+// 65,535 groups in a row.
 inline constexpr int maxProbesPerVolume = 65535;
 
 /*
@@ -44,8 +47,33 @@ inline constexpr int maxProbesPerVolume = 65535;
 * queries there are no probes yet (a software tracer comes later), and nothing here applies.
 */
 struct GlobalIlluminationSettings {
-    // Trace and update the probes of the frame's first probe volume.
+    // Trace and update the probes round the frame's ProbeCascades.
     bool enabled = true;
+
+    /*
+    * Where the probes are (render/gpu/probe_cascades.h): probeCascades nested grids round the point the game's
+    * ProbeCascades follows (the camera), the densest probeSpacing apart and each further one twice as far apart, so
+    * twice as far across; each cascadeProbesAcross probes along both level axes and cascadeProbesHigh up. Each lights
+    * points at full weight out to a little over a third of its width from the camera (probeCascadeReach), so the
+    * densest, 21 x 13 probes half a metre apart, covers 3.6 m round the camera at full weight and 1.6 m up and down, the
+    * fourth 29 m and 13 m. Finer probes see light through doorways that coarser ones miss; each cascade costs memory
+    * (about 8 KB a probe: 23,000 probes, about 190 MB) and tracing (only probes near surfaces trace). Odd counts centre
+    * the camera best. Changing any of them rebuilds the probes (a hitch).
+    */
+    int probeCascades = 4;
+    float probeSpacing = 0.5f;
+    int cascadeProbesAcross = 21;
+    int cascadeProbesHigh = 13;
+
+    /*
+    * A probe that starts (brought in by a cascade's move, woken, newly vigilant) begins from the coarser cascades' light
+    * where it stands, as a few frames of its own (probeSeedFrames), instead of from its first frame's rays alone. In the
+    * dark room model (probe_cascades_test, 128 rays at 60 fps) its light errs 9.6% over its first quarter second with a
+    * seed 20% off, against 13.3% from its rays alone; but 24% with a seed twice or none of the light (a coarse probe that
+    * sees through a doorway the fine one cannot), and from half a second on all are within half a percent of each other.
+    * Off: every probe starts from its rays.
+    */
+    bool seedProbes = true;
 
     // Rays each probe traces per frame. More converge faster and flicker less; the time constants below average over
     // rays per second of history, so a slower GPU can trace fewer with longer time constants.
@@ -201,12 +229,22 @@ struct GlobalIlluminationSettings {
     bool probeStates = true;
     float wakeCells = 1.0f;
 
-    // A debug view: each probe drawn as a small ball showing the light it stores, in the direction of the ball's surface.
+    // A debug view: each probe of one cascade (0 the densest) drawn as a small ball showing the light it stores, in the
+    // direction of the ball's surface, as much larger than the densest's balls as its spacing is. One at a time: the
+    // cascades nest, so a coarser probe sits where finer ones do.
     bool showProbes = false;
+    int shownProbeCascade = 0;
     float probeBallRadius = 0.1f;
 };
 
 void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor);
+
+// A probe's place in a grid, counted from the first probe along each axis.
+struct ProbeGridCoord {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+};
 
 // A texel's place in an image, counted from the top-left texel.
 struct TexelCoord {
@@ -311,17 +349,17 @@ bool probesSeeEachOther(float meanDistance, float separation);
 Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, const std::array<bool, 6>& visible, float weight);
 
 /*
-* What the sharing pass reads, as push constants (must match ddgi_share.comp): the grid and the weight.
+* What the sharing pass reads, as push constants (must match ddgi_share.comp): each cascade's size, how many there are
+* (where each is and how it is scrolled, in the cascades' buffer), and the weights.
 */
 struct GpuProbeShare {
-    std::int32_t counts[4]; // xyz probes along each axis
-    float spacing[4];       // xyz the spacing between probes
+    std::int32_t counts[4]; // xyz each cascade's probes along each axis, w how many cascades
     float weight[4];        // x the still light's sharing weight, y the fast light's, z a restarted probe's at first, w the long memory's share kept
 };
 
-static_assert(sizeof(GpuProbeShare) == 48, "GpuProbeShare must match ddgi_share.comp");
+static_assert(sizeof(GpuProbeShare) == 32, "GpuProbeShare must match ddgi_share.comp");
 
-GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight, float eventWeight, float longKeep);
+GpuProbeShare packProbeShare(const ProbeCounts& counts, int cascades, float weight, float fastWeight, float eventWeight, float longKeep);
 
 /*
 * Whether a probe counts as within reach of a light, for tracing more rays: the light's range, grown by reach (the
@@ -473,9 +511,20 @@ void validateProbeVolume(const ProbeVolume& volume);
 
 int probeCount(const ProbeCounts& counts);
 
-// Probes are numbered x first, then y, then z.
+// Slots are numbered x first, then y, then z.
 int probeIndex(const ProbeCounts& counts, int x, int y, int z);
-Vec3 probePosition(const ProbeVolume& volume, int index);
+
+/*
+* The slot a volume keeps the probe at grid place grid in: (grid + scroll) mod counts along each axis (ProbeScroll), so a
+* volume that never scrolls keeps probe (x, y, z) in slot probeIndex(x, y, z). Grid places outside the volume wrap round.
+*/
+int probeSlot(const ProbeVolume& volume, const ProbeGridCoord& grid);
+
+// The grid place of the probe kept in slot slot (the inverse of probeSlot).
+ProbeGridCoord probeGridCoord(const ProbeVolume& volume, int slot);
+
+// Where the grid puts the probe kept in slot slot.
+Vec3 probePosition(const ProbeVolume& volume, int slot);
 
 /*
 * Every probe's bordered square side by side in one image per kind (an atlas): probe i's square is column
@@ -497,15 +546,17 @@ Vec2 probeAtlasUv(const ProbeCounts& counts, int index, const Vec3& direction, i
 /*
 * What every probe pass reads, as push constants (must match ProbeVolumeData in assets/shaders/ddgi_volume.glsl):
 * exactly the 128 bytes every GPU allows, so the ray counts fill the rotation rows' spare w slots (whole numbers, exact
-* as floats).
+* as floats). Where each cascade's probes are is in the cascades' buffer (render/gpu/probe_cascades.h,
+* GpuProbeCascade); probe number p is slot p mod probes of cascade p / probes, so the atlases hold the cascades one
+* after another, as one grid counts.z times cascades layers deep (probeAtlasGrid).
 */
 struct GpuProbeVolume {
-    float origin[4];      // xyz the first probe, w the fast irradiance's share kept this frame
-    float spacing[4];     // xyz the spacing between probes, w the longest distance recorded (probeMaxDistance)
-    std::int32_t counts[4]; // xyz probes along each axis, w the ray stride: room for the most rays any probe traces
+    std::int32_t counts[4];   // xyz probes along each axis of one cascade, w the ray stride: room for the most rays any probe traces
+    std::int32_t cascades[4]; // x how many cascades, y probes in each, zw unused
     float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, the change window's share kept
     float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything), w the change threshold (0: fixed memory)
     float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
+    float keeps[4];       // x the fast irradiance's share kept this frame, yzw unused
 };
 
 static_assert(sizeof(GpuProbeVolume) == 128, "GpuProbeVolume must match ddgi_volume.glsl and fit in 128 bytes of push constants");
@@ -532,7 +583,11 @@ struct ProbeFrame {
 // Room for each probe's rays in the ray buffers: the larger count.
 int probeRayStride(const ProbeFrame& frame);
 
-GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& frame);
+// Every cascade has counts probes; the atlases hold cascades of them.
+GpuProbeVolume packProbeVolume(const ProbeCounts& counts, int cascades, const ProbeFrame& frame);
+
+// The grid the atlases are laid out as: cascades of counts one after another along z.
+ProbeCounts probeAtlasGrid(const ProbeCounts& counts, int cascades);
 
 // The ray budget's frame time is smoothed over this long, so one quick or slow frame does not move the ladder.
 inline constexpr float rayBudgetSmoothingSeconds = 0.25f;
@@ -575,7 +630,8 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
 * each it keeps this frame (restartedProbeKeep), and of the fast atlas, which restarts with the still irradiance but
 * outright (no noise is measured there to check against, and its memory is short anyway; no soft restart, which would
 * keep a switched-off light's bounce), and the event check's settings, worked out here since the update's push constants
-* are full.
+* are full. A seeded probe (one that starts, given the coarser cascades' light where it stands: seed its slot in the
+* frame's seeds) starts its stored light from the seed instead of its first frame's rays.
 */
 struct GpuProbeRestart {
     std::int32_t irradianceFrames = -1;
@@ -584,9 +640,17 @@ struct GpuProbeRestart {
     float distanceKeep = 0.0f;
     ProbeEventCheck check;
     float fastKeep = 0.0f; // the fast atlas's share kept: it restarts with the still one, outright (the shader's check.w)
+    std::int32_t seed = -1; // this frame's seed slot of a probe that starts from a seed, else -1
+    std::int32_t unused[3] = {0, 0, 0};
 };
 
-static_assert(sizeof(GpuProbeRestart) == 32, "GpuProbeRestart must match ProbeRestart in ddgi.glsl");
+static_assert(sizeof(GpuProbeRestart) == 48, "GpuProbeRestart must match ProbeRestart in ddgi.glsl");
+
+// A probe that starts from a seed, and its seed's slot in the frame's seeds (the seed pass writes them, the update reads them).
+struct ProbeSeed {
+    int probe = 0;
+    int slot = 0;
+};
 
 /*
 * Move every probe's restart on a frame, then start this frame's events: the probes in an event's region (all of them
@@ -595,10 +659,24 @@ static_assert(sizeof(GpuProbeRestart) == 32, "GpuProbeRestart must match ProbeRe
 * end of the event check (texels may restart that late), has reached the frame's share kept, after which it would change nothing. A frame keeping none of an
 * atlas (fresh atlases) starts no restart of it: there is nothing to forget. Sized to the volume: a new size starts with
 * none running. The restarted probes (probe_relocation.h, restartedProbes: woken, newly vigilant or moved) restart
-* their irradiance and distances outright: nothing kept on this frame, every texel restarted unchecked.
+* their irradiance and distances outright: nothing kept on this frame, every texel restarted unchecked. Of those, the
+* seeded ones (ProbeSeed) start their irradiance from the seed as if it were probeSeedFrames frames of their own: their
+* restart counts from there, so the seed's share fades as their own rays come in (restartedProbeKeep). Distances are
+* never seeded: a coarser probe's distances say nothing about what this one sees. restarts holds every cascade's probes
+* (cascades of volume's size, one after another), each cascade's events tested against its own volume.
 */
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, std::span<const ProbeVolume> cascades, std::span<const ProbeEvent> events,
+                          const ProbeFrame& frame, std::span<const int> restarted = {}, std::span<const ProbeSeed> seeded = {});
+
+// One volume's probes alone, as the cascades' first.
 void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame,
-                          std::span<const int> restarted = {});
+                          std::span<const int> restarted = {}, std::span<const ProbeSeed> seeded = {});
+
+/*
+* A texel as the seed starts it: the seed as its stored light and its change window's mean, marked restarted
+* (negative history) with probeSeedFrames frames behind it, its noise to be measured afresh.
+*/
+AdaptiveProbeTexel seededProbeTexel(const Vec3& seed);
 
 // One restart's frames since its event, a frame on (keep: the share its atlas keeps this frame), or -1 once it has
 // ended (advanceProbeRestarts' rule); negative stays negative.

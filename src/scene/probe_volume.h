@@ -11,17 +11,45 @@ struct ProbeCounts {
 };
 
 /*
+* How far a volume's storage is turned along each axis, as a circular buffer: the probe at grid place l (counted from
+* the first probe) is kept in slot (l + scroll) mod count. A window that follows the camera moves by changing this
+* instead of copying its probes, so only the plane it brings in starts afresh. 0 for a volume that never moves.
+*/
+struct ProbeScroll {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+};
+
+/*
 * A box of light probes for global illumination (render/gpu/ddgi.h): a regular grid of points where the renderer
 * measures the light arriving from every direction, so surfaces between them can look up the light that bounced
-* around the level. A component: a game places one where its light matters, as it places lights. Probes sit on the
-* grid's corners, the first at origin and the rest spacing apart along each axis, so the volume spans
-* (counts - 1) * spacing. Each room-like space needs at least one full cell of 8 probes inside it; 1-2 m apart suits
-* human-scale levels.
+* around the level. Probes sit on the grid's corners, the first at origin and the rest spacing apart along each axis,
+* so the volume spans (counts - 1) * spacing. The renderer's cascades (render/gpu/probe_cascades.h) are such volumes,
+* following the camera; games place ProbeCascades, not volumes.
 */
 struct ProbeVolume {
     Vec3 origin{0.0f, 0.0f, 0.0f};
     Vec3 spacing{1.0f, 1.0f, 1.0f};
     ProbeCounts counts;
+    ProbeScroll scroll;
+
+    // Most volumes never scroll, so the scroll may be left out.
+    ProbeVolume() = default;
+    ProbeVolume(const Vec3& origin, const Vec3& spacing, const ProbeCounts& counts, const ProbeScroll& scroll = {})
+        : origin(origin), spacing(spacing), counts(counts), scroll(scroll) {}
+};
+
+/*
+* Global illumination for a world: a component a game places once, as it places lights. The renderer keeps light
+* probes in nested grids (cascades) round a point, the camera by default: the densest near it and each further one
+* twice as coarse and twice as far, all moving with it, so light bounces everywhere the camera goes with no probes to
+* place per level. How dense and how many is the quality settings' choice (GlobalIlluminationSettings), not the game's.
+* A game that follows something other than the camera (a MOBA's ground under the view) sets centre each frame.
+*/
+struct ProbeCascades {
+    bool followCamera = true;
+    Vec3 centre{0.0f, 0.0f, 0.0f}; // followed when not the camera
 };
 
 // What changed: light only (a lamp switched, the time of day jumped), or the level's shape (a wall fell), which moves

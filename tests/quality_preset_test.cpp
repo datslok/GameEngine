@@ -55,6 +55,39 @@ namespace {
         assert(fast.globalIllumination.fastProbeSharing == 0.25f);
     }
 
+    /*
+    * The light probes' cascades per preset: High (the defaults) four of 21 x 13 x 21 from half a metre, Ultra the same,
+    * Medium four of 17 x 11 x 17, Low three of 15 x 9 x 15 from a metre; each lower one holds fewer probes.
+    */
+    void testPresetsSetTheProbeCascades() {
+        struct Cascades {
+            int cascades;
+            float spacing;
+            int across;
+            int high;
+        };
+
+        const std::array<Cascades, 4> expected{Cascades{3, 1.0f, 15, 9}, Cascades{4, 0.5f, 17, 11}, Cascades{4, 0.5f, 21, 13}, Cascades{4, 0.5f, 21, 13}};
+        int probesAbove = 0;
+
+        for (QualityPreset preset : {QualityPreset::Ultra, QualityPreset::High, QualityPreset::Medium, QualityPreset::Low}) {
+            RenderSettings settings;
+            applyQualityPreset(settings, preset);
+            const GlobalIlluminationSettings& probes = settings.globalIllumination;
+            const Cascades& wanted = expected[static_cast<std::size_t>(preset)];
+            assert(probes.probeCascades == wanted.cascades && probes.probeSpacing == wanted.spacing);
+            assert(probes.cascadeProbesAcross == wanted.across && probes.cascadeProbesHigh == wanted.high);
+
+            const int held = probes.probeCascades * probes.cascadeProbesAcross * probes.cascadeProbesAcross * probes.cascadeProbesHigh;
+            assert(held <= maxProbesPerVolume);
+            assert(preset == QualityPreset::Ultra || preset == QualityPreset::High || held < probesAbove);
+            probesAbove = held;
+        }
+
+        const GlobalIlluminationSettings defaults;
+        assert(defaults.probeCascades == 4 && defaults.probeSpacing == 0.5f && defaults.cascadeProbesAcross == 21 && defaults.cascadeProbesHigh == 13);
+    }
+
     // Each step down from High costs less on every axis a preset sets: fewer shadowed lights, coarser shadow texels,
     // shorter sun shadows, fewer bloom levels and probe rays. None ever asks for more than the engine's limits.
     void testLowerPresetsCostLess() {
@@ -156,6 +189,7 @@ void testQualityPreset() {
     testHighIsTheDefaults();
     testPresetsSetTheProbeRays();
     testPresetsSetProbeSharing();
+    testPresetsSetTheProbeCascades();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();
     testChangedValuesAreCustom();

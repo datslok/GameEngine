@@ -9,6 +9,7 @@
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/atmosphere.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/probe_cascades.h"
 #include "render/gpu/probe_relocation.h"
 #include "render/gpu/ray_tracing.h"
 #include "render/vulkan/bindless_textures.h"
@@ -34,6 +35,8 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -374,32 +377,45 @@ namespace {
         }
     }
 
-    // Every probe of an uneven grid, at both probe sizes, with a random direction each.
+    // Every probe of an uneven grid, scrolled and not, at both probe sizes, with a random direction each.
     void checkGrid(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{64};
-        const ProbeVolume volume{Vec3{-3.5f, 0.25f, 7.0f}, Vec3{1.0f, 0.75f, 1.5f}, ProbeCounts{5, 3, 4}};
+        const ProbeVolume plain{Vec3{-3.5f, 0.25f, 7.0f}, Vec3{1.0f, 0.75f, 1.5f}, ProbeCounts{5, 3, 4}};
+        const ProbeVolume scrolled{plain.origin, plain.spacing, plain.counts, ProbeScroll{3, 1, 2}};
         std::vector<GpuVec4> inputs;
 
-        for (int side : {probeIrradianceTexels, probeDistanceTexels}) {
-            for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
-                inputs.push_back(gpuVec4(volume.origin));
-                inputs.push_back(gpuVec4(volume.spacing));
-                inputs.push_back(gpuVec4(static_cast<float>(volume.counts.x), static_cast<float>(volume.counts.y),
-                                         static_cast<float>(volume.counts.z), static_cast<float>(probe)));
-                inputs.push_back(gpuVec4(random.direction(), static_cast<float>(side)));
+        for (const ProbeVolume& volume : {plain, scrolled}) {
+            for (int side : {probeIrradianceTexels, probeDistanceTexels}) {
+                for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
+                    inputs.push_back(gpuVec4(volume.origin));
+                    inputs.push_back(gpuVec4(volume.spacing));
+                    inputs.push_back(gpuVec4(static_cast<float>(volume.counts.x), static_cast<float>(volume.counts.y),
+                                             static_cast<float>(volume.counts.z), static_cast<float>(probe)));
+                    inputs.push_back(gpuVec4(random.direction(), static_cast<float>(side)));
+                    inputs.push_back(gpuVec4(static_cast<float>(volume.scroll.x), static_cast<float>(volume.scroll.y),
+                                             static_cast<float>(volume.scroll.z)));
+                }
             }
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_GRID, inputs, 4, 2);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_GRID, inputs, 5, 3);
 
-        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
-            const int probe = static_cast<int>(inputs[i * 4 + 2][3]);
-            const int side = static_cast<int>(inputs[i * 4 + 3][3]);
+        for (std::size_t i = 0; i < inputs.size() / 5; ++i) {
+            const int probe = static_cast<int>(inputs[i * 5 + 2][3]);
+            const int side = static_cast<int>(inputs[i * 5 + 3][3]);
+            const GpuVec4& scroll = inputs[i * 5 + 4];
+            const ProbeVolume volume{plain.origin, plain.spacing, plain.counts,
+                                     ProbeScroll{static_cast<int>(scroll[0]), static_cast<int>(scroll[1]), static_cast<int>(scroll[2])}};
             const TexelCoord origin = probeTileOrigin(volume.counts, probe, side);
-            const Vec2 uv = probeAtlasUv(volume.counts, probe, vec3From(inputs[i * 4 + 3]), side);
-            const GpuVec4& out = outputs[i * 2 + 1];
+            const Vec2 uv = probeAtlasUv(volume.counts, probe, vec3From(inputs[i * 5 + 3]), side);
+            const GpuVec4& out = outputs[i * 3 + 1];
+            const ProbeGridCoord grid = probeGridCoord(volume, probe);
+            const GpuVec4& placed = outputs[i * 3 + 2];
 
-            report.check("probePosition", arithmeticTolerance, probePosition(volume, probe), vec3From(outputs[i * 2]));
+            report.check("probePosition", arithmeticTolerance, probePosition(volume, probe), vec3From(outputs[i * 3]));
+            report.check("probeGridCoord", exactTolerance, Vec3{static_cast<float>(grid.x), static_cast<float>(grid.y), static_cast<float>(grid.z)},
+                         vec3From(placed));
+            report.check("probeSlot", exactTolerance, static_cast<float>(probeSlot(volume, grid)), placed[3]);
             report.check("probeTileOrigin", exactTolerance, Vec3{static_cast<float>(origin.x), static_cast<float>(origin.y), 0.0f},
                          Vec3{out[0], out[1], 0.0f});
             report.check("probeAtlasUv", arithmeticTolerance, Vec3{uv.x, uv.y, 0.0f}, Vec3{out[2], out[3], 0.0f});
@@ -461,7 +477,7 @@ namespace {
 
         // The frame's set 1 for these draws (all one white matte material), lights and probes, as the renderer writes it
         // with the camera at the origin.
-        VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting, const ProbeVolume& volume,
+        VkDescriptorSet writeFrame(const std::vector<DrawItem>& draws, const FrameLighting& lighting, std::span<const ProbeCascade> cascades,
                                    const VulkanDdgi& ddgi, const GlobalIlluminationSettings& settings) {
             MaterialTable materials;
             std::vector<GpuInstance> instances;
@@ -473,9 +489,9 @@ namespace {
             const GpuLights lights = packLighting(lighting, Vec3{});
             const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 100.0f};
             GpuFrameData frameData = makeFrameData(lights, Mat4::identity(), Vec3{}, makeClusterGrid(camera, 64, 64), false, false);
-            const ProbeHitLights hitLights = probeHitLights(lights, Vec3{}, volume);
-            packProbeSampling(frameData, ProbeSampling{volume, Vec3{}, settings.selfShadowBias, settings.bounceEnergy, settings.lightsPerHit,
-                                                       hitLights.points, hitLights.spots});
+            const ProbeHitLights hitLights = probeHitLights(lights, Vec3{}, cascades.back().volume);
+            packProbeSampling(frameData, ProbeSampling{cascades.front().volume.counts, static_cast<int>(cascades.size()), settings.selfShadowBias,
+                                                       settings.bounceEnergy, settings.lightsPerHit, hitLights.points, hitLights.spots});
 
             buffers.frameData.write(&frameData, sizeof(frameData));
             buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
@@ -492,7 +508,7 @@ namespace {
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             return writeSceneSet(descriptors, sceneLayout, buffers,
                                  SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance(), dummy},
-                                 clusterMasks, SceneBufferViews{ddgi.describeProbeStates(0), buffers.skyLight.describe()});
+                                 clusterMasks, SceneBufferViews{ddgi.describeProbeStates(0), buffers.skyLight.describe(), ddgi.describeProbeCascades(0)});
         }
 
         // Whether the last frame written lists a fast light for the probe rays' hits.
@@ -660,14 +676,15 @@ namespace {
         VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
+        const std::vector<ProbeCascade> cascades{fixedProbeCascade(volume)};
         scene.descriptors.reset();
-        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume, settings, draws, 0); });
-        const VkDescriptorSet frame = scene.writeFrame(draws, lighting, volume, ddgi, settings);
+        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, cascades, settings, draws, Vec3{}, 0); });
+        const VkDescriptorSet frame = scene.writeFrame(draws, lighting, cascades, ddgi, settings);
 
         scene.commands.run([&](VkCommandBuffer recording) {
             scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
             const ProbeSceneSets sets{scene.textures.getSet(), frame, scene.rayTracing.getSceneSet(0)};
-            ddgi.update(recording, scene.descriptors, sets, volume, settings, lighting.background, testFrameSeconds, scene.fastLightsListed,
+            ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, scene.fastLightsListed,
                         lighting.probeEvents, 0);
         });
 
@@ -943,15 +960,17 @@ namespace {
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
         // The first frame records the relocation; the second's prepare reads it back.
+        const std::vector<ProbeCascade> cascades{fixedProbeCascade(volume)};
+
         for (int frame = 0; frame < 2; ++frame) {
             scene.descriptors.reset();
-            scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume, settings, draws, 0); });
-            const VkDescriptorSet frameSet = scene.writeFrame(draws, FrameLighting{}, volume, ddgi, settings);
+            scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, cascades, settings, draws, Vec3{}, 0); });
+            const VkDescriptorSet frameSet = scene.writeFrame(draws, FrameLighting{}, cascades, ddgi, settings);
 
             scene.commands.run([&](VkCommandBuffer recording) {
                 scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
                 const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
-                ddgi.update(recording, scene.descriptors, sets, volume, settings, Vec3{}, testFrameSeconds, false, {}, 0);
+                ddgi.update(recording, scene.descriptors, sets, settings, Vec3{}, testFrameSeconds, false, {}, 0);
             });
         }
 
@@ -997,6 +1016,144 @@ namespace {
         report.check("states: vigilant by the floor", exactTolerance, static_cast<float>(ProbeState::Vigilant), static_cast<float>(states[0].state));
         report.check("states: buried off", exactTolerance, static_cast<float>(ProbeState::Off), static_cast<float>(states[3].state));
     }
+
+    /*
+    * Cascades that follow the camera, in the furnace (an empty sky drawn at B, no flat ambient): two cascades of 13 x 13 x
+    * 13 probes, 1 m and 2 m apart, for 8 frames round one point, then a metre on along x, which moves the densest a cell
+    * and leaves the coarser where it was. Every probe still holds B. The plane the move brought in starts from a seed,
+    * the coarser cascade's light where it stands (B, since that cascade lights it at full weight; the flat ambient, 0,
+    * would show if it did not), as probeSeedFrames frames of history: its texels' history is marked restarted with one
+    * frame more (an unseeded start would show 1). Every other probe keeps its history. The probes are all traced (states
+    * off), so the plane starts on the frame it comes in.
+    */
+    void checkCascadeScroll(const VulkanDevice& device, GpuCheckReport& report) {
+        ProbeTestScene scene{device};
+        const MeshHandle cube = scene.addMesh(Mesh::cube());
+        const std::vector<DrawItem> draws{drawOf(cube, Mat4::translation(0.0f, -10000.0f, 0.0f) * Mat4::scaling(0.001f, 0.001f, 0.001f))};
+
+        GlobalIlluminationSettings settings;
+        settings.probeStates = false;
+        settings.probeRelocation = false;
+        FrameLighting lighting;
+        lighting.background = Vec3{0.6f, 0.75f, 1.0f};
+        const ProbeCascadeLayout layout{ProbeCounts{13, 13, 13}, 1.0f, 2};
+
+        VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
+                        scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
+        std::vector<ProbeCascade> before;
+        std::vector<ProbeCascade> after;
+
+        for (int frame = 0; frame < 9; ++frame) {
+            const Vec3 centre = frame < 8 ? Vec3{-0.4f, 0.0f, 0.0f} : Vec3{0.6f, 0.0f, 0.0f};
+            const std::vector<ProbeCascade> cascades = probeCascadesAround(centre, layout, settings.selfShadowBias);
+            (frame < 8 ? before : after) = cascades;
+            scene.descriptors.reset();
+            scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, cascades, settings, draws, Vec3{}, 0); });
+            const VkDescriptorSet frameSet = scene.writeFrame(draws, lighting, cascades, ddgi, settings);
+
+            scene.commands.run([&](VkCommandBuffer recording) {
+                scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
+                const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
+                ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, false, {}, 0);
+            });
+        }
+
+        const std::vector<int> densestBrought = scrolledProbes(before[0], after[0]);
+        report.check("cascade scroll: a plane comes in", exactTolerance, 169.0f, static_cast<float>(densestBrought.size()));
+        report.check("cascade scroll: the coarser stays", exactTolerance, 0.0f, static_cast<float>(scrolledProbes(before[1], after[1]).size()));
+
+        const ReadImage atlas = readHalfImage(scene.device, scene.commands, ddgi.getIrradianceAtlas(), 4);
+        const ProbeCounts grid = probeAtlasGrid(layout.counts, layout.cascades);
+        const std::set<int> brought(densestBrought.begin(), densestBrought.end());
+        const FloatTolerance lightTolerance{.absolute = 2e-3f, .relative = 2e-3f};
+
+        for (int probe = 0; probe < probeCount(layout.counts) * layout.cascades; probe += 7) {
+            const TexelCoord origin = probeTileOrigin(grid, probe, probeIrradianceTexels);
+            const GpuVec4 texel = atlas.texel(origin.x + 4, origin.y + 4);
+            report.check("cascade scroll: the furnace", lightTolerance, lighting.background, Vec3{texel[0], texel[1], texel[2]});
+
+            const bool seeded = brought.count(probe) != 0;
+            report.check(seeded ? "cascade scroll: seeded history" : "cascade scroll: kept history", exactTolerance, 1.0f,
+                         seeded ? (texel[3] == -(probeSeedFrames + 1.0f) ? 1.0f : 0.0f) : (texel[3] > 1.0f ? 1.0f : 0.0f));
+        }
+
+        for (const int probe : densestBrought) {
+            const TexelCoord origin = probeTileOrigin(grid, probe, probeIrradianceTexels);
+            const GpuVec4 texel = atlas.texel(origin.x + 3, origin.y + 5);
+            report.check("cascade scroll: seeded from the coarser cascade", lightTolerance, lighting.background, Vec3{texel[0], texel[1], texel[2]});
+            report.check("cascade scroll: seeded history", exactTolerance, -(probeSeedFrames + 1.0f), texel[3]);
+        }
+    }
+
+    /*
+    * The same move over a static floor, with relocation and probe states on (the defaults): the plane the move brings in
+    * waits off on the frame it comes in, its relocation asked for; on the next frame its records are back (this frame in
+    * flight's, read once its fence has passed: no waiting for the GPU), the probes by the floor start vigilant, seeded,
+    * and the rest sleep. The probes stand half a metre off whole metres (the lattice's offset), so the floor, a slab from
+    * 1.2 to 0.8 m down, lies between two layers 0.3 m from each: those two see its top or its underside within their
+    * cells, the rest lie too far from it.
+    */
+    void checkCascadeScrollWaitsForItsRecords(const VulkanDevice& device, GpuCheckReport& report) {
+        ProbeTestScene scene{device};
+        const MeshHandle cube = scene.addMesh(Mesh::cube());
+        const std::vector<DrawItem> draws{blockDraw(cube, Vec3{-60.0f, -1.2f, -60.0f}, Vec3{60.0f, -0.8f, 60.0f}, true)};
+
+        const GlobalIlluminationSettings settings;
+        FrameLighting lighting;
+        lighting.background = Vec3{0.6f, 0.75f, 1.0f};
+        const ProbeCascadeLayout layout{ProbeCounts{13, 13, 13}, 1.0f, 2};
+
+        VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
+                        scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
+        std::vector<ProbeCascade> before;
+        std::vector<ProbeCascade> after;
+        std::vector<GpuProbeState> statesOnArrival;
+
+        for (int frame = 0; frame < 10; ++frame) {
+            const Vec3 centre = frame < 8 ? Vec3{-0.4f, 0.0f, 0.0f} : Vec3{0.6f, 0.0f, 0.0f};
+            const std::vector<ProbeCascade> cascades = probeCascadesAround(centre, layout, settings.selfShadowBias);
+            (frame < 8 ? before : after) = cascades;
+            scene.descriptors.reset();
+            scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, cascades, settings, draws, Vec3{}, 0); });
+
+            if (frame == 8) {
+                statesOnArrival = ddgi.getProbeStates();
+            }
+
+            const VkDescriptorSet frameSet = scene.writeFrame(draws, lighting, cascades, ddgi, settings);
+
+            scene.commands.run([&](VkCommandBuffer recording) {
+                scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
+                const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
+                ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, false, {}, 0);
+            });
+        }
+
+        const std::vector<int> brought = scrolledProbes(before[0], after[0]);
+        const std::vector<GpuProbeState>& states = ddgi.getProbeStates();
+        const ReadImage atlas = readHalfImage(scene.device, scene.commands, ddgi.getIrradianceAtlas(), 4);
+        const ProbeCounts grid = probeAtlasGrid(layout.counts, layout.cascades);
+        int seeded = 0;
+
+        for (const int probe : brought) {
+            const std::size_t index = static_cast<std::size_t>(probe);
+            report.check("cascade scroll: waits off for its records", exactTolerance, static_cast<float>(ProbeState::Off),
+                         static_cast<float>(statesOnArrival[index].state));
+
+            const ProbeGridCoord place = probeLatticeCoord(after[0], probe);
+            const ProbeState expected = place.y == -1 || place.y == -2 ? ProbeState::Vigilant : ProbeState::Sleeping;
+            report.check("cascade scroll: its state once its records are back", exactTolerance, static_cast<float>(expected),
+                         static_cast<float>(states[index].state));
+
+            if (expected == ProbeState::Vigilant) {
+                const TexelCoord origin = probeTileOrigin(grid, probe, probeIrradianceTexels);
+                report.check("cascade scroll: starts seeded", exactTolerance, -(probeSeedFrames + 1.0f), atlas.texel(origin.x + 4, origin.y + 4)[3]);
+                ++seeded;
+            }
+        }
+
+        report.check("cascade scroll: the rows by the floor start", exactTolerance, 26.0f, static_cast<float>(seeded));
+    }
 }
 
 void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -1023,4 +1180,8 @@ void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheck
 
     report.section("light probe relocation (ddgi_relocate.comp)");
     checkRelocationPass(device, report);
+
+    report.section("light probe cascades (scroll, ddgi_seed.comp)");
+    checkCascadeScroll(device, report);
+    checkCascadeScrollWaitsForItsRecords(device, report);
 }

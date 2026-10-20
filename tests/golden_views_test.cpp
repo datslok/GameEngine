@@ -131,7 +131,7 @@ namespace {
             const bool fastLight = std::any_of(frame.lighting.spotLights.begin(), frame.lighting.spotLights.end(),
                                                [](const PlacedSpotLight& placed) { return placed.light.fast; });
             assert(fastLight == (view.name == "flashlight"));
-            assert(frame.lighting.probeVolumes.size() == 1);
+            assert(frame.lighting.probeCascades.has_value());
         }
     }
 }

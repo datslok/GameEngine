@@ -31,8 +31,10 @@ FrameLighting collectLighting(World& world, float alpha) {
         lighting.spotLights.push_back(PlacedSpotLight{getRenderTransform(world, entity, alpha).position, light, entity});
     });
 
-    world.each<ProbeVolume>([&](Entity, ProbeVolume& volume) {
-        lighting.probeVolumes.push_back(volume);
+    world.each<ProbeCascades>([&](Entity, ProbeCascades& cascades) {
+        if (!lighting.probeCascades) {
+            lighting.probeCascades = cascades;
+        }
     });
 
     world.each<Atmosphere>([&](Entity, Atmosphere& atmosphere) {

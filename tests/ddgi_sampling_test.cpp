@@ -171,25 +171,16 @@ namespace {
         assert(nearlyEqual(probeCornerWeight(normal, toProbe * -1.0f, 4.0f, moments, 0.5f), crushProbeWeight(hidden) * 0.5f, 1e-9f));
     }
 
-    void testTheVolumeFadesBeyondItsProbes() {
-        // Probes from 0 to 3 on each axis.
-        assert(probeVolumeWeight(unitVolume, Vec3{1.5f, 1.5f, 1.5f}) == 1.0f);
-        assert(probeVolumeWeight(unitVolume, Vec3{0.0f, 3.0f, 1.0f}) == 1.0f);
-
-        // Full out to the margin, half way through the fade, nothing past it.
-        assert(probeVolumeWeight(unitVolume, Vec3{-probeVolumeMarginCells, 1.0f, 1.0f}) == 1.0f);
-        const float halfway = probeVolumeMarginCells + 0.5f * probeVolumeFadeCells;
-        assert(nearlyEqual(probeVolumeWeight(unitVolume, Vec3{3.0f + halfway, 1.0f, 1.0f}), 0.5f));
-        assert(nearlyEqual(probeVolumeWeight(unitVolume, Vec3{-halfway, 1.0f, 3.0f + halfway}), 0.25f));
-        assert(probeVolumeWeight(unitVolume, Vec3{1.0f, -5.0f, 1.0f}) == 0.0f);
-
-        // Spacing scales the margin: with 2 m between probes, a point 1 m outside is still fully in.
-        const ProbeVolume wide{Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 2.0f, 2.0f}, ProbeCounts{2, 2, 2}};
-        assert(probeVolumeWeight(wide, Vec3{1.0f, -1.0f, 1.0f}) == 1.0f);
-
-        // A single layer of probes reaches the margin either side of it.
-        const ProbeVolume layer{Vec3{0.0f, 1.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{3, 1, 3}};
-        assert(probeVolumeWeight(layer, Vec3{1.0f, 1.0f - probeVolumeMarginCells, 1.0f}) == 1.0f);
+    // A cascade's weight along each axis: full to reach - fade from the centre, half way through the fade, nothing past it.
+    void testTheCascadeWeightFadesRoundItsCentre() {
+        const Vec3 centre{1.0f, 2.0f, 3.0f};
+        const Vec3 reach{4.0f, 2.0f, 4.0f};
+        const Vec3 fade{1.0f, 0.5f, 1.0f};
+        assert(probeCascadeWeight(centre, reach, fade, centre) == 1.0f);
+        assert(probeCascadeWeight(centre, reach, fade, Vec3{-2.0f, 3.5f, 0.0f}) == 1.0f);
+        assert(nearlyEqual(probeCascadeWeight(centre, reach, fade, Vec3{4.5f, 2.0f, 3.0f}), 0.5f));
+        assert(nearlyEqual(probeCascadeWeight(centre, reach, fade, Vec3{4.5f, 0.25f, 3.0f}), 0.25f));
+        assert(probeCascadeWeight(centre, reach, fade, Vec3{1.0f, 2.0f, 7.0f}) == 0.0f);
     }
 
     void testTheBlendAveragesSquareRoots() {
@@ -455,8 +446,8 @@ namespace {
 
     void testProbeSamplingIsPacked() {
         ProbeSampling sampling;
-        sampling.volume = ProbeVolume{Vec3{-25.5f, 0.5f, 2.5f}, Vec3{1.0f, 0.5f, 2.0f}, ProbeCounts{12, 5, 16}};
-        sampling.cameraOrigin = Vec3{-20.0f, 1.5f, 10.0f};
+        sampling.counts = ProbeCounts{12, 5, 16};
+        sampling.cascades = 3;
         sampling.selfShadowBias = 0.4f;
         sampling.bounceEnergy = 0.9f;
         sampling.lightsPerHit = 3;
@@ -466,11 +457,8 @@ namespace {
         GpuFrameData frameData{};
         packProbeSampling(frameData, sampling);
 
-        assert(frameData.probeOrigin[0] == -5.5f && frameData.probeOrigin[1] == -1.0f && frameData.probeOrigin[2] == -7.5f);
-        assert(frameData.probeOrigin[3] == 0.4f);
-        assert(frameData.probeSpacing[0] == 1.0f && frameData.probeSpacing[1] == 0.5f && frameData.probeSpacing[2] == 2.0f);
-        assert(frameData.probeSpacing[3] == 0.9f);
-        assert(frameData.probeCounts[0] == 12 && frameData.probeCounts[1] == 5 && frameData.probeCounts[2] == 16);
+        assert(frameData.probeShading[0] == 0.4f && frameData.probeShading[1] == 0.9f);
+        assert(frameData.probeCounts[0] == 12 && frameData.probeCounts[1] == 5 && frameData.probeCounts[2] == 16 && frameData.probeCounts[3] == 3);
         assert(frameData.probeLights[0] == 7 && frameData.probeLights[1] == 2 && frameData.probeLights[2] == 3);
 
         // More lights per hit than the shader holds are capped.
@@ -505,7 +493,7 @@ void testDdgiSampling() {
     testChebyshevVisibility();
     testSmallWeightsAreCrushed();
     testACornersWholeWeight();
-    testTheVolumeFadesBeyondItsProbes();
+    testTheCascadeWeightFadesRoundItsCentre();
     testTheBlendAveragesSquareRoots();
     testUniformProbesGiveTheirOwnValue();
     testFastLightIsBlendedApart();

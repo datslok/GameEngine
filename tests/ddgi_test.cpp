@@ -1,6 +1,7 @@
 #include "render/gpu/ddgi.h"
 #include "math/aabb.h"
 #include "math/angles.h"
+#include "probe_helpers.h"
 
 #include <algorithm>
 #include <array>
@@ -504,20 +505,6 @@ namespace {
         assert(nearlyEqual(blendProbeValue(Vec2{2.0f, 4.0f}, Vec2{1.0f, 1.0f}, 0.75f), Vec2{1.75f, 3.25f}));
     }
 
-    // One texel's cosine-weighted mean of a set of rays, as the update computes it.
-    Vec3 irradianceEstimate(const Vec3& texel, const std::vector<Vec3>& directions, const std::vector<Vec3>& radiance) {
-        Vec3 sum{0.0f, 0.0f, 0.0f};
-        float weights = 0.0f;
-
-        for (std::size_t i = 0; i < directions.size(); ++i) {
-            const float weight = irradianceRayWeight(texel, directions[i]);
-            sum = sum + radiance[i] * weight;
-            weights += weight;
-        }
-
-        return sum * (1.0f / weights);
-    }
-
     /*
     * The furnace test: in a uniform sky drawn at B, every texel of every probe stores exactly B, whatever the rotation,
     * because the estimate is normalised by its own weights. That is the ambient light a uniform sky gives, so probe
@@ -995,7 +982,7 @@ namespace {
         assert(frame.windowHysteresis == hysteresisForTimeConstant(frameSeconds, settings.changeWindowSeconds));
         assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, true).windowHysteresis == 0.0f);
 
-        const GpuProbeVolume packed = packProbeVolume(ProbeVolume{}, frame);
+        const GpuProbeVolume packed = packProbeVolume(ProbeCounts{}, 1, frame);
         assert(packed.rotation[2][3] == frame.windowHysteresis && packed.sky[3] == frame.changeThreshold);
     }
 
@@ -1270,11 +1257,12 @@ namespace {
         assert(GlobalIlluminationSettings{}.eventProbeSharing == 0.5f);
     }
 
-    // The update reads each probe's restart as two ints and six floats, as the shader's ProbeRestart; none by default.
+    // The update reads each probe's restart as two ints, six floats and a seed slot, as the shader's ProbeRestart; none
+    // by default.
     void testRestartsArePackedForTheShader() {
-        static_assert(sizeof(GpuProbeRestart) == 32);
+        static_assert(sizeof(GpuProbeRestart) == 48);
         const GpuProbeRestart none;
-        assert(none.irradianceFrames < 0 && none.distanceFrames < 0);
+        assert(none.irradianceFrames < 0 && none.distanceFrames < 0 && none.seed < 0);
     }
 
     /*
@@ -1520,8 +1508,9 @@ namespace {
         // Fast lights' light is shared with its own weight, 0.5 by default whatever the still weight; the pass reads both.
         GlobalIlluminationSettings defaults;
         assert(defaults.fastProbeSharing == 0.5f);
-        const GpuProbeShare packed = packProbeShare(ProbeVolume{}, 0.1f, 0.5f, 0.5f, 0.99f);
+        const GpuProbeShare packed = packProbeShare(ProbeCounts{4, 3, 5}, 2, 0.1f, 0.5f, 0.5f, 0.99f);
         assert(packed.weight[0] == 0.1f && packed.weight[1] == 0.5f && packed.weight[2] == 0.5f && packed.weight[3] == 0.99f);
+        assert(packed.counts[0] == 4 && packed.counts[1] == 3 && packed.counts[2] == 5 && packed.counts[3] == 2);
 
         const GlobalIlluminationSettings settings;
         assert(settings.probeSharing == 0.1f);
@@ -1694,9 +1683,8 @@ namespace {
         assert(rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1000, 1, 2}}));
     }
 
-    // The push constants carry the volume and the frame's values where the shaders read them.
+    // The push constants carry each cascade's size, how many there are and the frame's values where the shaders read them.
     void testProbeVolumePacking() {
-        const ProbeVolume volume{Vec3{-2.0f, 0.5f, 3.0f}, Vec3{1.0f, 0.5f, 2.0f}, ProbeCounts{4, 3, 5}};
         ProbeFrame frame;
         frame.raysPerProbe = 96;
         frame.fastRaysPerProbe = 200;
@@ -1708,13 +1696,13 @@ namespace {
         frame.distanceHysteresis = 0.98f;
         frame.ballRadius = 0.15f;
 
-        const GpuProbeVolume packed = packProbeVolume(volume, frame);
+        const GpuProbeVolume packed = packProbeVolume(ProbeCounts{4, 3, 5}, 3, frame);
         const ProbeRotationRows rows = probeRotationRows(frame.rotation);
 
-        assert(packed.origin[0] == -2.0f && packed.origin[1] == 0.5f && packed.origin[2] == 3.0f && packed.origin[3] == 0.5f);
-        assert(packed.spacing[0] == 1.0f && packed.spacing[1] == 0.5f && packed.spacing[2] == 2.0f);
-        assert(nearlyEqual(packed.spacing[3], probeMaxDistance(volume.spacing)));
         assert(packed.counts[0] == 4 && packed.counts[1] == 3 && packed.counts[2] == 5 && packed.counts[3] == 200);
+        assert(packed.cascades[0] == 3 && packed.cascades[1] == 60 && packed.keeps[0] == 0.5f);
+        const ProbeCounts grid = probeAtlasGrid(ProbeCounts{4, 3, 5}, 3);
+        assert(grid.x == 4 && grid.y == 3 && grid.z == 15);
         assert(probeRayStride(frame) == 200);
 
         for (int row = 0; row < 3; ++row) {

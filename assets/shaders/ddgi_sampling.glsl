@@ -69,10 +69,8 @@ float probeCornerWeight(vec3 normal, vec3 toProbe, float distance, vec2 moments,
     return crushProbeWeight(probeBackFaceWeight(normal, toProbe) * probeVisibility(distance, moments)) * trilinear;
 }
 
-float probeVolumeWeight(vec3 origin, vec3 spacing, ivec3 counts, vec3 point) {
-    vec3 cells = (point - origin) / spacing;
-    vec3 inside = min(cells, vec3(counts - 1) - cells);
-    vec3 weights = clamp((inside + (DDGI_VOLUME_MARGIN + DDGI_VOLUME_FADE)) / DDGI_VOLUME_FADE, 0.0, 1.0);
+float probeCascadeWeight(vec3 centre, vec3 reach, vec3 fade, vec3 point) {
+    vec3 weights = clamp((reach - abs(point - centre)) / fade, 0.0, 1.0);
     return weights.x * weights.y * weights.z;
 }
 

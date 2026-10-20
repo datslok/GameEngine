@@ -35,10 +35,21 @@ namespace {
     float historyForShare(float keep) {
         return keep < 1.0f ? std::min(keep / (1.0f - keep), static_cast<float>(maxProbeHistory)) : static_cast<float>(maxProbeHistory);
     }
+
+    // value mod count, never negative.
+    int wrapped(int value, int count) {
+        const int remainder = value % count;
+        return remainder < 0 ? remainder + count : remainder;
+    }
 }
 
 void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
+    visitor.field("Cascades", settings.probeCascades, {.min = 1, .max = DDGI_MAX_CASCADES});
+    visitor.field("Probe spacing", settings.probeSpacing, {.min = 0.05f, .max = 8.0f, .sliderMax = 2.0f, .unit = "m (densest)"});
+    visitor.field("Probes across", settings.cascadeProbesAcross, {.min = 4, .max = 41});
+    visitor.field("Probes high", settings.cascadeProbesHigh, {.min = 4, .max = 41});
+    visitor.field("Seed starting probes", settings.seedProbes);
     visitor.field("Rays per probe", settings.raysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
     visitor.field("Probe updates per second", settings.probeUpdatesPerSecond, {.min = 0.0f, .max = 1000.0f, .sliderMax = 240.0f, .unit = "(0: every frame)"});
     visitor.field("Irradiance time constant", settings.irradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 10.0f, .unit = "s"});
@@ -65,6 +76,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Probe states", settings.probeStates);
     visitor.field("Wake distance", settings.wakeCells, {.min = 0.0f, .max = 4.0f, .unit = "cells"});
     visitor.field("Show probes", settings.showProbes);
+    visitor.field("Shown probe cascade", settings.shownProbeCascade, {.min = 0, .max = DDGI_MAX_CASCADES - 1, .unit = "(0: densest)"});
     visitor.field("Probe ball radius", settings.probeBallRadius, {.min = 0.01f, .max = 1.0f, .sliderMax = 0.4f, .unit = "m"});
 }
 
@@ -263,14 +275,12 @@ Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, co
     return sum * (1.0f / weights);
 }
 
-GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight, float eventWeight, float longKeep) {
+GpuProbeShare packProbeShare(const ProbeCounts& counts, int cascades, float weight, float fastWeight, float eventWeight, float longKeep) {
     GpuProbeShare packed{};
-    packed.counts[0] = volume.counts.x;
-    packed.counts[1] = volume.counts.y;
-    packed.counts[2] = volume.counts.z;
-    packed.spacing[0] = volume.spacing.x;
-    packed.spacing[1] = volume.spacing.y;
-    packed.spacing[2] = volume.spacing.z;
+    packed.counts[0] = counts.x;
+    packed.counts[1] = counts.y;
+    packed.counts[2] = counts.z;
+    packed.counts[3] = cascades;
     packed.weight[0] = weight;
     packed.weight[1] = fastWeight;
     packed.weight[2] = eventWeight;
@@ -471,12 +481,24 @@ int probeIndex(const ProbeCounts& counts, int x, int y, int z) {
     return x + counts.x * (y + counts.y * z);
 }
 
-Vec3 probePosition(const ProbeVolume& volume, int index) {
-    const int x = index % volume.counts.x;
-    const int y = (index / volume.counts.x) % volume.counts.y;
-    const int z = index / (volume.counts.x * volume.counts.y);
-    return volume.origin + Vec3{volume.spacing.x * static_cast<float>(x), volume.spacing.y * static_cast<float>(y),
-                                volume.spacing.z * static_cast<float>(z)};
+int probeSlot(const ProbeVolume& volume, const ProbeGridCoord& grid) {
+    const ProbeCounts& counts = volume.counts;
+    return probeIndex(counts, wrapped(grid.x + volume.scroll.x, counts.x), wrapped(grid.y + volume.scroll.y, counts.y),
+                      wrapped(grid.z + volume.scroll.z, counts.z));
+}
+
+ProbeGridCoord probeGridCoord(const ProbeVolume& volume, int slot) {
+    const ProbeCounts& counts = volume.counts;
+    const int x = slot % counts.x;
+    const int y = (slot / counts.x) % counts.y;
+    const int z = slot / (counts.x * counts.y);
+    return ProbeGridCoord{wrapped(x - volume.scroll.x, counts.x), wrapped(y - volume.scroll.y, counts.y), wrapped(z - volume.scroll.z, counts.z)};
+}
+
+Vec3 probePosition(const ProbeVolume& volume, int slot) {
+    const ProbeGridCoord grid = probeGridCoord(volume, slot);
+    return volume.origin + Vec3{volume.spacing.x * static_cast<float>(grid.x), volume.spacing.y * static_cast<float>(grid.y),
+                                volume.spacing.z * static_cast<float>(grid.z)};
 }
 
 ProbeAtlasSize probeAtlasSize(const ProbeCounts& counts, int side) {
@@ -502,20 +524,15 @@ int probeRayStride(const ProbeFrame& frame) {
     return std::max(frame.raysPerProbe, frame.fastRaysPerProbe);
 }
 
-GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& frame) {
+GpuProbeVolume packProbeVolume(const ProbeCounts& counts, int cascades, const ProbeFrame& frame) {
     GpuProbeVolume packed{};
-    packed.origin[0] = volume.origin.x;
-    packed.origin[1] = volume.origin.y;
-    packed.origin[2] = volume.origin.z;
-    packed.origin[3] = frame.fastIrradianceHysteresis;
-    packed.spacing[0] = volume.spacing.x;
-    packed.spacing[1] = volume.spacing.y;
-    packed.spacing[2] = volume.spacing.z;
-    packed.spacing[3] = probeMaxDistance(volume.spacing);
-    packed.counts[0] = volume.counts.x;
-    packed.counts[1] = volume.counts.y;
-    packed.counts[2] = volume.counts.z;
+    packed.counts[0] = counts.x;
+    packed.counts[1] = counts.y;
+    packed.counts[2] = counts.z;
     packed.counts[3] = probeRayStride(frame);
+    packed.cascades[0] = cascades;
+    packed.cascades[1] = probeCount(counts);
+    packed.keeps[0] = frame.fastIrradianceHysteresis;
 
     const ProbeRotationRows rows = probeRotationRows(frame.rotation);
 
@@ -537,6 +554,10 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
     packed.hysteresis[2] = frame.ballRadius;
     packed.hysteresis[3] = static_cast<float>(frame.rayPhase);
     return packed;
+}
+
+ProbeCounts probeAtlasGrid(const ProbeCounts& counts, int cascades) {
+    return ProbeCounts{counts.x, counts.y, counts.z * cascades};
 }
 
 int probeRayDivisor(int currentDivisor, float framesPerSecond, float updatesPerSecond, int raysPerProbe) {
@@ -613,9 +634,10 @@ std::int32_t advanceRestartFrames(std::int32_t frames, float keep, const ProbeFr
     return restartedProbeKeep(keep, frame.restartHysteresis, frame.restartGrowth, sinceCheck) >= keep ? -1 : next;
 }
 
-void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame,
-                          std::span<const int> restarted) {
-    const std::size_t probes = static_cast<std::size_t>(probeCount(volume.counts));
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, std::span<const ProbeVolume> cascades, std::span<const ProbeEvent> events,
+                          const ProbeFrame& frame, std::span<const int> restarted, std::span<const ProbeSeed> seeded) {
+    const std::size_t perCascade = cascades.empty() ? 0 : static_cast<std::size_t>(probeCount(cascades.front().counts));
+    const std::size_t probes = perCascade * cascades.size();
 
     if (restarts.size() != probes) {
         restarts.assign(probes, GpuProbeRestart{});
@@ -624,6 +646,7 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
     for (GpuProbeRestart& restart : restarts) {
         restart.irradianceFrames = advanceRestartFrames(restart.irradianceFrames, frame.irradianceHysteresis, frame);
         restart.distanceFrames = advanceRestartFrames(restart.distanceFrames, frame.distanceHysteresis, frame);
+        restart.seed = -1;
     }
 
     const bool keepsIrradiance = frame.irradianceHysteresis > 0.0f;
@@ -631,7 +654,9 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
 
     for (const ProbeEvent& event : events) {
         for (std::size_t probe = 0; probe < probes; ++probe) {
-            if (!event.everywhere && !event.region.contains(probePosition(volume, static_cast<int>(probe)))) {
+            const ProbeVolume& volume = cascades[probe / perCascade];
+
+            if (!event.everywhere && !event.region.contains(probePosition(volume, static_cast<int>(probe % perCascade)))) {
                 continue;
             }
 
@@ -645,6 +670,20 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
         }
     }
 
+    // Their stored light belongs to another time or place, so none of it is kept and no texel checks it first.
+    for (const int probe : restarted) {
+        GpuProbeRestart& restart = restarts.at(static_cast<std::size_t>(probe));
+        restart.irradianceFrames = 0;
+        restart.distanceFrames = 0;
+    }
+
+    // A seed stands for its first frames: its restart starts that many frames on.
+    for (const ProbeSeed& seed : seeded) {
+        GpuProbeRestart& restart = restarts.at(static_cast<std::size_t>(seed.probe));
+        restart.irradianceFrames = static_cast<std::int32_t>(probeSeedFrames);
+        restart.seed = seed.slot;
+    }
+
     for (GpuProbeRestart& restart : restarts) {
         restart.irradianceKeep = restartedProbeKeep(frame.irradianceHysteresis, frame.restartHysteresis, frame.restartGrowth,
                                                     static_cast<float>(restart.irradianceFrames));
@@ -654,14 +693,23 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
         restart.fastKeep = restartedProbeKeep(frame.fastIrradianceHysteresis, 0.0f, frame.restartGrowth, static_cast<float>(restart.irradianceFrames));
     }
 
-    // Their stored light belongs to another time or place, so none of it is kept and no texel checks it first.
     for (const int probe : restarted) {
         GpuProbeRestart& restart = restarts.at(static_cast<std::size_t>(probe));
-        restart.irradianceFrames = 0;
-        restart.distanceFrames = 0;
-        restart.irradianceKeep = 0.0f;
         restart.distanceKeep = 0.0f;
-        restart.fastKeep = 0.0f;
         restart.check.threshold = 0.0f;
+
+        if (restart.seed < 0) {
+            restart.irradianceKeep = 0.0f;
+            restart.fastKeep = 0.0f;
+        }
     }
+}
+
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame,
+                          std::span<const int> restarted, std::span<const ProbeSeed> seeded) {
+    advanceProbeRestarts(restarts, std::span<const ProbeVolume>{&volume, 1}, events, frame, restarted, seeded);
+}
+
+AdaptiveProbeTexel seededProbeTexel(const Vec3& seed) {
+    return AdaptiveProbeTexel{seed, -probeSeedFrames, seed, 0.0f};
 }

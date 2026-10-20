@@ -38,6 +38,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the flat ambient light
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the sky view table (probe rays that escape)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the atmosphere
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // the probes' cascades (vertex for the debug balls)
     }};
 }
 
@@ -152,6 +153,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         views.skyLight,
         VkDescriptorBufferInfo{},
         buffers.atmosphere.describe(),
+        views.probeCascades,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

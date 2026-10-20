@@ -202,12 +202,18 @@ float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRe
 
 // A probe's scene event this frame (render/gpu/ddgi.h, GpuProbeRestart): the frames since its irradiance (x) and
 // distances (y) were restarted, negative for none, the share of each it keeps this frame, and the event check (x the
-// threshold, y the memory's growth, z the check's frames) with, in w, the fast atlas's share kept.
+// threshold, y the memory's growth, z the check's frames) with, in w, the fast atlas's share kept; seed.x the probe's
+// seed slot this frame, -1 for none.
 struct ProbeRestart {
     ivec2 frames;
     vec2 keeps;
     vec4 check;
+    ivec4 seed;
 };
+
+AdaptiveProbeTexel seededProbeTexel(vec3 seed) {
+    return AdaptiveProbeTexel(seed, -DDGI_SEED_FRAMES, seed, 0.0);
+}
 
 float restartedProbeKeep(float longKeep, float shortKeep, float growth, float frames) {
     if (frames < 0.0) {
@@ -274,9 +280,20 @@ AdaptiveProbeTexel adaptiveProbeUpdate(AdaptiveProbeTexel texel, vec3 estimate, 
     return adaptiveProbeBlend(own, estimate, longKeep, windowKeep, threshold);
 }
 
-vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, int index) {
-    ivec3 grid = ivec3(index % counts.x, (index / counts.x) % counts.y, index / (counts.x * counts.y));
-    return origin + spacing * vec3(grid);
+// GLSL leaves % undefined for negative numbers, so grid places must lie within the volume (0..counts - 1), as every
+// caller's do; the scroll does too.
+int probeSlot(ivec3 counts, ivec3 scroll, ivec3 grid) {
+    ivec3 stored = (grid + scroll) % counts;
+    return stored.x + counts.x * (stored.y + counts.y * stored.z);
+}
+
+ivec3 probeGridCoord(ivec3 counts, ivec3 scroll, int slot) {
+    ivec3 stored = ivec3(slot % counts.x, (slot / counts.x) % counts.y, slot / (counts.x * counts.y));
+    return (stored - scroll + counts) % counts;
+}
+
+vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, ivec3 scroll, int slot) {
+    return origin + spacing * vec3(probeGridCoord(counts, scroll, slot));
 }
 
 ivec2 probeTileOrigin(ivec3 counts, int index, int side) {

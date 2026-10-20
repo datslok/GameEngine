@@ -102,18 +102,12 @@ float probeCornerWeight(const Vec3& normal, const Vec3& toProbe, float distance,
     return crushProbeWeight(probeBackFaceWeight(normal, toProbe) * probeVisibility(distance, moments)) * trilinear;
 }
 
-/*
-* Along each axis, how far the point lies inside the probes' span (negative outside), in cells; the margin beyond the
-* outer probes counts fully, then the weight falls linearly across the fade.
-*/
-float probeVolumeWeight(const ProbeVolume& volume, const Vec3& point) {
-    const Vec3 cells = cellsFromOrigin(volume, point);
+float probeCascadeWeight(const Vec3& centre, const Vec3& reach, const Vec3& fade, const Vec3& point) {
     float weight = 1.0f;
 
     for (int axis = 0; axis < 3; ++axis) {
-        const float along = component(cells, axis);
-        const float inside = std::min(along, static_cast<float>(count(volume.counts, axis) - 1) - along);
-        weight *= std::clamp((inside + (probeVolumeMarginCells + probeVolumeFadeCells)) / probeVolumeFadeCells, 0.0f, 1.0f);
+        const float distance = std::abs(component(point, axis) - component(centre, axis));
+        weight *= std::clamp((component(reach, axis) - distance) / component(fade, axis), 0.0f, 1.0f);
     }
 
     return weight;
@@ -137,7 +131,14 @@ Vec3 finishProbeBlend(const ProbeBlend& blend) {
 * a fast lookup the fast part reads nothing.
 */
 ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
-                         const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup) {
+                         const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup, int firstProbe) {
+    return sampleTracedProbes(volume, selfShadowBias, point, normal, lookupNormal, reflected, toViewer, lookup, firstProbe)
+        .value_or(ProbeLights{ProbeLight{lookup.ambient, lookup.ambient}, ProbeLight{}});
+}
+
+std::optional<ProbeLights> sampleTracedProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal,
+                                              const Vec3& lookupNormal, const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup,
+                                              int firstProbe) {
     const Vec3 biased = point + probeSelfShadowBias(normal, toViewer, volume.spacing, selfShadowBias);
     const ProbeCell cell = probeCell(volume, biased);
     const Vec3 none{0.0f, 0.0f, 0.0f};
@@ -148,14 +149,15 @@ ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const 
 
     for (int corner = 0; corner < 8; ++corner) {
         const ProbeGridCoord grid = probeCellCorner(cell, volume.counts, corner);
-        const int index = probeIndex(volume.counts, grid.x, grid.y, grid.z);
+        const int slot = probeSlot(volume, grid);
+        const int index = firstProbe + slot;
         const GpuProbeState state = lookup.state ? lookup.state(index) : GpuProbeState{};
 
         if (!probeTraced(static_cast<ProbeState>(state.state))) {
             continue;
         }
 
-        const Vec3 probe = probePosition(volume, index) + Vec3{state.offset[0], state.offset[1], state.offset[2]};
+        const Vec3 probe = probePosition(volume, slot) + Vec3{state.offset[0], state.offset[1], state.offset[2]};
         const Vec3 fromProbe = biased - probe;
         const float distance = fromProbe.length();
         const Vec3 direction = distance > 0.0f ? fromProbe * (1.0f / distance) : normal;
@@ -169,7 +171,7 @@ ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const 
     }
 
     if (diffuse.weight <= 0.0f) {
-        return ProbeLights{ProbeLight{lookup.ambient, lookup.ambient}, ProbeLight{}};
+        return std::nullopt;
     }
 
     return ProbeLights{ProbeLight{finishProbeBlend(diffuse), finishProbeBlend(specular)},
@@ -269,18 +271,12 @@ ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin,
 }
 
 void packProbeSampling(GpuFrameData& frameData, const ProbeSampling& sampling) {
-    const Vec3 relative = sampling.volume.origin - sampling.cameraOrigin;
-    frameData.probeOrigin[0] = relative.x;
-    frameData.probeOrigin[1] = relative.y;
-    frameData.probeOrigin[2] = relative.z;
-    frameData.probeOrigin[3] = sampling.selfShadowBias;
-    frameData.probeSpacing[0] = sampling.volume.spacing.x;
-    frameData.probeSpacing[1] = sampling.volume.spacing.y;
-    frameData.probeSpacing[2] = sampling.volume.spacing.z;
-    frameData.probeSpacing[3] = sampling.bounceEnergy;
-    frameData.probeCounts[0] = sampling.volume.counts.x;
-    frameData.probeCounts[1] = sampling.volume.counts.y;
-    frameData.probeCounts[2] = sampling.volume.counts.z;
+    frameData.probeShading[0] = sampling.selfShadowBias;
+    frameData.probeShading[1] = sampling.bounceEnergy;
+    frameData.probeCounts[0] = sampling.counts.x;
+    frameData.probeCounts[1] = sampling.counts.y;
+    frameData.probeCounts[2] = sampling.counts.z;
+    frameData.probeCounts[3] = sampling.cascades;
     frameData.probeLights[0] = sampling.hitPoints;
     frameData.probeLights[1] = sampling.hitSpots;
     frameData.probeLights[2] = std::clamp(sampling.lightsPerHit, 0, maxLightsPerHit);

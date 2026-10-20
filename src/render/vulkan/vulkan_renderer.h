@@ -238,6 +238,7 @@ private:
 
     // Bound in place of the light probes' states while there are none (one probe's worth of zeros, never read then).
     VulkanBuffer noProbeStates;
+    VulkanBuffer noProbeCascades;
 
     // This frame's camera in the atmosphere's frame: its distance from the planet's centre, km (0 without an atmosphere).
     float cameraAtmosphereRadius = 0.0f;
@@ -292,13 +293,13 @@ private:
         std::vector<std::uint32_t> drawList;
     };
 
-    // probes: the frame's probe volume when this frame traces and samples it, else null; hitLights: the lights its rays'
-    // hits may need (empty without probes).
+    // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
+    // rays' hits may need (empty without probes).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const RenderSettings& settings,
-                               const ProbeVolume* probes, const ProbeHitLights& hitLights);
+                               std::span<const ProbeCascade> probes, const ProbeHitLights& hitLights);
 
-    // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and a probe volume.
+    // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
     ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
@@ -311,7 +312,7 @@ private:
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;
-    void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet);
+    void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).
