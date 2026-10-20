@@ -189,7 +189,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
   - Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), compute pipelines, and the Vulkan renderer (for ray queries)
   - [x] Probe grid: probe volumes placed by each game, octahedral irradiance and distance atlases written from compute (`ddgi-probes`)
   - [x] Hardware ray queries: acceleration structures per mesh and per frame, instance masks, and a debug view (`ray-queries`)
-  - [ ] An RTX quality preset beside Low to Ultra, once DDGI has settings for it to set
+  - [x] Quality presets set the light probes' rays: Low 32, Medium 64, High 128 (the default), Ultra 256, instead of a separate RTX preset (`gi-quality-presets`)
   - [x] Probe update in compute: 64 rays a probe on a turned Fibonacci spiral, back faces, sunlight at hits by shadow rays (`ddgi-probes`)
   - [x] Every light and infinite bounces at probe hits: the brightest point and spot lights by shadow rays, last frame's probes read at each hit (`ddgi-sampling`)
   - [x] Hysteresis blending: time constants (`ddgi-probes`), irradiance blended linearly (`ddgi-sampling`)
