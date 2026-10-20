@@ -30,6 +30,8 @@ inline constexpr float backFaceDistanceShare = static_cast<float>(DDGI_BACK_FACE
 inline constexpr float minProbeTexelWeight = static_cast<float>(DDGI_MIN_TEXEL_WEIGHT);
 inline constexpr float maxDistanceDiagonals = static_cast<float>(DDGI_MAX_DISTANCE_DIAGONALS);
 inline constexpr int maxProbeAtlasSide = DDGI_MAX_ATLAS_SIDE;
+inline constexpr float probeChangeFloorShare = static_cast<float>(DDGI_CHANGE_FLOOR_SHARE);
+inline constexpr int maxProbeHistory = DDGI_MAX_HISTORY;
 
 // The most probes one volume may hold: one workgroup per probe, and every GPU runs at least 65,535 groups in a row.
 inline constexpr int maxProbesPerVolume = 65535;
@@ -64,6 +66,21 @@ struct GlobalIlluminationSettings {
     // is worse than slightly late visibility [2021].
     float irradianceTimeConstant = 2.0f;
     float distanceTimeConstant = 1.0f;
+
+    /*
+    * The adaptive memory (adaptiveProbeBlend): each irradiance texel keeps the long memory above while its light only
+    * wobbles within its own measured noise, and restarts its average from the last changeWindowSeconds when the light
+    * moves more than changeThreshold standard deviations of that window's mean, so a steady room can use a long memory
+    * (calm) and a lamp switched on still comes in fast. In the dark room model (ddgi_test), with a 4 s long memory
+    * against the fixed 2 s: a lamp switched on or off comes in within about 0.5-1.1 s instead of 4.6 and the light
+    * crawls half as much (8 s: a quarter); but a change too faint to tell from the noise in a few frames (a dim patch's
+    * light doubling, or a lamp switched off where the probe saw it with a fraction of a ray a frame, whose noise takes
+    * the long memory to fade) is only followed by the long memory, slower than 2 s, and so is a slow drift. Fast
+    * lights' atlas and the distances keep their fixed memories.
+    */
+    bool adaptiveMemory = false;
+    float changeWindowSeconds = 0.2f;
+    float changeThreshold = 5.0f;
 
     /*
     * Fast lights (PointLight::fast, SpotLight::fast: flashlights, headlights) keep their light in a second irradiance
@@ -212,6 +229,35 @@ float hysteresisForTimeConstant(float frameSeconds, float timeConstant);
 Vec3 blendProbeValue(const Vec3& oldValue, const Vec3& newValue, float hysteresis);
 Vec2 blendProbeValue(const Vec2& oldValue, const Vec2& newValue, float hysteresis);
 
+// How bright a probe's light looks: its luminance (Rec. 709 weights, as bloom's Karis average).
+float probeLuminance(const Vec3& light);
+
+/*
+* An irradiance texel as the adaptive memory keeps it: the stored light and how many frames it averages since its last
+* restart (in the irradiance atlas, alpha), the change window's mean light and the standard deviation of one frame's
+* luminance about it (in the change atlas). history 0: never updated adaptively (fresh, or just switched on).
+*/
+struct AdaptiveProbeTexel {
+    Vec3 stored{0.0f, 0.0f, 0.0f};
+    float history = 0.0f;
+    Vec3 recent{0.0f, 0.0f, 0.0f};
+    float noise = 0.0f;
+};
+
+/*
+* One frame of the adaptive memory, a running mean that restarts when the light really changes (like a denoiser's
+* history length). The stored light blends the estimate in by the smaller of 1 / (history + 1) and the long memory's
+* share (longKeep), so after a restart it is the plain mean of the frames since, until that would keep more than the
+* long memory. The window's mean blends by windowKeep, and the noise (the variance of each frame's luminance about the
+* window's mean) by longKeep. When the window's mean and the stored light differ by more than threshold times the
+* window's own spread (an exponential mean keeping k has the variance sigma^2 (1 - k) / (1 + k)) plus
+* probeChangeFloorShare of the light, the light has changed: the stored light becomes the window's mean, worth the
+* k / (1 - k) frames whose running mean keeps the window's share. A texel without history starts from its stored light
+* with the history whose running mean keeps longKeep, so it carries on smoothly (fresh atlases: shares 0, the first
+* estimate taken outright).
+*/
+AdaptiveProbeTexel adaptiveProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold);
+
 // Throws std::invalid_argument for a volume the renderer cannot hold: fewer than one probe along an axis, spacing not
 // positive, more than maxProbesPerVolume probes, or atlases larger than maxProbeAtlasSide.
 void validateProbeVolume(const ProbeVolume& volume);
@@ -248,8 +294,8 @@ struct GpuProbeVolume {
     float origin[4];      // xyz the first probe, w the fast irradiance's share kept this frame
     float spacing[4];     // xyz the spacing between probes, w the longest distance recorded (probeMaxDistance)
     std::int32_t counts[4]; // xyz probes along each axis, w the ray stride: room for the most rays any probe traces
-    float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, unused
-    float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything)
+    float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, the change window's share kept
+    float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything), w the change threshold (0: fixed memory)
     float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
 };
 
@@ -265,6 +311,8 @@ struct ProbeFrame {
     float irradianceHysteresis = 0.0f;
     float fastIrradianceHysteresis = 0.0f;
     float distanceHysteresis = 0.0f;
+    float windowHysteresis = 0.0f; // the adaptive memory's change window's share kept
+    float changeThreshold = 0.0f;  // 0: the fixed memory
     float ballRadius = 0.1f;
 };
 

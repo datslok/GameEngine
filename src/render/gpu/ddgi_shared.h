@@ -84,4 +84,12 @@
 // The most point and spot lights a probe ray's hit may add (each costs a shadow ray); a setting picks how many up to this.
 #define DDGI_MAX_HIT_LIGHTS 8
 
+// The adaptive memory (render/gpu/ddgi.h, adaptiveProbeBlend): a change smaller than this share of the stored light is
+// never taken for a real one, however steady the light (a texel in total darkness has no noise to measure against).
+#define DDGI_CHANGE_FLOOR_SHARE 0.01
+
+// The most frames a texel's history counts, which a half float holds exactly; by then the long memory's share is the
+// smaller anyway.
+#define DDGI_MAX_HISTORY 2048
+
 #endif

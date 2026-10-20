@@ -27,7 +27,8 @@ struct ProbeSceneSets {
 
 /*
 * Global illumination's light probes on the GPU (render/gpu/ddgi.h): the three atlases (irradiance from still lights and
-* from fast lights, RGBA16F, and distances, RG16F, written by compute as storage images, the renderer's first), the
+* from fast lights, RGBA16F, and distances, RG16F, written by compute as storage images, the renderer's first) and the
+* adaptive memory's change statistics beside the still irradiance, the
 * buffers of the frame's probe rays (still light and distance, fast light as half floats, and which probes a fast light
 * reached), and the passes that fill them: ddgi_trace.comp traces every probe's rays, then ddgi_update_irradiance.comp
 * (both irradiance atlases) and ddgi_update_distance.comp blend them into the atlases, one workgroup per probe. Between
@@ -91,6 +92,10 @@ private:
     VulkanImage irradiance;
     VulkanImage fastIrradiance;
     VulkanImage distance;
+
+    // The adaptive memory's state beside the irradiance atlas's history (alpha): the change window's mean light and the
+    // noise about it (render/gpu/ddgi.h, AdaptiveProbeTexel), RGBA16F, laid out as the irradiance atlas.
+    VulkanImage changeStatistics;
     VulkanBuffer rays;
     VulkanBuffer fastRays;
     VulkanBuffer nearFastLight;

@@ -670,6 +670,232 @@ namespace {
         assert(budget.crawl < 1.1 * sixty.crawl && budget.crawl > 2.0 * chosen.crawl);
     }
 
+    bool sameTexel(const AdaptiveProbeTexel& a, const AdaptiveProbeTexel& b) {
+        return nearlyEqual(a.stored, b.stored) && nearlyEqual(a.history, b.history) && nearlyEqual(a.recent, b.recent) &&
+               nearlyEqual(a.noise, b.noise);
+    }
+
+    /*
+    * The adaptive memory's state starts from what the atlas holds: a texel with no history (fresh atlases, or the adaptive
+    * memory just switched on) takes its stored light as the recent mean, no noise yet, and the history whose running
+    * mean keeps the long memory's share, k / (1 - k) frames (none for fresh atlases, whose shares are 0), so the stored
+    * light carries on smoothly; fresh atlases take the first estimate outright.
+    */
+    void testTheAdaptiveMemoryStartsFromTheStoredLight() {
+        const Vec3 estimate{2.0f, 1.0f, 0.5f};
+        const AdaptiveProbeTexel fresh = adaptiveProbeBlend(AdaptiveProbeTexel{}, estimate, 0.0f, 0.0f, 5.0f);
+        assert(nearlyEqual(fresh.stored, estimate) && nearlyEqual(fresh.recent, estimate) && fresh.noise == 0.0f);
+        assert(fresh.history == 1.0f);
+
+        // Switched on with light stored: the long memory's share applies, as without the adaptive memory.
+        const float longKeep = 0.99f;
+        const float windowKeep = 0.9f;
+        AdaptiveProbeTexel switchedOn;
+        switchedOn.stored = Vec3{1.0f, 1.0f, 1.0f};
+        const AdaptiveProbeTexel next = adaptiveProbeBlend(switchedOn, Vec3{1.02f, 1.02f, 1.02f}, longKeep, windowKeep, 5.0f);
+        assert(nearlyEqual(next.stored, blendProbeValue(switchedOn.stored, Vec3{1.02f, 1.02f, 1.02f}, longKeep)));
+        assert(nearlyEqual(next.recent, blendProbeValue(switchedOn.stored, Vec3{1.02f, 1.02f, 1.02f}, windowKeep)));
+        assert(nearlyEqual(next.history, longKeep / (1.0f - longKeep) + 1.0f, 1e-3f));
+    }
+
+    /*
+    * After a restart the stored light is the plain mean of the frames since (each blended in by 1 / (n + 1)), until the
+    * long memory's share is the smaller; history grows a frame at a time up to maxProbeHistory.
+    */
+    void testTheAdaptiveMemoryAveragesSinceItsLastRestart() {
+        const float longKeep = 0.999f;
+        const std::vector<Vec3> estimates{{1.0f, 0.0f, 0.0f}, {3.0f, 0.0f, 0.0f}, {2.0f, 0.0f, 0.0f}, {6.0f, 0.0f, 0.0f}};
+        AdaptiveProbeTexel texel = adaptiveProbeBlend(AdaptiveProbeTexel{}, estimates[0], 0.0f, 0.0f, 1e9f);
+        float sum = estimates[0].x;
+
+        for (std::size_t frame = 1; frame < estimates.size(); ++frame) {
+            texel = adaptiveProbeBlend(texel, estimates[frame], longKeep, 0.9f, 1e9f);
+            sum += estimates[frame].x;
+            assert(nearlyEqual(texel.stored.x, sum / static_cast<float>(frame + 1)));
+            assert(texel.history == static_cast<float>(frame + 1));
+        }
+
+        // Long settled: the long memory's share, exactly as the fixed blend.
+        AdaptiveProbeTexel settled = texel;
+        settled.history = 5000.0f;
+        const AdaptiveProbeTexel blended = adaptiveProbeBlend(settled, Vec3{2.0f, 0.0f, 0.0f}, longKeep, 0.9f, 1e9f);
+        assert(nearlyEqual(blended.stored, blendProbeValue(settled.stored, Vec3{2.0f, 0.0f, 0.0f}, longKeep)));
+        assert(blended.history == static_cast<float>(maxProbeHistory));
+    }
+
+    /*
+    * A real change restarts the history: light that wobbles by a tenth round 1 for a few seconds, then jumps to 3, moves
+    * the window's mean out of its noise band within a few frames; the stored light then takes the window's mean, worth
+    * the frames whose running mean keeps the window's share, k / (1 - k). While the light only wobbles, it never
+    * restarts.
+    */
+    void testTheAdaptiveMemoryRestartsOnARealChange() {
+        const float frameSeconds = 1.0f / 60.0f;
+        const float longKeep = hysteresisForTimeConstant(frameSeconds, 4.0f);
+        const float windowKeep = hysteresisForTimeConstant(frameSeconds, 0.2f);
+        AdaptiveProbeTexel texel;
+
+        for (int frame = 0; frame < 600; ++frame) {
+            const float wobble = frame % 2 == 0 ? 0.9f : 1.1f;
+            const AdaptiveProbeTexel before = texel;
+            texel = adaptiveProbeBlend(texel, Vec3{wobble, wobble, wobble}, frame == 0 ? 0.0f : longKeep, frame == 0 ? 0.0f : windowKeep, 5.0f);
+            assert(frame < 2 || texel.history == std::min(before.history + 1.0f, static_cast<float>(maxProbeHistory)));
+        }
+
+        assert(std::abs(texel.stored.x - 1.0f) < 0.02f);
+        assert(std::abs(texel.noise - 0.1f) < 0.02f);
+
+        int restartedAfter = -1;
+
+        for (int frame = 0; frame < 30 && restartedAfter < 0; ++frame) {
+            const float history = texel.history;
+            texel = adaptiveProbeBlend(texel, Vec3{3.0f, 3.0f, 3.0f}, longKeep, windowKeep, 5.0f);
+
+            if (texel.history < history) {
+                restartedAfter = frame;
+                assert(sameTexel(texel, AdaptiveProbeTexel{texel.recent, windowKeep / (1.0f - windowKeep), texel.recent, texel.noise}));
+            }
+        }
+
+        assert(restartedAfter >= 0 && restartedAfter < 5);
+    }
+
+    /*
+    * What the adaptive memory is for, in the dark room model: a lamp switched on and off (the patch from the room's own
+    * darkness to bright), 64 rays at 60 frames a second. With a 4 s long memory it must crawl clearly less than the fixed
+    * 2 s blend and still follow the switch clearly faster.
+    */
+    struct SwitchedTexel {
+        double crawl = 0.0;     // change over 0.1 s, as a share of the light, in the steady half of each state
+        double reach90 = 0.0;   // mean seconds to 90% of each switch
+    };
+
+    SwitchedTexel switchedTexel(bool adaptive, float framesPerSecond) {
+        const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
+        const float patchCosine = std::cos(radiansFromDegrees(15.0f));
+        Vec3 texelDirection;
+        float best = -2.0f;
+
+        for (int y = 0; y < probeIrradianceTexels; ++y) {
+            for (int x = 0; x < probeIrradianceTexels; ++x) {
+                const Vec3 direction = probeTexelDirection(TexelCoord{x, y}, probeIrradianceTexels);
+
+                if (direction.dot(towardsPatch) > best) {
+                    best = direction.dot(towardsPatch);
+                    texelDirection = direction;
+                }
+            }
+        }
+
+        const auto estimateAt = [&](std::uint64_t frame, float patch) {
+            const ProbeRayFrame rays = probeRayFrame(frame);
+            const ProbeRotationRows rows = probeRotationRows(rays.rotation);
+            std::vector<Vec3> directions;
+            std::vector<Vec3> radiance;
+
+            for (int ray = 0; ray < 64; ++ray) {
+                const Vec3 direction = probeRayDirection(ray, 64, rays.phase, rows);
+                const float light = direction.dot(towardsPatch) > patchCosine ? patch : 0.005f;
+                directions.push_back(direction);
+                radiance.push_back(Vec3{light, light, light});
+            }
+
+            return irradianceEstimate(texelDirection, directions, radiance).x;
+        };
+
+        const float frameSeconds = 1.0f / framesPerSecond;
+        const float fixedKeep = hysteresisForTimeConstant(frameSeconds, 2.0f);
+        const float longKeep = hysteresisForTimeConstant(frameSeconds, 4.0f);
+        const float windowKeep = hysteresisForTimeConstant(frameSeconds, 0.2f);
+        const int stateFrames = static_cast<int>(30.0f * framesPerSecond);
+        const int tenth = static_cast<int>(framesPerSecond / 10.0f);
+        const double dark = estimateAt(1u << 20, 0.005f);
+        double lit = 0.0;
+
+        for (std::uint64_t frame = 0; frame < 4000; ++frame) {
+            lit += estimateAt(frame + (1u << 21), 2.0f) / 4000.0;
+        }
+
+        AdaptiveProbeTexel texel;
+        std::uint64_t frame = 0;
+        double changeSquares = 0.0;
+        long changes = 0;
+        double reached = 0.0;
+        int switches = 0;
+
+        for (int state = 0; state < 9; ++state) {
+            const bool on = state % 2 == 1;
+            const double from = on ? dark : lit;
+            const double to = on ? lit : dark;
+            std::vector<float> history;
+            bool arrived = state == 0;
+
+            for (int i = 0; i < stateFrames; ++i, ++frame) {
+                const float estimate = estimateAt(frame, on ? 2.0f : 0.005f);
+                const bool first = frame == 0;
+
+                if (adaptive) {
+                    texel = adaptiveProbeBlend(texel, Vec3{estimate, estimate, estimate}, first ? 0.0f : longKeep, first ? 0.0f : windowKeep, 5.0f);
+                } else {
+                    texel.stored = blendProbeValue(texel.stored, Vec3{estimate, estimate, estimate}, first ? 0.0f : fixedKeep);
+                }
+
+                const double stored = texel.stored.x;
+
+                if (!arrived && std::abs(stored - from) >= 0.9 * std::abs(to - from)) {
+                    arrived = true;
+                    reached += i * frameSeconds;
+                    ++switches;
+                }
+
+                // The lit state's steady half: the crawl the eye sees in a lit dark room.
+                if (on && i > stateFrames / 2) {
+                    history.push_back(texel.stored.x);
+
+                    if (history.size() > static_cast<std::size_t>(tenth)) {
+                        const double change = (history.back() - history[history.size() - 1 - static_cast<std::size_t>(tenth)]) / lit;
+                        changeSquares += change * change;
+                        ++changes;
+                    }
+                }
+            }
+
+            assert(arrived);
+        }
+
+        return SwitchedTexel{std::sqrt(changeSquares / changes), reached / switches};
+    }
+
+    /*
+    * The schedule hands the update the change window's share and the threshold, 0 (off) unless the adaptive memory is on,
+    * and fresh atlases keep nothing of the window either; the volume carries them in its spare slots.
+    */
+    void testTheScheduleCarriesTheAdaptiveMemory() {
+        const float frameSeconds = 1.0f / 120.0f;
+        GlobalIlluminationSettings settings;
+        ProbeSchedule schedule;
+        assert(!settings.adaptiveMemory);
+        assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, false).changeThreshold == 0.0f);
+
+        settings.adaptiveMemory = true;
+        const ProbeFrame frame = scheduleProbeFrame(schedule, settings, frameSeconds, false, false);
+        assert(frame.changeThreshold == settings.changeThreshold);
+        assert(frame.windowHysteresis == hysteresisForTimeConstant(frameSeconds, settings.changeWindowSeconds));
+        assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, true).windowHysteresis == 0.0f);
+
+        const GpuProbeVolume packed = packProbeVolume(ProbeVolume{}, frame);
+        assert(packed.rotation[2][3] == frame.windowHysteresis && packed.sky[3] == frame.changeThreshold);
+    }
+
+    void testTheAdaptiveMemoryIsCalmerAndQuicker() {
+        for (float framesPerSecond : {60.0f, 240.0f}) {
+            const SwitchedTexel fixed = switchedTexel(false, framesPerSecond);
+            const SwitchedTexel adaptive = switchedTexel(true, framesPerSecond);
+            assert(adaptive.crawl < 0.7 * fixed.crawl);
+            assert(adaptive.reach90 < 0.6 * fixed.reach90);
+        }
+    }
+
     // Probes are numbered x first, then y, then z, and sit on the grid's corners from the origin.
     void testProbePositionsFollowTheGrid() {
         const ProbeVolume volume{Vec3{-2.0f, 0.5f, 3.0f}, Vec3{1.0f, 0.5f, 2.0f}, ProbeCounts{4, 3, 5}};
@@ -794,6 +1020,11 @@ void testDdgi() {
     testAUniformSkyGivesItsOwnValue();
     testAHalfSkyGivesTheCosineLaw();
     testASparselyLitTexelSettlesOnItsTrueMean();
+    testTheAdaptiveMemoryStartsFromTheStoredLight();
+    testTheAdaptiveMemoryAveragesSinceItsLastRestart();
+    testTheAdaptiveMemoryRestartsOnARealChange();
+    testTheScheduleCarriesTheAdaptiveMemory();
+    testTheAdaptiveMemoryIsCalmerAndQuicker();
     testProbePositionsFollowTheGrid();
     testProbeAtlasLayout();
     testImpossibleVolumesAreRejected();

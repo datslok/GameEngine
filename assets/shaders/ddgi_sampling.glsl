@@ -5,7 +5,6 @@
 // mirrored by render/gpu/ddgi_sampling.h, which explains each; the GPU tests check them against it. The atlas reads
 // themselves live in scene_probes.glsl.
 
-#include "render/gpu/bloom_shared.h"
 #include "render/gpu/ddgi_shared.h"
 #include "ddgi.glsl"
 #include "lighting.glsl"
@@ -117,7 +116,7 @@ vec3 spotLightAtHit(vec3 offsetToLight, float range, vec3 radiance, float source
 }
 
 float hitLightStrength(vec3 irradiance) {
-    return dot(irradiance, vec3(BLOOM_LUMA_RED, BLOOM_LUMA_GREEN, BLOOM_LUMA_BLUE));
+    return probeLuminance(irradiance);
 }
 
 struct BrightestLights {

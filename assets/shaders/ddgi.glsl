@@ -5,6 +5,7 @@
 // update's weights and blending, and where each probe lives in the atlases. Pure functions, mirrored by
 // render/gpu/ddgi.h, which explains each; the GPU tests check them against it.
 
+#include "render/gpu/bloom_shared.h"
 #include "render/gpu/ddgi_shared.h"
 
 // 1 for zero and up, -1 below: the octahedral fold needs a sign that is never 0.
@@ -121,6 +122,50 @@ vec3 blendProbeValue(vec3 oldValue, vec3 newValue, float hysteresis) {
 
 vec2 blendProbeValue(vec2 oldValue, vec2 newValue, float hysteresis) {
     return newValue + (oldValue - newValue) * hysteresis;
+}
+
+float probeLuminance(vec3 light) {
+    return dot(light, vec3(BLOOM_LUMA_RED, BLOOM_LUMA_GREEN, BLOOM_LUMA_BLUE));
+}
+
+struct AdaptiveProbeTexel {
+    vec3 stored;
+    float history;
+    vec3 recent;
+    float noise;
+};
+
+float historyForShare(float keep) {
+    return keep < 1.0 ? min(keep / (1.0 - keep), float(DDGI_MAX_HISTORY)) : float(DDGI_MAX_HISTORY);
+}
+
+AdaptiveProbeTexel adaptiveProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, float longKeep, float windowKeep, float threshold) {
+    AdaptiveProbeTexel next = texel;
+
+    if (texel.history < 1.0) {
+        next.recent = texel.stored;
+        next.noise = 0.0;
+        next.history = historyForShare(longKeep);
+    } else {
+        float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
+        float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * longKeep;
+        next.noise = sqrt(variance);
+    }
+
+    next.recent = blendProbeValue(next.recent, estimate, windowKeep);
+    next.stored = blendProbeValue(next.stored, estimate, min(longKeep, next.history / (next.history + 1.0)));
+
+    float windowSpread = next.noise * sqrt((1.0 - windowKeep) / (1.0 + windowKeep));
+    float band = threshold * windowSpread + DDGI_CHANGE_FLOOR_SHARE * probeLuminance(next.stored);
+
+    if (abs(probeLuminance(next.recent) - probeLuminance(next.stored)) > band) {
+        next.stored = next.recent;
+        next.history = historyForShare(windowKeep);
+    } else {
+        next.history = min(next.history + 1.0, float(DDGI_MAX_HISTORY));
+    }
+
+    return next;
 }
 
 vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, int index) {

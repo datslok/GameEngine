@@ -40,5 +40,11 @@ void main() {
         testOutput(1, vec4(vec2(probeTileOrigin(counts, index, side)), probeAtlasUv(counts, index, fourth.xyz, side)));
     } else if (function == GPU_TEST_PROBE_REACH) {
         testOutput(0, vec4(probeNearLight(first.xyz, second.xyz, first.w, second.w) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_PROBE_ADAPTIVE) {
+        AdaptiveProbeTexel texel = adaptiveProbeBlend(AdaptiveProbeTexel(first.xyz, first.w, second.xyz, second.w), third.xyz,
+                                                      fourth.x, fourth.y, fourth.z);
+        testOutput(0, vec4(texel.stored, texel.history));
+        testOutput(1, vec4(texel.recent, texel.noise));
+        testOutput(2, vec4(probeLuminance(third.xyz)));
     }
 }

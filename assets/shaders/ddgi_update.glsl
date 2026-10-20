@@ -7,7 +7,10 @@
 // weights, blends that into the stored value and writes it back in place; once the whole square is done, the border
 // is copied from it, so filtering across the square's folded edges reads the right neighbours. The irradiance update
 // does this for two atlases at once from the same rays: the still lights' and the fast lights', each with its own share
-// kept (render/gpu/ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant).
+// kept (render/gpu/ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant). With the adaptive memory on (the
+// volume's change threshold above 0), the still lights' texels blend by adaptiveProbeBlend instead, their history in the
+// atlas's alpha and the change window's mean and noise in a third image (alpha is 0 otherwise, so switching the adaptive
+// memory on starts every texel from its stored light).
 #ifndef DDGI_UPDATE_GLSL
 #define DDGI_UPDATE_GLSL
 
@@ -33,6 +36,7 @@ layout(std430, set = 0, binding = 2) readonly buffer ProbeNearFastLights {
 #if UPDATE_IRRADIANCE
 layout(set = 0, binding = 3, rgba16f) uniform image2D atlas;
 layout(set = 0, binding = 4, rgba16f) uniform image2D fastAtlas;
+layout(set = 0, binding = 5, rgba16f) uniform image2D changeAtlas;
 #else
 layout(set = 0, binding = 3, rg16f) uniform image2D atlas;
 #endif
@@ -91,7 +95,15 @@ void main() {
 
     if (sum.w > DDGI_MIN_TEXEL_WEIGHT) {
 #if UPDATE_IRRADIANCE
-        result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, volume.hysteresis.x), 1.0);
+        if (volume.sky.w > 0.0) {
+            vec4 change = imageLoad(changeAtlas, origin + 1 + texel);
+            AdaptiveProbeTexel adaptive = adaptiveProbeBlend(AdaptiveProbeTexel(stored.rgb, stored.a, change.rgb, change.a), sum.rgb / sum.w,
+                                                             volume.hysteresis.x, volume.rotation[2].w, volume.sky.w);
+            result = vec4(adaptive.stored, adaptive.history);
+            imageStore(changeAtlas, origin + 1 + texel, vec4(adaptive.recent, adaptive.noise));
+        } else {
+            result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, volume.hysteresis.x), 0.0);
+        }
         fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, volume.origin.w), 1.0);
 #else
         result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, volume.hysteresis.y), 0.0, 1.0);
