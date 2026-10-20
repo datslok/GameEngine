@@ -185,6 +185,9 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
 - [x] The sun's disc in the sky (`sun-disc`)
 - [x] Sample distribution shadow maps: the cascades end at the farthest surface on screen (`sdsm`)
 
+**Documentation pass (next, before 6d's software tracer)**
+- [ ] Make the docs easy for people to read: several have very long paragraphs and list items with little or no spacing (`docs/ARCHITECTURE.md` has single paragraphs of about 11,500 characters, `README.md`'s Features list bullets of about 6,000). Short paragraphs with one idea each, headings, lists and tables, blank lines between. Covers `README.md`, `ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/BUILDLOG.md`, `docs/ENGINE_GUIDE.md`, `docs/ILLUMINATION.md`, `docs/LUMEN.md` and `docs/RAGDOLLPLAN.md`; not `CLAUDE.md`, which is only for Claude. Every fact and number kept; one sample section shown first and agreed before the rest
+
 **6d. Global illumination: DDGI** ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, built in the form of its 2021 production follow-up, "Scaling Probe-Based Real-Time Dynamic Global Illumination for Production"). Today light stops at the first surface it hits, so a room lit through one window is black wherever the sunbeam does not land, and the ambient light is a flat stand-in for all the light bouncing around. DDGI measures that bounced light at points in space each frame and lets every surface look it up. Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINATION.md](docs/ILLUMINATION.md)
   - Needs first: the HDR target and tone mapping above (bounce light routinely adds up to more than 1 and would clip to white), compute pipelines, and the Vulkan renderer (for ray queries)
   - [x] Probe grid: probe volumes placed by each game, octahedral irradiance and distance atlases written from compute (`ddgi-probes`)
