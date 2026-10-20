@@ -113,6 +113,7 @@ void gpuTestOverlay(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestCascades(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDdgiSampling(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestProbeRelocation(GpuFunctionRunner& runner, GpuCheckReport& report);
 
 class VulkanDevice;
 

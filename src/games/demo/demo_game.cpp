@@ -365,7 +365,9 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
 
     const Entity ground = world.create();
     world.add(ground, groundPlacement);
-    world.add(ground, makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass));
+    ModelRenderer groundRenderer = makeMeshRenderer(assets.addMesh(Mesh::plane(20.0f)), grass);
+    groundRenderer.isStatic = true;
+    world.add(ground, std::move(groundRenderer));
 
     // The player's own body for first person: an invisible capsule standing where the first-person view starts.
     controls.spawnBody(world);

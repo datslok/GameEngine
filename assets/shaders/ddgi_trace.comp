@@ -17,7 +17,8 @@
 * Light from fast lights (flashlights) is kept apart for the fast atlas: their direct light at the hit, and their light
 * as last frame's fast atlas holds it, so their later bounces keep its short memory too. Probes within reach of a fast
 * light trace the fast count of rays (render/gpu/ddgi.h, probeNearLight); the dispatch has room for the most any probe
-* traces (the stride), and the rest of a probe's room is skipped.
+* traces (the stride), and the rest of a probe's room is skipped. Only awake and vigilant probes trace, from where
+* relocation moved them (scene_probe_states.glsl).
 */
 #include "ray_scene.glsl"
 #include "materials.glsl"
@@ -116,11 +117,12 @@ void main() {
     int probe = index / stride;
     int ray = index % stride;
 
-    if (probe >= volumeProbeCount()) {
+    // Off and sleeping probes are not traced (render/gpu/probe_relocation.h); the rest from where relocation moved them.
+    if (probe >= volumeProbeCount() || !probeTraced(probeStates[probe].state)) {
         return;
     }
 
-    vec3 origin = volumeProbePosition(probe);
+    vec3 origin = volumeProbePosition(probe) + probeStates[probe].offset;
     bool nearFastLight = anyFastLightNear(origin);
     int rays = volumeRayCount(nearFastLight);
 

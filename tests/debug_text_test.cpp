@@ -76,8 +76,8 @@ namespace {
         assert(allInside(debug, 10.0f, 20.0f, 10.0f + width, 32.0f));
     }
 
-    // The engine's culling readout sits in the top-left corner and changes with the numbers. Five lines (the last the video
-    // memory) reach about 120 pixels down.
+    // The engine's culling readout sits in the top-left corner and changes with the numbers. Six lines (the light probes,
+    // then the video memory last) reach 140 pixels down.
     void testRenderStatsReadout() {
         RenderStats stats;
         stats.drawn = 6;
@@ -89,7 +89,7 @@ namespace {
         drawRenderStats(stats, debug);
         assert(debug.getLines().empty());
         assert(!debug.getScreenLines().empty());
-        assert(allInside(debug, 0.0f, 0.0f, 600.0f, 130.0f));
+        assert(allInside(debug, 0.0f, 0.0f, 600.0f, 150.0f));
 
         RenderStats moreCulled = stats;
         moreCulled.culled = 7;
@@ -106,7 +106,7 @@ namespace {
         DebugDraw lights;
         drawRenderStats(manyLights, lights);
         assert(lights.getScreenLines().size() != debug.getScreenLines().size());
-        assert(allInside(lights, 0.0f, 0.0f, 600.0f, 130.0f));
+        assert(allInside(lights, 0.0f, 0.0f, 600.0f, 150.0f));
 
         // A fourth line counts the shadow tiles drawn and the cube faces skipped.
         RenderStats someSkipped = stats;
@@ -116,7 +116,7 @@ namespace {
         DebugDraw tiles;
         drawRenderStats(someSkipped, tiles);
         assert(tiles.getScreenLines().size() != debug.getScreenLines().size());
-        assert(allInside(tiles, 0.0f, 0.0f, 600.0f, 130.0f));
+        assert(allInside(tiles, 0.0f, 0.0f, 600.0f, 150.0f));
     }
 }
 

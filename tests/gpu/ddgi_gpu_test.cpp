@@ -1,3 +1,4 @@
+#include "cpu_trace.h"
 #include "gpu_check.h"
 #include "gpu_test_functions.h"
 
@@ -6,6 +7,8 @@
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/probe_relocation.h"
+#include "render/gpu/ray_tracing.h"
 #include "render/vulkan/bindless_textures.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/frame_descriptors.h"
@@ -417,6 +420,7 @@ namespace {
         std::unique_ptr<VulkanTexture> white;
         VulkanBuffer clusterMasks;
         std::vector<std::unique_ptr<VulkanMesh>> meshes;
+        std::vector<IndexedMesh> indexedMeshes; // the same meshes' triangles, for the CPU's rays
 
         explicit ProbeTestScene(const VulkanDevice& device):
             device(device),
@@ -447,7 +451,8 @@ namespace {
         }
 
         MeshHandle addMesh(const Mesh& mesh) {
-            meshes.push_back(std::make_unique<VulkanMesh>(device, commands, buildIndexedMesh(mesh)));
+            indexedMeshes.push_back(buildIndexedMesh(mesh));
+            meshes.push_back(std::make_unique<VulkanMesh>(device, commands, indexedMeshes.back()));
             rayTracing.addMesh(commands, *meshes.back());
             return MeshHandle{static_cast<std::uint32_t>(meshes.size() - 1)};
         }
@@ -482,7 +487,7 @@ namespace {
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             return writeSceneSet(descriptors, sceneLayout, buffers,
                                  SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance()},
-                                 clusterMasks);
+                                 clusterMasks, ddgi.describeProbeStates(0));
         }
 
         // Whether the last frame written lists a fast light for the probe rays' hits.
@@ -695,7 +700,7 @@ namespace {
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
         scene.descriptors.reset();
-        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume, settings); });
+        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume, settings, draws, 0); });
         const VkDescriptorSet frame = scene.writeFrame(draws, lighting, volume, ddgi, settings);
 
         scene.commands.run([&](VkCommandBuffer recording) {
@@ -750,8 +755,11 @@ namespace {
         const DrawItem speck = drawOf(cube, Mat4::translation(0.0f, -10000.0f, 0.0f) * Mat4::scaling(0.001f, 0.001f, 0.001f));
 
         // The probes' plain rules, which these scenes check ray by ray: 64 rays in the frame's shared directions, every
-        // frame, the fixed memory (the ray budget, the adaptive memory and sharing, on by default, are checked apart).
+        // frame, the fixed memory, every probe traced where the grid puts it (the ray budget, the adaptive memory, sharing,
+        // relocation and probe states, on by default, are checked apart).
         GlobalIlluminationSettings settings;
+        settings.probeRelocation = false;
+        settings.probeStates = false;
         settings.raysPerProbe = 64;
         settings.probeUpdatesPerSecond = 0.0f;
         settings.adaptiveMemory = false;
@@ -936,6 +944,100 @@ namespace {
     }
 }
 
+namespace {
+    // A box of solid blocks: Mesh::cube spans -1..1, so it is scaled by half the box's size and moved to its middle.
+    DrawItem blockDraw(MeshHandle cube, const Vec3& low, const Vec3& high, bool isStatic) {
+        const Vec3 middle = (low + high) * 0.5f;
+        const Vec3 half = (high - low) * 0.5f;
+        DrawItem draw = drawOf(cube, Mat4::translation(middle.x, middle.y, middle.z) * Mat4::scaling(half.x, half.y, half.z));
+        draw.isStatic = isStatic;
+        return draw;
+    }
+
+    /*
+    * The real relocation pass (ddgi_relocate.comp, through VulkanDdgi: recorded with a frame's update, read back by the
+    * next frame's prepare) against relocateProbe on the CPU, its rays traced over the same triangles with the static
+    * mask. A row of probes 1 m apart over a static floor:
+    * - one with a moving block round it, which relocation must not see: it stays put;
+    * - one 0.1 m inside a static wall: it leaves through the wall's nearer face;
+    * - one 0.03 m from a static post: it moves away from it;
+    * - one 0.5 m inside a static block, deeper than its offset limit reaches: off.
+    * Then the frame's states: the probes near the floor vigilant, the buried one off.
+    */
+    void checkRelocationPass(const VulkanDevice& device, GpuCheckReport& report) {
+        ProbeTestScene scene{device};
+        const MeshHandle cube = scene.addMesh(Mesh::cube());
+        const ProbeVolume volume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{4, 1, 1}};
+
+        const std::vector<DrawItem> draws{
+            blockDraw(cube, Vec3{-1.0f, -1.5f, -5.0f}, Vec3{10.0f, -0.5f, 5.0f}, true), // floor
+            blockDraw(cube, Vec3{-0.2f, -0.2f, -0.2f}, Vec3{0.2f, 0.2f, 0.2f}, false), // moving block round probe 0
+            blockDraw(cube, Vec3{0.9f, -0.5f, -3.0f}, Vec3{1.2f, 3.0f, 3.0f}, true),   // wall round probe 1
+            blockDraw(cube, Vec3{2.03f, -0.5f, -0.3f}, Vec3{2.3f, 2.0f, 0.3f}, true),  // post beside probe 2
+            blockDraw(cube, Vec3{2.5f, -0.5f, -2.0f}, Vec3{5.0f, 2.0f, 2.0f}, true),   // block round probe 3
+        };
+
+        GlobalIlluminationSettings settings;
+        VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
+                        scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
+
+        // The first frame records the relocation; the second's prepare reads it back.
+        for (int frame = 0; frame < 2; ++frame) {
+            scene.descriptors.reset();
+            scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume, settings, draws, 0); });
+            const VkDescriptorSet frameSet = scene.writeFrame(draws, FrameLighting{}, volume, ddgi, settings);
+
+            scene.commands.run([&](VkCommandBuffer recording) {
+                scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
+                const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
+                ddgi.update(recording, scene.descriptors, sets, volume, settings, Vec3{}, testFrameSeconds, false, {}, 0);
+            });
+        }
+
+        std::vector<CpuTraceInstance> traced;
+
+        for (const DrawItem& draw : draws) {
+            traced.push_back(CpuTraceInstance{&scene.indexedMeshes[draw.mesh.index], draw.model, draw.castsShadows, draw.isStatic});
+        }
+
+        const ProbeRayTrace traceStatic = [&](const Vec3& origin, const Vec3& direction) {
+            const std::optional<CpuTraceHit> hit = traceOnCpu(traced, Ray{origin, direction}, probeRayMiss, staticRayMask);
+            return !hit ? probeRayMiss : hit->front ? hit->distance : -hit->distance;
+        };
+
+        const std::vector<GpuProbeRelocation>& relocations = ddgi.getRelocations();
+        report.check("relocation records", exactTolerance, static_cast<float>(probeCount(volume.counts)), static_cast<float>(relocations.size()));
+
+        if (relocations.size() != static_cast<std::size_t>(probeCount(volume.counts))) {
+            return;
+        }
+
+        // Distances and the moves built from them differ by rounding only (the hardware's watertight test against the
+        // CPU's Moller-Trumbore), about 1e-5 of the distance.
+        const FloatTolerance placeTolerance{.absolute = 1e-4f, .relative = 1e-4f};
+
+        for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
+            const GpuProbeRelocation expected = relocateProbe(probePosition(volume, probe), volume.spacing, probeRelocationIterations, traceStatic);
+            const GpuProbeRelocation& actual = relocations[static_cast<std::size_t>(probe)];
+            report.check("relocation offset", placeTolerance, Vec3{expected.offset[0], expected.offset[1], expected.offset[2]},
+                         Vec3{actual.offset[0], actual.offset[1], actual.offset[2]});
+            report.check("relocation off", exactTolerance, expected.off, actual.off);
+            report.check("relocation surface beyond cells", placeTolerance, expected.surfaceBeyondCells, actual.surfaceBeyondCells);
+        }
+
+        // What each scene asks of the relocation, beyond matching the CPU.
+        const auto offsetX = [&](int probe) { return relocations[static_cast<std::size_t>(probe)].offset[0]; };
+        report.check("unmoved beside a mover", exactTolerance, 0.0f, offsetX(0));
+        report.check("left the wall", exactTolerance, 1.0f, 1.0f + offsetX(1) < 0.9f ? 1.0f : 0.0f);
+        report.check("moved off the post", exactTolerance, 1.0f, offsetX(2) < 0.0f ? 1.0f : 0.0f);
+        report.check("buried and off", exactTolerance, 1.0f, relocations[3].off);
+
+        const std::vector<GpuProbeState>& states = ddgi.getProbeStates();
+        report.check("states: vigilant by the floor", exactTolerance, static_cast<float>(ProbeState::Vigilant), static_cast<float>(states[0].state));
+        report.check("states: buried off", exactTolerance, static_cast<float>(ProbeState::Off), static_cast<float>(states[3].state));
+    }
+}
+
 void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("ddgi.glsl");
     checkOctahedral(runner, report);
@@ -957,4 +1059,7 @@ void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheck
     }
 
     checkProbePasses(device, report);
+
+    report.section("light probe relocation (ddgi_relocate.comp)");
+    checkRelocationPass(device, report);
 }

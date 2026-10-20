@@ -34,6 +34,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe distances
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, compute},                     // the lights probe rays' hits may need
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe irradiance from fast lights
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // probe states (vertex for the probes' debug balls)
     }};
 }
 
@@ -122,7 +123,7 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
 }
 
 VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images,
-                              const VulkanBuffer& clusterMasks) {
+                              const VulkanBuffer& clusterMasks, const VkDescriptorBufferInfo& probeStates) {
     const VkDescriptorSet set = descriptors.allocate(layout.getFrameLayout());
 
     const std::array<VkDescriptorBufferInfo, SceneBindingCount> bufferInfos{
@@ -142,6 +143,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.probeHitLights.describe(),
         VkDescriptorBufferInfo{},
+        probeStates,
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

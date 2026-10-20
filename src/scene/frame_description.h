@@ -23,6 +23,9 @@ struct DrawItem {
     Material material;
     bool castsShadows = true;
 
+    // Part of the level that never moves (ModelRenderer::isStatic): light probes move off it and stay asleep beside it.
+    bool isStatic = false;
+
     // Filled in by the engine from the mesh's bounds (attachBoundingSpheres), so views can skip what they cannot see.
     BoundingSphere bounds;
 };

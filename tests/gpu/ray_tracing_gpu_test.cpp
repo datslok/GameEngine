@@ -1,3 +1,4 @@
+#include "cpu_trace.h"
 #include "gpu_check.h"
 #include "gpu_test_functions.h"
 
@@ -63,66 +64,6 @@ namespace {
         bool castsShadows = true;
     };
 
-    // What a ray hit, as the CPU finds it with the physics raycast over every triangle of every instance it may see.
-    struct ExpectedHit {
-        float distance = 0.0f;
-        std::uint32_t instance = 0;
-        std::uint32_t triangle = 0;
-        bool front = false;
-        Vec3 normal; // the mesh's own normal, interpolated at the hit (not normalised)
-        float cosine = 1.0f; // between the ray and the triangle's normal, unsigned: small for a grazing hit
-    };
-
-    Vec3 cornerPosition(const IndexedMesh& mesh, std::uint32_t corner, const Mat4& model) {
-        const MeshVertex& vertex = mesh.vertices[mesh.indices[corner]];
-        return transformPoint(model, vertex.position);
-    }
-
-    std::optional<ExpectedHit> traceOnCpu(const std::vector<TestMesh>& meshes, const std::vector<TestInstance>& instances, const Ray& ray,
-                                          float maxDistance, std::uint32_t mask) {
-        std::optional<ExpectedHit> nearest;
-
-        for (std::uint32_t instance = 0; instance < instances.size(); ++instance) {
-            const TestInstance& placed = instances[instance];
-            DrawItem draw;
-            draw.castsShadows = placed.castsShadows;
-
-            if ((rayMaskFor(draw) & mask) == 0) {
-                continue;
-            }
-
-            const IndexedMesh& mesh = meshes[placed.mesh].indexed;
-
-            for (std::uint32_t triangle = 0; triangle * 3 < mesh.indices.size(); ++triangle) {
-                const Vec3 a = cornerPosition(mesh, triangle * 3, placed.model);
-                const Vec3 b = cornerPosition(mesh, triangle * 3 + 1, placed.model);
-                const Vec3 c = cornerPosition(mesh, triangle * 3 + 2, placed.model);
-                const float reach = nearest ? nearest->distance : maxDistance;
-                const std::optional<RayHit> hit = raycastTriangle(ray, a, b, c, reach);
-
-                if (!hit || (nearest && hit->distance >= nearest->distance)) {
-                    continue;
-                }
-
-                // The hit's barycentric weights, from areas (an affine map keeps them), give the interpolated normal.
-                const Vec3 normal = (b - a).cross(c - a);
-                const float area = normal.lengthSquared();
-                const float second = (hit->point - a).cross(c - a).dot(normal) / area;
-                const float third = (b - a).cross(hit->point - a).dot(normal) / area;
-                const Vec3 weights = hitCornerWeights(second, third);
-                const MeshVertex& first = mesh.vertices[mesh.indices[triangle * 3]];
-                const MeshVertex& secondCorner = mesh.vertices[mesh.indices[triangle * 3 + 1]];
-                const MeshVertex& thirdCorner = mesh.vertices[mesh.indices[triangle * 3 + 2]];
-
-                nearest = ExpectedHit{hit->distance, instance, triangle, hitsFrontFace(a, b, c, ray.direction, handedness(placed.model)),
-                                      first.normal * weights.x + secondCorner.normal * weights.y + thirdCorner.normal * weights.z,
-                                      std::abs(normal.normalized().dot(ray.direction))};
-            }
-        }
-
-        return nearest;
-    }
-
     /*
     * The test shader's inputs and outputs live in buffers it reaches by address, and its scene through the ray tracing
     * set (set 0 here), so its layout is that set plus push constants.
@@ -164,6 +105,12 @@ namespace {
             {1, Mat4::translation(0.0f, 3.0f, -8.0f), false},
             {2, Mat4::translation(0.0f, -2.5f, -5.0f), true},
         };
+
+        std::vector<CpuTraceInstance> traced;
+
+        for (const TestInstance& instance : instances) {
+            traced.push_back(CpuTraceInstance{&meshes[instance.mesh].indexed, instance.model, instance.castsShadows});
+        }
 
         std::vector<DrawItem> draws;
         std::vector<std::uint32_t> meshOfInstance;
@@ -261,7 +208,7 @@ namespace {
         std::memcpy(hits.data(), hitBuffer.getMapped(), hits.size() * sizeof(GpuVec4));
 
         for (std::size_t i = 0; i < cpuRays.size(); ++i) {
-            const std::optional<ExpectedHit> expected = traceOnCpu(meshes, instances, cpuRays[i], 100.0f, masks[i]);
+            const std::optional<CpuTraceHit> expected = traceOnCpu(traced, cpuRays[i], 100.0f, masks[i]);
             const GpuVec4& hit = hits[i * 2];
             const bool gpuHit = hit[0] >= 0.0f;
 

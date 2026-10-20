@@ -26,6 +26,11 @@ struct ModelRenderer {
 
     // Whether it blocks light from shadow-casting lights. Off for things that surround their own light, like a glowing lamp shade.
     bool castsShadows = true;
+
+    // Part of the level that never moves (floors, walls): global illumination's probes move out of it at start-up, and
+    // only things not marked static wake sleeping probes. Unmarked things count as moving, which costs only some probe
+    // work, while a mover marked static would leave probes asleep beside it.
+    bool isStatic = false;
 };
 
 // Build a renderer with a single mesh.

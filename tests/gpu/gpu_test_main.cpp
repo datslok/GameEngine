@@ -29,6 +29,7 @@ int main() {
             gpuTestClusters(runner, report);
             gpuTestCascades(runner, report);
             gpuTestDdgiSampling(runner, report);
+            gpuTestProbeRelocation(runner, report);
             gpuTestDepthRange(device, report);
             gpuTestRayTracing(device, runner, report);
             gpuTestDdgi(device, runner, report);

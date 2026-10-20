@@ -25,10 +25,11 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 }
 
 /*
-* Five lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
+* Six lines of text, in the same colour as the bounding boxes: the camera's view, all shadow views together (each
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
-* tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, and the video memory.
+* tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
+* states, and the video memory.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
@@ -52,8 +53,18 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     debugText(debug, debugReadoutLine(1), debugReadoutTextHeight, shadows, boundingBoxColour);
     debugText(debug, debugReadoutLine(2), debugReadoutTextHeight, lights, boundingBoxColour);
     debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
+    debugText(debug, debugReadoutLine(probeReadoutLine), debugReadoutTextHeight, probeStatsText(stats.probes), boundingBoxColour);
     debugText(debug, debugReadoutLine(videoMemoryReadoutLine), debugReadoutTextHeight, videoMemoryText(stats.videoMemory), boundingBoxColour);
 }
+std::string probeStatsText(const ProbeStateCounts& counts) {
+    if (counts.probes == 0) {
+        return "PROBES -";
+    }
+
+    return "PROBES " + std::to_string(counts.probes) + "  TRACED " + std::to_string(counts.traced) + "  AWAKE " + std::to_string(counts.awake) +
+           "  ASLEEP " + std::to_string(counts.sleeping) + "  OFF " + std::to_string(counts.off) + "  MOVED " + std::to_string(counts.moved);
+}
+
 /*
 * Megabytes rounded to the nearest: memory is reserved in blocks of megabytes, so finer would only flicker.
 */

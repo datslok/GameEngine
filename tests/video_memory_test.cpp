@@ -56,9 +56,10 @@ namespace {
         assert(videoMemoryText(VideoMemory{}) == "VRAM -");
     }
 
-    // The readout's lines: the engine's counts and memory first, then its timings, then the game's own.
+    // The readout's lines: the engine's counts, the light probes and memory first, then its timings, then the game's own.
     void testReadoutLinesFollowEachOther() {
-        assert(videoMemoryReadoutLine == 4);
+        assert(probeReadoutLine == 4);
+        assert(videoMemoryReadoutLine == probeReadoutLine + 1);
         assert(engineProfileReadoutLine == videoMemoryReadoutLine + 1);
         assert(gpuProfileReadoutLine == engineProfileReadoutLine + 1);
         assert(firstGameReadoutLine == gpuProfileReadoutLine + 1);

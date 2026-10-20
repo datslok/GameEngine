@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/ddgi.h"
+#include "render/gpu/probe_relocation.h"
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
@@ -37,6 +38,13 @@ struct ProbeSceneSets {
 * updates the atlases are sampled (SurfaceRead): by the main pass, the debug balls and the next frame's trace (last
 * frame's probes, for the light that bounced more than once). They are shared by the frames in flight: barriers order
 * each frame's update after the last frame's reads. Also draws the probes' debug balls. Needs ray queries.
+*
+* Relocation and states (render/gpu/probe_relocation.h): a new volume, a geometry change event or switching relocation
+* runs ddgi_relocate.comp once, which moves each probe off the static level and writes its record into read-back
+* memory; the next frame waits for it (a one-off hitch) and reads it. From then on each frame's states (offsets, and
+* which probes are traced) are worked out on the CPU from those records and what moves, written to that frame in
+* flight's upload memory and read by every probe pass and the main pass. Until the first records arrive every probe is
+* traced where the grid puts it.
 */
 class VulkanDdgi {
 public:
@@ -49,16 +57,19 @@ public:
     * Ready the atlases for this frame's volume, before the frame's scene set (which points at them) is written: a volume
     * that differs from last frame's (or the first) gets new atlases, cleared, which its first update fills outright.
     * Also picks what this frame reads: the shared atlases while the settings share light between probes (switching
-    * that rewrites the probes' turns, after waiting for the GPU). Leaves them readable. Outside any rendering block.
+    * that rewrites the probes' turns, after waiting for the GPU). Leaves them readable. And this frame's probe states,
+    * from the relocation's records (waiting for a relocation recorded last frame) and the draws that move, written to
+    * frame in flight frameIndex's upload memory (describeProbeStates). Outside any rendering block.
     */
-    void prepare(VkCommandBuffer commands, const ProbeVolume& volume, const GlobalIlluminationSettings& settings);
+    void prepare(VkCommandBuffer commands, const ProbeVolume& volume, const GlobalIlluminationSettings& settings, std::span<const DrawItem> draws,
+                 std::uint32_t frameIndex);
 
     /*
     * Record this frame's probe update for the volume prepare() readied: trace, then blend, leaving the atlases readable
     * for the frame's later passes. fastLights: the frame lists a fast light for the probe rays' hits (ProbeHitLights::
     * fast), so probes within its reach trace more rays. events: the scene events to start this frame (none while the
-    * settings ignore them); frameIndex: the frame in flight, whose upload memory holds the restarts. Outside any
-    * rendering block.
+    * settings ignore them; a geometry change also relocates the probes); frameIndex: the frame in flight, whose upload
+    * memory holds the restarts and the states prepare() wrote. Outside any rendering block.
     */
     void update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume,
                 const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds, bool fastLights,
@@ -69,6 +80,13 @@ public:
     void drawProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frame);
 
     bool hasProbes() const;
+
+    // This frame in flight's probe states (GpuProbeState), as prepare() wrote them, for the scene set.
+    VkDescriptorBufferInfo describeProbeStates(std::uint32_t frameIndex) const;
+
+    // The probes' states this frame and the last relocation's records (empty until they arrive), for tests and readouts.
+    const std::vector<GpuProbeState>& getProbeStates() const;
+    const std::vector<GpuProbeRelocation>& getRelocations() const;
 
     // The atlases as the scene set samples them (valid after prepare()): the shared ones while probes share light.
     SampledImage sampledIrradiance() const;
@@ -91,6 +109,10 @@ private:
     std::unique_ptr<ComputePipeline> irradiancePipeline;
     std::unique_ptr<ComputePipeline> distancePipeline;
     std::unique_ptr<ComputePipeline> sharePipeline;
+
+    OwnedHandle<VkDescriptorSetLayout> relocateSetLayout;
+    OwnedHandle<VkPipelineLayout> relocateLayout;
+    std::unique_ptr<ComputePipeline> relocatePipeline;
 
     OwnedHandle<VkDescriptorSetLayout> ballsSetLayout;
     OwnedHandle<VkPipelineLayout> ballsLayout;
@@ -130,10 +152,32 @@ private:
     // Set by prepare() when the atlases are new: the next update keeps nothing of them.
     bool freshAtlases = false;
 
+    // The relocation's records: written by the GPU into read-back memory, copied here once that frame has finished.
+    VulkanBuffer relocationRecords;
+    std::vector<GpuProbeRelocation> relocations;
+
+    // A relocation is wanted at the next update, or was recorded and its records are not read yet; and whether the
+    // records hold moves (settings.probeRelocation) or only classes.
+    bool relocationRequested = false;
+    bool relocationPending = false;
+    bool relocatedWithMoves = false;
+
+    // This frame's states, the probes that restart because of them (restartedProbes), and each frame in flight's copy.
+    std::vector<GpuProbeState> states;
+    std::vector<int> restartedByStates;
+    std::vector<UploadArray> stateUploads;
+
     // The push constants of the last update, which the debug balls reuse.
     GpuProbeVolume lastPacked{};
 
     void createTracePipeline(VkDescriptorSetLayout texturesLayout, VkDescriptorSetLayout frameLayout, VkDescriptorSetLayout rayLayout);
+    void createRelocatePipeline(VkDescriptorSetLayout texturesLayout, VkDescriptorSetLayout frameLayout, VkDescriptorSetLayout rayLayout);
+
+    // Record the relocation of every probe of the volume, its records left for the CPU to read once the frame finishes.
+    void relocate(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume, int iterations);
+
+    // Copy the records of a relocation recorded earlier, waiting for the GPU to finish it.
+    void collectRelocation(const ProbeVolume& volume);
     void createBallsPipeline(DescriptorLayouts& layouts, VkDescriptorSetLayout texturesLayout, VkDescriptorSetLayout frameLayout,
                              VkFormat colourFormat, VkFormat depthFormat);
 
@@ -142,12 +186,12 @@ private:
 
     void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int rayStride);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
-               int probes, const UploadArray& frameRestarts);
+               int probes, const UploadArray& frameRestarts, const UploadArray& frameStates);
     void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, const GlobalIlluminationSettings& settings,
-                     float longKeep, const UploadArray& frameRestarts);
+                     float longKeep, const UploadArray& frameRestarts, const UploadArray& frameStates);
 
-    // Point the set's binding at this frame in flight's restarts.
-    void writeRestarts(VkDescriptorSet set, std::uint32_t binding, const UploadArray& frameRestarts) const;
+    // Point the set's binding at one of this frame in flight's upload arrays (its restarts or its states).
+    void writeUpload(VkDescriptorSet set, std::uint32_t binding, const UploadArray& upload) const;
 
     // Fill the turns buffer: each probe's own turn, or identity rows.
     void writeProbeTurns(int probes, bool independent);

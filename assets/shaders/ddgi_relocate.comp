@@ -1,0 +1,100 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Relocating the light probes (render/gpu/probe_relocation.h, relocateProbe), one workgroup per probe: the probe traces
+* the fixed spiral of DDGI_RELOCATION_RAYS distance-only rays against the static level (RAY_MASK_STATIC), the first
+* invocation tallies them and takes a step (relocateProbeStep), and so on up to the push constants' iterations; once
+* the probe stays put, is stuck, or the iterations are spent, the last rays' tally is written as its record
+* (finishProbeRelocation), which the CPU reads back to choose each frame's states.
+*/
+#include "ray_scene.glsl"
+#include "ddgi.glsl"
+#include "probe_relocation.glsl"
+
+layout(local_size_x = DDGI_RELOCATION_GROUP_SIZE) in;
+
+// Must match GpuProbeRelocate in render/vulkan/vulkan_ddgi.cpp.
+layout(push_constant) uniform RelocationData {
+    vec4 origin;  // xyz the first probe's grid point
+    vec4 spacing; // xyz the spacing between probes
+    ivec4 counts; // xyz probes along each axis, w the most steps a probe takes (0: classify only)
+} relocation;
+
+layout(std430, set = 3, binding = 0) writeonly buffer ProbeRelocations {
+    ProbeRelocation relocations[];
+};
+
+shared float rayDistances[DDGI_RELOCATION_RAYS];
+shared vec3 probeOffset;
+shared bool recorded;
+
+// A ray against the static level, its distance as tallyProbeRay takes it: negative for a back face, the whole reach
+// for a miss. No minimum distance, as the probes' own rays.
+float traceStatic(vec3 origin, vec3 direction) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_STATIC, origin, 0.0, direction, DDGI_RAY_REACH);
+
+    while (rayQueryProceedEXT(query)) {
+    }
+
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return DDGI_RAY_REACH;
+    }
+
+    float distance = rayQueryGetIntersectionTEXT(query, true);
+    return rayQueryGetIntersectionFrontFaceEXT(query, true) ? distance : -distance;
+}
+
+void main() {
+    int probe = int(gl_WorkGroupID.x);
+    int invocation = int(gl_LocalInvocationIndex);
+    vec3 spacing = relocation.spacing.xyz;
+    vec3 grid = probePosition(relocation.origin.xyz, spacing, relocation.counts.xyz, probe);
+    int iterations = relocation.counts.w;
+
+    if (invocation == 0) {
+        probeOffset = vec3(0.0);
+        recorded = false;
+    }
+
+    barrier();
+
+    for (int iteration = 0; iteration <= iterations; ++iteration) {
+        vec3 start = grid + probeOffset;
+
+        for (int ray = invocation; ray < DDGI_RELOCATION_RAYS; ray += DDGI_RELOCATION_GROUP_SIZE) {
+            rayDistances[ray] = traceStatic(start, sphericalFibonacci(ray, DDGI_RELOCATION_RAYS));
+        }
+
+        barrier();
+
+        if (invocation == 0) {
+            ProbeRayTally tally = emptyProbeRayTally();
+
+            for (int ray = 0; ray < DDGI_RELOCATION_RAYS; ++ray) {
+                tallyProbeRay(tally, sphericalFibonacci(ray, DDGI_RELOCATION_RAYS), rayDistances[ray], probeOffset, spacing);
+            }
+
+            // The last step, a stuck probe or one that stays put: these rays are the ones its final place would trace.
+            ProbeMove move = ProbeMove(probeOffset, false);
+
+            if (iteration < iterations) {
+                move = relocateProbeStep(tally, probeOffset, spacing);
+            }
+
+            if (iteration == iterations || move.stuck || move.offset == probeOffset) {
+                relocations[probe] = finishProbeRelocation(tally, probeOffset, move.stuck);
+                recorded = true;
+            } else {
+                probeOffset = move.offset;
+            }
+        }
+
+        barrier();
+
+        if (recorded) {
+            break;
+        }
+    }
+}

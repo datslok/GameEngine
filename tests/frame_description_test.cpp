@@ -53,6 +53,20 @@ namespace {
         assert(frame.lighting.directionalLights.size() == 1);
     }
 
+    // A model marked static (part of the level) draws as static; models are not static unless marked.
+    void testStaticModelsDrawStatic() {
+        World world;
+        const Entity entity = world.create();
+        world.add(entity, Transform{});
+        ModelRenderer renderer = makeMeshRenderer(MeshHandle{3});
+        renderer.isStatic = true;
+        world.add(entity, renderer);
+
+        const FrameDescription frame = buildFrame(world, makeTestCamera(), 0.0f);
+        assert(frame.draws.size() == 1 && frame.draws[0].isStatic);
+        assert(!ModelRenderer{}.isStatic && !DrawItem{}.isStatic);
+    }
+
     // A model with several parts stays one entity, but each part is its own draw, placed by the entity times the part's local transform.
     void testEachPartIsOneDraw() {
         World world;
@@ -140,6 +154,7 @@ void testFrameDescription() {
     testCameraIsCopied();
     testLightingIsCollected();
     testEachPartIsOneDraw();
+    testStaticModelsDrawStatic();
     testHiddenAndUnplacedModelsAreSkipped();
     testMovingEntitiesAreInterpolated();
 }

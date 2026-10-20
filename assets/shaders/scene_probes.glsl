@@ -5,6 +5,7 @@
 #define SCENE_PROBES_GLSL
 
 #include "ddgi_sampling.glsl"
+#include "scene_probe_states.glsl"
 
 // Bound to an empty stand-in while the probes are not sampled (nothing reads them then).
 layout(set = 1, binding = 12) uniform sampler2D probeIrradianceAtlas;
@@ -29,7 +30,8 @@ struct ProbeLights {
 * corner probes of the cell round the biased point, each read in the right direction and weighted. lookupNormal is the
 * direction the irradiance is read in, reflected the mirror direction (read only withSpecular, a constant at each call,
 * so a matte caller pays nothing for it). origin is the first probe in the point's own space (measured from the camera
-* on screen, the world for probe rays).
+* on screen, the world for probe rays). Only traced probes count, each where relocation moved it; a point with none
+* round it gets the flat ambient light.
 */
 ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflected, vec3 toViewer, vec3 origin, bool withSpecular) {
     vec3 spacing = probeSpacing.xyz;
@@ -44,7 +46,13 @@ ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
     for (int corner = 0; corner < 8; ++corner) {
         ivec3 grid = probeCellCorner(cell, counts, corner);
         int index = grid.x + counts.x * (grid.y + counts.y * grid.z);
-        vec3 probe = origin + spacing * vec3(grid);
+        ProbeState state = probeStates[index];
+
+        if (!probeTraced(state.state)) {
+            continue;
+        }
+
+        vec3 probe = origin + spacing * vec3(grid) + state.offset;
         vec3 fromProbe = biased - probe;
         float distance = length(fromProbe);
         vec3 direction = distance > 0.0 ? fromProbe / distance : normal;
@@ -60,6 +68,10 @@ ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
             addProbeSample(specular, textureLod(probeIrradianceAtlas, reflectedUv, 0.0).rgb, weight);
             addProbeSample(fastSpecular, textureLod(probeFastIrradianceAtlas, reflectedUv, 0.0).rgb, weight);
         }
+    }
+
+    if (diffuse.weight <= 0.0) {
+        return ProbeLights(ProbeLight(ambient.rgb, ambient.rgb), ProbeLight(vec3(0.0), vec3(0.0)));
     }
 
     ProbeLight still = ProbeLight(finishProbeBlend(diffuse), withSpecular ? finishProbeBlend(specular) : vec3(0.0));
