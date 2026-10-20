@@ -11,6 +11,18 @@
 #include <vector>
 
 namespace {
+    /*
+    * The probes as they were before the ray budget, the adaptive memory and sharing (all on by default now): 64 rays
+    * every frame and the fixed memory, for the tests of the schedule's own rules.
+    */
+    GlobalIlluminationSettings plainProbeSettings() {
+        GlobalIlluminationSettings settings;
+        settings.raysPerProbe = 64;
+        settings.probeUpdatesPerSecond = 0.0f;
+        settings.adaptiveMemory = false;
+        settings.probeSharing = 0.0f;
+        return settings;
+    }
     bool nearlyEqual(float actual, float expected, float tolerance = 1e-5f) {
         return std::abs(actual - expected) <= tolerance;
     }
@@ -308,7 +320,7 @@ namespace {
     * probes did before fast lights, so the golden images do not change.
     */
     void testTheScheduleWithoutFastLights() {
-        const GlobalIlluminationSettings settings;
+        const GlobalIlluminationSettings settings = plainProbeSettings();
         const float frameSeconds = 1.0f / 120.0f;
         ProbeSchedule schedule;
 
@@ -343,7 +355,7 @@ namespace {
     * only as 1/30 s for it.
     */
     void testTheScheduleWithFastLights() {
-        const GlobalIlluminationSettings settings;
+        GlobalIlluminationSettings settings = plainProbeSettings();
         const float frameSeconds = 1.0f / 240.0f;
         ProbeSchedule schedule;
 
@@ -400,7 +412,7 @@ namespace {
     * cycle; the shares kept still come from the frame's own time, so the light settles as fast as without the budget.
     */
     void testTheScheduleWithARayBudget() {
-        GlobalIlluminationSettings settings;
+        GlobalIlluminationSettings settings = plainProbeSettings();
         settings.probeUpdatesPerSecond = 60.0f;
         const float frameSeconds = 1.0f / 240.0f;
         ProbeSchedule schedule;
@@ -873,7 +885,7 @@ namespace {
     */
     void testTheScheduleCarriesTheAdaptiveMemory() {
         const float frameSeconds = 1.0f / 120.0f;
-        GlobalIlluminationSettings settings;
+        GlobalIlluminationSettings settings = plainProbeSettings();
         ProbeSchedule schedule;
         assert(!settings.adaptiveMemory);
         assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, false).changeThreshold == 0.0f);
@@ -985,8 +997,8 @@ namespace {
         const std::array<Vec3, 6> uniform{own, own, own, own, own, own};
         assert(nearlyEqual(sharedProbeValue(own, uniform, allVisible, 0.7f), own));
 
-        GlobalIlluminationSettings settings;
-        assert(settings.probeSharing == 0.0f);
+        const GlobalIlluminationSettings settings;
+        assert(settings.probeSharing == 0.5f);
     }
 
     /*

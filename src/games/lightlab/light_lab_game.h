@@ -13,7 +13,7 @@
 
 /*
 * Where and when the light lab's sun shines (scene/sun) and how bright the day is. The solar time is the clock: it moves
-* on by itself at hoursPerSecond (0.025 by default; golden views hold it still), so its slider shows the time of day as
+* on by itself at hoursPerSecond (0, still, by default; golden views hold it still), so its slider shows the time of day as
 * it passes.
 * The brightness values are picked by eye for daylight through the default tone mapping, since lights have no physical
 * units yet. The sky is uniform until a real sky (phase 6d) replaces it; the light probes see it and carry its light
@@ -23,7 +23,7 @@ struct LightLabSunSettings {
     float latitudeDegrees = 45.0f;
     float dayOfYear = 80.0f;       // the March equinox: sunrise near 6, sunset near 18
     float solarHours = 15.5f;      // mid-afternoon: the sun low in the west-south-west, long shadows, the window lit
-    float hoursPerSecond = 0.025f; // a whole day in 16 minutes
+    float hoursPerSecond = 0.0f;   // 0.025 runs a whole day in 16 minutes
     float sunIntensity = 3.0f;
     float skyBrightness = 1.0f;    // the sky at full daylight, seen behind everything and lighting it; it dims towards dusk
 
