@@ -29,7 +29,7 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
-* states, and the video memory.
+* states, the video memory, and the eye's exposure.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
@@ -55,7 +55,32 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
     debugText(debug, debugReadoutLine(probeReadoutLine), debugReadoutTextHeight, probeStatsText(stats.probes), boundingBoxColour);
     debugText(debug, debugReadoutLine(videoMemoryReadoutLine), debugReadoutTextHeight, videoMemoryText(stats.videoMemory), boundingBoxColour);
+    debugText(debug, debugReadoutLine(exposureReadoutLine), debugReadoutTextHeight, exposureText(stats.eyeAdaptation), boundingBoxColour);
 }
+// Signed and to a tenth of a stop: finer would only flicker as the exposure eases.
+std::string exposureText(const std::optional<GpuEyeAdaptation>& adaptation) {
+    if (!adaptation) {
+        return "EXPOSURE FIXED";
+    }
+
+    char text[64];
+    std::snprintf(text, sizeof(text), "EXPOSURE %+.1f EV  SCENE %+.1f EV", adaptation->exposureEv, adaptation->meanEv);
+    return text;
+}
+
+// Tenths of a metre and hundredths of the direction: enough to set up the same view, without flickering as it moves.
+std::string cameraText(const Vec3& position, const Vec3& forward) {
+    char text[96];
+    std::snprintf(text, sizeof(text), "CAMERA %.1f %.1f %.1f  LOOK %.2f %.2f %.2f", position.x, position.y, position.z, forward.x, forward.y,
+                  forward.z);
+    return text;
+}
+
+void drawCameraReadout(const Camera& camera, DebugDraw& debug) {
+    debugText(debug, debugReadoutLine(cameraReadoutLine), debugReadoutTextHeight, cameraText(camera.getPosition(), camera.getForward()),
+              boundingBoxColour);
+}
+
 std::string probeStatsText(const ProbeStateCounts& counts) {
     if (counts.probes == 0) {
         return "PROBES -";

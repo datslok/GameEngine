@@ -33,6 +33,7 @@ int main() {
             gpuTestProbeRelocation(runner, report);
             gpuTestAtmosphere(device, runner, report);
             gpuTestDepthRange(device, report);
+            gpuTestEyeAdaptation(device, runner, report);
             gpuTestRayTracing(device, runner, report);
             gpuTestDdgi(device, runner, report);
             report.print();

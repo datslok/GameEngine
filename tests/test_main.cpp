@@ -54,6 +54,7 @@ void testGoldenViews();
 void testSun();
 void testCelestial();
 void testStars();
+void testEyeAdaptation();
 void testGameRegistry();
 void testPlayerControls();
 void testLightLab();
@@ -176,6 +177,7 @@ int main(){
     testSun();
     testCelestial();
     testStars();
+    testEyeAdaptation();
     testGameRegistry();
     testPlayerControls();
     testLightLab();

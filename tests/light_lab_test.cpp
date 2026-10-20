@@ -472,13 +472,13 @@ namespace {
             assert(near(glow.x, expected.x, 1e-3f) && near(glow.y, expected.y, 1e-3f) && near(glow.z, expected.z, 1e-3f));
         };
 
-        check(1.0f);
+        check(LightLabSunSettings{}.sunDiscScale);
 
         // It follows the camera, frame by frame.
         const Input noInput;
         lab.game.getCamera().setPosition(Vec3{120.0f, 30.0f, -260.0f});
         lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
-        check(1.0f);
+        check(LightLabSunSettings{}.sunDiscScale);
 
         // Larger for looks, and dimmer per pixel by as much, so it gives the same light.
         lab.game.getSunSettings().sunDiscScale = 2.0f;

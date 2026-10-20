@@ -102,6 +102,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
+    eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     createRayTracing();
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
@@ -362,6 +363,7 @@ std::unique_ptr<VulkanPipeline> VulkanRenderer::createToneMapPipeline(VkFormat f
     description.vertexShader = "assets/shaders/fullscreen_triangle.vert.spv";
     description.fragmentShader = "assets/shaders/tone_map.frag.spv";
     description.resources.fragmentSamplers = 2;
+    description.resources.fragmentStorageBuffers = 1;
     description.resources.fragmentUniforms = 1;
     description.colourFormat = format;
     return std::make_unique<VulkanPipeline>(device, layouts, description);
@@ -570,6 +572,10 @@ FrameContext VulkanRenderer::beginFrame() {
     // The surfaces this frame's last use measured, for fitting the next shadows (kept until used).
     if (const std::optional<ScreenDepthRange> measured = depthRange->collect(frameIndex)) {
         unusedDepthRange = measured;
+    }
+
+    if (const std::optional<GpuEyeAdaptation> adapted = eyeAdaptation->collect(frameIndex)) {
+        lastEyeAdaptation = adapted;
     }
 
     frame.descriptors->reset();
@@ -981,6 +987,20 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthRange);
     }
 
+    // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
+    // mapping. Switched off, it starts afresh when switched on again.
+    if (settings.toneMapping.eyeAdaptation) {
+        beginGpuPass(frame, GpuPass::EyeAdaptation);
+        eyeAdaptation->adapt(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, settings.toneMapping, description.frameSeconds,
+                             eyeAdaptationFresh || capturing);
+        endGpuPass(frame, GpuPass::EyeAdaptation);
+        eyeAdaptationFresh = false;
+        stats.eyeAdaptation = lastEyeAdaptation;
+    } else {
+        eyeAdaptationFresh = true;
+        lastEyeAdaptation.reset();
+    }
+
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
     beginGpuPass(frame, GpuPass::Bloom);
     const BloomComposite bloomMix = bloom->draw(frame, sceneColour, frameWidth, frameHeight, settings.bloom);
@@ -1292,7 +1312,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
-    sceneColour.transition(commands, ImageState::FragmentRead);
+    sceneColour.transition(commands, ImageState::SurfaceRead);
 }
 
 /*
@@ -1313,7 +1333,7 @@ void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSe
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
-    sceneColour.transition(commands, ImageState::FragmentRead);
+    sceneColour.transition(commands, ImageState::SurfaceRead);
 }
 
 /*
@@ -1341,7 +1361,7 @@ void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet scene
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
-    sceneColour.transition(commands, ImageState::FragmentRead);
+    sceneColour.transition(commands, ImageState::SurfaceRead);
 }
 
 /*
@@ -1379,7 +1399,8 @@ void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipe
         SampledImage{bloomResult != nullptr ? bloomResult->getView() : sceneColour.getView(), linearSampler.get(),
                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
     };
-    bindFragmentResources(commands, frame.descriptors, pipeline, images);
+    const std::array<VkDescriptorBufferInfo, 1> buffers{eyeAdaptation->describeAdaptation()};
+    bindFragmentResources(commands, frame.descriptors, pipeline, images, buffers);
     drawFullScreenTriangle(commands);
 }
 
@@ -1414,6 +1435,9 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     // The frame's probe events happen on the first frame drawn, not on every repeat of it.
     FrameDescription repeated = description;
     repeated.lighting.probeEvents.clear();
+
+    // Every frame a capture draws snaps the eye to its target, so the picture does not depend on what came before.
+    capturing = true;
 
     if (framesBefore > 0) {
         drawFramesBeforeCapture(description, repeated, settings, framesBefore);
@@ -1472,10 +1496,12 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
         abandonFrame();
         device.waitIdle();
         displayOutput = screenOutput;
+        capturing = false;
         throw;
     }
 
     displayOutput = screenOutput;
+    capturing = false;
 
     CapturedFrame captured;
     captured.scene = readImage(readback, 0, width, height, PixelFormat::RgbaHalf);
@@ -1682,6 +1708,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     createFrames();
     debugLines->setFramesInFlight(count);
     depthRange->setFramesInFlight(count);
+    eyeAdaptation->setFramesInFlight(count);
 
     if (rayTracing) {
         rayTracing->setFramesInFlight(count);

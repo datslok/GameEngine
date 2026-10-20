@@ -244,6 +244,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
         drawRenderStats(renderer.getLastFrameStats(), debugDraw);
+        drawCameraReadout(camera, debugDraw);
 
         // Also from the previous window: the profiler shows a finished half second at a time.
         drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);

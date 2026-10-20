@@ -1,0 +1,54 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* This frame's adapted exposure (render/gpu/eye_adaptation.h, adaptToHistogram): the mean of the histogram's middle
+* pixels, the exposure that brings it towards the reference, and a step towards that from last frame's exposure, into
+* the dark only after the scene has stayed darker for the delay (or straight there when told to snap, or before
+* anything was measured). One invocation: 256 bins are nothing to sum.
+*/
+#include "eye_adaptation.glsl"
+
+layout(local_size_x = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Histogram {
+    uint counts[EYE_HISTOGRAM_BINS];
+};
+
+layout(std430, set = 0, binding = 1) buffer Adaptation {
+    EyeAdaptation adaptation;
+};
+
+// Must match GpuEyeAdaptationStep.
+layout(push_constant) uniform Step {
+    float seconds;
+    float strength;
+    float referenceEv;
+    float darkSeconds;
+    float brightSeconds;
+    float lowestEv;
+    float highestEv;
+    float snap;
+    float darkDelaySeconds;
+    float unused0;
+    float unused1;
+    float unused2;
+} step;
+
+void main() {
+    uint histogram[EYE_HISTOGRAM_BINS];
+
+    for (int bin = 0; bin < EYE_HISTOGRAM_BINS; ++bin) {
+        histogram[bin] = counts[bin];
+    }
+
+    EyeAdaptation previous = adaptation;
+    bool measuredBefore = previous.measured > 0.0;
+    float meanEv = histogramMeanEv(histogram, EYE_LOW_SHARE, EYE_HIGH_SHARE, measuredBefore ? previous.meanEv : step.referenceEv);
+    float targetEv = targetExposureEv(meanEv, step.referenceEv, step.strength, step.lowestEv, step.highestEv);
+    bool jump = step.snap > 0.5 || !measuredBefore;
+    vec2 stepped = jump ? vec2(targetEv, 0.0)
+                        : holdThenAdaptExposure(previous.exposureEv, targetEv, previous.darkHeldSeconds, step.seconds, step.darkSeconds, step.brightSeconds,
+                                                step.darkDelaySeconds);
+    adaptation = EyeAdaptation(stepped.x, targetEv, meanEv, 1.0, stepped.y, 0.0, 0.0, 0.0);
+}
