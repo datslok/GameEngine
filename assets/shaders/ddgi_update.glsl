@@ -58,6 +58,8 @@ layout(std430, set = 0, binding = 6) readonly buffer ProbeCascades {
     ProbeCascade probeCascades[];
 };
 
+#include "probe_cascade_holding.glsl"
+
 // This frame's seeds (ddgi_seed.comp): a probe's still and fast light per texel of its square, at its seed slot.
 struct ProbeSeedTexel {
     vec4 still;
@@ -127,7 +129,7 @@ void main() {
         fastStored = vec4(seed.fast.rgb, 1.0);
     }
 #else
-    float longest = probeCascades[volumeCascadeOf(probe)].origin.w;
+    float longest = probeCascades[probeCascadeHolding(probe, volume.cascades.x)].origin.w;
 #endif
 
     for (int ray = 0; ray < rays; ++ray) {

@@ -982,7 +982,7 @@ namespace {
         assert(frame.windowHysteresis == hysteresisForTimeConstant(frameSeconds, settings.changeWindowSeconds));
         assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, true).windowHysteresis == 0.0f);
 
-        const GpuProbeVolume packed = packProbeVolume(ProbeCounts{}, 1, frame);
+        const GpuProbeVolume packed = packProbeVolume(1, 1, frame);
         assert(packed.rotation[2][3] == frame.windowHysteresis && packed.sky[3] == frame.changeThreshold);
     }
 
@@ -1508,9 +1508,9 @@ namespace {
         // Fast lights' light is shared with its own weight, 0.5 by default whatever the still weight; the pass reads both.
         GlobalIlluminationSettings defaults;
         assert(defaults.fastProbeSharing == 0.5f);
-        const GpuProbeShare packed = packProbeShare(ProbeCounts{4, 3, 5}, 2, 0.1f, 0.5f, 0.5f, 0.99f);
+        const GpuProbeShare packed = packProbeShare(60, 2, 0.1f, 0.5f, 0.5f, 0.99f);
         assert(packed.weight[0] == 0.1f && packed.weight[1] == 0.5f && packed.weight[2] == 0.5f && packed.weight[3] == 0.99f);
-        assert(packed.counts[0] == 4 && packed.counts[1] == 3 && packed.counts[2] == 5 && packed.counts[3] == 2);
+        assert(packed.counts[0] == 8 && packed.counts[1] == 8 && packed.counts[2] == 60 && packed.counts[3] == 2);
 
         const GlobalIlluminationSettings settings;
         assert(settings.probeSharing == 0.1f);
@@ -1631,31 +1631,45 @@ namespace {
     }
 
     /*
-    * The atlases: every probe's bordered square inside the image and none overlapping, each row of squares one layer of
-    * the grid; and the place to sample for a texel's own direction is that texel's centre in that probe's square.
+    * The atlases: every probe's bordered square side by side in rows of a fixed number of columns, as near square as
+    * whole rows allow (cascades of any sizes, one after another); every square inside the image and none overlapping, the
+    * image within the largest side at the most probes; and the place to sample for a texel's own direction is that
+    * texel's centre in that probe's square.
     */
     void testProbeAtlasLayout() {
-        const ProbeCounts counts{4, 3, 5};
+        const ProbeAtlasGrid sixty = probeAtlasGrid(60);
+        assert(sixty.columns == 8 && sixty.rows == 8);
+        const ProbeAtlasGrid square = probeAtlasGrid(64);
+        assert(square.columns == 8 && square.rows == 8);
+        const ProbeAtlasGrid one = probeAtlasGrid(1);
+        assert(one.columns == 1 && one.rows == 1);
 
-        for (int side : {probeIrradianceTexels, probeDistanceTexels}) {
-            const int bordered = side + 2;
-            const ProbeAtlasSize size = probeAtlasSize(counts, side);
-            assert(size.width == 12 * bordered && size.height == 5 * bordered);
+        for (int probes : {60, 31 * 17 * 31 + 3 * 21 * 13 * 21, maxProbesPerVolume}) {
+            const ProbeAtlasGrid grid = probeAtlasGrid(probes);
+            assert(grid.columns * grid.rows >= probes && grid.columns * (grid.rows - 1) < probes);
 
-            std::set<std::pair<int, int>> origins;
+            for (int side : {probeIrradianceTexels, probeDistanceTexels}) {
+                const int bordered = side + 2;
+                const ProbeAtlasSize size = probeAtlasSize(grid, side);
+                assert(size.width == grid.columns * bordered && size.height == grid.rows * bordered);
+                assert(size.width <= maxProbeAtlasSide && size.height <= maxProbeAtlasSide);
 
-            for (int probe = 0; probe < probeCount(counts); ++probe) {
-                const TexelCoord origin = probeTileOrigin(counts, probe, side);
-                assert(origin.x % bordered == 0 && origin.y % bordered == 0);
-                assert(origin.x + bordered <= size.width && origin.y + bordered <= size.height);
-                assert(origins.insert({origin.x, origin.y}).second);
-                assert(origin.y / bordered == probe / 12);
+                std::set<std::pair<int, int>> origins;
+                const int step = probes > 1000 ? 97 : 1;
 
-                for (const TexelCoord texel : {TexelCoord{0, 0}, TexelCoord{side - 1, 2}, TexelCoord{3, side - 1}}) {
-                    const Vec2 uv = probeAtlasUv(counts, probe, probeTexelDirection(texel, side), side);
-                    const Vec2 centre{(static_cast<float>(origin.x + 1 + texel.x) + 0.5f) / static_cast<float>(size.width),
-                                      (static_cast<float>(origin.y + 1 + texel.y) + 0.5f) / static_cast<float>(size.height)};
-                    assert(nearlyEqual(uv, centre, 1e-5f));
+                for (int probe = 0; probe < probes; probe += step) {
+                    const TexelCoord origin = probeTileOrigin(grid, probe, side);
+                    assert(origin.x % bordered == 0 && origin.y % bordered == 0);
+                    assert(origin.x + bordered <= size.width && origin.y + bordered <= size.height);
+                    assert(origins.insert({origin.x, origin.y}).second);
+                    assert(origin.y / bordered == probe / grid.columns && origin.x / bordered == probe % grid.columns);
+
+                    for (const TexelCoord texel : {TexelCoord{0, 0}, TexelCoord{side - 1, 2}, TexelCoord{3, side - 1}}) {
+                        const Vec2 uv = probeAtlasUv(grid, probe, probeTexelDirection(texel, side), side);
+                        const Vec2 centre{(static_cast<float>(origin.x + 1 + texel.x) + 0.5f) / static_cast<float>(size.width),
+                                          (static_cast<float>(origin.y + 1 + texel.y) + 0.5f) / static_cast<float>(size.height)};
+                        assert(nearlyEqual(uv, centre, 1e-5f));
+                    }
                 }
             }
         }
@@ -1671,8 +1685,8 @@ namespace {
         return false;
     }
 
-    // Volumes the renderer cannot hold are refused: no probes along an axis, spacing that is not positive, more probes
-    // than one dispatch runs, or squares that do not fit in the largest image.
+    // Volumes the renderer cannot hold are refused: no probes along an axis, spacing that is not positive, or more probes
+    // than one dispatch runs (any that fit, the atlases hold: probeAtlasGrid).
     void testImpossibleVolumesAreRejected() {
         assert(!rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{16, 8, 16}}));
         assert(!rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1, 1, 1}}));
@@ -1680,10 +1694,11 @@ namespace {
         assert(rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 0.0f, 1.0f}, ProbeCounts{4, 4, 4}}));
         assert(rejects(ProbeVolume{Vec3{}, Vec3{-1.0f, 1.0f, 1.0f}, ProbeCounts{4, 4, 4}}));
         assert(rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{64, 32, 64}}));
-        assert(rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1000, 1, 2}}));
+        assert(!rejects(ProbeVolume{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{1000, 1, 2}}));
     }
 
-    // The push constants carry each cascade's size, how many there are and the frame's values where the shaders read them.
+    // The push constants carry the atlases' grid, how many cascades and probes there are, and the frame's values where the
+    // shaders read them (each cascade's own size is in its record: probe_cascades.h, GpuProbeCascade).
     void testProbeVolumePacking() {
         ProbeFrame frame;
         frame.raysPerProbe = 96;
@@ -1696,13 +1711,11 @@ namespace {
         frame.distanceHysteresis = 0.98f;
         frame.ballRadius = 0.15f;
 
-        const GpuProbeVolume packed = packProbeVolume(ProbeCounts{4, 3, 5}, 3, frame);
+        const GpuProbeVolume packed = packProbeVolume(60, 3, frame);
         const ProbeRotationRows rows = probeRotationRows(frame.rotation);
 
-        assert(packed.counts[0] == 4 && packed.counts[1] == 3 && packed.counts[2] == 5 && packed.counts[3] == 200);
+        assert(packed.counts[0] == 8 && packed.counts[1] == 8 && packed.counts[3] == 200);
         assert(packed.cascades[0] == 3 && packed.cascades[1] == 60 && packed.keeps[0] == 0.5f);
-        const ProbeCounts grid = probeAtlasGrid(ProbeCounts{4, 3, 5}, 3);
-        assert(grid.x == 4 && grid.y == 3 && grid.z == 15);
         assert(probeRayStride(frame) == 200);
 
         for (int row = 0; row < 3; ++row) {

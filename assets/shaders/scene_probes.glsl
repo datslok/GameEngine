@@ -29,9 +29,9 @@ struct ProbeLights {
     ProbeLight fast;
 };
 
-// The grid the atlases are laid out as: the cascades one after another along z.
-ivec3 probeAtlasGrid() {
-    return ivec3(probeCounts.xy, probeCounts.z * probeCounts.w);
+// The atlases' columns and rows of squares, every cascade's probes one after another (ddgi.h, probeAtlasGrid).
+ivec2 probeAtlasGrid() {
+    return probeAtlas.xy;
 }
 
 /*
@@ -45,8 +45,8 @@ ProbeLights sampleProbes(int cascade, vec3 point, vec3 normal, vec3 lookupNormal
     ProbeCascade window = probeCascades[cascade];
     vec3 origin = window.origin.xyz;
     vec3 spacing = window.spacing.xyz;
-    ivec3 counts = probeCounts.xyz;
-    ivec3 atlas = probeAtlasGrid();
+    ivec3 counts = window.counts.xyz;
+    ivec2 atlas = probeAtlasGrid();
     vec3 biased = point + probeSelfShadowBias(normal, toViewer, spacing, probeShading.x);
     ProbeCell cell = probeCell(origin, spacing, counts, biased);
     ProbeBlend diffuse = ProbeBlend(vec3(0.0), 0.0);
@@ -56,7 +56,7 @@ ProbeLights sampleProbes(int cascade, vec3 point, vec3 normal, vec3 lookupNormal
 
     for (int corner = 0; corner < 8; ++corner) {
         ivec3 grid = probeCellCorner(cell, counts, corner);
-        int index = cascadeProbeNumber(window, counts, grid);
+        int index = cascadeProbeNumber(window, grid);
         ProbeState state = probeStates[index];
 
         if (!probeTraced(state.state)) {
@@ -102,7 +102,7 @@ ProbeLights probeAmbient(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
     ProbeLights sum = ProbeLights(ProbeLight(vec3(0.0), vec3(0.0)), ProbeLight(vec3(0.0), vec3(0.0)));
     float total = 0.0;
 
-    for (int cascade = fromCascade; cascade < probeCounts.w && total < 1.0; ++cascade) {
+    for (int cascade = fromCascade; cascade < probeAtlas.w && total < 1.0; ++cascade) {
         float weight = cascadeWeight(probeCascades[cascade], point) * (1.0 - total);
 
         if (weight <= 0.0) {

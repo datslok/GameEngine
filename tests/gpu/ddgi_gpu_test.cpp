@@ -394,20 +394,23 @@ namespace {
                     inputs.push_back(gpuVec4(random.direction(), static_cast<float>(side)));
                     inputs.push_back(gpuVec4(static_cast<float>(volume.scroll.x), static_cast<float>(volume.scroll.y),
                                              static_cast<float>(volume.scroll.z)));
+                    const ProbeAtlasGrid atlas = probeAtlasGrid(probeCount(volume.counts));
+                    inputs.push_back(gpuVec4(static_cast<float>(atlas.columns), static_cast<float>(atlas.rows), 0.0f));
                 }
             }
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_GRID, inputs, 5, 3);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_GRID, inputs, 6, 3);
 
-        for (std::size_t i = 0; i < inputs.size() / 5; ++i) {
-            const int probe = static_cast<int>(inputs[i * 5 + 2][3]);
-            const int side = static_cast<int>(inputs[i * 5 + 3][3]);
-            const GpuVec4& scroll = inputs[i * 5 + 4];
+        for (std::size_t i = 0; i < inputs.size() / 6; ++i) {
+            const int probe = static_cast<int>(inputs[i * 6 + 2][3]);
+            const int side = static_cast<int>(inputs[i * 6 + 3][3]);
+            const GpuVec4& scroll = inputs[i * 6 + 4];
+            const ProbeAtlasGrid atlas{static_cast<int>(inputs[i * 6 + 5][0]), static_cast<int>(inputs[i * 6 + 5][1])};
             const ProbeVolume volume{plain.origin, plain.spacing, plain.counts,
                                      ProbeScroll{static_cast<int>(scroll[0]), static_cast<int>(scroll[1]), static_cast<int>(scroll[2])}};
-            const TexelCoord origin = probeTileOrigin(volume.counts, probe, side);
-            const Vec2 uv = probeAtlasUv(volume.counts, probe, vec3From(inputs[i * 5 + 3]), side);
+            const TexelCoord origin = probeTileOrigin(atlas, probe, side);
+            const Vec2 uv = probeAtlasUv(atlas, probe, vec3From(inputs[i * 6 + 3]), side);
             const GpuVec4& out = outputs[i * 3 + 1];
             const ProbeGridCoord grid = probeGridCoord(volume, probe);
             const GpuVec4& placed = outputs[i * 3 + 2];
@@ -490,7 +493,7 @@ namespace {
             const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, 0.1f, 100.0f};
             GpuFrameData frameData = makeFrameData(lights, Mat4::identity(), Vec3{}, makeClusterGrid(camera, 64, 64), false, false);
             const ProbeHitLights hitLights = probeHitLights(lights, Vec3{}, cascades.back().volume);
-            packProbeSampling(frameData, ProbeSampling{cascades.front().volume.counts, static_cast<int>(cascades.size()), settings.selfShadowBias,
+            packProbeSampling(frameData, ProbeSampling{countCascadeProbes(cascades), static_cast<int>(cascades.size()), settings.selfShadowBias,
                                                        settings.bounceEnergy, settings.lightsPerHit, hitLights.points, hitLights.spots});
 
             buffers.frameData.write(&frameData, sizeof(frameData));
@@ -582,10 +585,15 @@ namespace {
         ReadImage sharedIrradiance;
     };
 
+    // The atlases' grid for a single volume's probes.
+    ProbeAtlasGrid atlasOf(const ProbeCounts& counts) {
+        return probeAtlasGrid(probeCount(counts));
+    }
+
     // A probe's shared irradiance against what it should hold, inner texels and borders.
-    void checkShared(const ReadAtlases& atlases, const ProbeCounts& counts, int probe, const std::vector<Vec3>& expected, FloatTolerance tolerance,
+    void checkShared(const ReadAtlases& atlases, const ProbeAtlasGrid& atlas, int probe, const std::vector<Vec3>& expected, FloatTolerance tolerance,
                      const std::string& name, GpuCheckReport& report) {
-        const TexelCoord origin = probeTileOrigin(counts, probe, probeIrradianceTexels);
+        const TexelCoord origin = probeTileOrigin(atlas, probe, probeIrradianceTexels);
 
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
             const int x = origin.x + 1 + texel % probeIrradianceTexels;
@@ -602,8 +610,8 @@ namespace {
     }
 
     // A probe's own irradiance, inner texels in order, as read back.
-    std::vector<Vec3> ownIrradiance(const ReadAtlases& atlases, const ProbeCounts& counts, int probe) {
-        const TexelCoord origin = probeTileOrigin(counts, probe, probeIrradianceTexels);
+    std::vector<Vec3> ownIrradiance(const ReadAtlases& atlases, const ProbeAtlasGrid& atlas, int probe) {
+        const TexelCoord origin = probeTileOrigin(atlas, probe, probeIrradianceTexels);
         std::vector<Vec3> own;
 
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
@@ -617,12 +625,12 @@ namespace {
     * Compare one probe's squares in all three atlases with what the CPU expects, and check every border texel is an
     * exact copy of the inner texel it should copy.
     */
-    void checkProbe(const ReadAtlases& atlases, const ProbeCounts& counts, int probe, const ExpectedProbe& expected, const std::string& name,
+    void checkProbe(const ReadAtlases& atlases, const ProbeAtlasGrid& atlas, int probe, const ExpectedProbe& expected, const std::string& name,
                     GpuCheckReport& report) {
         const ReadImage& irradiance = atlases.irradiance;
         const ReadImage& fastIrradiance = atlases.fastIrradiance;
         const ReadImage& distance = atlases.distance;
-        const TexelCoord irradianceOrigin = probeTileOrigin(counts, probe, probeIrradianceTexels);
+        const TexelCoord irradianceOrigin = probeTileOrigin(atlas, probe, probeIrradianceTexels);
 
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
             const int x = irradianceOrigin.x + 1 + texel % probeIrradianceTexels;
@@ -633,7 +641,7 @@ namespace {
                          vec3From(fastIrradiance.texel(x, y)));
         }
 
-        const TexelCoord distanceOrigin = probeTileOrigin(counts, probe, probeDistanceTexels);
+        const TexelCoord distanceOrigin = probeTileOrigin(atlas, probe, probeDistanceTexels);
 
         for (int texel = 0; texel < probeDistanceTexels * probeDistanceTexels; ++texel) {
             const GpuVec4 stored = distance.texel(distanceOrigin.x + 1 + texel % probeDistanceTexels, distanceOrigin.y + 1 + texel / probeDistanceTexels);
@@ -756,7 +764,7 @@ namespace {
             const ExpectedProbe expected = expectedProbe(rays, results, probeMaxDistance(volume.spacing));
 
             for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
-                checkProbe(atlases, volume.counts, probe, expected, "furnace", report);
+                checkProbe(atlases, atlasOf(volume.counts), probe, expected, "furnace", report);
             }
 
             // Sharing on: each probe turns its rays its own way, and the furnace is still exactly the sky, shared or not.
@@ -765,8 +773,8 @@ namespace {
             const ReadAtlases shared = runProbes(scene, {speck}, lighting, volume, sharing);
 
             for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
-                checkProbe(shared, volume.counts, probe, expected, "furnace, sharing", report);
-                checkShared(shared, volume.counts, probe, expected.irradiance, storedIrradianceTolerance, "furnace: shared irradiance", report);
+                checkProbe(shared, atlasOf(volume.counts), probe, expected, "furnace, sharing", report);
+                checkShared(shared, atlasOf(volume.counts), probe, expected.irradiance, storedIrradianceTolerance, "furnace: shared irradiance", report);
             }
         }
 
@@ -782,7 +790,7 @@ namespace {
             const ReadAtlases atlases = runProbes(scene, {speck, box}, lighting, volume, sharing);
 
             for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
-                checkShared(atlases, volume.counts, probe, ownIrradiance(atlases, volume.counts, probe), exactTolerance, "walled probes: shared is own",
+                checkShared(atlases, atlasOf(volume.counts), probe, ownIrradiance(atlases, atlasOf(volume.counts), probe), exactTolerance, "walled probes: shared is own",
                             report);
             }
         }
@@ -800,7 +808,7 @@ namespace {
                 results.push_back(RayResult{Vec3{0.0f, 0.0f, 0.0f}, -wall});
             }
 
-            checkProbe(atlases, volume.counts, 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sealed box", report);
+            checkProbe(atlases, atlasOf(volume.counts), 0, expectedProbe(rays, results, probeMaxDistance(volume.spacing)), "sealed box", report);
         }
 
         const float height = 1.0f;
@@ -825,7 +833,7 @@ namespace {
                 results.push_back(sunlitFloor(ray));
             }
 
-            checkProbe(atlases, overFloor.counts, 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "sunlit floor", report);
+            checkProbe(atlases, atlasOf(overFloor.counts), 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "sunlit floor", report);
         }
 
         FrameLighting lampLit;
@@ -868,7 +876,7 @@ namespace {
                 results.push_back(RayResult{brightest, along});
             }
 
-            checkProbe(atlases, overFloor.counts, 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "lamp-lit floor", report);
+            checkProbe(atlases, atlasOf(overFloor.counts), 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "lamp-lit floor", report);
         }
 
         {
@@ -892,7 +900,7 @@ namespace {
                 results.push_back(RayResult{lampOnFloor(packed.points[1], hit), along, lampOnFloor(packed.points[0], hit)});
             }
 
-            checkProbe(atlases, overFloor.counts, 0, expectedProbe(fastRays, results, probeMaxDistance(overFloor.spacing)), "fast lamp", report);
+            checkProbe(atlases, atlasOf(overFloor.counts), 0, expectedProbe(fastRays, results, probeMaxDistance(overFloor.spacing)), "fast lamp", report);
         }
 
         {
@@ -917,7 +925,7 @@ namespace {
                 results.push_back(sunlitFloor(ray));
             }
 
-            checkProbe(atlases, overFloor.counts, 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "far fast lamp", report);
+            checkProbe(atlases, atlasOf(overFloor.counts), 0, expectedProbe(rays, results, probeMaxDistance(overFloor.spacing)), "far fast lamp", report);
         }
     }
 }
@@ -1018,8 +1026,9 @@ namespace {
     }
 
     /*
-    * Cascades that follow the camera, in the furnace (an empty sky drawn at B, no flat ambient): two cascades of 13 x 13 x
-    * 13 probes, 1 m and 2 m apart, for 8 frames round one point, then a metre on along x, which moves the densest a cell
+    * Cascades that follow the camera, in the furnace (an empty sky drawn at B, no flat ambient): two cascades of different sizes,
+    * 15 x 13 x 15 probes 1 m apart and 17 x 13 x 17 2 m apart (wide enough to light the densest's whole window at full
+    * weight, so the plane it brings in is seeded from it alone), for 8 frames round one point, then a metre on along x, which moves the densest a cell
     * and leaves the coarser where it was. Every probe still holds B. The plane the move brought in starts from a seed,
     * the coarser cascade's light where it stands (B, since that cascade lights it at full weight; the flat ambient, 0,
     * would show if it did not), as probeSeedFrames frames of history: its texels' history is marked restarted with one
@@ -1036,7 +1045,7 @@ namespace {
         settings.probeRelocation = false;
         FrameLighting lighting;
         lighting.background = Vec3{0.6f, 0.75f, 1.0f};
-        const ProbeCascadeLayout layout{ProbeCounts{13, 13, 13}, 1.0f, 2};
+        const ProbeCascadeLayout layout{ProbeCounts{15, 13, 15}, ProbeCounts{17, 13, 17}, 1.0f, 2};
 
         VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
@@ -1059,15 +1068,15 @@ namespace {
         }
 
         const std::vector<int> densestBrought = scrolledProbes(before[0], after[0]);
-        report.check("cascade scroll: a plane comes in", exactTolerance, 169.0f, static_cast<float>(densestBrought.size()));
+        report.check("cascade scroll: a plane comes in", exactTolerance, 195.0f, static_cast<float>(densestBrought.size()));
         report.check("cascade scroll: the coarser stays", exactTolerance, 0.0f, static_cast<float>(scrolledProbes(before[1], after[1]).size()));
 
         const ReadImage atlas = readHalfImage(scene.device, scene.commands, ddgi.getIrradianceAtlas(), 4);
-        const ProbeCounts grid = probeAtlasGrid(layout.counts, layout.cascades);
+        const ProbeAtlasGrid grid = probeAtlasGrid(probeCascadeLayoutProbes(layout));
         const std::set<int> brought(densestBrought.begin(), densestBrought.end());
         const FloatTolerance lightTolerance{.absolute = 2e-3f, .relative = 2e-3f};
 
-        for (int probe = 0; probe < probeCount(layout.counts) * layout.cascades; probe += 7) {
+        for (int probe = 0; probe < probeCascadeLayoutProbes(layout); probe += 7) {
             const TexelCoord origin = probeTileOrigin(grid, probe, probeIrradianceTexels);
             const GpuVec4 texel = atlas.texel(origin.x + 4, origin.y + 4);
             report.check("cascade scroll: the furnace", lightTolerance, lighting.background, Vec3{texel[0], texel[1], texel[2]});
@@ -1101,7 +1110,7 @@ namespace {
         const GlobalIlluminationSettings settings;
         FrameLighting lighting;
         lighting.background = Vec3{0.6f, 0.75f, 1.0f};
-        const ProbeCascadeLayout layout{ProbeCounts{13, 13, 13}, 1.0f, 2};
+        const ProbeCascadeLayout layout{ProbeCounts{15, 13, 15}, ProbeCounts{17, 13, 17}, 1.0f, 2};
 
         VulkanDdgi ddgi{scene.device, scene.layouts, scene.textures.getLayout(), scene.sceneLayout.getFrameLayout(), scene.rayTracing.getSetLayout(),
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
@@ -1132,7 +1141,7 @@ namespace {
         const std::vector<int> brought = scrolledProbes(before[0], after[0]);
         const std::vector<GpuProbeState>& states = ddgi.getProbeStates();
         const ReadImage atlas = readHalfImage(scene.device, scene.commands, ddgi.getIrradianceAtlas(), 4);
-        const ProbeCounts grid = probeAtlasGrid(layout.counts, layout.cascades);
+        const ProbeAtlasGrid grid = probeAtlasGrid(probeCascadeLayoutProbes(layout));
         int seeded = 0;
 
         for (const int probe : brought) {
@@ -1152,7 +1161,7 @@ namespace {
             }
         }
 
-        report.check("cascade scroll: the rows by the floor start", exactTolerance, 26.0f, static_cast<float>(seeded));
+        report.check("cascade scroll: the rows by the floor start", exactTolerance, 30.0f, static_cast<float>(seeded));
     }
 }
 

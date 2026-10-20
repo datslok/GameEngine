@@ -34,8 +34,8 @@ layout(std430, set = 3, binding = 1) writeonly buffer ProbeSeeds {
 void main() {
     int seed = int(gl_WorkGroupID.x);
     int probe = seedProbes[seed];
-    int cascade = volumeCascadeOf(probe);
-    vec3 position = cascadeProbePosition(probeCascades[cascade], volume.counts.xyz, probe) + probeStates[probe].offset;
+    int cascade = probeCascadeHolding(probe, volume.cascades.x);
+    vec3 position = cascadeProbePosition(probeCascades[cascade], probe) + probeStates[probe].offset;
     vec3 direction = probeTexelDirection(ivec2(gl_LocalInvocationID.xy), DDGI_IRRADIANCE_TEXELS);
 
     ProbeLights light = probeAmbient(position, direction, direction, direction, direction, cascade + 1, false);

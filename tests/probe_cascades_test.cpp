@@ -47,12 +47,20 @@ namespace {
         }
     };
 
-    // The settings' layout: 21 x 13 x 21 probes a cascade, four cascades from half a metre, each twice as far apart.
+    /*
+    * The settings' layout: the densest cascade 31 x 17 x 31 probes, the three coarser 21 x 13 x 21, from half a metre,
+    * each twice as far apart; the probes numbered one cascade after another.
+    */
     void testTheLayoutFollowsTheSettings() {
         const GlobalIlluminationSettings settings;
         const ProbeCascadeLayout layout = probeCascadeLayout(settings);
+        assert(layout.densest.x == 31 && layout.densest.y == 17 && layout.densest.z == 31);
         assert(layout.counts.x == 21 && layout.counts.y == 13 && layout.counts.z == 21);
         assert(layout.cascades == 4 && layout.spacing == 0.5f);
+        const ProbeCounts first = probeCascadeCounts(layout, 0);
+        const ProbeCounts second = probeCascadeCounts(layout, 1);
+        assert(first.x == 31 && first.y == 17 && second.x == 21 && second.y == 13 && probeCascadeCounts(layout, 3).z == 21);
+        assert(probeCascadeLayoutProbes(layout) == 31 * 17 * 31 + 3 * 21 * 13 * 21);
         assert(settings.seedProbes);
         assert(probeCascadeSpacing(layout, 0) == 0.5f && probeCascadeSpacing(layout, 1) == 1.0f && probeCascadeSpacing(layout, 3) == 4.0f);
 
@@ -65,16 +73,26 @@ namespace {
         huge.cascadeProbesAcross = 41;
         huge.cascadeProbesHigh = 21;
         const ProbeCascadeLayout fitted = probeCascadeLayout(huge);
-        assert(fitted.cascades >= 1 && probeCount(fitted.counts) * fitted.cascades <= maxProbesPerVolume);
-        assert(probeCount(fitted.counts) * (fitted.cascades + 1) > maxProbesPerVolume);
+        assert(fitted.cascades >= 1 && probeCascadeLayoutProbes(fitted) <= maxProbesPerVolume);
+        assert(probeCascadeLayoutProbes(fitted) + probeCount(fitted.counts) > maxProbesPerVolume);
+
+        // A densest cascade too large for one dispatch on its own gives way on its up axis.
+        GlobalIlluminationSettings vast = settings;
+        vast.densestProbesAcross = 61;
+        vast.densestProbesHigh = 41;
+        const ProbeCascadeLayout squeezed = probeCascadeLayout(vast);
+        assert(squeezed.cascades == 1 && squeezed.densest.x == 61 && probeCount(squeezed.densest) <= maxProbesPerVolume);
 
         GlobalIlluminationSettings tiny = settings;
         tiny.cascadeProbesAcross = 0;
         tiny.cascadeProbesHigh = -3;
+        tiny.densestProbesAcross = 1;
+        tiny.densestProbesHigh = 0;
         tiny.probeCascades = 0;
         tiny.probeSpacing = 0.0f;
         const ProbeCascadeLayout least = probeCascadeLayout(tiny);
         assert(least.counts.x == 2 && least.counts.y == 2 && least.counts.z == 2 && least.cascades == 1 && least.spacing > 0.0f);
+        assert(least.densest.x == 2 && least.densest.y == 2 && least.densest.z == 2);
     }
 
     /*
@@ -223,34 +241,63 @@ namespace {
 
         // The middle probe is still the lattice point nearest the centre.
         const ProbeCascade densest = probeCascadesAround(Vec3{0.0f, 0.0f, 0.0f}, layout, settings.selfShadowBias).front();
-        const float middle = probePosition(densest.volume, probeSlot(densest.volume, ProbeGridCoord{10, 6, 10})).y;
+        const ProbeCounts& counts = densest.volume.counts;
+        const ProbeGridCoord centreProbe{(counts.x - 1) / 2, (counts.y - 1) / 2, (counts.z - 1) / 2};
+        const float middle = probePosition(densest.volume, probeSlot(densest.volume, centreProbe)).y;
         assert(std::abs(middle) <= 0.25f + 1e-5f);
     }
 
-    // The cascades double their spacing, number their probes one after another and are all weighted round the centre.
+    /*
+    * The cascades double their spacing, number their probes one after another (the densest's more) and are all weighted
+    * round the centre, each reaching further than the one inside it.
+    */
     void testCascadesDoubleAndNest() {
         const GlobalIlluminationSettings settings;
         const ProbeCascadeLayout layout = probeCascadeLayout(settings);
         const Vec3 centre{-23.7f, 1.6f, 8.9f};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(centre, layout, settings.selfShadowBias);
         assert(cascades.size() == 4);
+        int first = 0;
 
         for (std::size_t c = 0; c < cascades.size(); ++c) {
             const float spacing = probeCascadeSpacing(layout, static_cast<int>(c));
+            const ProbeCounts counts = probeCascadeCounts(layout, static_cast<int>(c));
             assert(cascades[c].volume.spacing.x == spacing);
-            assert(cascades[c].firstProbe == static_cast<int>(c) * probeCount(layout.counts));
+            assert(cascades[c].volume.counts.x == counts.x && cascades[c].volume.counts.y == counts.y && cascades[c].volume.counts.z == counts.z);
+            assert(cascades[c].firstProbe == first);
             assert(nearlyEqual(cascades[c].weightCentre, centre));
+            first += probeCount(counts);
 
-            // Each reaches about twice as far as the one inside it.
+            // Each reaches further than the one inside it, the coarser ones (alike in counts) about twice as far.
             if (c > 0) {
+                assert(cascades[c].weightReach.x > cascades[c - 1].weightReach.x + cascades[c].weightFade.x);
+                assert(cascades[c].weightReach.y > cascades[c - 1].weightReach.y + cascades[c].weightFade.y);
+            }
+
+            if (c > 1) {
                 assert(cascades[c].weightReach.x > 1.9f * cascades[c - 1].weightReach.x);
             }
         }
 
-        // The densest lights 3.6 m round the camera at full weight and 1.6 m up and down (the settings' comment).
+        assert(first == probeCascadeLayoutProbes(layout));
+
+        // The densest lights 6.1 m round the camera at full weight and 2.6 m up and down (the settings' comment): a room
+        // round the camera, and its floor and ceiling from eye height. The next 7.4 m and 3.4 m, as before.
         const ProbeCascade& densest = cascades.front();
-        assert(nearlyEqual(densest.weightReach.x - densest.weightFade.x, 3.6375f, 1e-3f));
-        assert(nearlyEqual(densest.weightReach.y - densest.weightFade.y, 1.6375f, 1e-3f));
+        assert(nearlyEqual(densest.weightReach.x - densest.weightFade.x, 6.1375f, 1e-3f));
+        assert(nearlyEqual(densest.weightReach.y - densest.weightFade.y, 2.6375f, 1e-3f));
+        assert(nearlyEqual(cascades[1].weightReach.x - cascades[1].weightFade.x, 7.275f, 1e-3f));
+    }
+
+    // The cascade a probe number belongs to: the last one whose first probe is at or before it, right at every boundary.
+    void testAProbeFindsItsCascade() {
+        const ProbeCascadeLayout layout{ProbeCounts{5, 3, 5}, ProbeCounts{3, 3, 3}, 1.0f, 3};
+        const std::vector<ProbeCascade> cascades = probeCascadesAround(Vec3{0.0f, 0.0f, 0.0f}, layout, 0.3f);
+        assert(cascades[1].firstProbe == 75 && cascades[2].firstProbe == 102);
+
+        assert(probeCascadeHolding(cascades, 0) == 0 && probeCascadeHolding(cascades, 74) == 0);
+        assert(probeCascadeHolding(cascades, 75) == 1 && probeCascadeHolding(cascades, 101) == 1);
+        assert(probeCascadeHolding(cascades, 102) == 2 && probeCascadeHolding(cascades, 128) == 2);
     }
 
     /*
@@ -362,7 +409,7 @@ namespace {
     * flat ambient does (fast light: nothing). A cascade with no traced probes round a point leaves it to the coarser.
     */
     void testCascadesBlendDensestFirst() {
-        const ProbeCascadeLayout layout{ProbeCounts{9, 9, 9}, 1.0f, 2};
+        const ProbeCascadeLayout layout{ProbeCounts{9, 9, 9}, ProbeCounts{9, 9, 9}, 1.0f, 2};
         const Vec3 centre{0.2f, 0.1f, -0.3f};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(centre, layout, 0.3f);
         const std::vector<Vec3> light{Vec3{1.0f, 1.0f, 1.0f}, Vec3{4.0f, 4.0f, 4.0f}};
@@ -415,9 +462,9 @@ namespace {
         assert(nearlyEqual(blended.fast.diffuse, light[0] * 0.5f * weight, 1e-4f));
     }
 
-    // Packed for the shaders: positions from the camera, the scroll and first probe, the longest distance recorded.
+    // Packed for the shaders: positions from the camera, the scroll and first probe, the longest distance recorded, each cascade's own counts.
     void testCascadesArePackedForTheShaders() {
-        const ProbeCascadeLayout layout{ProbeCounts{5, 3, 5}, 0.5f, 2};
+        const ProbeCascadeLayout layout{ProbeCounts{7, 3, 5}, ProbeCounts{5, 3, 5}, 0.5f, 2};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(Vec3{10.3f, 1.2f, -4.4f}, layout, 0.3f);
         const Vec3 camera{10.0f, 1.5f, -4.0f};
         const std::vector<GpuProbeCascade> packed = packProbeCascades(cascades, camera);
@@ -433,6 +480,7 @@ namespace {
             assert(gpu.scroll[3] == cascade.firstProbe);
             assert(nearlyEqual(Vec3{gpu.weightCentre[0], gpu.weightCentre[1], gpu.weightCentre[2]}, cascade.weightCentre - camera));
             assert(gpu.weightReach[0] == cascade.weightReach.x && gpu.weightFade[1] == cascade.weightFade.y);
+            assert(gpu.counts[0] == cascade.volume.counts.x && gpu.counts[1] == cascade.volume.counts.y && gpu.counts[2] == cascade.volume.counts.z);
         }
     }
 
@@ -479,7 +527,7 @@ namespace {
 
     // Each cascade's states from its own records, in order, with its own spacing; no records yet: all vigilant.
     void testEachCascadeHasItsStates() {
-        const ProbeCascadeLayout layout{ProbeCounts{3, 3, 3}, 1.0f, 2};
+        const ProbeCascadeLayout layout{ProbeCounts{3, 3, 3}, ProbeCounts{3, 3, 3}, 1.0f, 2};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(Vec3{0.0f, 0.0f, 0.0f}, layout, 0.3f);
         const GlobalIlluminationSettings settings;
         const std::vector<GpuProbeState> none = buildCascadeStates(cascades, {}, {}, settings);
@@ -506,7 +554,7 @@ namespace {
 
     // Probes that start are seeded from the coarser cascades, all but the coarsest's, at most the seeds' room.
     void testSeedsSkipTheCoarsest() {
-        const ProbeCascadeLayout layout{ProbeCounts{4, 4, 4}, 1.0f, 3};
+        const ProbeCascadeLayout layout{ProbeCounts{4, 4, 4}, ProbeCounts{4, 4, 4}, 1.0f, 3};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(Vec3{0.0f, 0.0f, 0.0f}, layout, 0.3f);
         const std::vector<int> restarted{3, 70, 127, 128, 150, 191};
         const std::vector<ProbeSeed> seeds = chooseProbeSeeds(restarted, cascades);
@@ -559,9 +607,12 @@ namespace {
         assert(seed.stored.x == 0.3f && seed.recent.y == 0.2f && seed.history == -probeSeedFrames && seed.noise == 0.0f);
     }
 
-    // Each cascade's events against its own probes: a region round a point restarts the probes inside it in every cascade.
+    /*
+    * Each cascade's events against its own probes: a region round a point restarts the probes inside it in every cascade,
+    * the densest's more numerous probes first and the coarser's after them.
+    */
     void testEventsReachEveryCascade() {
-        const ProbeCascadeLayout layout{ProbeCounts{5, 5, 5}, 1.0f, 2};
+        const ProbeCascadeLayout layout{ProbeCounts{7, 5, 7}, ProbeCounts{5, 5, 5}, 1.0f, 2};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(Vec3{0.0f, 0.0f, 0.0f}, layout, 0.3f);
         const std::vector<ProbeVolume> volumes{cascades[0].volume, cascades[1].volume};
         ProbeFrame frame;
@@ -570,12 +621,13 @@ namespace {
         const ProbeEvent event = probeEventAround(ProbeEventKind::LightChange, Vec3{0.0f, 0.0f, 0.0f}, 1.5f);
         std::vector<GpuProbeRestart> restarts;
         advanceProbeRestarts(restarts, volumes, std::span<const ProbeEvent>{&event, 1}, frame);
-        assert(restarts.size() == 250);
+        assert(restarts.size() == 245 + 125);
 
         for (std::size_t c = 0; c < 2; ++c) {
-            for (int slot = 0; slot < 125; ++slot) {
+            for (int slot = 0; slot < probeCount(volumes[c].counts); ++slot) {
                 const bool inside = event.region.contains(probePosition(volumes[c], slot));
-                assert((restarts[c * 125 + static_cast<std::size_t>(slot)].irradianceFrames == 0) == inside);
+                const std::size_t probe = static_cast<std::size_t>(cascades[c].firstProbe + slot);
+                assert((restarts[probe].irradianceFrames == 0) == inside);
             }
         }
 
@@ -671,6 +723,7 @@ void testProbeCascades() {
     testAScrollBringsInOnePlane();
     testTheLatticeKeepsOffRoundNumbers();
     testCascadesDoubleAndNest();
+    testAProbeFindsItsCascade();
     testTheWeightNeverReadsAnOuterPlane();
     testTheWeightFadesRoundTheCentre();
     testAFixedVolumeFadesBeyondItsProbes();

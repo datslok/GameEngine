@@ -6,8 +6,8 @@
 
 // Must match GpuProbeVolume in render/gpu/ddgi.h.
 layout(push_constant) uniform ProbeVolumeData {
-    ivec4 counts;     // xyz probes along each axis of one cascade, w the ray stride (room for the most rays any probe traces)
-    ivec4 cascades;   // x how many cascades, y probes in each
+    ivec4 counts;     // xy the atlases' columns and rows, w the ray stride (room for the most rays any probe traces)
+    ivec4 cascades;   // x how many cascades, y every cascade's probes together
     vec4 rotation[3]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, the change window's share kept
     vec4 sky;         // rgb the light rays that hit nothing bring back, w the change threshold (0: fixed memory)
     vec4 hysteresis;  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
@@ -16,17 +16,12 @@ layout(push_constant) uniform ProbeVolumeData {
 
 // Every cascade's probes together.
 int volumeProbeCount() {
-    return volume.cascades.x * volume.cascades.y;
+    return volume.cascades.y;
 }
 
-// The grid the atlases are laid out as: the cascades one after another along z.
-ivec3 volumeAtlasGrid() {
-    return ivec3(volume.counts.xy, volume.counts.z * volume.cascades.x);
-}
-
-// The cascade probe number belongs to.
-int volumeCascadeOf(int probe) {
-    return probe / volume.cascades.y;
+// The atlases' columns and rows of squares, every cascade's probes one after another (ddgi.h, probeAtlasGrid).
+ivec2 volumeAtlasGrid() {
+    return volume.counts.xy;
 }
 
 // A whole number the push constants carry as a float.

@@ -68,7 +68,7 @@ struct GpuFrameData {
     float cascadeOptions[4];        // x: the sun cascades' blend band (a share of a radius), y: 1 dithers between them instead
     // The light probes (render/gpu/ddgi_sampling.h, packProbeSampling), all zero while they are not sampled.
     float probeShading[4];          // x: the self-shadow bias setting, y: the share of probe light a probe ray's hit passes on
-    std::int32_t probeCounts[4];    // xyz: each cascade's probes along each axis, w: how many cascades
+    std::int32_t probeAtlas[4];     // xy: the probe atlases' columns and rows (ddgi.h, probeAtlasGrid), w: how many cascades
     std::int32_t probeLights[4];    // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
 };
 

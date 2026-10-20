@@ -4,9 +4,6 @@
 #include <cmath>
 
 namespace {
-    // The probe atlases' bordered squares are this many texels across at most (the distances'), which bounds a row.
-    constexpr int widestBorderedSquare = DDGI_DISTANCE_TEXELS + 2;
-
     // value mod count, never negative.
     int wrapped(int value, int count) {
         const int remainder = value % count;
@@ -17,17 +14,15 @@ namespace {
         return a.x == b.x && a.y == b.y && a.z == b.z;
     }
 
-    // The cascade whose probes include probe: the last one starting at or before it.
-    std::size_t cascadeHolding(std::span<const ProbeCascade> cascades, int probe) {
-        std::size_t holding = 0;
+    // At least 2 probes along each axis, the up axis giving way until they fit in one dispatch.
+    ProbeCounts fittedCounts(int across, int high) {
+        ProbeCounts counts{std::max(across, 2), std::max(high, 2), std::max(across, 2)};
 
-        for (std::size_t c = 1; c < cascades.size(); ++c) {
-            if (cascades[c].firstProbe <= probe) {
-                holding = c;
-            }
+        while (counts.y > 2 && probeCount(counts) > maxProbesPerVolume) {
+            --counts.y;
         }
 
-        return holding;
+        return counts;
     }
 
     void addScaled(ProbeLight& sum, const ProbeLight& light, float weight) {
@@ -37,30 +32,29 @@ namespace {
 }
 
 /*
-* A row of the atlases is one layer of a cascade (counts.x * counts.y squares), so the level axes are kept to what fits
-* across (the up axis giving way first), a cascade to what one dispatch holds, and the cascades to what is left.
+* Every probe has its own workgroup in one dispatch, so all the cascades together must fit in maxProbesPerVolume: the
+* densest first (it matters most), then as many coarser ones as fit beside it. The atlases hold any number that fits.
 */
 ProbeCascadeLayout probeCascadeLayout(const GlobalIlluminationSettings& settings) {
     ProbeCascadeLayout layout;
-    const int across = std::max(settings.cascadeProbesAcross, 2);
-    layout.counts = ProbeCounts{across, std::max(settings.cascadeProbesHigh, 2), across};
+    layout.densest = fittedCounts(settings.densestProbesAcross, settings.densestProbesHigh);
+    layout.counts = fittedCounts(settings.cascadeProbesAcross, settings.cascadeProbesHigh);
     layout.spacing = std::max(settings.probeSpacing, 0.01f);
     layout.cascades = std::clamp(settings.probeCascades, 1, maxProbeCascades);
 
-    while (layout.counts.y > 2 &&
-           (layout.counts.x * layout.counts.y * widestBorderedSquare > maxProbeAtlasSide || probeCount(layout.counts) > maxProbesPerVolume)) {
-        --layout.counts.y;
-    }
-
-    const auto fits = [&](int cascades) {
-        return probeCount(layout.counts) * cascades <= maxProbesPerVolume && layout.counts.z * cascades * widestBorderedSquare <= maxProbeAtlasSide;
-    };
-
-    while (layout.cascades > 1 && !fits(layout.cascades)) {
+    while (layout.cascades > 1 && probeCascadeLayoutProbes(layout) > maxProbesPerVolume) {
         --layout.cascades;
     }
 
     return layout;
+}
+
+ProbeCounts probeCascadeCounts(const ProbeCascadeLayout& layout, int cascade) {
+    return cascade == 0 ? layout.densest : layout.counts;
+}
+
+int probeCascadeLayoutProbes(const ProbeCascadeLayout& layout) {
+    return probeCount(layout.densest) + (layout.cascades - 1) * probeCount(layout.counts);
 }
 
 float probeCascadeSpacing(const ProbeCascadeLayout& layout, int cascade) {
@@ -105,12 +99,37 @@ std::vector<ProbeCascade> probeCascadesAround(const Vec3& centre, const ProbeCas
     std::vector<ProbeCascade> cascades;
     cascades.reserve(static_cast<std::size_t>(layout.cascades));
 
+    int firstProbe = 0;
+
     for (int c = 0; c < layout.cascades; ++c) {
-        cascades.push_back(probeWindow(centre, probeCascadeSpacing(layout, c), layout.counts, selfShadowBias, c * probeCount(layout.counts),
-                                       probeLatticeOffset(layout)));
+        const ProbeCounts counts = probeCascadeCounts(layout, c);
+        cascades.push_back(probeWindow(centre, probeCascadeSpacing(layout, c), counts, selfShadowBias, firstProbe, probeLatticeOffset(layout)));
+        firstProbe += probeCount(counts);
     }
 
     return cascades;
+}
+
+int probeCascadeHolding(std::span<const ProbeCascade> cascades, int probe) {
+    int holding = 0;
+
+    for (std::size_t c = 1; c < cascades.size(); ++c) {
+        if (cascades[c].firstProbe <= probe) {
+            holding = static_cast<int>(c);
+        }
+    }
+
+    return holding;
+}
+
+int countCascadeProbes(std::span<const ProbeCascade> cascades) {
+    int probes = 0;
+
+    for (const ProbeCascade& cascade : cascades) {
+        probes += probeCount(cascade.volume.counts);
+    }
+
+    return probes;
 }
 
 ProbeCascade fixedProbeCascade(const ProbeVolume& volume, int firstProbe) {
@@ -208,6 +227,9 @@ std::vector<GpuProbeCascade> packProbeCascades(std::span<const ProbeCascade> cas
         gpu.weightFade[0] = cascade.weightFade.x;
         gpu.weightFade[1] = cascade.weightFade.y;
         gpu.weightFade[2] = cascade.weightFade.z;
+        gpu.counts[0] = cascade.volume.counts.x;
+        gpu.counts[1] = cascade.volume.counts.y;
+        gpu.counts[2] = cascade.volume.counts.z;
         packed.push_back(gpu);
     }
 
@@ -235,7 +257,7 @@ std::vector<ProbeRelocationRequest> relocationRequests(std::span<const ProbeCasc
     requests.reserve(probes.size());
 
     for (const int probe : probes) {
-        const ProbeCascade& cascade = cascades[cascadeHolding(cascades, probe)];
+        const ProbeCascade& cascade = cascades[static_cast<std::size_t>(probeCascadeHolding(cascades, probe))];
         requests.push_back(ProbeRelocationRequest{probe, probeLatticeCoord(cascade, probe - cascade.firstProbe)});
     }
 
@@ -256,7 +278,7 @@ void keepProbeRelocations(std::vector<GpuProbeRelocation>& records, std::span<co
                           std::span<const GpuProbeRelocation> found, std::span<const ProbeCascade> cascades) {
     for (std::size_t i = 0; i < requests.size() && i < found.size(); ++i) {
         const ProbeRelocationRequest& request = requests[i];
-        const ProbeCascade& cascade = cascades[cascadeHolding(cascades, request.probe)];
+        const ProbeCascade& cascade = cascades[static_cast<std::size_t>(probeCascadeHolding(cascades, request.probe))];
 
         if (static_cast<std::size_t>(request.probe) < records.size() &&
             sameCoord(probeLatticeCoord(cascade, request.probe - cascade.firstProbe), request.place)) {

@@ -23,11 +23,6 @@ namespace {
         return side + 2;
     }
 
-    // Squares across one row of an atlas: one layer of the grid.
-    int atlasColumns(const ProbeCounts& counts) {
-        return counts.x * counts.y;
-    }
-
     // Probes' own turns are drawn from numbers this high, which no ray cycle (frame number / probeRayCycle) reaches.
     constexpr std::uint64_t probeTurnNumbers = std::uint64_t{1} << 62;
 
@@ -47,6 +42,8 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
     visitor.field("Cascades", settings.probeCascades, {.min = 1, .max = DDGI_MAX_CASCADES});
     visitor.field("Probe spacing", settings.probeSpacing, {.min = 0.05f, .max = 8.0f, .sliderMax = 2.0f, .unit = "m (densest)"});
+    visitor.field("Densest probes across", settings.densestProbesAcross, {.min = 4, .max = 61});
+    visitor.field("Densest probes high", settings.densestProbesHigh, {.min = 4, .max = 41});
     visitor.field("Probes across", settings.cascadeProbesAcross, {.min = 4, .max = 41});
     visitor.field("Probes high", settings.cascadeProbesHigh, {.min = 4, .max = 41});
     visitor.field("Seed starting probes", settings.seedProbes);
@@ -275,11 +272,12 @@ Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, co
     return sum * (1.0f / weights);
 }
 
-GpuProbeShare packProbeShare(const ProbeCounts& counts, int cascades, float weight, float fastWeight, float eventWeight, float longKeep) {
+GpuProbeShare packProbeShare(int probes, int cascades, float weight, float fastWeight, float eventWeight, float longKeep) {
+    const ProbeAtlasGrid grid = probeAtlasGrid(probes);
     GpuProbeShare packed{};
-    packed.counts[0] = counts.x;
-    packed.counts[1] = counts.y;
-    packed.counts[2] = counts.z;
+    packed.counts[0] = grid.columns;
+    packed.counts[1] = grid.rows;
+    packed.counts[2] = probes;
     packed.counts[3] = cascades;
     packed.weight[0] = weight;
     packed.weight[1] = fastWeight;
@@ -464,13 +462,6 @@ void validateProbeVolume(const ProbeVolume& volume) {
     if (probes > maxProbesPerVolume) {
         throw std::invalid_argument("A probe volume may hold at most " + std::to_string(maxProbesPerVolume) + " probes");
     }
-
-    const long long widest = static_cast<long long>(atlasColumns(counts)) * borderedSide(probeDistanceTexels);
-    const long long tallest = static_cast<long long>(counts.z) * borderedSide(probeDistanceTexels);
-
-    if (widest > maxProbeAtlasSide || tallest > maxProbeAtlasSide) {
-        throw std::invalid_argument("A probe volume's atlases would be larger than " + std::to_string(maxProbeAtlasSide) + " texels");
-    }
 }
 
 int probeCount(const ProbeCounts& counts) {
@@ -501,20 +492,38 @@ Vec3 probePosition(const ProbeVolume& volume, int slot) {
                                 volume.spacing.z * static_cast<float>(grid.z)};
 }
 
-ProbeAtlasSize probeAtlasSize(const ProbeCounts& counts, int side) {
-    return ProbeAtlasSize{atlasColumns(counts) * borderedSide(side), counts.z * borderedSide(side)};
+/*
+* The smallest number of columns whose square holds every probe, then as many rows as they need: as near square as
+* whole rows allow, so the most probes one dispatch holds (65,535: 256 x 256 squares of 18 texels, 4,608 a side) stay
+* far within the largest image side.
+*/
+ProbeAtlasGrid probeAtlasGrid(int probes) {
+    if (probes < 1) {
+        return ProbeAtlasGrid{};
+    }
+
+    int columns = static_cast<int>(std::sqrt(static_cast<double>(probes)));
+
+    while (columns * columns < probes) {
+        ++columns;
+    }
+
+    return ProbeAtlasGrid{columns, (probes + columns - 1) / columns};
 }
 
-TexelCoord probeTileOrigin(const ProbeCounts& counts, int index, int side) {
-    const int columns = atlasColumns(counts);
-    return TexelCoord{(index % columns) * borderedSide(side), (index / columns) * borderedSide(side)};
+ProbeAtlasSize probeAtlasSize(const ProbeAtlasGrid& grid, int side) {
+    return ProbeAtlasSize{grid.columns * borderedSide(side), grid.rows * borderedSide(side)};
+}
+
+TexelCoord probeTileOrigin(const ProbeAtlasGrid& grid, int index, int side) {
+    return TexelCoord{(index % grid.columns) * borderedSide(side), (index / grid.columns) * borderedSide(side)};
 }
 
 // The direction's place in the inner square (0..side texels from its first inner texel), then in the whole atlas.
-Vec2 probeAtlasUv(const ProbeCounts& counts, int index, const Vec3& direction, int side) {
+Vec2 probeAtlasUv(const ProbeAtlasGrid& grid, int index, const Vec3& direction, int side) {
     const Vec2 square = octahedralEncode(direction);
-    const TexelCoord origin = probeTileOrigin(counts, index, side);
-    const ProbeAtlasSize size = probeAtlasSize(counts, side);
+    const TexelCoord origin = probeTileOrigin(grid, index, side);
+    const ProbeAtlasSize size = probeAtlasSize(grid, side);
     const float inner = static_cast<float>(side);
     return Vec2{(static_cast<float>(origin.x + 1) + (square.x * 0.5f + 0.5f) * inner) / static_cast<float>(size.width),
                 (static_cast<float>(origin.y + 1) + (square.y * 0.5f + 0.5f) * inner) / static_cast<float>(size.height)};
@@ -524,14 +533,14 @@ int probeRayStride(const ProbeFrame& frame) {
     return std::max(frame.raysPerProbe, frame.fastRaysPerProbe);
 }
 
-GpuProbeVolume packProbeVolume(const ProbeCounts& counts, int cascades, const ProbeFrame& frame) {
+GpuProbeVolume packProbeVolume(int probes, int cascades, const ProbeFrame& frame) {
+    const ProbeAtlasGrid grid = probeAtlasGrid(probes);
     GpuProbeVolume packed{};
-    packed.counts[0] = counts.x;
-    packed.counts[1] = counts.y;
-    packed.counts[2] = counts.z;
+    packed.counts[0] = grid.columns;
+    packed.counts[1] = grid.rows;
     packed.counts[3] = probeRayStride(frame);
     packed.cascades[0] = cascades;
-    packed.cascades[1] = probeCount(counts);
+    packed.cascades[1] = probes;
     packed.keeps[0] = frame.fastIrradianceHysteresis;
 
     const ProbeRotationRows rows = probeRotationRows(frame.rotation);
@@ -554,10 +563,6 @@ GpuProbeVolume packProbeVolume(const ProbeCounts& counts, int cascades, const Pr
     packed.hysteresis[2] = frame.ballRadius;
     packed.hysteresis[3] = static_cast<float>(frame.rayPhase);
     return packed;
-}
-
-ProbeCounts probeAtlasGrid(const ProbeCounts& counts, int cascades) {
-    return ProbeCounts{counts.x, counts.y, counts.z * cascades};
 }
 
 int probeRayDivisor(int currentDivisor, float framesPerSecond, float updatesPerSecond, int raysPerProbe) {
@@ -636,8 +641,11 @@ std::int32_t advanceRestartFrames(std::int32_t frames, float keep, const ProbeFr
 
 void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, std::span<const ProbeVolume> cascades, std::span<const ProbeEvent> events,
                           const ProbeFrame& frame, std::span<const int> restarted, std::span<const ProbeSeed> seeded) {
-    const std::size_t perCascade = cascades.empty() ? 0 : static_cast<std::size_t>(probeCount(cascades.front().counts));
-    const std::size_t probes = perCascade * cascades.size();
+    std::size_t probes = 0;
+
+    for (const ProbeVolume& volume : cascades) {
+        probes += static_cast<std::size_t>(probeCount(volume.counts));
+    }
 
     if (restarts.size() != probes) {
         restarts.assign(probes, GpuProbeRestart{});
@@ -653,20 +661,28 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, std::span<cons
     const bool keepsDistances = frame.distanceHysteresis > 0.0f;
 
     for (const ProbeEvent& event : events) {
-        for (std::size_t probe = 0; probe < probes; ++probe) {
-            const ProbeVolume& volume = cascades[probe / perCascade];
+        std::size_t first = 0;
 
-            if (!event.everywhere && !event.region.contains(probePosition(volume, static_cast<int>(probe % perCascade)))) {
-                continue;
+        for (const ProbeVolume& volume : cascades) {
+            const int count = probeCount(volume.counts);
+
+            for (int slot = 0; slot < count; ++slot) {
+                if (!event.everywhere && !event.region.contains(probePosition(volume, slot))) {
+                    continue;
+                }
+
+                GpuProbeRestart& restart = restarts[first + static_cast<std::size_t>(slot)];
+
+                if (keepsIrradiance) {
+                    restart.irradianceFrames = 0;
+                }
+
+                if (keepsDistances && event.kind == ProbeEventKind::GeometryChange) {
+                    restart.distanceFrames = 0;
+                }
             }
 
-            if (keepsIrradiance) {
-                restarts[probe].irradianceFrames = 0;
-            }
-
-            if (keepsDistances && event.kind == ProbeEventKind::GeometryChange) {
-                restarts[probe].distanceFrames = 0;
-            }
+            first += static_cast<std::size_t>(count);
         }
     }
 

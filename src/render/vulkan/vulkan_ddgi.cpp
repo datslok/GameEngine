@@ -30,7 +30,7 @@ namespace {
 
     // What the relocation pass reads, as push constants (must match RelocationData in ddgi_relocate.comp).
     struct GpuProbeRelocate {
-        std::int32_t counts[4]; // xyz each cascade's probes along each axis, w the most steps a probe takes (0: classify only)
+        std::int32_t counts[4]; // x how many cascades (each one's size in its record), w the most steps a probe takes (0: classify only)
     };
 
     // Cascades of the same size and spacing share their atlases from frame to frame, however they move.
@@ -262,16 +262,15 @@ void VulkanDdgi::createBallsPipeline(DescriptorLayouts& layouts, VkDescriptorSet
 }
 
 /*
-* New cascades replace everything sized by their probes: the atlases (every cascade's one after another, probeAtlasGrid),
+* New cascades replace everything sized by their probes: the atlases (every cascade's probes one after another, probeAtlasGrid),
 * the per-probe buffers and the relocation's records. The frames still in flight may be using the old ones, so this
 * waits for the GPU first, as a shadow atlas resize does. The atlases start at zero: no light and no distance, which
 * the first update replaces outright (hysteresis 0); every probe is relocated at the first update.
 */
 void VulkanDdgi::createAtlases(VkCommandBuffer commands, std::span<const ProbeCascade> next) {
     device.waitIdle();
-    counts = next.front().volume.counts;
-    probes = probeCount(counts) * static_cast<int>(next.size());
-    const ProbeCounts grid = probeAtlasGrid(counts, static_cast<int>(next.size()));
+    probes = countCascadeProbes(next);
+    const ProbeAtlasGrid grid = probeAtlasGrid(probes);
 
     const auto createAtlas = [&](VkFormat format, int side, const char* name) {
         const ProbeAtlasSize size = probeAtlasSize(grid, side);
@@ -356,7 +355,7 @@ void VulkanDdgi::prepare(VkCommandBuffer commands, std::span<const ProbeCascade>
         validateProbeVolume(cascade.volume);
     }
 
-    if (static_cast<long long>(probeCount(next.front().volume.counts)) * static_cast<long long>(next.size()) > maxProbesPerVolume) {
+    if (countCascadeProbes(next) > maxProbesPerVolume) {
         throw std::invalid_argument("The light probes' cascades may hold at most " + std::to_string(maxProbesPerVolume) + " probes");
     }
 
@@ -466,7 +465,7 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     const bool fresh = std::exchange(freshAtlases, false);
     ProbeFrame frame = scheduleProbeFrame(schedule, settings, frameSeconds, fastLights, fresh);
     frame.sky = sky;
-    lastPacked = packProbeVolume(counts, static_cast<int>(cascades.size()), frame);
+    lastPacked = packProbeVolume(probes, static_cast<int>(cascades.size()), frame);
 
     // Written to this frame in flight's upload memory, whose last reads finished with its fence.
     std::vector<ProbeVolume> volumes;
@@ -539,7 +538,7 @@ void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descrip
     writeUpload(set, 2, frameCascades);
     writeStorageImages(commands, device.getDevice(), set, 3, images);
 
-    const GpuProbeShare packed = packProbeShare(counts, static_cast<int>(cascades.size()), settings.probeSharing, settings.fastProbeSharing,
+    const GpuProbeShare packed = packProbeShare(probes, static_cast<int>(cascades.size()), settings.probeSharing, settings.fastProbeSharing,
                                                 settings.eventProbeSharing, longKeep);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->get());
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->getLayout(), 0, 1, &set, 0, nullptr);
@@ -666,7 +665,7 @@ void VulkanDdgi::relocate(VkCommandBuffer commands, FrameDescriptors& descriptor
     const std::array<const VulkanBuffer*, 1> records{&relocation.records};
     writeBuffers(device.getDevice(), recordSet, 1, records);
 
-    const GpuProbeRelocate packed{{counts.x, counts.y, counts.z, iterations}};
+    const GpuProbeRelocate packed{{static_cast<std::int32_t>(cascades.size()), 0, 0, iterations}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, relocatePipeline->get());
     const std::array<VkDescriptorSet, 4> boundSets{sets.textures, sets.frame, sets.rayScene, recordSet};
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, relocateLayout.get(), 0, static_cast<std::uint32_t>(boundSets.size()),
@@ -720,7 +719,8 @@ void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descript
                             nullptr);
     vkCmdPushConstants(commands, ballsLayout.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(lastPacked), &lastPacked);
     const int shown = std::clamp(cascade, 0, static_cast<int>(cascades.size()) - 1);
-    vkCmdDraw(commands, 6, static_cast<std::uint32_t>(probeCount(counts)), 0, static_cast<std::uint32_t>(cascades[static_cast<std::size_t>(shown)].firstProbe));
+    const ProbeCascade& drawn = cascades[static_cast<std::size_t>(shown)];
+    vkCmdDraw(commands, 6, static_cast<std::uint32_t>(probeCount(drawn.volume.counts)), 0, static_cast<std::uint32_t>(drawn.firstProbe));
 }
 
 bool VulkanDdgi::hasProbes() const {
