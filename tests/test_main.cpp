@@ -52,6 +52,8 @@ void testHalfFloat();
 void testImageCompare();
 void testGoldenViews();
 void testSun();
+void testCelestial();
+void testStars();
 void testGameRegistry();
 void testPlayerControls();
 void testLightLab();
@@ -172,6 +174,8 @@ int main(){
     testImageCompare();
     testGoldenViews();
     testSun();
+    testCelestial();
+    testStars();
     testGameRegistry();
     testPlayerControls();
     testLightLab();

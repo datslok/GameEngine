@@ -21,7 +21,19 @@ struct Atmosphere {
     vec4 sunIlluminance; // rgb pi times the sun's value above the air
     vec4 sunDisc;        // rgb the disc's radiance as drawn
     vec4 ambient;        // rgb the frame's own flat ambient
+    vec4 moon;           // xyz towards the moon, w the cosine of the drawn disc's angular radius
+    vec4 moonIlluminance; // rgb pi times the moon's value above the air, w the sine of the drawn disc's angular radius
+    vec4 moonDisc;       // rgb the disc's radiance as drawn where lommelSeeliger is 1
 };
+
+// The lights the sky view table's skies are lit by, in its order (ATMOSPHERE_SKY_VIEW_LIGHTS): the sun, the moon.
+vec3 atmosphereLightDirection(Atmosphere atmosphere, int light) {
+    return light == 0 ? atmosphere.sun.xyz : atmosphere.moon.xyz;
+}
+
+vec3 atmosphereLightIlluminance(Atmosphere atmosphere, int light) {
+    return light == 0 ? atmosphere.sunIlluminance.rgb : atmosphere.moonIlluminance.rgb;
+}
 
 struct AtmosphereMedium {
     vec3 rayleighScattering;
@@ -255,6 +267,35 @@ vec3 skyViewSunDirection(float cosSunZenith) {
     return atmosphereDirectionAt(cosSunZenith);
 }
 
+vec2 skyViewAtlasUv(vec2 uv, int light) {
+    return vec2(uv.x, (uv.y + float(light)) / float(ATMOSPHERE_SKY_VIEW_LIGHTS));
+}
+
+float lommelSeeliger(vec3 direction, vec3 towardsBody, float sinRadius, vec3 towardsLight) {
+    float along = dot(direction, towardsBody);
+
+    if (sinRadius <= 0.0 || along <= 0.0) {
+        return 0.0;
+    }
+
+    vec3 across = (direction - towardsBody * along) * (1.0 / sinRadius);
+    float acrossSquared = dot(across, across);
+
+    if (acrossSquared > 1.0) {
+        return 0.0;
+    }
+
+    float viewCosine = sqrt(1.0 - acrossSquared);
+    vec3 normal = across - towardsBody * viewCosine;
+    float lightCosine = dot(normal, towardsLight);
+
+    if (lightCosine <= 0.0 || lightCosine + viewCosine <= 0.0) {
+        return 0.0;
+    }
+
+    return 2.0 * lightCosine / (lightCosine + viewCosine);
+}
+
 struct ScatteringMarch {
     vec3 luminance;
     vec3 throughput;
@@ -326,11 +367,11 @@ vec3 multipleScatteringFromSums(vec3 luminanceSum, vec3 scatteredOnceSum) {
     return atmosphereDivide(luminanceSum * share, vec3(1.0) - scatteredOnceSum * share);
 }
 
-// The light a sky step gathers per kilometre: the sun's through the air, by the phase functions, and the multiple
-// scattering (both per unit illuminance), times the sun's illuminance.
-vec3 skyStepSource(Atmosphere atmosphere, AtmosphereMedium medium, vec3 sunlight, vec3 multipleScattering, float cosTheta) {
+// The light a sky step gathers per kilometre: the light's through the air, by the phase functions, and the multiple
+// scattering (both per unit illuminance), times the light's illuminance.
+vec3 skyStepSource(Atmosphere atmosphere, AtmosphereMedium medium, vec3 sunlight, vec3 multipleScattering, float cosTheta, vec3 illuminance) {
     vec3 phaseScattering = medium.rayleighScattering * rayleighPhase(cosTheta) + vec3(medium.mieScattering * henyeyGreensteinPhase(atmosphere.mie.w, cosTheta));
-    return atmosphere.sunIlluminance.rgb * (sunlight * phaseScattering + multipleScattering * medium.scattering);
+    return illuminance * (sunlight * phaseScattering + multipleScattering * medium.scattering);
 }
 
 // The direction number index of the flat ambient's average: the spiral's z, stratified in even steps, as the up.

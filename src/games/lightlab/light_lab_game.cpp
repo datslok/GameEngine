@@ -1,13 +1,17 @@
 #include "games/lightlab/light_lab_game.h"
 
+#include "assets/star_catalogue.h"
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
 #include "math/angles.h"
 #include "core/srgb.h"
 #include "math/transform.h"
+#include "scene/celestial.h"
 #include "scene/lighting.h"
 #include "scene/model_renderer.h"
+#include "scene/moon.h"
 #include "scene/sky_object.h"
+#include "scene/stars.h"
 #include "scene/sun.h"
 
 #include <algorithm>
@@ -132,7 +136,17 @@ namespace {
 
         // The back room's lamp on (it starts off).
         bool lampOn = false;
+
+        // The day of the year (the default's unless set), for the moon's phase.
+        float dayOfYear = LightLabSunSettings{}.dayOfYear;
+
+        // Look towards the moon's bearing instead of at the target, tilted down so the moon stands near the top of the
+        // view and the ground shows below it.
+        bool facingMoon = false;
     };
+
+    // How far below the moon the moon-facing view looks.
+    constexpr float moonViewBelowRadians = 0.45f;
 
     const LabGoldenView labGoldenViews[] = {
         {{"towers", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 15.5f},
@@ -141,12 +155,14 @@ namespace {
         {{"sunset-hdr", 0.5, true}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 17.6f},
         {{"sun-disc", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 15.5f, true},
         {{"flashlight", 0.5, false}, Vec3{-18.0f, 1.7f, 9.4f}, Vec3{-21.6f, 0.9f, 6.0f}, 15.5f, false, true},
-        {{"back-room-lamp", 0.5, false}, Vec3{-17.7f, 1.7f, 9.5f}, Vec3{-21.5f, 1.2f, 5.8f}, 15.5f, false, false, true}
+        {{"back-room-lamp", 0.5, false}, Vec3{-17.7f, 1.7f, 9.5f}, Vec3{-21.5f, 1.2f, 5.8f}, 15.5f, false, false, true},
+        {{"moonlit", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 21.0f, false, false, false, 88.0f, true}
     };
 }
 
 void visit(LightLabSunSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Latitude", settings.latitudeDegrees, {.min = -90.0f, .max = 90.0f, .unit = "deg"});
+    visitor.field("Year", settings.year, {.min = 1, .max = 9999, .sliderMin = 1900, .sliderMax = 2100});
     visitor.field("Day of year", settings.dayOfYear, {.min = 1.0f, .max = daysPerYear});
     visitor.field("Solar hours", settings.solarHours, {.min = 0.0f, .max = hoursPerDay, .unit = "h"});
     visitor.field("Hours per second", settings.hoursPerSecond, {.min = 0.0f, .max = hoursPerDay, .sliderMax = 1.0f, .unit = "h/s"});
@@ -164,6 +180,53 @@ float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds) {
 
     const float advanced = std::fmod(solarHours + hoursPerSecond * seconds, hoursPerDay);
     return advanced < 0.0f ? advanced + hoursPerDay : advanced;
+}
+
+/*
+* Whole days past midnight carry into the day of the year, and days past the year's last into the year. The clock never
+* runs backwards (its speed is at least 0), so only forward carries happen.
+*/
+void advanceLabClock(LightLabSunSettings& settings, float seconds) {
+    if (settings.hoursPerSecond == 0.0f) {
+        return;
+    }
+
+    const float hours = settings.solarHours + settings.hoursPerSecond * seconds;
+    const float days = std::floor(hours / hoursPerDay);
+    settings.solarHours = hours - days * hoursPerDay;
+    settings.dayOfYear += days;
+
+    while (settings.dayOfYear >= daysPerYear + 1.0f) {
+        settings.dayOfYear -= daysPerYear;
+        ++settings.year;
+    }
+}
+
+void visit(LightLabNightSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Moon intensity", settings.moonIntensity, {.min = 0.0f, .sliderMax = 1.0f});
+    visitor.field("Moon disc size", settings.moonDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
+    visitor.field("Star brightness", settings.starBrightness, {.min = 0.0f, .sliderMax = 20.0f, .unit = "millionths"});
+    visitor.field("Star contrast", settings.starContrast, {.min = 0.0f, .max = 2.0f});
+}
+
+float starVisibility(const Vec3& towardsSun) {
+    return 1.0f - smoothStep(radiansFromDegrees(labStarsFullBelowDegrees), radiansFromDegrees(labStarsAppearBelowDegrees), sunElevation(towardsSun));
+}
+
+DirectionalLight moonlightFor(const Vec3& towardsMoon, const Vec3& towardsSun, const LightLabNightSettings& settings, bool atmosphere) {
+    DirectionalLight moonlight;
+    moonlight.direction = towardsMoon * -1.0f;
+    moonlight.colour = labMoonColour;
+    moonlight.intensity = settings.moonIntensity * moonPhaseBrightness(moonPhaseAngle(towardsSun, towardsMoon));
+    moonlight.castsShadows = true;
+    moonlight.angularRadius = moonAngularRadius;
+    moonlight.reflectsSun = true;
+
+    if (!atmosphere) {
+        moonlight.intensity *= smoothStep(radiansFromDegrees(sunFadeBelowDegrees), radiansFromDegrees(sunFullAboveDegrees), sunElevation(towardsMoon));
+    }
+
+    return moonlight;
 }
 
 Daylight daylightFor(const Vec3& towardsSun, const LightLabSunSettings& settings) {
@@ -236,6 +299,18 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
 
     sun = world.create();
     world.add(sun, DirectionalLight{});
+    moon = world.create();
+    world.add(moon, DirectionalLight{});
+
+    // The stars, made once and shared with every frame's copy of the sky.
+    std::vector<Star> catalogue;
+    for (const CatalogueStar& star : loadStarCatalogue(brightStarCataloguePath)) {
+        catalogue.push_back(makeStar(star));
+    }
+    StarrySky starrySky;
+    starrySky.stars = std::make_shared<const std::vector<Star>>(std::move(catalogue));
+    stars = world.create();
+    world.add(stars, std::move(starrySky));
     sky = world.create();
     world.add(sky, AmbientLight{});
     world.add(sky, SkyBackground{});
@@ -323,7 +398,7 @@ void LightLabGame::signalClockJumps(World& world) {
 */
 void LightLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     (void)simulationSeconds;
-    sunSettings.solarHours = advanceSolarHours(sunSettings.solarHours, sunSettings.hoursPerSecond, tickSeconds);
+    advanceLabClock(sunSettings, tickSeconds);
     clockHoursSeen = advanceSolarHours(clockHoursSeen, sunSettings.hoursPerSecond, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
@@ -348,10 +423,23 @@ void LightLabGame::updateDaylight(World& world) {
     world.get<AmbientLight>(sky) = daylight.sky;
     world.get<SkyBackground>(sky) = daylight.background;
 
-    // The real sky's air, while it is on; its disc drawn the same size as the lab's own.
+    // The moon and the stars where the sky has turned to at this moment.
+    const double days = daysSinceJ2000(sunSettings.year, sunSettings.dayOfYear, sunSettings.solarHours);
+    const Mat4 toWorld = equatorialToWorld(radiansFromDegrees(sunSettings.latitudeDegrees), siderealAngle(days, sunSettings.solarHours));
+    const EclipticPosition moonPosition = moonEclipticPosition(days);
+    const Vec3 towardsMoon = transformDirection(toWorld, eclipticToEquatorial(moonPosition.longitude, moonPosition.latitude));
+    world.get<DirectionalLight>(moon) = moonlightFor(towardsMoon, towardsSun, nightSettings, sunSettings.atmosphere);
+
+    StarrySky& starrySky = world.get<StarrySky>(stars);
+    starrySky.toWorld = toWorld;
+    starrySky.brightness = nightSettings.starBrightness * labStarBrightnessUnit * starVisibility(towardsSun);
+    starrySky.contrast = nightSettings.starContrast;
+
+    // The real sky's air, while it is on; its discs drawn the same size as the lab's own.
     if (sunSettings.atmosphere) {
         Atmosphere atmosphere = atmosphereSettings;
         atmosphere.sunDiscScale = sunSettings.sunDiscScale;
+        atmosphere.moonDiscScale = nightSettings.moonDiscScale;
 
         if (world.has<Atmosphere>(air)) {
             world.get<Atmosphere>(air) = atmosphere;
@@ -406,6 +494,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Sun", [&] {
         visit(sunSettings, visitor);
     });
+    visitor.group("Night", [&] {
+        visit(nightSettings, visitor);
+    });
     visitor.group("Atmosphere", [&] {
         visit(atmosphereSettings, visitor);
     });
@@ -427,11 +518,19 @@ void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
         if (golden.view.name == view.name) {
             // The clock stands still, so the view's ticks do not move the sun off its hour.
             sunSettings.solarHours = golden.solarHours;
+            sunSettings.dayOfYear = golden.dayOfYear;
             sunSettings.hoursPerSecond = 0.0f;
             updateDaylight(world);
-            const Vec3 target = golden.facingSun
+            Vec3 target = golden.facingSun
                 ? golden.cameraPosition + directionTowardsSunOn(sunSettings.latitudeDegrees, sunSettings.dayOfYear, sunSettings.solarHours)
                 : golden.cameraTarget;
+
+            if (golden.facingMoon) {
+                const Vec3 towardsMoon = world.get<DirectionalLight>(moon).direction.normalized() * -1.0f;
+                const float pitch = sunElevation(towardsMoon) - moonViewBelowRadians;
+                const Vec3 bearing = Vec3{towardsMoon.x, 0.0f, towardsMoon.z}.normalized();
+                target = golden.cameraPosition + bearing * std::cos(pitch) + Vec3{0.0f, std::sin(pitch), 0.0f};
+            }
             controls.poseFreeCamera(world, golden.cameraPosition, target);
             updateDaylight(world);
 
@@ -452,6 +551,14 @@ const StaticLevel& LightLabGame::getLevel() const {
 
 LightLabSunSettings& LightLabGame::getSunSettings() {
     return sunSettings;
+}
+
+LightLabNightSettings& LightLabGame::getNightSettings() {
+    return nightSettings;
+}
+
+Entity LightLabGame::getMoon() const {
+    return moon;
 }
 
 

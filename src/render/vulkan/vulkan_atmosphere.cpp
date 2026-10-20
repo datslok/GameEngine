@@ -96,7 +96,7 @@ VulkanAtmosphere::VulkanAtmosphere(const VulkanDevice& device, DescriptorLayouts
     sampler(sampler),
     transmittance(createTable(device, transmittanceLutWidth, transmittanceLutHeight, "Atmosphere transmittance table")),
     multipleScattering(createTable(device, multipleScatteringLutSize, multipleScatteringLutSize, "Atmosphere multiple scattering table")),
-    skyView(createTable(device, skyViewLutWidth, skyViewLutHeight, "Atmosphere sky view table")),
+    skyView(createTable(device, skyViewLutWidth, skyViewLutHeight * skyViewLights, "Atmosphere sky view table")),
     // Copied from by the GPU tests, which read the ambient back.
     skyLight(device.getAllocator(), skyLightBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Gpu)
 {
@@ -204,7 +204,7 @@ void VulkanAtmosphere::update(VkCommandBuffer commands, FrameDescriptors& descri
     skyView.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
     const std::array<VkImageView, 1> skyViewView{skyView.getView()};
     dispatch(commands, descriptors, device.getDevice(), *skyViewPipeline, buffers, tables, skyViewView,
-             workgroupCount(skyViewLutWidth, ATMOSPHERE_GROUP_SIDE), workgroupCount(skyViewLutHeight, ATMOSPHERE_GROUP_SIDE));
+             workgroupCount(skyViewLutWidth, ATMOSPHERE_GROUP_SIDE), workgroupCount(skyViewLutHeight * skyViewLights, ATMOSPHERE_GROUP_SIDE));
     skyView.transition(commands, ImageState::SurfaceRead);
 
     const VkPipelineStageFlags2 readers = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -243,6 +243,10 @@ void VulkanAtmosphere::drawSky(VkCommandBuffer commands, FrameDescriptors& descr
 
 SampledImage VulkanAtmosphere::sampledSkyView() const {
     return SampledImage{skyView.getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+}
+
+SampledImage VulkanAtmosphere::sampledTransmittance() const {
+    return SampledImage{transmittance.getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
 VkDescriptorBufferInfo VulkanAtmosphere::describeSkyLight() const {

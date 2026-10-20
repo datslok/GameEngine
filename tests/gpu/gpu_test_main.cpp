@@ -26,6 +26,7 @@ int main() {
             gpuTestBloom(runner, report);
             gpuTestDither(runner, report);
             gpuTestOverlay(runner, report);
+            gpuTestStars(runner, report);
             gpuTestClusters(runner, report);
             gpuTestCascades(runner, report);
             gpuTestDdgiSampling(runner, report);

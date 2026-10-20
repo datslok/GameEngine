@@ -1,7 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Runs atmosphere.glsl's functions on the cases atmosphere_gpu_test.cpp sends: each case's first nine inputs are the
+// Runs atmosphere.glsl's functions on the cases atmosphere_gpu_test.cpp sends: each case's first twelve inputs are the
 // atmosphere (GpuAtmosphere), then the function's own.
 #include "gpu_test.glsl"
 #include "atmosphere.glsl"
@@ -12,9 +12,9 @@ void main() {
     }
 
     Atmosphere atmosphere = Atmosphere(testInput(0), testInput(1), testInput(2), testInput(3), testInput(4), testInput(5), testInput(6),
-                                       testInput(7), testInput(8));
-    vec4 first = testInput(9);
-    vec4 second = testInput(10);
+                                       testInput(7), testInput(8), testInput(9), testInput(10), testInput(11));
+    vec4 first = testInput(12);
+    vec4 second = testInput(13);
 
     if (function == GPU_TEST_ATMOSPHERE_MEDIUM) {
         // first: x altitude, y the cosine from the sun.
@@ -43,12 +43,11 @@ void main() {
         // first: xyz the throughput so far, w the step's length; second: xyz the sunlight, w the cosine from the sun;
         // third: xyz the multiple scattering, w an altitude; fourth: x a ray's radius, y its cosine to the up, z a
         // sphere's radius; sixth: x a step, y the steps, z a ray's length.
-        vec4 third = testInput(11);
-        vec4 fourth = testInput(12);
-        vec4 fifth = testInput(13);
-        vec4 sixth = testInput(14);
+        vec4 third = testInput(14);
+        vec4 fourth = testInput(15);
+        vec4 sixth = testInput(17);
         AtmosphereMedium medium = atmosphereMedium(atmosphere, third.w);
-        vec3 source = skyStepSource(atmosphere, medium, second.xyz, third.xyz, second.w);
+        vec3 source = skyStepSource(atmosphere, medium, second.xyz, third.xyz, second.w, atmosphere.sunIlluminance.rgb);
         ScatteringMarch march = ScatteringMarch(vec3(0.1, 0.2, 0.3), first.xyz, vec3(0.05));
         scatteringMarchStep(march, medium, source, first.w);
         MarchSample sampled = marchSample(int(sixth.x), int(sixth.y), sixth.z);
@@ -64,5 +63,14 @@ void main() {
         testOutput(0, vec4(march.luminance, 0.0));
         testOutput(1, vec4(march.multipleScatteringAs1, 0.0));
         testOutput(2, vec4(multipleScatteringFromSums(second.xxx * vec3(1.0, 2.0, 3.0), second.yyy * vec3(1.0, 1.5, 2.0)), 0.0));
+    } else if (function == GPU_TEST_ATMOSPHERE_LIGHTS) {
+        // first: xyz a direction, w a disc's sine; second: xyz towards the disc, w a light's number; third: xyz towards
+        // the light; fourth: xy a sky's table coordinate.
+        vec4 third = testInput(14);
+        vec4 fourth = testInput(15);
+        int light = int(second.w);
+        testOutput(0, vec4(lommelSeeliger(first.xyz, second.xyz, first.w, third.xyz), skyViewAtlasUv(fourth.xy, light), 0.0));
+        testOutput(1, vec4(atmosphereLightDirection(atmosphere, light), 0.0));
+        testOutput(2, vec4(atmosphereLightIlluminance(atmosphere, light), 0.0));
     }
 }

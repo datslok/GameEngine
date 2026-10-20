@@ -19,10 +19,17 @@ vec3 multipleScatteringFromTable(sampler2D table, Atmosphere atmosphere, float r
     return textureLod(table, multipleScatteringLutUv(atmosphere, radius, cosSunZenith), 0.0).rgb;
 }
 
-// The sky's light along a world direction from the camera (without the sun's disc).
+// The sky's light along a world direction from the camera (without the discs): the sky lit by the sun plus the sky lit
+// by the moon, each looked up by its own light's bearing.
 vec3 skyFromTable(sampler2D table, Atmosphere atmosphere, vec3 direction) {
-    SkyViewDirection lookup = skyViewLookup(atmosphere, atmosphere.radii.w, direction, atmosphere.sun.xyz);
-    return textureLod(table, skyViewLutUv(atmosphere, atmosphere.radii.w, lookup), 0.0).rgb;
+    vec3 sky = vec3(0.0);
+
+    for (int light = 0; light < ATMOSPHERE_SKY_VIEW_LIGHTS; ++light) {
+        SkyViewDirection lookup = skyViewLookup(atmosphere, atmosphere.radii.w, direction, atmosphereLightDirection(atmosphere, light));
+        sky += textureLod(table, skyViewAtlasUv(skyViewLutUv(atmosphere, atmosphere.radii.w, lookup), light), 0.0).rgb;
+    }
+
+    return sky;
 }
 
 #endif

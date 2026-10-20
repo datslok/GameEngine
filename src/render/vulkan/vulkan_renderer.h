@@ -23,6 +23,7 @@
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_atmosphere.h"
+#include "render/vulkan/vulkan_stars.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
@@ -223,6 +224,9 @@ private:
 
     // The sky and the air the light crosses, when the frame has an atmosphere.
     std::unique_ptr<VulkanAtmosphere> atmosphere;
+
+    // The stars behind the sky, when the frame has an atmosphere and a starry sky.
+    std::unique_ptr<VulkanStars> starPass;
     std::unique_ptr<VulkanDebugLines> debugLines;
     std::unique_ptr<VulkanOverlay> overlay;
     bool debugUiStarted = false;
@@ -306,9 +310,10 @@ private:
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
     // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
-    // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone).
+    // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone),
+    // with stars, when the frame has them, over it.
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
-                      bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky);
+                      bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky, const StarrySky* stars);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;

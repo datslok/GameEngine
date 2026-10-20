@@ -250,6 +250,55 @@ Vec3 skyViewSunDirection(float cosSunZenith) {
     return directionAt(cosSunZenith);
 }
 
+Vec2 skyViewAtlasUv(const Vec2& uv, int light) {
+    return Vec2{uv.x, (uv.y + static_cast<float>(light)) / static_cast<float>(skyViewLights)};
+}
+
+/*
+* The normal at a point of the disc: its part across the view is the direction's offset from the centre over the disc's
+* radius, and its part back towards the viewer (-towardsBody) makes it a unit vector; that part is also mu. At the very
+* edge mu and, with the light behind the viewer, mu0 are both 0: nothing there.
+*/
+float lommelSeeliger(const Vec3& direction, const Vec3& towardsBody, float sinRadius, const Vec3& towardsLight) {
+    const float along = direction.dot(towardsBody);
+
+    if (sinRadius <= 0.0f || along <= 0.0f) {
+        return 0.0f;
+    }
+
+    const Vec3 across = (direction - towardsBody * along) * (1.0f / sinRadius);
+    const float acrossSquared = across.lengthSquared();
+
+    if (acrossSquared > 1.0f) {
+        return 0.0f;
+    }
+
+    const float viewCosine = std::sqrt(1.0f - acrossSquared);
+    const Vec3 normal = across - towardsBody * viewCosine;
+    const float lightCosine = normal.dot(towardsLight);
+
+    if (lightCosine <= 0.0f || lightCosine + viewCosine <= 0.0f) {
+        return 0.0f;
+    }
+
+    return 2.0f * lightCosine / (lightCosine + viewCosine);
+}
+
+float lommelSeeligerDiscShare(float phaseAngle) {
+    const float angle = std::abs(phaseAngle);
+
+    if (angle <= 0.0f) {
+        return 1.0f;
+    }
+
+    if (angle >= pi) {
+        return 0.0f;
+    }
+
+    const float share = 1.0f - std::sin(angle * 0.5f) * std::tan(angle * 0.5f) * std::log(1.0f / std::tan(angle * 0.25f));
+    return std::max(share, 0.0f);
+}
+
 float oneMinusExp(float depth) {
     if (depth < 1e-3f) {
         return depth * (1.0f - depth * (0.5f - depth / 6.0f));
@@ -392,25 +441,31 @@ DirectionalLight throughAtmosphere(const DirectionalLight& light, const Atmosphe
     return through;
 }
 
-int atmosphereSun(std::span<const DirectionalLight> lights) {
-    int brightest = -1;
-    float strongest = -1.0f;
+/*
+* One walk over the lights, keeping the brightest of each kind: their value above the air, colour times intensity.
+*/
+AtmosphereSkyLights atmosphereSkyLights(std::span<const DirectionalLight> lights) {
+    AtmosphereSkyLights found;
+    float strongestSun = -1.0f;
+    float strongestMoon = -1.0f;
 
     for (std::size_t index = 0; index < lights.size(); ++index) {
         const DirectionalLight& light = lights[index];
         const float strength = light.intensity * std::max({light.colour.x, light.colour.y, light.colour.z});
+        float& strongest = light.reflectsSun ? strongestMoon : strongestSun;
 
         if (strength > strongest) {
             strongest = strength;
-            brightest = static_cast<int>(index);
+            (light.reflectsSun ? found.moon : found.sun) = static_cast<int>(index);
         }
     }
 
-    return brightest;
+    return found;
 }
 
 GpuAtmosphere packAtmosphere(const Atmosphere& atmosphere, const AtmosphereFrame& frame) {
     const Vec3 illuminance = frame.sunLight * pi;
+    const Vec3 moonIlluminance = frame.moonLight * pi;
     return GpuAtmosphere{
         {atmosphere.rayleighScattering.x, atmosphere.rayleighScattering.y, atmosphere.rayleighScattering.z, atmosphere.rayleighScaleHeight},
         {atmosphere.mieScattering, atmosphere.mieAbsorption, atmosphere.mieScaleHeight, atmosphere.mieAnisotropy},
@@ -420,5 +475,8 @@ GpuAtmosphere packAtmosphere(const Atmosphere& atmosphere, const AtmosphereFrame
         {frame.towardsSun.x, frame.towardsSun.y, frame.towardsSun.z, std::cos(frame.discAngularRadius)},
         {illuminance.x, illuminance.y, illuminance.z, 0.0f},
         {frame.sunDisc.x, frame.sunDisc.y, frame.sunDisc.z, 0.0f},
-        {frame.ambient.x, frame.ambient.y, frame.ambient.z, 0.0f}};
+        {frame.ambient.x, frame.ambient.y, frame.ambient.z, 0.0f},
+        {frame.towardsMoon.x, frame.towardsMoon.y, frame.towardsMoon.z, std::cos(frame.moonDiscAngularRadius)},
+        {moonIlluminance.x, moonIlluminance.y, moonIlluminance.z, std::sin(frame.moonDiscAngularRadius)},
+        {frame.moonDisc.x, frame.moonDisc.y, frame.moonDisc.z, 0.0f}};
 }
