@@ -101,4 +101,8 @@
 // stars_test.comp
 #define GPU_TEST_STARS 0
 
+// eye_adaptation_test.comp
+#define GPU_TEST_EYE_STEPS 0
+#define GPU_TEST_EYE_MEAN 1
+
 #endif

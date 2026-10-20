@@ -8,6 +8,6 @@ ToneMapUniformData packToneMapping(const ToneMappingSettings& settings, const Di
 
     return ToneMapUniformData{
         {settings.exposure, display.peakBrightness, static_cast<float>(static_cast<int>(settings.curve)), bloom.strength},
-        {display.whiteLevel, display.hdr ? 0.0f : 1.0f, bloom.scale, 0.0f}
+        {display.whiteLevel, display.hdr ? 0.0f : 1.0f, bloom.scale, settings.eyeAdaptation ? 1.0f : 0.0f}
     };
 }

@@ -23,6 +23,7 @@
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_atmosphere.h"
+#include "render/vulkan/vulkan_eye_adaptation.h"
 #include "render/vulkan/vulkan_stars.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
@@ -207,6 +208,13 @@ private:
     // Fitting the sun's cascades to the screen (cascades.h): the depth measurement read back but not yet used (from a
     // frame or two ago), and where the cascades end now.
     std::unique_ptr<VulkanDepthRange> depthRange;
+
+    // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
+    // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.
+    std::unique_ptr<VulkanEyeAdaptation> eyeAdaptation;
+    std::optional<GpuEyeAdaptation> lastEyeAdaptation;
+    bool eyeAdaptationFresh = true;
+    bool capturing = false;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
 

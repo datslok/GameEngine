@@ -56,11 +56,19 @@ namespace {
         assert(videoMemoryText(VideoMemory{}) == "VRAM -");
     }
 
-    // The readout's lines: the engine's counts, the light probes and memory first, then its timings, then the game's own.
+    // The readout's lines: the engine's counts, the light probes, memory, exposure and camera first, then its timings, then the game's own.
+    // The camera's line: where it stands in metres and the unit direction it looks, to set up a view somewhere else.
+    void testCameraReadout() {
+        assert(cameraText(Vec3{-10.04f, 1.7f, 9.0f}, Vec3{-0.981f, -0.05f, 0.2f}) == "CAMERA -10.0 1.7 9.0  LOOK -0.98 -0.05 0.20");
+        assert(cameraText(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}) == "CAMERA 0.0 0.0 0.0  LOOK 0.00 0.00 -1.00");
+    }
+
     void testReadoutLinesFollowEachOther() {
         assert(probeReadoutLine == 4);
         assert(videoMemoryReadoutLine == probeReadoutLine + 1);
-        assert(engineProfileReadoutLine == videoMemoryReadoutLine + 1);
+        assert(exposureReadoutLine == videoMemoryReadoutLine + 1);
+        assert(cameraReadoutLine == exposureReadoutLine + 1);
+        assert(engineProfileReadoutLine == cameraReadoutLine + 1);
         assert(gpuProfileReadoutLine == engineProfileReadoutLine + 1);
         assert(firstGameReadoutLine == gpuProfileReadoutLine + 1);
     }
@@ -72,4 +80,5 @@ void testVideoMemory() {
     testIntegratedGpuCounts();
     testReadoutText();
     testReadoutLinesFollowEachOther();
+    testCameraReadout();
 }

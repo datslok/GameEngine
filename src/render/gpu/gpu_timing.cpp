@@ -26,6 +26,8 @@ const char* gpuPassName(GpuPass pass) {
         return "RAYS";
     case GpuPass::DepthRange:
         return "DEPTHS";
+    case GpuPass::EyeAdaptation:
+        return "EYE";
     case GpuPass::Bloom:
         return "BLOOM";
     case GpuPass::ToneMap:

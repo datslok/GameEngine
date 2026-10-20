@@ -12,6 +12,18 @@ void validateToneMapping(const ToneMappingSettings& settings, float peakBrightne
     if (!(peakBrightness > 0.0f)) {
         throw std::invalid_argument("Tone mapping peak brightness must be positive");
     }
+
+    if (!(settings.adaptationReference > 0.0f) || !(settings.adaptationStrength >= 0.0f)) {
+        throw std::invalid_argument("Eye adaptation needs a positive reference brightness and a strength of at least 0");
+    }
+
+    if (!(settings.darkAdaptationSeconds >= 0.0f) || !(settings.brightAdaptationSeconds >= 0.0f) || !(settings.darkAdaptationDelaySeconds >= 0.0f)) {
+        throw std::invalid_argument("Eye adaptation times must not be negative");
+    }
+
+    if (!(settings.lowestExposureEv <= settings.highestExposureEv)) {
+        throw std::invalid_argument("Eye adaptation's lowest exposure must not be above its highest");
+    }
 }
 
 namespace {
@@ -135,4 +147,12 @@ namespace {
 void visit(ToneMappingSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Curve", settings.curve, curveNames);
     visitor.field("Exposure", settings.exposure, {.min = 0.0f, .sliderMax = 4.0f});
+    visitor.field("Eye adaptation", settings.eyeAdaptation);
+    visitor.field("Adaptation reference", settings.adaptationReference, {.min = 0.001f, .sliderMax = 1.0f});
+    visitor.field("Adaptation strength", settings.adaptationStrength, {.min = 0.0f, .sliderMax = 1.0f});
+    visitor.field("Dark adaptation", settings.darkAdaptationSeconds, {.min = 0.0f, .sliderMax = 10.0f, .unit = "s"});
+    visitor.field("Dark adaptation delay", settings.darkAdaptationDelaySeconds, {.min = 0.0f, .sliderMax = 5.0f, .unit = "s"});
+    visitor.field("Bright adaptation", settings.brightAdaptationSeconds, {.min = 0.0f, .sliderMax = 10.0f, .unit = "s"});
+    visitor.field("Lowest exposure", settings.lowestExposureEv, {.min = -16.0f, .max = 16.0f, .sliderMax = 0.0f, .unit = "EV"});
+    visitor.field("Highest exposure", settings.highestExposureEv, {.min = -16.0f, .max = 16.0f, .sliderMin = 0.0f, .unit = "EV"});
 }

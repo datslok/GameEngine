@@ -23,10 +23,27 @@ enum class ToneMapCurve {
 struct ToneMappingSettings {
     ToneMapCurve curve = ToneMapCurve::AgX;
 
-    // Multiplies the scene's brightness before the curve, like a camera's exposure. 1 leaves it unchanged. The curves
-    // darken the faintest values and compress the brightest, so 1.5 keeps a scene lit for the old, clipped look about as
-    // bright in its shadows and mid-tones (AgX shows 0.006 as 0.005 and 0.5 as 0.52), while highlights still roll off.
-    float exposure = 1.5f;
+    // Multiplies the scene's brightness before the curve, like a camera's exposure. 1 leaves it unchanged (chosen by the
+    // user by eye with eye adaptation on; 1.5 kept scenes lit for the old, clipped look about as bright in their
+    // shadows and mid-tones, since the curves darken the faintest values: AgX shows 0.006 as 0.005 and 0.5 as 0.52).
+    float exposure = 1.0f;
+
+    /*
+    * Eye adaptation (render/gpu/eye_adaptation.h): the exposure above becomes a bias, multiplied by one that follows
+    * the scene's brightness. The reference is the scene brightness (its middle pixels' mean luminance) shown as it is;
+    * the strength how much of a difference from it is made up (1 all, 0 none: a night five stops darker shows 2.5
+    * stops darker at 0.5); the exposure stays within its lowest and highest stops (at most one brighter, chosen by eye
+    * so dark scenes stay dark); it eases towards its target with a
+    * time constant, slower into the dark than into the light, as an eye does.
+    */
+    bool eyeAdaptation = true;
+    float adaptationReference = 0.3f;
+    float adaptationStrength = 0.5f;
+    float darkAdaptationSeconds = 1.0f;
+    float darkAdaptationDelaySeconds = 1.0f; // into the dark, the eye first holds this long (holdThenAdaptExposure)
+    float brightAdaptationSeconds = 0.7f;
+    float lowestExposureEv = -4.0f;
+    float highestExposureEv = 1.0f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

@@ -1,0 +1,35 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs eye_adaptation.glsl's functions on the cases eye_adaptation_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "eye_adaptation.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_EYE_STEPS) {
+        // Inputs: (colour, luminance), (bin, mean, reference, strength), (lowest, highest, current, target),
+        // (seconds, dark seconds, bright seconds, delay), (seconds already held, 0, 0, 0).
+        vec4 colour = testInput(0);
+        vec4 second = testInput(1);
+        vec4 third = testInput(2);
+        vec4 fourth = testInput(3);
+        testOutput(0, vec4(pixelLuminance(colour.rgb), float(histogramBin(colour.w)), histogramBinEv(int(second.x)),
+                           targetExposureEv(second.y, second.z, second.w, third.x, third.y)));
+        vec2 held = holdThenAdaptExposure(third.z, third.w, testInput(4).x, fourth.x, fourth.y, fourth.z, fourth.w);
+        testOutput(1, vec4(adaptExposureEv(third.z, third.w, fourth.x, fourth.y, fourth.z), held, 0.0));
+    } else if (function == GPU_TEST_EYE_MEAN) {
+        // Inputs: the histogram, four bins a vec4, then (low share, high share, fallback, 0).
+        uint counts[EYE_HISTOGRAM_BINS];
+
+        for (int bin = 0; bin < EYE_HISTOGRAM_BINS; ++bin) {
+            counts[bin] = uint(testInput(uint(bin / 4))[bin % 4]);
+        }
+
+        vec4 shares = testInput(uint(EYE_HISTOGRAM_BINS / 4));
+        testOutput(0, vec4(histogramMeanEv(counts, shares.x, shares.y, shares.z)));
+    }
+}

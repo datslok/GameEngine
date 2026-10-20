@@ -37,7 +37,7 @@ struct LightLabSunSettings {
 
     // The sun disc in the sky against its real size (0.53 degrees across), for looks only: shadows keep the real size,
     // and a bigger disc glows dimmer by as much, so it gives the same light.
-    float sunDiscScale = 1.0f;
+    float sunDiscScale = 5.0f;
 };
 
 void visit(LightLabSunSettings& settings, SettingsVisitor& visitor);
@@ -52,16 +52,16 @@ float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);
 void advanceLabClock(LightLabSunSettings& settings, float seconds);
 
 /*
-* The night sky's dials, picked by eye, not real: the engine has no exposure yet (the real full moon gives a 400,000th of
-* the sun's light, which would draw pure black), so the moon and stars are as bright as looks right through the default
-* tone mapping.
+* The night sky's dials, picked by eye, not real: the real full moon gives a 400,000th of the sun's light, more than the
+* eye adaptation makes up (render/gpu/eye_adaptation.h: part of a difference, at most 1 stop), so the moon and stars
+* are as bright as looks right through it.
 */
 struct LightLabNightSettings {
     // The full moon's light above the air (the sun's is sunIntensity); the phase dims it (scene/moon.h).
-    float moonIntensity = 0.25f;
+    float moonIntensity = 0.05f;
 
     // The moon's disc against its real size, for looks only, as the sun's.
-    float moonDiscScale = 1.0f;
+    float moonDiscScale = 5.0f;
 
     // A magnitude 0 star's light, in millionths of the engine's light value (labStarBrightnessUnit), and how far the
     // magnitudes spread the stars' light (1 real, lower squeezes it so faint stars show; scene/stars.h, StarrySky).

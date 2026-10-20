@@ -1,10 +1,12 @@
 #pragma once
 
+#include "render/gpu/eye_adaptation.h"
 #include "render/gpu/gpu_timing.h"
 #include "render/gpu/probe_relocation.h"
 #include "render/gpu/video_memory.h"
 
 #include <cstddef>
+#include <optional>
 
 // What the last frame drew and what it skipped, counting each mesh once per view (each shadow tile is a view).
 // Shadow views also skip meshes that do not cast shadows.
@@ -44,4 +46,8 @@ struct RenderStats {
 
     // The video memory in use and the driver's budget, read as this frame began (render/gpu/video_memory.h).
     VideoMemory videoMemory;
+
+    // The eye's adapted exposure as an earlier frame left it (as many back as there are frames in flight), while it
+    // adapts (render/gpu/eye_adaptation.h).
+    std::optional<GpuEyeAdaptation> eyeAdaptation;
 };

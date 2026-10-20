@@ -22,6 +22,7 @@ enum class GpuPass {
     ProbeBalls,
     RayDebug,
     DepthRange,
+    EyeAdaptation,
     Bloom,
     ToneMap,
     DebugLines,

@@ -79,7 +79,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 25, 900, 5, 0, 6, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 25, 900, 5, 0, 6, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -95,7 +95,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1146 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1155 * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

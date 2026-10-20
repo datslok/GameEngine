@@ -1,0 +1,40 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The scene's brightness as a histogram (render/gpu/eye_adaptation.h): each invocation puts one pixel of the lit scene
+* into its bin in stops, first in the workgroup's own histogram in shared memory (fast atomics), then each invocation
+* adds one bin of it to the frame's histogram, only where it holds pixels. Counts add up the same in any order, so the
+* result never depends on which group finishes first. The frame's histogram is zeroed before this pass.
+*/
+#include "eye_adaptation.glsl"
+
+layout(local_size_x = EYE_HISTOGRAM_GROUP_SIDE, local_size_y = EYE_HISTOGRAM_GROUP_SIDE) in;
+
+layout(std430, set = 0, binding = 0) buffer Histogram {
+    uint counts[EYE_HISTOGRAM_BINS];
+};
+
+layout(set = 0, binding = 1) uniform sampler2D sceneColour;
+
+shared uint groupCounts[EYE_HISTOGRAM_BINS];
+
+void main() {
+    // One bin an invocation: a group has exactly as many invocations as there are bins.
+    uint bin = gl_LocalInvocationIndex;
+    groupCounts[bin] = 0u;
+    barrier();
+
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (all(lessThan(pixel, textureSize(sceneColour, 0)))) {
+        vec3 colour = max(texelFetch(sceneColour, pixel, 0).rgb, vec3(0.0));
+        atomicAdd(groupCounts[histogramBin(pixelLuminance(colour))], 1u);
+    }
+
+    barrier();
+
+    if (groupCounts[bin] > 0u) {
+        atomicAdd(counts[bin], groupCounts[bin]);
+    }
+}

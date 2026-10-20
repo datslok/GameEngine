@@ -123,6 +123,7 @@ void gpuTestDepthRange(const VulkanDevice& device, GpuCheckReport& report);
 
 // The sky's library, then its passes (the tables and the flat ambient) against the CPU's marches.
 void gpuTestAtmosphere(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestEyeAdaptation(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);
 
 // Ray tracing's library, then real acceleration structures traced on the GPU against the CPU's raycast (skipped on a
 // GPU without ray queries).
