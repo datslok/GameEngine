@@ -53,15 +53,19 @@ struct GlobalIlluminationSettings {
     /*
     * Where the probes are (render/gpu/probe_cascades.h): probeCascades nested grids round the point the game's
     * ProbeCascades follows (the camera), the densest probeSpacing apart and each further one twice as far apart, so
-    * twice as far across; each cascadeProbesAcross probes along both level axes and cascadeProbesHigh up. Each lights
-    * points at full weight out to a little over a third of its width from the camera (probeCascadeReach), so the
-    * densest, 21 x 13 probes half a metre apart, covers 3.6 m round the camera at full weight and 1.6 m up and down, the
-    * fourth 29 m and 13 m. Finer probes see light through doorways that coarser ones miss; each cascade costs memory
-    * (about 8 KB a probe: 23,000 probes, about 190 MB) and tracing (only probes near surfaces trace). Odd counts centre
-    * the camera best. Changing any of them rebuilds the probes (a hitch).
+    * twice as far across. The densest has densestProbesAcross probes along both level axes and densestProbesHigh up,
+    * the coarser ones cascadeProbesAcross and cascadeProbesHigh: detail matters most near the camera, so the densest is
+    * the one made larger. Each lights points at full weight out to a little over a third of its width from the camera
+    * (probeCascadeReach), so the densest, 31 x 17 probes half a metre apart, covers 6.1 m round the camera at full
+    * weight and 2.6 m up and down (a room round the camera, and its floor and ceiling from eye height; 21 x 13 covered
+    * 3.6 m and 1.6 m), the next 7.3 m and 3.4 m, the fourth 29 m and 13 m. Finer probes see light through doorways that
+    * coarser ones miss; each cascade costs memory (about 8 KB a probe: 33,500 probes, about 270 MB) and tracing (only
+    * probes near surfaces trace). Odd counts centre the camera best. Changing any of them rebuilds the probes (a hitch).
     */
     int probeCascades = 4;
     float probeSpacing = 0.5f;
+    int densestProbesAcross = 31;
+    int densestProbesHigh = 17;
     int cascadeProbesAcross = 21;
     int cascadeProbesHigh = 13;
 
@@ -349,17 +353,17 @@ bool probesSeeEachOther(float meanDistance, float separation);
 Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, const std::array<bool, 6>& visible, float weight);
 
 /*
-* What the sharing pass reads, as push constants (must match ddgi_share.comp): each cascade's size, how many there are
-* (where each is and how it is scrolled, in the cascades' buffer), and the weights.
+* What the sharing pass reads, as push constants (must match ddgi_share.comp): the atlases' grid, how many probes and
+* cascades there are (where each cascade is, its size and how it is scrolled, in the cascades' buffer), and the weights.
 */
 struct GpuProbeShare {
-    std::int32_t counts[4]; // xyz each cascade's probes along each axis, w how many cascades
+    std::int32_t counts[4]; // xy the atlases' columns and rows, z every cascade's probes together, w how many cascades
     float weight[4];        // x the still light's sharing weight, y the fast light's, z a restarted probe's at first, w the long memory's share kept
 };
 
 static_assert(sizeof(GpuProbeShare) == 32, "GpuProbeShare must match ddgi_share.comp");
 
-GpuProbeShare packProbeShare(const ProbeCounts& counts, int cascades, float weight, float fastWeight, float eventWeight, float longKeep);
+GpuProbeShare packProbeShare(int probes, int cascades, float weight, float fastWeight, float eventWeight, float longKeep);
 
 /*
 * Whether a probe counts as within reach of a light, for tracing more rays: the light's range, grown by reach (the
@@ -506,7 +510,7 @@ float restartedProbeKeep(float longKeep, float shortKeep, float growth, float fr
 float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep);
 
 // Throws std::invalid_argument for a volume the renderer cannot hold: fewer than one probe along an axis, spacing not
-// positive, more than maxProbesPerVolume probes, or atlases larger than maxProbeAtlasSide.
+// positive, or more than maxProbesPerVolume probes (any that fit, the atlases hold: probeAtlasGrid).
 void validateProbeVolume(const ProbeVolume& volume);
 
 int probeCount(const ProbeCounts& counts);
@@ -527,32 +531,41 @@ ProbeGridCoord probeGridCoord(const ProbeVolume& volume, int slot);
 Vec3 probePosition(const ProbeVolume& volume, int slot);
 
 /*
-* Every probe's bordered square side by side in one image per kind (an atlas): probe i's square is column
-* i mod (counts.x * counts.y), row i / (counts.x * counts.y), so each row of squares is one layer of the grid (one z).
+* Every probe's bordered square side by side in one image per kind (an atlas), every cascade's probes one after another
+* whatever their sizes: probe i's square is column i mod columns, row i / columns, as text runs along lines. The rows
+* used to be the grid's layers, which needs every cascade the same width and makes a wide one's rows too long for an
+* image (31 x 31 distance squares are 17,298 texels).
 */
+struct ProbeAtlasGrid {
+    int columns = 1;
+    int rows = 1;
+};
+
+ProbeAtlasGrid probeAtlasGrid(int probes);
+
 struct ProbeAtlasSize {
     int width = 0;
     int height = 0;
 };
 
-ProbeAtlasSize probeAtlasSize(const ProbeCounts& counts, int side);
+ProbeAtlasSize probeAtlasSize(const ProbeAtlasGrid& grid, int side);
 
 // The top-left texel of probe index's bordered square (side + 2 across).
-TexelCoord probeTileOrigin(const ProbeCounts& counts, int index, int side);
+TexelCoord probeTileOrigin(const ProbeAtlasGrid& grid, int index, int side);
 
 // Where to sample probe index's atlas for a direction: 0..1 across the whole atlas, inside the square's inner texels.
-Vec2 probeAtlasUv(const ProbeCounts& counts, int index, const Vec3& direction, int side);
+Vec2 probeAtlasUv(const ProbeAtlasGrid& grid, int index, const Vec3& direction, int side);
 
 /*
 * What every probe pass reads, as push constants (must match ProbeVolumeData in assets/shaders/ddgi_volume.glsl):
 * exactly the 128 bytes every GPU allows, so the ray counts fill the rotation rows' spare w slots (whole numbers, exact
-* as floats). Where each cascade's probes are is in the cascades' buffer (render/gpu/probe_cascades.h,
-* GpuProbeCascade); probe number p is slot p mod probes of cascade p / probes, so the atlases hold the cascades one
-* after another, as one grid counts.z times cascades layers deep (probeAtlasGrid).
+* as floats). Where each cascade's probes are, and how many, is in the cascades' buffer (render/gpu/probe_cascades.h,
+* GpuProbeCascade): probe number p belongs to the last cascade whose first probe is p or less (probeCascadeHolding),
+* and the atlases hold every probe in that numbering (probeAtlasGrid).
 */
 struct GpuProbeVolume {
-    std::int32_t counts[4];   // xyz probes along each axis of one cascade, w the ray stride: room for the most rays any probe traces
-    std::int32_t cascades[4]; // x how many cascades, y probes in each, zw unused
+    std::int32_t counts[4];   // xy the atlases' columns and rows, z unused, w the ray stride: room for the most rays any probe traces
+    std::int32_t cascades[4]; // x how many cascades, y every cascade's probes together, zw unused
     float rotation[3][4]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, the change window's share kept
     float sky[4];         // rgb the light rays that hit nothing bring back (the sky behind everything), w the change threshold (0: fixed memory)
     float hysteresis[4];  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
@@ -583,11 +596,8 @@ struct ProbeFrame {
 // Room for each probe's rays in the ray buffers: the larger count.
 int probeRayStride(const ProbeFrame& frame);
 
-// Every cascade has counts probes; the atlases hold cascades of them.
-GpuProbeVolume packProbeVolume(const ProbeCounts& counts, int cascades, const ProbeFrame& frame);
-
-// The grid the atlases are laid out as: cascades of counts one after another along z.
-ProbeCounts probeAtlasGrid(const ProbeCounts& counts, int cascades);
+// probes: every cascade's together, which the atlases hold (probeAtlasGrid).
+GpuProbeVolume packProbeVolume(int probes, int cascades, const ProbeFrame& frame);
 
 // The ray budget's frame time is smoothed over this long, so one quick or slow frame does not move the ladder.
 inline constexpr float rayBudgetSmoothingSeconds = 0.25f;
@@ -663,7 +673,7 @@ struct ProbeSeed {
 * seeded ones (ProbeSeed) start their irradiance from the seed as if it were probeSeedFrames frames of their own: their
 * restart counts from there, so the seed's share fades as their own rays come in (restartedProbeKeep). Distances are
 * never seeded: a coarser probe's distances say nothing about what this one sees. restarts holds every cascade's probes
-* (cascades of volume's size, one after another), each cascade's events tested against its own volume.
+* (each cascade's, of its own size, one after another), each cascade's events tested against its own volume.
 */
 void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, std::span<const ProbeVolume> cascades, std::span<const ProbeEvent> events,
                           const ProbeFrame& frame, std::span<const int> restarted = {}, std::span<const ProbeSeed> seeded = {});

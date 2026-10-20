@@ -1032,7 +1032,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            settings.clusterHeatmap, settings.shadows);
     if (!probes.empty()) {
         const GlobalIlluminationSettings& illumination = settings.globalIllumination;
-        packProbeSampling(frameData, ProbeSampling{probes.front().volume.counts, static_cast<int>(probes.size()), illumination.selfShadowBias,
+        packProbeSampling(frameData, ProbeSampling{countCascadeProbes(probes), static_cast<int>(probes.size()), illumination.selfShadowBias,
                                                    illumination.bounceEnergy, illumination.lightsPerHit, hitLights.points, hitLights.spots});
     }
 

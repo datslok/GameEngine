@@ -273,10 +273,10 @@ ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin,
 void packProbeSampling(GpuFrameData& frameData, const ProbeSampling& sampling) {
     frameData.probeShading[0] = sampling.selfShadowBias;
     frameData.probeShading[1] = sampling.bounceEnergy;
-    frameData.probeCounts[0] = sampling.counts.x;
-    frameData.probeCounts[1] = sampling.counts.y;
-    frameData.probeCounts[2] = sampling.counts.z;
-    frameData.probeCounts[3] = sampling.cascades;
+    const ProbeAtlasGrid atlas = probeAtlasGrid(sampling.probes);
+    frameData.probeAtlas[0] = atlas.columns;
+    frameData.probeAtlas[1] = atlas.rows;
+    frameData.probeAtlas[3] = sampling.cascades;
     frameData.probeLights[0] = sampling.hitPoints;
     frameData.probeLights[1] = sampling.hitSpots;
     frameData.probeLights[2] = std::clamp(sampling.lightsPerHit, 0, maxLightsPerHit);

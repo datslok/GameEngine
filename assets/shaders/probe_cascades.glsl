@@ -15,16 +15,17 @@ struct ProbeCascade {
     vec4 weightCentre; // xyz where its weight is centred
     vec4 weightReach;  // xyz how far from there it lights
     vec4 weightFade;   // xyz how far its weight takes to fall to nothing
+    ivec4 counts;      // xyz its probes along each axis
 };
 
-// Where the grid puts probe number probe of this cascade (counts probes along each axis).
-vec3 cascadeProbePosition(ProbeCascade cascade, ivec3 counts, int probe) {
-    return probePosition(cascade.origin.xyz, cascade.spacing.xyz, counts, cascade.scroll.xyz, probe - cascade.scroll.w);
+// Where the grid puts probe number probe of this cascade.
+vec3 cascadeProbePosition(ProbeCascade cascade, int probe) {
+    return probePosition(cascade.origin.xyz, cascade.spacing.xyz, cascade.counts.xyz, cascade.scroll.xyz, probe - cascade.scroll.w);
 }
 
 // The probe number of the probe at grid place grid (within the cascade) of this cascade.
-int cascadeProbeNumber(ProbeCascade cascade, ivec3 counts, ivec3 grid) {
-    return cascade.scroll.w + probeSlot(counts, cascade.scroll.xyz, grid);
+int cascadeProbeNumber(ProbeCascade cascade, ivec3 grid) {
+    return cascade.scroll.w + probeSlot(cascade.counts.xyz, cascade.scroll.xyz, grid);
 }
 
 float cascadeWeight(ProbeCascade cascade, vec3 point) {

@@ -205,12 +205,12 @@ struct ProbeHitLights {
 ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume, bool keepFastApart = true);
 
 /*
-* What the frame's shaders need to sample the probes and light their rays' hits, into the frame's uniform block: each
-* cascade's probes along each axis, how many cascades (where each is, in the cascades' buffer: probe_cascades.h), and
-* the sampling's settings.
+* What the frame's shaders need to sample the probes and light their rays' hits, into the frame's uniform block: every
+* cascade's probes together (for the atlases' grid), how many cascades (where each is and its size, in the cascades'
+* buffer: probe_cascades.h), and the sampling's settings.
 */
 struct ProbeSampling {
-    ProbeCounts counts;
+    int probes = 1;
     int cascades = 1;
     float selfShadowBias = 0.3f;
     float bounceEnergy = 0.85f;

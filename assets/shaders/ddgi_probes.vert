@@ -22,8 +22,8 @@ const vec2 squareCorners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.
 
 void main() {
     probe = gl_InstanceIndex;
-    ProbeCascade cascade = probeCascades[volumeCascadeOf(probe)];
-    vec3 centre = cascadeProbePosition(cascade, volume.counts.xyz, probe) + probeStates[probe].offset;
+    ProbeCascade cascade = probeCascades[probeCascadeHolding(probe, volume.cascades.x)];
+    vec3 centre = cascadeProbePosition(cascade, probe) + probeStates[probe].offset;
     float radius = volume.hysteresis.z * cascade.spacing.x / probeCascades[0].spacing.x;
     float distance = length(centre);
     ball = vec4(centre, radius);

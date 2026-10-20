@@ -19,7 +19,7 @@ layout(local_size_x = DDGI_RELOCATION_GROUP_SIZE) in;
 
 // Must match GpuProbeRelocate in render/vulkan/vulkan_ddgi.cpp.
 layout(push_constant) uniform RelocationData {
-    ivec4 counts; // xyz each cascade's probes along each axis, w the most steps a probe takes (0: classify only)
+    ivec4 counts; // x how many cascades (each one's size in its record), w the most steps a probe takes (0: classify only)
 } relocation;
 
 // The probes asked for, by number among all cascades'.
@@ -58,10 +58,9 @@ void main() {
     int request = int(gl_WorkGroupID.x);
     int probe = requests[request];
     int invocation = int(gl_LocalInvocationIndex);
-    ivec3 counts = relocation.counts.xyz;
-    ProbeCascade cascade = probeCascades[probe / (counts.x * counts.y * counts.z)];
+    ProbeCascade cascade = probeCascades[probeCascadeHolding(probe, relocation.counts.x)];
     vec3 spacing = cascade.spacing.xyz;
-    vec3 grid = cascadeProbePosition(cascade, counts, probe) + cameraOrigin.xyz;
+    vec3 grid = cascadeProbePosition(cascade, probe) + cameraOrigin.xyz;
     int iterations = relocation.counts.w;
 
     if (invocation == 0) {

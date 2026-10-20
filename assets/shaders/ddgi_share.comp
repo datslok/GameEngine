@@ -17,7 +17,7 @@ layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEX
 
 // Must match GpuProbeShare in render/gpu/ddgi.h.
 layout(push_constant) uniform ProbeShareData {
-    ivec4 counts;  // xyz each cascade's probes along each axis, w how many cascades
+    ivec4 counts;  // xy the atlases' columns and rows, z every cascade's probes together, w how many cascades
     vec4 weight;   // x the still light's sharing weight, y the fast light's, z a restarted probe's at first, w the long memory's share kept
 } share;
 
@@ -32,10 +32,12 @@ layout(std430, set = 0, binding = 1) readonly buffer ProbeStates {
     ProbeState probeStates[];
 };
 
-// The cascades: where each one's probes are and how they are scrolled.
+// The cascades: where each one's probes are, how many and how they are scrolled.
 layout(std430, set = 0, binding = 2) readonly buffer ProbeCascades {
     ProbeCascade probeCascades[];
 };
+
+#include "probe_cascade_holding.glsl"
 
 layout(set = 0, binding = 3, rgba16f) readonly uniform image2D irradiance;
 layout(set = 0, binding = 4, rgba16f) readonly uniform image2D fastIrradiance;
@@ -49,7 +51,6 @@ shared vec4 fastSquare[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
 void main() {
     const ivec3 steps[DDGI_SHARE_NEIGHBOURS] = ivec3[DDGI_SHARE_NEIGHBOURS](ivec3(1, 0, 0), ivec3(-1, 0, 0), ivec3(0, 1, 0),
                                                                           ivec3(0, -1, 0), ivec3(0, 0, 1), ivec3(0, 0, -1));
-    ivec3 counts = share.counts.xyz;
     int probe = int(gl_WorkGroupID.x);
 
     // An untraced probe is never read, so its shared copy is left as it is; the whole workgroup leaves together.
@@ -57,8 +58,9 @@ void main() {
         return;
     }
 
-    ivec3 atlas = ivec3(counts.xy, counts.z * share.counts.w);
-    ProbeCascade cascade = probeCascades[probe / (counts.x * counts.y * counts.z)];
+    ivec2 atlas = share.counts.xy;
+    ProbeCascade cascade = probeCascades[probeCascadeHolding(probe, share.counts.w)];
+    ivec3 counts = cascade.counts.xyz;
     ivec3 grid = probeGridCoord(counts, cascade.scroll.xyz, probe - cascade.scroll.w);
     ivec2 texel = ivec2(gl_LocalInvocationID.xy);
     ivec2 origin = probeTileOrigin(atlas, probe, DDGI_IRRADIANCE_TEXELS);
@@ -81,7 +83,7 @@ void main() {
             continue;
         }
 
-        int otherProbe = cascadeProbeNumber(cascade, counts, other);
+        int otherProbe = cascadeProbeNumber(cascade, other);
 
         if (probeTraced(probeStates[otherProbe].state)) {
             vec3 between = vec3(step) * cascade.spacing.xyz + probeStates[otherProbe].offset - probeStates[probe].offset;

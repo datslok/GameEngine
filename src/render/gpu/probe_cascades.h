@@ -33,19 +33,27 @@ inline constexpr float probeCascadeFadeCells = static_cast<float>(DDGI_CASCADE_F
 inline constexpr float probeCascadeEdgeCells = static_cast<float>(DDGI_CASCADE_EDGE);
 inline constexpr float probeLatticeOffsetShare = static_cast<float>(DDGI_LATTICE_OFFSET);
 
-// How many cascades of how many probes, and the densest's spacing.
+// How many cascades of how many probes (the densest its own, the coarser ones alike), and the densest's spacing.
 struct ProbeCascadeLayout {
+    ProbeCounts densest;
     ProbeCounts counts;
     float spacing = 0.5f;
     int cascades = 1;
 };
 
 /*
-* The layout the settings ask for, kept within what the atlases hold: at least 2 probes along each axis, 1 to
-* maxProbeCascades cascades, as many cascades as fit in maxProbesPerVolume probes and the atlases' largest side, and a
-* spacing of at least a centimetre.
+* The layout the settings ask for, kept within what one dispatch holds: at least 2 probes along each axis, 1 to
+* maxProbeCascades cascades, the densest's up axis giving way until it alone fits in maxProbesPerVolume probes, as many
+* cascades as fit with it, and a spacing of at least a centimetre. Any number of probes that fits, the atlases hold
+* (ddgi.h, probeAtlasGrid).
 */
 ProbeCascadeLayout probeCascadeLayout(const GlobalIlluminationSettings& settings);
+
+// Cascade number cascade's probes along each axis: the densest's for the first, the coarser ones' for the rest.
+ProbeCounts probeCascadeCounts(const ProbeCascadeLayout& layout, int cascade);
+
+// Every cascade's probes together.
+int probeCascadeLayoutProbes(const ProbeCascadeLayout& layout);
 
 // Cascade number cascade's spacing: the densest's, doubled cascade times.
 float probeCascadeSpacing(const ProbeCascadeLayout& layout, int cascade);
@@ -95,6 +103,15 @@ ProbeCascade probeWindow(const Vec3& centre, float spacing, const ProbeCounts& c
 std::vector<ProbeCascade> probeCascadesAround(const Vec3& centre, const ProbeCascadeLayout& layout, float selfShadowBias);
 
 /*
+* The cascade whose probes include probe number probe: the last one whose first probe is probe or less. Cascades differ
+* in size, so it is found by walking them (at most maxProbeCascades), as the shaders do (probe_cascade_holding.glsl).
+*/
+int probeCascadeHolding(std::span<const ProbeCascade> cascades, int probe);
+
+// Every cascade's probes together: what the atlases and every per-probe buffer hold.
+int countCascadeProbes(std::span<const ProbeCascade> cascades);
+
+/*
 * A volume that stays put, as a cascade: full weight out to half a cell beyond its outer probes, fading to nothing over
 * the next half (DDGI_VOLUME_MARGIN, DDGI_VOLUME_FADE), as the probes' first single volume did; for tests that place
 * probes by hand.
@@ -134,9 +151,10 @@ struct GpuProbeCascade {
     float weightCentre[4];  // xyz where its weight is centred, w unused
     float weightReach[4];   // xyz how far it lights from the centre, w unused
     float weightFade[4];    // xyz how far its weight takes to fall to nothing, w unused
+    std::int32_t counts[4]; // xyz its probes along each axis, w unused
 };
 
-static_assert(sizeof(GpuProbeCascade) == 96, "GpuProbeCascade must match ProbeCascade in probe_cascades.glsl");
+static_assert(sizeof(GpuProbeCascade) == 112, "GpuProbeCascade must match ProbeCascade in probe_cascades.glsl");
 
 std::vector<GpuProbeCascade> packProbeCascades(std::span<const ProbeCascade> cascades, const Vec3& cameraOrigin);
 

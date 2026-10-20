@@ -133,9 +133,8 @@ private:
     OwnedHandle<VkPipelineLayout> ballsLayout;
     std::unique_ptr<VulkanPipeline> ballsPipeline;
 
-    // This frame's cascades and last frame's (to find the planes a move brought in); every cascade has counts probes.
+    // This frame's cascades and last frame's (to find the planes a move brought in), and all their probes together.
     std::vector<ProbeCascade> cascades;
-    ProbeCounts counts;
     int probes = 0;
 
     VulkanImage irradiance;

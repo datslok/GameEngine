@@ -125,8 +125,8 @@ void main() {
     }
 
     // Rays leave from the probe in the world; everything else here is measured from the camera, as the cascades are.
-    ProbeCascade cascade = probeCascades[volumeCascadeOf(probe)];
-    vec3 relativeOrigin = cascadeProbePosition(cascade, volume.counts.xyz, probe) + probeStates[probe].offset;
+    ProbeCascade cascade = probeCascades[probeCascadeHolding(probe, volume.cascades.x)];
+    vec3 relativeOrigin = cascadeProbePosition(cascade, probe) + probeStates[probe].offset;
     vec3 origin = relativeOrigin + cameraOrigin.xyz;
     bool nearFastLight = anyFastLightNear(relativeOrigin, cascade.origin.w);
     int rays = volumeRayCount(nearFastLight);

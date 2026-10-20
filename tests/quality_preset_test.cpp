@@ -56,18 +56,22 @@ namespace {
     }
 
     /*
-    * The light probes' cascades per preset: High (the defaults) four of 21 x 13 x 21 from half a metre, Ultra the same,
-    * Medium four of 17 x 11 x 17, Low three of 15 x 9 x 15 from a metre; each lower one holds fewer probes.
+    * The light probes' cascades per preset: High (the defaults) a densest of 31 x 17 x 31 from half a metre and three of
+    * 21 x 13 x 21, Ultra the same, Medium a densest of 25 x 15 x 25 and three of 17 x 11 x 17, Low a densest of
+    * 19 x 11 x 19 and two of 15 x 9 x 15 from a metre; each lower one holds fewer probes.
     */
     void testPresetsSetTheProbeCascades() {
         struct Cascades {
             int cascades;
             float spacing;
+            int densestAcross;
+            int densestHigh;
             int across;
             int high;
         };
 
-        const std::array<Cascades, 4> expected{Cascades{3, 1.0f, 15, 9}, Cascades{4, 0.5f, 17, 11}, Cascades{4, 0.5f, 21, 13}, Cascades{4, 0.5f, 21, 13}};
+        const std::array<Cascades, 4> expected{Cascades{3, 1.0f, 19, 11, 15, 9}, Cascades{4, 0.5f, 25, 15, 17, 11}, Cascades{4, 0.5f, 31, 17, 21, 13},
+                                               Cascades{4, 0.5f, 31, 17, 21, 13}};
         int probesAbove = 0;
 
         for (QualityPreset preset : {QualityPreset::Ultra, QualityPreset::High, QualityPreset::Medium, QualityPreset::Low}) {
@@ -76,9 +80,11 @@ namespace {
             const GlobalIlluminationSettings& probes = settings.globalIllumination;
             const Cascades& wanted = expected[static_cast<std::size_t>(preset)];
             assert(probes.probeCascades == wanted.cascades && probes.probeSpacing == wanted.spacing);
+            assert(probes.densestProbesAcross == wanted.densestAcross && probes.densestProbesHigh == wanted.densestHigh);
             assert(probes.cascadeProbesAcross == wanted.across && probes.cascadeProbesHigh == wanted.high);
 
-            const int held = probes.probeCascades * probes.cascadeProbesAcross * probes.cascadeProbesAcross * probes.cascadeProbesHigh;
+            const int held = probes.densestProbesAcross * probes.densestProbesAcross * probes.densestProbesHigh +
+                             (probes.probeCascades - 1) * probes.cascadeProbesAcross * probes.cascadeProbesAcross * probes.cascadeProbesHigh;
             assert(held <= maxProbesPerVolume);
             assert(preset == QualityPreset::Ultra || preset == QualityPreset::High || held < probesAbove);
             probesAbove = held;
@@ -86,6 +92,7 @@ namespace {
 
         const GlobalIlluminationSettings defaults;
         assert(defaults.probeCascades == 4 && defaults.probeSpacing == 0.5f && defaults.cascadeProbesAcross == 21 && defaults.cascadeProbesHigh == 13);
+        assert(defaults.densestProbesAcross == 31 && defaults.densestProbesHigh == 17);
     }
 
     // Each step down from High costs less on every axis a preset sets: fewer shadowed lights, coarser shadow texels,

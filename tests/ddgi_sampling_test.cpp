@@ -446,7 +446,7 @@ namespace {
 
     void testProbeSamplingIsPacked() {
         ProbeSampling sampling;
-        sampling.counts = ProbeCounts{12, 5, 16};
+        sampling.probes = 960;
         sampling.cascades = 3;
         sampling.selfShadowBias = 0.4f;
         sampling.bounceEnergy = 0.9f;
@@ -458,7 +458,8 @@ namespace {
         packProbeSampling(frameData, sampling);
 
         assert(frameData.probeShading[0] == 0.4f && frameData.probeShading[1] == 0.9f);
-        assert(frameData.probeCounts[0] == 12 && frameData.probeCounts[1] == 5 && frameData.probeCounts[2] == 16 && frameData.probeCounts[3] == 3);
+        // The atlases' grid for every cascade's probes together (ddgi.h, probeAtlasGrid), and how many cascades.
+        assert(frameData.probeAtlas[0] == 31 && frameData.probeAtlas[1] == 31 && frameData.probeAtlas[3] == 3);
         assert(frameData.probeLights[0] == 7 && frameData.probeLights[1] == 2 && frameData.probeLights[2] == 3);
 
         // More lights per hit than the shader holds are capped.

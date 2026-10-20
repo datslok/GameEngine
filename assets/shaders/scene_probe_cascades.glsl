@@ -9,4 +9,6 @@ layout(std430, set = 1, binding = 20) readonly buffer ProbeCascades {
     ProbeCascade probeCascades[];
 };
 
+#include "probe_cascade_holding.glsl"
+
 #endif

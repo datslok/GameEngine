@@ -296,15 +296,14 @@ vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, ivec3 scroll, int sl
     return origin + spacing * vec3(probeGridCoord(counts, scroll, slot));
 }
 
-ivec2 probeTileOrigin(ivec3 counts, int index, int side) {
-    int columns = counts.x * counts.y;
-    return ivec2(index % columns, index / columns) * (side + 2);
+ivec2 probeTileOrigin(ivec2 grid, int index, int side) {
+    return ivec2(index % grid.x, index / grid.x) * (side + 2);
 }
 
-vec2 probeAtlasUv(ivec3 counts, int index, vec3 direction, int side) {
+vec2 probeAtlasUv(ivec2 grid, int index, vec3 direction, int side) {
     vec2 square = octahedralEncode(direction);
-    ivec2 origin = probeTileOrigin(counts, index, side);
-    vec2 atlasSize = vec2(counts.x * counts.y, counts.z) * float(side + 2);
+    ivec2 origin = probeTileOrigin(grid, index, side);
+    vec2 atlasSize = vec2(grid) * float(side + 2);
     return (vec2(origin + 1) + (square * 0.5 + 0.5) * float(side)) / atlasSize;
 }
 
