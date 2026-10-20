@@ -97,7 +97,8 @@ namespace {
 
             const bool nearBuilding = overlaps(crown.bounds(), grown(labSunlitRoom, labBuildingKeepClear)) ||
                                       overlaps(crown.bounds(), grown(labBackRoom, labBuildingKeepClear));
-            if (inViewKeepClear(x, z) || nearBuilding) {
+            const bool nearStreet = overlaps(crown.bounds(), grown(labStreetBounds, labStreetKeepClear));
+            if (inViewKeepClear(x, z) || nearBuilding || nearStreet) {
                 continue;
             }
 
@@ -155,8 +156,107 @@ namespace {
         add(Vec3{west, top, north}, Vec3{east, top + wall, south});
         return building;
     }
+
+    /*
+    * The hashed numbers' uses, apart from the trees' (0 to 2), so a house's width never shares a number with anything
+    * else's. Houses are numbered along each row, west to east, the north row's first; windows in the order they are made.
+    */
+    enum StreetHashUse : std::uint32_t {
+        houseWidthUse = 10,
+        houseStoreysUse,
+        houseSurfaceUse,
+        windowLitUse = 20,
+        windowTintUse
+    };
+
+    /*
+    * One row of houses from west to east along a front, the north row's (side -1) backs towards the start, cut by the
+    * cross street. Each stretch is filled with hashed widths; a house that would leave less than the narrowest house
+    * before the stretch's end takes the rest instead. Then each house's front gets a window per bay and storey.
+    */
+    void buildHouseRow(float side, std::uint32_t& houseNumber, LightLabLayout& layout) {
+        const float front = labStreetZ + side * labHouseFrontOffset;
+        const float back = front + side * labHouseDepth;
+        const float stretches[2][2] = {{labStreetWestX, -labCrossStreetHalfWidth}, {labCrossStreetHalfWidth, labStreetEastX}};
+
+        for (const auto& stretch : stretches) {
+            float west = stretch[0];
+
+            while (stretch[1] - west > 1e-3f) {
+                const std::uint32_t house = houseNumber++;
+                float width = labHouseMinWidth + (labHouseMaxWidth - labHouseMinWidth) * hashedFraction(house, houseWidthUse);
+                if (stretch[1] - west - width < labHouseMinWidth) {
+                    width = stretch[1] - west;
+                }
+
+                const int storeys = labHouseMinStoreys + static_cast<int>(hashedFraction(house, houseStoreysUse) *
+                                                                         static_cast<float>(labHouseMaxStoreys - labHouseMinStoreys + 1));
+                const float height = labStoreyHeight * static_cast<float>(storeys);
+                const LabSurface surface = hashedFraction(house, houseSurfaceUse) < 0.5f ? LabSurface::Brick : LabSurface::Render;
+                layout.street.push_back(spanning(Vec3{west, 0.0f, std::min(front, back)}, Vec3{west + width, height, std::max(front, back)}, surface));
+
+                const int bays = std::max(1, static_cast<int>(width / labWindowBayWidth));
+                for (int storey = 0; storey < storeys; ++storey) {
+                    for (int bay = 0; bay < bays; ++bay) {
+                        const std::uint32_t number = static_cast<std::uint32_t>(layout.windows.size());
+                        const Vec3 centre{west + width * (static_cast<float>(bay) + 0.5f) / static_cast<float>(bays),
+                                          labStoreyHeight * static_cast<float>(storey) + labWindowCentreAboveFloor, front};
+                        layout.windows.push_back(LabWindow{LabBlock{centre, Vec3{labWindowHalfWidth, labWindowHalfHeight, labWindowHalfDepth}, LabSurface::Glass},
+                                                           hashedFraction(number, windowLitUse) < labLitWindowShare, hashedFraction(number, windowTintUse)});
+                    }
+                }
+
+                west += width;
+            }
+        }
+    }
+
+    /*
+    * The lamps along one kerb (side -1 north, +1 south), the south side's half a spacing further east. Each is a post on
+    * the pavement set back from the bulb towards the houses, an arm from the post's top over the bulb, and a shade over
+    * the bulb, just clear of it, with the arm lying along the shade's top.
+    */
+    void buildLampRow(float side, LightLabLayout& layout) {
+        const float bulbZ = labStreetZ + side * (labRoadHalfWidth - labStreetLampKerbInset);
+        const float postZ = bulbZ + side * labStreetLampPostSetBack;
+        const float shadeBottom = labStreetLampHeight + labStreetBulbHalfSize + 0.01f;
+        const float shadeTop = shadeBottom + 2.0f * labStreetShadeHalfHeight;
+        const float armHalf = labStreetLampPostHalfWidth;
+        const float firstX = labStreetWestX + labStreetLampSpacing * (side < 0.0f ? 0.25f : 0.75f);
+
+        for (int index = 0; index < labStreetLampsPerSide; ++index) {
+            const float x = firstX + labStreetLampSpacing * static_cast<float>(index);
+            layout.streetLamps.push_back(Vec3{x, labStreetLampHeight, bulbZ});
+            layout.street.push_back(spanning(Vec3{x - armHalf, labKerbHeight, postZ - armHalf}, Vec3{x + armHalf, shadeTop + 2.0f * armHalf, postZ + armHalf},
+                                             LabSurface::Metal));
+            layout.street.push_back(spanning(Vec3{x - armHalf, shadeTop, std::min(bulbZ, postZ - side * armHalf)},
+                                             Vec3{x + armHalf, shadeTop + 2.0f * armHalf, std::max(bulbZ, postZ - side * armHalf)}, LabSurface::Metal));
+            layout.street.push_back(spanning(Vec3{x - labStreetShadeHalfWidth, shadeBottom, bulbZ - labStreetShadeHalfWidth},
+                                             Vec3{x + labStreetShadeHalfWidth, shadeTop, bulbZ + labStreetShadeHalfWidth}, LabSurface::Metal));
+        }
+    }
+
+    // The road and pavements, both rows of houses with their windows, and both rows of lamps.
+    void buildStreet(LightLabLayout& layout) {
+        layout.street.push_back(spanning(Vec3{labStreetWestX, 0.0f, labStreetZ - labRoadHalfWidth}, Vec3{labStreetEastX, labRoadTop, labStreetZ + labRoadHalfWidth},
+                                         LabSurface::Asphalt));
+        for (const float side : {-1.0f, 1.0f}) {
+            const float kerb = labStreetZ + side * labRoadHalfWidth;
+            const float front = labStreetZ + side * labHouseFrontOffset;
+            layout.street.push_back(spanning(Vec3{labStreetWestX, 0.0f, std::min(kerb, front)}, Vec3{labStreetEastX, labKerbHeight, std::max(kerb, front)},
+                                             LabSurface::Paving));
+        }
+
+        std::uint32_t houseNumber = 0;
+        buildHouseRow(-1.0f, houseNumber, layout);
+        buildHouseRow(1.0f, houseNumber, layout);
+        buildLampRow(-1.0f, layout);
+        buildLampRow(1.0f, layout);
+    }
 }
 
 LightLabLayout buildLightLabLayout() {
-    return LightLabLayout{buildTowers(), buildFence(), buildTrees(), buildBuilding()};
+    LightLabLayout layout{buildTowers(), buildFence(), buildTrees(), buildBuilding(), {}, {}, {}};
+    buildStreet(layout);
+    return layout;
 }

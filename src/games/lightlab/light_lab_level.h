@@ -19,7 +19,13 @@ enum class LabSurface {
     Leaves,   // tree crowns
     Plaster,  // the building's walls and roof
     Floorboards, // the building's floor
-    RedPaint  // the panel lining the sunlit room's east wall
+    RedPaint, // the panel lining the sunlit room's east wall
+    Asphalt,  // the street's road
+    Paving,   // its pavements
+    Brick,    // houses
+    Render,   // houses with smooth rendered fronts
+    Metal,    // lamp posts, arms and shades
+    Glass     // windows (dark until lit)
 };
 
 struct LabBlock {
@@ -95,12 +101,72 @@ inline const Aabb labFrontDoor{Vec3{-17.3f, labFloorTop, 7.0f}, Vec3{-17.0f, 2.1
 inline const Vec3 labLampPosition{-20.0f, labRoomHeight - 0.15f, 7.575f};
 inline const Vec3 labLampFixtureHalfSize{0.15f, 0.025f, 0.15f};
 
+/*
+* A street running east to west south of the start, lined with houses and lit at night by 60 lamps and the houses' lit
+* windows: the test ground for many lights. A 10 m road between 3 m pavements, raised a kerb's height, then rows of
+* houses (6 to 12 m wide, 3 or 4 storeys, 10 m deep, each a solid block), cut by a cross street where it meets the line
+* north from the start, so the start can walk in. The lamps stand at each pavement's kerb every 10 m, the two sides
+* staggered by half that, so a point on the road is lit by two to four: a pole set back towards the houses, an arm over
+* the bulb, and a shade above it that keeps the light off the sky and the upper storeys, as a real lamp's housing does.
+* Each house front has a window per bay and storey, a share of them lit, each a little warmer or cooler.
+*/
+inline constexpr float labStreetZ = 45.0f;              // the road's centre line
+inline constexpr float labStreetWestX = -150.0f;
+inline constexpr float labStreetEastX = 150.0f;
+inline constexpr float labRoadHalfWidth = 5.0f;
+inline constexpr float labPavementWidth = 3.0f;
+inline constexpr float labKerbHeight = 0.15f;
+inline constexpr float labRoadTop = 0.02f;              // over the grass, as the building's floor
+inline constexpr float labCrossStreetHalfWidth = 5.0f;  // round x = 0
+inline constexpr float labHouseDepth = 10.0f;
+inline constexpr float labHouseMinWidth = 6.0f;
+inline constexpr float labHouseMaxWidth = 12.0f;
+inline constexpr float labStoreyHeight = 3.0f;
+inline constexpr int labHouseMinStoreys = 3;
+inline constexpr int labHouseMaxStoreys = 4;
+inline constexpr float labWindowBayWidth = 3.0f;        // at most one window per this much front
+inline constexpr float labWindowHalfWidth = 0.6f;
+inline constexpr float labWindowHalfHeight = 0.75f;
+inline constexpr float labWindowCentreAboveFloor = 1.65f;
+inline constexpr float labWindowHalfDepth = 0.03f;      // a pane centred on the front, standing this far out of it
+inline constexpr float labLitWindowShare = 0.4f;
+inline constexpr int labStreetLampsPerSide = 30;
+inline constexpr float labStreetLampSpacing = 10.0f;
+inline constexpr float labStreetLampKerbInset = 0.5f;   // the bulb over the road, this far in from the kerb
+inline constexpr float labStreetLampHeight = 6.0f;      // the bulb's centre
+inline constexpr float labStreetLampPostSetBack = 0.6f; // the post behind the bulb, towards the houses
+inline constexpr float labStreetLampPostHalfWidth = 0.07f;
+inline constexpr float labStreetBulbHalfSize = 0.12f;
+inline constexpr float labStreetShadeHalfWidth = 0.4f;
+inline constexpr float labStreetShadeHalfHeight = 0.04f;
+inline constexpr float labStreetKeepClear = 10.0f;      // trees keep this far from the street's houses
+
+// The house fronts' distance from the road's centre line, either side.
+inline constexpr float labHouseFrontOffset = labRoadHalfWidth + labPavementWidth;
+
+// The street from the far side of one row of houses to the other's, from the ground to the tallest roof.
+inline const Aabb labStreetBounds{Vec3{labStreetWestX, 0.0f, labStreetZ - labHouseFrontOffset - labHouseDepth},
+                                  Vec3{labStreetEastX, labStoreyHeight * static_cast<float>(labHouseMaxStoreys), labStreetZ + labHouseFrontOffset + labHouseDepth}};
+
+/*
+* A window pane on a house front, whether it is lit at night, and its light's tint, from 0 (the warmest) to 1 (the
+* coolest), picked by hashing the window's number.
+*/
+struct LabWindow {
+    LabBlock pane;
+    bool lit = false;
+    float tint = 0.0f;
+};
+
 // The level's parts, each group drawn as one entity and all of it solid.
 struct LightLabLayout {
     std::vector<LabBlock> towers;
     std::vector<LabBlock> fence;
     std::vector<LabBlock> trees; // a trunk then its crown, for each tree
     std::vector<LabBlock> building;
+    std::vector<LabBlock> street; // the road, pavements, houses and lamps' posts, arms and shades
+    std::vector<LabWindow> windows;
+    std::vector<Vec3> streetLamps; // each lamp's bulb: the north side's west to east, then the south side's
 };
 
 LightLabLayout buildLightLabLayout();

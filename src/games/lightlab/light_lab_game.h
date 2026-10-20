@@ -3,6 +3,7 @@
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "engine/game.h"
+#include "games/lightlab/light_lab_level.h"
 #include "gameplay/control_mode.h"
 #include "gameplay/flashlight.h"
 #include "gameplay/player_controls.h"
@@ -114,6 +115,33 @@ inline const PointLight labLampLight{
 inline constexpr float labLampGlow = 6.0f;
 
 /*
+* A street lamp (light_lab_level.h): a warm bulb (about 3000 K) 6 m up, reaching far enough that neighbouring pools
+* overlap, bright enough under it to read by, picked by eye like the ceiling lamp. Still lights: their bounce goes into
+* the probes' long memory, which their switch restarts with one scene event over the whole street.
+*/
+inline const PointLight labStreetLampLight{
+    .colour = Vec3{1.0f, 0.78f, 0.52f},
+    .intensity = 12.0f,
+    .range = 15.0f,
+    .sourceRadius = 0.5f
+};
+
+// The bulbs glow this many times their light's colour while they are on.
+inline constexpr float labStreetBulbGlow = 8.0f;
+
+// A lit window's glow (its radiance, the light behind a curtain) from the warmest tint to the coolest: about 15 times
+// the lamp-lit road's brightness, so the exposure the road sets leaves the windows their colour instead of white.
+inline const Vec3 labWarmWindowGlow{0.4f, 0.25f, 0.13f};
+inline const Vec3 labCoolWindowGlow{0.28f, 0.32f, 0.4f};
+
+/*
+* The street's lamps and windows come on by themselves once the sun is this far below the horizon (real street lamps,
+* switched by a light sensor, come on a little before civil dusk at 6 degrees), and go off at dawn as it rises past it.
+*/
+inline constexpr float labStreetLightsBelowDegrees = -2.0f;
+bool streetLightsWantedFor(const Vec3& towardsSun);
+
+/*
 * The day's light for the sun in a direction. With the atmosphere, only the sun as it is above the air, white and the
 * same at every hour (the renderer does the rest). Without it, the hand-made day: sunlight fading out as the sun sinks
 * below the horizon and warmer the lower it stands (a stand-in for the air's reddening), and the sky seen behind
@@ -166,6 +194,13 @@ public:
     // The back room's ceiling lamp: its PointLight while on, its fixture's ModelRenderer always.
     Entity getLamp() const;
 
+    // The street's lamps (a Transform at each bulb, and their PointLight while on), the one entity of all their bulbs'
+    // glow and the one of all the windows (one part per window, in the layout's order), and whether they are on.
+    const std::vector<Entity>& getStreetLamps() const;
+    Entity getStreetBulbs() const;
+    Entity getStreetWindows() const;
+    bool streetLightsAreOn() const;
+
 private:
     // Point the sun, set the sky and place the sun disc for the current settings and camera.
     void updateDaylight(World& world);
@@ -175,6 +210,12 @@ private:
 
     // A light change for every probe when the clock was moved by hand past labClockJumpHours since it was last seen.
     void signalClockJumps(World& world);
+
+    // Switch the street's lights to what the sun asks for, flipped while K's override holds.
+    void updateStreetLights(World& world);
+
+    // Switch every street lamp, bulb and lit window at once, and tell the probes over the street.
+    void setStreetLights(World& world, bool on);
 
     PlayerControls controls;
     LightLabSunSettings sunSettings;
@@ -204,6 +245,18 @@ private:
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;
+
+    // The street's lights (see setStreetLights) and the windows' layout, kept for switching their glow.
+    std::vector<Entity> streetLamps;
+    Entity streetBulbs;
+    Entity streetWindows;
+    std::vector<LabWindow> windowLayout;
+    bool streetLit = false;
+
+    // What the sun asked for last frame, and whether K has flipped the street from that until the sun next asks for
+    // something else (dusk or dawn), when the automatic switch takes over again.
+    bool streetWantedBySun = false;
+    bool streetOverridden = false;
 
     // The solar time as the clock itself has moved it since the last jump was signalled.
     float clockHoursSeen = 0.0f;
