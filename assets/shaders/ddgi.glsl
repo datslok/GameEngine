@@ -238,7 +238,7 @@ AdaptiveProbeTexel adaptiveProbeUpdate(AdaptiveProbeTexel texel, vec3 estimate, 
         return restartedProbeBlend(texel, estimate, framesSinceRestart, restartKeep);
     }
 
-    return adaptiveProbeBlend(texel, estimate, longKeep, windowKeep, threshold);
+    return adaptiveProbeBlend(texel, estimate, framesSinceRestart >= 0 ? restartKeep : longKeep, windowKeep, threshold);
 }
 
 vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, int index) {

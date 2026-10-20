@@ -107,6 +107,15 @@ struct GlobalIlluminationSettings {
     */
     float eventMemorySeconds = 0.05f;
 
+    // How fast a restart's memory grows back: its time constant is this share of the time since the event, until the
+    // usual memory is the shorter (restartedProbeKeep). 1 is close to the plain mean since the event, which keeps its
+    // first frames as long as any: the lamp light still in them (a soft restart's share, the bounce of last frame's
+    // probes) faded only as 1 / time, so a lamp switched off took seconds to go quite dark. Smaller forgets the first
+    // frames sooner, for more noise while the memory grows. In the dark room model at 30 fps (ddgi_test), switched off,
+    // within 1% of darkness after 1.32 s at 1, 0.30 s at 0.5, 0.20 s at 0.25 (the flashlight: 0.46 s); a restarted
+    // probe whose light stays errs 3.3%, 4.5% and 7.2% from half a second to 4 s after (1.6% left alone).
+    float eventMemoryGrowth = 0.5f;
+
     /*
     * Sharing between neighbouring probes: each probe's irradiance (still and fast) is read as its own light weighted 1
     * and each of its six face neighbours' that it can see weighted probeSharing (sharedProbeValue), so neighbours,
@@ -372,18 +381,21 @@ AdaptiveProbeTexel restartedProbeBlend(const AdaptiveProbeTexel& texel, const Ve
 /*
 * One frame of an irradiance texel with the adaptive memory, given the frames since a scene event restarted it (negative:
 * none running): the restart on the event's frame, restartedProbeBlend while the change window holds fewer frames than
-* have passed since (historyForShare of its share kept), then adaptiveProbeBlend, carrying on from the history counted.
-* restartKeep: the restart's share kept this frame (GpuProbeRestart::irradianceKeep).
+* have passed since (historyForShare of its share kept), then adaptiveProbeBlend, carrying on from the history counted,
+* with the restart's share as its long memory while the restart runs. restartKeep: the restart's share kept this frame
+* (GpuProbeRestart::irradianceKeep).
 */
 AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold,
                                        int framesSinceRestart, float restartKeep);
 
 /*
-* The share a probe keeps framesSinceRestart frames after a scene event restarted it: a running mean's n / (n + 1),
-* none on the event's frame, but never less than the soft restart's shortKeep (eventMemorySeconds), until the usual
-* share longKeep is the smaller. Negative: no restart, longKeep.
+* The share a probe keeps framesSinceRestart (n) frames after a scene event restarted it: none on the event's frame,
+* then a memory whose time constant is growth times the time since the event, exp(-1 / (growth n)) (growth 1 is close
+* to a running mean's n / (n + 1)), never less than the soft restart's shortKeep (eventMemorySeconds), until the usual
+* share longKeep is the smaller. Each earlier frame's weight then falls as (its time / the time now)^(1 / growth), not
+* the running mean's first power. Negative: no restart, longKeep.
 */
-float restartedProbeKeep(float longKeep, float shortKeep, int framesSinceRestart);
+float restartedProbeKeep(float longKeep, float shortKeep, float growth, int framesSinceRestart);
 
 /*
 * A probe's still sharing weight framesSinceRestart frames after a scene event restarted it: eventWeight on the event's
@@ -447,6 +459,7 @@ struct ProbeFrame {
     float distanceHysteresis = 0.0f;
     float windowHysteresis = 0.0f; // the adaptive memory's change window's share kept
     float restartHysteresis = 0.0f; // the soft restart's share kept at least (eventMemorySeconds)
+    float restartGrowth = 1.0f;     // how fast a restart's memory grows back (eventMemoryGrowth)
     float changeThreshold = 0.0f;  // 0: the fixed memory
     float ballRadius = 0.1f;
 };

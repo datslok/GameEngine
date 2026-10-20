@@ -49,6 +49,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Scene events", settings.sceneEvents);
     visitor.field("Event probe sharing", settings.eventProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Event memory", settings.eventMemorySeconds, {.min = 0.0f, .max = 2.0f, .sliderMax = 0.5f, .unit = "s"});
+    visitor.field("Event memory growth", settings.eventMemoryGrowth, {.min = 0.05f, .max = 1.0f});
     visitor.field("Probe sharing", settings.probeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast probe sharing", settings.fastProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast lights", settings.fastLights);
@@ -373,16 +374,16 @@ AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Ve
         return restartedProbeBlend(texel, estimate, framesSinceRestart, restartKeep);
     }
 
-    return adaptiveProbeBlend(texel, estimate, longKeep, windowKeep, threshold);
+    return adaptiveProbeBlend(texel, estimate, framesSinceRestart >= 0 ? restartKeep : longKeep, windowKeep, threshold);
 }
 
-float restartedProbeKeep(float longKeep, float shortKeep, int framesSinceRestart) {
+float restartedProbeKeep(float longKeep, float shortKeep, float growth, int framesSinceRestart) {
     if (framesSinceRestart < 0) {
         return longKeep;
     }
 
-    const float frames = static_cast<float>(framesSinceRestart);
-    return std::min(longKeep, std::max(shortKeep, frames / (frames + 1.0f)));
+    const float grown = framesSinceRestart == 0 ? 0.0f : std::exp(-1.0f / (growth * static_cast<float>(framesSinceRestart)));
+    return std::min(longKeep, std::max(shortKeep, grown));
 }
 
 float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep) {
@@ -549,6 +550,7 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
     frame.distanceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant);
     frame.windowHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.changeWindowSeconds);
     frame.restartHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.eventMemorySeconds);
+    frame.restartGrowth = settings.eventMemoryGrowth;
     frame.changeThreshold = settings.adaptiveMemory ? settings.changeThreshold : 0.0f;
     frame.ballRadius = settings.probeBallRadius;
     return frame;
@@ -556,13 +558,13 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
 
 namespace {
     // One more frame since the restart, or none once its ramp has reached the share kept.
-    std::int32_t advanceRestart(std::int32_t frames, float keep, float shortKeep) {
+    std::int32_t advanceRestart(std::int32_t frames, float keep, const ProbeFrame& frame) {
         if (frames < 0) {
             return frames;
         }
 
         const std::int32_t next = frames + 1;
-        return restartedProbeKeep(keep, shortKeep, next) >= keep ? -1 : next;
+        return restartedProbeKeep(keep, frame.restartHysteresis, frame.restartGrowth, next) >= keep ? -1 : next;
     }
 }
 
@@ -574,8 +576,8 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
     }
 
     for (GpuProbeRestart& restart : restarts) {
-        restart.irradianceFrames = advanceRestart(restart.irradianceFrames, frame.irradianceHysteresis, frame.restartHysteresis);
-        restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis, frame.restartHysteresis);
+        restart.irradianceFrames = advanceRestart(restart.irradianceFrames, frame.irradianceHysteresis, frame);
+        restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis, frame);
     }
 
     const bool keepsIrradiance = frame.irradianceHysteresis > 0.0f;
@@ -598,7 +600,7 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
     }
 
     for (GpuProbeRestart& restart : restarts) {
-        restart.irradianceKeep = restartedProbeKeep(frame.irradianceHysteresis, frame.restartHysteresis, restart.irradianceFrames);
-        restart.distanceKeep = restartedProbeKeep(frame.distanceHysteresis, frame.restartHysteresis, restart.distanceFrames);
+        restart.irradianceKeep = restartedProbeKeep(frame.irradianceHysteresis, frame.restartHysteresis, frame.restartGrowth, restart.irradianceFrames);
+        restart.distanceKeep = restartedProbeKeep(frame.distanceHysteresis, frame.restartHysteresis, frame.restartGrowth, restart.distanceFrames);
     }
 }
