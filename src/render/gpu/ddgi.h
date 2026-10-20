@@ -90,6 +90,11 @@ struct GlobalIlluminationSettings {
     // a change.
     bool sceneEvents = true;
 
+    // While an event's restart runs, the restarted probes share their still light with this weight at first, fading back
+    // to probeSharing (the preset's) over the restart's period (eventProbeSharingWeight): averaging few frames, they are
+    // noisiest just then. Never less than probeSharing. Needs sharing on (either weight above 0), as every preset has.
+    float eventProbeSharing = 0.5f;
+
     /*
     * Sharing between neighbouring probes: each probe's irradiance (still and fast) is read as its own light weighted 1
     * and each of its six face neighbours' that it can see weighted probeSharing (sharedProbeValue), so neighbours,
@@ -257,12 +262,12 @@ Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, co
 struct GpuProbeShare {
     std::int32_t counts[4]; // xyz probes along each axis
     float spacing[4];       // xyz the spacing between probes
-    float weight[4];        // x the still light's sharing weight, y the fast light's
+    float weight[4];        // x the still light's sharing weight, y the fast light's, z a restarted probe's at first, w the long memory's share kept
 };
 
 static_assert(sizeof(GpuProbeShare) == 48, "GpuProbeShare must match ddgi_share.comp");
 
-GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight);
+GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight, float eventWeight, float longKeep);
 
 /*
 * Whether a probe counts as within reach of a light, for tracing more rays: the light's range, grown by reach (the
@@ -364,6 +369,13 @@ AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Ve
 * share longKeep is the smaller. Negative: no restart, longKeep.
 */
 float rampedProbeKeep(float longKeep, int framesSinceRestart);
+
+/*
+* A probe's still sharing weight framesSinceRestart frames after a scene event restarted it: eventWeight on the event's
+* frame, fading linearly back to weight over the restart's period (historyForShare(longKeep) frames, as long as its
+* ramp lasts), never below weight. Negative (no restart), or no period (longKeep 0): weight.
+*/
+float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep);
 
 // Throws std::invalid_argument for a volume the renderer cannot hold: fewer than one probe along an axis, spacing not
 // positive, more than maxProbesPerVolume probes, or atlases larger than maxProbeAtlasSide.
@@ -477,7 +489,8 @@ static_assert(sizeof(GpuProbeRestart) == 8, "GpuProbeRestart must match ProbeRes
 /*
 * Move every probe's restart on a frame, then start this frame's events: the probes in an event's region (all of them
 * when everywhere) restart their irradiance, and a geometry change their distances too. A restart ends once its ramp
-* (rampedProbeKeep) has reached the frame's share kept, after which it would change nothing. Sized to the volume: a new
-* size starts with none running.
+* (rampedProbeKeep) has reached the frame's share kept, after which it would change nothing. A frame keeping none of an
+* atlas (fresh atlases) starts no restart of it: there is nothing to forget. Sized to the volume: a new size starts with
+* none running.
 */
 void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame);

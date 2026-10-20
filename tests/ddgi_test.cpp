@@ -989,7 +989,8 @@ namespace {
     /*
     * Events restart the probes in their region (all of them when everywhere): a light change the irradiance only, a
     * geometry change the distances too. Each restart then counts the frames since, and ends once its ramp has reached the
-    * frame's share kept (fresh atlases, which keep nothing, end it at once). A new volume starts with no restarts.
+    * frame's share kept (fresh atlases, which keep nothing, end it at once and start none). A new volume starts with no
+    * restarts.
     */
     void testEventsRestartTheProbesInTheirRegion() {
         const ProbeVolume volume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{4, 2, 3}};
@@ -1037,6 +1038,11 @@ namespace {
         advanceProbeRestarts(restarts, volume, {}, fresh);
         assert(restarts[0].irradianceFrames == -1);
 
+        // A frame that keeps nothing (fresh atlases) has nothing to forget: its events start no restart, which would
+        // otherwise run on (and share more) through the frames after.
+        advanceProbeRestarts(restarts, volume, collapse, fresh);
+        assert(restarts[0].irradianceFrames == -1 && restarts[0].distanceFrames == -1);
+
         const ProbeVolume larger{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{5, 2, 3}};
         advanceProbeRestarts(restarts, volume, collapse, frame);
         advanceProbeRestarts(restarts, larger, {}, frame);
@@ -1065,6 +1071,30 @@ namespace {
             assert(fixedSignalled.reach90 < 0.02 * fixed.reach90);
             assert(fixedSignalled.crawl < 1.1 * fixed.crawl);
         }
+    }
+
+    /*
+    * While a scene event's restart runs, the restarted probe shares its still light more (eventProbeSharing, 0.5 by
+    * default), since averaging few frames it is noisiest: from the event weight on the event's frame, fading linearly
+    * over the restart's period (the frames whose running mean keeps the long memory's share, k / (1 - k)) back to the
+    * preset's own weight, and never below it. No restart: the preset's weight.
+    */
+    void testEventSharingFadesBackToThePresets() {
+        const float longKeep = 0.99f; // a period of 99 frames
+        assert(eventProbeSharingWeight(0.1f, 0.5f, -1, longKeep) == 0.1f);
+        assert(eventProbeSharingWeight(0.1f, 0.5f, 0, longKeep) == 0.5f);
+        assert(nearlyEqual(eventProbeSharingWeight(0.1f, 0.5f, 33, longKeep), 0.5f - 0.4f / 3.0f, 1e-4f));
+        assert(nearlyEqual(eventProbeSharingWeight(0.1f, 0.5f, 99, longKeep), 0.1f, 1e-4f));
+        assert(eventProbeSharingWeight(0.1f, 0.5f, 500, longKeep) == 0.1f);
+
+        // A preset that already shares more (Low's 0.5 against a smaller event weight) keeps its own throughout.
+        assert(eventProbeSharingWeight(0.5f, 0.3f, 0, longKeep) == 0.5f);
+        assert(eventProbeSharingWeight(0.5f, 0.3f, 40, longKeep) == 0.5f);
+
+        // Fresh atlases keep nothing: no period to fade over.
+        assert(eventProbeSharingWeight(0.1f, 0.5f, 0, 0.0f) == 0.1f);
+
+        assert(GlobalIlluminationSettings{}.eventProbeSharing == 0.5f);
     }
 
     // The update reads each probe's restart as two ints, as the shader's ivec2; none by default.
@@ -1165,8 +1195,8 @@ namespace {
         // Fast lights' light is shared with its own weight, 0.5 by default whatever the still weight; the pass reads both.
         GlobalIlluminationSettings defaults;
         assert(defaults.fastProbeSharing == 0.5f);
-        const GpuProbeShare packed = packProbeShare(ProbeVolume{}, 0.1f, 0.5f);
-        assert(packed.weight[0] == 0.1f && packed.weight[1] == 0.5f);
+        const GpuProbeShare packed = packProbeShare(ProbeVolume{}, 0.1f, 0.5f, 0.5f, 0.99f);
+        assert(packed.weight[0] == 0.1f && packed.weight[1] == 0.5f && packed.weight[2] == 0.5f && packed.weight[3] == 0.99f);
 
         const GlobalIlluminationSettings settings;
         assert(settings.probeSharing == 0.1f);
@@ -1404,6 +1434,7 @@ void testDdgi() {
     testEventsRestartTheProbesInTheirRegion();
     testAnEventBringsALampInAtOnce();
     testRestartsArePackedForTheShader();
+    testEventSharingFadesBackToThePresets();
     testEachProbeTurnsItsRaysItsOwnWay();
     testNeighboursShareOnlyIfTheyCanSeeEachOther();
     testSharingAveragesTheVisibleNeighbours();

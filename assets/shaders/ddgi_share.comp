@@ -5,7 +5,8 @@
 // irradiance, still and fast, read as its own light and that of each face neighbour it can see (its mean distance
 // towards the neighbour reaching most of the way there), weighted by sharedProbeValue, into the shared atlases that
 // everything reads. One workgroup per probe, one invocation per texel of its square, the border copied last, as in the
-// update. The probes' own atlases are only read, so they keep accumulating their own light.
+// update. The probes' own atlases are only read, so they keep accumulating their own light. A probe a scene event
+// restarted shares its still light more for a while (eventProbeSharingWeight), from the restarts the update reads.
 #include "render/gpu/ddgi_shared.h"
 #include "ddgi.glsl"
 
@@ -15,14 +16,19 @@ layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEX
 layout(push_constant) uniform ProbeShareData {
     ivec4 counts;  // xyz probes along each axis
     vec4 spacing;  // xyz the spacing between probes
-    vec4 weight;   // x the still light's sharing weight, y the fast light's
+    vec4 weight;   // x the still light's sharing weight, y the fast light's, z a restarted probe's at first, w the long memory's share kept
 } share;
 
-layout(set = 0, binding = 0, rgba16f) readonly uniform image2D irradiance;
-layout(set = 0, binding = 1, rgba16f) readonly uniform image2D fastIrradiance;
-layout(set = 0, binding = 2, rg16f) readonly uniform image2D distances;
-layout(set = 0, binding = 3, rgba16f) writeonly uniform image2D sharedIrradiance;
-layout(set = 0, binding = 4, rgba16f) writeonly uniform image2D sharedFastIrradiance;
+// Each probe's frames since a scene event restarted its irradiance (x), negative for none.
+layout(std430, set = 0, binding = 0) readonly buffer ProbeRestarts {
+    ivec2 probeRestarts[];
+};
+
+layout(set = 0, binding = 1, rgba16f) readonly uniform image2D irradiance;
+layout(set = 0, binding = 2, rgba16f) readonly uniform image2D fastIrradiance;
+layout(set = 0, binding = 3, rg16f) readonly uniform image2D distances;
+layout(set = 0, binding = 4, rgba16f) writeonly uniform image2D sharedIrradiance;
+layout(set = 0, binding = 5, rgba16f) writeonly uniform image2D sharedFastIrradiance;
 
 shared vec4 square[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
 shared vec4 fastSquare[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
@@ -63,7 +69,8 @@ void main() {
         }
     }
 
-    vec4 result = vec4(sharedProbeValue(own.rgb, neighbours, visible, share.weight.x), own.a);
+    float weight = eventProbeSharingWeight(share.weight.x, share.weight.z, probeRestarts[probe].x, share.weight.w);
+    vec4 result = vec4(sharedProbeValue(own.rgb, neighbours, visible, weight), own.a);
     vec4 fastResult = vec4(sharedProbeValue(ownFast.rgb, fastNeighbours, visible, share.weight.y), ownFast.a);
     imageStore(sharedIrradiance, origin + 1 + texel, result);
     imageStore(sharedFastIrradiance, origin + 1 + texel, fastResult);

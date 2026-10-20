@@ -206,6 +206,17 @@ float rampedProbeKeep(float longKeep, int framesSinceRestart) {
     return min(longKeep, frames / (frames + 1.0));
 }
 
+float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep) {
+    float period = historyForShare(longKeep);
+
+    if (framesSinceRestart < 0 || !(period > 0.0)) {
+        return weight;
+    }
+
+    float faded = min(float(framesSinceRestart) / period, 1.0);
+    return max(weight, eventWeight + (weight - eventWeight) * faded);
+}
+
 AdaptiveProbeTexel restartProbeTexel(vec3 estimate) {
     return AdaptiveProbeTexel(estimate, 1.0, estimate, 0.0);
 }

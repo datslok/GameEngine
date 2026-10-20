@@ -51,7 +51,8 @@ void main() {
                                                        fourth.x, fourth.y, fourth.z, int(fourth.w));
         testOutput(0, vec4(texel.stored, texel.history));
         testOutput(1, vec4(texel.recent, texel.noise));
-        testOutput(2, vec4(rampedProbeKeep(fourth.x, int(fourth.w))));
+        vec4 sharing = testInput(4);
+        testOutput(2, vec4(rampedProbeKeep(fourth.x, int(fourth.w)), eventProbeSharingWeight(sharing.x, sharing.y, int(fourth.w), fourth.x), 0.0, 0.0));
     } else if (function == GPU_TEST_PROBE_SHARING) {
         vec3 neighbours[DDGI_SHARE_NEIGHBOURS];
         bool visible[DDGI_SHARE_NEIGHBOURS];

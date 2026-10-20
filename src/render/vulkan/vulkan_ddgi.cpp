@@ -114,8 +114,9 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
     update.shader = "assets/shaders/ddgi_update_distance.comp.spv";
     distancePipeline = std::make_unique<ComputePipeline>(device, update);
 
-    // Sharing reads both irradiance atlases and the distances, and writes the two shared atlases.
+    // Sharing reads the scene event restarts, both irradiance atlases and the distances, and writes the two shared atlases.
     ComputePipelineDescription share;
+    share.storageBuffers = 1;
     share.storageImages = 5;
     share.pushConstantBytes = sizeof(GpuProbeShare);
     share.shader = "assets/shaders/ddgi_share.comp.spv";
@@ -271,7 +272,7 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     blend(commands, descriptors, *distancePipeline, distanceAtlas, probes, frameRestarts);
 
     if (sharing) {
-        shareProbes(commands, descriptors, volume, settings.probeSharing, settings.fastProbeSharing);
+        shareProbes(commands, descriptors, volume, settings, frame.irradianceHysteresis, frameRestarts);
     }
 
     // The blends' writes made visible to every later read: this frame's main pass and debug balls, the next one's trace.
@@ -295,9 +296,11 @@ std::array<const VulkanBuffer*, 4> VulkanDdgi::probeBuffers() const {
 * for (a transition to the same writable state still records a barrier); the shared atlases go to storage use from being
 * sampled (last frame's main pass and balls, this frame's trace), whose reads must finish first.
 */
-void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight, float fastWeight) {
+void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, const GlobalIlluminationSettings& settings,
+                             float longKeep, const UploadArray& frameRestarts) {
     const std::array<VulkanImage*, 5> images{&irradiance, &fastIrradiance, &distance, &sharedIrradiance, &sharedFastIrradiance};
     const VkDescriptorSet set = descriptors.allocate(sharePipeline->getResourceLayout());
+    writeRestarts(set, 0, frameRestarts);
     std::array<VkDescriptorImageInfo, 5> imageInfos{};
     std::array<VkWriteDescriptorSet, 5> writes{};
 
@@ -306,7 +309,7 @@ void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descrip
         imageInfos[index] = VkDescriptorImageInfo{VK_NULL_HANDLE, images[index]->getView(), VK_IMAGE_LAYOUT_GENERAL};
         writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[index].dstSet = set;
-        writes[index].dstBinding = static_cast<std::uint32_t>(index);
+        writes[index].dstBinding = static_cast<std::uint32_t>(index) + 1;
         writes[index].descriptorCount = 1;
         writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[index].pImageInfo = &imageInfos[index];
@@ -314,7 +317,7 @@ void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descrip
 
     vkUpdateDescriptorSets(device.getDevice(), static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-    const GpuProbeShare packed = packProbeShare(volume, weight, fastWeight);
+    const GpuProbeShare packed = packProbeShare(volume, settings.probeSharing, settings.fastProbeSharing, settings.eventProbeSharing, longKeep);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->get());
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->getLayout(), 0, 1, &set, 0, nullptr);
     vkCmdPushConstants(commands, sharePipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(packed), &packed);
@@ -362,15 +365,7 @@ void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, 
     writeBuffers(device.getDevice(), set, 0, buffers);
 
     // The restarts after the probe buffers, then the atlases.
-    const VkDescriptorBufferInfo restartInfo = frameRestarts.describe();
-    VkWriteDescriptorSet restartWrite{};
-    restartWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    restartWrite.dstSet = set;
-    restartWrite.dstBinding = static_cast<std::uint32_t>(buffers.size());
-    restartWrite.descriptorCount = 1;
-    restartWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    restartWrite.pBufferInfo = &restartInfo;
-    vkUpdateDescriptorSets(device.getDevice(), 1, &restartWrite, 0, nullptr);
+    writeRestarts(set, static_cast<std::uint32_t>(buffers.size()), frameRestarts);
     const std::uint32_t firstImage = static_cast<std::uint32_t>(buffers.size()) + 1;
 
     std::vector<VkDescriptorImageInfo> imageInfos;
@@ -397,6 +392,18 @@ void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, 
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &set, 0, nullptr);
     vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(lastPacked), &lastPacked);
     vkCmdDispatch(commands, static_cast<std::uint32_t>(probes), 1, 1);
+}
+
+void VulkanDdgi::writeRestarts(VkDescriptorSet set, std::uint32_t binding, const UploadArray& frameRestarts) const {
+    const VkDescriptorBufferInfo restartInfo = frameRestarts.describe();
+    VkWriteDescriptorSet restartWrite{};
+    restartWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    restartWrite.dstSet = set;
+    restartWrite.dstBinding = binding;
+    restartWrite.descriptorCount = 1;
+    restartWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    restartWrite.pBufferInfo = &restartInfo;
+    vkUpdateDescriptorSets(device.getDevice(), 1, &restartWrite, 0, nullptr);
 }
 
 // Six corners (two triangles) per ball, one instance per probe.

@@ -143,7 +143,11 @@ private:
     void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int rayStride);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
                int probes, const UploadArray& frameRestarts);
-    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight, float fastWeight);
+    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, const GlobalIlluminationSettings& settings,
+                     float longKeep, const UploadArray& frameRestarts);
+
+    // Point the set's binding at this frame in flight's restarts.
+    void writeRestarts(VkDescriptorSet set, std::uint32_t binding, const UploadArray& frameRestarts) const;
 
     // Fill the turns buffer: each probe's own turn, or identity rows.
     void writeProbeTurns(int probes, bool independent);

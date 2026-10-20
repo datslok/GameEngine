@@ -252,7 +252,7 @@ namespace {
 
     /*
     * The adaptive memory's update after scene events, for frame counts from none (negative) through the event's frame and
-    * the frames the change window holds to past them, and the fixed memory's ramp. Where the adaptive memory itself runs,
+    * the frames the change window holds to past them, the fixed memory's ramp, and the sharing weight's fade. Where the adaptive memory itself runs,
     * the light stays well inside its noise (as in checkAdaptiveMemory), so rounding cannot move a case across the
     * threshold.
     */
@@ -268,22 +268,26 @@ namespace {
             inputs.push_back(gpuVec4(light.x, light.y, light.z, 0.5f * probeLuminance(light)));
             inputs.push_back(gpuVec4(estimate.x, estimate.y, estimate.z));
             inputs.push_back(gpuVec4(random.between(0.9f, 0.9999f), random.between(0.5f, 0.95f), random.between(2.0f, 8.0f), frames));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_RESTART, inputs, 4, 3);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_RESTART, inputs, 5, 3);
 
-        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
-            const GpuVec4& texelIn = inputs[i * 4];
-            const GpuVec4& changeIn = inputs[i * 4 + 1];
-            const GpuVec4& shares = inputs[i * 4 + 3];
+        for (std::size_t i = 0; i < inputs.size() / 5; ++i) {
+            const GpuVec4& texelIn = inputs[i * 5];
+            const GpuVec4& changeIn = inputs[i * 5 + 1];
+            const GpuVec4& shares = inputs[i * 5 + 3];
+            const GpuVec4& sharing = inputs[i * 5 + 4];
             const int frames = static_cast<int>(shares[3]);
             const AdaptiveProbeTexel expected = adaptiveProbeUpdate(AdaptiveProbeTexel{vec3From(texelIn), texelIn[3], vec3From(changeIn), changeIn[3]},
-                                                                    vec3From(inputs[i * 4 + 2]), shares[0], shares[1], shares[2], frames);
+                                                                    vec3From(inputs[i * 5 + 2]), shares[0], shares[1], shares[2], frames);
             report.check("adaptiveProbeUpdate stored", arithmeticTolerance, expected.stored, vec3From(outputs[i * 3]));
             report.check("adaptiveProbeUpdate history", arithmeticTolerance, expected.history, outputs[i * 3][3]);
             report.check("adaptiveProbeUpdate recent", arithmeticTolerance, expected.recent, vec3From(outputs[i * 3 + 1]));
             report.check("adaptiveProbeUpdate noise", transcendentalTolerance, expected.noise, outputs[i * 3 + 1][3]);
             report.check("rampedProbeKeep", arithmeticTolerance, rampedProbeKeep(shares[0], frames), outputs[i * 3 + 2][0]);
+            report.check("eventProbeSharingWeight", arithmeticTolerance, eventProbeSharingWeight(sharing[0], sharing[1], frames, shares[0]),
+                         outputs[i * 3 + 2][1]);
         }
     }
 

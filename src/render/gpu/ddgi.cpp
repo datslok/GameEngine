@@ -47,6 +47,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Change window", settings.changeWindowSeconds, {.min = 0.01f, .max = 2.0f, .sliderMax = 1.0f, .unit = "s"});
     visitor.field("Change threshold", settings.changeThreshold, {.min = 1.0f, .max = 20.0f, .sliderMax = 10.0f, .unit = "sd"});
     visitor.field("Scene events", settings.sceneEvents);
+    visitor.field("Event probe sharing", settings.eventProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Probe sharing", settings.probeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast probe sharing", settings.fastProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast lights", settings.fastLights);
@@ -255,7 +256,7 @@ Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, co
     return sum * (1.0f / weights);
 }
 
-GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight) {
+GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight, float eventWeight, float longKeep) {
     GpuProbeShare packed{};
     packed.counts[0] = volume.counts.x;
     packed.counts[1] = volume.counts.y;
@@ -265,6 +266,8 @@ GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fast
     packed.spacing[2] = volume.spacing.z;
     packed.weight[0] = weight;
     packed.weight[1] = fastWeight;
+    packed.weight[2] = eventWeight;
+    packed.weight[3] = longKeep;
     return packed;
 }
 
@@ -378,6 +381,17 @@ float rampedProbeKeep(float longKeep, int framesSinceRestart) {
 
     const float frames = static_cast<float>(framesSinceRestart);
     return std::min(longKeep, frames / (frames + 1.0f));
+}
+
+float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep) {
+    const float period = historyForShare(longKeep);
+
+    if (framesSinceRestart < 0 || !(period > 0.0f)) {
+        return weight;
+    }
+
+    const float faded = std::min(static_cast<float>(framesSinceRestart) / period, 1.0f);
+    return std::max(weight, eventWeight + (weight - eventWeight) * faded);
 }
 
 void validateProbeVolume(const ProbeVolume& volume) {
@@ -561,15 +575,20 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
         restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis);
     }
 
+    const bool keepsIrradiance = frame.irradianceHysteresis > 0.0f;
+    const bool keepsDistances = frame.distanceHysteresis > 0.0f;
+
     for (const ProbeEvent& event : events) {
         for (std::size_t probe = 0; probe < probes; ++probe) {
             if (!event.everywhere && !event.region.contains(probePosition(volume, static_cast<int>(probe)))) {
                 continue;
             }
 
-            restarts[probe].irradianceFrames = 0;
+            if (keepsIrradiance) {
+                restarts[probe].irradianceFrames = 0;
+            }
 
-            if (event.kind == ProbeEventKind::GeometryChange) {
+            if (keepsDistances && event.kind == ProbeEventKind::GeometryChange) {
                 restarts[probe].distanceFrames = 0;
             }
         }
