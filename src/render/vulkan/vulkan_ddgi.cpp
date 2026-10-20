@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_ddgi.h"
+#include "render/frames_in_flight.h"
 #include "render/gpu/compute_dispatch.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/vulkan_check.h"
@@ -95,10 +96,16 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
 {
     createTracePipeline(texturesLayout, frameLayout, rayLayout);
 
-    // Both read the three ray buffers and the probes' turns; the irradiance update writes two atlases and the adaptive
-    // memory's change statistics, the distance update one atlas.
+    restartUploads.reserve(maxFramesInFlight);
+
+    for (std::uint32_t frame = 0; frame < maxFramesInFlight; ++frame) {
+        restartUploads.emplace_back(device.getAllocator(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    }
+
+    // Both read the three ray buffers, the probes' turns and the scene event restarts; the irradiance update writes two
+    // atlases and the adaptive memory's change statistics, the distance update one atlas.
     ComputePipelineDescription update;
-    update.storageBuffers = 4;
+    update.storageBuffers = 5;
     update.storageImages = 3;
     update.pushConstantBytes = sizeof(GpuProbeVolume);
     update.shader = "assets/shaders/ddgi_update_irradiance.comp.spv";
@@ -237,7 +244,8 @@ void VulkanDdgi::writeProbeTurns(int probes, bool independent) {
 }
 
 void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume,
-                        const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds, bool fastLights) {
+                        const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds, bool fastLights,
+                        std::span<const ProbeEvent> events, std::uint32_t frameIndex) {
     if (!currentVolume || !sameVolume(*currentVolume, volume)) {
         throw std::logic_error("Prepare the light probes for a volume before updating them");
     }
@@ -247,6 +255,11 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     frame.sky = sky;
     lastPacked = packProbeVolume(volume, frame);
 
+    // Written to this frame in flight's upload memory, whose last reads finished with its fence.
+    advanceProbeRestarts(restarts, volume, events, frame);
+    UploadArray& frameRestarts = restartUploads.at(frameIndex);
+    frameRestarts.write(restarts);
+
     const int probes = probeCount(volume.counts);
     trace(commands, descriptors, sets, probes, probeRayStride(frame));
 
@@ -254,8 +267,8 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     // (each frame's transition still orders its update after the last one's writes).
     const std::array<VulkanImage*, 3> irradianceAtlases{&irradiance, &fastIrradiance, &changeStatistics};
     const std::array<VulkanImage*, 1> distanceAtlas{&distance};
-    blend(commands, descriptors, *irradiancePipeline, irradianceAtlases, probes);
-    blend(commands, descriptors, *distancePipeline, distanceAtlas, probes);
+    blend(commands, descriptors, *irradiancePipeline, irradianceAtlases, probes, frameRestarts);
+    blend(commands, descriptors, *distancePipeline, distanceAtlas, probes, frameRestarts);
 
     if (sharing) {
         shareProbes(commands, descriptors, volume, settings.probeSharing, settings.fastProbeSharing);
@@ -343,10 +356,22 @@ void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, 
 * (this frame's trace, last frame's main pass and balls), whose reads must finish before it is written.
 */
 void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
-                       int probes) {
+                       int probes, const UploadArray& frameRestarts) {
     const VkDescriptorSet set = descriptors.allocate(pipeline.getResourceLayout());
     const std::array<const VulkanBuffer*, 4> buffers = probeBuffers();
     writeBuffers(device.getDevice(), set, 0, buffers);
+
+    // The restarts after the probe buffers, then the atlases.
+    const VkDescriptorBufferInfo restartInfo = frameRestarts.describe();
+    VkWriteDescriptorSet restartWrite{};
+    restartWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    restartWrite.dstSet = set;
+    restartWrite.dstBinding = static_cast<std::uint32_t>(buffers.size());
+    restartWrite.descriptorCount = 1;
+    restartWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    restartWrite.pBufferInfo = &restartInfo;
+    vkUpdateDescriptorSets(device.getDevice(), 1, &restartWrite, 0, nullptr);
+    const std::uint32_t firstImage = static_cast<std::uint32_t>(buffers.size()) + 1;
 
     std::vector<VkDescriptorImageInfo> imageInfos;
 
@@ -360,7 +385,7 @@ void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, 
     for (std::size_t index = 0; index < atlases.size(); ++index) {
         writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[index].dstSet = set;
-        writes[index].dstBinding = static_cast<std::uint32_t>(buffers.size() + index);
+        writes[index].dstBinding = firstImage + static_cast<std::uint32_t>(index);
         writes[index].descriptorCount = 1;
         writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[index].pImageInfo = &imageInfos[index];

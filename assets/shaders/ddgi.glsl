@@ -197,6 +197,40 @@ AdaptiveProbeTexel adaptiveProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, f
     return next;
 }
 
+float rampedProbeKeep(float longKeep, int framesSinceRestart) {
+    if (framesSinceRestart < 0) {
+        return longKeep;
+    }
+
+    float frames = float(framesSinceRestart);
+    return min(longKeep, frames / (frames + 1.0));
+}
+
+AdaptiveProbeTexel restartProbeTexel(vec3 estimate) {
+    return AdaptiveProbeTexel(estimate, 1.0, estimate, 0.0);
+}
+
+AdaptiveProbeTexel restartedProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, int framesSinceRestart, float longKeep) {
+    float frames = float(framesSinceRestart);
+    float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
+    float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * ((frames - 1.0) / frames);
+    vec3 stored = blendProbeValue(texel.stored, estimate, rampedProbeKeep(longKeep, framesSinceRestart));
+    return AdaptiveProbeTexel(stored, frames + 1.0, stored, sqrt(variance));
+}
+
+AdaptiveProbeTexel adaptiveProbeUpdate(AdaptiveProbeTexel texel, vec3 estimate, float longKeep, float windowKeep, float threshold,
+                                       int framesSinceRestart) {
+    if (framesSinceRestart == 0) {
+        return restartProbeTexel(estimate);
+    }
+
+    if (framesSinceRestart > 0 && float(framesSinceRestart) < historyForShare(windowKeep)) {
+        return restartedProbeBlend(texel, estimate, framesSinceRestart, longKeep);
+    }
+
+    return adaptiveProbeBlend(texel, estimate, longKeep, windowKeep, threshold);
+}
+
 vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, int index) {
     ivec3 grid = ivec3(index % counts.x, (index / counts.x) % counts.y, index / (counts.x * counts.y));
     return origin + spacing * vec3(grid);

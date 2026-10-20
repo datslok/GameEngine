@@ -46,6 +46,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Adaptive memory", settings.adaptiveMemory);
     visitor.field("Change window", settings.changeWindowSeconds, {.min = 0.01f, .max = 2.0f, .sliderMax = 1.0f, .unit = "s"});
     visitor.field("Change threshold", settings.changeThreshold, {.min = 1.0f, .max = 20.0f, .sliderMax = 10.0f, .unit = "sd"});
+    visitor.field("Scene events", settings.sceneEvents);
     visitor.field("Probe sharing", settings.probeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast probe sharing", settings.fastProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast lights", settings.fastLights);
@@ -339,6 +340,46 @@ AdaptiveProbeTexel adaptiveProbeBlend(const AdaptiveProbeTexel& texel, const Vec
     return next;
 }
 
+AdaptiveProbeTexel restartProbeTexel(const Vec3& estimate) {
+    return AdaptiveProbeTexel{estimate, 1.0f, estimate, 0.0f};
+}
+
+// The n-th deviation since the restart joins the mean of their squares by 1 / n.
+AdaptiveProbeTexel restartedProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, int framesSinceRestart, float longKeep) {
+    const float frames = static_cast<float>(framesSinceRestart);
+    const float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
+    const float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * ((frames - 1.0f) / frames);
+
+    AdaptiveProbeTexel next;
+    next.stored = blendProbeValue(texel.stored, estimate, rampedProbeKeep(longKeep, framesSinceRestart));
+    next.recent = next.stored;
+    next.noise = std::sqrt(variance);
+    next.history = frames + 1.0f;
+    return next;
+}
+
+AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold,
+                                       int framesSinceRestart) {
+    if (framesSinceRestart == 0) {
+        return restartProbeTexel(estimate);
+    }
+
+    if (framesSinceRestart > 0 && static_cast<float>(framesSinceRestart) < historyForShare(windowKeep)) {
+        return restartedProbeBlend(texel, estimate, framesSinceRestart, longKeep);
+    }
+
+    return adaptiveProbeBlend(texel, estimate, longKeep, windowKeep, threshold);
+}
+
+float rampedProbeKeep(float longKeep, int framesSinceRestart) {
+    if (framesSinceRestart < 0) {
+        return longKeep;
+    }
+
+    const float frames = static_cast<float>(framesSinceRestart);
+    return std::min(longKeep, frames / (frames + 1.0f));
+}
+
 void validateProbeVolume(const ProbeVolume& volume) {
     const ProbeCounts& counts = volume.counts;
 
@@ -494,4 +535,43 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
     frame.changeThreshold = settings.adaptiveMemory ? settings.changeThreshold : 0.0f;
     frame.ballRadius = settings.probeBallRadius;
     return frame;
+}
+
+namespace {
+    // One more frame since the restart, or none once its ramp has reached the share kept.
+    std::int32_t advanceRestart(std::int32_t frames, float keep) {
+        if (frames < 0) {
+            return frames;
+        }
+
+        const std::int32_t next = frames + 1;
+        return rampedProbeKeep(keep, next) >= keep ? -1 : next;
+    }
+}
+
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame) {
+    const std::size_t probes = static_cast<std::size_t>(probeCount(volume.counts));
+
+    if (restarts.size() != probes) {
+        restarts.assign(probes, GpuProbeRestart{});
+    }
+
+    for (GpuProbeRestart& restart : restarts) {
+        restart.irradianceFrames = advanceRestart(restart.irradianceFrames, frame.irradianceHysteresis);
+        restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis);
+    }
+
+    for (const ProbeEvent& event : events) {
+        for (std::size_t probe = 0; probe < probes; ++probe) {
+            if (!event.everywhere && !event.region.contains(probePosition(volume, static_cast<int>(probe)))) {
+                continue;
+            }
+
+            restarts[probe].irradianceFrames = 0;
+
+            if (event.kind == ProbeEventKind::GeometryChange) {
+                restarts[probe].distanceFrames = 0;
+            }
+        }
+    }
 }

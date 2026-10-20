@@ -19,3 +19,11 @@ Vec3 Aabb::centre() const {
 Vec3 Aabb::size() const {
     return maximum - minimum;
 }
+
+/*
+* Each axis separately: between the corners on all three.
+*/
+bool Aabb::contains(const Vec3& point) const {
+    return point.x >= minimum.x && point.x <= maximum.x && point.y >= minimum.y && point.y <= maximum.y && point.z >= minimum.z &&
+           point.z <= maximum.z;
+}

@@ -272,6 +272,9 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     FrameDescription frame = buildFrame(world, game.getCamera(), alpha);
     frame.lightFocus = game.getLightFocus();
+
+    // Probe events last one frame: this one carries them.
+    clearProbeEvents(world);
     frame.frameSeconds = frameSeconds;
 
     // Spheres around each draw let the renderer skip what a view cannot see.

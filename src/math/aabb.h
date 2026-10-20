@@ -12,4 +12,7 @@ struct Aabb {
 
     Vec3 centre() const;
     Vec3 size() const;
+
+    // Whether the point lies inside or on the box's faces.
+    bool contains(const Vec3& point) const;
 };

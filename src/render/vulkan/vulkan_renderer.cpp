@@ -890,8 +890,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (traceProbes) {
         beginGpuPass(frame, GpuPass::Probes);
         const ProbeSceneSets probeSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
+        const std::span<const ProbeEvent> events = illumination.sceneEvents ? std::span<const ProbeEvent>{description.lighting.probeEvents}
+                                                                            : std::span<const ProbeEvent>{};
         ddgi->update(frame.commands, frame.descriptors, probeSets, *probes, illumination, description.lighting.background, description.frameSeconds,
-                     hitLights.fast > 0);
+                     hitLights.fast > 0, events, frame.frameIndex);
         endGpuPass(frame, GpuPass::Probes);
     }
 
@@ -1311,15 +1313,21 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 
     const int framesBefore = tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0);
 
+    // The frame's probe events happen on the first frame drawn, not on every repeat of it.
+    FrameDescription repeated = description;
+    repeated.lighting.probeEvents.clear();
+
     if (framesBefore > 0) {
-        drawFramesBeforeCapture(description, settings, framesBefore);
+        drawFramesBeforeCapture(description, repeated, settings, framesBefore);
     }
+
+    const FrameDescription& lastFrame = framesBefore > 0 ? repeated : description;
 
     FrameContext frame = beginFrame();
     displayOutput = output;
 
     try {
-        const BloomComposite bloomMix = drawScene(frame, description, settings, nullptr);
+        const BloomComposite bloomMix = drawScene(frame, lastFrame, settings, nullptr);
 
         target.transition(frame.commands, ImageState::ColourTarget, ImageContents::Discard);
         const ColourAttachment colour{target.getView(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, {}};
@@ -1387,7 +1395,8 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 * in the lamp field), the atlas layout and the shadow cache. Every frame is the same commands from the same start, so
 * the capture comes out the same each time.
 */
-void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description, const RenderSettings& settings, int frames) {
+void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings,
+                                             int frames) {
     const LightHistory coldHistory = lightHistory;
     const ShadowAtlasLayout coldLayout = shadowLayout;
     std::uint32_t lastFrame = 0;
@@ -1397,7 +1406,7 @@ void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description
         lastFrame = frame.frameIndex;
 
         try {
-            drawScene(frame, description, settings, nullptr);
+            drawScene(frame, drawn == 0 ? description : repeated, settings, nullptr);
             finishGpuTimings(frame);
             submitFrame(frame, false);
         }

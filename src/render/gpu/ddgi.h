@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 /*
@@ -83,6 +84,11 @@ struct GlobalIlluminationSettings {
     bool adaptiveMemory = true;
     float changeWindowSeconds = 0.2f;
     float changeThreshold = 8.0f;
+
+    // Scene events (ProbeEvent, signalled by the game: a lamp switched, the clock jumped): the probes in an event's region
+    // restart their average at once (advanceProbeRestarts). Off, events are ignored and only the memories above follow
+    // a change.
+    bool sceneEvents = true;
 
     /*
     * Sharing between neighbouring probes: each probe's irradiance (still and fast) is read as its own light weighted 1
@@ -327,6 +333,38 @@ struct AdaptiveProbeTexel {
 */
 AdaptiveProbeTexel adaptiveProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold);
 
+/*
+* A texel restarted by a scene event: what it stored belongs to the light before the change, so its light becomes this
+* frame's estimate, worth one frame (history 1), and so does the change window's mean; the noise is measured afresh.
+*/
+AdaptiveProbeTexel restartProbeTexel(const Vec3& estimate);
+
+/*
+* A frame after a scene event restarted the texel, framesSinceRestart (1 or more) frames ago, while the change window
+* would still reach back before the event: the stored light is the plain mean since the event (until the long memory's
+* share is the smaller), the window's mean the same, and the noise the mean square of each frame's luminance about the
+* mean so far, measured afresh, since the old light's noise is no guide to the new one's. No change is looked for: the
+* event said the light changed. Looking, with the old noise (a dark room's, tiny) or the first frames' few samples, the
+* lit room's own noise passed for change after change, each restarting the average from a window that still held the
+* darkness: in the dark room model a lamp came in in 0.27 s instead of 0.04.
+*/
+AdaptiveProbeTexel restartedProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, int framesSinceRestart, float longKeep);
+
+/*
+* One frame of an irradiance texel with the adaptive memory, given the frames since a scene event restarted it (negative:
+* none running): the restart on the event's frame, restartedProbeBlend while the change window holds fewer frames than
+* have passed since (historyForShare of its share kept), then adaptiveProbeBlend, carrying on from the history counted.
+*/
+AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold,
+                                       int framesSinceRestart);
+
+/*
+* The share a probe keeps framesSinceRestart frames after a scene event restarted it, where nothing tracks a history of
+* its own (the fixed memory, the distances): a running mean's n / (n + 1), none on the event's frame, until the usual
+* share longKeep is the smaller. Negative: no restart, longKeep.
+*/
+float rampedProbeKeep(float longKeep, int framesSinceRestart);
+
 // Throws std::invalid_argument for a volume the renderer cannot hold: fewer than one probe along an axis, spacing not
 // positive, more than maxProbesPerVolume probes, or atlases larger than maxProbeAtlasSide.
 void validateProbeVolume(const ProbeVolume& volume);
@@ -424,3 +462,22 @@ struct ProbeSchedule {
 * fresh: atlases just made, which keep nothing.
 */
 ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationSettings& settings, float frameSeconds, bool fastLights, bool fresh);
+
+/*
+* Each probe's scene event this frame, as the update reads it (ProbeRestarts in ddgi_update.glsl, an ivec2): the frames
+* since an event restarted its irradiance and its distances, 0 on the event's frame, negative when none is running.
+*/
+struct GpuProbeRestart {
+    std::int32_t irradianceFrames = -1;
+    std::int32_t distanceFrames = -1;
+};
+
+static_assert(sizeof(GpuProbeRestart) == 8, "GpuProbeRestart must match ProbeRestarts in ddgi_update.glsl");
+
+/*
+* Move every probe's restart on a frame, then start this frame's events: the probes in an event's region (all of them
+* when everywhere) restart their irradiance, and a geometry change their distances too. A restart ends once its ramp
+* (rampedProbeKeep) has reached the frame's share kept, after which it would change nothing. Sized to the volume: a new
+* size starts with none running.
+*/
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame);

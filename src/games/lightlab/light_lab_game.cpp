@@ -4,6 +4,7 @@
 #include "gameplay/first_person_body.h"
 #include "math/angles.h"
 #include "math/transform.h"
+#include "scene/lighting.h"
 #include "scene/model_renderer.h"
 #include "scene/sky_object.h"
 #include "scene/sun.h"
@@ -109,8 +110,9 @@ namespace {
     * the start (sun shadows in four cascades out to 200 m), the field from above, the sunlit room's beam on its
     * floor (the rest of the room lit by the light probes: sunlight bounced off the floor, and the sky through the
     * window), the towers again at sunset in HDR (a low,
-    * red sun and long shadows), the sun itself, its disc and the glow bloom spreads round it, and the dark back room
-    * lit by the flashlight (a fast light: its bounce light kept in the probes' fast atlas).
+    * red sun and long shadows), the sun itself, its disc and the glow bloom spreads round it, the dark back room
+    * lit by the flashlight (a fast light: its bounce light kept in the probes' fast atlas), and the back room lit by its
+    * ceiling lamp (a still light).
     */
     struct LabGoldenView {
         GoldenView view;
@@ -123,6 +125,9 @@ namespace {
 
         // The flashlight on (it starts off).
         bool flashlightOn = false;
+
+        // The back room's lamp on (it starts off).
+        bool lampOn = false;
     };
 
     const LabGoldenView labGoldenViews[] = {
@@ -131,7 +136,8 @@ namespace {
         {{"sunlit-room", 0.5, false}, Vec3{-22.3f, 2.2f, 14.4f}, Vec3{-18.6f, 0.3f, 10.6f}, 15.5f},
         {{"sunset-hdr", 0.5, true}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{0.0f, 3.0f, -40.0f}, 17.6f},
         {{"sun-disc", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 15.5f, true},
-        {{"flashlight", 0.5, false}, Vec3{-18.0f, 1.7f, 9.4f}, Vec3{-21.6f, 0.9f, 6.0f}, 15.5f, false, true}
+        {{"flashlight", 0.5, false}, Vec3{-18.0f, 1.7f, 9.4f}, Vec3{-21.6f, 0.9f, 6.0f}, 15.5f, false, true},
+        {{"back-room-lamp", 0.5, false}, Vec3{-17.7f, 1.7f, 9.5f}, Vec3{-21.5f, 1.2f, 5.8f}, 15.5f, false, false, true}
     };
 }
 
@@ -220,6 +226,19 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     world.add(probes, labProbeVolume);
     flashlight.create(world, false);
 
+    // The lamp's panel stands for the bulb's glow, so like the sun disc it must not block the light it gives.
+    ModelRenderer fixture;
+    fixture.parts.push_back(RenderPart{cube, surfaceMaterial(LabSurface::Plaster),
+                                       Mat4::translation(0.0f, labRoomHeight - labLampFixtureHalfSize.y - labLampPosition.y, 0.0f) *
+                                           Mat4::scaling(labLampFixtureHalfSize.x, labLampFixtureHalfSize.y, labLampFixtureHalfSize.z)});
+    fixture.castsShadows = false;
+    lamp = world.create();
+    Transform lampPlacement;
+    lampPlacement.position = labLampPosition;
+    world.add(lamp, lampPlacement);
+    world.add(lamp, std::move(fixture));
+    clockHoursSeen = sunSettings.solarHours;
+
     // The sun disc: a glowing sphere with no colour of its own. It stands for the sunlight's source, so it must not
     // block that light. It teleports with the camera every frame, so it has no PreviousTransform to blend from.
     Material sunGlow;
@@ -246,6 +265,39 @@ void LightLabGame::onInput(World& world, const Input& input) {
     if (input.wasKeyPressed(Key::F)) {
         flashlight.toggle(world);
     }
+
+    if (input.wasKeyPressed(Key::L)) {
+        toggleLamp(world);
+    }
+}
+
+/*
+* Off removes the light, as the flashlight's switch does, so it takes no seat; the panel glows only while it is on.
+*/
+void LightLabGame::toggleLamp(World& world) {
+    const bool on = !world.has<PointLight>(lamp);
+
+    if (on) {
+        world.add(lamp, labLampLight);
+    } else {
+        world.remove<PointLight>(lamp);
+    }
+
+    world.get<ModelRenderer>(lamp).parts[0].material.emissive = on ? labLampLight.colour * labLampGlow : Vec3{0.0f, 0.0f, 0.0f};
+    signalProbeEvent(world, probeEventAround(ProbeEventKind::LightChange, labLampPosition, labLampLight.range));
+}
+
+/*
+* The clock's own ticks move clockHoursSeen along with it, so only a change from outside (the slider, a settings file)
+* opens a gap; small drags add up until they pass the threshold. Measured the short way round the day.
+*/
+void LightLabGame::signalClockJumps(World& world) {
+    const float gap = std::fmod(sunSettings.solarHours - clockHoursSeen + 1.5f * hoursPerDay, hoursPerDay) - 0.5f * hoursPerDay;
+
+    if (std::abs(gap) > labClockJumpHours) {
+        signalProbeEvent(world, ProbeEvent{ProbeEventKind::LightChange, true, Aabb{}});
+        clockHoursSeen = sunSettings.solarHours;
+    }
 }
 
 /*
@@ -254,6 +306,7 @@ void LightLabGame::onInput(World& world, const Input& input) {
 void LightLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     (void)simulationSeconds;
     sunSettings.solarHours = advanceSolarHours(sunSettings.solarHours, sunSettings.hoursPerSecond, tickSeconds);
+    clockHoursSeen = advanceSolarHours(clockHoursSeen, sunSettings.hoursPerSecond, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 
@@ -265,6 +318,7 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
         controls.updateCamera(world, input, frameSeconds, alpha);
     }
 
+    signalClockJumps(world);
     updateDaylight(world);
     flashlight.place(world, flashlightInHand(controls.getCamera()));
     world.get<ProbeVolume>(probes) = probeSettings.denseProbes ? labDenseProbeVolume : labProbeVolume;
@@ -295,6 +349,10 @@ Entity LightLabGame::getSunDisc() const {
 
 Entity LightLabGame::getFlashlight() const {
     return flashlight.getEntity();
+}
+
+Entity LightLabGame::getLamp() const {
+    return lamp;
 }
 
 Camera& LightLabGame::getCamera() {
@@ -348,6 +406,10 @@ void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
 
             if (golden.flashlightOn && !flashlight.isOn(world)) {
                 flashlight.toggle(world);
+            }
+
+            if (golden.lampOn && !world.has<PointLight>(lamp)) {
+                toggleLamp(world);
             }
         }
     }

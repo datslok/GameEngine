@@ -34,11 +34,6 @@ namespace {
         }
     };
 
-    bool inside(const Vec3& point, const Aabb& box) {
-        return point.x >= box.minimum.x && point.x <= box.maximum.x && point.y >= box.minimum.y && point.y <= box.maximum.y &&
-               point.z >= box.minimum.z && point.z <= box.maximum.z;
-    }
-
     // The box grown by a margin on every side.
     Aabb grown(const Aabb& box, float margin) {
         return Aabb{box.minimum - Vec3{margin, margin, margin}, box.maximum + Vec3{margin, margin, margin}};
@@ -143,7 +138,7 @@ namespace {
         const std::optional<LevelHit> hit = raycast(lab.game.getLevel(), beam);
         assert(hit);
         assert(near(hit->hit.point.y, labFloorTop, 1e-3f));
-        assert(inside(hit->hit.point, grown(labSunlitRoom, 1e-3f)));
+        assert(grown(labSunlitRoom, 1e-3f).contains(hit->hit.point));
 
         // The sun component follows the settings, and the sky shows behind everything.
         assert(collectLighting(lab.world, 1.0f).background.y > 0.0f);
@@ -172,7 +167,7 @@ namespace {
         const float doorZ = labFrontDoor.centre().z;
 
         const Vec3 throughDoor = walkWest(lab, Vec3{-14.0f, 0.0f, doorZ}, 4.0f);
-        assert(inside(throughDoor, grown(labBackRoom, 0.01f)));
+        assert(grown(labBackRoom, 0.01f).contains(throughDoor));
         assert(throughDoor.x > labBackRoom.minimum.x);
 
         const Vec3 blocked = walkWest(lab, Vec3{-14.0f, 0.0f, labSunlitRoom.centre().z}, 4.0f);
@@ -398,10 +393,94 @@ namespace {
         lab.game.onInput(lab.world, pressF);
         assert(!lab.world.has<SpotLight>(flashlight));
     }
+
+    // The probe events signalled since the last frame, cleared as the engine does once the frame is built.
+    std::vector<ProbeEvent> takeProbeEvents(Lab& lab) {
+        const std::vector<ProbeEvent> events = collectLighting(lab.world, 1.0f).probeEvents;
+        clearProbeEvents(lab.world);
+        return events;
+    }
+
+    /*
+    * The back room's ceiling lamp: under the middle of the ceiling, off at the start (so the golden views keep their
+    * picture), its fixture dark; L switches it on (a still light, not fast: its bounce goes into the probes' long memory)
+    * and the fixture glows, and each switch signals a light change to the probes over the lamp's reach.
+    */
+    void testTheBackRoomLamp() {
+        Lab lab;
+        const Entity lamp = lab.game.getLamp();
+        assert(lab.world.isAlive(lamp) && !lab.world.has<PointLight>(lamp));
+        const Vec3 position = lab.world.get<Transform>(lamp).position;
+        assert(labBackRoom.contains(position) && position.y > labRoomHeight - 0.3f);
+        assert(!lab.world.get<ModelRenderer>(lamp).castsShadows);
+        assert(lab.world.get<ModelRenderer>(lamp).parts[0].material.emissive.x == 0.0f);
+        assert(takeProbeEvents(lab).empty());
+
+        Input pressL;
+        pressL.beginFrame();
+        pressL.pressKey(Key::L);
+
+        for (bool on : {true, false}) {
+            lab.game.onInput(lab.world, pressL);
+            assert(lab.world.has<PointLight>(lamp) == on);
+            assert((lab.world.get<ModelRenderer>(lamp).parts[0].material.emissive.x > 0.0f) == on);
+
+            const std::vector<ProbeEvent> events = takeProbeEvents(lab);
+            assert(events.size() == 1);
+            assert(events[0].kind == ProbeEventKind::LightChange && !events[0].everywhere);
+            const float reach = labLampLight.range;
+            assert(events[0].region.contains(position + Vec3{reach, reach, reach} * 0.99f));
+            assert(events[0].region.contains(position - Vec3{reach, reach, reach} * 0.99f));
+        }
+
+        assert(!labLampLight.fast && labLampLight.castsShadows);
+    }
+
+    /*
+    * Moving the clock by hand (the solar time's slider) jumps the sun and sky: a light change everywhere, once the jump
+    * passes labClockJumpHours, small drags adding up. The clock running by itself moves the sun smoothly and signals
+    * nothing.
+    */
+    void testAClockJumpRestartsTheProbes() {
+        Lab lab;
+        Input idle;
+        idle.beginFrame();
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(takeProbeEvents(lab).empty());
+
+        LightLabSunSettings& sun = lab.game.getSunSettings();
+        sun.solarHours += 0.6f * labClockJumpHours;
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(takeProbeEvents(lab).empty());
+
+        sun.solarHours += 0.6f * labClockJumpHours;
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        const std::vector<ProbeEvent> events = takeProbeEvents(lab);
+        assert(events.size() == 1 && events[0].kind == ProbeEventKind::LightChange && events[0].everywhere);
+
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(takeProbeEvents(lab).empty());
+
+        // Across midnight the jump is the short way round.
+        sun.solarHours = 23.99f;
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        takeProbeEvents(lab);
+        sun.solarHours = 0.01f;
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(takeProbeEvents(lab).empty());
+
+        sun.hoursPerSecond = 1.0f;
+        int ticks = 0;
+        runTicks(lab.game, lab.world, static_cast<int>(std::lround(1.0f / tickSeconds)), ticks);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(takeProbeEvents(lab).empty());
+    }
 }
 
 void testLightLab() {
     testTheLabsFlashlight();
+    testTheBackRoomLamp();
+    testAClockJumpRestartsTheProbes();
     testProbeVolume();
     testDenseProbes();
     testSunDisc();

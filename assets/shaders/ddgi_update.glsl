@@ -10,7 +10,9 @@
 // kept (render/gpu/ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant). With the adaptive memory on (the
 // volume's change threshold above 0), the still lights' texels blend by adaptiveProbeBlend instead, their history in the
 // atlas's alpha and the change window's mean and noise in a third image (alpha is 0 otherwise, so switching the adaptive
-// memory on starts every texel from its stored light).
+// memory on starts every texel from its stored light). A probe a scene event restarted (render/gpu/ddgi.h,
+// advanceProbeRestarts) takes this frame's estimate outright and then averages since the event, by the frames the restart
+// buffer counts (adaptiveProbeUpdate with the adaptive memory, rampedProbeKeep for the fixed memory and the distances).
 #ifndef DDGI_UPDATE_GLSL
 #define DDGI_UPDATE_GLSL
 
@@ -37,12 +39,17 @@ layout(std430, set = 0, binding = 3) readonly buffer ProbeTurns {
     ProbeTurn probeTurns[];
 };
 
+// Each probe's frames since a scene event restarted its irradiance (x) and distances (y), negative for none.
+layout(std430, set = 0, binding = 4) readonly buffer ProbeRestarts {
+    ivec2 probeRestarts[];
+};
+
 #if UPDATE_IRRADIANCE
-layout(set = 0, binding = 4, rgba16f) uniform image2D atlas;
-layout(set = 0, binding = 5, rgba16f) uniform image2D fastAtlas;
-layout(set = 0, binding = 6, rgba16f) uniform image2D changeAtlas;
+layout(set = 0, binding = 5, rgba16f) uniform image2D atlas;
+layout(set = 0, binding = 6, rgba16f) uniform image2D fastAtlas;
+layout(set = 0, binding = 7, rgba16f) uniform image2D changeAtlas;
 #else
-layout(set = 0, binding = 4, rg16f) uniform image2D atlas;
+layout(set = 0, binding = 5, rg16f) uniform image2D atlas;
 #endif
 
 shared vec3 rayDirections[DDGI_MAX_RAYS];
@@ -97,20 +104,22 @@ void main() {
     vec4 fastResult = fastStored;
 #endif
 
+    ivec2 restart = probeRestarts[probe];
+
     if (sum.w > DDGI_MIN_TEXEL_WEIGHT) {
 #if UPDATE_IRRADIANCE
         if (volume.sky.w > 0.0) {
             vec4 change = imageLoad(changeAtlas, origin + 1 + texel);
-            AdaptiveProbeTexel adaptive = adaptiveProbeBlend(AdaptiveProbeTexel(stored.rgb, stored.a, change.rgb, change.a), sum.rgb / sum.w,
-                                                             volume.hysteresis.x, volume.rotation[2].w, volume.sky.w);
+            AdaptiveProbeTexel adaptive = adaptiveProbeUpdate(AdaptiveProbeTexel(stored.rgb, stored.a, change.rgb, change.a), sum.rgb / sum.w,
+                                                              volume.hysteresis.x, volume.rotation[2].w, volume.sky.w, restart.x);
             result = vec4(adaptive.stored, adaptive.history);
             imageStore(changeAtlas, origin + 1 + texel, vec4(adaptive.recent, adaptive.noise));
         } else {
-            result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, volume.hysteresis.x), 0.0);
+            result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, rampedProbeKeep(volume.hysteresis.x, restart.x)), 0.0);
         }
         fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, volume.origin.w), 1.0);
 #else
-        result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, volume.hysteresis.y), 0.0, 1.0);
+        result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, rampedProbeKeep(volume.hysteresis.y, restart.y)), 0.0, 1.0);
 #endif
     }
 

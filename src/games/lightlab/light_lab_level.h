@@ -91,6 +91,11 @@ inline const Aabb labWindow{Vec3{-23.0f, 1.0f, 11.75f}, Vec3{-22.7f, 2.2f, 13.25
 inline const Aabb labInnerDoorway{Vec3{-20.5f, labFloorTop, 9.85f}, Vec3{-19.5f, 2.1f, 10.15f}};
 inline const Aabb labFrontDoor{Vec3{-17.3f, labFloorTop, 7.0f}, Vec3{-17.0f, 2.1f, 8.2f}};
 
+// The back room's ceiling lamp: its bulb under the middle of the ceiling, and the glowing panel above it, touching the
+// ceiling (half-sizes).
+inline const Vec3 labLampPosition{-20.0f, labRoomHeight - 0.15f, 7.575f};
+inline const Vec3 labLampFixtureHalfSize{0.15f, 0.025f, 0.15f};
+
 /*
 * Light probes for global illumination round the building, 1 m apart, on half-metre marks so that every wall, the floor
 * and the roof fall between two layers of probes (none is buried in a wall, until probes can move themselves out), and

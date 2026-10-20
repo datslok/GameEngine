@@ -1,4 +1,5 @@
 #include "render/gpu/ddgi.h"
+#include "math/aabb.h"
 #include "math/angles.h"
 
 #include <algorithm>
@@ -785,7 +786,7 @@ namespace {
         double reach90 = 0.0;   // mean seconds to 90% of each switch
     };
 
-    SwitchedTexel switchedTexel(bool adaptive, float framesPerSecond) {
+    SwitchedTexel switchedTexel(bool adaptive, float framesPerSecond, bool events = false) {
         const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
         const float patchCosine = std::cos(radiansFromDegrees(15.0f));
         Vec3 texelDirection;
@@ -849,10 +850,15 @@ namespace {
                 const float estimate = estimateAt(frame, on ? 2.0f : 0.005f);
                 const bool first = frame == 0;
 
+                // With events, the switch is signalled: the frame it happens restarts the texel, and the fixed memory
+                // then ramps its share kept back up from none.
+                const int sinceEvent = events && state > 0 ? i : -1;
+
                 if (adaptive) {
-                    texel = adaptiveProbeBlend(texel, Vec3{estimate, estimate, estimate}, first ? 0.0f : longKeep, first ? 0.0f : windowKeep, 5.0f);
+                    texel = adaptiveProbeUpdate(texel, Vec3{estimate, estimate, estimate}, first ? 0.0f : longKeep, first ? 0.0f : windowKeep, 5.0f,
+                                                sinceEvent);
                 } else {
-                    texel.stored = blendProbeValue(texel.stored, Vec3{estimate, estimate, estimate}, first ? 0.0f : fixedKeep);
+                    texel.stored = blendProbeValue(texel.stored, Vec3{estimate, estimate, estimate}, first ? 0.0f : rampedProbeKeep(fixedKeep, sinceEvent));
                 }
 
                 const double stored = texel.stored.x;
@@ -909,6 +915,163 @@ namespace {
             assert(adaptive.crawl < 0.7 * fixed.crawl);
             assert(adaptive.reach90 < 0.6 * fixed.reach90);
         }
+    }
+
+    /*
+    * A scene event restarts a texel: on the event's frame its light and the change window's mean become the estimate,
+    * worth one frame, the noise none yet. While the window would still reach back before the event (fewer frames since
+    * than it holds), the stored light and the window's mean are both the plain mean since the event, the noise the root
+    * mean square of each frame's luminance about the mean before it, and nothing restarts it again, however far the
+    * light strays from the old noise's band. Then the adaptive memory carries on from there; with no restart running
+    * (negative) it is the adaptive memory throughout.
+    */
+    void testARestartedTexelStartsFromItsEstimate() {
+        const AdaptiveProbeTexel settled{Vec3{0.1f, 0.1f, 0.1f}, 4000.0f, Vec3{0.1f, 0.1f, 0.1f}, 0.001f};
+        const float longKeep = 0.999f;
+        const float windowKeep = 0.9f; // the window holds 9 frames
+        const float threshold = 8.0f;
+
+        AdaptiveProbeTexel texel = adaptiveProbeUpdate(settled, Vec3{2.0f, 2.0f, 2.0f}, longKeep, windowKeep, threshold, 0);
+        assert(sameTexel(texel, AdaptiveProbeTexel{Vec3{2.0f, 2.0f, 2.0f}, 1.0f, Vec3{2.0f, 2.0f, 2.0f}, 0.0f}));
+
+        const std::vector<float> estimates{0.5f, 3.0f, 1.0f, 2.5f, 0.0f, 4.0f, 2.0f, 1.5f};
+        float sum = 2.0f;
+        float squares = 0.0f;
+
+        for (std::size_t index = 0; index < estimates.size(); ++index) {
+            const int frames = static_cast<int>(index) + 1;
+            const float mean = sum / static_cast<float>(frames);
+            const float estimate = estimates[index];
+            texel = adaptiveProbeUpdate(texel, Vec3{estimate, estimate, estimate}, longKeep, windowKeep, threshold, frames);
+            sum += estimate;
+            squares += (estimate - mean) * (estimate - mean);
+            assert(nearlyEqual(texel.stored.x, sum / static_cast<float>(frames + 1), 1e-4f));
+            assert(nearlyEqual(texel.recent, texel.stored));
+            assert(texel.history == static_cast<float>(frames + 1));
+            assert(nearlyEqual(texel.noise, std::sqrt(squares / static_cast<float>(frames)), 1e-4f));
+        }
+
+        // The window full: the adaptive memory, from the history counted.
+        const Vec3 next{2.2f, 2.2f, 2.2f};
+        assert(sameTexel(adaptiveProbeUpdate(texel, next, longKeep, windowKeep, threshold, 9),
+                         adaptiveProbeBlend(texel, next, longKeep, windowKeep, threshold)));
+        assert(sameTexel(adaptiveProbeUpdate(settled, next, longKeep, windowKeep, threshold, -1),
+                         adaptiveProbeBlend(settled, next, longKeep, windowKeep, threshold)));
+    }
+
+    /*
+    * Without the adaptive memory a restarted probe ramps its share kept as a running mean would: none on the event's
+    * frame, then n / (n + 1) n frames later, until the fixed memory's share is the smaller. Negative: no restart.
+    */
+    void testTheRampAfterARestart() {
+        const float keep = 0.99f;
+        assert(rampedProbeKeep(keep, -1) == keep);
+        assert(rampedProbeKeep(keep, 0) == 0.0f);
+        assert(nearlyEqual(rampedProbeKeep(keep, 1), 0.5f));
+        assert(nearlyEqual(rampedProbeKeep(keep, 3), 0.75f));
+        assert(rampedProbeKeep(keep, 1000) == keep);
+        assert(rampedProbeKeep(0.0f, 5) == 0.0f);
+    }
+
+    // The numbers of the volume's probes inside the box.
+    std::set<int> probesInside(const ProbeVolume& volume, const Aabb& box) {
+        std::set<int> inside;
+
+        for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
+            if (box.contains(probePosition(volume, probe))) {
+                inside.insert(probe);
+            }
+        }
+
+        return inside;
+    }
+
+    /*
+    * Events restart the probes in their region (all of them when everywhere): a light change the irradiance only, a
+    * geometry change the distances too. Each restart then counts the frames since, and ends once its ramp has reached the
+    * frame's share kept (fresh atlases, which keep nothing, end it at once). A new volume starts with no restarts.
+    */
+    void testEventsRestartTheProbesInTheirRegion() {
+        const ProbeVolume volume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{4, 2, 3}};
+        const int probes = probeCount(volume.counts);
+        ProbeFrame frame;
+        frame.irradianceHysteresis = 0.75f; // a ramp of 3 frames: 0, 1/2, 2/3, then 3/4 is the share itself
+        frame.distanceHysteresis = 0.5f;    // 0, then 1/2 is the share itself
+        std::vector<GpuProbeRestart> restarts;
+
+        advanceProbeRestarts(restarts, volume, {}, frame);
+        assert(static_cast<int>(restarts.size()) == probes);
+
+        for (const GpuProbeRestart& restart : restarts) {
+            assert(restart.irradianceFrames < 0 && restart.distanceFrames < 0);
+        }
+
+        const Aabb corner{Vec3{-0.5f, -0.5f, -0.5f}, Vec3{1.5f, 1.5f, 0.5f}};
+        const std::set<int> inside = probesInside(volume, corner);
+        assert(inside.size() == 4);
+        const std::vector<ProbeEvent> lamp{ProbeEvent{ProbeEventKind::LightChange, false, corner}};
+        advanceProbeRestarts(restarts, volume, lamp, frame);
+
+        for (int probe = 0; probe < probes; ++probe) {
+            const GpuProbeRestart& restart = restarts[static_cast<std::size_t>(probe)];
+            assert(restart.irradianceFrames == (inside.count(probe) != 0 ? 0 : -1));
+            assert(restart.distanceFrames < 0);
+        }
+
+        for (int expected : {1, 2, -1}) {
+            advanceProbeRestarts(restarts, volume, {}, frame);
+            assert(restarts[static_cast<std::size_t>(*inside.begin())].irradianceFrames == expected);
+        }
+
+        const std::vector<ProbeEvent> collapse{ProbeEvent{ProbeEventKind::GeometryChange, true, Aabb{}}};
+        advanceProbeRestarts(restarts, volume, collapse, frame);
+
+        for (const GpuProbeRestart& restart : restarts) {
+            assert(restart.irradianceFrames == 0 && restart.distanceFrames == 0);
+        }
+
+        advanceProbeRestarts(restarts, volume, {}, frame);
+        assert(restarts[0].irradianceFrames == 1 && restarts[0].distanceFrames == -1);
+
+        const ProbeFrame fresh;
+        advanceProbeRestarts(restarts, volume, {}, fresh);
+        assert(restarts[0].irradianceFrames == -1);
+
+        const ProbeVolume larger{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{5, 2, 3}};
+        advanceProbeRestarts(restarts, volume, collapse, frame);
+        advanceProbeRestarts(restarts, larger, {}, frame);
+        assert(static_cast<int>(restarts.size()) == probeCount(larger.counts));
+
+        for (const GpuProbeRestart& restart : restarts) {
+            assert(restart.irradianceFrames < 0 && restart.distanceFrames < 0);
+        }
+    }
+
+    /*
+    * What scene events are for, in the dark room model: the lamp's switch signalled, the texel restarts and takes the
+    * lamp in within a few frames, far quicker than the adaptive memory can tell the change from its noise, and crawls no
+    * more once settled; with the fixed memory too, the ramp brings it in far quicker than the plain blend.
+    */
+    void testAnEventBringsALampInAtOnce() {
+        for (float framesPerSecond : {60.0f, 240.0f}) {
+            const SwitchedTexel adaptive = switchedTexel(true, framesPerSecond);
+            const SwitchedTexel signalled = switchedTexel(true, framesPerSecond, true);
+            // Measured: 0.81 s against 0.044 at 60 fps, 0.96 against 0.008 at 240; the fixed memory's 4.6 s against the same.
+            assert(signalled.reach90 < 0.1 * adaptive.reach90);
+            assert(signalled.crawl < 1.1 * adaptive.crawl);
+
+            const SwitchedTexel fixed = switchedTexel(false, framesPerSecond);
+            const SwitchedTexel fixedSignalled = switchedTexel(false, framesPerSecond, true);
+            assert(fixedSignalled.reach90 < 0.02 * fixed.reach90);
+            assert(fixedSignalled.crawl < 1.1 * fixed.crawl);
+        }
+    }
+
+    // The update reads each probe's restart as two ints, as the shader's ivec2; none by default.
+    void testRestartsArePackedForTheShader() {
+        static_assert(sizeof(GpuProbeRestart) == 8);
+        const GpuProbeRestart none;
+        assert(none.irradianceFrames < 0 && none.distanceFrames < 0);
     }
 
     bool sameRows(const ProbeRotationRows& a, const ProbeRotationRows& b) {
@@ -1236,6 +1399,11 @@ void testDdgi() {
     testTheAdaptiveMemoryRestartsOnARealChange();
     testTheScheduleCarriesTheAdaptiveMemory();
     testTheAdaptiveMemoryIsCalmerAndQuicker();
+    testARestartedTexelStartsFromItsEstimate();
+    testTheRampAfterARestart();
+    testEventsRestartTheProbesInTheirRegion();
+    testAnEventBringsALampInAtOnce();
+    testRestartsArePackedForTheShader();
     testEachProbeTurnsItsRaysItsOwnWay();
     testNeighboursShareOnlyIfTheyCanSeeEachOther();
     testSharingAveragesTheVisibleNeighbours();
