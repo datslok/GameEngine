@@ -189,8 +189,7 @@ namespace {
     }
 
     /*
-    * A probe a hair from a wall moves away from it, towards the farthest surface it sees (here into the room), and stays
-    * within its limit.
+    * A probe a hair from a wall moves straight away from it, into the room, and stays within its limit.
     */
     void testProbeNearWallMovesAway() {
         const Vec3 spacing{1.0f, 1.0f, 1.0f};
@@ -203,6 +202,46 @@ namespace {
         assert(2.0f - moved.x >= probeMinFrontFaceShare * spacing.x);
         assert(withinOffsetLimit(offsetOf(relocation), spacing));
         assert(classifyProbe(relocation, 0.2f) == ProbeState::Vigilant);
+    }
+
+    /*
+    * A probe low over a room's floor beside an open doorway, with ground stretching far outside: the farthest surface it
+    * sees lies out through the doorway. It rises straight off the floor, the nearest surface, until it stands
+    * probeFrontFaceNudge of a spacing above it, and keeps its place across the floor. Moving towards the farthest surface
+    * (the 2021 reference's rule) walked it into the doorway, where it saw mostly the sunlit outdoors and lent that to the
+    * room's walls (the light lab's back room seen from afar through its door, lit by its one 4 m probe).
+    */
+    void testProbeLowOverAFloorRisesRatherThanWalkingOut() {
+        const Vec3 spacing{2.0f, 2.0f, 2.0f};
+        const std::vector<Aabb> room{
+            Aabb{Vec3{-2.3f, -0.3f, -2.3f}, Vec3{40.0f, 0.0f, 2.3f}}, // the floor, running far out of the doorway as ground
+            Aabb{Vec3{-2.3f, 3.0f, -2.3f}, Vec3{2.3f, 3.3f, 2.3f}},   // ceiling
+            Aabb{Vec3{-2.3f, 0.0f, -2.3f}, Vec3{-2.0f, 3.0f, 2.3f}},  // west wall
+            Aabb{Vec3{2.0f, 0.0f, -2.3f}, Vec3{2.3f, 3.0f, -0.5f}},   // east wall, either side of the doorway and over it
+            Aabb{Vec3{2.0f, 0.0f, 0.5f}, Vec3{2.3f, 3.0f, 2.3f}},
+            Aabb{Vec3{2.0f, 2.0f, -0.5f}, Vec3{2.3f, 3.0f, 0.5f}},
+            Aabb{Vec3{-2.0f, 0.0f, -2.3f}, Vec3{2.0f, 3.0f, -2.0f}},  // north wall
+            Aabb{Vec3{-2.0f, 0.0f, 2.0f}, Vec3{2.0f, 3.0f, 2.3f}},    // south wall
+        };
+        const Vec3 grid{1.0f, 0.1f, 0.0f};
+
+        // The setting: the floor is too close, and the farthest surface lies out through the doorway.
+        ProbeRayTally tally;
+        for (int ray = 0; ray < probeRelocationRays; ++ray) {
+            const Vec3 direction = sphericalFibonacci(ray, probeRelocationRays);
+            tallyProbeRay(tally, direction, traceBoxes(room, grid, direction), Vec3{0.0f, 0.0f, 0.0f}, spacing);
+        }
+        assert(tally.closestFrontFace < probeMinFrontFaceShare * spacing.y && tally.closestFrontFaceDirection.y < -0.9f);
+        assert(tally.farthestFrontFace > 5.0f && tally.farthestFrontFaceDirection.x > 0.9f);
+
+        const GpuProbeRelocation relocation = relocateAmongBoxes(room, grid, spacing);
+        const Vec3 offset = offsetOf(relocation);
+        assert(relocation.off == 0.0f);
+        assert(nearlyEqual(offset.y, probeFrontFaceNudge * spacing.y - grid.y, 0.02f));
+        // Its direction is the relocation ray that met the floor nearest, a few degrees off straight down (256 rays on a
+        // spiral), so it drifts a few centimetres sideways; walking out it moved 0.8 m towards the doorway.
+        assert(std::abs(offset.x) < 0.05f * spacing.x && std::abs(offset.z) < 0.05f * spacing.z);
+        assert(withinOffsetLimit(offset, spacing));
     }
 
     // A probe in the open middle of a room, well away from every surface, stays exactly where it is.
@@ -450,6 +489,7 @@ void testProbeRelocation() {
     testBuriedProbeEscapes();
     testDeeplyBuriedProbeIsOff();
     testProbeNearWallMovesAway();
+    testProbeLowOverAFloorRisesRatherThanWalkingOut();
     testProbeInOpenStays();
     testClassification();
     testNoIterationsOnlyClassifies();

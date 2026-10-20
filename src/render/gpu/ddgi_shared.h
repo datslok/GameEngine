@@ -144,12 +144,11 @@
 // A probe leaving through a back face stops this far short of the offset limit, in metres.
 #define DDGI_ESCAPE_MARGIN 0.001
 
-// A probe whose nearest front face is closer than this share of the smallest spacing moves up to the nudge share
-// towards the farthest front face it sees, unless the two lie the same way (cosine above the last number: it only sees
-// one surface, and moving could take it through).
+// A probe whose nearest front face is closer than this share of the smallest spacing moves straight away from it until
+// it stands the nudge share of the spacing off it. The 2021 reference moved it towards the farthest front face it saw,
+// which inside a room lies out through a door or window, so it walked probes into openings.
 #define DDGI_MIN_FRONT_FACE_SHARE 0.1
 #define DDGI_FRONT_FACE_NUDGE 0.2
-#define DDGI_SAME_SURFACE_COSINE 0.5
 
 // What a probe does this frame (ProbeState): off (buried in the static level: never traced or read), sleeping (no
 // static surface near: not traced, not read), awake (a sleeping probe near something that moves) and vigilant (a static

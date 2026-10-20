@@ -191,6 +191,29 @@ namespace {
         assert(checked > 300);
     }
 
+    /*
+    * The 4 m cascade has one probe inside the back room, its grid point low over the floor. Relocated against the level,
+    * it rises off the floor and stays well inside the room, more than 2 m from the open front door: walked towards the
+    * farthest surface it saw (out through the door) it ended 0.85 m from the doorway, and the room seen from afar glowed
+    * with the sunlit outdoors it saw there.
+    */
+    void testTheBackRoomsCoarseProbeKeepsAwayFromTheDoor() {
+        Lab lab;
+        const ProbeRayTrace trace = [&](const Vec3& origin, const Vec3& direction) {
+            return traceRelocationRay(lab.game.getLevel(), origin, direction);
+        };
+        const ProbeCascadeLayout cascades = probeCascadeLayout(GlobalIlluminationSettings{});
+        const float spacing = probeCascadeSpacing(cascades, 3);
+        const Vec3 grid{-19.75f, 0.25f, 8.25f};
+        assert(spacing == 4.0f && labBackRoom.contains(grid));
+
+        const GpuProbeRelocation relocation = relocateProbe(grid, Vec3{spacing, spacing, spacing}, probeRelocationIterations, trace);
+        const Vec3 probe = grid + Vec3{relocation.offset[0], relocation.offset[1], relocation.offset[2]};
+        assert(relocation.off == 0.0f && labBackRoom.contains(probe));
+        assert(probe.y > grid.y + 0.4f);
+        assert((probe - labFrontDoor.centre()).length() > 2.0f);
+    }
+
     // At the default afternoon, the sunbeam through the middle of the window lands on the sunlit room's floor.
     void testSunbeamThroughTheWindow() {
         Lab lab;
@@ -518,6 +541,7 @@ void testLightLab() {
     testForest();
     testBuildingOpenings();
     testProbesLeaveTheWindowWall();
+    testTheBackRoomsCoarseProbeKeepsAwayFromTheDoor();
     testSunbeamThroughTheWindow();
     testWalkingIn();
     testDaylight();

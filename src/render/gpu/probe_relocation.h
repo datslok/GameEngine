@@ -31,7 +31,6 @@ inline constexpr float probeOffsetLimit = static_cast<float>(DDGI_OFFSET_LIMIT);
 inline constexpr float probeEscapeMargin = static_cast<float>(DDGI_ESCAPE_MARGIN);
 inline constexpr float probeMinFrontFaceShare = static_cast<float>(DDGI_MIN_FRONT_FACE_SHARE);
 inline constexpr float probeFrontFaceNudge = static_cast<float>(DDGI_FRONT_FACE_NUDGE);
-inline constexpr float sameSurfaceCosine = static_cast<float>(DDGI_SAME_SURFACE_COSINE);
 inline constexpr float probeRelocationMinDistance = static_cast<float>(DDGI_RELOCATION_MIN_DISTANCE);
 
 // The distance a ray that met nothing reports (the trace's whole reach).
@@ -89,8 +88,9 @@ struct ProbeMove {
 * One relocation step from the rays traced at offset:
 * - inside something (more than insideBackFaceShare of the rays met back faces): through the nearest back face, scaled
 *   as far as the limit allows (probeEscapeScale); if that does not reach the face (scale 1 or less) it is stuck;
-* - a front face nearer than probeMinFrontFaceShare of the smallest spacing: up to probeFrontFaceNudge of it towards
-*   the farthest front face, unless that lies the same way (sameSurfaceCosine), clamped to the limit;
+* - a front face nearer than probeMinFrontFaceShare of the smallest spacing: straight away from it until it is
+*   probeFrontFaceNudge of that spacing off it, clamped to the limit (not towards the farthest front face, as the 2021
+*   reference does: inside a room that lies out through an opening, and walked probes into doorways);
 * - otherwise where it is.
 */
 ProbeMove relocateProbeStep(const ProbeRayTally& tally, const Vec3& offset, const Vec3& spacing);
