@@ -36,10 +36,12 @@ shared vec3 probeOffset;
 shared bool recorded;
 
 // A ray against the static level, its distance as tallyProbeRay takes it: negative for a back face, the whole reach
-// for a miss. No minimum distance, as the probes' own rays.
+// for a miss. Hits nearer than DDGI_RELOCATION_MIN_DISTANCE are skipped, so a probe on a surface or a seam between
+// solids sees past it.
 float traceStatic(vec3 origin, vec3 direction) {
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_STATIC, origin, 0.0, direction, DDGI_RAY_REACH);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_STATIC, origin, DDGI_RELOCATION_MIN_DISTANCE, direction,
+                          DDGI_RAY_REACH);
 
     while (rayQueryProceedEXT(query)) {
     }
