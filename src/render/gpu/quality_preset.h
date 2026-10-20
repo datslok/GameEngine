@@ -10,7 +10,7 @@
 * of different strength. High is the engine as tuned (its defaults: 4096 cascades, 128 light probe rays). Ultra is the
 * same with 256 probe rays, near fast lights too. Each step down from High gives up shadow detail (fewer lights with
 * shadows, coarser shadow texels, a shorter reach for the sun's shadows in fewer, smaller cascades: Medium's and Low's 2048
-* cascades take 128 MB instead of 384), the widest bloom levels and probe rays (64, then 32; the ray budget and the
+* cascades take 128 MB instead of 384), the widest bloom levels and probe rays (64, then 32, with more sharing between probes to make up: 0.3, then 0.5, against High's 0.1 and none on Ultra; the ray budget and the
 * rest of global illumination stay as tuned). Taste (tone mapping, exposure, the bloom's strength, HDR output) is never
 * touched. The numbers below High are first guesses until measured on weaker GPUs.
 */
