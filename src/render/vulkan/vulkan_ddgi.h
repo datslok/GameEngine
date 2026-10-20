@@ -46,9 +46,10 @@ public:
     /*
     * Ready the atlases for this frame's volume, before the frame's scene set (which points at them) is written: a volume
     * that differs from last frame's (or the first) gets new atlases, cleared, which its first update fills outright.
-    * Leaves them readable. Outside any rendering block.
+    * Also picks what this frame reads: the shared atlases while the settings share light between probes (switching
+    * that rewrites the probes' turns, after waiting for the GPU). Leaves them readable. Outside any rendering block.
     */
-    void prepare(VkCommandBuffer commands, const ProbeVolume& volume);
+    void prepare(VkCommandBuffer commands, const ProbeVolume& volume, const GlobalIlluminationSettings& settings);
 
     /*
     * Record this frame's probe update for the volume prepare() readied: trace, then blend, leaving the atlases readable
@@ -64,7 +65,7 @@ public:
 
     bool hasProbes() const;
 
-    // The atlases as the scene set samples them (valid after prepare()).
+    // The atlases as the scene set samples them (valid after prepare()): the shared ones while probes share light.
     SampledImage sampledIrradiance() const;
     SampledImage sampledDistance() const;
     SampledImage sampledFastIrradiance() const;
@@ -73,6 +74,7 @@ public:
     VulkanImage& getIrradianceAtlas();
     VulkanImage& getDistanceAtlas();
     VulkanImage& getFastIrradianceAtlas();
+    VulkanImage& getSharedIrradianceAtlas();
 
 private:
     const VulkanDevice& device;
@@ -83,6 +85,7 @@ private:
     std::unique_ptr<ComputePipeline> tracePipeline;
     std::unique_ptr<ComputePipeline> irradiancePipeline;
     std::unique_ptr<ComputePipeline> distancePipeline;
+    std::unique_ptr<ComputePipeline> sharePipeline;
 
     OwnedHandle<VkDescriptorSetLayout> ballsSetLayout;
     OwnedHandle<VkPipelineLayout> ballsLayout;
@@ -96,6 +99,17 @@ private:
     // The adaptive memory's state beside the irradiance atlas's history (alpha): the change window's mean light and the
     // noise about it (render/gpu/ddgi.h, AdaptiveProbeTexel), RGBA16F, laid out as the irradiance atlas.
     VulkanImage changeStatistics;
+
+    // What sharing between probes writes (ddgi_share.comp) and everything then reads, laid out as the irradiance atlas.
+    VulkanImage sharedIrradiance;
+    VulkanImage sharedFastIrradiance;
+
+    // Each probe's own turn of its rays (GpuProbeTurn), read by the trace and the update; identity rows unless sharing.
+    VulkanBuffer probeTurns;
+    bool turnsIndependent = false;
+
+    // This frame shares light between probes (set by prepare()).
+    bool sharing = false;
     VulkanBuffer rays;
     VulkanBuffer fastRays;
     VulkanBuffer nearFastLight;
@@ -119,7 +133,14 @@ private:
     void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int rayStride);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
                int probes);
+    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight);
+
+    // Fill the turns buffer: each probe's own turn, or identity rows.
+    void writeProbeTurns(int probes, bool independent);
 
     // The ray buffers, in their bindings' order (rays, fast rays, which probes a fast light reached).
     std::array<const VulkanBuffer*, 3> rayBuffers() const;
+
+    // What the trace and the update bind: the ray buffers, then the probes' turns.
+    std::array<const VulkanBuffer*, 4> probeBuffers() const;
 };

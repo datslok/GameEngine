@@ -7,7 +7,9 @@
 #include "render/gpu/ddgi_shared.h"
 #include "scene/probe_volume.h"
 
+#include <array>
 #include <cstdint>
+#include <vector>
 
 /*
 * Global illumination from light probes: DDGI ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, in the form
@@ -83,6 +85,17 @@ struct GlobalIlluminationSettings {
     float changeThreshold = 5.0f;
 
     /*
+    * Sharing between neighbouring probes: each probe's irradiance (still and fast) is read as its own light weighted 1
+    * and each of its six face neighbours' that it can see weighted probeSharing (sharedProbeValue), so neighbours,
+    * which see nearly the same light, pool their rays: like several times the rays, with no more tracing and no lag,
+    * for bounce light a little blurrier (about two cells across instead of one). Each probe then also turns its rays
+    * its own way (probeRayTurn), so neighbours' errors are independent; with one shared turn they would all err alike
+    * and sharing would remove nothing. The probes keep accumulating their own unshared light; only what is read (the
+    * main pass, the debug balls, the next frame's bounce) is shared. 0: off, everything exactly as before.
+    */
+    float probeSharing = 0.0f;
+
+    /*
     * Fast lights (PointLight::fast, SpotLight::fast: flashlights, headlights) keep their light in a second irradiance
     * atlas with a much shorter memory, so their bounce follows them instead of trailing for seconds; light adds up, so
     * the two atlases are simply summed where they are read. 0.05 s kept up with the light lab's flashlight by eye, for
@@ -137,6 +150,9 @@ Vec3 octahedralDecode(const Vec2& square);
 // The direction at the centre of an inner texel (0..side - 1 on each axis, without the border) of a probe's square.
 Vec3 probeTexelDirection(TexelCoord texel, int side);
 
+// The inner texel a direction falls in (the inverse of probeTexelDirection), clamped inside the square.
+TexelCoord probeDirectionTexel(const Vec3& unitDirection, int side);
+
 /*
 * Each probe's square carries a one-texel border, so filtering across its edge reads the right neighbours. In the
 * bordered square (side + 2 texels across, the inner texels at 1..side), the texel a border texel copies: an edge texel
@@ -188,6 +204,48 @@ ProbeRayFrame probeRayFrame(std::uint64_t frameNumber);
 
 // Ray ray of a probe's count in a frame of this phase: spiral point ray x probeRayCycle + phase, turned by the rotation.
 Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation);
+
+// The same, turned by the probe's own turn first (probeRayTurn), then by the frame's rotation.
+Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation, const ProbeRotationRows& turn);
+
+/*
+* Probe number probe's own turn of its rays, the same every frame: a uniform rotation (randomProbeRotation of a number
+* no ray cycle reaches), so neighbouring probes trace different directions and their errors are independent, which is
+* what lets sharing between them average the errors away.
+*/
+ProbeRotationRows probeRayTurn(int probe);
+
+// Each probe's turn as the shaders read it (std430: three vec4 rows, w unused).
+struct GpuProbeTurn {
+    float rows[3][4];
+};
+
+static_assert(sizeof(GpuProbeTurn) == 48, "GpuProbeTurn must match ProbeTurns in ddgi_volume.glsl");
+
+// Every probe's turn: its own (probeRayTurn) when sharing, else identity rows, which leave every ray exactly as before.
+std::vector<GpuProbeTurn> packProbeTurns(int probes, bool independent);
+
+// Whether a probe sees its neighbour separation away, from its mean distance towards it (DDGI_SHARE_VISIBLE_SHARE).
+bool probesSeeEachOther(float meanDistance, float separation);
+
+/*
+* A probe's light as sharing reads it: its own weighted 1, each visible neighbour's weighted weight, over the sum of the
+* weights, so uniform light stays exactly itself.
+*/
+Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, const std::array<bool, 6>& visible, float weight);
+
+/*
+* What the sharing pass reads, as push constants (must match ddgi_share.comp): the grid and the weight.
+*/
+struct GpuProbeShare {
+    std::int32_t counts[4]; // xyz probes along each axis
+    float spacing[4];       // xyz the spacing between probes
+    float weight[4];        // x the sharing weight
+};
+
+static_assert(sizeof(GpuProbeShare) == 48, "GpuProbeShare must match ddgi_share.comp");
+
+GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight);
 
 /*
 * Whether a probe counts as within reach of a light, for tracing more rays: the light's range, grown by reach (the

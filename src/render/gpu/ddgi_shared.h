@@ -92,4 +92,11 @@
 // smaller anyway.
 #define DDGI_MAX_HISTORY 2048
 
+// Sharing between neighbouring probes (render/gpu/ddgi.h, probesSeeEachOther): a probe sees its neighbour when its mean
+// distance towards it reaches this share of the way there; a wall between them stops it far short.
+#define DDGI_SHARE_VISIBLE_SHARE 0.9
+
+// The neighbours each probe shares with: its six face neighbours (one along each way of each axis).
+#define DDGI_SHARE_NEIGHBOURS 6
+
 #endif

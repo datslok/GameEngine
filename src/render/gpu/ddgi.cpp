@@ -28,6 +28,9 @@ namespace {
         return counts.x * counts.y;
     }
 
+    // Probes' own turns are drawn from numbers this high, which no ray cycle (frame number / probeRayCycle) reaches.
+    constexpr std::uint64_t probeTurnNumbers = std::uint64_t{1} << 62;
+
     // The frames whose running mean keeps this share (n / (n + 1) = keep), at most maxProbeHistory.
     float historyForShare(float keep) {
         return keep < 1.0f ? std::min(keep / (1.0f - keep), static_cast<float>(maxProbeHistory)) : static_cast<float>(maxProbeHistory);
@@ -43,6 +46,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Adaptive memory", settings.adaptiveMemory);
     visitor.field("Change window", settings.changeWindowSeconds, {.min = 0.01f, .max = 2.0f, .sliderMax = 1.0f, .unit = "s"});
     visitor.field("Change threshold", settings.changeThreshold, {.min = 1.0f, .max = 20.0f, .sliderMax = 10.0f, .unit = "sd"});
+    visitor.field("Probe sharing", settings.probeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast irradiance time constant", settings.fastIrradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 0.5f, .unit = "s"});
     visitor.field("Fast rays per probe", settings.fastRaysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
     visitor.field("Fast blend frame cap", settings.fastBlendMaxFrameSeconds, {.min = 0.001f, .max = 1.0f, .sliderMax = 0.1f, .unit = "s"});
@@ -184,6 +188,80 @@ ProbeRayFrame probeRayFrame(std::uint64_t frameNumber) {
 Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation) {
     const Vec3 point = sphericalFibonacci(ray * probeRayCycle + phase, count * probeRayCycle);
     return Vec3{rotation.rows[0].dot(point), rotation.rows[1].dot(point), rotation.rows[2].dot(point)};
+}
+
+Vec3 probeRayDirection(int ray, int count, int phase, const ProbeRotationRows& rotation, const ProbeRotationRows& turn) {
+    const Vec3 point = sphericalFibonacci(ray * probeRayCycle + phase, count * probeRayCycle);
+    const Vec3 turned{turn.rows[0].dot(point), turn.rows[1].dot(point), turn.rows[2].dot(point)};
+    return Vec3{rotation.rows[0].dot(turned), rotation.rows[1].dot(turned), rotation.rows[2].dot(turned)};
+}
+
+ProbeRotationRows probeRayTurn(int probe) {
+    return probeRotationRows(randomProbeRotation(probeTurnNumbers + static_cast<std::uint64_t>(probe)));
+}
+
+std::vector<GpuProbeTurn> packProbeTurns(int probes, bool independent) {
+    std::vector<GpuProbeTurn> turns(static_cast<std::size_t>(std::max(probes, 0)));
+
+    for (int probe = 0; probe < probes; ++probe) {
+        GpuProbeTurn& packed = turns[static_cast<std::size_t>(probe)];
+
+        if (!independent) {
+            for (int row = 0; row < 3; ++row) {
+                packed.rows[row][row] = 1.0f;
+            }
+
+            continue;
+        }
+
+        const ProbeRotationRows turn = probeRayTurn(probe);
+
+        for (int row = 0; row < 3; ++row) {
+            packed.rows[row][0] = turn.rows[row].x;
+            packed.rows[row][1] = turn.rows[row].y;
+            packed.rows[row][2] = turn.rows[row].z;
+        }
+    }
+
+    return turns;
+}
+
+TexelCoord probeDirectionTexel(const Vec3& unitDirection, int side) {
+    const Vec2 square = octahedralEncode(unitDirection);
+    const auto texel = [side](float coordinate) {
+        return std::clamp(static_cast<int>(std::floor((coordinate * 0.5f + 0.5f) * static_cast<float>(side))), 0, side - 1);
+    };
+    return TexelCoord{texel(square.x), texel(square.y)};
+}
+
+bool probesSeeEachOther(float meanDistance, float separation) {
+    return meanDistance >= static_cast<float>(DDGI_SHARE_VISIBLE_SHARE) * separation;
+}
+
+Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, const std::array<bool, 6>& visible, float weight) {
+    Vec3 sum = own;
+    float weights = 1.0f;
+
+    for (std::size_t neighbour = 0; neighbour < neighbours.size(); ++neighbour) {
+        if (visible[neighbour]) {
+            sum = sum + neighbours[neighbour] * weight;
+            weights += weight;
+        }
+    }
+
+    return sum * (1.0f / weights);
+}
+
+GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight) {
+    GpuProbeShare packed{};
+    packed.counts[0] = volume.counts.x;
+    packed.counts[1] = volume.counts.y;
+    packed.counts[2] = volume.counts.z;
+    packed.spacing[0] = volume.spacing.x;
+    packed.spacing[1] = volume.spacing.y;
+    packed.spacing[2] = volume.spacing.z;
+    packed.weight[0] = weight;
+    return packed;
 }
 
 bool probeNearLight(const Vec3& probe, const Vec3& light, float range, float reach) {

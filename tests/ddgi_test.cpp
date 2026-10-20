@@ -2,6 +2,7 @@
 #include "math/angles.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <set>
@@ -896,6 +897,196 @@ namespace {
         }
     }
 
+    bool sameRows(const ProbeRotationRows& a, const ProbeRotationRows& b) {
+        return nearlyEqual(a.rows[0], b.rows[0]) && nearlyEqual(a.rows[1], b.rows[1]) && nearlyEqual(a.rows[2], b.rows[2]);
+    }
+
+    /*
+    * Each probe's own turn, applied to its rays before the frame's rotation, so neighbours trace different directions
+    * and their noise is independent (what makes sharing between them pay): the same for the same probe, different for
+    * different probes, a rotation (orthonormal rows); identity rows when sharing is off, which leave every ray exactly
+    * as before.
+    */
+    void testEachProbeTurnsItsRaysItsOwnWay() {
+        const ProbeRotationRows first = probeRayTurn(0);
+        assert(sameRows(first, probeRayTurn(0)));
+        assert(!sameRows(first, probeRayTurn(1)));
+
+        for (int probe : {0, 1, 57, 4000}) {
+            const ProbeRotationRows turn = probeRayTurn(probe);
+
+            for (int row = 0; row < 3; ++row) {
+                assert(nearlyEqual(turn.rows[row].length(), 1.0f, 1e-5f));
+                assert(nearlyEqual(turn.rows[row].dot(turn.rows[(row + 1) % 3]), 0.0f, 1e-5f));
+            }
+        }
+
+        const std::vector<GpuProbeTurn> independent = packProbeTurns(3, true);
+        const std::vector<GpuProbeTurn> same = packProbeTurns(3, false);
+        assert(independent.size() == 3 && same.size() == 3);
+        assert(independent[2].rows[1][0] == probeRayTurn(2).rows[1].x && independent[2].rows[2][2] == probeRayTurn(2).rows[2].z);
+
+        for (const GpuProbeTurn& turn : same) {
+            for (int row = 0; row < 3; ++row) {
+                for (int column = 0; column < 4; ++column) {
+                    assert(turn.rows[row][column] == (row == column ? 1.0f : 0.0f));
+                }
+            }
+        }
+
+        // Identity rows change nothing, bit for bit; a probe's own turn applies before the frame's.
+        const ProbeRotationRows frame = probeRotationRows(randomProbeRotation(9));
+        const ProbeRotationRows identity{{Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}}};
+        const ProbeRotationRows turn = probeRayTurn(5);
+
+        for (int ray = 0; ray < 64; ++ray) {
+            const Vec3 plain = probeRayDirection(ray, 64, 3, frame);
+            const Vec3 unturned = probeRayDirection(ray, 64, 3, frame, identity);
+            assert(plain.x == unturned.x && plain.y == unturned.y && plain.z == unturned.z);
+
+            const Vec3 point = probeRayDirection(ray, 64, 3, identity);
+            const Vec3 turned{turn.rows[0].dot(point), turn.rows[1].dot(point), turn.rows[2].dot(point)};
+            const Vec3 expected{frame.rows[0].dot(turned), frame.rows[1].dot(turned), frame.rows[2].dot(turned)};
+            assert(nearlyEqual(probeRayDirection(ray, 64, 3, frame, turn), expected));
+        }
+    }
+
+    /*
+    * Two neighbouring probes share light only if each can see the other: the probe's mean distance towards its neighbour
+    * must reach most of the way there (DDGI_SHARE_VISIBLE_SHARE); a wall between them (a short distance) keeps them apart.
+    */
+    void testNeighboursShareOnlyIfTheyCanSeeEachOther() {
+        assert(probesSeeEachOther(1.0f, 1.0f));
+        assert(probesSeeEachOther(2.6f, 1.0f));
+        assert(!probesSeeEachOther(0.35f, 1.0f));
+        assert(probesSeeEachOther(static_cast<float>(DDGI_SHARE_VISIBLE_SHARE) * 2.0f, 2.0f));
+        assert(!probesSeeEachOther(static_cast<float>(DDGI_SHARE_VISIBLE_SHARE) * 2.0f - 0.01f, 2.0f));
+    }
+
+    /*
+    * The shared value: the probe's own light weighted 1 and each visible neighbour's the sharing weight, divided by the
+    * weights, so a uniform light stays exactly itself; neighbours that cannot see the probe, or a weight of 0, leave the
+    * probe's own light.
+    */
+    void testSharingAveragesTheVisibleNeighbours() {
+        const Vec3 own{1.0f, 2.0f, 3.0f};
+        const std::array<Vec3, 6> neighbours{Vec3{3.0f, 2.0f, 1.0f}, Vec3{5.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f},
+                                             Vec3{1.0f, 1.0f, 1.0f}, Vec3{2.0f, 2.0f, 2.0f}, Vec3{9.0f, 9.0f, 9.0f}};
+        const std::array<bool, 6> allVisible{true, true, true, true, true, true};
+        const std::array<bool, 6> noneVisible{};
+
+        assert(nearlyEqual(sharedProbeValue(own, neighbours, noneVisible, 0.5f), own));
+        assert(nearlyEqual(sharedProbeValue(own, neighbours, allVisible, 0.0f), own));
+
+        const std::array<bool, 6> twoVisible{true, false, false, false, true, false};
+        const Vec3 expected = (own + (neighbours[0] + neighbours[4]) * 0.5f) * (1.0f / 2.0f);
+        assert(nearlyEqual(sharedProbeValue(own, neighbours, twoVisible, 0.5f), expected));
+
+        const std::array<Vec3, 6> uniform{own, own, own, own, own, own};
+        assert(nearlyEqual(sharedProbeValue(own, uniform, allVisible, 0.7f), own));
+
+        GlobalIlluminationSettings settings;
+        assert(settings.probeSharing == 0.0f);
+    }
+
+    /*
+    * Why the probes need their own turns: seven probes in the same dark room (a probe and its six neighbours), each
+    * blending its own rays at 30 frames a second with the 2 s memory, shared with a weight of 0.5. With every probe
+    * tracing the same directions their errors are the same and sharing removes nothing; with their own turns it removes
+    * most of the crawl (in theory to sqrt(1 + 6 x 0.25) / 4 = 0.40 of it, for independent errors).
+    */
+    double sharedCrawl(bool ownTurns) {
+        const float framesPerSecond = 30.0f;
+        const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
+        const float patchCosine = std::cos(radiansFromDegrees(15.0f));
+        Vec3 texelDirection;
+        float best = -2.0f;
+
+        for (int y = 0; y < probeIrradianceTexels; ++y) {
+            for (int x = 0; x < probeIrradianceTexels; ++x) {
+                const Vec3 direction = probeTexelDirection(TexelCoord{x, y}, probeIrradianceTexels);
+
+                if (direction.dot(towardsPatch) > best) {
+                    best = direction.dot(towardsPatch);
+                    texelDirection = direction;
+                }
+            }
+        }
+
+        const ProbeRotationRows identity{{Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}}};
+        const float keep = hysteresisForTimeConstant(1.0f / framesPerSecond, 2.0f);
+        const int tenth = 3;
+        std::array<float, 7> stored{};
+        std::vector<float> history;
+        double changeSquares = 0.0;
+        double sum = 0.0;
+        int changes = 0;
+        const std::array<bool, 6> visible{true, true, true, true, true, true};
+
+        for (int frame = 0; frame < 8000; ++frame) {
+            const ProbeRayFrame rays = probeRayFrame(static_cast<std::uint64_t>(frame));
+            const ProbeRotationRows rows = probeRotationRows(rays.rotation);
+
+            for (int probe = 0; probe < 7; ++probe) {
+                const ProbeRotationRows turn = ownTurns ? probeRayTurn(probe) : identity;
+                std::vector<Vec3> directions;
+                std::vector<Vec3> radiance;
+
+                for (int ray = 0; ray < 64; ++ray) {
+                    const Vec3 direction = probeRayDirection(ray, 64, rays.phase, rows, turn);
+                    const float light = direction.dot(towardsPatch) > patchCosine ? 2.0f : 0.005f;
+                    directions.push_back(direction);
+                    radiance.push_back(Vec3{light, light, light});
+                }
+
+                const float estimate = irradianceEstimate(texelDirection, directions, radiance).x;
+                stored[static_cast<std::size_t>(probe)] = blendProbeValue(Vec3{stored[static_cast<std::size_t>(probe)], 0.0f, 0.0f},
+                                                                          Vec3{estimate, 0.0f, 0.0f}, frame == 0 ? 0.0f : keep).x;
+            }
+
+            const std::array<Vec3, 6> neighbours{Vec3{stored[1], 0.0f, 0.0f}, Vec3{stored[2], 0.0f, 0.0f}, Vec3{stored[3], 0.0f, 0.0f},
+                                                 Vec3{stored[4], 0.0f, 0.0f}, Vec3{stored[5], 0.0f, 0.0f}, Vec3{stored[6], 0.0f, 0.0f}};
+            const float shared = sharedProbeValue(Vec3{stored[0], 0.0f, 0.0f}, neighbours, visible, 0.5f).x;
+
+            if (frame >= 300) {
+                sum += shared;
+                history.push_back(shared);
+
+                if (history.size() > static_cast<std::size_t>(tenth)) {
+                    const double change = shared - history[history.size() - 1 - static_cast<std::size_t>(tenth)];
+                    changeSquares += change * change;
+                    ++changes;
+                }
+            }
+        }
+
+        return std::sqrt(changeSquares / changes) / (sum / static_cast<double>(history.size()));
+    }
+
+    // The inner texel a direction falls in: every texel's own centre direction finds it again, at both probe sizes, and
+    // the octahedron's edges and corners stay inside the square.
+    void testADirectionFindsItsTexel() {
+        for (int side : {probeIrradianceTexels, probeDistanceTexels}) {
+            for (int y = 0; y < side; ++y) {
+                for (int x = 0; x < side; ++x) {
+                    const TexelCoord found = probeDirectionTexel(probeTexelDirection(TexelCoord{x, y}, side), side);
+                    assert(found.x == x && found.y == y);
+                }
+            }
+
+            for (const Vec3& direction : {Vec3{0.0f, 0.0f, -1.0f}, Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}}) {
+                const TexelCoord found = probeDirectionTexel(direction, side);
+                assert(found.x >= 0 && found.x < side && found.y >= 0 && found.y < side);
+            }
+        }
+    }
+
+    void testSharingNeedsEachProbesOwnTurn() {
+        const double sameTurns = sharedCrawl(false);
+        const double ownTurns = sharedCrawl(true);
+        assert(ownTurns < 0.6 * sameTurns);
+    }
+
     // Probes are numbered x first, then y, then z, and sit on the grid's corners from the origin.
     void testProbePositionsFollowTheGrid() {
         const ProbeVolume volume{Vec3{-2.0f, 0.5f, 3.0f}, Vec3{1.0f, 0.5f, 2.0f}, ProbeCounts{4, 3, 5}};
@@ -1025,6 +1216,11 @@ void testDdgi() {
     testTheAdaptiveMemoryRestartsOnARealChange();
     testTheScheduleCarriesTheAdaptiveMemory();
     testTheAdaptiveMemoryIsCalmerAndQuicker();
+    testEachProbeTurnsItsRaysItsOwnWay();
+    testNeighboursShareOnlyIfTheyCanSeeEachOther();
+    testSharingAveragesTheVisibleNeighbours();
+    testADirectionFindsItsTexel();
+    testSharingNeedsEachProbesOwnTurn();
     testProbePositionsFollowTheGrid();
     testProbeAtlasLayout();
     testImpossibleVolumesAreRejected();

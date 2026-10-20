@@ -46,6 +46,10 @@ layout(std430, set = 3, binding = 2) writeonly buffer ProbeNearFastLights {
     int probeNearFastLight[];
 };
 
+layout(std430, set = 3, binding = 3) readonly buffer ProbeTurns {
+    ProbeTurn probeTurns[];
+};
+
 // The point lights, then the spotlights, whose light may reach the probes' rays' hits: x numbers into the light buffers,
 // y 1 for a fast light (render/gpu/ddgi_sampling.h, GpuProbeHitLight).
 layout(std430, set = 1, binding = 14) readonly buffer ProbeHitLights {
@@ -128,7 +132,7 @@ void main() {
         return;
     }
 
-    vec3 direction = volumeRayDirection(ray, rays);
+    vec3 direction = volumeRayDirection(ray, rays, probeTurns[probe]);
 
     // No minimum distance: a probe cannot hit itself, and skipping near hits lets rays slip through walls [2021].
     rayQueryEXT query;

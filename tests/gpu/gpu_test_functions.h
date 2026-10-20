@@ -74,6 +74,7 @@
 #define GPU_TEST_PROBE_GRID 5
 #define GPU_TEST_PROBE_REACH 6
 #define GPU_TEST_PROBE_ADAPTIVE 7
+#define GPU_TEST_PROBE_SHARING 8
 
 // ddgi_sampling_test.comp
 #define GPU_TEST_PROBE_BIAS 0

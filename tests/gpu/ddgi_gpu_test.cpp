@@ -250,6 +250,76 @@ namespace {
         }
     }
 
+    /*
+    * Sharing's functions: the shared value over random neighbours, some visible; the texel a random direction falls in
+    * (directions kept off texel edges, where rounding could pick either); whether a probe sees its neighbour, away from
+    * the threshold; and rays turned by a probe's own turn, then the frame's rotation.
+    */
+    void checkSharing(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{66};
+        constexpr int inputsPerCase = 16;
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            inputs.push_back(gpuVec4(random.between(0.0f, 20.0f), random.between(0.0f, 20.0f), random.between(0.0f, 20.0f), random.between(0.0f, 1.0f)));
+
+            for (int neighbour = 0; neighbour < DDGI_SHARE_NEIGHBOURS; ++neighbour) {
+                inputs.push_back(gpuVec4(random.between(0.0f, 20.0f), random.between(0.0f, 20.0f), random.between(0.0f, 20.0f),
+                                         random.between(0.0f, 1.0f) < 0.6f ? 1.0f : 0.0f));
+            }
+
+            const int side = i % 2 == 0 ? probeIrradianceTexels : probeDistanceTexels;
+            const TexelCoord texel{static_cast<int>(random.between(0.0f, static_cast<float>(side) - 0.01f)),
+                                   static_cast<int>(random.between(0.0f, static_cast<float>(side) - 0.01f))};
+            const Vec3 direction = probeTexelDirection(texel, side);
+            inputs.push_back(gpuVec4(direction.x, direction.y, direction.z, static_cast<float>(side)));
+
+            const float separation = random.between(0.5f, 2.0f);
+            const float share = random.between(0.0f, 1.0f) < 0.5f ? random.between(0.0f, 0.85f) : random.between(0.95f, 2.0f);
+            inputs.push_back(gpuVec4(share * separation, separation));
+
+            const ProbeRotationRows rotation = probeRotationRows(randomProbeRotation(static_cast<std::uint64_t>(i)));
+            const ProbeRotationRows turn = probeRayTurn(i);
+
+            for (const ProbeRotationRows* rows : {&rotation, &turn}) {
+                for (const Vec3& row : rows->rows) {
+                    inputs.push_back(gpuVec4(row.x, row.y, row.z));
+                }
+            }
+
+            const int count = i % 3 == 0 ? 256 : 64;
+            inputs.push_back(gpuVec4(random.between(0.0f, static_cast<float>(count) - 0.01f), static_cast<float>(count),
+                                     random.between(0.0f, static_cast<float>(probeRayCycle) - 0.01f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_SHARING, inputs, inputsPerCase, 3);
+
+        for (std::size_t i = 0; i < inputs.size() / inputsPerCase; ++i) {
+            const GpuVec4* in = &inputs[i * inputsPerCase];
+            std::array<Vec3, 6> neighbours;
+            std::array<bool, 6> visible{};
+
+            for (std::size_t neighbour = 0; neighbour < neighbours.size(); ++neighbour) {
+                neighbours[neighbour] = vec3From(in[1 + neighbour]);
+                visible[neighbour] = in[1 + neighbour][3] > 0.5f;
+            }
+
+            report.check("sharedProbeValue", arithmeticTolerance, sharedProbeValue(vec3From(in[0]), neighbours, visible, in[0][3]),
+                         vec3From(outputs[i * 3]));
+
+            const TexelCoord texel = probeDirectionTexel(vec3From(in[7]), static_cast<int>(in[7][3]));
+            const bool sees = probesSeeEachOther(in[8][0], in[8][1]);
+            report.check("probeDirectionTexel", exactTolerance, Vec3{static_cast<float>(texel.x), static_cast<float>(texel.y), 0.0f},
+                         Vec3{outputs[i * 3 + 1][0], outputs[i * 3 + 1][1], 0.0f});
+            report.check("probesSeeEachOther", exactTolerance, sees ? 1.0f : 0.0f, outputs[i * 3 + 1][2]);
+
+            const ProbeRotationRows rotation{{vec3From(in[9]), vec3From(in[10]), vec3From(in[11])}};
+            const ProbeRotationRows turn{{vec3From(in[12]), vec3From(in[13]), vec3From(in[14])}};
+            const Vec3 direction = probeRayDirection(static_cast<int>(in[15][0]), static_cast<int>(in[15][1]), static_cast<int>(in[15][2]), rotation, turn);
+            report.check("probeRayDirection (turned)", transcendentalTolerance, direction, vec3From(outputs[i * 3 + 2]));
+        }
+    }
+
     // Every probe of an uneven grid, at both probe sizes, with a random direction each.
     void checkGrid(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{64};
@@ -473,12 +543,44 @@ namespace {
     constexpr FloatTolerance storedIrradianceTolerance{.absolute = 1e-4f, .relative = 2e-3f};
     constexpr FloatTolerance storedDistanceTolerance{.absolute = 1e-3f, .relative = 2e-3f};
 
-    // The three atlases after an update.
+    // The three atlases after an update, and the shared irradiance (only written while probes share light).
     struct ReadAtlases {
         ReadAtlas irradiance;
         ReadAtlas fastIrradiance;
         ReadAtlas distance;
+        ReadAtlas sharedIrradiance;
     };
+
+    // A probe's shared irradiance against what it should hold, inner texels and borders.
+    void checkShared(const ReadAtlases& atlases, const ProbeCounts& counts, int probe, const std::vector<Vec3>& expected, FloatTolerance tolerance,
+                     const std::string& name, GpuCheckReport& report) {
+        const TexelCoord origin = probeTileOrigin(counts, probe, probeIrradianceTexels);
+
+        for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
+            const int x = origin.x + 1 + texel % probeIrradianceTexels;
+            const int y = origin.y + 1 + texel / probeIrradianceTexels;
+            report.check(name, tolerance, expected[static_cast<std::size_t>(texel)], vec3From(atlases.sharedIrradiance.texel(x, y)));
+        }
+
+        for (int number = 0; number < probeBorderTexelCount(probeIrradianceTexels); ++number) {
+            const TexelCoord bordered = probeBorderTexel(number, probeIrradianceTexels);
+            const TexelCoord source = probeBorderSource(bordered, probeIrradianceTexels);
+            report.check(name + " borders", exactTolerance, vec3From(atlases.sharedIrradiance.texel(origin.x + source.x, origin.y + source.y)),
+                         vec3From(atlases.sharedIrradiance.texel(origin.x + bordered.x, origin.y + bordered.y)));
+        }
+    }
+
+    // A probe's own irradiance, inner texels in order, as read back.
+    std::vector<Vec3> ownIrradiance(const ReadAtlases& atlases, const ProbeCounts& counts, int probe) {
+        const TexelCoord origin = probeTileOrigin(counts, probe, probeIrradianceTexels);
+        std::vector<Vec3> own;
+
+        for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
+            own.push_back(vec3From(atlases.irradiance.texel(origin.x + 1 + texel % probeIrradianceTexels, origin.y + 1 + texel / probeIrradianceTexels)));
+        }
+
+        return own;
+    }
 
     /*
     * Compare one probe's squares in all three atlases with what the CPU expects, and check every border texel is an
@@ -544,7 +646,7 @@ namespace {
                         scene.sampler.get(), VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT};
 
         scene.descriptors.reset();
-        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume); });
+        scene.commands.run([&](VkCommandBuffer recording) { ddgi.prepare(recording, volume, settings); });
         const VkDescriptorSet frame = scene.writeFrame(draws, lighting, volume, ddgi, settings);
 
         scene.commands.run([&](VkCommandBuffer recording) {
@@ -554,7 +656,7 @@ namespace {
         });
 
         return ReadAtlases{readAtlas(scene, ddgi.getIrradianceAtlas(), 4), readAtlas(scene, ddgi.getFastIrradianceAtlas(), 4),
-                           readAtlas(scene, ddgi.getDistanceAtlas(), 2)};
+                           readAtlas(scene, ddgi.getDistanceAtlas(), 2), readAtlas(scene, ddgi.getSharedIrradianceAtlas(), 4)};
     }
 
     // A lamp's light where a ray from the probe meets the floor below it (pointLightAtHit), as the packed lights hold it.
@@ -585,7 +687,9 @@ namespace {
     * - the two lamps again, the first flagged fast and both kept per hit: the probe is within the fast lamp's reach, so
     *   it traces the fast count of rays, and each ray's light goes into the atlas of its lamp;
     * - the sunlit floor with a fast lamp listed for the hits but out of the probe's reach: the stride makes room for the
-    *   fast count, but the probe traces the still count, and nothing reaches the fast atlas.
+    *   fast count, but the probe traces the still count, and nothing reaches the fast atlas;
+    * - sharing between probes: the furnace again, every probe's own and shared light still the sky; and two probes with
+    *   a wall between them, neither taking the other's light.
     * The atlases start empty, so the light bounced from them (last frame's probes) adds nothing on a first update. Each
     * scene also holds a speck far below, since a top-level structure needs something in it.
     */
@@ -610,6 +714,33 @@ namespace {
 
             for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
                 checkProbe(atlases, volume.counts, probe, expected, "furnace", report);
+            }
+
+            // Sharing on: each probe turns its rays its own way, and the furnace is still exactly the sky, shared or not.
+            GlobalIlluminationSettings sharing = settings;
+            sharing.probeSharing = 0.5f;
+            const ReadAtlases shared = runProbes(scene, {speck}, lighting, volume, sharing);
+
+            for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
+                checkProbe(shared, volume.counts, probe, expected, "furnace, sharing", report);
+                checkShared(shared, volume.counts, probe, expected.irradiance, storedIrradianceTolerance, "furnace: shared irradiance", report);
+            }
+        }
+
+        {
+            // A wall between two probes 1 m apart: one sealed in a box, the other outside under the sky. Each sees the
+            // box's wall 0.6 m or less towards the other, so neither takes the other's light: shared is own, exactly.
+            const ProbeVolume volume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{2, 1, 1}};
+            const DrawItem box = drawOf(cube, Mat4::scaling(0.4f, 0.4f, 0.4f));
+            FrameLighting lighting;
+            lighting.background = Vec3{0.6f, 0.75f, 1.0f};
+            GlobalIlluminationSettings sharing = settings;
+            sharing.probeSharing = 1.0f;
+            const ReadAtlases atlases = runProbes(scene, {speck, box}, lighting, volume, sharing);
+
+            for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
+                checkShared(atlases, volume.counts, probe, ownIrradiance(atlases, volume.counts, probe), exactTolerance, "walled probes: shared is own",
+                            report);
             }
         }
 
@@ -757,6 +888,7 @@ void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheck
     checkWeights(runner, report);
     checkBlending(runner, report);
     checkAdaptiveMemory(runner, report);
+    checkSharing(runner, report);
     checkGrid(runner, report);
 
     report.section("light probe passes (ddgi_trace.comp, ddgi_update_*.comp)");

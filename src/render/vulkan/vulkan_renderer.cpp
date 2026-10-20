@@ -864,7 +864,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const ProbeHitLights hitLights = traceProbes ? probeHitLights(lights, cameraOrigin, *probes) : ProbeHitLights{};
 
     if (traceProbes) {
-        ddgi->prepare(frame.commands, *probes);
+        ddgi->prepare(frame.commands, *probes, illumination);
     }
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.

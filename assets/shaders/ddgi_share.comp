@@ -1,0 +1,83 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+// Sharing between neighbouring probes (render/gpu/ddgi.h, GlobalIlluminationSettings::probeSharing): each probe's
+// irradiance, still and fast, read as its own light and that of each face neighbour it can see (its mean distance
+// towards the neighbour reaching most of the way there), weighted by sharedProbeValue, into the shared atlases that
+// everything reads. One workgroup per probe, one invocation per texel of its square, the border copied last, as in the
+// update. The probes' own atlases are only read, so they keep accumulating their own light.
+#include "render/gpu/ddgi_shared.h"
+#include "ddgi.glsl"
+
+layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEXELS) in;
+
+// Must match GpuProbeShare in render/gpu/ddgi.h.
+layout(push_constant) uniform ProbeShareData {
+    ivec4 counts;  // xyz probes along each axis
+    vec4 spacing;  // xyz the spacing between probes
+    vec4 weight;   // x the sharing weight
+} share;
+
+layout(set = 0, binding = 0, rgba16f) readonly uniform image2D irradiance;
+layout(set = 0, binding = 1, rgba16f) readonly uniform image2D fastIrradiance;
+layout(set = 0, binding = 2, rg16f) readonly uniform image2D distances;
+layout(set = 0, binding = 3, rgba16f) writeonly uniform image2D sharedIrradiance;
+layout(set = 0, binding = 4, rgba16f) writeonly uniform image2D sharedFastIrradiance;
+
+shared vec4 square[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
+shared vec4 fastSquare[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
+
+void main() {
+    const ivec3 steps[DDGI_SHARE_NEIGHBOURS] = ivec3[DDGI_SHARE_NEIGHBOURS](ivec3(1, 0, 0), ivec3(-1, 0, 0), ivec3(0, 1, 0),
+                                                                          ivec3(0, -1, 0), ivec3(0, 0, 1), ivec3(0, 0, -1));
+    ivec3 counts = share.counts.xyz;
+    int probe = int(gl_WorkGroupID.x);
+    ivec3 grid = ivec3(probe % counts.x, (probe / counts.x) % counts.y, probe / (counts.x * counts.y));
+    ivec2 texel = ivec2(gl_LocalInvocationID.xy);
+    ivec2 origin = probeTileOrigin(counts, probe, DDGI_IRRADIANCE_TEXELS);
+    ivec2 distanceOrigin = probeTileOrigin(counts, probe, DDGI_DISTANCE_TEXELS);
+
+    vec4 own = imageLoad(irradiance, origin + 1 + texel);
+    vec4 ownFast = imageLoad(fastIrradiance, origin + 1 + texel);
+    vec3 neighbours[DDGI_SHARE_NEIGHBOURS];
+    vec3 fastNeighbours[DDGI_SHARE_NEIGHBOURS];
+    bool visible[DDGI_SHARE_NEIGHBOURS];
+
+    for (int neighbour = 0; neighbour < DDGI_SHARE_NEIGHBOURS; ++neighbour) {
+        ivec3 step = steps[neighbour];
+        ivec3 other = grid + step;
+        neighbours[neighbour] = vec3(0.0);
+        fastNeighbours[neighbour] = vec3(0.0);
+        visible[neighbour] = false;
+
+        if (all(greaterThanEqual(other, ivec3(0))) && all(lessThan(other, counts))) {
+            vec3 direction = vec3(step);
+            float separation = dot(abs(direction), share.spacing.xyz);
+            ivec2 towards = probeDirectionTexel(direction, DDGI_DISTANCE_TEXELS);
+            float meanDistance = imageLoad(distances, distanceOrigin + 1 + towards).r;
+            int otherProbe = other.x + counts.x * (other.y + counts.y * other.z);
+            ivec2 otherOrigin = probeTileOrigin(counts, otherProbe, DDGI_IRRADIANCE_TEXELS);
+            visible[neighbour] = probesSeeEachOther(meanDistance, separation);
+            neighbours[neighbour] = imageLoad(irradiance, otherOrigin + 1 + texel).rgb;
+            fastNeighbours[neighbour] = imageLoad(fastIrradiance, otherOrigin + 1 + texel).rgb;
+        }
+    }
+
+    vec4 result = vec4(sharedProbeValue(own.rgb, neighbours, visible, share.weight.x), own.a);
+    vec4 fastResult = vec4(sharedProbeValue(ownFast.rgb, fastNeighbours, visible, share.weight.x), ownFast.a);
+    imageStore(sharedIrradiance, origin + 1 + texel, result);
+    imageStore(sharedFastIrradiance, origin + 1 + texel, fastResult);
+    square[texel.y][texel.x] = result;
+    fastSquare[texel.y][texel.x] = fastResult;
+
+    barrier();
+
+    int number = int(gl_LocalInvocationIndex);
+
+    if (number < probeBorderTexelCount(DDGI_IRRADIANCE_TEXELS)) {
+        ivec2 bordered = probeBorderTexel(number, DDGI_IRRADIANCE_TEXELS);
+        ivec2 source = probeBorderSource(bordered, DDGI_IRRADIANCE_TEXELS) - 1;
+        imageStore(sharedIrradiance, origin + bordered, square[source.y][source.x]);
+        imageStore(sharedFastIrradiance, origin + bordered, fastSquare[source.y][source.x]);
+    }
+}
