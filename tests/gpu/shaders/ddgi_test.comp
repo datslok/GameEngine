@@ -46,5 +46,23 @@ void main() {
         testOutput(0, vec4(texel.stored, texel.history));
         testOutput(1, vec4(texel.recent, texel.noise));
         testOutput(2, vec4(probeLuminance(third.xyz)));
+    } else if (function == GPU_TEST_PROBE_SHARING) {
+        vec3 neighbours[DDGI_SHARE_NEIGHBOURS];
+        bool visible[DDGI_SHARE_NEIGHBOURS];
+
+        for (int neighbour = 0; neighbour < DDGI_SHARE_NEIGHBOURS; ++neighbour) {
+            vec4 packed = testInput(1 + neighbour);
+            neighbours[neighbour] = packed.xyz;
+            visible[neighbour] = packed.w > 0.5;
+        }
+
+        vec4 lookup = testInput(7);
+        vec4 distances = testInput(8);
+        vec3 rotation[3] = vec3[3](testInput(9).xyz, testInput(10).xyz, testInput(11).xyz);
+        vec3 turn[3] = vec3[3](testInput(12).xyz, testInput(13).xyz, testInput(14).xyz);
+        vec4 ray = testInput(15);
+        testOutput(0, vec4(sharedProbeValue(first.xyz, neighbours, visible, first.w), 0.0));
+        testOutput(1, vec4(vec2(probeDirectionTexel(lookup.xyz, int(lookup.w))), probesSeeEachOther(distances.x, distances.y) ? 1.0 : 0.0, 0.0));
+        testOutput(2, vec4(probeRayDirection(int(ray.x), int(ray.y), int(ray.z), rotation, turn), 0.0));
     }
 }

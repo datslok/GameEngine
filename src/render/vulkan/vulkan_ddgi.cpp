@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -94,10 +95,10 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
 {
     createTracePipeline(texturesLayout, frameLayout, rayLayout);
 
-    // Both read the three ray buffers; the irradiance update writes two atlases and the adaptive memory's change
-    // statistics, the distance update one atlas.
+    // Both read the three ray buffers and the probes' turns; the irradiance update writes two atlases and the adaptive
+    // memory's change statistics, the distance update one atlas.
     ComputePipelineDescription update;
-    update.storageBuffers = 3;
+    update.storageBuffers = 4;
     update.storageImages = 3;
     update.pushConstantBytes = sizeof(GpuProbeVolume);
     update.shader = "assets/shaders/ddgi_update_irradiance.comp.spv";
@@ -105,6 +106,13 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
     update.storageImages = 1;
     update.shader = "assets/shaders/ddgi_update_distance.comp.spv";
     distancePipeline = std::make_unique<ComputePipeline>(device, update);
+
+    // Sharing reads both irradiance atlases and the distances, and writes the two shared atlases.
+    ComputePipelineDescription share;
+    share.storageImages = 5;
+    share.pushConstantBytes = sizeof(GpuProbeShare);
+    share.shader = "assets/shaders/ddgi_share.comp.spv";
+    sharePipeline = std::make_unique<ComputePipeline>(device, share);
 
     createBallsPipeline(layouts, texturesLayout, frameLayout, colourFormat, depthFormat);
 }
@@ -114,7 +122,7 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
 * and the ray tracing set), plus a fourth set of its own: the buffers it writes the rays into.
 */
 void VulkanDdgi::createTracePipeline(VkDescriptorSetLayout texturesLayout, VkDescriptorSetLayout frameLayout, VkDescriptorSetLayout rayLayout) {
-    raysLayout = createUniformLayout(device.getDevice(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3, VK_SHADER_STAGE_COMPUTE_BIT,
+    raysLayout = createUniformLayout(device.getDevice(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4, VK_SHADER_STAGE_COMPUTE_BIT,
                                      "Probe ray set layout creation failed");
 
     const std::array<VkDescriptorSetLayout, 4> sets{texturesLayout, frameLayout, rayLayout, raysLayout.get()};
@@ -185,25 +193,47 @@ void VulkanDdgi::createAtlases(VkCommandBuffer commands, const ProbeVolume& volu
     irradiance = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe irradiance atlas");
     fastIrradiance = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe fast irradiance atlas");
     changeStatistics = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe change statistics");
+    sharedIrradiance = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe shared irradiance atlas");
+    sharedFastIrradiance = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe shared fast irradiance atlas");
     distance = createAtlas(distanceFormat, probeDistanceTexels, "Probe distance atlas");
 
     const VkDeviceSize probes = static_cast<VkDeviceSize>(probeCount(volume.counts));
     rays = VulkanBuffer{device.getAllocator(), probes * maxRaysPerProbe * rayResultBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     fastRays = VulkanBuffer{device.getAllocator(), probes * maxRaysPerProbe * fastRayResultBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     nearFastLight = VulkanBuffer{device.getAllocator(), probes * probeFlagBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    probeTurns = VulkanBuffer{device.getAllocator(), probes * sizeof(GpuProbeTurn), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Upload};
+    writeProbeTurns(probeCount(volume.counts), turnsIndependent);
     currentVolume = volume;
 }
 
-void VulkanDdgi::prepare(VkCommandBuffer commands, const ProbeVolume& volume) {
+/*
+* The turns are written where the GPU reads them, so a change waits for every frame in flight to finish with the old
+* ones: a hitch, but only when sharing is switched on or off.
+*/
+void VulkanDdgi::prepare(VkCommandBuffer commands, const ProbeVolume& volume, const GlobalIlluminationSettings& settings) {
     validateProbeVolume(volume);
+    sharing = settings.probeSharing > 0.0f;
 
     if (!currentVolume || !sameVolume(*currentVolume, volume)) {
+        turnsIndependent = sharing;
         createAtlases(commands, volume);
         irradiance.transition(commands, ImageState::SurfaceRead);
         fastIrradiance.transition(commands, ImageState::SurfaceRead);
         distance.transition(commands, ImageState::SurfaceRead);
+        sharedIrradiance.transition(commands, ImageState::SurfaceRead);
+        sharedFastIrradiance.transition(commands, ImageState::SurfaceRead);
         freshAtlases = true;
+    } else if (sharing != turnsIndependent) {
+        device.waitIdle();
+        turnsIndependent = sharing;
+        writeProbeTurns(probeCount(volume.counts), turnsIndependent);
     }
+}
+
+void VulkanDdgi::writeProbeTurns(int probes, bool independent) {
+    const std::vector<GpuProbeTurn> turns = packProbeTurns(probes, independent);
+    std::memcpy(probeTurns.getMapped(), turns.data(), turns.size() * sizeof(GpuProbeTurn));
+    probeTurns.flush();
 }
 
 void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume,
@@ -227,14 +257,55 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     blend(commands, descriptors, *irradiancePipeline, irradianceAtlases, probes);
     blend(commands, descriptors, *distancePipeline, distanceAtlas, probes);
 
+    if (sharing) {
+        shareProbes(commands, descriptors, volume, settings.probeSharing);
+    }
+
     // The blends' writes made visible to every later read: this frame's main pass and debug balls, the next one's trace.
     irradiance.transition(commands, ImageState::SurfaceRead);
     fastIrradiance.transition(commands, ImageState::SurfaceRead);
     distance.transition(commands, ImageState::SurfaceRead);
+    sharedIrradiance.transition(commands, ImageState::SurfaceRead);
+    sharedFastIrradiance.transition(commands, ImageState::SurfaceRead);
 }
 
 std::array<const VulkanBuffer*, 3> VulkanDdgi::rayBuffers() const {
     return {&rays, &fastRays, &nearFastLight};
+}
+
+std::array<const VulkanBuffer*, 4> VulkanDdgi::probeBuffers() const {
+    return {&rays, &fastRays, &nearFastLight, &probeTurns};
+}
+
+/*
+* One workgroup per probe. The probes' own atlases stay in storage use from the blends, whose writes these reads wait
+* for (a transition to the same writable state still records a barrier); the shared atlases go to storage use from being
+* sampled (last frame's main pass and balls, this frame's trace), whose reads must finish first.
+*/
+void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight) {
+    const std::array<VulkanImage*, 5> images{&irradiance, &fastIrradiance, &distance, &sharedIrradiance, &sharedFastIrradiance};
+    const VkDescriptorSet set = descriptors.allocate(sharePipeline->getResourceLayout());
+    std::array<VkDescriptorImageInfo, 5> imageInfos{};
+    std::array<VkWriteDescriptorSet, 5> writes{};
+
+    for (std::size_t index = 0; index < images.size(); ++index) {
+        images[index]->transition(commands, ImageState::ComputeStorage);
+        imageInfos[index] = VkDescriptorImageInfo{VK_NULL_HANDLE, images[index]->getView(), VK_IMAGE_LAYOUT_GENERAL};
+        writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[index].dstSet = set;
+        writes[index].dstBinding = static_cast<std::uint32_t>(index);
+        writes[index].descriptorCount = 1;
+        writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[index].pImageInfo = &imageInfos[index];
+    }
+
+    vkUpdateDescriptorSets(device.getDevice(), static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    const GpuProbeShare packed = packProbeShare(volume, weight);
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->get());
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->getLayout(), 0, 1, &set, 0, nullptr);
+    vkCmdPushConstants(commands, sharePipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(packed), &packed);
+    vkCmdDispatch(commands, static_cast<std::uint32_t>(probeCount(volume.counts)), 1, 1);
 }
 
 /*
@@ -250,7 +321,7 @@ void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, 
     }
 
     const VkDescriptorSet raySet = descriptors.allocate(raysLayout.get());
-    writeBuffers(device.getDevice(), raySet, 0, rayBuffers());
+    writeBuffers(device.getDevice(), raySet, 0, probeBuffers());
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, tracePipeline->get());
     const std::array<VkDescriptorSet, 4> boundSets{sets.textures, sets.frame, sets.rayScene, raySet};
@@ -274,7 +345,7 @@ void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, 
 void VulkanDdgi::blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
                        int probes) {
     const VkDescriptorSet set = descriptors.allocate(pipeline.getResourceLayout());
-    const std::array<const VulkanBuffer*, 3> buffers = rayBuffers();
+    const std::array<const VulkanBuffer*, 4> buffers = probeBuffers();
     writeBuffers(device.getDevice(), set, 0, buffers);
 
     std::vector<VkDescriptorImageInfo> imageInfos;
@@ -310,8 +381,10 @@ void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descript
     }
 
     const VkDescriptorSet atlasSet = descriptors.allocate(ballsSetLayout.get());
-    const std::array<VkDescriptorImageInfo, 2> imageInfos{VkDescriptorImageInfo{sampler, irradiance.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                                          VkDescriptorImageInfo{sampler, fastIrradiance.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+    const SampledImage still = sampledIrradiance();
+    const SampledImage fast = sampledFastIrradiance();
+    const std::array<VkDescriptorImageInfo, 2> imageInfos{VkDescriptorImageInfo{still.sampler, still.view, still.layout},
+                                                          VkDescriptorImageInfo{fast.sampler, fast.view, fast.layout}};
     std::array<VkWriteDescriptorSet, 2> writes{};
 
     for (std::size_t index = 0; index < writes.size(); ++index) {
@@ -338,7 +411,7 @@ bool VulkanDdgi::hasProbes() const {
 }
 
 SampledImage VulkanDdgi::sampledIrradiance() const {
-    return SampledImage{irradiance.getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    return SampledImage{(sharing ? sharedIrradiance : irradiance).getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
 SampledImage VulkanDdgi::sampledDistance() const {
@@ -346,11 +419,15 @@ SampledImage VulkanDdgi::sampledDistance() const {
 }
 
 SampledImage VulkanDdgi::sampledFastIrradiance() const {
-    return SampledImage{fastIrradiance.getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    return SampledImage{(sharing ? sharedFastIrradiance : fastIrradiance).getView(), sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }
 
 VulkanImage& VulkanDdgi::getFastIrradianceAtlas() {
     return fastIrradiance;
+}
+
+VulkanImage& VulkanDdgi::getSharedIrradianceAtlas() {
+    return sharedIrradiance;
 }
 
 VulkanImage& VulkanDdgi::getIrradianceAtlas() {

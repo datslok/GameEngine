@@ -99,6 +99,35 @@ vec3 probeRayDirection(int ray, int count, int phase, vec3 rotation[3]) {
     return vec3(dot(rotation[0], point), dot(rotation[1], point), dot(rotation[2], point));
 }
 
+vec3 probeRayDirection(int ray, int count, int phase, vec3 rotation[3], vec3 turn[3]) {
+    vec3 point = sphericalFibonacci(ray * DDGI_RAY_CYCLE + phase, count * DDGI_RAY_CYCLE);
+    vec3 turned = vec3(dot(turn[0], point), dot(turn[1], point), dot(turn[2], point));
+    return vec3(dot(rotation[0], turned), dot(rotation[1], turned), dot(rotation[2], turned));
+}
+
+ivec2 probeDirectionTexel(vec3 unitDirection, int side) {
+    vec2 square = octahedralEncode(unitDirection);
+    return clamp(ivec2(floor((square * 0.5 + 0.5) * float(side))), ivec2(0), ivec2(side - 1));
+}
+
+bool probesSeeEachOther(float meanDistance, float separation) {
+    return meanDistance >= DDGI_SHARE_VISIBLE_SHARE * separation;
+}
+
+vec3 sharedProbeValue(vec3 own, vec3 neighbours[DDGI_SHARE_NEIGHBOURS], bool visible[DDGI_SHARE_NEIGHBOURS], float weight) {
+    vec3 sum = own;
+    float weights = 1.0;
+
+    for (int neighbour = 0; neighbour < DDGI_SHARE_NEIGHBOURS; ++neighbour) {
+        if (visible[neighbour]) {
+            sum += neighbours[neighbour] * weight;
+            weights += weight;
+        }
+    }
+
+    return sum * (1.0 / weights);
+}
+
 bool probeNearLight(vec3 probe, vec3 light, float range, float reach) {
     return length(light - probe) < range + reach;
 }

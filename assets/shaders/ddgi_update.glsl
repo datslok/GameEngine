@@ -20,7 +20,7 @@
 layout(local_size_x = PROBE_TEXELS, local_size_y = PROBE_TEXELS) in;
 
 // What ddgi_trace.comp wrote: the stride's room of rays per probe, and which probes a fast light reached (which traced
-// the fast count of rays).
+// the fast count of rays); and each probe's own turn of its rays, to find their directions again.
 layout(std430, set = 0, binding = 0) readonly buffer ProbeRays {
     vec4 probeRays[];
 };
@@ -33,12 +33,16 @@ layout(std430, set = 0, binding = 2) readonly buffer ProbeNearFastLights {
     int probeNearFastLight[];
 };
 
+layout(std430, set = 0, binding = 3) readonly buffer ProbeTurns {
+    ProbeTurn probeTurns[];
+};
+
 #if UPDATE_IRRADIANCE
-layout(set = 0, binding = 3, rgba16f) uniform image2D atlas;
-layout(set = 0, binding = 4, rgba16f) uniform image2D fastAtlas;
-layout(set = 0, binding = 5, rgba16f) uniform image2D changeAtlas;
+layout(set = 0, binding = 4, rgba16f) uniform image2D atlas;
+layout(set = 0, binding = 5, rgba16f) uniform image2D fastAtlas;
+layout(set = 0, binding = 6, rgba16f) uniform image2D changeAtlas;
 #else
-layout(set = 0, binding = 3, rg16f) uniform image2D atlas;
+layout(set = 0, binding = 4, rg16f) uniform image2D atlas;
 #endif
 
 shared vec3 rayDirections[DDGI_MAX_RAYS];
@@ -57,7 +61,7 @@ void main() {
     int invocations = PROBE_TEXELS * PROBE_TEXELS;
 
     for (int ray = int(gl_LocalInvocationIndex); ray < rays; ray += invocations) {
-        rayDirections[ray] = volumeRayDirection(ray, rays);
+        rayDirections[ray] = volumeRayDirection(ray, rays, probeTurns[probe]);
         rayResults[ray] = probeRays[probe * stride + ray];
 #if UPDATE_IRRADIANCE
         fastRayResults[ray] = unpackFastRayLight(fastProbeRays[probe * stride + ray]);

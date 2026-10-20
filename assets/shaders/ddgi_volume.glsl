@@ -31,9 +31,16 @@ int volumeRayCount(bool nearFastLight) {
     return volumeWholeNumber(nearFastLight ? volume.rotation[1].w : volume.rotation[0].w);
 }
 
-vec3 volumeRayDirection(int ray, int count) {
+// A probe's own turn of its rays (render/gpu/ddgi.h, GpuProbeTurn), as the trace and the update read it from their
+// ProbeTurns buffer: identity rows unless probes share light.
+struct ProbeTurn {
+    vec4 rows[3];
+};
+
+vec3 volumeRayDirection(int ray, int count, ProbeTurn probeTurn) {
     vec3 rotation[3] = vec3[3](volume.rotation[0].xyz, volume.rotation[1].xyz, volume.rotation[2].xyz);
-    return probeRayDirection(ray, count, volumeWholeNumber(volume.hysteresis.w), rotation);
+    vec3 turn[3] = vec3[3](probeTurn.rows[0].xyz, probeTurn.rows[1].xyz, probeTurn.rows[2].xyz);
+    return probeRayDirection(ray, count, volumeWholeNumber(volume.hysteresis.w), rotation, turn);
 }
 
 // A fast light's part of a ray's light, packed as half floats (8 bytes a ray instead of 16), and back.
