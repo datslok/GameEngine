@@ -61,6 +61,9 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Self-shadow bias", settings.selfShadowBias, {.min = 0.0f, .max = 2.0f, .sliderMax = 1.0f});
     visitor.field("Bounce energy", settings.bounceEnergy, {.min = 0.0f, .max = 1.0f});
     visitor.field("Lights per hit", settings.lightsPerHit, {.min = 0, .max = DDGI_MAX_HIT_LIGHTS});
+    visitor.field("Probe relocation", settings.probeRelocation);
+    visitor.field("Probe states", settings.probeStates);
+    visitor.field("Wake distance", settings.wakeCells, {.min = 0.0f, .max = 4.0f, .unit = "cells"});
     visitor.field("Show probes", settings.showProbes);
     visitor.field("Probe ball radius", settings.probeBallRadius, {.min = 0.01f, .max = 1.0f, .sliderMax = 0.4f, .unit = "m"});
 }
@@ -610,7 +613,8 @@ std::int32_t advanceRestartFrames(std::int32_t frames, float keep, const ProbeFr
     return restartedProbeKeep(keep, frame.restartHysteresis, frame.restartGrowth, sinceCheck) >= keep ? -1 : next;
 }
 
-void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame) {
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame,
+                          std::span<const int> restarted) {
     const std::size_t probes = static_cast<std::size_t>(probeCount(volume.counts));
 
     if (restarts.size() != probes) {
@@ -648,5 +652,16 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
                                                   static_cast<float>(restart.distanceFrames));
         restart.check = ProbeEventCheck{frame.restartThreshold, frame.restartGrowth, frame.restartCheckFrames};
         restart.fastKeep = restartedProbeKeep(frame.fastIrradianceHysteresis, 0.0f, frame.restartGrowth, static_cast<float>(restart.irradianceFrames));
+    }
+
+    // Their stored light belongs to another time or place, so none of it is kept and no texel checks it first.
+    for (const int probe : restarted) {
+        GpuProbeRestart& restart = restarts.at(static_cast<std::size_t>(probe));
+        restart.irradianceFrames = 0;
+        restart.distanceFrames = 0;
+        restart.irradianceKeep = 0.0f;
+        restart.distanceKeep = 0.0f;
+        restart.fastKeep = 0.0f;
+        restart.check.threshold = 0.0f;
     }
 }

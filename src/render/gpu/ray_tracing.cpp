@@ -4,7 +4,11 @@
 #include <stdexcept>
 
 std::uint32_t rayMaskFor(const DrawItem& draw) {
-    return draw.castsShadows ? solidRayMask : visualOnlyRayMask;
+    if (!draw.castsShadows) {
+        return visualOnlyRayMask;
+    }
+
+    return draw.isStatic ? solidRayMask | staticRayMask : solidRayMask;
 }
 
 GpuRayInstance packRayInstance(const DrawItem& draw, std::uint32_t instanceNumber, std::uint64_t meshStructure, std::uint32_t flags) {

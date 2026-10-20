@@ -5,6 +5,7 @@
 #include "render/gpu/ddgi.h"
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/probe_relocation.h"
 #include "scene/probe_volume.h"
 
 #include <cstdint>
@@ -41,6 +42,10 @@ inline constexpr int maxLightsPerHit = DDGI_MAX_HIT_LIGHTS;
 * the setting. A point on a wall sits exactly where the probes' rays stop, the worst place for the visibility test.
 */
 Vec3 probeSelfShadowBias(const Vec3& normal, const Vec3& toViewer, const Vec3& spacing, float selfShadowBias);
+
+// The longest the self-shadow bias can be (its normal and view parts both at full length): how far a surface's biased
+// point, which picks the probes that light it, can lie from the surface.
+float probeBiasReach(const Vec3& spacing, float selfShadowBias);
 
 // A probe's place in the grid, counted from the first probe along each axis.
 struct ProbeGridCoord {
@@ -112,12 +117,15 @@ Vec3 finishProbeBlend(const ProbeBlend& blend);
 /*
 * What sampling reads from the atlases, as the GPU reads it filtered: a probe's stored irradiance from still and from
 * fast lights (ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant) and its distances' mean and mean square,
-* each in a direction.
+* each in a direction; and each probe's state and offset (none: every probe traced where the grid puts it), and the
+* flat ambient light a point with no traced probe round it gets.
 */
 struct ProbeLookup {
     std::function<Vec3(int probe, const Vec3& direction)> irradiance;
     std::function<Vec2(int probe, const Vec3& direction)> moments;
     std::function<Vec3(int probe, const Vec3& direction)> fastIrradiance;
+    std::function<GpuProbeState(int probe)> state = nullptr;
+    Vec3 ambient{0.0f, 0.0f, 0.0f};
 };
 
 /*
@@ -142,7 +150,8 @@ struct ProbeLights {
 /*
 * The probes' light at a surface point with this normal seen from toViewer: the whole of sampling, as
 * scene_probes.glsl's sampleProbes does it. normal moves the test point and weighs the probes; lookupNormal is the
-* direction the irradiance is read in (the normal-mapped normal on screen), reflected the mirror direction.
+* direction the irradiance is read in (the normal-mapped normal on screen), reflected the mirror direction. Only traced
+* probes count (probe_relocation.h), each where relocation moved it; with none round the point, the flat ambient.
 */
 ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
                          const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup);

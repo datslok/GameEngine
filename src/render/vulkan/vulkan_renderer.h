@@ -232,6 +232,9 @@ private:
     // Bound in place of the light probes' atlases while there are none (one black texel, never read then).
     std::unique_ptr<VulkanTexture> noProbesTexture;
 
+    // Bound in place of the light probes' states while there are none (one probe's worth of zeros, never read then).
+    VulkanBuffer noProbeStates;
+
     // This frame's camera in world space (culling, debug lines) and measured from the camera (the main pass).
     Mat4 viewProjection = Mat4::identity();
     Mat4 relativeViewProjection = Mat4::identity();

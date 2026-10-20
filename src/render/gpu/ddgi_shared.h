@@ -99,4 +99,38 @@
 // The neighbours each probe shares with: its six face neighbours (one along each way of each axis).
 #define DDGI_SHARE_NEIGHBOURS 6
 
+// Relocation and states (render/gpu/probe_relocation.h, probe_relocation.glsl), the 2021 reference code's rules. Each
+// probe traces this many distance-only rays (a fixed spiral, so the result is the same every time) against the static
+// level, up to this many times, moving after each.
+#define DDGI_RELOCATION_RAYS 256
+#define DDGI_RELOCATION_ITERATIONS 5
+
+// Invocations per workgroup of the relocation pass, one workgroup per probe.
+#define DDGI_RELOCATION_GROUP_SIZE 64
+
+// A probe whose rays meet back faces more than this share of the time is inside something.
+#define DDGI_INSIDE_BACK_FACE_SHARE 0.25
+
+// The furthest a probe moves from its grid point, per axis, as a share of the spacing: inside its own cell, so the cell
+// a point falls in still finds its probes by the grid.
+#define DDGI_OFFSET_LIMIT 0.4
+
+// A probe leaving through a back face stops this far short of the offset limit, in metres.
+#define DDGI_ESCAPE_MARGIN 0.001
+
+// A probe whose nearest front face is closer than this share of the smallest spacing moves up to the nudge share
+// towards the farthest front face it sees, unless the two lie the same way (cosine above the last number: it only sees
+// one surface, and moving could take it through).
+#define DDGI_MIN_FRONT_FACE_SHARE 0.1
+#define DDGI_FRONT_FACE_NUDGE 0.2
+#define DDGI_SAME_SURFACE_COSINE 0.5
+
+// What a probe does this frame (ProbeState): off (buried in the static level: never traced or read), sleeping (no
+// static surface near: not traced, not read), awake (a sleeping probe near something that moves) and vigilant (a static
+// surface near). Awake and vigilant probes are traced and read.
+#define DDGI_PROBE_OFF 0
+#define DDGI_PROBE_SLEEPING 1
+#define DDGI_PROBE_AWAKE 2
+#define DDGI_PROBE_VIGILANT 3
+
 #endif

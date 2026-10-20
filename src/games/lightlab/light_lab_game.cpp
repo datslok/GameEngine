@@ -192,7 +192,7 @@ const char* LightLabGame::title() const {
 
 /*
 * The ground and each group of blocks are one entity each, and all of it is static level: the triangles drawn are the
-* triangles walked on, made from the same renderers.
+* triangles walked on, made from the same renderers, and the light probes move off them (ModelRenderer::isStatic).
 */
 void LightLabGame::onInit(World& world, AssetManager& assets) {
     const MeshHandle cube = assets.addMesh(Mesh::cube());
@@ -203,6 +203,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     grass.roughness = 1.0f;
 
     const auto addStatic = [&](ModelRenderer renderer) {
+        renderer.isStatic = true;
         staticLevel.add(assets.makeCollisionMesh(renderer));
         const Entity entity = world.create();
         world.add(entity, Transform{});

@@ -9,6 +9,9 @@
 // moon, lamp bulbs), so light-gathering rays leave them out.
 #define RAY_MASK_SOLID 1
 #define RAY_MASK_VISUAL_ONLY 2
+
+// Solid things that are part of the static level carry this bit too: light probes relocate against them alone.
+#define RAY_MASK_STATIC 4
 #define RAY_MASK_EVERYTHING 255
 
 // A mesh's vertices as floats (MeshVertex: position, normal, uv, tangent), read through the vertex buffer's address.

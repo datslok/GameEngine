@@ -39,6 +39,21 @@ namespace {
         return Aabb{box.minimum - Vec3{margin, margin, margin}, box.maximum + Vec3{margin, margin, margin}};
     }
 
+    /*
+    * The ground and the four groups of blocks are the static level, which the light probes move off; everything else
+    * (the lamp's fixture, the sun's disc, the player's body) is not.
+    */
+    void testTheLevelIsStatic() {
+        Lab lab;
+        int staticModels = 0;
+        int others = 0;
+
+        lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
+
+        assert(staticModels == 5);
+        assert(others > 0);
+    }
+
     // Each tower stands at its doubling distance, sized in proportion to it, and no tower overlaps another's bearing.
     void testTowersDoubleAndFanOut() {
         const LightLabLayout layout = buildLightLabLayout();
@@ -482,6 +497,7 @@ namespace {
 }
 
 void testLightLab() {
+    testTheLevelIsStatic();
     testTheLabsFlashlight();
     testTheBackRoomLamp();
     testAClockJumpRestartsTheProbes();

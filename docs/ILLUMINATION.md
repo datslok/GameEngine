@@ -124,6 +124,7 @@ Optionally multiply by screen-space ambient occlusion on directly visible pixels
   - Saving: 30-50% of probe tracing and updating time in their scenes, which can be spent on more rays per probe instead.
   - For fog or other participating media later, probes inside the medium would have to stay awake, since empty space then gets shaded too.
 - The [2021] text and code differ in detail here (see the table at the end); follow the code.
+- Built in `ddgi-probe-relocation` (Oct 20 2026) with the code's numbers, two changes: a probe that sees no static surface sleeps rather than being off (a mover may still come near it, and a level with nothing marked static keeps its probes near movers), and vigilant uses the probe's own cells (one spacing each way round its grid point) grown by the self-shadow bias's longest reach, exactly the cells a surface's biased point can pick it from, rather than 2 x the bias. Relocation runs on the GPU against the instances the game marks static (`ModelRenderer::isStatic`, `RAY_MASK_STATIC`); the states are worked out on the CPU each frame from its records read back. In the light lab's dense 20 cm volume the 0.4-cell limit (8 cm) frees only 5 of 355 buried probes from its 30 cm walls; the rest are off.
 
 ## Large worlds: tracking windows and nested volumes [2021]
 

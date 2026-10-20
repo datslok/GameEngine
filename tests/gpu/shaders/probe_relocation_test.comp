@@ -1,0 +1,37 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs probe_relocation.glsl's functions on the cases probe_relocation_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "probe_relocation.glsl"
+
+// Rays per relocation step case (must match probe_relocation_gpu_test.cpp).
+const int STEP_CASE_RAYS = 8;
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 first = testInput(0);
+    vec4 second = testInput(1);
+    vec4 third = testInput(2);
+
+    if (function == GPU_TEST_ESCAPE_SCALE) {
+        testOutput(0, vec4(probeEscapeScale(first.xyz, second.xyz, third.xyz)));
+    } else if (function == GPU_TEST_RELOCATION_STEP) {
+        // first: the probe's offset from its grid point; second: the spacing; then one (direction, distance) per ray.
+        ProbeRayTally tally = emptyProbeRayTally();
+
+        for (int ray = 0; ray < STEP_CASE_RAYS; ++ray) {
+            vec4 traced = testInput(2 + ray);
+            tallyProbeRay(tally, traced.xyz, traced.w, first.xyz, second.xyz);
+        }
+
+        ProbeMove move = relocateProbeStep(tally, first.xyz, second.xyz);
+        ProbeRelocation relocation = finishProbeRelocation(tally, first.xyz, move.stuck);
+        testOutput(0, vec4(float(tally.backFaces), float(tally.frontFaces), tally.closestBackFace, tally.closestFrontFace));
+        testOutput(1, vec4(tally.farthestFrontFace, tally.surfaceBeyondCells, move.stuck ? 1.0 : 0.0, relocation.off));
+        testOutput(2, vec4(move.offset, 0.0));
+    }
+}

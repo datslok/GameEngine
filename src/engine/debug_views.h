@@ -21,24 +21,30 @@
 void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug);
 
 // The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts, so a game
-// can put its own lines below the engine's (drawRenderStats uses lines 0 to 4).
+// can put its own lines below the engine's (drawRenderStats uses lines 0 to 5).
 constexpr float debugReadoutTextHeight = 14.0f;
 Vec2 debugReadoutLine(int line);
 
 // The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame.
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
 
-// The readout line drawRenderStats writes the video memory on (videoMemoryText).
-constexpr int videoMemoryReadoutLine = 4;
+// The readout lines drawRenderStats writes the light probes' states (probeStatsText) and the video memory
+// (videoMemoryText) on.
+constexpr int probeReadoutLine = 4;
+constexpr int videoMemoryReadoutLine = 5;
 
 // The readout line drawRenderStats leaves for the engine's timings (drawProfile).
-constexpr int engineProfileReadoutLine = 5;
+constexpr int engineProfileReadoutLine = 6;
 
 // The readout line for the GPU's timings per pass (a profiler from makeGpuProfiler).
-constexpr int gpuProfileReadoutLine = 6;
+constexpr int gpuProfileReadoutLine = 7;
 
-// The engine's readout uses lines 0 to 6; a game's own lines start here.
-constexpr int firstGameReadoutLine = 7;
+// The engine's readout uses lines 0 to 7; a game's own lines start here.
+constexpr int firstGameReadoutLine = 8;
+
+// The light probes' line: how many, traced (awake ones among them), asleep, off and moved by relocation, or "PROBES -"
+// without probes.
+std::string probeStatsText(const ProbeStateCounts& counts);
 
 // The video memory line: "VRAM used / budget MB  ENGINE n MB" (megabytes of 2^20 bytes), or the engine's share alone
 // when the driver gives no budget, or "VRAM -" before anything was measured.

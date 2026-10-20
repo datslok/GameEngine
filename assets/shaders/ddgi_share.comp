@@ -9,6 +9,7 @@
 // restarted shares its still light more for a while (eventProbeSharingWeight), from the restarts the update reads.
 #include "render/gpu/ddgi_shared.h"
 #include "ddgi.glsl"
+#include "probe_relocation.glsl"
 
 layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEXELS) in;
 
@@ -24,11 +25,17 @@ layout(std430, set = 0, binding = 0) readonly buffer ProbeRestarts {
     ProbeRestart probeRestarts[];
 };
 
-layout(set = 0, binding = 1, rgba16f) readonly uniform image2D irradiance;
-layout(set = 0, binding = 2, rgba16f) readonly uniform image2D fastIrradiance;
-layout(set = 0, binding = 3, rg16f) readonly uniform image2D distances;
-layout(set = 0, binding = 4, rgba16f) writeonly uniform image2D sharedIrradiance;
-layout(set = 0, binding = 5, rgba16f) writeonly uniform image2D sharedFastIrradiance;
+// Each probe's offset and state (render/gpu/probe_relocation.h): only traced probes share, each with its traced
+// neighbours, measured between where relocation moved them.
+layout(std430, set = 0, binding = 1) readonly buffer ProbeStates {
+    ProbeState probeStates[];
+};
+
+layout(set = 0, binding = 2, rgba16f) readonly uniform image2D irradiance;
+layout(set = 0, binding = 3, rgba16f) readonly uniform image2D fastIrradiance;
+layout(set = 0, binding = 4, rg16f) readonly uniform image2D distances;
+layout(set = 0, binding = 5, rgba16f) writeonly uniform image2D sharedIrradiance;
+layout(set = 0, binding = 6, rgba16f) writeonly uniform image2D sharedFastIrradiance;
 
 shared vec4 square[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
 shared vec4 fastSquare[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
@@ -38,6 +45,12 @@ void main() {
                                                                           ivec3(0, -1, 0), ivec3(0, 0, 1), ivec3(0, 0, -1));
     ivec3 counts = share.counts.xyz;
     int probe = int(gl_WorkGroupID.x);
+
+    // An untraced probe is never read, so its shared copy is left as it is; the whole workgroup leaves together.
+    if (!probeTraced(probeStates[probe].state)) {
+        return;
+    }
+
     ivec3 grid = ivec3(probe % counts.x, (probe / counts.x) % counts.y, probe / (counts.x * counts.y));
     ivec2 texel = ivec2(gl_LocalInvocationID.xy);
     ivec2 origin = probeTileOrigin(counts, probe, DDGI_IRRADIANCE_TEXELS);
@@ -56,12 +69,13 @@ void main() {
         fastNeighbours[neighbour] = vec3(0.0);
         visible[neighbour] = false;
 
-        if (all(greaterThanEqual(other, ivec3(0))) && all(lessThan(other, counts))) {
-            vec3 direction = vec3(step);
-            float separation = dot(abs(direction), share.spacing.xyz);
-            ivec2 towards = probeDirectionTexel(direction, DDGI_DISTANCE_TEXELS);
+        int otherProbe = other.x + counts.x * (other.y + counts.y * other.z);
+
+        if (all(greaterThanEqual(other, ivec3(0))) && all(lessThan(other, counts)) && probeTraced(probeStates[otherProbe].state)) {
+            vec3 between = vec3(step) * share.spacing.xyz + probeStates[otherProbe].offset - probeStates[probe].offset;
+            float separation = length(between);
+            ivec2 towards = probeDirectionTexel(between / separation, DDGI_DISTANCE_TEXELS);
             float meanDistance = imageLoad(distances, distanceOrigin + 1 + towards).r;
-            int otherProbe = other.x + counts.x * (other.y + counts.y * other.z);
             ivec2 otherOrigin = probeTileOrigin(counts, otherProbe, DDGI_IRRADIANCE_TEXELS);
             visible[neighbour] = probesSeeEachOther(meanDistance, separation);
             neighbours[neighbour] = imageLoad(irradiance, otherOrigin + 1 + texel).rgb;

@@ -5,11 +5,13 @@
 * The light probes' debug view (GlobalIlluminationSettings::showProbes): a ball at each probe. Each instance is one
 * probe, drawn as a square through the ball's centre square-on to the line from the camera, just covering the ball's
 * outline; ddgi_probes.frag finds the ball's surface within it. No vertex buffer: the six corners of the square's two triangles come from the vertex number.
-* Camera-relative like the main pass: positions are measured from the camera.
+* Camera-relative like the main pass: positions are measured from the camera. Each ball sits where relocation moved its
+* probe.
 */
 #include "frame_data.glsl"
 #include "ddgi.glsl"
 #include "ddgi_volume.glsl"
+#include "scene_probe_states.glsl"
 
 layout(location = 0) out vec3 relativePosition;
 layout(location = 1) flat out int probe;
@@ -18,7 +20,7 @@ const vec2 squareCorners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.
 
 void main() {
     probe = gl_InstanceIndex;
-    vec3 centre = volumeProbePosition(probe) - cameraOrigin.xyz;
+    vec3 centre = volumeProbePosition(probe) + probeStates[probe].offset - cameraOrigin.xyz;
     float radius = volume.hysteresis.z;
     float distance = length(centre);
 

@@ -436,6 +436,7 @@ void VulkanRenderer::createFixedTextures() {
     noProbes.bytesPerTexel = 8;
     noProbes.surface = false;
     noProbesTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, black, noProbes);
+    noProbeStates = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
 
 /*
@@ -864,7 +865,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const ProbeHitLights hitLights = traceProbes ? probeHitLights(lights, cameraOrigin, *probes, illumination.fastLights) : ProbeHitLights{};
 
     if (traceProbes) {
-        ddgi->prepare(frame.commands, *probes, illumination);
+        ddgi->prepare(frame.commands, *probes, illumination, description.draws, frame.frameIndex);
+        stats.probes = countProbeStates(ddgi->getProbeStates());
     }
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
@@ -1023,7 +1025,9 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         probes != nullptr ? ddgi->sampledFastIrradiance() : sampled(*noProbesTexture),
     };
 
-    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks);
+    const VkDescriptorBufferInfo probeStates =
+        probes != nullptr ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
+    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, probeStates);
 }
 
 /*

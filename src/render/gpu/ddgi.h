@@ -186,6 +186,21 @@ struct GlobalIlluminationSettings {
     // The point and spot lights each probe ray's hit adds, the brightest there, each checked by a shadow ray.
     int lightsPerHit = 4;
 
+    /*
+    * Relocation (render/gpu/probe_relocation.h): probes move off the static level, out of walls and away from surfaces
+    * they nearly touch, within their own cells, once at start-up and after a geometry change. Off, every probe stays
+    * where the grid puts it.
+    */
+    bool probeRelocation = true;
+
+    /*
+    * Probe states: only probes that some surface reads are traced (vigilant: a static surface within their cells; awake:
+    * something that moves within wakeCells more cells), and probes buried in the level are never read. Off, every probe
+    * is traced and read, as before.
+    */
+    bool probeStates = true;
+    float wakeCells = 1.0f;
+
     // A debug view: each probe drawn as a small ball showing the light it stores, in the direction of the ball's surface.
     bool showProbes = false;
     float probeBallRadius = 0.1f;
@@ -579,9 +594,11 @@ static_assert(sizeof(GpuProbeRestart) == 32, "GpuProbeRestart must match ProbeRe
 * for the frame. A restart ends once its ramp (restartedProbeKeep, with the frame's restartHysteresis), counted from the
 * end of the event check (texels may restart that late), has reached the frame's share kept, after which it would change nothing. A frame keeping none of an
 * atlas (fresh atlases) starts no restart of it: there is nothing to forget. Sized to the volume: a new size starts with
-* none running.
+* none running. The restarted probes (probe_relocation.h, restartedProbes: woken, newly vigilant or moved) restart
+* their irradiance and distances outright: nothing kept on this frame, every texel restarted unchecked.
 */
-void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame);
+void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVolume& volume, std::span<const ProbeEvent> events, const ProbeFrame& frame,
+                          std::span<const int> restarted = {});
 
 // One restart's frames since its event, a frame on (keep: the share its atlas keeps this frame), or -1 once it has
 // ended (advanceProbeRestarts' rule); negative stays negative.

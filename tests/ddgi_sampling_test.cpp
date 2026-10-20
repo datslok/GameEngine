@@ -253,6 +253,40 @@ namespace {
         assert(identical(split.fast.diffuse, fast.still.diffuse) && identical(split.fast.specular, fast.still.specular));
     }
 
+    /*
+    * Only traced probes light a surface, each where relocation moved it (render/gpu/probe_relocation.h): with the far
+    * side of the cell asleep, the light is the near side's alone; moving the traced probes changes their weights; with
+    * no traced probe round the point, the flat ambient light, and nothing from fast lights.
+    */
+    void testOnlyTracedProbesLight() {
+        const Vec3 near{1.0f, 0.5f, 0.25f};
+        const auto byColumn = [near](int probe, const Vec3&) { return probe % 4 <= 1 ? near : Vec3{0.1f, 0.9f, 0.6f}; };
+        const auto open = [](int, const Vec3&) { return openMoments(); };
+        const Vec3 point{1.4f, 1.5f, 1.6f};
+        const Vec3 normal{0.0f, 1.0f, 0.0f};
+        const Vec3 ambient{0.3f, 0.3f, 0.35f};
+
+        ProbeLookup farAsleep{byColumn, open, byColumn};
+        farAsleep.ambient = ambient;
+        farAsleep.state = [](int probe) {
+            return GpuProbeState{{0.0f, 0.0f, 0.0f}, static_cast<std::int32_t>(probe % 4 <= 1 ? ProbeState::Vigilant : ProbeState::Sleeping)};
+        };
+        const ProbeLights nearOnly = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, farAsleep);
+        assert(nearlyEqual(nearOnly.still.diffuse, near, 1e-4f));
+
+        ProbeLookup moved{byColumn, open, nullptr};
+        moved.state = [](int probe) { return GpuProbeState{{probe % 4 <= 1 ? 0.3f : 0.0f, 0.0f, 0.0f}, static_cast<std::int32_t>(ProbeState::Awake)}; };
+        const ProbeLights inPlace = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, ProbeLookup{byColumn, open, nullptr});
+        const ProbeLights shifted = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, moved);
+        assert(!nearlyEqual(inPlace.still.diffuse, shifted.still.diffuse, 1e-4f));
+
+        ProbeLookup allOff = farAsleep;
+        allOff.state = [](int) { return GpuProbeState{{0.0f, 0.0f, 0.0f}, static_cast<std::int32_t>(ProbeState::Off)}; };
+        const ProbeLights none = sampleProbes(unitVolume, 0.3f, point, normal, normal, normal, normal, allOff);
+        assert(identical(none.still.diffuse, ambient) && identical(none.still.specular, ambient));
+        assert(identical(none.fast.diffuse, Vec3{}) && identical(none.fast.specular, Vec3{}));
+    }
+
     // The specular stand-in is the same blend read in the mirror direction: probes brighter from above give an upward
     // reflection more light than a downward one, with the same weights.
     void testSpecularReadsTheMirrorDirection() {
@@ -476,6 +510,7 @@ void testDdgiSampling() {
     testUniformProbesGiveTheirOwnValue();
     testFastLightIsBlendedApart();
     testSpecularReadsTheMirrorDirection();
+    testOnlyTracedProbesLight();
     testAWallKeepsTheDarkSidesProbesOut();
     testTheBrightestLightsAreKept();
     testLightAtAProbeRaysHit();

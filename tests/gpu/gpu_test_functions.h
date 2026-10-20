@@ -86,4 +86,8 @@
 #define GPU_TEST_HIT_LIGHTS 5
 #define GPU_TEST_BRIGHTEST_LIGHTS 6
 
+// probe_relocation_test.comp
+#define GPU_TEST_ESCAPE_SCALE 0
+#define GPU_TEST_RELOCATION_STEP 1
+
 #endif

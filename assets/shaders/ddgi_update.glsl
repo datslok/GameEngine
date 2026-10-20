@@ -19,6 +19,7 @@
 
 #include "ddgi.glsl"
 #include "ddgi_volume.glsl"
+#include "probe_relocation.glsl"
 
 layout(local_size_x = PROBE_TEXELS, local_size_y = PROBE_TEXELS) in;
 
@@ -45,12 +46,17 @@ layout(std430, set = 0, binding = 4) readonly buffer ProbeRestarts {
     ProbeRestart probeRestarts[];
 };
 
+// Each probe's state (render/gpu/probe_relocation.h): off and sleeping probes traced nothing and keep what they hold.
+layout(std430, set = 0, binding = 5) readonly buffer ProbeStates {
+    ProbeState probeStates[];
+};
+
 #if UPDATE_IRRADIANCE
-layout(set = 0, binding = 5, rgba16f) uniform image2D atlas;
-layout(set = 0, binding = 6, rgba16f) uniform image2D fastAtlas;
-layout(set = 0, binding = 7, rgba16f) uniform image2D changeAtlas;
+layout(set = 0, binding = 6, rgba16f) uniform image2D atlas;
+layout(set = 0, binding = 7, rgba16f) uniform image2D fastAtlas;
+layout(set = 0, binding = 8, rgba16f) uniform image2D changeAtlas;
 #else
-layout(set = 0, binding = 5, rg16f) uniform image2D atlas;
+layout(set = 0, binding = 6, rg16f) uniform image2D atlas;
 #endif
 
 shared vec3 rayDirections[DDGI_MAX_RAYS];
@@ -64,6 +70,12 @@ shared vec4 fastSquare[PROBE_TEXELS][PROBE_TEXELS];
 
 void main() {
     int probe = int(gl_WorkGroupID.x);
+
+    // The whole workgroup leaves together, before any barrier.
+    if (!probeTraced(probeStates[probe].state)) {
+        return;
+    }
+
     int stride = volume.counts.w;
     int rays = volumeRayCount(probeNearFastLight[probe] != 0);
     int invocations = PROBE_TEXELS * PROBE_TEXELS;

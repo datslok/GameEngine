@@ -32,6 +32,11 @@ Vec3 probeSelfShadowBias(const Vec3& normal, const Vec3& toViewer, const Vec3& s
     return (normal * biasNormalShare + toViewer * biasViewShare) * (biasSpacingShare * smallestSpacing * selfShadowBias);
 }
 
+float probeBiasReach(const Vec3& spacing, float selfShadowBias) {
+    const float smallestSpacing = std::min({spacing.x, spacing.y, spacing.z});
+    return (biasNormalShare + biasViewShare) * biasSpacingShare * smallestSpacing * selfShadowBias;
+}
+
 ProbeCell probeCell(const ProbeVolume& volume, const Vec3& point) {
     const Vec3 cells = cellsFromOrigin(volume, point);
     int base[3];
@@ -144,7 +149,13 @@ ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const 
     for (int corner = 0; corner < 8; ++corner) {
         const ProbeGridCoord grid = probeCellCorner(cell, volume.counts, corner);
         const int index = probeIndex(volume.counts, grid.x, grid.y, grid.z);
-        const Vec3 probe = probePosition(volume, index);
+        const GpuProbeState state = lookup.state ? lookup.state(index) : GpuProbeState{};
+
+        if (!probeTraced(static_cast<ProbeState>(state.state))) {
+            continue;
+        }
+
+        const Vec3 probe = probePosition(volume, index) + Vec3{state.offset[0], state.offset[1], state.offset[2]};
         const Vec3 fromProbe = biased - probe;
         const float distance = fromProbe.length();
         const Vec3 direction = distance > 0.0f ? fromProbe * (1.0f / distance) : normal;
@@ -155,6 +166,10 @@ ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const 
         addProbeSample(specular, lookup.irradiance(index, reflected), weight);
         addProbeSample(fastDiffuse, lookup.fastIrradiance ? lookup.fastIrradiance(index, lookupNormal) : none, weight);
         addProbeSample(fastSpecular, lookup.fastIrradiance ? lookup.fastIrradiance(index, reflected) : none, weight);
+    }
+
+    if (diffuse.weight <= 0.0f) {
+        return ProbeLights{ProbeLight{lookup.ambient, lookup.ambient}, ProbeLight{}};
     }
 
     return ProbeLights{ProbeLight{finishProbeBlend(diffuse), finishProbeBlend(specular)},
