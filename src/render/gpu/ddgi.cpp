@@ -48,6 +48,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Change threshold", settings.changeThreshold, {.min = 1.0f, .max = 20.0f, .sliderMax = 10.0f, .unit = "sd"});
     visitor.field("Scene events", settings.sceneEvents);
     visitor.field("Event probe sharing", settings.eventProbeSharing, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Event memory", settings.eventMemorySeconds, {.min = 0.0f, .max = 2.0f, .sliderMax = 0.5f, .unit = "s"});
     visitor.field("Probe sharing", settings.probeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast probe sharing", settings.fastProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast lights", settings.fastLights);
@@ -343,44 +344,45 @@ AdaptiveProbeTexel adaptiveProbeBlend(const AdaptiveProbeTexel& texel, const Vec
     return next;
 }
 
-AdaptiveProbeTexel restartProbeTexel(const Vec3& estimate) {
-    return AdaptiveProbeTexel{estimate, 1.0f, estimate, 0.0f};
+AdaptiveProbeTexel restartProbeTexel(const AdaptiveProbeTexel& texel, const Vec3& estimate, float keep) {
+    const Vec3 stored = blendProbeValue(texel.stored, estimate, keep);
+    return AdaptiveProbeTexel{stored, historyForShare(keep) + 1.0f, stored, 0.0f};
 }
 
 // The n-th deviation since the restart joins the mean of their squares by 1 / n.
-AdaptiveProbeTexel restartedProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, int framesSinceRestart, float longKeep) {
+AdaptiveProbeTexel restartedProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, int framesSinceRestart, float keep) {
     const float frames = static_cast<float>(framesSinceRestart);
     const float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
     const float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * ((frames - 1.0f) / frames);
 
     AdaptiveProbeTexel next;
-    next.stored = blendProbeValue(texel.stored, estimate, rampedProbeKeep(longKeep, framesSinceRestart));
+    next.stored = blendProbeValue(texel.stored, estimate, keep);
     next.recent = next.stored;
     next.noise = std::sqrt(variance);
-    next.history = frames + 1.0f;
+    next.history = historyForShare(keep) + 1.0f;
     return next;
 }
 
 AdaptiveProbeTexel adaptiveProbeUpdate(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold,
-                                       int framesSinceRestart) {
+                                       int framesSinceRestart, float restartKeep) {
     if (framesSinceRestart == 0) {
-        return restartProbeTexel(estimate);
+        return restartProbeTexel(texel, estimate, restartKeep);
     }
 
     if (framesSinceRestart > 0 && static_cast<float>(framesSinceRestart) < historyForShare(windowKeep)) {
-        return restartedProbeBlend(texel, estimate, framesSinceRestart, longKeep);
+        return restartedProbeBlend(texel, estimate, framesSinceRestart, restartKeep);
     }
 
     return adaptiveProbeBlend(texel, estimate, longKeep, windowKeep, threshold);
 }
 
-float rampedProbeKeep(float longKeep, int framesSinceRestart) {
+float restartedProbeKeep(float longKeep, float shortKeep, int framesSinceRestart) {
     if (framesSinceRestart < 0) {
         return longKeep;
     }
 
     const float frames = static_cast<float>(framesSinceRestart);
-    return std::min(longKeep, frames / (frames + 1.0f));
+    return std::min(longKeep, std::max(shortKeep, frames / (frames + 1.0f)));
 }
 
 float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep) {
@@ -546,6 +548,7 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
     frame.fastIrradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(fastFrameSeconds, settings.fastIrradianceTimeConstant);
     frame.distanceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant);
     frame.windowHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.changeWindowSeconds);
+    frame.restartHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.eventMemorySeconds);
     frame.changeThreshold = settings.adaptiveMemory ? settings.changeThreshold : 0.0f;
     frame.ballRadius = settings.probeBallRadius;
     return frame;
@@ -553,13 +556,13 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
 
 namespace {
     // One more frame since the restart, or none once its ramp has reached the share kept.
-    std::int32_t advanceRestart(std::int32_t frames, float keep) {
+    std::int32_t advanceRestart(std::int32_t frames, float keep, float shortKeep) {
         if (frames < 0) {
             return frames;
         }
 
         const std::int32_t next = frames + 1;
-        return rampedProbeKeep(keep, next) >= keep ? -1 : next;
+        return restartedProbeKeep(keep, shortKeep, next) >= keep ? -1 : next;
     }
 }
 
@@ -571,8 +574,8 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
     }
 
     for (GpuProbeRestart& restart : restarts) {
-        restart.irradianceFrames = advanceRestart(restart.irradianceFrames, frame.irradianceHysteresis);
-        restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis);
+        restart.irradianceFrames = advanceRestart(restart.irradianceFrames, frame.irradianceHysteresis, frame.restartHysteresis);
+        restart.distanceFrames = advanceRestart(restart.distanceFrames, frame.distanceHysteresis, frame.restartHysteresis);
     }
 
     const bool keepsIrradiance = frame.irradianceHysteresis > 0.0f;
@@ -592,5 +595,10 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
                 restarts[probe].distanceFrames = 0;
             }
         }
+    }
+
+    for (GpuProbeRestart& restart : restarts) {
+        restart.irradianceKeep = restartedProbeKeep(frame.irradianceHysteresis, frame.restartHysteresis, restart.irradianceFrames);
+        restart.distanceKeep = restartedProbeKeep(frame.distanceHysteresis, frame.restartHysteresis, restart.distanceFrames);
     }
 }

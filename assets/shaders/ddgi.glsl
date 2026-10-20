@@ -197,15 +197,6 @@ AdaptiveProbeTexel adaptiveProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, f
     return next;
 }
 
-float rampedProbeKeep(float longKeep, int framesSinceRestart) {
-    if (framesSinceRestart < 0) {
-        return longKeep;
-    }
-
-    float frames = float(framesSinceRestart);
-    return min(longKeep, frames / (frames + 1.0));
-}
-
 float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep) {
     float period = historyForShare(longKeep);
 
@@ -217,26 +208,34 @@ float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRe
     return max(weight, eventWeight + (weight - eventWeight) * faded);
 }
 
-AdaptiveProbeTexel restartProbeTexel(vec3 estimate) {
-    return AdaptiveProbeTexel(estimate, 1.0, estimate, 0.0);
+// A probe's scene event this frame (render/gpu/ddgi.h, GpuProbeRestart): the frames since its irradiance (x) and
+// distances (y) were restarted, negative for none, and the share of each it keeps this frame.
+struct ProbeRestart {
+    ivec2 frames;
+    vec2 keeps;
+};
+
+AdaptiveProbeTexel restartProbeTexel(AdaptiveProbeTexel texel, vec3 estimate, float keep) {
+    vec3 stored = blendProbeValue(texel.stored, estimate, keep);
+    return AdaptiveProbeTexel(stored, historyForShare(keep) + 1.0, stored, 0.0);
 }
 
-AdaptiveProbeTexel restartedProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, int framesSinceRestart, float longKeep) {
+AdaptiveProbeTexel restartedProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, int framesSinceRestart, float keep) {
     float frames = float(framesSinceRestart);
     float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
     float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * ((frames - 1.0) / frames);
-    vec3 stored = blendProbeValue(texel.stored, estimate, rampedProbeKeep(longKeep, framesSinceRestart));
-    return AdaptiveProbeTexel(stored, frames + 1.0, stored, sqrt(variance));
+    vec3 stored = blendProbeValue(texel.stored, estimate, keep);
+    return AdaptiveProbeTexel(stored, historyForShare(keep) + 1.0, stored, sqrt(variance));
 }
 
 AdaptiveProbeTexel adaptiveProbeUpdate(AdaptiveProbeTexel texel, vec3 estimate, float longKeep, float windowKeep, float threshold,
-                                       int framesSinceRestart) {
+                                       int framesSinceRestart, float restartKeep) {
     if (framesSinceRestart == 0) {
-        return restartProbeTexel(estimate);
+        return restartProbeTexel(texel, estimate, restartKeep);
     }
 
     if (framesSinceRestart > 0 && float(framesSinceRestart) < historyForShare(windowKeep)) {
-        return restartedProbeBlend(texel, estimate, framesSinceRestart, longKeep);
+        return restartedProbeBlend(texel, estimate, framesSinceRestart, restartKeep);
     }
 
     return adaptiveProbeBlend(texel, estimate, longKeep, windowKeep, threshold);

@@ -11,8 +11,9 @@
 // volume's change threshold above 0), the still lights' texels blend by adaptiveProbeBlend instead, their history in the
 // atlas's alpha and the change window's mean and noise in a third image (alpha is 0 otherwise, so switching the adaptive
 // memory on starts every texel from its stored light). A probe a scene event restarted (render/gpu/ddgi.h,
-// advanceProbeRestarts) takes this frame's estimate outright and then averages since the event, by the frames the restart
-// buffer counts (adaptiveProbeUpdate with the adaptive memory, rampedProbeKeep for the fixed memory and the distances).
+// advanceProbeRestarts) keeps only the restart's share of its old light and then averages since the event, by the
+// frames and shares the restart buffer holds (adaptiveProbeUpdate with the adaptive memory; the share itself for the
+// fixed memory and the distances).
 #ifndef DDGI_UPDATE_GLSL
 #define DDGI_UPDATE_GLSL
 
@@ -39,9 +40,9 @@ layout(std430, set = 0, binding = 3) readonly buffer ProbeTurns {
     ProbeTurn probeTurns[];
 };
 
-// Each probe's frames since a scene event restarted its irradiance (x) and distances (y), negative for none.
+// Each probe's scene event restarts (ProbeRestart).
 layout(std430, set = 0, binding = 4) readonly buffer ProbeRestarts {
-    ivec2 probeRestarts[];
+    ProbeRestart probeRestarts[];
 };
 
 #if UPDATE_IRRADIANCE
@@ -104,22 +105,23 @@ void main() {
     vec4 fastResult = fastStored;
 #endif
 
-    ivec2 restart = probeRestarts[probe];
+    ProbeRestart restart = probeRestarts[probe];
 
     if (sum.w > DDGI_MIN_TEXEL_WEIGHT) {
 #if UPDATE_IRRADIANCE
         if (volume.sky.w > 0.0) {
             vec4 change = imageLoad(changeAtlas, origin + 1 + texel);
             AdaptiveProbeTexel adaptive = adaptiveProbeUpdate(AdaptiveProbeTexel(stored.rgb, stored.a, change.rgb, change.a), sum.rgb / sum.w,
-                                                              volume.hysteresis.x, volume.rotation[2].w, volume.sky.w, restart.x);
+                                                              volume.hysteresis.x, volume.rotation[2].w, volume.sky.w, restart.frames.x,
+                                                              restart.keeps.x);
             result = vec4(adaptive.stored, adaptive.history);
             imageStore(changeAtlas, origin + 1 + texel, vec4(adaptive.recent, adaptive.noise));
         } else {
-            result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, rampedProbeKeep(volume.hysteresis.x, restart.x)), 0.0);
+            result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, restart.frames.x >= 0 ? restart.keeps.x : volume.hysteresis.x), 0.0);
         }
         fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, volume.origin.w), 1.0);
 #else
-        result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, rampedProbeKeep(volume.hysteresis.y, restart.y)), 0.0, 1.0);
+        result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, restart.frames.y >= 0 ? restart.keeps.y : volume.hysteresis.y), 0.0, 1.0);
 #endif
     }
 
