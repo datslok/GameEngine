@@ -43,6 +43,12 @@ FrameLighting collectLighting(World& world, float alpha) {
         }
     });
 
+    world.each<StarrySky>([&](Entity, StarrySky& sky) {
+        if (!lighting.stars) {
+            lighting.stars = sky;
+        }
+    });
+
     world.each<ProbeEvent>([&](Entity, ProbeEvent& event) {
         lighting.probeEvents.push_back(event);
     });

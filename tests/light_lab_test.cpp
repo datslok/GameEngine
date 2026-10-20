@@ -12,7 +12,9 @@
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/probe_cascades.h"
 #include "render/gpu/probe_relocation.h"
+#include "scene/celestial.h"
 #include "scene/lighting.h"
+#include "scene/moon.h"
 #include "scene/model_renderer.h"
 #include "scene/sky_object.h"
 #include "scene/sun.h"
@@ -337,15 +339,104 @@ namespace {
         runTicks(lab.game, lab.world, static_cast<int>(std::lround(1.0f / tickSeconds)), ticks);
         assert(near(lab.game.getSunSettings().solarHours, 16.5f, 1e-3f));
 
-        // The sun stands still by default, and golden views hold it at their hour even when it moves.
+        // The sun stands still by default, and golden views hold it at their hour and day even when it moves.
         assert(Lab{}.game.getSunSettings().hoursPerSecond == 0.0f);
         for (const GoldenView& view : Lab{}.game.goldenViews()) {
             Lab golden;
             golden.game.getSunSettings().hoursPerSecond = 1.0f;
             golden.game.prepareGoldenView(golden.world, view);
             const float preparedHours = golden.game.getSunSettings().solarHours;
+            const float preparedDay = golden.game.getSunSettings().dayOfYear;
             advanceToGoldenView(golden.game, golden.world, view, EngineSettings{}.ticksPerSecond);
             assert(golden.game.getSunSettings().solarHours == preparedHours);
+            assert(golden.game.getSunSettings().dayOfYear == preparedDay);
+        }
+    }
+
+    /*
+    * The calendar runs on with the clock, so the moon keeps moving among the stars through the night instead of jumping
+    * back a day at midnight: past midnight the day moves on, past the year's last day the year.
+    */
+    void testCalendar() {
+        LightLabSunSettings settings;
+        settings.dayOfYear = 80.0f;
+        settings.solarHours = 23.5f;
+        settings.hoursPerSecond = 1.0f;
+        advanceLabClock(settings, 1.0f);
+        assert(near(settings.solarHours, 0.5f, 1e-5f) && settings.dayOfYear == 81.0f && settings.year == 2026);
+
+        settings.dayOfYear = daysPerYear;
+        settings.solarHours = 23.0f;
+        settings.hoursPerSecond = 2.0f;
+        advanceLabClock(settings, 1.0f);
+        assert(near(settings.solarHours, 1.0f, 1e-5f) && settings.dayOfYear == 1.0f && settings.year == 2027);
+
+        settings.solarHours = 10.0f;
+        settings.hoursPerSecond = 0.5f;
+        advanceLabClock(settings, 4.0f);
+        assert(near(settings.solarHours, 12.0f, 1e-5f) && settings.dayOfYear == 1.0f);
+
+        settings.hoursPerSecond = 0.0f;
+        advanceLabClock(settings, 100.0f);
+        assert(settings.solarHours == 12.0f);
+    }
+
+    /*
+    * The moon is a directional light from where it stands, shining by the sun's light (so its disc is drawn with its
+    * phase): the full moon at the night settings' intensity, dimmer by the phase curve away from full, at the moon's
+    * own angular size. With the atmosphere the renderer dims it below the horizon; without, it fades there itself.
+    */
+    void testMoonlight() {
+        const LightLabNightSettings night;
+        const Vec3 up{0.0f, 1.0f, 0.0f};
+        assert(moonlightFor(up, up * -1.0f, night, true).intensity == night.moonIntensity);
+
+        const DirectionalLight quarter = moonlightFor(up, Vec3{1.0f, 0.0f, 0.0f}, night, true);
+        assert(near(quarter.intensity, night.moonIntensity * moonPhaseBrightness(radiansFromDegrees(90.0f)), 1e-6f));
+        assert(quarter.reflectsSun && quarter.castsShadows);
+        assert(quarter.angularRadius == moonAngularRadius);
+        assert(near(quarter.direction.y, -1.0f, 1e-6f));
+
+        // The stars: none by day or in the first of dusk, all of them in the dark, more and more between.
+        const auto sunAt = [](float degrees) { return Vec3{0.0f, std::sin(radiansFromDegrees(degrees)), -std::cos(radiansFromDegrees(degrees))}; };
+        assert(starVisibility(sunAt(30.0f)) == 0.0f && starVisibility(sunAt(labStarsAppearBelowDegrees)) == 0.0f);
+        assert(starVisibility(sunAt(labStarsFullBelowDegrees)) == 1.0f && starVisibility(sunAt(-60.0f)) == 1.0f);
+        assert(starVisibility(sunAt(-7.0f)) > 0.0f && starVisibility(sunAt(-7.0f)) < starVisibility(sunAt(-11.0f)));
+
+        const Vec3 below{0.0f, -0.5f, 0.866f};
+        assert(moonlightFor(below, below * -1.0f, night, true).intensity > 0.0f);
+        assert(moonlightFor(below, below * -1.0f, night, false).intensity == 0.0f);
+    }
+
+    /*
+    * The lab's moon stands where the astronomy puts it for the clock's date and time, lights the scene, and its disc is
+    * drawn at the night settings' size; the stars are the whole catalogue, turned with the sky.
+    */
+    void testTheLabsMoonAndStars() {
+        Lab lab;
+        const LightLabSunSettings& sun = lab.game.getSunSettings();
+        const double days = daysSinceJ2000(sun.year, sun.dayOfYear, sun.solarHours);
+        const Mat4 toWorld = equatorialToWorld(radiansFromDegrees(sun.latitudeDegrees), siderealAngle(days, sun.solarHours));
+        const EclipticPosition moon = moonEclipticPosition(days);
+        const Vec3 towardsMoon = transformDirection(toWorld, eclipticToEquatorial(moon.longitude, moon.latitude));
+
+        const DirectionalLight& moonlight = lab.world.get<DirectionalLight>(lab.game.getMoon());
+        assert(moonlight.reflectsSun);
+        assert(near(moonlight.direction.normalized().dot(towardsMoon), -1.0f, 1e-5f));
+
+        const FrameLighting lighting = collectLighting(lab.world, 1.0f);
+        assert(lighting.atmosphere->moonDiscScale == lab.game.getNightSettings().moonDiscScale);
+        assert(lighting.stars.has_value());
+        assert(lighting.stars->stars->size() == 9096);
+        assert(lighting.stars->brightness == 0.0f); // the default afternoon: no stars through the day sky
+        lab.game.getSunSettings().solarHours = 0.0f;
+        lab.game.onUpdate(lab.world, Input{}, 1.0f / 60.0f, 1.0f);
+        assert(collectLighting(lab.world, 1.0f).stars->brightness == lab.game.getNightSettings().starBrightness * labStarBrightnessUnit);
+        assert(lighting.stars->contrast == lab.game.getNightSettings().starContrast);
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                assert(near(lighting.stars->toWorld.values[row][column], toWorld.values[row][column], 1e-6f));
+            }
         }
     }
     // The disc's direction from the camera and its angular radius as the camera sees it.
@@ -547,4 +638,7 @@ void testLightLab() {
     testDaylight();
     testAtmosphere();
     testClock();
+    testCalendar();
+    testMoonlight();
+    testTheLabsMoonAndStars();
 }

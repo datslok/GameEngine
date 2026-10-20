@@ -272,11 +272,127 @@ namespace {
         const DirectionalLight ground = throughAtmosphere(sun, earth, groundRadius);
         const Vec3 kept = atmosphereTransmittance(earth, groundRadius, 1.0f);
         assert(relativelyEqual(ground.colour * ground.intensity, kept * 3.0f, 1e-5f));
+    }
 
+    /*
+    * The sky's lights: the brightest light that shines by itself is the sun, the brightest that reflects the sun's light
+    * the moon, whatever their order.
+    */
+    void testSkyLights() {
+        DirectionalLight sun;
+        sun.intensity = 3.0f;
+        DirectionalLight dim = sun;
+        dim.intensity = 0.5f;
         DirectionalLight moon = sun;
         moon.intensity = 0.01f;
-        assert(atmosphereSun(std::vector<DirectionalLight>{moon, sun, moon}) == 1);
-        assert(atmosphereSun(std::vector<DirectionalLight>{}) < 0);
+        moon.reflectsSun = true;
+        DirectionalLight faintMoon = moon;
+        faintMoon.intensity = 0.001f;
+
+        const AtmosphereSkyLights both = atmosphereSkyLights(std::vector<DirectionalLight>{faintMoon, dim, moon, sun});
+        assert(both.sun == 3 && both.moon == 2);
+
+        const AtmosphereSkyLights sunOnly = atmosphereSkyLights(std::vector<DirectionalLight>{dim, sun});
+        assert(sunOnly.sun == 1 && sunOnly.moon < 0);
+
+        const AtmosphereSkyLights moonOnly = atmosphereSkyLights(std::vector<DirectionalLight>{moon});
+        assert(moonOnly.sun < 0 && moonOnly.moon == 0);
+
+        const AtmosphereSkyLights none = atmosphereSkyLights(std::vector<DirectionalLight>{});
+        assert(none.sun < 0 && none.moon < 0);
+    }
+
+    // Each sky keeps its own part of the table: the first sky's texel centres in the upper half, the second's below.
+    void testSkyViewAtlas() {
+        const float halfTexel = 0.5f / static_cast<float>(skyViewLutHeight);
+        const float atlasTexel = 1.0f / static_cast<float>(skyViewLutHeight * skyViewLights);
+        const Vec2 top = skyViewAtlasUv(Vec2{0.3f, halfTexel}, 0);
+        const Vec2 bottom = skyViewAtlasUv(Vec2{0.3f, 1.0f - halfTexel}, 1);
+
+        assert(top.x == 0.3f && bottom.x == 0.3f);
+        assert(nearlyEqual(top.y, 0.5f * atlasTexel, 1e-6f));
+        assert(nearlyEqual(bottom.y, 1.0f - 0.5f * atlasTexel, 1e-6f));
+        assert(nearlyEqual(skyViewAtlasUv(Vec2{0.3f, 1.0f - halfTexel}, 0).y, 0.5f - 0.5f * atlasTexel, 1e-6f));
+        assert(nearlyEqual(skyViewAtlasUv(Vec2{0.3f, halfTexel}, 1).y, 0.5f + 0.5f * atlasTexel, 1e-6f));
+    }
+
+    // A direction inside a disc of angular radius round towardsBody, a share of the way to its edge, at a bearing round
+    // its centre.
+    Vec3 directionInDisc(const Vec3& towardsBody, float radius, float share, float bearing) {
+        const Vec3 across = std::abs(towardsBody.y) < 0.9f ? towardsBody.cross(Vec3{0.0f, 1.0f, 0.0f}).normalized()
+                                                           : towardsBody.cross(Vec3{1.0f, 0.0f, 0.0f}).normalized();
+        const Vec3 other = towardsBody.cross(across);
+        const float angle = share * radius;
+        return towardsBody * std::cos(angle) + (across * std::cos(bearing) + other * std::sin(bearing)) * std::sin(angle);
+    }
+
+    /*
+    * The moon's disc: at full moon (the light behind the viewer) every point is 1, edge and middle alike; at a quarter
+    * (the light at right angles) the half towards the light is lit and the other dark; at new moon (the light behind the
+    * moon) and outside the disc, nothing.
+    */
+    void testLommelSeeliger() {
+        const Vec3 towardsMoon = Vec3{0.3f, 0.8f, -0.5f}.normalized();
+        const float radius = 0.01f;
+        const float sinRadius = std::sin(radius);
+        const Vec3 behindViewer = towardsMoon * -1.0f;
+
+        for (const float share : {0.0f, 0.3f, 0.7f, 0.95f}) {
+            for (const float bearing : {0.0f, 1.0f, 2.5f, 4.0f}) {
+                const Vec3 direction = directionInDisc(towardsMoon, radius, share, bearing);
+                assert(nearlyEqual(lommelSeeliger(direction, towardsMoon, sinRadius, behindViewer), 1.0f, 1e-3f));
+                assert(lommelSeeliger(direction, towardsMoon, sinRadius, towardsMoon) == 0.0f);
+            }
+        }
+
+        const Vec3 litSide = directionInDisc(towardsMoon, radius, 0.5f, 0.0f);
+        const Vec3 darkSide = directionInDisc(towardsMoon, radius, 0.5f, pi);
+        const Vec3 towardsLight = (litSide - towardsMoon * litSide.dot(towardsMoon)).normalized();
+        assert(lommelSeeliger(litSide, towardsMoon, sinRadius, towardsLight) > 0.5f);
+        assert(lommelSeeliger(darkSide, towardsMoon, sinRadius, towardsLight) == 0.0f);
+
+        const Vec3 outside = directionInDisc(towardsMoon, radius, 1.2f, 1.0f);
+        assert(lommelSeeliger(outside, towardsMoon, sinRadius, behindViewer) == 0.0f);
+    }
+
+    /*
+    * The disc's share against lommelSeeliger averaged on a fine grid of directions across the disc, with the light at
+    * each phase angle: 1 at full moon, under 0.4 at the quarters, 0 at new moon.
+    */
+    void testLommelSeeligerDiscShare() {
+        const Vec3 towardsMoon{0.0f, 0.0f, -1.0f};
+        const float radius = 0.01f;
+        const float sinRadius = std::sin(radius);
+        const int steps = 200;
+
+        for (const float phaseDegrees : {0.0f, 30.0f, 60.0f, 90.0f, 120.0f, 150.0f}) {
+            const float phase = phaseDegrees * pi / 180.0f;
+            // Seen from the moon the viewer is along +z; the light is turned from there by the phase angle.
+            const Vec3 towardsLight{std::sin(phase), 0.0f, std::cos(phase)};
+            double sum = 0.0;
+            int inside = 0;
+
+            for (int y = 0; y < steps; ++y) {
+                for (int x = 0; x < steps; ++x) {
+                    const float across = (static_cast<float>(x) + 0.5f) / static_cast<float>(steps) * 2.0f - 1.0f;
+                    const float up = (static_cast<float>(y) + 0.5f) / static_cast<float>(steps) * 2.0f - 1.0f;
+
+                    if (across * across + up * up > 1.0f) {
+                        continue;
+                    }
+
+                    const Vec3 direction = Vec3{across * sinRadius, up * sinRadius, -1.0f}.normalized();
+                    sum += lommelSeeliger(direction, towardsMoon, sinRadius, towardsLight);
+                    ++inside;
+                }
+            }
+
+            assert(nearlyEqual(lommelSeeligerDiscShare(phase), static_cast<float>(sum / inside), 0.01f));
+        }
+
+        assert(lommelSeeligerDiscShare(0.0f) == 1.0f);
+        assert(lommelSeeligerDiscShare(pi / 2.0f) < 0.4f);
+        assert(lommelSeeligerDiscShare(pi) == 0.0f);
     }
 
     /*
@@ -300,6 +416,19 @@ namespace {
         assert(nearlyEqual(packed.sunIlluminance[1], 2.0f * pi, 1e-5f));
         assert(nearlyEqual(packed.sun[3], std::cos(0.01f), 1e-7f));
         assert(packed.sunDisc[0] == 100.0f && packed.ambient[2] == 0.3f);
+
+        // The moon likewise, with its disc's sine for its shading; no moon packs no light.
+        assert(packed.moonIlluminance[0] == 0.0f && packed.moonDisc[0] == 0.0f);
+        frame.towardsMoon = Vec3{0.6f, 0.8f, 0.0f};
+        frame.moonLight = Vec3{0.05f, 0.04f, 0.03f};
+        frame.moonDiscAngularRadius = 0.02f;
+        frame.moonDisc = Vec3{7.0f, 6.0f, 5.0f};
+        const GpuAtmosphere withMoon = packAtmosphere(earth, frame);
+        assert(withMoon.moon[0] == 0.6f && withMoon.moon[1] == 0.8f);
+        assert(nearlyEqual(withMoon.moon[3], std::cos(0.02f), 1e-7f));
+        assert(nearlyEqual(withMoon.moonIlluminance[0], 0.05f * pi, 1e-6f));
+        assert(nearlyEqual(withMoon.moonIlluminance[3], std::sin(0.02f), 1e-7f));
+        assert(withMoon.moonDisc[1] == 6.0f);
     }
 
     // An atmosphere component reaches the frame's lighting (the first, if several).
@@ -332,6 +461,10 @@ void testAtmosphere() {
     testSkyAmbient();
     testViewRadius();
     testSunlightThroughTheAir();
+    testSkyLights();
+    testSkyViewAtlas();
+    testLommelSeeliger();
+    testLommelSeeligerDiscShare();
     testPacking();
     testCollected();
 }

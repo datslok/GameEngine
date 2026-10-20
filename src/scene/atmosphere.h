@@ -42,6 +42,9 @@ struct Atmosphere {
     // The sun's disc as drawn in the sky against its real size (the light's angular radius), for looks only: a bigger
     // disc glows dimmer by as much, so it gives the same light. Set by the game with its own disc size (not in visit).
     float sunDiscScale = 1.0f;
+
+    // The same for the moon's disc (DirectionalLight::reflectsSun), drawn with its phase.
+    float moonDiscScale = 1.0f;
 };
 
 void visit(Atmosphere& atmosphere, SettingsVisitor& visitor);

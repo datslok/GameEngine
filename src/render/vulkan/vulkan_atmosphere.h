@@ -42,6 +42,7 @@ public:
 
     // What the scene set points at once update has run: the sky view table and the flat ambient buffer.
     SampledImage sampledSkyView() const;
+    SampledImage sampledTransmittance() const;
     VkDescriptorBufferInfo describeSkyLight() const;
 
     // For tests.

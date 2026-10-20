@@ -21,6 +21,10 @@ struct DirectionalLight {
     // blocker the soft edge widens by tan(angularRadius) per metre. The sun's (and, nearly, the full moon's) by default:
     // 0.267 degrees, a disc about half a degree across. 0 gives the sharpest shadows.
     float angularRadius = 0.00465f;
+
+    // Whether its source shines by reflecting the sun's light, like the moon: with an Atmosphere its disc is drawn as a
+    // ball lit by the sun (its phase), and it lights the sky as the second light (render/gpu/atmosphere.h).
+    bool reflectsSun = false;
 };
 
 // Component: a light that shines in every direction from its entity's Transform position and fades out with distance.

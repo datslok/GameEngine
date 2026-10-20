@@ -16,6 +16,7 @@
 #include "render/vulkan/vulkan_check.h"
 #include "render/window_display.h"
 #include "scene/culling.h"
+#include "scene/moon.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_vulkan.h"
@@ -97,6 +98,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
 
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
     atmosphere = std::make_unique<VulkanAtmosphere>(device, layouts, linearSampler.get(), sceneColourFormat, depthFormat);
+    starPass = std::make_unique<VulkanStars>(device, layouts, sceneColourFormat, depthFormat);
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
@@ -828,8 +830,23 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     clusterGrid = makeClusterGrid(camera, static_cast<int>(frameWidth), static_cast<int>(frameHeight));
     const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
-    PrioritizedLighting prioritized = prioritizeLights(description.lighting, description.lightFocus, cameraFrustum, lightHistory,
-                                                             description.frameSeconds, settings.lights);
+    // Sunlight and moonlight (every directional light) reach the camera through the air, which dims and reddens them,
+    // before they are ranked: the brightest as it arrives gets the shadow cascades, so once the sun has set (its light
+    // through the air nothing) the moon has them.
+    const std::optional<Atmosphere>& air = description.lighting.atmosphere;
+    cameraAtmosphereRadius = air ? atmosphereViewRadius(*air, cameraOrigin.y) : 0.0f;
+    std::optional<FrameLighting> throughAir;
+
+    if (air) {
+        throughAir = description.lighting;
+
+        for (DirectionalLight& light : throughAir->directionalLights) {
+            light = throughAtmosphere(light, *air, cameraAtmosphereRadius);
+        }
+    }
+
+    PrioritizedLighting prioritized = prioritizeLights(throughAir ? *throughAir : description.lighting, description.lightFocus, cameraFrustum,
+                                                       lightHistory, description.frameSeconds, settings.lights);
     lightHistory = prioritized.history;
 
     stats.pointLights = description.lighting.pointLights.size();
@@ -838,16 +855,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.pointLightsShadowed = static_cast<std::size_t>(std::count_if(
         prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
         [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
-
-    // Sunlight (every directional light) reaches the camera through the air, which dims and reddens it.
-    const std::optional<Atmosphere>& air = description.lighting.atmosphere;
-    cameraAtmosphereRadius = air ? atmosphereViewRadius(*air, cameraOrigin.y) : 0.0f;
-
-    if (air) {
-        for (DirectionalLight& light : prioritized.lighting.directionalLights) {
-            light = throughAtmosphere(light, *air, cameraAtmosphereRadius);
-        }
-    }
 
     GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
     ensureShadowAtlas(shadowAtlasSizeFor(settings.shadows));
@@ -950,8 +957,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
     const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, frameWidth, frameHeight);
+    const std::optional<StarrySky>& stars = description.lighting.stars;
     drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, traceProbes, description.lighting.background,
-                 air ? &skyRays : nullptr);
+                 air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
 
     if (showProbes) {
@@ -1076,10 +1084,10 @@ GpuAtmosphere VulkanRenderer::packFrameAtmosphere(const FrameDescription& descri
     AtmosphereFrame frame;
     frame.viewRadius = cameraAtmosphereRadius;
     frame.ambient = Vec3{lights.ambient[0], lights.ambient[1], lights.ambient[2]};
-    const int sun = atmosphereSun(description.lighting.directionalLights);
+    const AtmosphereSkyLights skyLights = atmosphereSkyLights(description.lighting.directionalLights);
 
-    if (sun >= 0) {
-        const DirectionalLight& light = description.lighting.directionalLights[static_cast<std::size_t>(sun)];
+    if (skyLights.sun >= 0) {
+        const DirectionalLight& light = description.lighting.directionalLights[static_cast<std::size_t>(skyLights.sun)];
         frame.towardsSun = light.direction.normalized() * -1.0f;
         frame.sunLight = light.colour * light.intensity;
         frame.discAngularRadius = light.angularRadius * air.sunDiscScale;
@@ -1087,6 +1095,20 @@ GpuAtmosphere VulkanRenderer::packFrameAtmosphere(const FrameDescription& descri
         if (frame.discAngularRadius > 0.0f) {
             const DirectionalLight through = throughAtmosphere(light, air, cameraAtmosphereRadius);
             frame.sunDisc = discRadiance(through.colour * through.intensity, frame.discAngularRadius);
+        }
+    }
+
+    // The moon's disc is lit by the sun, so drawn only with one: its light shared over the lit part of the disc.
+    if (skyLights.moon >= 0) {
+        const DirectionalLight& light = description.lighting.directionalLights[static_cast<std::size_t>(skyLights.moon)];
+        frame.towardsMoon = light.direction.normalized() * -1.0f;
+        frame.moonLight = light.colour * light.intensity;
+        frame.moonDiscAngularRadius = light.angularRadius * air.moonDiscScale;
+        const float litShare = lommelSeeligerDiscShare(moonPhaseAngle(frame.towardsSun, frame.towardsMoon));
+
+        if (skyLights.sun >= 0 && frame.moonDiscAngularRadius > 0.0f && litShare > minMoonDiscShare) {
+            const DirectionalLight through = throughAtmosphere(light, air, cameraAtmosphereRadius);
+            frame.moonDisc = discRadiance(through.colour * through.intensity, frame.moonDiscAngularRadius) * (1.0f / litShare);
         }
     }
 
@@ -1241,7 +1263,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 * Afterwards the scene image becomes readable for bloom and tone mapping.
 */
 void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
-                                  bool keepDepth, bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky) {
+                                  bool keepDepth, bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky, const StarrySky* stars) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
@@ -1260,7 +1282,12 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     stats.drawCalls += drawBatches(commands, mainDraws.batches);
 
     if (sky != nullptr) {
-        atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(), *sky);
+        const VkDescriptorBufferInfo air = frames[frame.frameIndex].scene->atmosphere.describe();
+        atmosphere->drawSky(commands, frame.descriptors, air, *sky);
+
+        if (stars != nullptr) {
+            starPass->draw(commands, frame.descriptors, frame.frameIndex, *stars, air, atmosphere->sampledTransmittance(), *sky);
+        }
     }
 
     vkCmdEndRendering(commands);

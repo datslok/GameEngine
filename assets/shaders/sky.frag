@@ -4,7 +4,8 @@
 /*
 * The sky (render/gpu/atmosphere.h), added over the background wherever nothing was drawn (the full-screen triangle at
 * the far depth, depth test equal): each pixel's camera ray, as the ray debug view finds it, looks up the sky view table,
-* and inside the sun's disc as drawn adds its radiance through the air.
+* and inside the sun's disc as drawn adds its radiance through the air, and inside the moon's its radiance shaded by its
+* phase.
 */
 #include "atmosphere_tables.glsl"
 #include "ray_tracing.glsl"
@@ -33,6 +34,11 @@ void main() {
 
     if (dot(direction, data.atmosphere.sun.xyz) >= data.atmosphere.sun.w) {
         sky += data.atmosphere.sunDisc.rgb;
+    }
+
+    // The moon's disc, a ball lit by the sun: its phase.
+    if (dot(direction, data.atmosphere.moon.xyz) >= data.atmosphere.moon.w) {
+        sky += data.atmosphere.moonDisc.rgb * lommelSeeliger(direction, data.atmosphere.moon.xyz, data.atmosphere.moonIlluminance.w, data.atmosphere.sun.xyz);
     }
 
     colour = vec4(sky, 1.0);

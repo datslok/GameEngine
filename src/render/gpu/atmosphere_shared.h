@@ -23,6 +23,9 @@
 #define ATMOSPHERE_SKY_VIEW_HEIGHT 108
 #define ATMOSPHERE_SKY_VIEW_STEPS 30
 
+// The skies the sky view table holds, one above the other: lit by the sun and by the moon.
+#define ATMOSPHERE_SKY_VIEW_LIGHTS 2
+
 // Where in each step the medium is sampled, as a share of the step: the midpoint. The paper's 0.3 leans towards each
 // step's denser start: straight up it overestimated blue's optical depth by 2.5% (the light kept 0.9% low against the
 // closed form); the midpoint is within 0.05%.

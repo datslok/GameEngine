@@ -1,0 +1,25 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs stars.glsl's functions on the cases stars_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "stars.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    // Inputs: (right, magnitude), (up, brightness), (forward, contrast), (direction, cosine off the axis),
+    // (an offset in pixels, the screen's width and height).
+    if (function == GPU_TEST_STARS) {
+        vec4 right = testInput(0);
+        vec4 up = testInput(1);
+        vec4 forward = testInput(2);
+        vec4 direction = testInput(3);
+        vec4 screen = testInput(4);
+        testOutput(0, vec4(starScreenPosition(right.xyz, up.xyz, forward.xyz, direction.xyz), starLight(right.w, up.w, forward.w),
+                           starSplatWeight(screen.xy)));
+        testOutput(1, vec4(pixelSolidAngle(right.xyz, up.xyz, screen.z, screen.w, direction.w)));
+    }
+}

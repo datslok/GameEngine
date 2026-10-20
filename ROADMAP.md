@@ -203,6 +203,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
   - [x] Sampling in `triangle.frag`: 8 corner probes, trilinear, visibility and wrap weights, the self-shadow bias; the specular part reads the probes in the mirror direction until reflections (`ddgi-sampling`)
   - [x] Debug view: a ball at each probe showing its stored light (`ddgi-probes`)
   - [x] Sky and atmosphere (Hillaire 2020): a physically based sky and air lit by the sun, which probes' escaping rays see (`sky-atmosphere`)
+  - [x] Night sky: the moon in its real place and phase (a second sky lit by it, its shadows) and the real stars (`night-sky`)
   - [x] Cascades for large worlds: nested grids following the camera, scrolled as circular buffers, scrolled-in probes seeded from the coarser cascades (`ddgi-cascades`)
   - [ ] A software tracer for GPUs without ray tracing, as the lower quality setting: a coarse voxel grid of the scene built in compute (simpler than distance fields and handles moving objects), checked against the ray-traced result; probes only need blurry diffuse light, so coarse geometry is enough
 

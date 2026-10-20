@@ -23,6 +23,7 @@
 */
 struct LightLabSunSettings {
     float latitudeDegrees = 45.0f;
+    int year = 2026;               // for the moon's phase and the stars (scene/celestial.h)
     float dayOfYear = 80.0f;       // the March equinox: sunrise near 6, sunset near 18
     float solarHours = 15.5f;      // mid-afternoon: the sun low in the west-south-west, long shadows, the window lit
     float hoursPerSecond = 0.0f;   // 0.025 runs a whole day in 16 minutes
@@ -43,6 +44,55 @@ void visit(LightLabSunSettings& settings, SettingsVisitor& visitor);
 
 // The solar time after some seconds pass at the given speed, kept within one day (0 to 24 hours).
 float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);
+
+/*
+* The clock after some seconds: the solar time moves at hoursPerSecond and carries past midnight into the next day, and
+* past the year's last day into the next year, so the moon moves on among the stars through the night.
+*/
+void advanceLabClock(LightLabSunSettings& settings, float seconds);
+
+/*
+* The night sky's dials, picked by eye, not real: the engine has no exposure yet (the real full moon gives a 400,000th of
+* the sun's light, which would draw pure black), so the moon and stars are as bright as looks right through the default
+* tone mapping.
+*/
+struct LightLabNightSettings {
+    // The full moon's light above the air (the sun's is sunIntensity); the phase dims it (scene/moon.h).
+    float moonIntensity = 0.25f;
+
+    // The moon's disc against its real size, for looks only, as the sun's.
+    float moonDiscScale = 1.0f;
+
+    // A magnitude 0 star's light, in millionths of the engine's light value (labStarBrightnessUnit), and how far the
+    // magnitudes spread the stars' light (1 real, lower squeezes it so faint stars show; scene/stars.h, StarrySky).
+    float starBrightness = 1.0f;
+    float starContrast = 0.7f;
+};
+
+inline constexpr float labStarBrightnessUnit = 1e-6f;
+
+/*
+* How much of the stars' light shows for the sun's height: none in daylight, all of it in the dark. Real stars vanish by
+* day because the sky outshines them a millionfold, but the dial makes them thousands of times brighter than real, so
+* without this they would show through the blue sky. They come out through twilight, the brightest first as the sun
+* sinks 4 degrees below the horizon, all of them once it is 14 degrees down (between nautical and astronomical dusk).
+*/
+inline constexpr float labStarsAppearBelowDegrees = -4.0f;
+inline constexpr float labStarsFullBelowDegrees = -14.0f;
+float starVisibility(const Vec3& towardsSun);
+
+void visit(LightLabNightSettings& settings, SettingsVisitor& visitor);
+
+// The moonlight's colour: sunlight reflected by the moon's grey-brown ground, a little warmer than the sun's.
+inline const Vec3 labMoonColour{1.0f, 0.94f, 0.86f};
+
+/*
+* The moon's light from where it stands: from the moon (towardsMoon) at the full moon's intensity dimmed by the phase,
+* which the sun's direction sets, at the moon's angular size, shining by the sun's light (reflectsSun, so its disc is
+* drawn with its phase). With the atmosphere the renderer dims it on its way down, to nothing below the horizon; without,
+* it fades below the horizon here, as the hand-made sun does.
+*/
+DirectionalLight moonlightFor(const Vec3& towardsMoon, const Vec3& towardsSun, const LightLabNightSettings& settings, bool atmosphere);
 
 // Moving the clock by hand by more than this (the sun about 1.5 degrees) jumps the light: a scene event restarts every
 // light probe, which would otherwise take seconds to follow.
@@ -103,7 +153,9 @@ public:
     // For tests.
     const StaticLevel& getLevel() const;
     LightLabSunSettings& getSunSettings();
+    LightLabNightSettings& getNightSettings();
     Entity getSun() const;
+    Entity getMoon() const;
 
     // The glowing disc in the sky where the sunlight comes from (scene/sky_object.h).
     Entity getSunDisc() const;
@@ -126,6 +178,7 @@ private:
 
     PlayerControls controls;
     LightLabSunSettings sunSettings;
+    LightLabNightSettings nightSettings;
 
     // The real sky's air (Earth's by default), on the air entity while sunSettings.atmosphere is on.
     Atmosphere atmosphereSettings;
@@ -137,6 +190,10 @@ private:
     Entity sunDisc;
     Entity sky;
     Entity air;
+
+    // The moon's DirectionalLight, and the StarrySky's entity.
+    Entity moon;
+    Entity stars;
 
     // The ground and every block: built once in onInit, never rebuilt.
     StaticLevel staticLevel;

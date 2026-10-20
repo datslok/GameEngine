@@ -2,8 +2,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 // The sky view table (render/gpu/atmosphere.h, skyRadiance): the sky's light in each texel's direction from the camera,
-// marched through the air, each step lit by the sun through the transmittance table and by the multiple scattering
-// table, and the sunlit ground where it ends on it. Made every frame.
+// marched through the air, each step lit by its light through the transmittance table and by the multiple scattering
+// table, and the lit ground where it ends on it. One sky for each light (ATMOSPHERE_SKY_VIEW_LIGHTS: the sun's, then the
+// moon's, one above the other, skyViewAtlasUv): the air's scattering is linear in the light, so each light's sky is the
+// same march with its own direction and illuminance, and the two add. Made every frame.
 #include "atmosphere_tables.glsl"
 
 layout(local_size_x = ATMOSPHERE_GROUP_SIDE, local_size_y = ATMOSPHERE_GROUP_SIDE) in;
@@ -17,18 +19,28 @@ layout(set = 0, binding = 2) uniform sampler2D multipleScatteringTable;
 layout(set = 0, binding = 3, rgba16f) writeonly uniform image2D skyViewTable;
 
 void main() {
-    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 atlasTexel = ivec2(gl_GlobalInvocationID.xy);
     ivec2 size = ivec2(ATMOSPHERE_SKY_VIEW_WIDTH, ATMOSPHERE_SKY_VIEW_HEIGHT);
 
-    if (any(greaterThanEqual(texel, size))) {
+    if (atlasTexel.x >= size.x || atlasTexel.y >= size.y * ATMOSPHERE_SKY_VIEW_LIGHTS) {
         return;
     }
 
+    int light = atlasTexel.y / size.y;
+    ivec2 texel = ivec2(atlasTexel.x, atlasTexel.y - light * size.y);
     Atmosphere atmosphere = data.atmosphere;
+    vec3 illuminance = atmosphereLightIlluminance(atmosphere, light);
+
+    // A light giving nothing lights nothing: its sky is black, without the march.
+    if (all(equal(illuminance, vec3(0.0)))) {
+        imageStore(skyViewTable, atlasTexel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+
     float viewRadius = atmosphere.radii.w;
     SkyViewDirection view = skyViewLutDirection(atmosphere, viewRadius, (vec2(texel) + 0.5) / vec2(size));
     vec3 direction = skyViewTexelDirection(view);
-    vec3 sun = skyViewSunDirection(atmosphere.sun.y);
+    vec3 sun = skyViewSunDirection(atmosphereLightDirection(atmosphere, light).y);
     float rayLength = atmosphereMarchLength(atmosphere, viewRadius, direction.y);
     float cosTheta = dot(direction, sun);
     ScatteringMarch march = emptyScatteringMarch();
@@ -41,17 +53,17 @@ void main() {
         float cosSun = dot(point / pointRadius, sun);
         vec3 sunlight = transmittanceFromTable(transmittanceTable, atmosphere, pointRadius, cosSun);
         vec3 multipleScattering = multipleScatteringFromTable(multipleScatteringTable, atmosphere, pointRadius, cosSun);
-        scatteringMarchStep(march, medium, skyStepSource(atmosphere, medium, sunlight, multipleScattering, cosTheta), sampled.stepLength);
+        scatteringMarchStep(march, medium, skyStepSource(atmosphere, medium, sunlight, multipleScattering, cosTheta, illuminance), sampled.stepLength);
     }
 
-    // The sunlit ground where the ray ends on it, dimmed by the air in front.
+    // The lit ground where the ray ends on it, dimmed by the air in front.
     if (rayDistanceToSphere(viewRadius, direction.y, atmosphere.radii.x) >= 0.0) {
         vec3 point = vec3(0.0, viewRadius, 0.0) + direction * rayLength;
         float pointRadius = length(point);
         float facing = dot(point / pointRadius, sun);
-        vec3 sunlight = atmosphere.sunIlluminance.rgb * transmittanceFromTable(transmittanceTable, atmosphere, pointRadius, facing);
+        vec3 sunlight = illuminance * transmittanceFromTable(transmittanceTable, atmosphere, pointRadius, facing);
         march.luminance += march.throughput * groundRadiance(atmosphere, sunlight, facing);
     }
 
-    imageStore(skyViewTable, texel, vec4(march.luminance, 1.0));
+    imageStore(skyViewTable, atlasTexel, vec4(march.luminance, 1.0));
 }

@@ -33,6 +33,7 @@ inline constexpr int multipleScatteringSteps = ATMOSPHERE_MULTIPLE_SCATTERING_ST
 inline constexpr int skyViewLutWidth = ATMOSPHERE_SKY_VIEW_WIDTH;
 inline constexpr int skyViewLutHeight = ATMOSPHERE_SKY_VIEW_HEIGHT;
 inline constexpr int skyViewSteps = ATMOSPHERE_SKY_VIEW_STEPS;
+inline constexpr int skyViewLights = ATMOSPHERE_SKY_VIEW_LIGHTS;
 inline constexpr float atmosphereSampleOffset = static_cast<float>(ATMOSPHERE_SAMPLE_OFFSET);
 inline constexpr int skyAmbientDirections = ATMOSPHERE_AMBIENT_DIRECTIONS;
 inline constexpr float atmosphereMinAltitude = static_cast<float>(ATMOSPHERE_MIN_ALTITUDE);
@@ -111,6 +112,13 @@ SkyViewDirection skyViewLookup(const Atmosphere& atmosphere, float viewRadius, c
 // The direction a table texel stands for, and the sun's, in the frame where the sun's bearing is +x.
 Vec3 skyViewTexelDirection(const SkyViewDirection& direction);
 Vec3 skyViewSunDirection(float cosSunZenith);
+
+/*
+* The sky view table holds one sky for each light that lights it (skyViewLights: the sun's, then the moon's), one above
+* the other: a sky's coordinates (skyViewLutUv) in the whole table. Each sky keeps its texel centres, so filtering never
+* reads the next one.
+*/
+Vec2 skyViewAtlasUv(const Vec2& uv, int light);
 
 /*
 * The march along a ray: the light gathered so far, how much of what lies further on still reaches the start, and the
@@ -223,8 +231,38 @@ float atmosphereViewRadius(const Atmosphere& atmosphere, float cameraHeightMetre
 // A directional light as it reaches the camera: its value above the air times what gets through on the way down.
 DirectionalLight throughAtmosphere(const DirectionalLight& light, const Atmosphere& atmosphere, float viewRadius);
 
-// The light the sky is lit by: the brightest directional light's index, -1 without one.
-int atmosphereSun(std::span<const DirectionalLight> lights);
+/*
+* The lights that light the sky: the sun, the brightest directional light that shines by itself, and the moon, the
+* brightest that shines by the sun's light (DirectionalLight::reflectsSun); -1 for none. Ranked by their value above the
+* air.
+*/
+struct AtmosphereSkyLights {
+    int sun = -1;
+    int moon = -1;
+};
+
+AtmosphereSkyLights atmosphereSkyLights(std::span<const DirectionalLight> lights);
+
+/*
+* How a ball lit by a distant light looks at a direction inside its disc (Lommel-Seeliger's law, which fits the moon's
+* dusty ground: its radiance goes as mu0 / (mu0 + mu), mu0 and mu the cosines from its surface's normal to the light and
+* to the viewer), times 2 so the full disc is 1 everywhere: the full moon is as bright at its edge as in its middle,
+* unlike a matte (Lambertian) ball. The disc is seen from far away, so a direction maps onto the near half of the ball
+* straight across (orthographically): its offset from the disc's centre over the disc's radius (sinRadius, the sine of
+* its angular radius) is the normal's part across the view. 0 outside the disc and where the light does not reach.
+*/
+float lommelSeeliger(const Vec3& direction, const Vec3& towardsBody, float sinRadius, const Vec3& towardsLight);
+
+/*
+* The disc's light at a phase angle (the angle at the ball between the light and the viewer) against the full disc's:
+* lommelSeeliger averaged over the disc, which has the closed form 1 - sin(a/2) tan(a/2) ln(cot(a/4)). Dividing the
+* moonlight by it gives the radiance that, shaded this way, sums over the disc to that light.
+*/
+float lommelSeeligerDiscShare(float phaseAngle);
+
+// Below this lit share (a day or so from new moon) the disc is not drawn: its light over so thin a crescent would be
+// divided by almost nothing.
+inline constexpr float minMoonDiscShare = 1e-4f;
 
 // This frame's sky as the shaders take it beside the atmosphere's own numbers.
 struct AtmosphereFrame {
@@ -234,6 +272,12 @@ struct AtmosphereFrame {
     float discAngularRadius = 0.0f;   // as drawn
     Vec3 sunDisc{0.0f, 0.0f, 0.0f};   // the disc's radiance as drawn, through the air (sky_object.h, discRadiance)
     Vec3 ambient{0.0f, 0.0f, 0.0f};   // the frame's own flat ambient, to which the sky's is added
+
+    // The moon, as the sun above (none: no light); its disc's radiance where lommelSeeliger is 1.
+    Vec3 towardsMoon{0.0f, 1.0f, 0.0f};
+    Vec3 moonLight{0.0f, 0.0f, 0.0f};
+    float moonDiscAngularRadius = 0.0f;
+    Vec3 moonDisc{0.0f, 0.0f, 0.0f};
 };
 
 /*
@@ -249,8 +293,11 @@ struct GpuAtmosphere {
     float sunIlluminance[4]; // rgb pi times the sun's value above the air
     float sunDisc[4];        // rgb the disc's radiance as drawn
     float ambient[4];        // rgb the frame's own flat ambient
+    float moon[4];           // xyz towards the moon, w the cosine of the drawn disc's angular radius
+    float moonIlluminance[4]; // rgb pi times the moon's value above the air, w the sine of the drawn disc's angular radius
+    float moonDisc[4];       // rgb the disc's radiance as drawn where lommelSeeliger is 1
 };
 
-static_assert(sizeof(GpuAtmosphere) == 144, "GpuAtmosphere must match Atmosphere in atmosphere.glsl");
+static_assert(sizeof(GpuAtmosphere) == 192, "GpuAtmosphere must match Atmosphere in atmosphere.glsl");
 
 GpuAtmosphere packAtmosphere(const Atmosphere& atmosphere, const AtmosphereFrame& frame);

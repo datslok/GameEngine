@@ -14,17 +14,22 @@
 
 namespace {
     const std::string libraryShader = gpuTestShader("atmosphere_test");
-    constexpr std::size_t atmosphereInputs = 9;
+    constexpr std::size_t atmosphereInputs = 12;
 
     const Atmosphere earth;
 
-    // The atmosphere as every case begins: Earth's, the sun up and to the east, a camera 2 m up.
+    // The atmosphere as every case begins: Earth's, the sun up and to the east, the moon up in the north-west, a camera
+    // 2 m up.
     GpuAtmosphere packedEarth() {
         AtmosphereFrame frame;
         frame.viewRadius = earth.bottomRadius + 0.002f;
         frame.towardsSun = Vec3{0.6f, 0.8f, 0.0f};
         frame.sunLight = Vec3{3.0f, 2.9f, 2.7f};
         frame.discAngularRadius = 0.01f;
+        frame.towardsMoon = Vec3{-0.3f, 0.5f, -0.81f}.normalized();
+        frame.moonLight = Vec3{0.05f, 0.045f, 0.04f};
+        frame.moonDiscAngularRadius = 0.02f;
+        frame.moonDisc = Vec3{7.0f, 6.0f, 5.0f};
         return packAtmosphere(earth, frame);
     }
 
@@ -197,6 +202,46 @@ namespace {
 }
 
 namespace {
+    /*
+    * The sky's lights in the table's order, the moon's disc shaded over its whole disc and a little beyond, lit from all
+    * round, and each sky's place in the table.
+    */
+    void checkLights(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{106};
+        std::vector<GpuVec4> inputs;
+        const std::size_t perCase = atmosphereInputs + 4;
+
+        for (int i = 0; i < 300; ++i) {
+            pushAtmosphere(inputs);
+            const Vec3 towardsBody = random.direction();
+            const float radius = random.between(0.004f, 0.05f);
+            const Vec3 offset = random.direction() * (radius * random.between(0.0f, 1.3f));
+            const Vec3 direction = (towardsBody + offset - towardsBody * offset.dot(towardsBody)).normalized();
+            inputs.push_back(gpuVec4(direction, std::sin(radius)));
+            inputs.push_back(gpuVec4(towardsBody, static_cast<float>(i % skyViewLights)));
+            inputs.push_back(gpuVec4(random.direction()));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_ATMOSPHERE_LIGHTS, inputs, static_cast<std::uint32_t>(perCase), 3);
+        const GpuAtmosphere packed = packedEarth();
+        const FloatTolerance shadingTolerance{.absolute = 1e-4f, .relative = 1e-4f};
+
+        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
+            const GpuVec4* in = &inputs[i * perCase + atmosphereInputs];
+            const GpuVec4* out = &outputs[i * 3];
+            const int light = static_cast<int>(in[1][3]);
+            const Vec2 uv = skyViewAtlasUv(Vec2{in[3][0], in[3][1]}, light);
+            const float* direction = light == 0 ? packed.sun : packed.moon;
+            const float* illuminance = light == 0 ? packed.sunIlluminance : packed.moonIlluminance;
+
+            report.check("lommelSeeliger", shadingTolerance, lommelSeeliger(vec3From(in[0]), vec3From(in[1]), in[0][3], vec3From(in[2])), out[0][0]);
+            report.check("skyViewAtlasUv", arithmeticTolerance, Vec3{uv.x, uv.y, 0.0f}, Vec3{out[0][1], out[0][2], 0.0f});
+            report.check("atmosphereLightDirection", exactTolerance, Vec3{direction[0], direction[1], direction[2]}, vec3From(out[1]));
+            report.check("atmosphereLightIlluminance", exactTolerance, Vec3{illuminance[0], illuminance[1], illuminance[2]}, vec3From(out[2]));
+        }
+    }
+
     // One direction of the multiple scattering table's march, from the ground to the top, sun up and down, and the texel
     // from its sums. A march of 20 steps, each with a 40-step transmittance: their exponentials' rounding adds up.
     void checkMultipleScattering(GpuFunctionRunner& runner, GpuCheckReport& report) {
@@ -235,8 +280,8 @@ namespace {
     * air with the sun low in the south-east (a camera 2 m up):
     * - the transmittance table's texels against the march for their rays;
     * - a few multiple scattering texels against multipleScatteringTexel;
-    * - the sky view table's texels against skyRadiance for their directions, its lookups the two tables as read back
-    *   (filtered as the GPU's sampler does), so the pass is checked apart from the tables;
+    * - the sky view table's texels, the sun's sky and the moon's, against skyRadiance for their directions, its lookups
+    *   the two tables as read back (filtered as the GPU's sampler does), so the pass is checked apart from the tables;
     * - the flat ambient against skyAmbient over the sky view table as read back, plus the frame's own.
     * Every table is half floats: about 1e-3 of each value, and the sampler's filter weights about as much again.
     */
@@ -260,6 +305,8 @@ namespace {
         frame.towardsSun = Vec3{0.5f, 0.35f, -0.6f}.normalized();
         frame.sunLight = Vec3{3.0f, 3.0f, 3.0f};
         frame.ambient = Vec3{0.01f, 0.02f, 0.03f};
+        frame.towardsMoon = Vec3{-0.4f, 0.6f, 0.3f}.normalized();
+        frame.moonLight = Vec3{0.05f, 0.045f, 0.04f};
         const GpuAtmosphere packed = packAtmosphere(earth, frame);
         UploadArray params{device.getAllocator(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
         params.write(&packed, sizeof(packed));
@@ -298,22 +345,36 @@ namespace {
             },
             [&](float radius, float cosSunZenith) { return vec3From(scattering.bilinear(multipleScatteringLutUv(earth, radius, cosSunZenith))); }};
         const FloatTolerance filteredTolerance{.absolute = 1e-4f, .relative = 1e-2f};
-        const Vec3 illuminance = frame.sunLight * 3.14159265f;
+        const Vec3 towardsLights[skyViewLights] = {frame.towardsSun, frame.towardsMoon};
+        const Vec3 illuminances[skyViewLights] = {frame.sunLight * 3.14159265f, frame.moonLight * 3.14159265f};
+        report.check("sky view table height", exactTolerance, static_cast<float>(skyViewLutHeight * skyViewLights), static_cast<float>(sky.height));
 
-        for (int y = 0; y < sky.height; y += 9) {
-            for (int x = 0; x < sky.width; x += 13) {
-                const Vec2 uv{(static_cast<float>(x) + 0.5f) / static_cast<float>(sky.width), (static_cast<float>(y) + 0.5f) / static_cast<float>(sky.height)};
-                const SkyViewDirection view = skyViewLutDirection(earth, frame.viewRadius, uv);
-                const Vec3 direction = skyViewTexelDirection(view);
-                const Vec3 sun = skyViewSunDirection(frame.towardsSun.y);
-                report.check("sky view table", filteredTolerance, skyRadiance(earth, frame.viewRadius, direction, sun, illuminance, tables),
-                             vec3From(sky.texel(x, y)));
+        for (int light = 0; light < skyViewLights; ++light) {
+            const char* name = light == 0 ? "sky view table (sun)" : "sky view table (moon)";
+
+            for (int y = 0; y < skyViewLutHeight; y += 9) {
+                for (int x = 0; x < sky.width; x += 13) {
+                    const Vec2 uv{(static_cast<float>(x) + 0.5f) / static_cast<float>(sky.width),
+                                  (static_cast<float>(y) + 0.5f) / static_cast<float>(skyViewLutHeight)};
+                    const SkyViewDirection view = skyViewLutDirection(earth, frame.viewRadius, uv);
+                    const Vec3 direction = skyViewTexelDirection(view);
+                    const Vec3 lightDirection = skyViewSunDirection(towardsLights[light].y);
+                    report.check(name, filteredTolerance, skyRadiance(earth, frame.viewRadius, direction, lightDirection, illuminances[light], tables),
+                                 vec3From(sky.texel(x, y + light * skyViewLutHeight)));
+                }
             }
         }
 
+        // Both skies, each looked up by its own light's bearing.
         const Vec3 expectedAmbient = frame.ambient + skyAmbient([&](const Vec3& direction) {
-            const SkyViewDirection lookup = skyViewLookup(earth, frame.viewRadius, direction, frame.towardsSun);
-            return vec3From(sky.bilinear(skyViewLutUv(earth, frame.viewRadius, lookup)));
+            Vec3 both{0.0f, 0.0f, 0.0f};
+
+            for (int light = 0; light < skyViewLights; ++light) {
+                const SkyViewDirection lookup = skyViewLookup(earth, frame.viewRadius, direction, towardsLights[light]);
+                both = both + vec3From(sky.bilinear(skyViewAtlasUv(skyViewLutUv(earth, frame.viewRadius, lookup), light)));
+            }
+
+            return both;
         });
         report.check("flat ambient", filteredTolerance, expectedAmbient, Vec3{ambient[0], ambient[1], ambient[2]});
     }
@@ -326,6 +387,7 @@ void gpuTestAtmosphere(const VulkanDevice& device, GpuFunctionRunner& runner, Gp
     checkTables(runner, report);
     checkMarch(runner, report);
     checkMultipleScattering(runner, report);
+    checkLights(runner, report);
 
     report.section("atmosphere passes (atmosphere_*.comp)");
     checkPasses(device, report);
