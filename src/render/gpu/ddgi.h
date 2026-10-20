@@ -103,10 +103,11 @@ struct GlobalIlluminationSettings {
     * at 60, against 0.25% for the still light alone; 0.2 s would add none, for a longer trail). Probes within reach of a
     * fast light trace fastRaysPerProbe rays, since a short memory averages fewer frames (the rest still trace
     * raysPerProbe); 64 flickered over three times as much. In the dense probe test every probe is within the
-    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64.
+    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64. 128 by default (the High quality preset),
+    * 256 on Ultra.
     */
     float fastIrradianceTimeConstant = 0.1f;
-    int fastRaysPerProbe = 256;
+    int fastRaysPerProbe = 128;
 
     // Keep fast lights apart as above. Off, they are lights like any other: their bounce goes into the still atlas under
     // its memory (with the adaptive memory, restarting when it changes enough to tell from the noise), no probe traces

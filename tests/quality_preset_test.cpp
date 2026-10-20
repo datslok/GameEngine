@@ -2,23 +2,41 @@
 #include "render/gpu/render_settings.h"
 #include "render/gpu/shadow_map.h"
 
+#include <array>
 #include <cassert>
 #include <optional>
 
 namespace {
-    // Ultra is the engine as it is tuned: its defaults.
-    void testUltraIsTheDefaults() {
+    // High is the engine as it is tuned: its defaults.
+    void testHighIsTheDefaults() {
         const RenderSettings defaults;
-        assert(matchingQualityPreset(defaults) == QualityPreset::Ultra);
+        assert(matchingQualityPreset(defaults) == QualityPreset::High);
 
         RenderSettings settings;
         settings.shadows.texelTarget = 0.5f;
-        applyQualityPreset(settings, QualityPreset::Ultra);
+        settings.globalIllumination.raysPerProbe = 200;
+        applyQualityPreset(settings, QualityPreset::High);
         assert(settings.shadows.texelTarget == defaults.shadows.texelTarget);
+        assert(settings.globalIllumination.raysPerProbe == defaults.globalIllumination.raysPerProbe);
     }
 
-    // Each step down costs less on every axis a preset sets: fewer shadowed lights, coarser shadow texels, shorter
-    // sun shadows and fewer bloom levels. None ever asks for more than the engine's limits.
+    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, 128 (the defaults) and 256.
+    void testPresetsSetTheProbeRays() {
+        const std::array<int, 4> rays{32, 64, 128, 256};
+
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            RenderSettings settings;
+            applyQualityPreset(settings, preset);
+            const int expected = rays[static_cast<std::size_t>(preset)];
+            assert(settings.globalIllumination.raysPerProbe == expected);
+            assert(settings.globalIllumination.fastRaysPerProbe == expected);
+        }
+
+        assert(RenderSettings{}.globalIllumination.raysPerProbe == 128 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 128);
+    }
+
+    // Each step down from High costs less on every axis a preset sets: fewer shadowed lights, coarser shadow texels,
+    // shorter sun shadows, fewer bloom levels and probe rays. None ever asks for more than the engine's limits.
     void testLowerPresetsCostLess() {
         RenderSettings low;
         RenderSettings medium;
@@ -45,10 +63,14 @@ namespace {
         assert(high.shadows.cascadeCount <= maxShadowCascades);
         assert(cascadeTilePixels(low.shadows.cascadeResolution) <= cascadeTilePixels(medium.shadows.cascadeResolution));
         assert(cascadeTilePixels(medium.shadows.cascadeResolution) <= cascadeTilePixels(high.shadows.cascadeResolution));
-        assert(cascadeTilePixels(high.shadows.cascadeResolution) < cascadeTilePixels(RenderSettings{}.shadows.cascadeResolution));
 
         assert(low.bloom.maxLevels < medium.bloom.maxLevels);
         assert(medium.bloom.maxLevels < high.bloom.maxLevels);
+
+        assert(low.globalIllumination.raysPerProbe < medium.globalIllumination.raysPerProbe);
+        assert(medium.globalIllumination.raysPerProbe < high.globalIllumination.raysPerProbe);
+        assert(low.globalIllumination.fastRaysPerProbe < medium.globalIllumination.fastRaysPerProbe);
+        assert(medium.globalIllumination.fastRaysPerProbe < high.globalIllumination.fastRaysPerProbe);
     }
 
     // A preset sets quality, never taste: tone mapping, HDR output and the bloom's look stay as the player set them.
@@ -76,15 +98,16 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // High is Ultra with the sun's cascades at 2048, in the usual atlas (128 MB instead of 384), for typical GPUs.
-    void testHighIsUltraWithSmallerCascades() {
-        RenderSettings high;
-        applyQualityPreset(high, QualityPreset::High);
-        assert(high.shadows.cascadeResolution == CascadeResolution::Pixels2048);
-        assert(matchingQualityPreset(high) == QualityPreset::High);
+    // Ultra is High with more light probe rays, nothing else: the same 4096 cascades and everything else as tuned.
+    void testUltraIsHighWithMoreProbeRays() {
+        RenderSettings ultra;
+        applyQualityPreset(ultra, QualityPreset::Ultra);
+        assert(ultra.shadows.cascadeResolution == RenderSettings{}.shadows.cascadeResolution);
+        assert(matchingQualityPreset(ultra) == QualityPreset::Ultra);
 
-        high.shadows.cascadeResolution = RenderSettings{}.shadows.cascadeResolution;
-        assert(matchingQualityPreset(high) == QualityPreset::Ultra);
+        ultra.globalIllumination.raysPerProbe = RenderSettings{}.globalIllumination.raysPerProbe;
+        ultra.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
+        assert(matchingQualityPreset(ultra) == QualityPreset::High);
     }
 
     void testPresetNames() {
@@ -93,8 +116,9 @@ namespace {
 }
 
 void testQualityPreset() {
-    testHighIsUltraWithSmallerCascades();
-    testUltraIsTheDefaults();
+    testUltraIsHighWithMoreProbeRays();
+    testHighIsTheDefaults();
+    testPresetsSetTheProbeRays();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();
     testChangedValuesAreCustom();
