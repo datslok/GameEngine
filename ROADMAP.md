@@ -207,6 +207,8 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log): SDL
   - [x] Eye adaptation: an exposure that follows the scene's brightness, measured as a histogram on the GPU (`eye-adaptation`)
   - [x] The light lab's street: 60 shadowed lamps and lit windows, on at dusk or with K, the test ground for many lights at night (`light-lab-street`)
   - [x] Cascades for large worlds: nested grids following the camera, scrolled as circular buffers, scrolled-in probes seeded from the coarser cascades (`ddgi-cascades`)
+  - [x] The demo's light probes: cascades round the camera, the course static, the flying lamps fast (`demo-probes`)
+  - [ ] Golden images that land on one of two pictures: the light lab's `street-night` sometimes differs from its reference by the same 73 pixels (5 beyond tolerance, up to 29 half-float steps), in a full `make golden` and on `main` before `demo-probes` too, and the demo's `lamp-field` once by 22; both have many lights at probe rays' hits, so look there first (`keepBrightestLight` ties, the order lights reach a hit, the relocation records read back a frame in flight later). Details in the build log's `demo-probes` entry
   - [ ] A software tracer for GPUs without ray tracing, as the lower quality setting: a coarse voxel grid of the scene built in compute (simpler than distance fields and handles moving objects), checked against the ray-traced result; probes only need blurry diffuse light, so coarse geometry is enough
 
 **6e. Image quality**
