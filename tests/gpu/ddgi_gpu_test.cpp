@@ -210,6 +210,46 @@ namespace {
         }
     }
 
+    /*
+    * The adaptive memory on texels that clearly keep their history (an estimate within a thousandth of the light, the
+    * noise half the light) or clearly restart (an estimate ten times the light, little noise), so rounding cannot move a
+    * case across the threshold; histories from none to past the cap.
+    */
+    void checkAdaptiveMemory(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{65};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 500; ++i) {
+            const Vec3 light{random.between(0.01f, 20.0f), random.between(0.01f, 20.0f), random.between(0.01f, 20.0f)};
+            const bool restart = i % 2 == 1;
+            const Vec3 estimate = restart ? light * 10.0f : light * random.between(0.999f, 1.001f);
+            const float noise = restart ? 0.001f * probeLuminance(light) : 0.5f * probeLuminance(light);
+            const float history = i % 5 == 0 ? 0.0f : std::floor(random.between(1.0f, 3000.0f));
+            inputs.push_back(gpuVec4(light.x, light.y, light.z, history));
+            inputs.push_back(gpuVec4(light.x, light.y, light.z, noise));
+            inputs.push_back(gpuVec4(estimate.x, estimate.y, estimate.z));
+            inputs.push_back(gpuVec4(random.between(0.9f, 0.9999f), random.between(0.5f, 0.99f), random.between(2.0f, 8.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_ADAPTIVE, inputs, 4, 3);
+
+        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
+            const GpuVec4& texelIn = inputs[i * 4];
+            const GpuVec4& changeIn = inputs[i * 4 + 1];
+            const GpuVec4& shares = inputs[i * 4 + 3];
+            const AdaptiveProbeTexel texel{vec3From(texelIn), texelIn[3], vec3From(changeIn), changeIn[3]};
+            const Vec3 estimate = vec3From(inputs[i * 4 + 2]);
+            const AdaptiveProbeTexel expected = adaptiveProbeBlend(texel, estimate, shares[0], shares[1], shares[2]);
+            const GpuVec4& stored = outputs[i * 3];
+            const GpuVec4& recent = outputs[i * 3 + 1];
+            report.check("adaptiveProbeBlend stored", arithmeticTolerance, expected.stored, vec3From(stored));
+            report.check("adaptiveProbeBlend history", arithmeticTolerance, expected.history, stored[3]);
+            report.check("adaptiveProbeBlend recent", arithmeticTolerance, expected.recent, vec3From(recent));
+            report.check("adaptiveProbeBlend noise", transcendentalTolerance, expected.noise, recent[3]);
+            report.check("probeLuminance", arithmeticTolerance, probeLuminance(estimate), outputs[i * 3 + 2][0]);
+        }
+    }
+
     // Every probe of an uneven grid, at both probe sizes, with a random direction each.
     void checkGrid(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{64};
@@ -716,6 +756,7 @@ void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheck
     checkReach(runner, report);
     checkWeights(runner, report);
     checkBlending(runner, report);
+    checkAdaptiveMemory(runner, report);
     checkGrid(runner, report);
 
     report.section("light probe passes (ddgi_trace.comp, ddgi_update_*.comp)");

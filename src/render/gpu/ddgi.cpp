@@ -1,5 +1,6 @@
 #include "render/gpu/ddgi.h"
 #include "core/hash.h"
+#include "render/gpu/bloom_shared.h"
 #include "math/angles.h"
 #include "math/mat4.h"
 
@@ -26,6 +27,11 @@ namespace {
     int atlasColumns(const ProbeCounts& counts) {
         return counts.x * counts.y;
     }
+
+    // The frames whose running mean keeps this share (n / (n + 1) = keep), at most maxProbeHistory.
+    float historyForShare(float keep) {
+        return keep < 1.0f ? std::min(keep / (1.0f - keep), static_cast<float>(maxProbeHistory)) : static_cast<float>(maxProbeHistory);
+    }
 }
 
 void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
@@ -34,6 +40,9 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Probe updates per second", settings.probeUpdatesPerSecond, {.min = 0.0f, .max = 1000.0f, .sliderMax = 240.0f, .unit = "(0: every frame)"});
     visitor.field("Irradiance time constant", settings.irradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "s"});
     visitor.field("Distance time constant", settings.distanceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 4.0f, .unit = "s"});
+    visitor.field("Adaptive memory", settings.adaptiveMemory);
+    visitor.field("Change window", settings.changeWindowSeconds, {.min = 0.01f, .max = 2.0f, .sliderMax = 1.0f, .unit = "s"});
+    visitor.field("Change threshold", settings.changeThreshold, {.min = 1.0f, .max = 20.0f, .sliderMax = 10.0f, .unit = "sd"});
     visitor.field("Fast irradiance time constant", settings.fastIrradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 0.5f, .unit = "s"});
     visitor.field("Fast rays per probe", settings.fastRaysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
     visitor.field("Fast blend frame cap", settings.fastBlendMaxFrameSeconds, {.min = 0.001f, .max = 1.0f, .sliderMax = 0.1f, .unit = "s"});
@@ -214,6 +223,41 @@ Vec2 blendProbeValue(const Vec2& oldValue, const Vec2& newValue, float hysteresi
     return newValue + (oldValue - newValue) * hysteresis;
 }
 
+float probeLuminance(const Vec3& light) {
+    return light.x * static_cast<float>(BLOOM_LUMA_RED) + light.y * static_cast<float>(BLOOM_LUMA_GREEN) +
+           light.z * static_cast<float>(BLOOM_LUMA_BLUE);
+}
+
+// The noise is kept as a standard deviation, not a variance, so a bright texel's square cannot overflow a half float.
+AdaptiveProbeTexel adaptiveProbeBlend(const AdaptiveProbeTexel& texel, const Vec3& estimate, float longKeep, float windowKeep, float threshold) {
+    AdaptiveProbeTexel next = texel;
+
+    if (texel.history < 1.0f) {
+        next.recent = texel.stored;
+        next.noise = 0.0f;
+        next.history = historyForShare(longKeep);
+    } else {
+        const float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
+        const float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * longKeep;
+        next.noise = std::sqrt(variance);
+    }
+
+    next.recent = blendProbeValue(next.recent, estimate, windowKeep);
+    next.stored = blendProbeValue(next.stored, estimate, std::min(longKeep, next.history / (next.history + 1.0f)));
+
+    const float windowSpread = next.noise * std::sqrt((1.0f - windowKeep) / (1.0f + windowKeep));
+    const float band = threshold * windowSpread + probeChangeFloorShare * probeLuminance(next.stored);
+
+    if (std::abs(probeLuminance(next.recent) - probeLuminance(next.stored)) > band) {
+        next.stored = next.recent;
+        next.history = historyForShare(windowKeep);
+    } else {
+        next.history = std::min(next.history + 1.0f, static_cast<float>(maxProbeHistory));
+    }
+
+    return next;
+}
+
 void validateProbeVolume(const ProbeVolume& volume) {
     const ProbeCounts& counts = volume.counts;
 
@@ -304,9 +348,11 @@ GpuProbeVolume packProbeVolume(const ProbeVolume& volume, const ProbeFrame& fram
 
     packed.rotation[0][3] = static_cast<float>(frame.raysPerProbe);
     packed.rotation[1][3] = static_cast<float>(frame.fastRaysPerProbe);
+    packed.rotation[2][3] = frame.windowHysteresis;
     packed.sky[0] = frame.sky.x;
     packed.sky[1] = frame.sky.y;
     packed.sky[2] = frame.sky.z;
+    packed.sky[3] = frame.changeThreshold;
     packed.hysteresis[0] = frame.irradianceHysteresis;
     packed.hysteresis[1] = frame.distanceHysteresis;
     packed.hysteresis[2] = frame.ballRadius;
@@ -363,6 +409,8 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
     frame.irradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.irradianceTimeConstant);
     frame.fastIrradianceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(fastFrameSeconds, settings.fastIrradianceTimeConstant);
     frame.distanceHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.distanceTimeConstant);
+    frame.windowHysteresis = fresh ? 0.0f : hysteresisForTimeConstant(frameSeconds, settings.changeWindowSeconds);
+    frame.changeThreshold = settings.adaptiveMemory ? settings.changeThreshold : 0.0f;
     frame.ballRadius = settings.probeBallRadius;
     return frame;
 }

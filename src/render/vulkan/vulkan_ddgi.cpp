@@ -94,10 +94,11 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
 {
     createTracePipeline(texturesLayout, frameLayout, rayLayout);
 
-    // Both read the three ray buffers; the irradiance update writes two atlases, the distance update one.
+    // Both read the three ray buffers; the irradiance update writes two atlases and the adaptive memory's change
+    // statistics, the distance update one atlas.
     ComputePipelineDescription update;
     update.storageBuffers = 3;
-    update.storageImages = 2;
+    update.storageImages = 3;
     update.pushConstantBytes = sizeof(GpuProbeVolume);
     update.shader = "assets/shaders/ddgi_update_irradiance.comp.spv";
     irradiancePipeline = std::make_unique<ComputePipeline>(device, update);
@@ -183,6 +184,7 @@ void VulkanDdgi::createAtlases(VkCommandBuffer commands, const ProbeVolume& volu
 
     irradiance = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe irradiance atlas");
     fastIrradiance = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe fast irradiance atlas");
+    changeStatistics = createAtlas(irradianceFormat, probeIrradianceTexels, "Probe change statistics");
     distance = createAtlas(distanceFormat, probeDistanceTexels, "Probe distance atlas");
 
     const VkDeviceSize probes = static_cast<VkDeviceSize>(probeCount(volume.counts));
@@ -218,7 +220,9 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     const int probes = probeCount(volume.counts);
     trace(commands, descriptors, sets, probes, probeRayStride(frame));
 
-    const std::array<VulkanImage*, 2> irradianceAtlases{&irradiance, &fastIrradiance};
+    // The change statistics are only ever read and written by this update, so they stay in storage use between frames
+    // (each frame's transition still orders its update after the last one's writes).
+    const std::array<VulkanImage*, 3> irradianceAtlases{&irradiance, &fastIrradiance, &changeStatistics};
     const std::array<VulkanImage*, 1> distanceAtlas{&distance};
     blend(commands, descriptors, *irradiancePipeline, irradianceAtlases, probes);
     blend(commands, descriptors, *distancePipeline, distanceAtlas, probes);

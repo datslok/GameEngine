@@ -1,6 +1,5 @@
 #include "render/gpu/ddgi_sampling.h"
 #include "math/aabb.h"
-#include "render/gpu/bloom_shared.h"
 #include "render/gpu/clusters.h"
 #include "render/gpu/light_falloff.h"
 
@@ -186,10 +185,8 @@ Vec3 spotLightAtHit(const Vec3& offsetToLight, float range, const Vec3& radiance
     return facingIrradiance(radiance * (distanceFalloff(distance, range, sourceRadius) * cone), toLight, normal);
 }
 
-// The Rec. 709 weights bloom's Karis average uses too.
 float hitLightStrength(const Vec3& irradiance) {
-    return irradiance.x * static_cast<float>(BLOOM_LUMA_RED) + irradiance.y * static_cast<float>(BLOOM_LUMA_GREEN) +
-           irradiance.z * static_cast<float>(BLOOM_LUMA_BLUE);
+    return probeLuminance(irradiance);
 }
 
 /*
