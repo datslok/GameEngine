@@ -956,7 +956,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (showProbes) {
         beginGpuPass(frame, GpuPass::ProbeBalls);
-        drawProbeBalls(frame, sceneSet);
+        drawProbeBalls(frame, sceneSet, illumination.shownProbeCascade);
         endGpuPass(frame, GpuPass::ProbeBalls);
     }
 
@@ -1272,7 +1272,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
 * The light probes' debug balls, over the finished main pass: the scene image and its depth are drawn into again, both
 * kept (the balls are tested against the depth, and write their own), then the image goes back to being read.
 */
-void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet) {
+void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget);
     depth.transition(commands, ImageState::DepthTarget);
@@ -1282,7 +1282,7 @@ void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSe
     beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
     renderingOpen = true;
 
-    ddgi->drawProbes(commands, frame.descriptors, bindlessTextures->getSet(), sceneSet);
+    ddgi->drawProbes(commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, cascade);
 
     vkCmdEndRendering(commands);
     renderingOpen = false;

@@ -312,7 +312,7 @@ private:
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;
-    void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet);
+    void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).

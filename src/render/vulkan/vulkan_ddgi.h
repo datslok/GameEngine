@@ -83,9 +83,10 @@ public:
     // never come round again to read its own).
     void collectAllRelocations();
 
-    // Draw the last updated probes as balls into the open rendering block (colour and depth bound, the viewport set), with
-    // the scene's set 1 for the camera, the states and the cascades. Nothing before the first update.
-    void drawProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frame);
+    // Draw cascade number cascade's last updated probes (the coarsest if there are fewer) as balls into the open rendering
+    // block (colour and depth bound, the viewport set), with the scene's set 1 for the camera, the states and the
+    // cascades. Nothing before the first update.
+    void drawProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frame, int cascade);
 
     bool hasProbes() const;
 

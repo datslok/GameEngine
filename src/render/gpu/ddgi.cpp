@@ -76,6 +76,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Probe states", settings.probeStates);
     visitor.field("Wake distance", settings.wakeCells, {.min = 0.0f, .max = 4.0f, .unit = "cells"});
     visitor.field("Show probes", settings.showProbes);
+    visitor.field("Shown probe cascade", settings.shownProbeCascade, {.min = 0, .max = DDGI_MAX_CASCADES - 1, .unit = "(0: densest)"});
     visitor.field("Probe ball radius", settings.probeBallRadius, {.min = 0.01f, .max = 1.0f, .sliderMax = 0.4f, .unit = "m"});
 }
 

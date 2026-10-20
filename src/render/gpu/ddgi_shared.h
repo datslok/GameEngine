@@ -85,6 +85,11 @@
 #define DDGI_CASCADE_FADE 1.0
 #define DDGI_CASCADE_EDGE 1.0
 
+// Every cascade's lattice is offset this share of the densest spacing from the world's origin (the same in metres for
+// all, so they stay nested): levels are built on round numbers, and a probe exactly on a surface starts its rays on it,
+// where they hit or slip through by rounding (the light lab's ground, at 0, showed dark blotches under such probes).
+#define DDGI_LATTICE_OFFSET 0.5
+
 // A probe that starts (scrolled in by a cascade, woken, newly vigilant) is seeded from the coarser cascades' light where
 // it stands, which counts as this many frames of its own history and then fades out as its own rays come in. At most
 // DDGI_MAX_SEEDS probes are seeded a frame; the rest start from their first frame's rays.

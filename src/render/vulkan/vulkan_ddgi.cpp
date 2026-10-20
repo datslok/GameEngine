@@ -690,8 +690,8 @@ void VulkanDdgi::writeUpload(VkDescriptorSet set, std::uint32_t binding, const U
     vkUpdateDescriptorSets(device.getDevice(), 1, &write, 0, nullptr);
 }
 
-// Six corners (two triangles) per ball, one instance per probe.
-void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frame) {
+// Six corners (two triangles) per ball, one instance per probe of the cascade (its probes numbered from its first).
+void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frame, int cascade) {
     if (!hasProbes()) {
         return;
     }
@@ -719,7 +719,8 @@ void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descript
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, ballsLayout.get(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0,
                             nullptr);
     vkCmdPushConstants(commands, ballsLayout.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(lastPacked), &lastPacked);
-    vkCmdDraw(commands, 6, static_cast<std::uint32_t>(probes), 0, 0);
+    const int shown = std::clamp(cascade, 0, static_cast<int>(cascades.size()) - 1);
+    vkCmdDraw(commands, 6, static_cast<std::uint32_t>(probeCount(counts)), 0, static_cast<std::uint32_t>(cascades[static_cast<std::size_t>(shown)].firstProbe));
 }
 
 bool VulkanDdgi::hasProbes() const {

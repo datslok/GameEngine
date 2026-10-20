@@ -67,6 +67,10 @@ float probeCascadeSpacing(const ProbeCascadeLayout& layout, int cascade) {
     return std::ldexp(layout.spacing, cascade);
 }
 
+float probeLatticeOffset(const ProbeCascadeLayout& layout) {
+    return probeLatticeOffsetShare * layout.spacing;
+}
+
 int probeWindowStart(float centre, float spacing, int count) {
     return static_cast<int>(std::floor(centre / spacing + 0.5f)) - (count - 1) / 2;
 }
@@ -75,14 +79,17 @@ float probeCascadeReach(int count, float spacing, float biasReach) {
     return (static_cast<float>((count - 1) / 2) - 0.5f - probeCascadeEdgeCells) * spacing - biasReach;
 }
 
-ProbeCascade probeWindow(const Vec3& centre, float spacing, const ProbeCounts& counts, float selfShadowBias, int firstProbe) {
+ProbeCascade probeWindow(const Vec3& centre, float spacing, const ProbeCounts& counts, float selfShadowBias, int firstProbe, float latticeOffset) {
     const Vec3 spacings{spacing, spacing, spacing};
+    const Vec3 offset{latticeOffset, latticeOffset, latticeOffset};
+    const Vec3 fromLattice = centre - offset;
     const float biasReach = probeBiasReach(spacings, selfShadowBias);
 
     ProbeCascade cascade;
-    cascade.start = ProbeGridCoord{probeWindowStart(centre.x, spacing, counts.x), probeWindowStart(centre.y, spacing, counts.y),
-                                   probeWindowStart(centre.z, spacing, counts.z)};
-    cascade.volume.origin = Vec3{static_cast<float>(cascade.start.x), static_cast<float>(cascade.start.y), static_cast<float>(cascade.start.z)} * spacing;
+    cascade.start = ProbeGridCoord{probeWindowStart(fromLattice.x, spacing, counts.x), probeWindowStart(fromLattice.y, spacing, counts.y),
+                                   probeWindowStart(fromLattice.z, spacing, counts.z)};
+    cascade.volume.origin =
+        offset + Vec3{static_cast<float>(cascade.start.x), static_cast<float>(cascade.start.y), static_cast<float>(cascade.start.z)} * spacing;
     cascade.volume.spacing = spacings;
     cascade.volume.counts = counts;
     cascade.volume.scroll = ProbeScroll{wrapped(cascade.start.x, counts.x), wrapped(cascade.start.y, counts.y), wrapped(cascade.start.z, counts.z)};
@@ -99,7 +106,8 @@ std::vector<ProbeCascade> probeCascadesAround(const Vec3& centre, const ProbeCas
     cascades.reserve(static_cast<std::size_t>(layout.cascades));
 
     for (int c = 0; c < layout.cascades; ++c) {
-        cascades.push_back(probeWindow(centre, probeCascadeSpacing(layout, c), layout.counts, selfShadowBias, c * probeCount(layout.counts)));
+        cascades.push_back(probeWindow(centre, probeCascadeSpacing(layout, c), layout.counts, selfShadowBias, c * probeCount(layout.counts),
+                                       probeLatticeOffset(layout)));
     }
 
     return cascades;

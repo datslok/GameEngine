@@ -31,6 +31,7 @@
 inline constexpr int maxProbeCascades = DDGI_MAX_CASCADES;
 inline constexpr float probeCascadeFadeCells = static_cast<float>(DDGI_CASCADE_FADE);
 inline constexpr float probeCascadeEdgeCells = static_cast<float>(DDGI_CASCADE_EDGE);
+inline constexpr float probeLatticeOffsetShare = static_cast<float>(DDGI_LATTICE_OFFSET);
 
 // How many cascades of how many probes, and the densest's spacing.
 struct ProbeCascadeLayout {
@@ -49,9 +50,14 @@ ProbeCascadeLayout probeCascadeLayout(const GlobalIlluminationSettings& settings
 // Cascade number cascade's spacing: the densest's, doubled cascade times.
 float probeCascadeSpacing(const ProbeCascadeLayout& layout, int cascade);
 
+// How far every cascade's lattice is offset from the world's origin along each axis, in metres: probeLatticeOffsetShare
+// of the densest spacing, so no probe lies on a whole or half metre, where levels put their floors and walls.
+float probeLatticeOffset(const ProbeCascadeLayout& layout);
+
 /*
-* The first grid place, in cells from the world's origin, of a window of count probes spacing apart round centre: the
-* lattice point nearest centre is the window's middle probe (number (count - 1) / 2, rounded down).
+* The first grid place, in cells from the lattice's origin, of a window of count probes spacing apart round centre
+* (measured from the lattice's origin): the lattice point nearest centre is the window's middle probe (number
+* (count - 1) / 2, rounded down).
 */
 int probeWindowStart(float centre, float spacing, int count);
 
@@ -65,7 +71,7 @@ float probeCascadeReach(int count, float spacing, float biasReach);
 
 /*
 * One cascade: its window of probes (volume, scrolled so each lattice point keeps its slot), the window's first grid
-* place counted from the world's origin (start), where its probes begin among all the cascades' (firstProbe: the
+* place counted from the lattice's origin (start), where its probes begin among all the cascades' (firstProbe: the
 * atlases, the states, the restarts), and where it lights points: at full weight out to weightReach - weightFade from
 * weightCentre along each axis, falling to nothing at weightReach.
 */
@@ -78,11 +84,14 @@ struct ProbeCascade {
     Vec3 weightFade{0.0f, 0.0f, 0.0f};
 };
 
-// The window of counts probes spacing apart round centre, weighted round centre (probeCascadeReach, fading over
-// probeCascadeFadeCells cells); its probes numbered from firstProbe.
-ProbeCascade probeWindow(const Vec3& centre, float spacing, const ProbeCounts& counts, float selfShadowBias, int firstProbe);
+// The window of counts probes spacing apart round centre, on the lattice of that spacing whose origin is latticeOffset
+// from the world's along each axis, weighted round centre (probeCascadeReach, fading over probeCascadeFadeCells cells);
+// its probes numbered from firstProbe.
+ProbeCascade probeWindow(const Vec3& centre, float spacing, const ProbeCounts& counts, float selfShadowBias, int firstProbe,
+                         float latticeOffset = 0.0f);
 
-// Every cascade of the layout round centre, densest first, their probes numbered one cascade after another.
+// Every cascade of the layout round centre, densest first, their probes numbered one cascade after another, all on
+// lattices offset probeLatticeOffset from the world's origin.
 std::vector<ProbeCascade> probeCascadesAround(const Vec3& centre, const ProbeCascadeLayout& layout, float selfShadowBias);
 
 /*
@@ -95,7 +104,7 @@ ProbeCascade fixedProbeCascade(const ProbeVolume& volume, int firstProbe = 0);
 // How much a cascade lights a point, 0..1: the product over the axes of its fade (ProbeCascade).
 float probeCascadeWeight(const ProbeCascade& cascade, const Vec3& point);
 
-// The grid place, counted from the world's origin, of the probe kept in slot slot.
+// The grid place, counted from the lattice's origin, of the probe kept in slot slot.
 ProbeGridCoord probeLatticeCoord(const ProbeCascade& cascade, int slot);
 
 /*

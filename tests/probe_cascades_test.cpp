@@ -190,6 +190,43 @@ namespace {
         assert(scrolledProbes(before, coarser).size() == static_cast<std::size_t>(probeCount(counts)));
     }
 
+    /*
+    * Levels are built on round numbers (a floor at 0, walls on whole and half metres), and a probe exactly on a surface
+    * starts its rays on it, where they hit or slip through by rounding: the light lab's ground showed dark blotches under
+    * such probes. So every cascade's lattice is offset half the densest spacing from the world's origin, the same in
+    * metres for all, which keeps them nested: no probe of any cascade lies on a whole or half metre, and every coarser
+    * probe is also a point of every finer lattice.
+    */
+    void testTheLatticeKeepsOffRoundNumbers() {
+        const GlobalIlluminationSettings settings;
+        const ProbeCascadeLayout layout = probeCascadeLayout(settings);
+        assert(nearlyEqual(probeLatticeOffset(layout), 0.5f * layout.spacing));
+        Spread spread;
+
+        for (int i = 0; i < 50; ++i) {
+            const std::vector<ProbeCascade> cascades = probeCascadesAround(spread.nextVec3(200.0f), layout, settings.selfShadowBias);
+
+            for (const ProbeCascade& cascade : cascades) {
+                for (int slot = 0; slot < probeCount(cascade.volume.counts); slot += 37) {
+                    const Vec3 position = probePosition(cascade.volume, slot);
+
+                    for (int axis = 0; axis < 3; ++axis) {
+                        const float halves = axisOf(position, axis) * 2.0f;
+                        assert(std::abs(halves - std::round(halves)) > 0.2f);
+
+                        const float densestCells = (axisOf(position, axis) - probeLatticeOffset(layout)) / layout.spacing;
+                        assert(std::abs(densestCells - std::round(densestCells)) < 1e-3f);
+                    }
+                }
+            }
+        }
+
+        // The middle probe is still the lattice point nearest the centre.
+        const ProbeCascade densest = probeCascadesAround(Vec3{0.0f, 0.0f, 0.0f}, layout, settings.selfShadowBias).front();
+        const float middle = probePosition(densest.volume, probeSlot(densest.volume, ProbeGridCoord{10, 6, 10})).y;
+        assert(std::abs(middle) <= 0.25f + 1e-5f);
+    }
+
     // The cascades double their spacing, number their probes one after another and are all weighted round the centre.
     void testCascadesDoubleAndNest() {
         const GlobalIlluminationSettings settings;
@@ -542,9 +579,9 @@ namespace {
             }
         }
 
-        // 27 probes 1 m apart within 1.5 m, 1 at 2 m apart.
+        // On lattices offset half a metre: 64 probes 1 m apart within 1.5 m of the centre, 8 of those 2 m apart.
         const long restartedCount = std::count_if(restarts.begin(), restarts.end(), [](const GpuProbeRestart& restart) { return restart.irradianceFrames == 0; });
-        assert(restartedCount == 28);
+        assert(restartedCount == 72);
     }
 
     /*
@@ -632,6 +669,7 @@ void testProbeCascades() {
     testSlotsWrapRound();
     testAWindowIsCentredOnTheLattice();
     testAScrollBringsInOnePlane();
+    testTheLatticeKeepsOffRoundNumbers();
     testCascadesDoubleAndNest();
     testTheWeightNeverReadsAnOuterPlane();
     testTheWeightFadesRoundTheCentre();

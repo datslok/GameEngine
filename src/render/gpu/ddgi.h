@@ -229,8 +229,11 @@ struct GlobalIlluminationSettings {
     bool probeStates = true;
     float wakeCells = 1.0f;
 
-    // A debug view: each probe drawn as a small ball showing the light it stores, in the direction of the ball's surface.
+    // A debug view: each probe of one cascade (0 the densest) drawn as a small ball showing the light it stores, in the
+    // direction of the ball's surface, as much larger than the densest's balls as its spacing is. One at a time: the
+    // cascades nest, so a coarser probe sits where finer ones do.
     bool showProbes = false;
+    int shownProbeCascade = 0;
     float probeBallRadius = 0.1f;
 };
 

@@ -1089,13 +1089,14 @@ namespace {
     * The same move over a static floor, with relocation and probe states on (the defaults): the plane the move brings in
     * waits off on the frame it comes in, its relocation asked for; on the next frame its records are back (this frame in
     * flight's, read once its fence has passed: no waiting for the GPU), the probes by the floor start vigilant, seeded,
-    * and the rest sleep. The layers half a metre over the floor and under it are the ones by it (its top or its underside
-    * within their cells); the layer between is buried in it, the rest too far from it.
+    * and the rest sleep. The probes stand half a metre off whole metres (the lattice's offset), so the floor, a slab from
+    * 1.2 to 0.8 m down, lies between two layers 0.3 m from each: those two see its top or its underside within their
+    * cells, the rest lie too far from it.
     */
     void checkCascadeScrollWaitsForItsRecords(const VulkanDevice& device, GpuCheckReport& report) {
         ProbeTestScene scene{device};
         const MeshHandle cube = scene.addMesh(Mesh::cube());
-        const std::vector<DrawItem> draws{blockDraw(cube, Vec3{-60.0f, -1.5f, -60.0f}, Vec3{60.0f, -0.5f, 60.0f}, true)};
+        const std::vector<DrawItem> draws{blockDraw(cube, Vec3{-60.0f, -1.2f, -60.0f}, Vec3{60.0f, -0.8f, 60.0f}, true)};
 
         const GlobalIlluminationSettings settings;
         FrameLighting lighting;
@@ -1140,7 +1141,7 @@ namespace {
                          static_cast<float>(statesOnArrival[index].state));
 
             const ProbeGridCoord place = probeLatticeCoord(after[0], probe);
-            const ProbeState expected = place.y == 0 || place.y == -2 ? ProbeState::Vigilant : place.y == -1 ? ProbeState::Off : ProbeState::Sleeping;
+            const ProbeState expected = place.y == -1 || place.y == -2 ? ProbeState::Vigilant : ProbeState::Sleeping;
             report.check("cascade scroll: its state once its records are back", exactTolerance, static_cast<float>(expected),
                          static_cast<float>(states[index].state));
 
