@@ -788,6 +788,7 @@ namespace {
         double late = 0.0;      // the same from half a second to 4 s after it
         double dark99 = 0.0;    // mean seconds after each switch off until within 1% of the lamp's light of the darkness
         double flicker = 0.0;   // change over 0.1 s in the first 2 s after each switch (or event), as a share of the light (RMS)
+        double finalDark99 = 0.0; // seconds after the last switch (off) until within 1% of the lamp's light of the darkness, -1 never
     };
 
     /*
@@ -809,6 +810,11 @@ namespace {
         float offPatch = 0.005f;
         float onPatch = 2.0f;
         float fixedSeconds = 2.0f; // the fixed memory's time constant (the fast atlas's: 0.1 s)
+
+        // The switching: states of stateSeconds each, off first, the last one finalStateSeconds long (an odd count ends off).
+        int states = 9;
+        float stateSeconds = 30.0f;
+        float finalStateSeconds = 30.0f;
     };
 
     SwitchedTexel switchedTexel(const SwitchOptions& options) {
@@ -849,7 +855,7 @@ namespace {
         const float fixedKeep = hysteresisForTimeConstant(frameSeconds, options.fixedSeconds);
         const float longKeep = hysteresisForTimeConstant(frameSeconds, 4.0f);
         const float windowKeep = hysteresisForTimeConstant(frameSeconds, 0.2f);
-        const int stateFrames = static_cast<int>(30.0f * framesPerSecond);
+        const int usualStateFrames = static_cast<int>(options.stateSeconds * framesPerSecond);
         const int tenth = static_cast<int>(framesPerSecond / 10.0f);
         double darkness = 0.0;
         double lit = 0.0;
@@ -860,7 +866,7 @@ namespace {
         }
 
         const float shortKeep = hysteresisForTimeConstant(frameSeconds, options.eventMemorySeconds);
-        const ProbeEventCheck check{options.eventChangeThreshold, options.eventMemoryGrowth, options.eventCheckSeconds * framesPerSecond};
+        const ProbeEventCheck check{options.eventChangeThreshold, options.eventMemoryGrowth, eventCheckFrames(options.eventCheckSeconds, frameSeconds)};
         AdaptiveProbeTexel texel;
         std::uint64_t frame = 0;
         double changeSquares = 0.0;
@@ -875,8 +881,18 @@ namespace {
         int switchesOff = 0;
         double flickerSquares = 0.0;
         long flickerFrames = 0;
+        double finalDark99 = -1.0;
 
-        for (int state = 0; state < 9; ++state) {
+        // The restart's frames since the event, moved on and ended by the renderer's own rule.
+        ProbeFrame restartFrame;
+        restartFrame.restartHysteresis = shortKeep;
+        restartFrame.restartGrowth = options.eventMemoryGrowth;
+        restartFrame.restartCheckFrames = check.frames;
+        int sinceEvent = -1;
+
+        for (int state = 0; state < options.states; ++state) {
+            const bool last = state == options.states - 1;
+            const int stateFrames = last ? static_cast<int>(options.finalStateSeconds * framesPerSecond) : usualStateFrames;
             const bool on = options.lightStays || state % 2 == 1;
             const double from = on ? darkness : lit;
             const double to = on ? lit : darkness;
@@ -890,7 +906,11 @@ namespace {
                 const bool first = frame == 0;
 
                 // With events, the switch is signalled on the frame it happens.
-                const int sinceEvent = options.events && state > 0 ? i : -1;
+                if (options.events && state > 0 && i == 0) {
+                    sinceEvent = 0;
+                } else {
+                    sinceEvent = advanceRestartFrames(sinceEvent, options.adaptive ? longKeep : fixedKeep, restartFrame);
+                }
 
                 if (options.adaptive) {
                     texel = adaptiveProbeUpdate(texel, Vec3{estimate, estimate, estimate}, first ? 0.0f : longKeep, first ? 0.0f : windowKeep, 5.0f,
@@ -926,6 +946,10 @@ namespace {
                     dark = true;
                     darkened += i * frameSeconds;
                     ++switchesOff;
+
+                    if (last) {
+                        finalDark99 = i * frameSeconds;
+                    }
                 }
 
                 if (!arrived && std::abs(stored - from) >= 0.9 * std::abs(to - from)) {
@@ -946,12 +970,12 @@ namespace {
                 }
             }
 
-            assert(arrived);
+            assert(arrived || options.stateSeconds < 2.0f);
         }
 
-        return SwitchedTexel{std::sqrt(changeSquares / changes), switches > 0 ? reached / switches : 0.0, std::sqrt(earlySquares / std::max(earlyFrames, 1L)),
+        return SwitchedTexel{std::sqrt(changeSquares / std::max(changes, 1L)), switches > 0 ? reached / switches : 0.0, std::sqrt(earlySquares / std::max(earlyFrames, 1L)),
                              std::sqrt(lateSquares / std::max(lateFrames, 1L)), switchesOff > 0 ? darkened / switchesOff : 0.0,
-                             std::sqrt(flickerSquares / std::max(flickerFrames, 1L))};
+                             std::sqrt(flickerSquares / std::max(flickerFrames, 1L)), finalDark99};
     }
 
     /*
@@ -1284,9 +1308,13 @@ namespace {
         settings.eventMemoryGrowth = 0.3f;
         assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, false).restartGrowth == 0.3f);
         settings.eventChangeThreshold = 3.0f;
-        settings.eventCheckSeconds = 0.5f;
+        settings.eventCheckSeconds = 1.0f;
         const ProbeFrame checked = scheduleProbeFrame(schedule, settings, frameSeconds, false, false);
-        assert(checked.restartThreshold == 3.0f && nearlyEqual(checked.restartCheckFrames, 15.0f, 1e-3f));
+        assert(checked.restartThreshold == 3.0f && nearlyEqual(checked.restartCheckFrames, 30.0f, 1e-3f));
+
+        // Never fewer than minEventCheckFrames, however short the check is at the frame rate.
+        settings.eventCheckSeconds = 0.5f;
+        assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, false).restartCheckFrames == minEventCheckFrames);
     }
 
     /*
@@ -1374,6 +1402,30 @@ namespace {
             assert(restarted.dark99 < 0.1 * fading.dark99);
             assert(restarted.flicker < 1.05 * fading.flicker);
             assert(restarted.crawl < 1.01 * fading.crawl);
+        }
+    }
+
+    /*
+    * Switching the lamp quickly (spamming L), at low frame rates especially: a sparsely lit texel needs about 13 frames
+    * to tell its light going out from its noise, so each switch's check was cut short by the next and never restarted
+    * it, and once the switching stopped with the lamp off the light took the long memory to go dark: 13-16 s in the dark
+    * room model, 18 s even for one switch at 15 fps, where a 0.5 s check is 7 frames. Now a texel the last event
+    * restarted restarts at once at the next (the same light switched back, most likely), and the check lasts at least
+    * minEventCheckFrames: dark at once after switching every 0.1 to 1 s, at 15 and 30 fps; 0.73 s after one switch at
+    * 15 fps, 0.23 s at 30.
+    */
+    void testSwitchingQuicklyStillGoesDark() {
+        const GlobalIlluminationSettings defaults;
+
+        for (float framesPerSecond : {15.0f, 30.0f}) {
+            for (float stateSeconds : {0.1f, 0.3f, 1.0f, 30.0f}) {
+                const SwitchOptions switching{.framesPerSecond = framesPerSecond, .events = true, .eventMemorySeconds = defaults.eventMemorySeconds,
+                                              .eventMemoryGrowth = defaults.eventMemoryGrowth, .eventChangeThreshold = defaults.eventChangeThreshold,
+                                              .eventCheckSeconds = defaults.eventCheckSeconds, .states = 13, .stateSeconds = stateSeconds,
+                                              .finalStateSeconds = 30.0f};
+                const double dark = switchedTexel(switching).finalDark99;
+                assert(dark >= 0.0 && dark < (stateSeconds < 2.0f ? 2.0 / framesPerSecond : 1.0));
+            }
         }
     }
 
@@ -1712,6 +1764,7 @@ void testDdgi() {
     testAGrowingMemoryForgetsTheSwitchSooner();
     testTheEventCheckSparesUnchangedLight();
     testFastLightsRestartWithTheEvent();
+    testSwitchingQuicklyStillGoesDark();
     testEachProbeTurnsItsRaysItsOwnWay();
     testNeighboursShareOnlyIfTheyCanSeeEachOther();
     testSharingAveragesTheVisibleNeighbours();
