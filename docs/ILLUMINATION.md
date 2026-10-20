@@ -14,6 +14,7 @@ Two papers by the same group define the method. Where they differ, this file say
 - **Cigolle et al. (2014), "A Survey of Efficient Representations for Independent Unit Vectors"**, JCGT 3(2). http://jcgt.org/published/0003/02/01/. The octahedral mapping.
 - **Donnelly and Lauritzen (2006), "Variance Shadow Maps"**, I3D 2006. The Chebyshev visibility test (equation 5 there).
 - **Marques et al. (2013), "Spherical Fibonacci Point Sets for Illumination Integrals"**, Computer Graphics Forum 32(8). The ray direction pattern.
+- Lumen (Unreal Engine 5), which tried irradiance probes like these and moved past them to probes on the visible pixels, has its own notes: [LUMEN.md](LUMEN.md).
 - Further reading named by [2021], not read: Wang, Khiat, Kry and Nowrouzezahrai (2019), "Fast Non-Uniform Radiance Probe Placement and Tracing" (better placement than a grid); Dachsbacher and Stamminger (2005), "Reflective Shadow Maps" (less lag for a flashlight's bounce light).
 
 Both papers are CC BY-ND 3.0. Write our own code from the formulas here rather than pasting the reference shaders.
