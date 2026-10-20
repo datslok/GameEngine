@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
+#include <vector>
 
 namespace {
     bool nearlyEqual(float a, float b) {
@@ -350,12 +351,13 @@ namespace {
     }
 
     // L fills the ground with more lamps than the shader has seats, to show light priority at work, and removes them
-    // again, entities and all.
+    // again, entities and all (each switch's probe event lasts one frame, cleared as the engine does).
     void testLampsToggle() {
         World world;
         AssetManager assets;
         DemoGame game{ControlMode::Moba, false};
         game.onInit(world, assets);
+        clearProbeEvents(world);
 
         const std::size_t entitiesBefore = world.getEntityCount();
         assert(countPointLights(world) == 0);
@@ -376,7 +378,106 @@ namespace {
 
         game.onInput(world, pressL);
         assert(countPointLights(world) == 0);
+        clearProbeEvents(world);
         assert(world.getEntityCount() == entitiesBefore);
+    }
+
+    // The probe events signalled since the last frame, cleared as the engine does once the frame is built.
+    std::vector<ProbeEvent> takeProbeEvents(World& world) {
+        const std::vector<ProbeEvent> events = collectLighting(world, 1.0f).probeEvents;
+        clearProbeEvents(world);
+        return events;
+    }
+
+    // Whether the region holds everything within reach of the point along each axis (a hair less, for rounding).
+    bool reaches(const Aabb& region, const Vec3& centre, float reach) {
+        const Vec3 half = Vec3{reach, reach, reach} * 0.99f;
+        return region.contains(centre - half) && region.contains(centre + half);
+    }
+
+    /*
+    * Bounce light in the demo (the light probes): one ProbeCascades round the camera, and the two things that never
+    * move, the ground and the obstacle course, marked static so the probes move off them. Everything else moves or
+    * comes and goes.
+    */
+    void testDemoProbes() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+
+        const FrameLighting lighting = collectLighting(world, 1.0f);
+        assert(lighting.probeCascades.has_value());
+        assert(lighting.probeCascades->followCamera);
+
+        std::size_t staticRenderers = 0;
+        std::size_t staticParts = 0;
+        world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
+            if (renderer.isStatic) {
+                ++staticRenderers;
+                staticParts += renderer.parts.size();
+            }
+        });
+        assert(staticRenderers == 2);
+        assert(staticParts > 2); // the ground's one plane and the course's many blocks
+    }
+
+    /*
+    * The lamp field's lamps fly, so their bounce light is fast (it follows them without trailing), and each switch of
+    * the field is one scene event over every lamp's reach: a change of shape too, since the pillars come and go.
+    */
+    void testLampsAreFastAndSignalTheProbes() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+        clearProbeEvents(world);
+
+        Input pressL = mobaInput();
+        pressL.pressKey(Key::L);
+        game.onInput(world, pressL);
+
+        const std::vector<ProbeEvent> on = takeProbeEvents(world);
+        assert(on.size() == 1);
+        assert(on[0].kind == ProbeEventKind::GeometryChange && !on[0].everywhere);
+
+        world.each<PointLight, Transform>([&](Entity, PointLight& light, Transform& placement) {
+            assert(light.fast);
+            assert(reaches(on[0].region, placement.position, light.range));
+        });
+        game.onInput(world, pressL);
+        const std::vector<ProbeEvent> off = takeProbeEvents(world);
+        assert(off.size() == 1);
+        assert(off[0].kind == ProbeEventKind::GeometryChange && !off[0].everywhere);
+        assert(off[0].region.contains(on[0].region.centre()));
+    }
+
+    // Each switch of the floodlights is one light change over all four beams' reach.
+    void testFloodlightsSignalTheProbes() {
+        World world;
+        AssetManager assets;
+        DemoGame game{ControlMode::Moba, false};
+        game.onInit(world, assets);
+        clearProbeEvents(world);
+
+        std::vector<Vec3> heads;
+        float range = 0.0f;
+        for (const Entity light : game.getFloodlights()) {
+            heads.push_back(world.get<Transform>(light).position);
+            range = world.get<SpotLight>(light).range;
+        }
+
+        Input pressK = mobaInput();
+        pressK.pressKey(Key::K);
+        for (int press = 0; press < 2; ++press) {
+            game.onInput(world, pressK);
+            const std::vector<ProbeEvent> events = takeProbeEvents(world);
+            assert(events.size() == 1);
+            assert(events[0].kind == ProbeEventKind::LightChange && !events[0].everywhere);
+            for (const Vec3& head : heads) {
+                assert(reaches(events[0].region, head, range));
+            }
+        }
     }
 
     // The lamps fly round their pillars like fireflies, so the shadows sweep. Switched on part way through the game, each
@@ -490,6 +591,9 @@ void testDemoGame() {
     testDropIntoFirstPerson();
     testLampsToggle();
     testLampsFly();
+    testDemoProbes();
+    testLampsAreFastAndSignalTheProbes();
+    testFloodlightsSignalTheProbes();
     testThrowGrenade();
 
     World world;

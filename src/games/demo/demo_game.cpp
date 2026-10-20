@@ -11,7 +11,9 @@
 #include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
+#include "scene/lighting.h"
 #include "scene/model_renderer.h"
+#include "scene/probe_volume.h"
 
 #include <cmath>
 #include <memory>
@@ -236,6 +238,17 @@ namespace {
         return course;
     }
 
+    // One scene event for the light probes round a group of things switched together (the lamp field, the floodlights):
+    // the box within reach of every one of them.
+    void signalAround(World& world, const std::vector<Entity>& entities, ProbeEventKind kind, float reach) {
+        std::vector<Vec3> positions;
+        positions.reserve(entities.size());
+        for (const Entity entity : entities) {
+            positions.push_back(world.get<Transform>(entity).position);
+        }
+        signalProbeEvent(world, probeEventAround(kind, positions, reach));
+    }
+
     // A surface that shows only its own light: black, so lights never change it, and fully rough, so their reflections
     // (4% head-on, like any non-metal) spread too thin to see. The moon, the lamp bulbs, the floodlight heads and the marker.
     Material glowMaterial(const Vec3& emissive) {
@@ -355,6 +368,10 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     // The flashlight. updateFlashlight places it every frame, in the right hand or (in MOBA mode) in the duck's.
     flashlight.create(world, true);
 
+    // Bounce light: light probes round the camera wherever it goes (scene/probe_volume.h). Rays that miss everything
+    // bring back the night's faint ambient, so most of what they gather is the lamps' and the flashlight's.
+    world.add(world.create(), ProbeCascades{});
+
     // Ground: it never moves, so it needs no PreviousTransform.
     Material grass;
     grass.colour = Pixel{75, 110, 75};
@@ -386,6 +403,8 @@ void DemoGame::createScene(World& world, AssetManager& assets) {
     staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(ground)), groundPlacement.getMatrix());
     staticLevel.add(assets.makeCollisionMesh(course), coursePlacement.getMatrix());
 
+    // Static like the ground, so the probes move off its blocks instead of sitting inside them.
+    course.isStatic = true;
     const Entity courseEntity = world.create();
     world.add(courseEntity, coursePlacement);
     world.add(courseEntity, std::move(course));
@@ -595,9 +614,11 @@ void DemoGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
 * Four colours in turn make it easy to see which lamps are lit: an unseated lamp's bulb still glows (it is emissive),
 * but the ground around it stays dark. Each lamp flies round its pillar (a Firefly), so it has a PreviousTransform and is
 * placed where its flight puts it right now, or the first tick would make it jump. The pillars never move.
+* Each switch is one scene event over the whole field (signalLampField), a change of shape since the pillars come and go.
 */
 void DemoGame::toggleLamps(World& world) {
     if (!lampEntities.empty()) {
+        signalLampField(world);
         for (const Entity entity : lampEntities) {
             world.destroy(entity);
         }
@@ -660,7 +681,8 @@ void DemoGame::toggleLamps(World& world) {
             world.add(lamp, flight);
             world.add(lamp, std::move(bulb));
             world.add(lamp, Collider{Sphere{Vec3{0.0f, 0.0f, 0.0f}, 1.0f}, nullptr});
-            world.add(lamp, PointLight{.colour = colour, .intensity = lampIntensity, .range = lampRange, .sourceRadius = lampSourceRadius});
+            // Fast: the lamps fly, and the probes' usual memory of seconds would leave their bounce trailing behind them.
+            world.add(lamp, PointLight{.colour = colour, .intensity = lampIntensity, .range = lampRange, .sourceRadius = lampSourceRadius, .fast = true});
             lampEntities.push_back(lamp);
 
             Transform pillarPlacement;
@@ -676,6 +698,16 @@ void DemoGame::toggleLamps(World& world) {
             ++index;
         }
     }
+
+    signalLampField(world);
+}
+
+/*
+* The lamp field's region: round every lamp and pillar, as far as a lamp's light reaches from its pillar (it flies up to
+* its orbit and wobble away), so the box holds every lamp wherever it flies.
+*/
+void DemoGame::signalLampField(World& world) const {
+    signalAround(world, lampEntities, ProbeEventKind::GeometryChange, lampRange + lampOrbitRadius + lampOrbitWobble);
 }
 
 /*
@@ -960,10 +992,11 @@ const std::vector<Entity>& DemoGame::getFloodlights() const {
 * Off means the lamp entities (spotlight and glowing head) are gone, like the lamp field, so they take no light seats
 * or shadow tiles; the poles are level geometry and stay. Each lamp hangs out from its pole towards the course, high up,
 * and aims at a point past the course's middle, so the four beams cross. Its head glows with the light's colour and does
-* not block the light that comes from inside it.
+* not block the light that comes from inside it. Each switch is one scene event over the four beams' reach.
 */
 void DemoGame::toggleFloodlights(World& world) {
     if (!floodlights.empty()) {
+        signalAround(world, floodlights, ProbeEventKind::LightChange, floodlightRange);
         for (const Entity light : floodlights) {
             world.destroy(light);
         }
@@ -999,6 +1032,8 @@ void DemoGame::toggleFloodlights(World& world) {
         });
         floodlights.push_back(light);
     }
+
+    signalAround(world, floodlights, ProbeEventKind::LightChange, floodlightRange);
 }
 
 Entity DemoGame::getFirstPersonBody() const {

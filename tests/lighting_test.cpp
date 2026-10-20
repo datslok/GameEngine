@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <vector>
 
 namespace {
     bool nearlyEqual(float actual, float expected) {
@@ -156,6 +157,22 @@ namespace {
         });
         assert(left == 0);
     }
+
+    /*
+    * Lights switched together signal one event, not one each: the box round all of them, each grown by its reach.
+    */
+    void testProbeEventAroundSeveralPoints() {
+        const std::vector<Vec3> centres{Vec3{1.0f, 0.0f, -2.0f}, Vec3{-3.0f, 4.0f, 5.0f}, Vec3{0.0f, 1.0f, 0.0f}};
+        const ProbeEvent event = probeEventAround(ProbeEventKind::GeometryChange, centres, 0.5f);
+        assert(event.kind == ProbeEventKind::GeometryChange && !event.everywhere);
+        assert(nearlyEqual(event.region.minimum, Vec3{-3.5f, -0.5f, -2.5f}));
+        assert(nearlyEqual(event.region.maximum, Vec3{1.5f, 4.5f, 5.5f}));
+
+        // One point is the cube round it, as the single-point form gives.
+        const ProbeEvent single = probeEventAround(ProbeEventKind::LightChange, std::vector<Vec3>{Vec3{1.0f, 2.0f, 3.0f}}, 0.5f);
+        const ProbeEvent around = probeEventAround(ProbeEventKind::LightChange, Vec3{1.0f, 2.0f, 3.0f}, 0.5f);
+        assert(nearlyEqual(single.region.minimum, around.region.minimum) && nearlyEqual(single.region.maximum, around.region.maximum));
+    }
 }
 
 void testLighting() {
@@ -167,4 +184,5 @@ void testLighting() {
     testPointLightPositionIsInterpolated();
     testProbeCascadesAreCopied();
     testProbeEventsLastOneFrame();
+    testProbeEventAroundSeveralPoints();
 }

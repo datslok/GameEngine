@@ -139,6 +139,7 @@ private:
     // The cube's collider (its box plus its triangles), shared by the spinning cubes and the lamp pillars.
     Collider cubeCollider;
     void toggleLamps(World& world);
+    void signalLampField(World& world) const;
 
     // K switches the floodlights over the obstacle course (on at the start).
     std::vector<Entity> floodlights;
