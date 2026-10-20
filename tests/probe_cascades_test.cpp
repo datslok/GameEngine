@@ -48,21 +48,22 @@ namespace {
     };
 
     /*
-    * The settings' layout: the densest cascade 31 x 17 x 31 probes, the three coarser 21 x 13 x 21, from half a metre,
-    * each twice as far apart; the probes numbered one cascade after another.
+    * The settings' layout: six cascades from half a metre to 16 m, each twice as far apart, the densest 31 x 17 x 31
+    * probes and the five coarser 21 x 13 x 21; the probes numbered one cascade after another.
     */
     void testTheLayoutFollowsTheSettings() {
         const GlobalIlluminationSettings settings;
         const ProbeCascadeLayout layout = probeCascadeLayout(settings);
         assert(layout.densest.x == 31 && layout.densest.y == 17 && layout.densest.z == 31);
         assert(layout.counts.x == 21 && layout.counts.y == 13 && layout.counts.z == 21);
-        assert(layout.cascades == 4 && layout.spacing == 0.5f);
+        assert(layout.cascades == 6 && layout.spacing == 0.5f);
         const ProbeCounts first = probeCascadeCounts(layout, 0);
         const ProbeCounts second = probeCascadeCounts(layout, 1);
         assert(first.x == 31 && first.y == 17 && second.x == 21 && second.y == 13 && probeCascadeCounts(layout, 3).z == 21);
-        assert(probeCascadeLayoutProbes(layout) == 31 * 17 * 31 + 3 * 21 * 13 * 21);
+        assert(probeCascadeLayoutProbes(layout) == 31 * 17 * 31 + 5 * 21 * 13 * 21);
         assert(settings.seedProbes);
-        assert(probeCascadeSpacing(layout, 0) == 0.5f && probeCascadeSpacing(layout, 1) == 1.0f && probeCascadeSpacing(layout, 3) == 4.0f);
+        assert(probeCascadeSpacing(layout, 0) == 0.5f && probeCascadeSpacing(layout, 1) == 1.0f && probeCascadeSpacing(layout, 3) == 4.0f &&
+               probeCascadeSpacing(layout, 5) == 16.0f);
 
         // Kept to what the atlases hold: no more cascades than the most, no more probes than one workgroup each.
         GlobalIlluminationSettings many = settings;
@@ -256,7 +257,7 @@ namespace {
         const ProbeCascadeLayout layout = probeCascadeLayout(settings);
         const Vec3 centre{-23.7f, 1.6f, 8.9f};
         const std::vector<ProbeCascade> cascades = probeCascadesAround(centre, layout, settings.selfShadowBias);
-        assert(cascades.size() == 4);
+        assert(cascades.size() == 6);
         int first = 0;
 
         for (std::size_t c = 0; c < cascades.size(); ++c) {
@@ -287,6 +288,12 @@ namespace {
         assert(nearlyEqual(densest.weightReach.x - densest.weightFade.x, 6.1375f, 1e-3f));
         assert(nearlyEqual(densest.weightReach.y - densest.weightFade.y, 2.6375f, 1e-3f));
         assert(nearlyEqual(cascades[1].weightReach.x - cascades[1].weightFade.x, 7.275f, 1e-3f));
+
+        // The two far cascades, 8 m and 16 m apart, carry bounce light out to 58 m and 116 m at full weight (the fourth
+        // reaches 29 m), past which the flat ambient takes over.
+        assert(nearlyEqual(cascades[3].weightReach.x - cascades[3].weightFade.x, 29.1f, 1e-2f));
+        assert(nearlyEqual(cascades[4].weightReach.x - cascades[4].weightFade.x, 58.2f, 1e-2f));
+        assert(nearlyEqual(cascades[5].weightReach.x - cascades[5].weightFade.x, 116.4f, 1e-2f));
     }
 
     // The cascade a probe number belongs to: the last one whose first probe is at or before it, right at every boundary.
