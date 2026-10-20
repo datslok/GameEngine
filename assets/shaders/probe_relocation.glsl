@@ -104,9 +104,8 @@ ProbeMove relocateProbeStep(ProbeRayTally tally, vec3 offset, vec3 spacing) {
 
     float smallestSpacing = min(spacing.x, min(spacing.y, spacing.z));
 
-    if (tally.frontFaces > 0 && tally.closestFrontFace < DDGI_MIN_FRONT_FACE_SHARE * smallestSpacing &&
-        dot(tally.closestFrontFaceDirection, tally.farthestFrontFaceDirection) <= DDGI_SAME_SURFACE_COSINE) {
-        vec3 moved = offset + tally.farthestFrontFaceDirection * min(tally.farthestFrontFace, DDGI_FRONT_FACE_NUDGE * smallestSpacing);
+    if (tally.frontFaces > 0 && tally.closestFrontFace < DDGI_MIN_FRONT_FACE_SHARE * smallestSpacing) {
+        vec3 moved = offset - tally.closestFrontFaceDirection * (DDGI_FRONT_FACE_NUDGE * smallestSpacing - tally.closestFrontFace);
         return ProbeMove(clamp(moved, -limit, limit), false);
     }
 

@@ -83,9 +83,8 @@ ProbeMove relocateProbeStep(const ProbeRayTally& tally, const Vec3& offset, cons
 
     const float smallestSpacing = std::min({spacing.x, spacing.y, spacing.z});
 
-    if (tally.frontFaces > 0 && tally.closestFrontFace < probeMinFrontFaceShare * smallestSpacing &&
-        tally.closestFrontFaceDirection.dot(tally.farthestFrontFaceDirection) <= sameSurfaceCosine) {
-        const Vec3 moved = offset + tally.farthestFrontFaceDirection * std::min(tally.farthestFrontFace, probeFrontFaceNudge * smallestSpacing);
+    if (tally.frontFaces > 0 && tally.closestFrontFace < probeMinFrontFaceShare * smallestSpacing) {
+        const Vec3 moved = offset - tally.closestFrontFaceDirection * (probeFrontFaceNudge * smallestSpacing - tally.closestFrontFace);
         return ProbeMove{Vec3{std::clamp(moved.x, -limit.x, limit.x), std::clamp(moved.y, -limit.y, limit.y), std::clamp(moved.z, -limit.z, limit.z)},
                          false};
     }
