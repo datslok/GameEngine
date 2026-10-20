@@ -111,13 +111,18 @@ namespace {
     }
 
     /*
-    * Low's sun cascades are 2048, like Medium's: 1024 saved no memory (the atlas is 128 MB for any cascade up to 2048)
-    * and left the light lab's 30 cm walls a texel or two thick, with ragged sunlight along their edges.
+    * Low's sun cascades are three of 2048, like Medium's: 1024 saved no memory (the atlas is 128 MB for any cascade up to
+    * 2048) and, like two cascades, left the light lab's 30 cm walls with ragged sunlight along their edges. Low still
+    * reaches half as far.
     */
     void testLowKeepsSharpEnoughCascades() {
         RenderSettings low;
+        RenderSettings medium;
         applyQualityPreset(low, QualityPreset::Low);
+        applyQualityPreset(medium, QualityPreset::Medium);
         assert(low.shadows.cascadeResolution == CascadeResolution::Pixels2048);
+        assert(low.shadows.cascadeCount == 3);
+        assert(low.shadows.directionalDistance < medium.shadows.directionalDistance);
     }
 
     void testPresetNames() {

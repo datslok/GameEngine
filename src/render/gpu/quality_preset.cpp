@@ -43,7 +43,7 @@ namespace {
             }
             case QualityPreset::Low:
                 return {.shadowedPoints = 8, .shadowedSpots = 4, .texelTarget = 0.1f, .spotTexelTarget = 0.05f,
-                        .directionalDistance = 60.0f, .cascadeCount = 2,
+                        .directionalDistance = 60.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
