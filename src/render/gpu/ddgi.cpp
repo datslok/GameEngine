@@ -47,6 +47,7 @@ void visit(GlobalIlluminationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Change window", settings.changeWindowSeconds, {.min = 0.01f, .max = 2.0f, .sliderMax = 1.0f, .unit = "s"});
     visitor.field("Change threshold", settings.changeThreshold, {.min = 1.0f, .max = 20.0f, .sliderMax = 10.0f, .unit = "sd"});
     visitor.field("Probe sharing", settings.probeSharing, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Fast probe sharing", settings.fastProbeSharing, {.min = 0.0f, .max = 1.0f});
     visitor.field("Fast lights", settings.fastLights);
     visitor.field("Fast irradiance time constant", settings.fastIrradianceTimeConstant, {.min = 0.0f, .max = 10.0f, .sliderMax = 0.5f, .unit = "s"});
     visitor.field("Fast rays per probe", settings.fastRaysPerProbe, {.min = minRaysPerProbe, .max = maxRaysPerProbe});
@@ -253,7 +254,7 @@ Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, co
     return sum * (1.0f / weights);
 }
 
-GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight) {
+GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight) {
     GpuProbeShare packed{};
     packed.counts[0] = volume.counts.x;
     packed.counts[1] = volume.counts.y;
@@ -262,6 +263,7 @@ GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight) {
     packed.spacing[1] = volume.spacing.y;
     packed.spacing[2] = volume.spacing.z;
     packed.weight[0] = weight;
+    packed.weight[1] = fastWeight;
     return packed;
 }
 

@@ -212,7 +212,7 @@ void VulkanDdgi::createAtlases(VkCommandBuffer commands, const ProbeVolume& volu
 */
 void VulkanDdgi::prepare(VkCommandBuffer commands, const ProbeVolume& volume, const GlobalIlluminationSettings& settings) {
     validateProbeVolume(volume);
-    sharing = settings.probeSharing > 0.0f;
+    sharing = settings.probeSharing > 0.0f || settings.fastProbeSharing > 0.0f;
 
     if (!currentVolume || !sameVolume(*currentVolume, volume)) {
         turnsIndependent = sharing;
@@ -258,7 +258,7 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     blend(commands, descriptors, *distancePipeline, distanceAtlas, probes);
 
     if (sharing) {
-        shareProbes(commands, descriptors, volume, settings.probeSharing);
+        shareProbes(commands, descriptors, volume, settings.probeSharing, settings.fastProbeSharing);
     }
 
     // The blends' writes made visible to every later read: this frame's main pass and debug balls, the next one's trace.
@@ -282,7 +282,7 @@ std::array<const VulkanBuffer*, 4> VulkanDdgi::probeBuffers() const {
 * for (a transition to the same writable state still records a barrier); the shared atlases go to storage use from being
 * sampled (last frame's main pass and balls, this frame's trace), whose reads must finish first.
 */
-void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight) {
+void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight, float fastWeight) {
     const std::array<VulkanImage*, 5> images{&irradiance, &fastIrradiance, &distance, &sharedIrradiance, &sharedFastIrradiance};
     const VkDescriptorSet set = descriptors.allocate(sharePipeline->getResourceLayout());
     std::array<VkDescriptorImageInfo, 5> imageInfos{};
@@ -301,7 +301,7 @@ void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descrip
 
     vkUpdateDescriptorSets(device.getDevice(), static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-    const GpuProbeShare packed = packProbeShare(volume, weight);
+    const GpuProbeShare packed = packProbeShare(volume, weight, fastWeight);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->get());
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sharePipeline->getLayout(), 0, 1, &set, 0, nullptr);
     vkCmdPushConstants(commands, sharePipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(packed), &packed);

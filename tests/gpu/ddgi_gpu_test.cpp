@@ -706,6 +706,7 @@ namespace {
         settings.probeUpdatesPerSecond = 0.0f;
         settings.adaptiveMemory = false;
         settings.probeSharing = 0.0f;
+        settings.fastProbeSharing = 0.0f;
         const std::vector<Vec3> rays = firstFrameRays(settings.raysPerProbe);
         const std::vector<Vec3> fastRays = firstFrameRays(settings.fastRaysPerProbe);
 
