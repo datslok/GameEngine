@@ -13,7 +13,7 @@
 // memory on starts every texel from its stored light). A probe a scene event restarted (render/gpu/ddgi.h,
 // advanceProbeRestarts) checks whether its light really changed and restarts only then (adaptiveProbeUpdate, with the
 // adaptive memory), or with the fixed memory and for the distances restarts outright, keeping the share the restart
-// buffer holds.
+// buffer holds. The fast atlas restarts with the still irradiance, outright.
 #ifndef DDGI_UPDATE_GLSL
 #define DDGI_UPDATE_GLSL
 
@@ -119,7 +119,7 @@ void main() {
         } else {
             result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, restart.frames.x >= 0 ? restart.keeps.x : volume.hysteresis.x), 0.0);
         }
-        fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, volume.origin.w), 1.0);
+        fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, restart.frames.x >= 0 ? restart.check.w : volume.origin.w), 1.0);
 #else
         result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, restart.frames.y >= 0 ? restart.keeps.y : volume.hysteresis.y), 0.0, 1.0);
 #endif

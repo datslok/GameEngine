@@ -382,6 +382,10 @@ namespace {
         lab.game.onInput(lab.world, pressF);
         assert(lab.world.has<SpotLight>(flashlight));
 
+        // Switching it is a scene event for the probes round it (gameplay/flashlight).
+        assert(collectLighting(lab.world, 1.0f).probeEvents.size() == 1);
+        clearProbeEvents(lab.world);
+
         Input idle;
         idle.beginFrame();
         lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);

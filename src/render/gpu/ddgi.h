@@ -408,7 +408,6 @@ struct ProbeEventCheck {
     float threshold = 0.0f; // eventChangeThreshold: noise units a change must pass
     float growth = 1.0f;    // eventMemoryGrowth
     float frames = 0.0f;    // the check's length in frames (eventCheckSeconds)
-    float unused = 0.0f;
 };
 
 /*
@@ -544,8 +543,10 @@ ProbeFrame scheduleProbeFrame(ProbeSchedule& schedule, const GlobalIlluminationS
 /*
 * Each probe's scene event this frame, as the update reads it (ProbeRestart in ddgi.glsl): the frames since an event
 * restarted its irradiance and its distances, 0 on the event's frame, negative when none is running, the share of
-* each it keeps this frame (restartedProbeKeep), and the event check's settings, worked out here since the update's push
-* constants are full.
+* each it keeps this frame (restartedProbeKeep), and of the fast atlas, which restarts with the still irradiance but
+* outright (no noise is measured there to check against, and its memory is short anyway; no soft restart, which would
+* keep a switched-off light's bounce), and the event check's settings, worked out here since the update's push constants
+* are full.
 */
 struct GpuProbeRestart {
     std::int32_t irradianceFrames = -1;
@@ -553,6 +554,7 @@ struct GpuProbeRestart {
     float irradianceKeep = 0.0f;
     float distanceKeep = 0.0f;
     ProbeEventCheck check;
+    float fastKeep = 0.0f; // the fast atlas's share kept: it restarts with the still one, outright (the shader's check.w)
 };
 
 static_assert(sizeof(GpuProbeRestart) == 32, "GpuProbeRestart must match ProbeRestart in ddgi.glsl");

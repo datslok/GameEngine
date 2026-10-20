@@ -642,5 +642,6 @@ void advanceProbeRestarts(std::vector<GpuProbeRestart>& restarts, const ProbeVol
         restart.distanceKeep = restartedProbeKeep(frame.distanceHysteresis, frame.restartHysteresis, frame.restartGrowth,
                                                   static_cast<float>(restart.distanceFrames));
         restart.check = ProbeEventCheck{frame.restartThreshold, frame.restartGrowth, frame.restartCheckFrames};
+        restart.fastKeep = restartedProbeKeep(frame.fastIrradianceHysteresis, 0.0f, frame.restartGrowth, static_cast<float>(restart.irradianceFrames));
     }
 }

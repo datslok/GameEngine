@@ -210,7 +210,7 @@ float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRe
 
 // A probe's scene event this frame (render/gpu/ddgi.h, GpuProbeRestart): the frames since its irradiance (x) and
 // distances (y) were restarted, negative for none, the share of each it keeps this frame, and the event check (x the
-// threshold, y the memory's growth, z the check's frames).
+// threshold, y the memory's growth, z the check's frames) with, in w, the fast atlas's share kept.
 struct ProbeRestart {
     ivec2 frames;
     vec2 keeps;

@@ -808,6 +808,7 @@ namespace {
         bool lightStays = false;
         float offPatch = 0.005f;
         float onPatch = 2.0f;
+        float fixedSeconds = 2.0f; // the fixed memory's time constant (the fast atlas's: 0.1 s)
     };
 
     SwitchedTexel switchedTexel(const SwitchOptions& options) {
@@ -845,7 +846,7 @@ namespace {
 
         const float framesPerSecond = options.framesPerSecond;
         const float frameSeconds = 1.0f / framesPerSecond;
-        const float fixedKeep = hysteresisForTimeConstant(frameSeconds, 2.0f);
+        const float fixedKeep = hysteresisForTimeConstant(frameSeconds, options.fixedSeconds);
         const float longKeep = hysteresisForTimeConstant(frameSeconds, 4.0f);
         const float windowKeep = hysteresisForTimeConstant(frameSeconds, 0.2f);
         const int stateFrames = static_cast<int>(30.0f * framesPerSecond);
@@ -1120,6 +1121,7 @@ namespace {
         frame.restartGrowth = 1.0f;
         frame.restartThreshold = 4.0f;
         frame.restartCheckFrames = 0.0f;    // no check period: the restart's ramp alone decides when it ends
+        frame.fastIrradianceHysteresis = 0.3f;
         std::vector<GpuProbeRestart> restarts;
 
         advanceProbeRestarts(restarts, volume, {}, frame);
@@ -1141,9 +1143,10 @@ namespace {
             assert(restart.distanceFrames < 0);
         }
 
-        // Each restart carries the share its probe keeps this frame (restartedProbeKeep), and the event check's settings,
-        // the update's to use.
+        // Each restart carries the share its probe keeps this frame (restartedProbeKeep), the fast atlas's too (restarted
+        // with the still one, outright, with no soft restart), and the event check's settings, the update's to use.
         assert(restarts[static_cast<std::size_t>(*inside.begin())].irradianceKeep == 0.0f);
+        assert(restarts[static_cast<std::size_t>(*inside.begin())].fastKeep == 0.0f);
         const ProbeEventCheck carried = restarts[0].check;
         assert(carried.threshold == frame.restartThreshold && carried.growth == frame.restartGrowth && carried.frames == frame.restartCheckFrames);
 
@@ -1152,6 +1155,7 @@ namespace {
             const GpuProbeRestart& restart = restarts[static_cast<std::size_t>(*inside.begin())];
             assert(restart.irradianceFrames == expected);
             assert(expected < 0 || nearlyEqual(restart.irradianceKeep, std::exp(-1.0f / static_cast<float>(expected))));
+            assert(nearlyEqual(restart.fastKeep, restartedProbeKeep(frame.fastIrradianceHysteresis, 0.0f, frame.restartGrowth, static_cast<float>(expected))));
         }
 
         // A soft restart keeps at least its short memory's share, until the growing memory passes it, and ends with it.
@@ -1347,6 +1351,30 @@ namespace {
         const SwitchedTexel unsignalled = switchedTexel(none);
         assert(lamp.reach90 < 0.05 * unsignalled.reach90 && lamp.reach90 < 0.25);
         assert(lamp.dark99 < 0.05 * unsignalled.dark99 && lamp.dark99 < 0.4);
+    }
+
+    /*
+    * Fast lights restart with the event (the flashlight's switch), outright: in the dark room model with the fast
+    * atlas's 0.1 s memory, its bounce comes on 90% of the way within 0.02 s at 30 fps (0.04 at 60) instead of 0.17
+    * (0.22), and switched off it is dark at once (the new light exactly none) instead of after 0.43 s (0.45) to fall
+    * within 1%; it flickers no more after the switch (19.0% against 19.3% of change in 0.1 s at 30 fps, 13.5% against
+    * 15.0% at 60: the model's sparse patch at a short memory is a harsh case) and settles to the same crawl.
+    */
+    void testFastLightsRestartWithTheEvent() {
+        const GlobalIlluminationSettings defaults;
+
+        for (float framesPerSecond : {30.0f, 60.0f}) {
+            const SwitchOptions plain{.adaptive = false, .framesPerSecond = framesPerSecond, .fixedSeconds = defaults.fastIrradianceTimeConstant};
+            SwitchOptions signalled = plain;
+            signalled.events = true;
+            signalled.eventMemoryGrowth = defaults.eventMemoryGrowth;
+            const SwitchedTexel fading = switchedTexel(plain);
+            const SwitchedTexel restarted = switchedTexel(signalled);
+            assert(restarted.reach90 < 0.3 * fading.reach90);
+            assert(restarted.dark99 < 0.1 * fading.dark99);
+            assert(restarted.flicker < 1.05 * fading.flicker);
+            assert(restarted.crawl < 1.01 * fading.crawl);
+        }
     }
 
     bool sameRows(const ProbeRotationRows& a, const ProbeRotationRows& b) {
@@ -1683,6 +1711,7 @@ void testDdgi() {
     testASoftRestartIsCalmerAtFirst();
     testAGrowingMemoryForgetsTheSwitchSooner();
     testTheEventCheckSparesUnchangedLight();
+    testFastLightsRestartWithTheEvent();
     testEachProbeTurnsItsRaysItsOwnWay();
     testNeighboursShareOnlyIfTheyCanSeeEachOther();
     testSharingAveragesTheVisibleNeighbours();
