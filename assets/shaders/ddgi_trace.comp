@@ -5,7 +5,8 @@
 * The light probes' rays (render/gpu/ddgi.h): one invocation per ray, each traced from its probe against the frame's
 * solid instances (the glowing stand-ins for lights are left out, since their light is counted directly), and what it
 * brings back written for the update: the light leaving the surface it hit, towards the probe, and its distance.
-* - a miss brings back the sky behind everything, at the ray's whole reach;
+* - a miss brings back the sky behind everything (the background, and the atmosphere's sky in its direction), at the
+*   ray's whole reach;
 * - a back face (the probe sees the inside of something) brings back no light, its distance recorded negative;
 * - a front face brings back its own glow, plus, on its base colour (matte only: the probes' cosine averaging blurs away
 *   gloss [2019]):
@@ -144,7 +145,7 @@ void main() {
     }
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
-        probeRays[index] = vec4(volume.sky.rgb, DDGI_RAY_REACH);
+        probeRays[index] = vec4(volume.sky.rgb + skyLightTowards(direction), DDGI_RAY_REACH);
         fastProbeRays[index] = packFastRayLight(vec3(0.0));
         return;
     }

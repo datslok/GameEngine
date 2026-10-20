@@ -3,6 +3,7 @@
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
 #include "math/angles.h"
+#include "core/srgb.h"
 #include "math/transform.h"
 #include "scene/lighting.h"
 #include "scene/model_renderer.h"
@@ -56,6 +57,9 @@ namespace {
         const float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
         return t * t * (3.0f - 2.0f * t);
     }
+
+    // The field's grass, in sRGB like every material colour.
+    const Pixel labGrassColour{75, 110, 75};
 
     // Surfaces in sRGB and how rough they are: matte grass, bark and leaves; plaster, painted wood and stone a little
     // smoother; varnished floorboards smoother still.
@@ -148,6 +152,7 @@ void visit(LightLabSunSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Hours per second", settings.hoursPerSecond, {.min = 0.0f, .max = hoursPerDay, .sliderMax = 1.0f, .unit = "h/s"});
     visitor.field("Sun intensity", settings.sunIntensity, {.min = 0.0f, .sliderMax = 10.0f});
     visitor.field("Sky brightness", settings.skyBrightness, {.min = 0.0f, .sliderMax = 5.0f});
+    visitor.field("Atmosphere (real sky)", settings.atmosphere);
     visitor.field("Sun disc size", settings.sunDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
 }
 
@@ -165,6 +170,16 @@ float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds) {
 }
 
 Daylight daylightFor(const Vec3& towardsSun, const LightLabSunSettings& settings) {
+    if (settings.atmosphere) {
+        Daylight daylight;
+        daylight.sun.direction = towardsSun * -1.0f;
+        daylight.sun.colour = Vec3{1.0f, 1.0f, 1.0f};
+        daylight.sun.intensity = settings.sunIntensity;
+        daylight.sun.castsShadows = true;
+        daylight.sky.colour = Vec3{0.0f, 0.0f, 0.0f}; // the sky's own light comes from the atmosphere
+        return daylight;
+    }
+
     const float elevation = sunElevation(towardsSun);
     const float sunUp = smoothStep(radiansFromDegrees(sunFadeBelowDegrees), radiansFromDegrees(sunFullAboveDegrees), elevation);
     const float warmth = 1.0f - smoothStep(0.0f, radiansFromDegrees(sunWarmBelowDegrees), elevation);
@@ -199,8 +214,12 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     const LightLabLayout layout = buildLightLabLayout();
 
     Material grass;
-    grass.colour = Pixel{75, 110, 75};
+    grass.colour = labGrassColour;
     grass.roughness = 1.0f;
+
+    // The planet beyond the field is grass too, so its ground seen past the field's edge, and its light scattered back
+    // up into the air, match the field (the albedo in linear light, as material colours are decoded).
+    atmosphereSettings.groundAlbedo = Vec3{srgbByteToLinear(labGrassColour.r), srgbByteToLinear(labGrassColour.g), srgbByteToLinear(labGrassColour.b)};
 
     const auto addStatic = [&](ModelRenderer renderer) {
         renderer.isStatic = true;
@@ -223,6 +242,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     sky = world.create();
     world.add(sky, AmbientLight{});
     world.add(sky, SkyBackground{});
+    air = world.create();
     probes = world.create();
     world.add(probes, labProbeVolume);
     flashlight.create(world, false);
@@ -332,6 +352,20 @@ void LightLabGame::updateDaylight(World& world) {
     world.get<AmbientLight>(sky) = daylight.sky;
     world.get<SkyBackground>(sky) = daylight.background;
 
+    // The real sky's air, while it is on; its disc drawn the same size as the lab's own.
+    if (sunSettings.atmosphere) {
+        Atmosphere atmosphere = atmosphereSettings;
+        atmosphere.sunDiscScale = sunSettings.sunDiscScale;
+
+        if (world.has<Atmosphere>(air)) {
+            world.get<Atmosphere>(air) = atmosphere;
+        } else {
+            world.add(air, atmosphere);
+        }
+    } else if (world.has<Atmosphere>(air)) {
+        world.remove<Atmosphere>(air);
+    }
+
     // The disc where the sunlight comes from, just inside the far plane, glowing with that light over its patch of sky.
     // Hidden once the sun has set (its light has faded to nothing).
     const Camera& camera = controls.getCamera();
@@ -340,7 +374,7 @@ void LightLabGame::updateDaylight(World& world) {
                                                   discAngularRadius);
 
     ModelRenderer& disc = world.get<ModelRenderer>(sunDisc);
-    disc.visible = daylight.sun.intensity > 0.0f && discAngularRadius > 0.0f;
+    disc.visible = !sunSettings.atmosphere && daylight.sun.intensity > 0.0f && discAngularRadius > 0.0f;
     disc.parts[0].material.emissive = discRadiance(daylight.sun.colour * daylight.sun.intensity, discAngularRadius);
 }
 
@@ -378,6 +412,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Probes", [&] {
         visit(probeSettings, visitor);
+    });
+    visitor.group("Atmosphere", [&] {
+        visit(atmosphereSettings, visitor);
     });
     controls.visitSettings(visitor);
 }

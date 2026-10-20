@@ -22,6 +22,7 @@
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/scene_layout.h"
+#include "render/vulkan/vulkan_atmosphere.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
@@ -219,6 +220,9 @@ private:
     std::unique_ptr<VulkanDdgi> ddgi;
 
     std::unique_ptr<VulkanBloom> bloom;
+
+    // The sky and the air the light crosses, when the frame has an atmosphere.
+    std::unique_ptr<VulkanAtmosphere> atmosphere;
     std::unique_ptr<VulkanDebugLines> debugLines;
     std::unique_ptr<VulkanOverlay> overlay;
     bool debugUiStarted = false;
@@ -234,6 +238,9 @@ private:
 
     // Bound in place of the light probes' states while there are none (one probe's worth of zeros, never read then).
     VulkanBuffer noProbeStates;
+
+    // This frame's camera in the atmosphere's frame: its distance from the planet's centre, km (0 without an atmosphere).
+    float cameraAtmosphereRadius = 0.0f;
 
     // This frame's camera in world space (culling, debug lines) and measured from the camera (the main pass).
     Mat4 viewProjection = Mat4::identity();
@@ -298,10 +305,12 @@ private:
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
     void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
     // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
+    // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone).
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
-                      bool sampleProbes, const Vec3& background);
+                      bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
+    GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without

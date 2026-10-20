@@ -7,6 +7,7 @@
 #include "gameplay/flashlight.h"
 #include "gameplay/player_controls.h"
 #include "physics/static_level.h"
+#include "scene/atmosphere.h"
 #include "scene/light.h"
 
 #include <vector>
@@ -15,17 +16,23 @@
 * Where and when the light lab's sun shines (scene/sun) and how bright the day is. The solar time is the clock: it moves
 * on by itself at hoursPerSecond (0, still, by default; golden views hold it still), so its slider shows the time of day as
 * it passes.
-* The brightness values are picked by eye for daylight through the default tone mapping, since lights have no physical
-* units yet. The sky is uniform until a real sky (phase 6d) replaces it; the light probes see it and carry its light
-* round the level, and the flat ambient light (where there are no probes) is the light that same sky gives.
+* With the atmosphere (the default) the renderer draws a real sky lit by the sun, dims and reddens the sunlight on its
+* way down through the air, and lights the scene with that sky (render/gpu/atmosphere.h); without it, the lab's own
+* hand-made day: a uniform blue sky, a sun warmed by hand towards the horizon, and a disc of its own. The brightness is
+* picked by eye through the default tone mapping.
 */
 struct LightLabSunSettings {
     float latitudeDegrees = 45.0f;
     float dayOfYear = 80.0f;       // the March equinox: sunrise near 6, sunset near 18
     float solarHours = 15.5f;      // mid-afternoon: the sun low in the west-south-west, long shadows, the window lit
     float hoursPerSecond = 0.0f;   // 0.025 runs a whole day in 16 minutes
-    float sunIntensity = 3.0f;
-    float skyBrightness = 1.0f;    // the sky at full daylight, seen behind everything and lighting it; it dims towards dusk
+    // The sun's light: above the air with the atmosphere (in the default mid-afternoon it reaches the ground at about 3,
+    // as the hand-made day's did), on the ground without it.
+    float sunIntensity = 4.0f;
+    float skyBrightness = 1.0f;    // the hand-made sky at full daylight, seen behind everything and lighting it; it dims towards dusk
+
+    // The real sky and air (the lab's Atmosphere settings), or the hand-made day.
+    bool atmosphere = true;
 
     // The sun disc in the sky against its real size (0.53 degrees across), for looks only: shadows keep the real size,
     // and a bigger disc glows dimmer by as much, so it gives the same light.
@@ -65,10 +72,11 @@ inline const PointLight labLampLight{
 inline constexpr float labLampGlow = 6.0f;
 
 /*
-* The day's light for the sun in a direction: sunlight travelling away from it, fading out as the sun sinks below the
-* horizon and warmer the lower it stands (a stand-in for the atmosphere's reddening), and the sky seen behind everything
-* with the ambient light it gives (the same value: a uniform sky drawn at B gives a surface facing it the irradiance B),
-* blue, dimming towards dusk but never quite black.
+* The day's light for the sun in a direction. With the atmosphere, only the sun as it is above the air, white and the
+* same at every hour (the renderer does the rest). Without it, the hand-made day: sunlight fading out as the sun sinks
+* below the horizon and warmer the lower it stands (a stand-in for the air's reddening), and the sky seen behind
+* everything with the ambient light it gives (the same value: a uniform sky drawn at B gives a surface facing it the
+* irradiance B), blue, dimming towards dusk but never quite black.
 */
 struct Daylight {
     DirectionalLight sun;
@@ -129,12 +137,16 @@ private:
     LightLabSunSettings sunSettings;
     LightLabProbeSettings probeSettings;
 
+    // The real sky's air (Earth's by default), on the air entity while sunSettings.atmosphere is on.
+    Atmosphere atmosphereSettings;
+
     // The entity holding the frame's ProbeVolume, set from probeSettings every frame.
     Entity probes;
 
     Entity sun;
     Entity sunDisc;
     Entity sky;
+    Entity air;
 
     // The ground and every block: built once in onInit, never rebuilt.
     StaticLevel staticLevel;

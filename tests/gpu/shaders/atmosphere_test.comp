@@ -1,0 +1,68 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs atmosphere.glsl's functions on the cases atmosphere_gpu_test.cpp sends: each case's first nine inputs are the
+// atmosphere (GpuAtmosphere), then the function's own.
+#include "gpu_test.glsl"
+#include "atmosphere.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    Atmosphere atmosphere = Atmosphere(testInput(0), testInput(1), testInput(2), testInput(3), testInput(4), testInput(5), testInput(6),
+                                       testInput(7), testInput(8));
+    vec4 first = testInput(9);
+    vec4 second = testInput(10);
+
+    if (function == GPU_TEST_ATMOSPHERE_MEDIUM) {
+        // first: x altitude, y the cosine from the sun.
+        AtmosphereMedium medium = atmosphereMedium(atmosphere, first.x);
+        testOutput(0, vec4(medium.rayleighScattering, medium.mieScattering));
+        testOutput(1, vec4(medium.scattering, rayleighPhase(first.y)));
+        testOutput(2, vec4(medium.extinction, henyeyGreensteinPhase(atmosphere.mie.w, first.y)));
+    } else if (function == GPU_TEST_ATMOSPHERE_TRANSMITTANCE) {
+        // first: x radius, y the cosine to the up; second: xy a transmittance table coordinate.
+        AtmosphereRay ray = transmittanceLutRay(atmosphere, second.xy);
+        testOutput(0, vec4(atmosphereTransmittance(atmosphere, first.x, first.y), aboveHorizon(atmosphere, first.x, first.y) ? 1.0 : 0.0));
+        testOutput(1, vec4(transmittanceLutUv(atmosphere, first.x, first.y), ray.radius, ray.cosZenith));
+        testOutput(2, vec4(atmosphereMarchLength(atmosphere, first.x, first.y)));
+    } else if (function == GPU_TEST_ATMOSPHERE_TABLES) {
+        // first: xyz a direction, w the camera's radius; second: xyz the sun's direction, w unused.
+        AtmosphereRay scattering = multipleScatteringLutRay(atmosphere, multipleScatteringLutUv(atmosphere, first.w, first.y));
+        SkyViewDirection lookup = skyViewLookup(atmosphere, first.w, first.xyz, second.xyz);
+        vec2 uv = skyViewLutUv(atmosphere, first.w, lookup);
+        SkyViewDirection back = skyViewLutDirection(atmosphere, first.w, uv);
+        testOutput(0, vec4(multipleScatteringLutUv(atmosphere, first.w, first.y), scattering.radius, scattering.cosZenith));
+        testOutput(1, vec4(lookup.cosViewZenith, lookup.cosLightView, lookup.meetsGround ? 1.0 : 0.0, 0.0));
+        testOutput(2, vec4(uv, back.cosViewZenith, back.cosLightView));
+        testOutput(3, vec4(skyViewTexelDirection(back), back.meetsGround ? 1.0 : 0.0));
+        testOutput(4, vec4(skyViewSunDirection(second.y), 0.0));
+    } else if (function == GPU_TEST_ATMOSPHERE_MARCH) {
+        // first: xyz the throughput so far, w the step's length; second: xyz the sunlight, w the cosine from the sun;
+        // third: xyz the multiple scattering, w an altitude; fourth: x a ray's radius, y its cosine to the up, z a
+        // sphere's radius; sixth: x a step, y the steps, z a ray's length.
+        vec4 third = testInput(11);
+        vec4 fourth = testInput(12);
+        vec4 fifth = testInput(13);
+        vec4 sixth = testInput(14);
+        AtmosphereMedium medium = atmosphereMedium(atmosphere, third.w);
+        vec3 source = skyStepSource(atmosphere, medium, second.xyz, third.xyz, second.w);
+        ScatteringMarch march = ScatteringMarch(vec3(0.1, 0.2, 0.3), first.xyz, vec3(0.05));
+        scatteringMarchStep(march, medium, source, first.w);
+        MarchSample sampled = marchSample(int(sixth.x), int(sixth.y), sixth.z);
+        testOutput(0, vec4(source, rayDistanceToSphere(fourth.x, fourth.y, fourth.z)));
+        testOutput(1, vec4(march.luminance, sampled.distance));
+        testOutput(2, vec4(march.throughput, sampled.stepLength));
+        testOutput(3, vec4(march.multipleScatteringAs1, 0.0));
+        testOutput(4, vec4(skyAmbientDirection(int(sixth.x)), 0.0));
+        testOutput(5, vec4(groundRadiance(atmosphere, second.xyz, second.w), 0.0));
+    } else if (function == GPU_TEST_ATMOSPHERE_MULTIPLE_SCATTERING) {
+        // first: x radius, y the sun's cosine to the up, z the direction's number; second: two sums.
+        ScatteringMarch march = multipleScatteringDirection(atmosphere, first.x, first.y, int(first.z));
+        testOutput(0, vec4(march.luminance, 0.0));
+        testOutput(1, vec4(march.multipleScatteringAs1, 0.0));
+        testOutput(2, vec4(multipleScatteringFromSums(second.xxx * vec3(1.0, 2.0, 3.0), second.yyy * vec3(1.0, 1.5, 2.0)), 0.0));
+    }
+}

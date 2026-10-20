@@ -35,6 +35,12 @@ FrameLighting collectLighting(World& world, float alpha) {
         lighting.probeVolumes.push_back(volume);
     });
 
+    world.each<Atmosphere>([&](Entity, Atmosphere& atmosphere) {
+        if (!lighting.atmosphere) {
+            lighting.atmosphere = atmosphere;
+        }
+    });
+
     world.each<ProbeEvent>([&](Entity, ProbeEvent& event) {
         lighting.probeEvents.push_back(event);
     });

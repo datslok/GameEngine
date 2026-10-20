@@ -2,9 +2,11 @@
 
 #include "ecs/world.h"
 #include "math/vec3.h"
+#include "scene/atmosphere.h"
 #include "scene/light.h"
 #include "scene/probe_volume.h"
 
+#include <optional>
 #include <vector>
 
 // A point light together with where it is this frame, and whose it is, so the renderer can recognise it next frame
@@ -40,6 +42,7 @@ struct FrameLighting {
     std::vector<PlacedSpotLight> spotLights;
     std::vector<ProbeVolume> probeVolumes; // where global illumination measures bounced light
     std::vector<ProbeEvent> probeEvents;   // big changes signalled since the last frame, in order
+    std::optional<Atmosphere> atmosphere;  // the sky and the air the light crosses (the first, if several)
 };
 
 // Gather the World's lights for drawing at alpha (0..1) between the last two ticks.

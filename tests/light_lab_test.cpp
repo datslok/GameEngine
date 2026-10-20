@@ -155,8 +155,8 @@ namespace {
         assert(near(hit->hit.point.y, labFloorTop, 1e-3f));
         assert(grown(labSunlitRoom, 1e-3f).contains(hit->hit.point));
 
-        // The sun component follows the settings, and the sky shows behind everything.
-        assert(collectLighting(lab.world, 1.0f).background.y > 0.0f);
+        // The sun component follows the settings, and the sky shows behind everything (the atmosphere's).
+        assert(collectLighting(lab.world, 1.0f).atmosphere.has_value());
         const DirectionalLight& sun = lab.world.get<DirectionalLight>(lab.game.getSun());
         assert(near(sun.direction.normalized().dot(towardsSun), -1.0f, 1e-5f));
         assert(sun.castsShadows);
@@ -189,9 +189,11 @@ namespace {
         assert(blocked.x > labSunlitRoom.maximum.x);
     }
 
-    // Day and night: no sunlight once the sun is well below the horizon, a redder sun low down, a brighter one high up.
+    // Without the atmosphere, the hand-made day: no sunlight once the sun is well below the horizon, a redder sun low
+    // down, a brighter one high up.
     void testDaylight() {
-        const LightLabSunSettings settings;
+        LightLabSunSettings settings;
+        settings.atmosphere = false;
         const Daylight night = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 0.0f), settings);
         const Daylight evening = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 17.5f), settings);
         const Daylight noon = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 12.0f), settings);
@@ -213,6 +215,41 @@ namespace {
             assert(daylight->sky.colour.x == daylight->background.colour.x && daylight->sky.colour.y == daylight->background.colour.y &&
                    daylight->sky.colour.z == daylight->background.colour.z);
         }
+    }
+
+    /*
+    * With the atmosphere (the default), the sun is its light above the air, white and the same at every hour: the
+    * renderer dims and reddens it on its way down, and draws the sky and its disc, so the lab's own sky, ambient light
+    * and disc are gone. Switching it off brings them back.
+    */
+    void testAtmosphere() {
+        const LightLabSunSettings settings;
+        assert(settings.atmosphere);
+        const Daylight night = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 0.0f), settings);
+        const Daylight evening = daylightFor(directionTowardsSunOn(45.0f, 80.0f, 17.5f), settings);
+
+        for (const Daylight* daylight : {&night, &evening}) {
+            assert(daylight->sun.intensity == settings.sunIntensity);
+            assert(daylight->sun.colour.x == daylight->sun.colour.z);
+            assert(daylight->sky.colour.y == 0.0f && daylight->background.colour.y == 0.0f);
+        }
+
+        Lab lab;
+        const FrameLighting lighting = collectLighting(lab.world, 1.0f);
+        assert(lighting.atmosphere.has_value());
+        assert(lighting.atmosphere->sunDiscScale == lab.game.getSunSettings().sunDiscScale);
+        assert(lighting.atmosphere->groundAlbedo.y > lighting.atmosphere->groundAlbedo.x); // the planet beyond is grass too
+        assert(!lab.world.get<ModelRenderer>(lab.game.getSunDisc()).visible);
+
+        const Input noInput;
+        lab.game.getSunSettings().atmosphere = false;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        assert(!collectLighting(lab.world, 1.0f).atmosphere.has_value());
+        assert(lab.world.get<ModelRenderer>(lab.game.getSunDisc()).visible);
+
+        lab.game.getSunSettings().atmosphere = true;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        assert(collectLighting(lab.world, 1.0f).atmosphere.has_value());
     }
 
     // The clock runs at its speed, wraps round midnight, and stands still at speed 0.
@@ -246,10 +283,13 @@ namespace {
     /*
     * A glowing disc in the sky where the sunlight comes from: along the sun's direction from the camera wherever it goes,
     * inside its far plane, at the sun's real angular size times the disc size setting, casting no shadow (it stands for
-    * the light's own source), and glowing with the sunlight spread over its solid angle (capped). Gone at night.
+    * the light's own source), and glowing with the sunlight spread over its solid angle (capped). Gone at night. Only
+    * without the atmosphere, which draws the disc itself.
     */
     void testSunDisc() {
         Lab lab;
+        lab.game.getSunSettings().atmosphere = false;
+        lab.game.onUpdate(lab.world, Input{}, 1.0f / 60.0f, 1.0f);
         const Entity disc = lab.game.getSunDisc();
         const DirectionalLight& sun = lab.world.get<DirectionalLight>(lab.game.getSun());
 
@@ -511,5 +551,6 @@ void testLightLab() {
     testSunbeamThroughTheWindow();
     testWalkingIn();
     testDaylight();
+    testAtmosphere();
     testClock();
 }

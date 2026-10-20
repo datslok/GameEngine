@@ -1,0 +1,26 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+// The transmittance table (render/gpu/atmosphere.h): each texel's ray to space, marched (atmosphereTransmittance).
+// Made when the atmosphere changes.
+#include "atmosphere.glsl"
+
+layout(local_size_x = ATMOSPHERE_GROUP_SIDE, local_size_y = ATMOSPHERE_GROUP_SIDE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer AtmosphereData {
+    Atmosphere atmosphere;
+} data;
+
+layout(set = 0, binding = 1, rgba16f) writeonly uniform image2D transmittanceTable;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(ATMOSPHERE_TRANSMITTANCE_WIDTH, ATMOSPHERE_TRANSMITTANCE_HEIGHT);
+
+    if (any(greaterThanEqual(texel, size))) {
+        return;
+    }
+
+    AtmosphereRay ray = transmittanceLutRay(data.atmosphere, (vec2(texel) + 0.5) / vec2(size));
+    imageStore(transmittanceTable, texel, vec4(atmosphereTransmittance(data.atmosphere, ray.radius, ray.cosZenith), 1.0));
+}

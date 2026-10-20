@@ -7,6 +7,7 @@
 
 #include "render/gpu/bloom_shared.h"
 #include "render/gpu/ddgi_shared.h"
+#include "fibonacci.glsl"
 
 // 1 for zero and up, -1 below: the octahedral fold needs a sign that is never 0.
 vec2 signNotZero(vec2 value) {
@@ -82,15 +83,6 @@ ivec2 probeBorderTexel(int number, int side) {
 
     int corner = number - 4 * side;
     return ivec2((corner & 1) != 0 ? last : 0, (corner & 2) != 0 ? last : 0);
-}
-
-vec3 sphericalFibonacci(int index, int count) {
-    const float goldenFraction = 0.6180339887;
-    const float fullTurn = 6.28318530718;
-    float z = 1.0 - (2.0 * float(index) + 1.0) / float(count);
-    float angle = fullTurn * fract(float(index) * goldenFraction);
-    float radius = sqrt(max(0.0, 1.0 - z * z));
-    return vec3(radius * cos(angle), radius * sin(angle), z);
 }
 
 // phase: the frame's place in its ray cycle; rotation: the cycle's rotation matrix's rows.
