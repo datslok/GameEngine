@@ -1,0 +1,39 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+// The flat ambient light (render/gpu/atmosphere.h, skyAmbient): the frame's own ambient plus the light the sky gives an
+// open surface, the cosine-weighted mean of the sky view table over the directions above, one invocation each, summed
+// in order by the first. Every frame, after the sky view table.
+#include "atmosphere_tables.glsl"
+
+layout(local_size_x = ATMOSPHERE_AMBIENT_DIRECTIONS) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer AtmosphereData {
+    Atmosphere atmosphere;
+} data;
+
+layout(std430, set = 0, binding = 1) writeonly buffer SkyLight {
+    vec4 ambient;
+} skyLight;
+
+layout(set = 0, binding = 2) uniform sampler2D skyViewTable;
+
+shared vec3 contributions[ATMOSPHERE_AMBIENT_DIRECTIONS];
+
+void main() {
+    int index = int(gl_LocalInvocationIndex);
+    vec3 direction = skyAmbientDirection(index);
+    contributions[index] = direction.y > 0.0 ? skyFromTable(skyViewTable, data.atmosphere, direction) * direction.y : vec3(0.0);
+
+    barrier();
+
+    if (index == 0) {
+        vec3 sum = vec3(0.0);
+
+        for (int other = 0; other < ATMOSPHERE_AMBIENT_DIRECTIONS; ++other) {
+            sum += contributions[other];
+        }
+
+        skyLight.ambient = vec4(data.atmosphere.ambient.rgb + sum * (4.0 / float(ATMOSPHERE_AMBIENT_DIRECTIONS)), 1.0);
+    }
+}

@@ -35,6 +35,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, compute},                     // the lights probe rays' hits may need
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // probe irradiance from fast lights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // probe states (vertex for the probes' debug balls)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the flat ambient light
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the sky view table (probe rays that escape)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the atmosphere
     }};
 }
 
@@ -118,12 +121,14 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     spotLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     shadowTiles(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
 VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images,
-                              const VulkanBuffer& clusterMasks, const VkDescriptorBufferInfo& probeStates) {
+                              const VulkanBuffer& clusterMasks, const SceneBufferViews& views) {
     const VkDescriptorSet set = descriptors.allocate(layout.getFrameLayout());
 
     const std::array<VkDescriptorBufferInfo, SceneBindingCount> bufferInfos{
@@ -143,7 +148,10 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.probeHitLights.describe(),
         VkDescriptorBufferInfo{},
-        probeStates,
+        views.probeStates,
+        views.skyLight,
+        VkDescriptorBufferInfo{},
+        buffers.atmosphere.describe(),
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -154,6 +162,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[ProbeIrradianceBinding] = imageInfo(images.probeIrradiance);
     imageInfos[ProbeDistanceBinding] = imageInfo(images.probeDistance);
     imageInfos[ProbeFastIrradianceBinding] = imageInfo(images.probeFastIrradiance);
+    imageInfos[SkyViewBinding] = imageInfo(images.skyView);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

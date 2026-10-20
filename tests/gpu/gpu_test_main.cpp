@@ -30,6 +30,7 @@ int main() {
             gpuTestCascades(runner, report);
             gpuTestDdgiSampling(runner, report);
             gpuTestProbeRelocation(runner, report);
+            gpuTestAtmosphere(device, runner, report);
             gpuTestDepthRange(device, report);
             gpuTestRayTracing(device, runner, report);
             gpuTestDdgi(device, runner, report);

@@ -1,11 +1,13 @@
 #include "cpu_trace.h"
 #include "gpu_check.h"
+#include "image_readback.h"
 #include "gpu_test_functions.h"
 
 #include "core/half_float.h"
 #include "render/gpu/ddgi.h"
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/atmosphere.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/probe_relocation.h"
 #include "render/gpu/ray_tracing.h"
@@ -476,6 +478,9 @@ namespace {
                                                        hitLights.points, hitLights.spots});
 
             buffers.frameData.write(&frameData, sizeof(frameData));
+            buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
+            const GpuAtmosphere noAtmosphere{};
+            buffers.atmosphere.write(&noAtmosphere, sizeof(noAtmosphere));
             buffers.instances.write(instances);
             buffers.materials.write(materials.getEntries());
             buffers.directionalLights.write(lights.directional);
@@ -486,57 +491,13 @@ namespace {
 
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             return writeSceneSet(descriptors, sceneLayout, buffers,
-                                 SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance()},
-                                 clusterMasks, ddgi.describeProbeStates(0));
+                                 SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance(), dummy},
+                                 clusterMasks, SceneBufferViews{ddgi.describeProbeStates(0), buffers.skyLight.describe()});
         }
 
         // Whether the last frame written lists a fast light for the probe rays' hits.
         bool fastLightsListed = false;
     };
-
-    // An atlas read back as floats, four channels per texel whatever its format.
-    struct ReadAtlas {
-        int width = 0;
-        int height = 0;
-        int channels = 0;
-        std::vector<float> values;
-
-        GpuVec4 texel(int x, int y) const {
-            GpuVec4 value{0.0f, 0.0f, 0.0f, 0.0f};
-            for (int channel = 0; channel < channels; ++channel) {
-                value[static_cast<std::size_t>(channel)] = values[static_cast<std::size_t>((y * width + x) * channels + channel)];
-            }
-            return value;
-        }
-    };
-
-    ReadAtlas readAtlas(ProbeTestScene& scene, VulkanImage& atlas, int channels) {
-        const ImageDescription& description = atlas.getDescription();
-        ReadAtlas read{static_cast<int>(description.width), static_cast<int>(description.height), channels, {}};
-        const VkDeviceSize bytes = static_cast<VkDeviceSize>(read.width) * read.height * channels * sizeof(std::uint16_t);
-        VulkanBuffer readback{scene.device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
-
-        scene.commands.run([&](VkCommandBuffer recording) {
-            atlas.transition(recording, ImageState::TransferSource);
-            VkBufferImageCopy copy{};
-            copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            copy.imageSubresource.layerCount = 1;
-            copy.imageExtent = {description.width, description.height, 1};
-            vkCmdCopyImageToBuffer(recording, atlas.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.get(), 1, &copy);
-            bufferBarrier(recording, readback.get(), {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT},
-                          {VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT});
-        });
-
-        readback.invalidate();
-        std::vector<std::uint16_t> halves(static_cast<std::size_t>(bytes / sizeof(std::uint16_t)));
-        std::memcpy(halves.data(), readback.getMapped(), bytes);
-
-        for (std::uint16_t half : halves) {
-            read.values.push_back(halfToFloat(half));
-        }
-
-        return read;
-    }
 
     // What the update should store for one probe, worked out on the CPU from what each of its rays brings back.
     struct ExpectedProbe {
@@ -599,10 +560,10 @@ namespace {
 
     // The three atlases after an update, and the shared irradiance (only written while probes share light).
     struct ReadAtlases {
-        ReadAtlas irradiance;
-        ReadAtlas fastIrradiance;
-        ReadAtlas distance;
-        ReadAtlas sharedIrradiance;
+        ReadImage irradiance;
+        ReadImage fastIrradiance;
+        ReadImage distance;
+        ReadImage sharedIrradiance;
     };
 
     // A probe's shared irradiance against what it should hold, inner texels and borders.
@@ -642,9 +603,9 @@ namespace {
     */
     void checkProbe(const ReadAtlases& atlases, const ProbeCounts& counts, int probe, const ExpectedProbe& expected, const std::string& name,
                     GpuCheckReport& report) {
-        const ReadAtlas& irradiance = atlases.irradiance;
-        const ReadAtlas& fastIrradiance = atlases.fastIrradiance;
-        const ReadAtlas& distance = atlases.distance;
+        const ReadImage& irradiance = atlases.irradiance;
+        const ReadImage& fastIrradiance = atlases.fastIrradiance;
+        const ReadImage& distance = atlases.distance;
         const TexelCoord irradianceOrigin = probeTileOrigin(counts, probe, probeIrradianceTexels);
 
         for (int texel = 0; texel < probeIrradianceTexels * probeIrradianceTexels; ++texel) {
@@ -710,8 +671,8 @@ namespace {
                         lighting.probeEvents, 0);
         });
 
-        return ReadAtlases{readAtlas(scene, ddgi.getIrradianceAtlas(), 4), readAtlas(scene, ddgi.getFastIrradianceAtlas(), 4),
-                           readAtlas(scene, ddgi.getDistanceAtlas(), 2), readAtlas(scene, ddgi.getSharedIrradianceAtlas(), 4)};
+        return ReadAtlases{readHalfImage(scene.device, scene.commands, ddgi.getIrradianceAtlas(), 4), readHalfImage(scene.device, scene.commands, ddgi.getFastIrradianceAtlas(), 4),
+                           readHalfImage(scene.device, scene.commands, ddgi.getDistanceAtlas(), 2), readHalfImage(scene.device, scene.commands, ddgi.getSharedIrradianceAtlas(), 4)};
     }
 
     // A lamp's light where a ray from the probe meets the floor below it (pointLightAtHit), as the packed lights hold it.

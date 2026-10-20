@@ -489,7 +489,7 @@ void main() {
     // geometric normal, steadier than the normal map's; the light read along the shaded normal, and in the mirror
     // direction as the specular part's stand-in until reflections exist), the flat ambient elsewhere; the still and
     // fast lights' atlases added. Without probes, the flat ambient alone.
-    vec3 ambientReflected = shadeAmbient(point, ambient.rgb);
+    vec3 ambientReflected = shadeAmbient(point, flatAmbient());
 
     if (probesOn) {
         vec3 reflected = reflect(-toCamera, shadingNormal);

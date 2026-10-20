@@ -6,6 +6,7 @@
 
 #include "ddgi_sampling.glsl"
 #include "scene_probe_states.glsl"
+#include "scene_sky.glsl"
 
 // Bound to an empty stand-in while the probes are not sampled (nothing reads them then).
 layout(set = 1, binding = 12) uniform sampler2D probeIrradianceAtlas;
@@ -71,7 +72,7 @@ ProbeLights sampleProbes(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
     }
 
     if (diffuse.weight <= 0.0) {
-        return ProbeLights(ProbeLight(ambient.rgb, ambient.rgb), ProbeLight(vec3(0.0), vec3(0.0)));
+        return ProbeLights(ProbeLight(flatAmbient(), flatAmbient()), ProbeLight(vec3(0.0), vec3(0.0)));
     }
 
     ProbeLight still = ProbeLight(finishProbeBlend(diffuse), withSpecular ? finishProbeBlend(specular) : vec3(0.0));
@@ -88,11 +89,11 @@ ProbeLights probeAmbient(vec3 point, vec3 normal, vec3 lookupNormal, vec3 reflec
     float inVolume = probeVolumeWeight(origin, probeSpacing.xyz, probeCounts.xyz, point);
 
     if (inVolume <= 0.0) {
-        return ProbeLights(ProbeLight(ambient.rgb, ambient.rgb), ProbeLight(vec3(0.0), vec3(0.0)));
+        return ProbeLights(ProbeLight(flatAmbient(), flatAmbient()), ProbeLight(vec3(0.0), vec3(0.0)));
     }
 
     ProbeLights probes = sampleProbes(point, normal, lookupNormal, reflected, toViewer, origin, withSpecular);
-    ProbeLight still = ProbeLight(mix(ambient.rgb, probes.still.diffuse, inVolume), mix(ambient.rgb, probes.still.specular, inVolume));
+    ProbeLight still = ProbeLight(mix(flatAmbient(), probes.still.diffuse, inVolume), mix(flatAmbient(), probes.still.specular, inVolume));
     ProbeLight fast = ProbeLight(probes.fast.diffuse * inVolume, probes.fast.specular * inVolume);
     return ProbeLights(still, fast);
 }

@@ -13,6 +13,7 @@
 enum class GpuPass {
     DebugUi,
     RayScene,
+    Atmosphere,
     Probes,
     Clusters,
     Shadows,

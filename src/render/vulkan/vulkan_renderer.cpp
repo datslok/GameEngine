@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_renderer.h"
+#include "scene/sky_object.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/depth_shared.h"
@@ -95,6 +96,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     createFixedTextures();
 
     bloom = std::make_unique<VulkanBloom>(device, layouts, linearSampler.get());
+    atmosphere = std::make_unique<VulkanAtmosphere>(device, layouts, linearSampler.get(), sceneColourFormat, depthFormat);
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
@@ -825,7 +827,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     clusterGrid = makeClusterGrid(camera, static_cast<int>(frameWidth), static_cast<int>(frameHeight));
     const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
-    const PrioritizedLighting prioritized = prioritizeLights(description.lighting, description.lightFocus, cameraFrustum, lightHistory,
+    PrioritizedLighting prioritized = prioritizeLights(description.lighting, description.lightFocus, cameraFrustum, lightHistory,
                                                              description.frameSeconds, settings.lights);
     lightHistory = prioritized.history;
 
@@ -835,6 +837,16 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.pointLightsShadowed = static_cast<std::size_t>(std::count_if(
         prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
         [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
+
+    // Sunlight (every directional light) reaches the camera through the air, which dims and reddens it.
+    const std::optional<Atmosphere>& air = description.lighting.atmosphere;
+    cameraAtmosphereRadius = air ? atmosphereViewRadius(*air, cameraOrigin.y) : 0.0f;
+
+    if (air) {
+        for (DirectionalLight& light : prioritized.lighting.directionalLights) {
+            light = throughAtmosphere(light, *air, cameraAtmosphereRadius);
+        }
+    }
 
     GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
     ensureShadowAtlas(shadowAtlasSizeFor(settings.shadows));
@@ -889,6 +901,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::RayScene);
     }
 
+    // The sky's tables and the flat ambient it gives, before anything reads them (the probe rays, the main pass).
+    if (air) {
+        beginGpuPass(frame, GpuPass::Atmosphere);
+        atmosphere->update(frame.commands, frame.descriptors, *air, frames[frame.frameIndex].scene->atmosphere.describe());
+        endGpuPass(frame, GpuPass::Atmosphere);
+    }
+
     if (traceProbes) {
         beginGpuPass(frame, GpuPass::Probes);
         const ProbeSceneSets probeSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
@@ -921,7 +940,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
     const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, traceProbes, description.lighting.background);
+    const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, frameWidth, frameHeight);
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, traceProbes, description.lighting.background,
+                 air ? &skyRays : nullptr);
     endGpuPass(frame, GpuPass::Main);
 
     if (showProbes) {
@@ -1007,6 +1028,9 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     buffers.frameData.write(&frameData, sizeof(frameData));
+    buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
+    const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
+    buffers.atmosphere.write(&packedAtmosphere, sizeof(packedAtmosphere));
     buffers.probeHitLights.write(hitLights.lights);
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
@@ -1023,11 +1047,40 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         probes != nullptr ? ddgi->sampledIrradiance() : sampled(*noProbesTexture),
         probes != nullptr ? ddgi->sampledDistance() : sampled(*noProbesTexture),
         probes != nullptr ? ddgi->sampledFastIrradiance() : sampled(*noProbesTexture),
+        description.lighting.atmosphere ? atmosphere->sampledSkyView() : sampled(*noProbesTexture),
     };
 
-    const VkDescriptorBufferInfo probeStates =
-        probes != nullptr ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
-    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, probeStates);
+    SceneBufferViews views;
+    views.probeStates = probes != nullptr ? ddgi->describeProbeStates(frame.frameIndex) : VkDescriptorBufferInfo{noProbeStates.get(), 0, VK_WHOLE_SIZE};
+    views.skyLight = description.lighting.atmosphere ? atmosphere->describeSkyLight() : buffers.skyLight.describe();
+    return writeSceneSet(frame.descriptors, *sceneLayout, buffers, images, clusterMasks, views);
+}
+
+/*
+* The atmosphere's numbers for this frame: the camera's radius, the sun the sky is lit by (the brightest directional
+* light, as it is above the air) and its disc as drawn (its radiance through the air down to the camera, sky_object.h),
+* and the frame's own ambient light, to which the sky's is added.
+*/
+GpuAtmosphere VulkanRenderer::packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const {
+    const Atmosphere& air = *description.lighting.atmosphere;
+    AtmosphereFrame frame;
+    frame.viewRadius = cameraAtmosphereRadius;
+    frame.ambient = Vec3{lights.ambient[0], lights.ambient[1], lights.ambient[2]};
+    const int sun = atmosphereSun(description.lighting.directionalLights);
+
+    if (sun >= 0) {
+        const DirectionalLight& light = description.lighting.directionalLights[static_cast<std::size_t>(sun)];
+        frame.towardsSun = light.direction.normalized() * -1.0f;
+        frame.sunLight = light.colour * light.intensity;
+        frame.discAngularRadius = light.angularRadius * air.sunDiscScale;
+
+        if (frame.discAngularRadius > 0.0f) {
+            const DirectionalLight through = throughAtmosphere(light, air, cameraAtmosphereRadius);
+            frame.sunDisc = discRadiance(through.colour * through.intensity, frame.discAngularRadius);
+        }
+    }
+
+    return packAtmosphere(air, frame);
 }
 
 /*
@@ -1178,7 +1231,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 * Afterwards the scene image becomes readable for bloom and tone mapping.
 */
 void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
-                                  bool keepDepth, bool sampleProbes, const Vec3& background) {
+                                  bool keepDepth, bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
@@ -1195,6 +1248,10 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     stats.drawCalls += drawBatches(commands, mainDraws.batches);
+
+    if (sky != nullptr) {
+        atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(), *sky);
+    }
 
     vkCmdEndRendering(commands);
     renderingOpen = false;

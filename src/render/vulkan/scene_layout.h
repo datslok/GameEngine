@@ -43,7 +43,10 @@ enum SceneBinding : std::uint32_t {
     ProbeHitLightsBinding = 14,
     ProbeFastIrradianceBinding = 15,
     ProbeStatesBinding = 16,
-    SceneBindingCount = 17
+    SkyLightBinding = 17,
+    SkyViewBinding = 18,
+    AtmosphereBinding = 19,
+    SceneBindingCount = 20
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -108,6 +111,11 @@ struct SceneBuffers {
     UploadArray shadowTiles;
     UploadArray drawList;
     UploadArray probeHitLights;
+
+    // The flat ambient light when there is no atmosphere (with one, the atmosphere's own buffer stands in), and the
+    // atmosphere's numbers (GpuAtmosphere; present or not, render/gpu/atmosphere.h).
+    UploadArray skyLight;
+    UploadArray atmosphere;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
@@ -119,12 +127,19 @@ struct SceneImages {
     SampledImage probeIrradiance;
     SampledImage probeDistance;
     SampledImage probeFastIrradiance;
+    SampledImage skyView; // the atmosphere's sky view table, or a stand-in without one
 };
 
-// Write this frame's set 1 (from the frame's pools, so it goes when they are reset). probeStates: the light probes'
-// states this frame (render/vulkan/vulkan_ddgi.h), or a stand-in while there are none.
+// The buffers set 1 points at that the frame does not write itself: the light probes' states and the flat ambient light
+// (each a stand-in without probes or an atmosphere).
+struct SceneBufferViews {
+    VkDescriptorBufferInfo probeStates{};
+    VkDescriptorBufferInfo skyLight{};
+};
+
+// Write this frame's set 1 (from the frame's pools, so it goes when they are reset).
 VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& layout, const SceneBuffers& buffers, const SceneImages& images,
-                              const VulkanBuffer& clusterMasks, const VkDescriptorBufferInfo& probeStates);
+                              const VulkanBuffer& clusterMasks, const SceneBufferViews& views);
 
 // Bind both scene sets. Before a pass's draws: other passes' pipelines (the debug UI's) bind sets of their own. Graphics
 // and compute pipelines each have their own bound sets, so the cluster pass binds them at the compute bind point.
