@@ -24,21 +24,20 @@ namespace {
         assert(nearlyEqual(lighting.background, Vec3{0.0f, 0.0f, 0.0f}));
         assert(lighting.directionalLights.empty());
         assert(lighting.pointLights.empty());
-        assert(lighting.probeVolumes.empty());
+        assert(!lighting.probeCascades.has_value());
     }
 
-    // A game places light probes as it places lights: each volume reaches the renderer unchanged.
-    void testProbeVolumesAreCopied() {
+    // A game places light probes as it places lights: its ProbeCascades (the first, if several) reaches the renderer.
+    void testProbeCascadesAreCopied() {
         World world;
-        world.add(world.create(), ProbeVolume{Vec3{-3.0f, 0.5f, 2.0f}, Vec3{1.0f, 1.5f, 2.0f}, ProbeCounts{4, 3, 5}});
+        world.add(world.create(), ProbeCascades{false, Vec3{-3.0f, 0.5f, 2.0f}});
+        world.add(world.create(), ProbeCascades{});
 
         const FrameLighting lighting = collectLighting(world, 0.0f);
 
-        assert(lighting.probeVolumes.size() == 1);
-        const ProbeVolume& volume = lighting.probeVolumes[0];
-        assert(nearlyEqual(volume.origin, Vec3{-3.0f, 0.5f, 2.0f}));
-        assert(nearlyEqual(volume.spacing, Vec3{1.0f, 1.5f, 2.0f}));
-        assert(volume.counts.x == 4 && volume.counts.y == 3 && volume.counts.z == 5);
+        assert(lighting.probeCascades.has_value());
+        assert(!lighting.probeCascades->followCamera);
+        assert(nearlyEqual(lighting.probeCascades->centre, Vec3{-3.0f, 0.5f, 2.0f}));
     }
 
     // What shows where nothing is drawn: black by default, the sky's colour when a game sets one (several add up).
@@ -166,6 +165,6 @@ void testLighting() {
     testSkyBackgroundIsCollected();
     testDirectionalLightsAreCopied();
     testPointLightPositionIsInterpolated();
-    testProbeVolumesAreCopied();
+    testProbeCascadesAreCopied();
     testProbeEventsLastOneFrame();
 }

@@ -1,24 +1,32 @@
-// The probe volume every light probe pass reads, as push constants (render/gpu/ddgi.h, GpuProbeVolume), and what
-// follows from it. Declarations and small helpers only.
+// The probes every light probe pass reads, as push constants (render/gpu/ddgi.h, GpuProbeVolume), and what follows from
+// them. Declarations and small helpers only. Where each cascade's probes are is in the cascades' buffer
+// (probe_cascades.glsl), which each pass declares where it binds it.
 #ifndef DDGI_VOLUME_GLSL
 #define DDGI_VOLUME_GLSL
 
 // Must match GpuProbeVolume in render/gpu/ddgi.h.
 layout(push_constant) uniform ProbeVolumeData {
-    vec4 origin;      // xyz the first probe, w the fast irradiance's share kept this frame
-    vec4 spacing;     // xyz the spacing between probes, w the longest distance recorded
-    ivec4 counts;     // xyz probes along each axis, w the ray stride (room for the most rays any probe traces)
-    vec4 rotation[3]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, unused
-    vec4 sky;         // rgb the light rays that hit nothing bring back
+    ivec4 counts;     // xyz probes along each axis of one cascade, w the ray stride (room for the most rays any probe traces)
+    ivec4 cascades;   // x how many cascades, y probes in each
+    vec4 rotation[3]; // this frame's ray rotation, its matrix's rows in xyz; w: still probes' rays, fast probes' rays, the change window's share kept
+    vec4 sky;         // rgb the light rays that hit nothing bring back, w the change threshold (0: fixed memory)
     vec4 hysteresis;  // x the irradiance's, y the distances' share kept this frame, z the debug balls' radius, w the ray phase
+    vec4 keeps;       // x the fast irradiance's share kept this frame
 } volume;
 
+// Every cascade's probes together.
 int volumeProbeCount() {
-    return volume.counts.x * volume.counts.y * volume.counts.z;
+    return volume.cascades.x * volume.cascades.y;
 }
 
-vec3 volumeProbePosition(int probe) {
-    return probePosition(volume.origin.xyz, volume.spacing.xyz, volume.counts.xyz, probe);
+// The grid the atlases are laid out as: the cascades one after another along z.
+ivec3 volumeAtlasGrid() {
+    return ivec3(volume.counts.xy, volume.counts.z * volume.cascades.x);
+}
+
+// The cascade probe number belongs to.
+int volumeCascadeOf(int probe) {
+    return probe / volume.cascades.y;
 }
 
 // A whole number the push constants carry as a float.

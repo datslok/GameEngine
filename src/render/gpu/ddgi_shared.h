@@ -77,6 +77,20 @@
 #define DDGI_VOLUME_MARGIN 0.5
 #define DDGI_VOLUME_FADE 0.5
 
+// Cascades (render/gpu/probe_cascades.h): nested grids of probes following a point, each twice the spacing of the last.
+// The most a frame may hold; each fades out over its last DDGI_CASCADE_FADE cells, ending DDGI_CASCADE_EDGE cells (and
+// the self-shadow bias's reach) inside the nearest an outer plane of its window can be, so the cell round any point it
+// lights never touches an outer plane, where a scroll brings in probes that are new.
+#define DDGI_MAX_CASCADES 6
+#define DDGI_CASCADE_FADE 1.0
+#define DDGI_CASCADE_EDGE 1.0
+
+// A probe that starts (scrolled in by a cascade, woken, newly vigilant) is seeded from the coarser cascades' light where
+// it stands, which counts as this many frames of its own history and then fades out as its own rays come in. At most
+// DDGI_MAX_SEEDS probes are seeded a frame; the rest start from their first frame's rays.
+#define DDGI_SEED_FRAMES 4.0
+#define DDGI_MAX_SEEDS 2048
+
 // The main pass's specialization constant (constant_id) that switches sampling the probes on. Its pipelines without probes
 // have none of the probe code, so pictures without probes are drawn exactly as before probes existed.
 #define DDGI_SAMPLE_PROBES_CONSTANT 0

@@ -13,12 +13,14 @@
 // memory on starts every texel from its stored light). A probe a scene event restarted (render/gpu/ddgi.h,
 // advanceProbeRestarts) checks whether its light really changed and restarts only then (adaptiveProbeUpdate, with the
 // adaptive memory), or with the fixed memory and for the distances restarts outright, keeping the share the restart
-// buffer holds. The fast atlas restarts with the still irradiance, outright.
+// buffer holds. The fast atlas restarts with the still irradiance, outright. A probe that starts from a seed (the
+// coarser cascades' light where it stands, ddgi_seed.comp) takes it as its stored light first (seededProbeTexel).
 #ifndef DDGI_UPDATE_GLSL
 #define DDGI_UPDATE_GLSL
 
 #include "ddgi.glsl"
 #include "ddgi_volume.glsl"
+#include "probe_cascades.glsl"
 #include "probe_relocation.glsl"
 
 layout(local_size_x = PROBE_TEXELS, local_size_y = PROBE_TEXELS) in;
@@ -51,12 +53,27 @@ layout(std430, set = 0, binding = 5) readonly buffer ProbeStates {
     ProbeState probeStates[];
 };
 
+// The cascades, for the longest distance each one's probes record.
+layout(std430, set = 0, binding = 6) readonly buffer ProbeCascades {
+    ProbeCascade probeCascades[];
+};
+
+// This frame's seeds (ddgi_seed.comp): a probe's still and fast light per texel of its square, at its seed slot.
+struct ProbeSeedTexel {
+    vec4 still;
+    vec4 fast;
+};
+
+layout(std430, set = 0, binding = 7) readonly buffer ProbeSeeds {
+    ProbeSeedTexel probeSeeds[];
+};
+
 #if UPDATE_IRRADIANCE
-layout(set = 0, binding = 6, rgba16f) uniform image2D atlas;
-layout(set = 0, binding = 7, rgba16f) uniform image2D fastAtlas;
-layout(set = 0, binding = 8, rgba16f) uniform image2D changeAtlas;
+layout(set = 0, binding = 8, rgba16f) uniform image2D atlas;
+layout(set = 0, binding = 9, rgba16f) uniform image2D fastAtlas;
+layout(set = 0, binding = 10, rgba16f) uniform image2D changeAtlas;
 #else
-layout(set = 0, binding = 6, rg16f) uniform image2D atlas;
+layout(set = 0, binding = 8, rg16f) uniform image2D atlas;
 #endif
 
 shared vec3 rayDirections[DDGI_MAX_RAYS];
@@ -92,12 +109,25 @@ void main() {
 
     ivec2 texel = ivec2(gl_LocalInvocationID.xy);
     vec3 texelDirection = probeTexelDirection(texel, PROBE_TEXELS);
-    ivec2 origin = probeTileOrigin(volume.counts.xyz, probe, PROBE_TEXELS);
+    ivec2 origin = probeTileOrigin(volumeAtlasGrid(), probe, PROBE_TEXELS);
+    ProbeRestart restart = probeRestarts[probe];
     vec4 stored = imageLoad(atlas, origin + 1 + texel);
     vec4 sum = vec4(0.0);
 #if UPDATE_IRRADIANCE
     vec4 fastStored = imageLoad(fastAtlas, origin + 1 + texel);
     vec3 fastSum = vec3(0.0);
+    vec4 change = imageLoad(changeAtlas, origin + 1 + texel);
+
+    // A seed stands for the probe's first frames (render/gpu/ddgi.h, seededProbeTexel): its light, marked restarted.
+    if (restart.seed.x >= 0) {
+        ProbeSeedTexel seed = probeSeeds[restart.seed.x * PROBE_TEXELS * PROBE_TEXELS + int(gl_LocalInvocationIndex)];
+        AdaptiveProbeTexel seeded = seededProbeTexel(seed.still.rgb);
+        stored = vec4(seeded.stored, seeded.history);
+        change = vec4(seeded.recent, seeded.noise);
+        fastStored = vec4(seed.fast.rgb, 1.0);
+    }
+#else
+    float longest = probeCascades[volumeCascadeOf(probe)].origin.w;
 #endif
 
     for (int ray = 0; ray < rays; ++ray) {
@@ -106,7 +136,7 @@ void main() {
         sum += vec4(rayResults[ray].rgb, 1.0) * weight;
         fastSum += fastRayResults[ray] * weight;
 #else
-        float distance = distanceForUpdate(rayResults[ray].a, volume.spacing.w);
+        float distance = distanceForUpdate(rayResults[ray].a, longest);
         sum += vec4(distance, distance * distance, 0.0, 1.0) * distanceRayWeight(texelDirection, rayDirections[ray]);
 #endif
     }
@@ -117,12 +147,9 @@ void main() {
     vec4 fastResult = fastStored;
 #endif
 
-    ProbeRestart restart = probeRestarts[probe];
-
     if (sum.w > DDGI_MIN_TEXEL_WEIGHT) {
 #if UPDATE_IRRADIANCE
         if (volume.sky.w > 0.0) {
-            vec4 change = imageLoad(changeAtlas, origin + 1 + texel);
             AdaptiveProbeTexel adaptive = adaptiveProbeUpdate(AdaptiveProbeTexel(stored.rgb, stored.a, change.rgb, change.a), sum.rgb / sum.w,
                                                               volume.hysteresis.x, volume.rotation[2].w, volume.sky.w, restart.frames.x,
                                                               restart.check);
@@ -131,7 +158,7 @@ void main() {
         } else {
             result = vec4(blendProbeValue(stored.rgb, sum.rgb / sum.w, restart.frames.x >= 0 ? restart.keeps.x : volume.hysteresis.x), 0.0);
         }
-        fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, restart.frames.x >= 0 ? restart.check.w : volume.origin.w), 1.0);
+        fastResult = vec4(blendProbeValue(fastStored.rgb, fastSum / sum.w, restart.frames.x >= 0 ? restart.check.w : volume.keeps.x), 1.0);
 #else
         result = vec4(blendProbeValue(stored.rg, sum.rg / sum.w, restart.frames.y >= 0 ? restart.keeps.y : volume.hysteresis.y), 0.0, 1.0);
 #endif

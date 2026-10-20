@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 /*
@@ -46,13 +47,6 @@ Vec3 probeSelfShadowBias(const Vec3& normal, const Vec3& toViewer, const Vec3& s
 // The longest the self-shadow bias can be (its normal and view parts both at full length): how far a surface's biased
 // point, which picks the probes that light it, can lie from the surface.
 float probeBiasReach(const Vec3& spacing, float selfShadowBias);
-
-// A probe's place in the grid, counted from the first probe along each axis.
-struct ProbeGridCoord {
-    int x = 0;
-    int y = 0;
-    int z = 0;
-};
 
 // The grid cell around a point: its first corner (clamped into the grid) and how far across the cell the point lies
 // along each axis (0..1, clamped).
@@ -94,11 +88,10 @@ float crushProbeWeight(float weight);
 float probeCornerWeight(const Vec3& normal, const Vec3& toProbe, float distance, const Vec2& moments, float trilinear);
 
 /*
-* How much a volume lights a point, 0..1: full over the probes' box grown by probeVolumeMarginCells of a cell, falling
-* linearly to nothing over the next probeVolumeFadeCells (the product over the axes), where the flat ambient light takes
-* over, so the volume's edge shows no seam.
+* How much a cascade lights a point along each axis, multiplied (render/gpu/probe_cascades.h): 1 out to reach - fade
+* from its centre, falling linearly to nothing at reach.
 */
-float probeVolumeWeight(const ProbeVolume& volume, const Vec3& point);
+float probeCascadeWeight(const Vec3& centre, const Vec3& reach, const Vec3& fade, const Vec3& point);
 
 /*
 * The blend of the corners: the square root of each stored irradiance, weighted, then the sum divided by the summed
@@ -152,9 +145,15 @@ struct ProbeLights {
 * scene_probes.glsl's sampleProbes does it. normal moves the test point and weighs the probes; lookupNormal is the
 * direction the irradiance is read in (the normal-mapped normal on screen), reflected the mirror direction. Only traced
 * probes count (probe_relocation.h), each where relocation moved it; with none round the point, the flat ambient.
+* lookup's probe numbers are the volume's slots (probeSlot) from firstProbe.
 */
 ProbeLights sampleProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal, const Vec3& lookupNormal,
-                         const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup);
+                         const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup, int firstProbe = 0);
+
+// The same, or nothing when no probe round the point is traced (sampleProbes then gives the flat ambient).
+std::optional<ProbeLights> sampleTracedProbes(const ProbeVolume& volume, float selfShadowBias, const Vec3& point, const Vec3& normal,
+                                              const Vec3& lookupNormal, const Vec3& reflected, const Vec3& toViewer, const ProbeLookup& lookup,
+                                              int firstProbe = 0);
 
 /*
 * The light a point or spot light gives a matte surface at a probe ray's hit, before its shadow ray: the irradiance on the
@@ -205,10 +204,14 @@ struct ProbeHitLights {
 // the rest.
 ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin, const ProbeVolume& volume, bool keepFastApart = true);
 
-// What the frame's shaders need to sample the probes and light their rays' hits, into the frame's uniform block.
+/*
+* What the frame's shaders need to sample the probes and light their rays' hits, into the frame's uniform block: each
+* cascade's probes along each axis, how many cascades (where each is, in the cascades' buffer: probe_cascades.h), and
+* the sampling's settings.
+*/
 struct ProbeSampling {
-    ProbeVolume volume;
-    Vec3 cameraOrigin{0.0f, 0.0f, 0.0f};
+    ProbeCounts counts;
+    int cascades = 1;
     float selfShadowBias = 0.3f;
     float bounceEnergy = 0.85f;
     int lightsPerHit = 4;
@@ -216,6 +219,6 @@ struct ProbeSampling {
     int hitSpots = 0;
 };
 
-// Fill frameData's probe fields: the first probe measured from the camera (the main pass is camera-relative). Whether
-// pixels sample the probes is the main pass pipeline's choice (DDGI_SAMPLE_PROBES_CONSTANT), not a field.
+// Fill frameData's probe fields. Whether pixels sample the probes is the main pass pipeline's choice
+// (DDGI_SAMPLE_PROBES_CONSTANT), not a field.
 void packProbeSampling(GpuFrameData& frameData, const ProbeSampling& sampling);

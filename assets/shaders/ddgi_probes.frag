@@ -25,6 +25,7 @@ const float awakeRimCosine = 0.4;
 
 layout(location = 0) in vec3 relativePosition;
 layout(location = 1) flat in int probe;
+layout(location = 2) flat in vec4 ball; // xyz its centre, w its radius
 
 layout(set = 2, binding = 0) uniform sampler2D irradianceAtlas;
 layout(set = 2, binding = 1) uniform sampler2D fastIrradianceAtlas;
@@ -32,8 +33,8 @@ layout(set = 2, binding = 1) uniform sampler2D fastIrradianceAtlas;
 layout(location = 0) out vec4 colour;
 
 void main() {
-    vec3 centre = volumeProbePosition(probe) + probeStates[probe].offset - cameraOrigin.xyz;
-    float radius = volume.hysteresis.z;
+    vec3 centre = ball.xyz;
+    float radius = ball.w;
     vec3 direction = normalize(relativePosition);
 
     // Where the ray first meets the ball: t^2 - 2 t (d . c) + |c|^2 - r^2 = 0, the nearer root.
@@ -67,6 +68,6 @@ void main() {
         return;
     }
 
-    vec2 uv = probeAtlasUv(volume.counts.xyz, probe, normal, DDGI_IRRADIANCE_TEXELS);
+    vec2 uv = probeAtlasUv(volumeAtlasGrid(), probe, normal, DDGI_IRRADIANCE_TEXELS);
     colour = vec4(textureLod(irradianceAtlas, uv, 0.0).rgb + textureLod(fastIrradianceAtlas, uv, 0.0).rgb, 1.0);
 }

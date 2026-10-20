@@ -80,8 +80,9 @@ vec3 hitLightOffset(int listed, vec3 relativeHit) {
     return hitLightPositionRange(listed).xyz - relativeHit;
 }
 
-// Whether a fast light listed for the hits is within reach of the probe (probeNearLight), in this pass's world space.
-bool anyFastLightNear(vec3 probe) {
+// Whether a fast light listed for the hits is within reach of the probe (probeNearLight), both measured from the camera;
+// reach is the longest distance the probe's cascade records.
+bool anyFastLightNear(vec3 probe, float reach) {
     for (int listed = 0; listed < probeLights.x + probeLights.y; ++listed) {
         if (probeHitLights[listed].y == 0) {
             continue;
@@ -89,7 +90,7 @@ bool anyFastLightNear(vec3 probe) {
 
         vec4 light = hitLightPositionRange(listed);
 
-        if (probeNearLight(probe, light.xyz + cameraOrigin.xyz, light.w, volume.spacing.w)) {
+        if (probeNearLight(probe, light.xyz, light.w, reach)) {
             return true;
         }
     }
@@ -123,8 +124,11 @@ void main() {
         return;
     }
 
-    vec3 origin = volumeProbePosition(probe) + probeStates[probe].offset;
-    bool nearFastLight = anyFastLightNear(origin);
+    // Rays leave from the probe in the world; everything else here is measured from the camera, as the cascades are.
+    ProbeCascade cascade = probeCascades[volumeCascadeOf(probe)];
+    vec3 relativeOrigin = cascadeProbePosition(cascade, volume.counts.xyz, probe) + probeStates[probe].offset;
+    vec3 origin = relativeOrigin + cameraOrigin.xyz;
+    bool nearFastLight = anyFastLightNear(relativeOrigin, cascade.origin.w);
     int rays = volumeRayCount(nearFastLight);
 
     if (ray == 0) {
@@ -208,10 +212,10 @@ void main() {
         }
     }
 
-    // The probes are read in this pass's own space, the world; each atlas's light passed on into its own.
-    ProbeLights bounced = probeAmbient(hit, normal, normal, normal, -direction, volume.origin.xyz, false);
-    irradiance += bounced.still.diffuse * probeSpacing.w;
-    fastIrradiance += bounced.fast.diffuse * probeSpacing.w;
+    // Last frame's probes at the hit, every cascade; each atlas's light passed on into its own.
+    ProbeLights bounced = probeAmbient(relativeHit, normal, normal, normal, -direction, 0, false);
+    irradiance += bounced.still.diffuse * probeShading.y;
+    fastIrradiance += bounced.fast.diffuse * probeShading.y;
 
     probeRays[index] = vec4(material.emissive.rgb + albedo * irradiance, distance);
     fastProbeRays[index] = packFastRayLight(albedo * fastIrradiance);

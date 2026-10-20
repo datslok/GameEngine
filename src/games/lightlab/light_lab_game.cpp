@@ -156,9 +156,6 @@ void visit(LightLabSunSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Sun disc size", settings.sunDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
 }
 
-void visit(LightLabProbeSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Dense probes (20 cm, building only)", settings.denseProbes);
-}
 
 float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds) {
     if (hoursPerSecond == 0.0f) {
@@ -244,7 +241,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     world.add(sky, SkyBackground{});
     air = world.create();
     probes = world.create();
-    world.add(probes, labProbeVolume);
+    world.add(probes, ProbeCascades{});
     flashlight.create(world, false);
 
     // The lamp's panel stands for the bulb's glow, so like the sun disc it must not block the light it gives.
@@ -342,7 +339,6 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
     signalClockJumps(world);
     updateDaylight(world);
     flashlight.place(world, flashlightInHand(controls.getCamera()));
-    world.get<ProbeVolume>(probes) = probeSettings.denseProbes ? labDenseProbeVolume : labProbeVolume;
 }
 
 void LightLabGame::updateDaylight(World& world) {
@@ -410,9 +406,6 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Sun", [&] {
         visit(sunSettings, visitor);
     });
-    visitor.group("Probes", [&] {
-        visit(probeSettings, visitor);
-    });
     visitor.group("Atmosphere", [&] {
         visit(atmosphereSettings, visitor);
     });
@@ -461,9 +454,6 @@ LightLabSunSettings& LightLabGame::getSunSettings() {
     return sunSettings;
 }
 
-LightLabProbeSettings& LightLabGame::getProbeSettings() {
-    return probeSettings;
-}
 
 Entity LightLabGame::getSun() const {
     return sun;

@@ -2,7 +2,6 @@
 
 #include "math/aabb.h"
 #include "math/vec3.h"
-#include "scene/probe_volume.h"
 
 #include <array>
 #include <cmath>
@@ -95,38 +94,6 @@ inline const Aabb labFrontDoor{Vec3{-17.3f, labFloorTop, 7.0f}, Vec3{-17.0f, 2.1
 // ceiling (half-sizes).
 inline const Vec3 labLampPosition{-20.0f, labRoomHeight - 0.15f, 7.575f};
 inline const Vec3 labLampFixtureHalfSize{0.15f, 0.025f, 0.15f};
-
-/*
-* Light probes for global illumination round the building, 1 m apart, on half-metre marks so that every wall, the floor
-* and the roof fall between two layers of probes (none is buried in a wall, until probes can move themselves out), and
-* each room holds full cells of 8. Three layers reach out beyond the walls and two above the roof, so the outside of
-* the building is lit too: 12 x 5 x 16 probes.
-*/
-inline const ProbeVolume labProbeVolume{Vec3{-25.5f, 0.5f, 2.5f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{12, 5, 16}};
-
-/*
-* A test of finer bounce light (switched on in the settings, LightLabProbeSettings): probes 20 cm apart inside the
-* building only, from the back room's floor and west wall to the sunlit room's far corner, centred so the outermost
-* probes sit about half a spacing in from the walls (where the volume's full weight still reaches). 27 x 15 x 47 =
-* 19,035 probes: the whole field at this spacing would need 89,000, past the 65,535 one volume may hold. With the walls
-* 30 cm thick, some layers fall inside walls, the floor or the ceiling, until probes can move themselves out; their back
-* faces keep them out of the light they cannot see.
-*/
-inline constexpr float labDenseProbeSpacing = 0.2f;
-inline const ProbeVolume labDenseProbeVolume = [] {
-    const Vec3 low{labBackRoom.minimum.x, labBackRoom.minimum.y, labBackRoom.minimum.z};
-    const Vec3 high{labBackRoom.maximum.x, labBackRoom.maximum.y, labSunlitRoom.maximum.z};
-    const auto along = [](float from, float to, int& count) {
-        count = static_cast<int>(std::lround((to - from) / labDenseProbeSpacing));
-        const float span = labDenseProbeSpacing * static_cast<float>(count - 1);
-        return from + 0.5f * ((to - from) - span);
-    };
-
-    ProbeVolume volume;
-    volume.spacing = Vec3{labDenseProbeSpacing, labDenseProbeSpacing, labDenseProbeSpacing};
-    volume.origin = Vec3{along(low.x, high.x, volume.counts.x), along(low.y, high.y, volume.counts.y), along(low.z, high.z, volume.counts.z)};
-    return volume;
-}();
 
 // The level's parts, each group drawn as one entity and all of it solid.
 struct LightLabLayout {

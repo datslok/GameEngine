@@ -36,8 +36,11 @@ void main() {
         ivec3 counts = ivec3(third.xyz);
         int index = int(third.w);
         int side = int(fourth.w);
-        testOutput(0, vec4(probePosition(first.xyz, second.xyz, counts, index), 0.0));
+        ivec3 scroll = ivec3(testInput(4).xyz);
+        ivec3 grid = probeGridCoord(counts, scroll, index);
+        testOutput(0, vec4(probePosition(first.xyz, second.xyz, counts, scroll, index), 0.0));
         testOutput(1, vec4(vec2(probeTileOrigin(counts, index, side)), probeAtlasUv(counts, index, fourth.xyz, side)));
+        testOutput(2, vec4(vec3(grid), float(probeSlot(counts, scroll, grid))));
     } else if (function == GPU_TEST_PROBE_REACH) {
         testOutput(0, vec4(probeNearLight(first.xyz, second.xyz, first.w, second.w) ? 1.0 : 0.0));
     } else if (function == GPU_TEST_PROBE_ADAPTIVE) {

@@ -7,16 +7,17 @@
 // everything reads. One workgroup per probe, one invocation per texel of its square, the border copied last, as in the
 // update. The probes' own atlases are only read, so they keep accumulating their own light. A probe a scene event
 // restarted shares its still light more for a while (eventProbeSharingWeight), from the restarts the update reads.
+// Neighbours are found within the probe's own cascade, by grid place (its storage is scrolled), never across its edge.
 #include "render/gpu/ddgi_shared.h"
 #include "ddgi.glsl"
+#include "probe_cascades.glsl"
 #include "probe_relocation.glsl"
 
 layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEXELS) in;
 
 // Must match GpuProbeShare in render/gpu/ddgi.h.
 layout(push_constant) uniform ProbeShareData {
-    ivec4 counts;  // xyz probes along each axis
-    vec4 spacing;  // xyz the spacing between probes
+    ivec4 counts;  // xyz each cascade's probes along each axis, w how many cascades
     vec4 weight;   // x the still light's sharing weight, y the fast light's, z a restarted probe's at first, w the long memory's share kept
 } share;
 
@@ -31,11 +32,16 @@ layout(std430, set = 0, binding = 1) readonly buffer ProbeStates {
     ProbeState probeStates[];
 };
 
-layout(set = 0, binding = 2, rgba16f) readonly uniform image2D irradiance;
-layout(set = 0, binding = 3, rgba16f) readonly uniform image2D fastIrradiance;
-layout(set = 0, binding = 4, rg16f) readonly uniform image2D distances;
-layout(set = 0, binding = 5, rgba16f) writeonly uniform image2D sharedIrradiance;
-layout(set = 0, binding = 6, rgba16f) writeonly uniform image2D sharedFastIrradiance;
+// The cascades: where each one's probes are and how they are scrolled.
+layout(std430, set = 0, binding = 2) readonly buffer ProbeCascades {
+    ProbeCascade probeCascades[];
+};
+
+layout(set = 0, binding = 3, rgba16f) readonly uniform image2D irradiance;
+layout(set = 0, binding = 4, rgba16f) readonly uniform image2D fastIrradiance;
+layout(set = 0, binding = 5, rg16f) readonly uniform image2D distances;
+layout(set = 0, binding = 6, rgba16f) writeonly uniform image2D sharedIrradiance;
+layout(set = 0, binding = 7, rgba16f) writeonly uniform image2D sharedFastIrradiance;
 
 shared vec4 square[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
 shared vec4 fastSquare[DDGI_IRRADIANCE_TEXELS][DDGI_IRRADIANCE_TEXELS];
@@ -51,10 +57,12 @@ void main() {
         return;
     }
 
-    ivec3 grid = ivec3(probe % counts.x, (probe / counts.x) % counts.y, probe / (counts.x * counts.y));
+    ivec3 atlas = ivec3(counts.xy, counts.z * share.counts.w);
+    ProbeCascade cascade = probeCascades[probe / (counts.x * counts.y * counts.z)];
+    ivec3 grid = probeGridCoord(counts, cascade.scroll.xyz, probe - cascade.scroll.w);
     ivec2 texel = ivec2(gl_LocalInvocationID.xy);
-    ivec2 origin = probeTileOrigin(counts, probe, DDGI_IRRADIANCE_TEXELS);
-    ivec2 distanceOrigin = probeTileOrigin(counts, probe, DDGI_DISTANCE_TEXELS);
+    ivec2 origin = probeTileOrigin(atlas, probe, DDGI_IRRADIANCE_TEXELS);
+    ivec2 distanceOrigin = probeTileOrigin(atlas, probe, DDGI_DISTANCE_TEXELS);
 
     vec4 own = imageLoad(irradiance, origin + 1 + texel);
     vec4 ownFast = imageLoad(fastIrradiance, origin + 1 + texel);
@@ -69,14 +77,18 @@ void main() {
         fastNeighbours[neighbour] = vec3(0.0);
         visible[neighbour] = false;
 
-        int otherProbe = other.x + counts.x * (other.y + counts.y * other.z);
+        if (any(lessThan(other, ivec3(0))) || any(greaterThanEqual(other, counts))) {
+            continue;
+        }
 
-        if (all(greaterThanEqual(other, ivec3(0))) && all(lessThan(other, counts)) && probeTraced(probeStates[otherProbe].state)) {
-            vec3 between = vec3(step) * share.spacing.xyz + probeStates[otherProbe].offset - probeStates[probe].offset;
+        int otherProbe = cascadeProbeNumber(cascade, counts, other);
+
+        if (probeTraced(probeStates[otherProbe].state)) {
+            vec3 between = vec3(step) * cascade.spacing.xyz + probeStates[otherProbe].offset - probeStates[probe].offset;
             float separation = length(between);
             ivec2 towards = probeDirectionTexel(between / separation, DDGI_DISTANCE_TEXELS);
             float meanDistance = imageLoad(distances, distanceOrigin + 1 + towards).r;
-            ivec2 otherOrigin = probeTileOrigin(counts, otherProbe, DDGI_IRRADIANCE_TEXELS);
+            ivec2 otherOrigin = probeTileOrigin(atlas, otherProbe, DDGI_IRRADIANCE_TEXELS);
             visible[neighbour] = probesSeeEachOther(meanDistance, separation);
             neighbours[neighbour] = imageLoad(irradiance, otherOrigin + 1 + texel).rgb;
             fastNeighbours[neighbour] = imageLoad(fastIrradiance, otherOrigin + 1 + texel).rgb;

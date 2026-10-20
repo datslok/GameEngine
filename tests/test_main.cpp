@@ -71,6 +71,7 @@ void testDepthRange();
 void testDdgi();
 void testDdgiSampling();
 void testProbeRelocation();
+void testProbeCascades();
 void testAtmosphere();
 void testRayTracing();
 void testVideoMemory();
@@ -190,6 +191,7 @@ int main(){
     testDdgi();
     testDdgiSampling();
     testProbeRelocation();
+    testProbeCascades();
     testAtmosphere();
     testRayTracing();
     testVideoMemory();

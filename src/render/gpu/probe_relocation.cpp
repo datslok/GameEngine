@@ -201,7 +201,7 @@ std::vector<GpuProbeState> buildProbeStates(const ProbeVolume& volume, std::span
         for (int z = zs.first; z <= zs.last; ++z) {
             for (int y = ys.first; y <= ys.last; ++y) {
                 for (int x = xs.first; x <= xs.last; ++x) {
-                    std::int32_t& state = states[static_cast<std::size_t>(probeIndex(volume.counts, x, y, z))].state;
+                    std::int32_t& state = states[static_cast<std::size_t>(probeSlot(volume, ProbeGridCoord{x, y, z}))].state;
 
                     if (state == static_cast<std::int32_t>(ProbeState::Sleeping)) {
                         state = static_cast<std::int32_t>(ProbeState::Awake);

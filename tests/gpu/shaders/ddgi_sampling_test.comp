@@ -28,8 +28,8 @@ void main() {
         vec2 moments = third.yz;
         testOutput(0, vec4(probeBackFaceWeight(first.xyz, second.xyz), probeVisibility(third.x, moments), crushProbeWeight(fourth.x),
                            probeCornerWeight(first.xyz, second.xyz, third.x, moments, third.w)));
-    } else if (function == GPU_TEST_PROBE_VOLUME_WEIGHT) {
-        testOutput(0, vec4(probeVolumeWeight(first.xyz, second.xyz, ivec3(third.xyz), fourth.xyz)));
+    } else if (function == GPU_TEST_PROBE_CASCADE_WEIGHT) {
+        testOutput(0, vec4(probeCascadeWeight(first.xyz, second.xyz, third.xyz, fourth.xyz)));
     } else if (function == GPU_TEST_PROBE_BLEND) {
         ProbeBlend blend = ProbeBlend(vec3(0.0), 0.0);
         addProbeSample(blend, first.xyz, first.w);
