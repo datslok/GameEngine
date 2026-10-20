@@ -861,7 +861,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const ProbeVolume* probes = traceProbes ? &description.lighting.probeVolumes.front() : nullptr;
 
     // The lights the probe rays' hits may need, and whether any of them is fast.
-    const ProbeHitLights hitLights = traceProbes ? probeHitLights(lights, cameraOrigin, *probes) : ProbeHitLights{};
+    const ProbeHitLights hitLights = traceProbes ? probeHitLights(lights, cameraOrigin, *probes, illumination.fastLights) : ProbeHitLights{};
 
     if (traceProbes) {
         ddgi->prepare(frame.commands, *probes, illumination);

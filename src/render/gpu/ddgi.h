@@ -108,6 +108,11 @@ struct GlobalIlluminationSettings {
     float fastIrradianceTimeConstant = 0.05f;
     int fastRaysPerProbe = 256;
 
+    // Keep fast lights apart as above. Off, they are lights like any other: their bounce goes into the still atlas under
+    // its memory (with the adaptive memory, restarting when it changes enough to tell from the noise), no probe traces
+    // the fast count, and the fast atlas fades to nothing.
+    bool fastLights = true;
+
     // The fast blend never takes a frame as longer than this, so one slow frame (a hitch) cannot replace most of its
     // history with one noisy estimate.
     float fastBlendMaxFrameSeconds = 1.0f / 30.0f;
