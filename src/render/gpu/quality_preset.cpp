@@ -11,6 +11,8 @@ namespace {
         int cascadeCount = 0;
         CascadeResolution cascadeResolution = CascadeResolution::Pixels2048;
         std::uint32_t bloomLevels = 0;
+        int probeRays = 0;     // the light probes' rays, near fast lights or not
+        int fastProbeRays = 0;
 
         bool operator==(const QualityValues&) const = default;
     };
@@ -24,27 +26,30 @@ namespace {
             .directionalDistance = settings.shadows.directionalDistance,
             .cascadeCount = settings.shadows.cascadeCount,
             .cascadeResolution = settings.shadows.cascadeResolution,
-            .bloomLevels = settings.bloom.maxLevels
+            .bloomLevels = settings.bloom.maxLevels,
+            .probeRays = settings.globalIllumination.raysPerProbe,
+            .fastProbeRays = settings.globalIllumination.fastRaysPerProbe
         };
     }
 
-    // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra with 2048 cascades.
+    // High is read from the defaults, so retuning a default retunes High with it, and Ultra is High with 256 probe rays.
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
-            case QualityPreset::High: {
-                QualityValues high = valuesOf(RenderSettings{});
-                high.cascadeResolution = CascadeResolution::Pixels2048;
-                return high;
+            case QualityPreset::Ultra: {
+                QualityValues ultra = valuesOf(RenderSettings{});
+                ultra.probeRays = 256;
+                ultra.fastProbeRays = 256;
+                return ultra;
             }
             case QualityPreset::Low:
                 return {.shadowedPoints = 8, .shadowedSpots = 4, .texelTarget = 0.1f, .spotTexelTarget = 0.05f,
                         .directionalDistance = 60.0f, .cascadeCount = 2,
-                        .cascadeResolution = CascadeResolution::Pixels1024, .bloomLevels = 4};
+                        .cascadeResolution = CascadeResolution::Pixels1024, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
-                        .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5};
-            case QualityPreset::Ultra:
+                        .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64};
+            case QualityPreset::High:
                 break;
         }
 
@@ -62,6 +67,8 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.shadows.cascadeCount = values.cascadeCount;
     settings.shadows.cascadeResolution = values.cascadeResolution;
     settings.bloom.maxLevels = values.bloomLevels;
+    settings.globalIllumination.raysPerProbe = values.probeRays;
+    settings.globalIllumination.fastRaysPerProbe = values.fastProbeRays;
 }
 
 std::optional<QualityPreset> matchingQualityPreset(const RenderSettings& settings) {

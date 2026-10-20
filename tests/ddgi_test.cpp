@@ -13,7 +13,7 @@
 namespace {
     /*
     * The probes as they were before the ray budget, the adaptive memory and sharing (all on by default now): 64 rays
-    * every frame and the fixed memory, for the tests of the schedule's own rules.
+    * every frame (256 near fast lights) and the fixed memory, for the tests of the schedule's own rules.
     */
     GlobalIlluminationSettings plainProbeSettings() {
         GlobalIlluminationSettings settings;
@@ -21,6 +21,7 @@ namespace {
         settings.probeUpdatesPerSecond = 0.0f;
         settings.adaptiveMemory = false;
         settings.probeSharing = 0.0f;
+        settings.fastRaysPerProbe = 256;
         return settings;
     }
     bool nearlyEqual(float actual, float expected, float tolerance = 1e-5f) {
