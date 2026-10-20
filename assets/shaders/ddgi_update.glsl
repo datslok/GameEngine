@@ -11,9 +11,9 @@
 // volume's change threshold above 0), the still lights' texels blend by adaptiveProbeBlend instead, their history in the
 // atlas's alpha and the change window's mean and noise in a third image (alpha is 0 otherwise, so switching the adaptive
 // memory on starts every texel from its stored light). A probe a scene event restarted (render/gpu/ddgi.h,
-// advanceProbeRestarts) keeps only the restart's share of its old light and then averages since the event, by the
-// frames and shares the restart buffer holds (adaptiveProbeUpdate with the adaptive memory; the share itself for the
-// fixed memory and the distances).
+// advanceProbeRestarts) checks whether its light really changed and restarts only then (adaptiveProbeUpdate, with the
+// adaptive memory), or with the fixed memory and for the distances restarts outright, keeping the share the restart
+// buffer holds.
 #ifndef DDGI_UPDATE_GLSL
 #define DDGI_UPDATE_GLSL
 
@@ -113,7 +113,7 @@ void main() {
             vec4 change = imageLoad(changeAtlas, origin + 1 + texel);
             AdaptiveProbeTexel adaptive = adaptiveProbeUpdate(AdaptiveProbeTexel(stored.rgb, stored.a, change.rgb, change.a), sum.rgb / sum.w,
                                                               volume.hysteresis.x, volume.rotation[2].w, volume.sky.w, restart.frames.x,
-                                                              restart.keeps.x);
+                                                              restart.check);
             result = vec4(adaptive.stored, adaptive.history);
             imageStore(changeAtlas, origin + 1 + texel, vec4(adaptive.recent, adaptive.noise));
         } else {

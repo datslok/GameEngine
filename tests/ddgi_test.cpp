@@ -787,13 +787,30 @@ namespace {
         double early = 0.0;     // the error over the first half second after each switch on (or event), as a share of the light (RMS)
         double late = 0.0;      // the same from half a second to 4 s after it
         double dark99 = 0.0;    // mean seconds after each switch off until within 1% of the lamp's light of the darkness
+        double flicker = 0.0;   // change over 0.1 s in the first 2 s after each switch (or event), as a share of the light (RMS)
     };
 
-    // eventMemorySeconds: with events, the soft restart's short memory (0: a hard restart). lightStays: the lamp never
-    // really switches, though the events still come (a probe in an event's region whose light the lamp hardly changes).
-    // eventMemoryGrowth: how fast the restart's memory grows back (GlobalIlluminationSettings::eventMemoryGrowth).
-    SwitchedTexel switchedTexel(bool adaptive, float framesPerSecond, bool events = false, float eventMemorySeconds = 0.0f, bool lightStays = false,
-                                float eventMemoryGrowth = 1.0f) {
+    /*
+    * How the switching runs: the memory (adaptive or fixed) at a frame rate, and with events the scene event settings
+    * (GlobalIlluminationSettings::eventMemorySeconds, eventMemoryGrowth, eventChangeThreshold, eventCheckSeconds; a
+    * threshold of 0 restarts every texel, as events first did). The patch's light off and on: no patch (the room's own
+    * darkness) and a bright one by default; lightStays keeps it on, the events still coming (a probe in an event's
+    * region whose light does not change).
+    */
+    struct SwitchOptions {
+        bool adaptive = true;
+        float framesPerSecond = 60.0f;
+        bool events = false;
+        float eventMemorySeconds = 0.0f;
+        float eventMemoryGrowth = 1.0f;
+        float eventChangeThreshold = 0.0f;
+        float eventCheckSeconds = 0.5f;
+        bool lightStays = false;
+        float offPatch = 0.005f;
+        float onPatch = 2.0f;
+    };
+
+    SwitchedTexel switchedTexel(const SwitchOptions& options) {
         const Vec3 towardsPatch{1.0f, 0.0f, 0.0f};
         const float patchCosine = std::cos(radiansFromDegrees(15.0f));
         Vec3 texelDirection;
@@ -826,19 +843,23 @@ namespace {
             return irradianceEstimate(texelDirection, directions, radiance).x;
         };
 
+        const float framesPerSecond = options.framesPerSecond;
         const float frameSeconds = 1.0f / framesPerSecond;
         const float fixedKeep = hysteresisForTimeConstant(frameSeconds, 2.0f);
         const float longKeep = hysteresisForTimeConstant(frameSeconds, 4.0f);
         const float windowKeep = hysteresisForTimeConstant(frameSeconds, 0.2f);
         const int stateFrames = static_cast<int>(30.0f * framesPerSecond);
         const int tenth = static_cast<int>(framesPerSecond / 10.0f);
-        const double darkness = estimateAt(1u << 20, 0.005f);
+        double darkness = 0.0;
         double lit = 0.0;
 
         for (std::uint64_t frame = 0; frame < 4000; ++frame) {
-            lit += estimateAt(frame + (1u << 21), 2.0f) / 4000.0;
+            darkness += estimateAt(frame + (1u << 20), options.offPatch) / 4000.0;
+            lit += estimateAt(frame + (1u << 21), options.onPatch) / 4000.0;
         }
 
+        const float shortKeep = hysteresisForTimeConstant(frameSeconds, options.eventMemorySeconds);
+        const ProbeEventCheck check{options.eventChangeThreshold, options.eventMemoryGrowth, options.eventCheckSeconds * framesPerSecond};
         AdaptiveProbeTexel texel;
         std::uint64_t frame = 0;
         double changeSquares = 0.0;
@@ -851,30 +872,31 @@ namespace {
         long lateFrames = 0;
         double darkened = 0.0;
         int switchesOff = 0;
-        const float shortKeep = hysteresisForTimeConstant(frameSeconds, eventMemorySeconds);
+        double flickerSquares = 0.0;
+        long flickerFrames = 0;
 
         for (int state = 0; state < 9; ++state) {
-            const bool on = lightStays || state % 2 == 1;
+            const bool on = options.lightStays || state % 2 == 1;
             const double from = on ? darkness : lit;
             const double to = on ? lit : darkness;
             std::vector<float> history;
-            bool arrived = state == 0;
+            std::vector<float> afterSwitch;
+            bool arrived = state == 0 || options.lightStays;
             bool dark = on || state == 0;
 
             for (int i = 0; i < stateFrames; ++i, ++frame) {
-                const float estimate = estimateAt(frame, on ? 2.0f : 0.005f);
+                const float estimate = estimateAt(frame, on ? options.onPatch : options.offPatch);
                 const bool first = frame == 0;
 
-                // With events, the switch is signalled: the frame it happens restarts the texel, which then keeps the
-                // restart's share (restartedProbeKeep) until its usual memory is the smaller.
-                const int sinceEvent = events && state > 0 ? i : -1;
+                // With events, the switch is signalled on the frame it happens.
+                const int sinceEvent = options.events && state > 0 ? i : -1;
 
-                if (adaptive) {
+                if (options.adaptive) {
                     texel = adaptiveProbeUpdate(texel, Vec3{estimate, estimate, estimate}, first ? 0.0f : longKeep, first ? 0.0f : windowKeep, 5.0f,
-                                                sinceEvent, restartedProbeKeep(longKeep, shortKeep, eventMemoryGrowth, sinceEvent));
+                                                sinceEvent, check);
                 } else {
                     texel.stored = blendProbeValue(texel.stored, Vec3{estimate, estimate, estimate},
-                                                   first ? 0.0f : restartedProbeKeep(fixedKeep, shortKeep, eventMemoryGrowth, sinceEvent));
+                                                   first ? 0.0f : restartedProbeKeep(fixedKeep, shortKeep, options.eventMemoryGrowth, static_cast<float>(sinceEvent)));
                 }
 
                 const double stored = texel.stored.x;
@@ -889,7 +911,17 @@ namespace {
                     ++lateFrames;
                 }
 
-                if (!dark && std::abs(stored - darkness) <= 0.01 * (lit - darkness)) {
+                if (state > 0 && i < static_cast<int>(2.0f * framesPerSecond)) {
+                    afterSwitch.push_back(texel.stored.x);
+
+                    if (afterSwitch.size() > static_cast<std::size_t>(tenth)) {
+                        const double change = (afterSwitch.back() - afterSwitch[afterSwitch.size() - 1 - static_cast<std::size_t>(tenth)]) / lit;
+                        flickerSquares += change * change;
+                        ++flickerFrames;
+                    }
+                }
+
+                if (!dark && std::abs(stored - darkness) <= 0.01 * std::abs(lit - darkness)) {
                     dark = true;
                     darkened += i * frameSeconds;
                     ++switchesOff;
@@ -913,11 +945,12 @@ namespace {
                 }
             }
 
-            assert(arrived || lightStays);
+            assert(arrived);
         }
 
-        return SwitchedTexel{std::sqrt(changeSquares / changes), switches > 0 ? reached / switches : 0.0, std::sqrt(earlySquares / earlyFrames),
-                             std::sqrt(lateSquares / lateFrames), switchesOff > 0 ? darkened / switchesOff : 0.0};
+        return SwitchedTexel{std::sqrt(changeSquares / changes), switches > 0 ? reached / switches : 0.0, std::sqrt(earlySquares / std::max(earlyFrames, 1L)),
+                             std::sqrt(lateSquares / std::max(lateFrames, 1L)), switchesOff > 0 ? darkened / switchesOff : 0.0,
+                             std::sqrt(flickerSquares / std::max(flickerFrames, 1L))};
     }
 
     /*
@@ -943,60 +976,98 @@ namespace {
 
     void testTheAdaptiveMemoryIsCalmerAndQuicker() {
         for (float framesPerSecond : {60.0f, 240.0f}) {
-            const SwitchedTexel fixed = switchedTexel(false, framesPerSecond);
-            const SwitchedTexel adaptive = switchedTexel(true, framesPerSecond);
+            const SwitchedTexel fixed = switchedTexel({.adaptive = false, .framesPerSecond = framesPerSecond});
+            const SwitchedTexel adaptive = switchedTexel({.framesPerSecond = framesPerSecond});
             assert(adaptive.crawl < 0.7 * fixed.crawl);
             assert(adaptive.reach90 < 0.6 * fixed.reach90);
         }
     }
 
     /*
-    * A scene event restarts a texel: on the event's frame it keeps the restart's share of its light (none for a hard
-    * restart: the estimate, worth one frame), the change window's mean the same, the noise none yet. While the window
-    * would still reach back before the event (fewer frames since than it holds), the stored light and the window's mean
-    * blend by the restart's share (a hard restart's n / (n + 1): the plain mean since the event), the noise is the root
-    * mean square of each frame's luminance about the mean before it, the history the frames whose running mean keeps
-    * that share, and nothing restarts it again, however far the light strays from the old noise's band. Then the
-    * adaptive memory carries on from there; with no restart running (negative) it is the adaptive memory throughout.
+    * A scene event makes each texel in its region check, for check.frames frames, whether its light really changed:
+    * the mean of the frames since the event (kept in the change window's place) against the stored light, in units of
+    * the noise measured before the event, shrinking as 1 / sqrt(frames). Light that only wobbles within its noise never
+    * restarts: the stored light keeps its long memory. A change far outside the noise restarts on the event's frame, a
+    * smaller one a few frames later, from the mean since the event, its history marked negative while the restart runs.
+    * A restarted texel then measures its noise afresh and looks for no change while its frames since are fewer than the
+    * change window holds, its memory growing with them (restartedProbeKeep), then the adaptive memory carries on with
+    * that memory; when the restart is over the marker goes and the usual memory takes over. A new event checks it again.
     */
-    void testARestartedTexelStartsFromItsEstimate() {
-        const AdaptiveProbeTexel settled{Vec3{0.1f, 0.1f, 0.1f}, 4000.0f, Vec3{0.1f, 0.1f, 0.1f}, 0.001f};
+    void testTheEventCheckRestartsOnlyRealChanges() {
         const float longKeep = 0.999f;
         const float windowKeep = 0.9f; // the window holds 9 frames
         const float threshold = 8.0f;
-        // A hard restart whose memory grows as fast as the frames since (n / (n + 1)): the plain mean since the event.
-        const auto hard = [&](int frames) { return frames < 0 ? longKeep : std::min(longKeep, static_cast<float>(frames) / static_cast<float>(frames + 1)); };
+        const ProbeEventCheck check{4.0f, 0.5f, 20.0f};
+        const AdaptiveProbeTexel settled{Vec3{1.0f, 1.0f, 1.0f}, 2000.0f, Vec3{1.0f, 1.0f, 1.0f}, 0.1f};
+        const auto grey = [](float value) { return Vec3{value, value, value}; };
 
-        AdaptiveProbeTexel texel = adaptiveProbeUpdate(settled, Vec3{2.0f, 2.0f, 2.0f}, longKeep, windowKeep, threshold, 0, hard(0));
-        assert(sameTexel(texel, AdaptiveProbeTexel{Vec3{2.0f, 2.0f, 2.0f}, 1.0f, Vec3{2.0f, 2.0f, 2.0f}, 0.0f}));
+        // Wobbling within its noise: the long memory, the mean since the event kept, never a restart.
+        AdaptiveProbeTexel calm = settled;
+        float sum = 0.0f;
 
-        // A soft restart keeping half: halfway to the estimate, worth the frames whose mean keeps half (1, plus this one).
-        const AdaptiveProbeTexel soft = adaptiveProbeUpdate(settled, Vec3{2.0f, 2.0f, 2.0f}, longKeep, windowKeep, threshold, 0, 0.5f);
-        assert(sameTexel(soft, AdaptiveProbeTexel{Vec3{1.05f, 1.05f, 1.05f}, 2.0f, Vec3{1.05f, 1.05f, 1.05f}, 0.0f}));
-
-        const std::vector<float> estimates{0.5f, 3.0f, 1.0f, 2.5f, 0.0f, 4.0f, 2.0f, 1.5f};
-        float sum = 2.0f;
-        float squares = 0.0f;
-
-        for (std::size_t index = 0; index < estimates.size(); ++index) {
-            const int frames = static_cast<int>(index) + 1;
-            const float mean = sum / static_cast<float>(frames);
-            const float estimate = estimates[index];
-            texel = adaptiveProbeUpdate(texel, Vec3{estimate, estimate, estimate}, longKeep, windowKeep, threshold, frames, hard(frames));
+        for (int frames = 0; frames < 20; ++frames) {
+            const float estimate = frames % 2 == 0 ? 1.1f : 0.9f;
+            const AdaptiveProbeTexel before = calm;
+            calm = adaptiveProbeUpdate(calm, grey(estimate), longKeep, windowKeep, threshold, frames, check);
             sum += estimate;
-            squares += (estimate - mean) * (estimate - mean);
-            assert(nearlyEqual(texel.stored.x, sum / static_cast<float>(frames + 1), 1e-4f));
-            assert(nearlyEqual(texel.recent, texel.stored));
-            assert(nearlyEqual(texel.history, static_cast<float>(frames + 1), 1e-3f));
-            assert(nearlyEqual(texel.noise, std::sqrt(squares / static_cast<float>(frames)), 1e-4f));
+            assert(nearlyEqual(calm.stored, blendProbeValue(before.stored, grey(estimate), longKeep)));
+            assert(nearlyEqual(calm.recent.x, sum / static_cast<float>(frames + 1), 1e-4f));
+            assert(calm.history == std::min(before.history + 1.0f, static_cast<float>(maxProbeHistory)));
         }
 
-        // The window full: the adaptive memory, from the history counted, the restart's share its long memory while it runs.
-        const Vec3 next{2.2f, 2.2f, 2.2f};
-        assert(sameTexel(adaptiveProbeUpdate(texel, next, longKeep, windowKeep, threshold, 9, hard(9)),
-                         adaptiveProbeBlend(texel, next, hard(9), windowKeep, threshold)));
-        assert(sameTexel(adaptiveProbeUpdate(settled, next, longKeep, windowKeep, threshold, -1, hard(-1)),
-                         adaptiveProbeBlend(settled, next, longKeep, windowKeep, threshold)));
+        // Far outside the noise: restarted on the event's frame, from that frame.
+        const AdaptiveProbeTexel lit = adaptiveProbeUpdate(settled, grey(3.0f), longKeep, windowKeep, threshold, 0, check);
+        assert(sameTexel(lit, AdaptiveProbeTexel{grey(3.0f), -1.0f, grey(3.0f), 0.0f}));
+
+        // Twice the noise: restarted once the mean of 5 frames tells it apart (0.4 / sqrt(5) + 1% of the light < 0.2).
+        AdaptiveProbeTexel brighter = settled;
+        int restartedAt = -1;
+
+        for (int frames = 0; frames < 20 && restartedAt < 0; ++frames) {
+            brighter = adaptiveProbeUpdate(brighter, grey(1.2f), longKeep, windowKeep, threshold, frames, check);
+
+            if (brighter.history < 0.0f) {
+                restartedAt = frames;
+            }
+        }
+
+        assert(restartedAt == 4);
+        assert(nearlyEqual(brighter.stored, grey(1.2f), 1e-4f));
+
+        // Restarted: the noise measured afresh, the memory growing with its frames, the window's mean the stored light.
+        AdaptiveProbeTexel young = lit;
+        float squares = 0.0f;
+
+        for (int frames = 1; frames < 9; ++frames) {
+            const float estimate = frames % 2 == 0 ? 3.3f : 2.7f;
+            const AdaptiveProbeTexel before = young;
+            young = adaptiveProbeUpdate(young, grey(estimate), longKeep, windowKeep, threshold, frames, check);
+            const float keep = restartedProbeKeep(longKeep, 0.0f, check.growth, -before.history);
+            squares += (estimate - before.recent.x) * (estimate - before.recent.x);
+            assert(nearlyEqual(young.stored, blendProbeValue(before.stored, grey(estimate), keep)));
+            assert(nearlyEqual(young.recent, young.stored));
+            assert(young.history == before.history - 1.0f);
+            assert(nearlyEqual(young.noise, std::sqrt(squares / static_cast<float>(frames)), 1e-4f));
+        }
+
+        // The window full: the adaptive memory with the growing memory, still marked.
+        AdaptiveProbeTexel own = young;
+        own.history = -young.history;
+        AdaptiveProbeTexel expected = adaptiveProbeBlend(own, grey(3.0f), restartedProbeKeep(longKeep, 0.0f, 0.5f, own.history), windowKeep, threshold);
+        expected.history = -expected.history;
+        assert(sameTexel(adaptiveProbeUpdate(young, grey(3.0f), longKeep, windowKeep, threshold, 9, check), expected));
+
+        // The restart over: unmarked, the usual memory. Past the check without a restart, or no event: the same.
+        assert(sameTexel(adaptiveProbeUpdate(young, grey(3.0f), longKeep, windowKeep, threshold, -1, check),
+                         adaptiveProbeBlend(own, grey(3.0f), longKeep, windowKeep, threshold)));
+        assert(sameTexel(adaptiveProbeUpdate(settled, grey(1.05f), longKeep, windowKeep, threshold, 20, check),
+                         adaptiveProbeBlend(settled, grey(1.05f), longKeep, windowKeep, threshold)));
+        assert(sameTexel(adaptiveProbeUpdate(settled, grey(1.05f), longKeep, windowKeep, threshold, -1, check),
+                         adaptiveProbeBlend(settled, grey(1.05f), longKeep, windowKeep, threshold)));
+
+        // A new event checks a texel the last one restarted.
+        const AdaptiveProbeTexel again = adaptiveProbeUpdate(young, grey(0.1f), longKeep, windowKeep, threshold, 0, check);
+        assert(again.history == -1.0f && nearlyEqual(again.stored, grey(0.1f)));
     }
 
     /*
@@ -1047,6 +1118,8 @@ namespace {
         frame.distanceHysteresis = 0.5f;    // 0, e^-1, then the share
         frame.restartHysteresis = 0.0f;     // hard restarts
         frame.restartGrowth = 1.0f;
+        frame.restartThreshold = 4.0f;
+        frame.restartCheckFrames = 0.0f;    // no check period: the restart's ramp alone decides when it ends
         std::vector<GpuProbeRestart> restarts;
 
         advanceProbeRestarts(restarts, volume, {}, frame);
@@ -1068,8 +1141,11 @@ namespace {
             assert(restart.distanceFrames < 0);
         }
 
-        // Each restart carries the share its probe keeps this frame (restartedProbeKeep), the update's to use.
+        // Each restart carries the share its probe keeps this frame (restartedProbeKeep), and the event check's settings,
+        // the update's to use.
         assert(restarts[static_cast<std::size_t>(*inside.begin())].irradianceKeep == 0.0f);
+        const ProbeEventCheck carried = restarts[0].check;
+        assert(carried.threshold == frame.restartThreshold && carried.growth == frame.restartGrowth && carried.frames == frame.restartCheckFrames);
 
         for (int expected : {1, 2, 3, -1}) {
             advanceProbeRestarts(restarts, volume, {}, frame);
@@ -1129,14 +1205,14 @@ namespace {
     */
     void testAnEventBringsALampInAtOnce() {
         for (float framesPerSecond : {60.0f, 240.0f}) {
-            const SwitchedTexel adaptive = switchedTexel(true, framesPerSecond);
-            const SwitchedTexel signalled = switchedTexel(true, framesPerSecond, true);
+            const SwitchedTexel adaptive = switchedTexel({.framesPerSecond = framesPerSecond});
+            const SwitchedTexel signalled = switchedTexel({.framesPerSecond = framesPerSecond, .events = true});
             // Measured: 0.81 s against 0.044 at 60 fps, 0.96 against 0.008 at 240; the fixed memory's 4.6 s against the same.
             assert(signalled.reach90 < 0.1 * adaptive.reach90);
             assert(signalled.crawl < 1.1 * adaptive.crawl);
 
-            const SwitchedTexel fixed = switchedTexel(false, framesPerSecond);
-            const SwitchedTexel fixedSignalled = switchedTexel(false, framesPerSecond, true);
+            const SwitchedTexel fixed = switchedTexel({.adaptive = false, .framesPerSecond = framesPerSecond});
+            const SwitchedTexel fixedSignalled = switchedTexel({.adaptive = false, .framesPerSecond = framesPerSecond, .events = true});
             assert(fixedSignalled.reach90 < 0.02 * fixed.reach90);
             assert(fixedSignalled.crawl < 1.1 * fixed.crawl);
         }
@@ -1166,29 +1242,31 @@ namespace {
         assert(GlobalIlluminationSettings{}.eventProbeSharing == 0.5f);
     }
 
-    // The update reads each probe's restart as two ints and two floats, as the shader's ProbeRestart; none by default.
+    // The update reads each probe's restart as two ints and six floats, as the shader's ProbeRestart; none by default.
     void testRestartsArePackedForTheShader() {
-        static_assert(sizeof(GpuProbeRestart) == 16);
+        static_assert(sizeof(GpuProbeRestart) == 32);
         const GpuProbeRestart none;
         assert(none.irradianceFrames < 0 && none.distanceFrames < 0);
     }
 
     /*
-    * The soft restart (eventMemorySeconds) in the dark room model at 30 frames a second. A probe in an event's region
-    * whose light did not really change (lightStays) is far calmer over the first half second with the short memory
-    * than restarted hard; one whose light did change reaches it later, the old light fading out over the memory and a
-    * tail. Measured (error over the first half second, as a share of the light; time to 90% of a switch): no event
-    * 1.4%; hard 22.5% and 0.05 s; 0.05 s 16.9% and 0.14 s; 0.1 s 13.4% and 0.26 s; 0.3 s 8.1% and 1.45 s. The schedule
-    * hands the update that share for the frame's time, none for fresh atlases or a memory of 0.
+    * The soft restart (eventMemorySeconds), for restarts that take no event check (the fixed memory), in the dark room
+    * model at 30 frames a second: a probe in an event's region whose light did not really change (lightStays) is far
+    * calmer over the first half second with a 0.1 s memory than restarted hard (13.9% against 22.8% of the light; 2.2%
+    * left alone); one whose light did change reaches it later, the old light fading out over the memory. (Before the
+    * event check, with the adaptive memory: no event 1.4%; hard 22.5% and 0.05 s to 90% of a switch; 0.05 s 16.9% and
+    * 0.14 s; 0.1 s 13.4% and 0.26 s; 0.3 s 8.1% and 1.45 s.) The schedule hands the update that share for the frame's
+    * time, none for fresh atlases or a memory of 0.
     */
     void testASoftRestartIsCalmerAtFirst() {
-        const SwitchedTexel hard = switchedTexel(true, 30.0f, true, 0.0f, true);
-        const SwitchedTexel soft = switchedTexel(true, 30.0f, true, 0.1f, true);
-        const SwitchedTexel untouched = switchedTexel(true, 30.0f, false, 0.0f, true);
+        const SwitchedTexel hard = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .lightStays = true});
+        const SwitchedTexel soft = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = 0.1f, .lightStays = true});
+        const SwitchedTexel untouched = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .lightStays = true});
         assert(soft.early < 0.7 * hard.early);
-        assert(untouched.early < 0.2 * soft.early);
+        assert(untouched.early < 0.3 * soft.early);
         assert(soft.crawl < 1.1 * hard.crawl);
-        assert(switchedTexel(true, 30.0f, true, 0.1f).reach90 > 2.0 * switchedTexel(true, 30.0f, true, 0.0f).reach90);
+        assert(switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = 0.1f}).reach90 >
+               2.0 * switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true}).reach90);
 
         GlobalIlluminationSettings settings;
         ProbeSchedule schedule;
@@ -1201,11 +1279,15 @@ namespace {
         assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, false).restartHysteresis == 0.0f);
         settings.eventMemoryGrowth = 0.3f;
         assert(scheduleProbeFrame(schedule, settings, frameSeconds, false, false).restartGrowth == 0.3f);
+        settings.eventChangeThreshold = 3.0f;
+        settings.eventCheckSeconds = 0.5f;
+        const ProbeFrame checked = scheduleProbeFrame(schedule, settings, frameSeconds, false, false);
+        assert(checked.restartThreshold == 3.0f && nearlyEqual(checked.restartCheckFrames, 15.0f, 1e-3f));
     }
 
     /*
-    * How fast a restart's memory grows back (eventMemoryGrowth), in the dark room model at 30 fps with the default soft
-    * restart: with growth 1 (close to the plain mean since the event) the lamp light the first frames kept faded as
+    * How fast a restart's memory grows back (eventMemoryGrowth), in the dark room model at 30 fps with the fixed memory
+    * and the default soft restart: with growth 1 (close to the plain mean since the event) the lamp light the first frames kept faded as
     * 1 / time, so switched off it took 1.32 s to fall within 1% of the lamp of darkness (the flashlight's 0.1 s memory
     * takes 0.46 s); at the default 0.5, 0.30 s; at 0.25, 0.20 s. The price is noise while the memory grows, in a probe
     * whose light did not change: over the first half second 16.8%, 20.6%, 26.3%, from then to 4 s 3.3%, 4.5%, 7.2%
@@ -1215,14 +1297,56 @@ namespace {
         const GlobalIlluminationSettings defaults;
         assert(defaults.eventMemoryGrowth == 0.5f);
         const float memory = defaults.eventMemorySeconds;
-        const SwitchedTexel plain = switchedTexel(true, 30.0f, true, memory, false, 1.0f);
-        const SwitchedTexel grown = switchedTexel(true, 30.0f, true, memory, false, defaults.eventMemoryGrowth);
+        const SwitchedTexel plain = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = memory});
+        const SwitchedTexel grown = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = memory,
+                                                   .eventMemoryGrowth = defaults.eventMemoryGrowth});
+        const SwitchedTexel plainStays = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = memory,
+                                                        .lightStays = true});
+        const SwitchedTexel grownStays = switchedTexel({.adaptive = false, .framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = memory,
+                                                        .eventMemoryGrowth = defaults.eventMemoryGrowth, .lightStays = true});
         assert(grown.dark99 < 0.3 * plain.dark99);
         assert(grown.crawl < 1.01 * plain.crawl);
-
-        const SwitchedTexel plainStays = switchedTexel(true, 30.0f, true, memory, true, 1.0f);
-        const SwitchedTexel grownStays = switchedTexel(true, 30.0f, true, memory, true, defaults.eventMemoryGrowth);
         assert(grownStays.early < 1.3 * plainStays.early && grownStays.late < 1.5 * plainStays.late);
+    }
+
+    /*
+    * The event check in the dark room model at 30 fps with the default settings: a faint change (a sparsely lit texel
+    * the lamp makes 15% brighter) and a texel whose light stays both flicker over the 2 s after each event exactly as
+    * with no events at all (0.74% of change in 0.1 s), where restarting every texel (a threshold of 0, as events first
+    * did) made them flicker 13.9% and 14.9%; their change comes in over the long memory instead. The lamp itself still
+    * switches within a fraction of a second: 90% of the way on in 0.16 s and within 1% of darkness 0.28 s after it is
+    * switched off, against 5.2 and 18.3 s with no events (thresholds of 3 gave 0.09 and 0.13 s, 5 gave 1.3 and 4.9 s,
+    * the sparse patch's noise taking too many frames to tell apart within the check).
+    */
+    void testTheEventCheckSparesUnchangedLight() {
+        const GlobalIlluminationSettings defaults;
+        assert(defaults.eventChangeThreshold == 4.0f && defaults.eventCheckSeconds == 0.5f);
+        const SwitchOptions checked{.framesPerSecond = 30.0f, .events = true, .eventMemorySeconds = defaults.eventMemorySeconds,
+                                    .eventMemoryGrowth = defaults.eventMemoryGrowth, .eventChangeThreshold = defaults.eventChangeThreshold,
+                                    .eventCheckSeconds = defaults.eventCheckSeconds};
+        SwitchOptions forced = checked;
+        forced.eventChangeThreshold = 0.0f;
+        const SwitchOptions none{.framesPerSecond = 30.0f};
+
+        const auto faint = [](SwitchOptions options) {
+            options.offPatch = 2.0f;
+            options.onPatch = 2.3f;
+            return switchedTexel(options);
+        };
+        const auto stays = [](SwitchOptions options) {
+            options.lightStays = true;
+            return switchedTexel(options);
+        };
+
+        assert(faint(checked).flicker < 1.1 * faint(none).flicker);
+        assert(stays(checked).flicker < 1.1 * stays(none).flicker);
+        assert(faint(forced).flicker > 10.0 * faint(checked).flicker);
+        assert(stays(forced).flicker > 10.0 * stays(checked).flicker);
+
+        const SwitchedTexel lamp = switchedTexel(checked);
+        const SwitchedTexel unsignalled = switchedTexel(none);
+        assert(lamp.reach90 < 0.05 * unsignalled.reach90 && lamp.reach90 < 0.25);
+        assert(lamp.dark99 < 0.05 * unsignalled.dark99 && lamp.dark99 < 0.4);
     }
 
     bool sameRows(const ProbeRotationRows& a, const ProbeRotationRows& b) {
@@ -1550,7 +1674,7 @@ void testDdgi() {
     testTheAdaptiveMemoryRestartsOnARealChange();
     testTheScheduleCarriesTheAdaptiveMemory();
     testTheAdaptiveMemoryIsCalmerAndQuicker();
-    testARestartedTexelStartsFromItsEstimate();
+    testTheEventCheckRestartsOnlyRealChanges();
     testTheRampAfterARestart();
     testEventsRestartTheProbesInTheirRegion();
     testAnEventBringsALampInAtOnce();
@@ -1558,6 +1682,7 @@ void testDdgi() {
     testEventSharingFadesBackToThePresets();
     testASoftRestartIsCalmerAtFirst();
     testAGrowingMemoryForgetsTheSwitchSooner();
+    testTheEventCheckSparesUnchangedLight();
     testEachProbeTurnsItsRaysItsOwnWay();
     testNeighboursShareOnlyIfTheyCanSeeEachOther();
     testSharingAveragesTheVisibleNeighbours();
