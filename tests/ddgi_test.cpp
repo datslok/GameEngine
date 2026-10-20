@@ -21,6 +21,7 @@ namespace {
         settings.probeUpdatesPerSecond = 0.0f;
         settings.adaptiveMemory = false;
         settings.probeSharing = 0.0f;
+        settings.fastProbeSharing = 0.0f;
         settings.fastRaysPerProbe = 256;
         return settings;
     }
@@ -997,6 +998,12 @@ namespace {
 
         const std::array<Vec3, 6> uniform{own, own, own, own, own, own};
         assert(nearlyEqual(sharedProbeValue(own, uniform, allVisible, 0.7f), own));
+
+        // Fast lights' light is shared with its own weight, 0.5 by default whatever the still weight; the pass reads both.
+        GlobalIlluminationSettings defaults;
+        assert(defaults.fastProbeSharing == 0.5f);
+        const GpuProbeShare packed = packProbeShare(ProbeVolume{}, 0.1f, 0.5f);
+        assert(packed.weight[0] == 0.1f && packed.weight[1] == 0.5f);
 
         const GlobalIlluminationSettings settings;
         assert(settings.probeSharing == 0.1f);

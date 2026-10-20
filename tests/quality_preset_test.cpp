@@ -47,6 +47,12 @@ namespace {
         }
 
         assert(RenderSettings{}.globalIllumination.probeSharing == 0.1f);
+
+        // Fast lights' sharing is the same on every preset.
+        RenderSettings fast;
+        fast.globalIllumination.fastProbeSharing = 0.25f;
+        applyQualityPreset(fast, QualityPreset::Low);
+        assert(fast.globalIllumination.fastProbeSharing == 0.25f);
     }
 
     // Each step down from High costs less on every axis a preset sets: fewer shadowed lights, coarser shadow texels,

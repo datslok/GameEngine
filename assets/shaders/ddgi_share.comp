@@ -15,7 +15,7 @@ layout(local_size_x = DDGI_IRRADIANCE_TEXELS, local_size_y = DDGI_IRRADIANCE_TEX
 layout(push_constant) uniform ProbeShareData {
     ivec4 counts;  // xyz probes along each axis
     vec4 spacing;  // xyz the spacing between probes
-    vec4 weight;   // x the sharing weight
+    vec4 weight;   // x the still light's sharing weight, y the fast light's
 } share;
 
 layout(set = 0, binding = 0, rgba16f) readonly uniform image2D irradiance;
@@ -64,7 +64,7 @@ void main() {
     }
 
     vec4 result = vec4(sharedProbeValue(own.rgb, neighbours, visible, share.weight.x), own.a);
-    vec4 fastResult = vec4(sharedProbeValue(ownFast.rgb, fastNeighbours, visible, share.weight.x), ownFast.a);
+    vec4 fastResult = vec4(sharedProbeValue(ownFast.rgb, fastNeighbours, visible, share.weight.y), ownFast.a);
     imageStore(sharedIrradiance, origin + 1 + texel, result);
     imageStore(sharedFastIrradiance, origin + 1 + texel, fastResult);
     square[texel.y][texel.x] = result;

@@ -95,6 +95,11 @@ struct GlobalIlluminationSettings {
     */
     float probeSharing = 0.1f;
 
+    // The same for fast lights' light (the fast atlas) on its own weight: their short memory averages few frames, so
+    // their bounce flickers most at low frame rates (a flashlight at 30 fps), and sharing makes up for it. The quality
+    // presets leave it alone. Either weight above 0 turns every probe's rays its own way.
+    float fastProbeSharing = 0.5f;
+
     /*
     * Fast lights (PointLight::fast, SpotLight::fast: flashlights, headlights) keep their light in a second irradiance
     * atlas with a much shorter memory, so their bounce follows them instead of trailing for seconds; light adds up, so
@@ -246,12 +251,12 @@ Vec3 sharedProbeValue(const Vec3& own, const std::array<Vec3, 6>& neighbours, co
 struct GpuProbeShare {
     std::int32_t counts[4]; // xyz probes along each axis
     float spacing[4];       // xyz the spacing between probes
-    float weight[4];        // x the sharing weight
+    float weight[4];        // x the still light's sharing weight, y the fast light's
 };
 
 static_assert(sizeof(GpuProbeShare) == 48, "GpuProbeShare must match ddgi_share.comp");
 
-GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight);
+GpuProbeShare packProbeShare(const ProbeVolume& volume, float weight, float fastWeight);
 
 /*
 * Whether a probe counts as within reach of a light, for tracing more rays: the light's range, grown by reach (the

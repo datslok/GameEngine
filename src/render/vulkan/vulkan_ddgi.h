@@ -108,7 +108,7 @@ private:
     VulkanBuffer probeTurns;
     bool turnsIndependent = false;
 
-    // This frame shares light between probes (set by prepare()).
+    // This frame shares light between probes, still or fast (set by prepare()).
     bool sharing = false;
     VulkanBuffer rays;
     VulkanBuffer fastRays;
@@ -133,7 +133,7 @@ private:
     void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int rayStride);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
                int probes);
-    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight);
+    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight, float fastWeight);
 
     // Fill the turns buffer: each probe's own turn, or identity rows.
     void writeProbeTurns(int probes, bool independent);
