@@ -55,8 +55,168 @@ namespace {
 
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
 
-        assert(staticModels == 5);
+        // The ground, the towers, fence, trees, building, the street, its windows and its bulbs' glow (static, and
+        // visual only, so they neither block nor wake the probes).
+        assert(staticModels == 8);
         assert(others > 0);
+    }
+
+    // The street's houses: the blocks of brick or render.
+    bool isHouse(const LabBlock& block) {
+        return block.surface == LabSurface::Brick || block.surface == LabSurface::Render;
+    }
+
+    /*
+    * The street: houses in two rows along it, fronts on the pavements' edges, 3 or 4 storeys, nothing standing in the
+    * road, the pavements or the cross street, every house within the street's bounds; the forest, the building and the
+    * towers' view all clear of it; the same every time.
+    */
+    void testTheStreet() {
+        const LightLabLayout layout = buildLightLabLayout();
+        const LightLabLayout again = buildLightLabLayout();
+        assert(layout.street.size() == again.street.size());
+
+        const Aabb corridor{Vec3{labStreetWestX, labRoadTop + 0.01f, labStreetZ - labHouseFrontOffset + 0.01f},
+                            Vec3{labStreetEastX, 100.0f, labStreetZ + labHouseFrontOffset - 0.01f}};
+        const Aabb crossStreet{Vec3{-labCrossStreetHalfWidth + 0.01f, 0.01f, labStreetBounds.minimum.z},
+                               Vec3{labCrossStreetHalfWidth - 0.01f, 100.0f, labStreetBounds.maximum.z}};
+        int houses = 0;
+
+        for (std::size_t index = 0; index < layout.street.size(); ++index) {
+            const LabBlock& block = layout.street[index];
+            assert(block.centre.x == again.street[index].centre.x && block.halfSize.y == again.street[index].halfSize.y);
+            const Aabb bounds = block.bounds();
+            assert(bounds.minimum.z > 0.0f); // south of the start, out of the towers' view
+
+            if (!isHouse(block)) {
+                continue;
+            }
+
+            ++houses;
+            assert(!overlaps(bounds, corridor) && !overlaps(bounds, crossStreet));
+            assert(near(bounds.minimum.y, 0.0f, 1e-4f));
+            const float storeys = bounds.maximum.y / labStoreyHeight;
+            assert(near(storeys, std::round(storeys), 1e-4f) && storeys >= labHouseMinStoreys - 0.01f && storeys <= labHouseMaxStoreys + 0.01f);
+            assert(near(bounds.maximum.z - bounds.minimum.z, labHouseDepth, 1e-3f));
+            const float width = bounds.maximum.x - bounds.minimum.x;
+            assert(width >= labHouseMinWidth - 1e-3f && width < 2.0f * labHouseMaxWidth);
+            assert(bounds.minimum.x >= labStreetWestX - 1e-3f && bounds.maximum.x <= labStreetEastX + 1e-3f);
+            const bool north = block.centre.z < labStreetZ;
+            assert(near(north ? bounds.maximum.z : bounds.minimum.z, labStreetZ + (north ? -labHouseFrontOffset : labHouseFrontOffset), 1e-3f));
+            assert(!overlaps(bounds, grown(labSunlitRoom, 5.0f)) && !overlaps(bounds, grown(labBackRoom, 5.0f)));
+        }
+
+        // Rows from end to end but for the cross street, on both sides: about 300 m / 9 m a house each side.
+        assert(houses > 40 && houses < 80);
+
+        const Aabb keepClear = grown(labStreetBounds, labStreetKeepClear);
+        for (const LabBlock& tree : layout.trees) {
+            assert(!overlaps(tree.bounds(), keepClear));
+        }
+    }
+
+    /*
+    * The lamps: 30 a side, 10 m apart along each kerb, the sides staggered by half that, each bulb over the road's edge
+    * at its height with a shade above it covering it (so the light cannot go up), a post set back from it, and nothing
+    * of the street but its own bulb's glow between the bulb and the shade.
+    */
+    void testTheStreetLamps() {
+        const LightLabLayout layout = buildLightLabLayout();
+        assert(static_cast<int>(layout.streetLamps.size()) == 2 * labStreetLampsPerSide);
+
+        for (int side = 0; side < 2; ++side) {
+            const float z = labStreetZ + (side == 0 ? -1.0f : 1.0f) * (labRoadHalfWidth - labStreetLampKerbInset);
+
+            for (int index = 0; index < labStreetLampsPerSide; ++index) {
+                const Vec3& bulb = layout.streetLamps[static_cast<std::size_t>(side * labStreetLampsPerSide + index)];
+                assert(near(bulb.z, z, 1e-4f) && near(bulb.y, labStreetLampHeight, 1e-4f));
+                assert(bulb.x > labStreetWestX && bulb.x < labStreetEastX);
+
+                if (index > 0) {
+                    const Vec3& previous = layout.streetLamps[static_cast<std::size_t>(side * labStreetLampsPerSide + index - 1)];
+                    assert(near(bulb.x - previous.x, labStreetLampSpacing, 1e-3f));
+                }
+            }
+        }
+
+        assert(near(layout.streetLamps[labStreetLampsPerSide].x - layout.streetLamps[0].x, 0.5f * labStreetLampSpacing, 1e-3f));
+
+        for (const Vec3& bulb : layout.streetLamps) {
+            int shades = 0;
+            int posts = 0;
+
+            for (const LabBlock& block : layout.street) {
+                const Aabb bounds = block.bounds();
+                assert(!bounds.contains(bulb));
+
+                if (block.surface != LabSurface::Metal) {
+                    continue;
+                }
+
+                const bool over = bounds.minimum.x <= bulb.x - labStreetBulbHalfSize && bounds.maximum.x >= bulb.x + labStreetBulbHalfSize &&
+                                  bounds.minimum.z <= bulb.z - labStreetBulbHalfSize && bounds.maximum.z >= bulb.z + labStreetBulbHalfSize;
+                if (over && bounds.minimum.y > bulb.y && bounds.minimum.y < bulb.y + 2.0f * labStreetBulbHalfSize) {
+                    ++shades;
+                }
+
+                if (near(bounds.minimum.y, labKerbHeight, 1e-3f) && bounds.maximum.y > bulb.y - 1.0f && near(block.centre.x, bulb.x, 1e-3f) &&
+                    std::abs(block.centre.z - bulb.z) > labStreetBulbHalfSize + labStreetLampPostHalfWidth) {
+                    ++posts;
+                }
+            }
+
+            assert(shades == 1 && posts == 1);
+        }
+    }
+
+    /*
+    * The windows: each on the front of one house, its pane standing just out of it, between that house's ends and below
+    * its roof; a share of them lit, near labLitWindowShare, each tint within 0..1; the same every time.
+    */
+    void testTheStreetWindows() {
+        const LightLabLayout layout = buildLightLabLayout();
+        const LightLabLayout again = buildLightLabLayout();
+        assert(layout.windows.size() > 300 && layout.windows.size() == again.windows.size());
+        int lit = 0;
+
+        for (std::size_t index = 0; index < layout.windows.size(); ++index) {
+            const LabWindow& window = layout.windows[index];
+            assert(window.lit == again.windows[index].lit && window.tint == again.windows[index].tint);
+            assert(window.tint >= 0.0f && window.tint <= 1.0f);
+            lit += window.lit ? 1 : 0;
+
+            const Aabb pane = window.pane.bounds();
+            const bool north = pane.minimum.z < labStreetZ;
+            const float front = labStreetZ + (north ? -labHouseFrontOffset : labHouseFrontOffset);
+            assert(near(window.pane.centre.z, front, 1e-4f) && near(window.pane.halfSize.z, labWindowHalfDepth, 1e-6f));
+            int houses = 0;
+
+            for (const LabBlock& block : layout.street) {
+                const Aabb house = block.bounds();
+                if (isHouse(block) && overlaps(pane, house)) {
+                    ++houses;
+                    assert(pane.minimum.x >= house.minimum.x && pane.maximum.x <= house.maximum.x && pane.maximum.y < house.maximum.y);
+                }
+            }
+
+            assert(houses == 1);
+        }
+
+        const float share = static_cast<float>(lit) / static_cast<float>(layout.windows.size());
+        assert(std::abs(share - labLitWindowShare) < 0.08f);
+    }
+
+    // The automatic switch: on once the sun is labStreetLightsBelowDegrees down, off above it.
+    void testStreetLightsFollowTheSun() {
+        const auto sunAt = [](float degrees) {
+            const float elevation = radiansFromDegrees(degrees);
+            return Vec3{0.0f, std::sin(elevation), -std::cos(elevation)};
+        };
+
+        assert(!streetLightsWantedFor(sunAt(30.0f)));
+        assert(!streetLightsWantedFor(sunAt(labStreetLightsBelowDegrees + 0.5f)));
+        assert(streetLightsWantedFor(sunAt(labStreetLightsBelowDegrees - 0.5f)));
+        assert(streetLightsWantedFor(sunAt(-60.0f)));
     }
 
     // Each tower stands at its doubling distance, sized in proportion to it, and no tower overlaps another's bearing.
@@ -579,6 +739,99 @@ namespace {
         assert(!labLampLight.fast && labLampLight.castsShadows);
     }
 
+    // The scene events over a region (the clock's jumps are everywhere).
+    std::vector<ProbeEvent> takeRegionEvents(Lab& lab) {
+        std::vector<ProbeEvent> region;
+        for (const ProbeEvent& event : takeProbeEvents(lab)) {
+            if (!event.everywhere) {
+                region.push_back(event);
+            }
+        }
+        return region;
+    }
+
+    // Whether every lamp has its light, the bulbs glow and the lit windows glow (and only they), all as one.
+    bool streetIsLit(Lab& lab, bool on) {
+        const LightLabLayout layout = buildLightLabLayout();
+        const ModelRenderer& bulbs = lab.world.get<ModelRenderer>(lab.game.getStreetBulbs());
+        const ModelRenderer& windows = lab.world.get<ModelRenderer>(lab.game.getStreetWindows());
+        bool matches = lab.game.streetLightsAreOn() == on && windows.parts.size() == layout.windows.size();
+
+        for (const Entity lamp : lab.game.getStreetLamps()) {
+            matches = matches && lab.world.has<PointLight>(lamp) == on;
+        }
+        for (const RenderPart& bulb : bulbs.parts) {
+            matches = matches && (bulb.material.emissive.x > 0.0f) == on;
+        }
+        for (std::size_t index = 0; matches && index < layout.windows.size(); ++index) {
+            matches = (windows.parts[index].material.emissive.x > 0.0f) == (on && layout.windows[index].lit);
+        }
+
+        return matches;
+    }
+
+    // One light change over the whole street and the lamps' reach round it.
+    bool oneStreetEvent(const std::vector<ProbeEvent>& events) {
+        const Vec3 reach{labStreetLampLight.range, labStreetLampLight.range, labStreetLampLight.range};
+        return events.size() == 1 && events[0].kind == ProbeEventKind::LightChange && events[0].region.contains(labStreetBounds.minimum - reach * 0.99f) &&
+               events[0].region.contains(labStreetBounds.maximum + reach * 0.99f);
+    }
+
+    /*
+    * The street's lights: 60 lamps, each a still light at its bulb, off by day (the default afternoon), the bulbs'
+    * glow visual only. Night switches them all on at once with one event over the street; K flips them, and the flip
+    * holds until the sun next asks for a change (dawn), when the automatic switch takes over.
+    */
+    void testTheStreetLights() {
+        Lab lab;
+        const LightLabLayout layout = buildLightLabLayout();
+        assert(lab.game.getStreetLamps().size() == layout.streetLamps.size());
+        for (std::size_t index = 0; index < layout.streetLamps.size(); ++index) {
+            const Vec3 position = lab.world.get<Transform>(lab.game.getStreetLamps()[index]).position;
+            assert(position.x == layout.streetLamps[index].x && position.z == layout.streetLamps[index].z);
+        }
+        assert(!lab.world.get<ModelRenderer>(lab.game.getStreetBulbs()).castsShadows);
+        assert(lab.world.get<ModelRenderer>(lab.game.getStreetWindows()).castsShadows);
+        assert(!labStreetLampLight.fast && labStreetLampLight.castsShadows);
+
+        Input idle;
+        idle.beginFrame();
+        Input pressK;
+        pressK.beginFrame();
+        pressK.pressKey(Key::K);
+        LightLabSunSettings& sun = lab.game.getSunSettings();
+        const auto frame = [&](const Input& input) {
+            lab.game.onInput(lab.world, input);
+            lab.game.onUpdate(lab.world, input, 1.0f / 60.0f, 1.0f);
+            return takeRegionEvents(lab);
+        };
+
+        assert(frame(idle).empty() && streetIsLit(lab, false));
+
+        // Night: on by itself, once.
+        sun.solarHours = 22.0f;
+        assert(oneStreetEvent(frame(idle)) && streetIsLit(lab, true));
+        assert(frame(idle).empty() && streetIsLit(lab, true));
+
+        // K: off, and it stays off through the night.
+        assert(oneStreetEvent(frame(pressK)) && streetIsLit(lab, false));
+        sun.solarHours = 23.0f;
+        assert(frame(idle).empty() && streetIsLit(lab, false));
+
+        // Dawn asks for off, as the street already is: the override ends with nothing to switch.
+        sun.solarHours = 10.0f;
+        assert(frame(idle).empty() && streetIsLit(lab, false));
+
+        // By day K switches them on; dusk asks for on, so the override ends and they stay on.
+        assert(oneStreetEvent(frame(pressK)) && streetIsLit(lab, true));
+        sun.solarHours = 22.0f;
+        assert(frame(idle).empty() && streetIsLit(lab, true));
+
+        // And the next dawn switches them off by itself.
+        sun.solarHours = 10.0f;
+        assert(oneStreetEvent(frame(idle)) && streetIsLit(lab, false));
+    }
+
     /*
     * Moving the clock by hand (the solar time's slider) jumps the sun and sky: a light change everywhere, once the jump
     * passes labClockJumpHours, small drags adding up. The clock running by itself moves the sun smoothly and signals
@@ -624,6 +877,7 @@ void testLightLab() {
     testTheLevelIsStatic();
     testTheLabsFlashlight();
     testTheBackRoomLamp();
+    testTheStreetLights();
     testAClockJumpRestartsTheProbes();
     testTheLabsProbesFollowTheCamera();
     testSunDisc();
@@ -631,6 +885,10 @@ void testLightLab() {
     testFence();
     testForest();
     testBuildingOpenings();
+    testTheStreet();
+    testTheStreetLamps();
+    testTheStreetWindows();
+    testStreetLightsFollowTheSun();
     testProbesLeaveTheWindowWall();
     testTheBackRoomsCoarseProbeKeepsAwayFromTheDoor();
     testSunbeamThroughTheWindow();

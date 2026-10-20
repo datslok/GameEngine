@@ -98,6 +98,31 @@ namespace {
             material.colour = Pixel{185, 30, 25};
             material.roughness = 0.8f;
             break;
+        case LabSurface::Asphalt:
+            material.colour = Pixel{55, 55, 58};
+            material.roughness = 0.9f;
+            break;
+        case LabSurface::Paving:
+            material.colour = Pixel{150, 145, 135};
+            material.roughness = 0.85f;
+            break;
+        case LabSurface::Brick:
+            material.colour = Pixel{145, 80, 60};
+            material.roughness = 0.9f;
+            break;
+        case LabSurface::Render:
+            material.colour = Pixel{205, 195, 175};
+            material.roughness = 0.85f;
+            break;
+        case LabSurface::Metal:
+            material.colour = Pixel{70, 72, 75};
+            material.metallic = 1.0f;
+            material.roughness = 0.5f;
+            break;
+        case LabSurface::Glass:
+            material.colour = Pixel{20, 24, 30};
+            material.roughness = 0.1f;
+            break;
         }
         return material;
     }
@@ -119,8 +144,9 @@ namespace {
     * floor (the rest of the room lit by the light probes: sunlight bounced off the floor, and the sky through the
     * window), the towers again at sunset in HDR (a low,
     * red sun and long shadows), the sun itself, its disc and the glow bloom spreads round it, the dark back room
-    * lit by the flashlight (a fast light: its bounce light kept in the probes' fast atlas), and the back room lit by its
-    * ceiling lamp (a still light).
+    * lit by the flashlight (a fast light: its bounce light kept in the probes' fast atlas), the back room lit by its
+    * ceiling lamp (a still light), the moon over the field, and the street at night down its length, lit by its 60
+    * lamps and its windows.
     */
     struct LabGoldenView {
         GoldenView view;
@@ -156,7 +182,8 @@ namespace {
         {{"sun-disc", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 15.5f, true},
         {{"flashlight", 0.5, false}, Vec3{-18.0f, 1.7f, 9.4f}, Vec3{-21.6f, 0.9f, 6.0f}, 15.5f, false, true},
         {{"back-room-lamp", 0.5, false}, Vec3{-17.7f, 1.7f, 9.5f}, Vec3{-21.5f, 1.2f, 5.8f}, 15.5f, false, false, true},
-        {{"moonlit", 0.5, false}, Vec3{0.0f, 1.7f, 4.0f}, Vec3{}, 21.0f, false, false, false, 88.0f, true}
+        {{"moonlit", 0.5, false}, Vec3{0.0f, 1.7f, 80.0f}, Vec3{}, 21.0f, false, false, false, 88.0f, true},
+        {{"street-night", 0.5, false}, Vec3{-40.0f, 1.7f, 43.0f}, Vec3{40.0f, 3.0f, 46.0f}, 22.0f}
     };
 }
 
@@ -287,6 +314,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
         const Entity entity = world.create();
         world.add(entity, Transform{});
         world.add(entity, std::move(renderer));
+        return entity;
     };
 
     addStatic(makeMeshRenderer(assets.addMesh(Mesh::plane(labGroundHalfSize)), grass));
@@ -294,6 +322,37 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(blocksRenderer(cube, layout.fence));
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
+    addStatic(blocksRenderer(cube, layout.street));
+
+    // The windows, one part each in the layout's order, so switching finds each lit one's glow by its number.
+    std::vector<LabBlock> panes;
+    for (const LabWindow& window : layout.windows) {
+        panes.push_back(window.pane);
+    }
+    streetWindows = addStatic(blocksRenderer(cube, panes));
+    windowLayout = layout.windows;
+
+    /*
+    * The street lamps: a still light at each bulb while on, and the bulbs' glow as one renderer. Like the ceiling
+    * lamp's panel the glow stands for the light's source, so it must not block that light; it never moves, so it is
+    * static (visual only, it neither blocks the probes nor keeps them awake).
+    */
+    ModelRenderer bulbs;
+    for (const Vec3& bulb : layout.streetLamps) {
+        bulbs.parts.push_back(RenderPart{cube, surfaceMaterial(LabSurface::Glass),
+                                         Mat4::translation(bulb.x, bulb.y, bulb.z) *
+                                             Mat4::scaling(labStreetBulbHalfSize, labStreetBulbHalfSize, labStreetBulbHalfSize)});
+        const Entity streetLamp = world.create();
+        Transform placement;
+        placement.position = bulb;
+        world.add(streetLamp, placement);
+        streetLamps.push_back(streetLamp);
+    }
+    bulbs.castsShadows = false;
+    bulbs.isStatic = true;
+    streetBulbs = world.create();
+    world.add(streetBulbs, Transform{});
+    world.add(streetBulbs, std::move(bulbs));
 
     controls.spawnBody(world);
 
@@ -346,6 +405,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     // Start from the mode's predictable camera pose, then light the day around it.
     controls.setControlMode(world, controls.getMode());
     updateDaylight(world);
+    updateStreetLights(world);
 }
 
 void LightLabGame::onInput(World& world, const Input& input) {
@@ -362,6 +422,67 @@ void LightLabGame::onInput(World& world, const Input& input) {
     if (input.wasKeyPressed(Key::L)) {
         toggleLamp(world);
     }
+
+    if (input.wasKeyPressed(Key::K)) {
+        streetOverridden = !streetOverridden;
+        updateStreetLights(world);
+    }
+}
+
+bool streetLightsWantedFor(const Vec3& towardsSun) {
+    return sunElevation(towardsSun) < radiansFromDegrees(labStreetLightsBelowDegrees);
+}
+
+/*
+* The override is a flip of the automatic switch, not a state of its own, so it ends the moment the sun asks for
+* something new: K at night turns the street off until dawn, K by day turns it on until dusk, and either way the street
+* is back on the sun's clock afterwards.
+*/
+void LightLabGame::updateStreetLights(World& world) {
+    const Vec3 towardsSun = directionTowardsSunOn(sunSettings.latitudeDegrees, sunSettings.dayOfYear, sunSettings.solarHours);
+    const bool wanted = streetLightsWantedFor(towardsSun);
+
+    if (wanted != streetWantedBySun) {
+        streetWantedBySun = wanted;
+        streetOverridden = false;
+    }
+
+    const bool on = wanted != streetOverridden;
+    if (on != streetLit) {
+        setStreetLights(world, on);
+    }
+}
+
+/*
+* Off removes the lights, as the ceiling lamp's switch does, so they take no seats or shadows by day. Sixty lamps
+* switched together are one change to the light, so one event over the street and their reach round it.
+*/
+void LightLabGame::setStreetLights(World& world, bool on) {
+    streetLit = on;
+
+    for (const Entity streetLamp : streetLamps) {
+        if (on) {
+            world.add(streetLamp, labStreetLampLight);
+        } else {
+            world.remove<PointLight>(streetLamp);
+        }
+    }
+
+    const Vec3 bulbGlow = on ? labStreetLampLight.colour * labStreetBulbGlow : Vec3{0.0f, 0.0f, 0.0f};
+    for (RenderPart& bulb : world.get<ModelRenderer>(streetBulbs).parts) {
+        bulb.material.emissive = bulbGlow;
+    }
+
+    std::vector<RenderPart>& panes = world.get<ModelRenderer>(streetWindows).parts;
+    for (std::size_t index = 0; index < panes.size(); ++index) {
+        const LabWindow& window = windowLayout[index];
+        const Vec3 glow = labWarmWindowGlow + (labCoolWindowGlow - labWarmWindowGlow) * window.tint;
+        panes[index].material.emissive = on && window.lit ? glow : Vec3{0.0f, 0.0f, 0.0f};
+    }
+
+    const float reach = labStreetLampLight.range;
+    const Vec3 margin{reach, reach, reach};
+    signalProbeEvent(world, ProbeEvent{ProbeEventKind::LightChange, false, Aabb{labStreetBounds.minimum - margin, labStreetBounds.maximum + margin}});
 }
 
 /*
@@ -413,6 +534,7 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
 
     signalClockJumps(world);
     updateDaylight(world);
+    updateStreetLights(world);
     flashlight.place(world, flashlightInHand(controls.getCamera()));
 }
 
@@ -474,6 +596,22 @@ Entity LightLabGame::getLamp() const {
     return lamp;
 }
 
+const std::vector<Entity>& LightLabGame::getStreetLamps() const {
+    return streetLamps;
+}
+
+Entity LightLabGame::getStreetBulbs() const {
+    return streetBulbs;
+}
+
+Entity LightLabGame::getStreetWindows() const {
+    return streetWindows;
+}
+
+bool LightLabGame::streetLightsAreOn() const {
+    return streetLit;
+}
+
 Camera& LightLabGame::getCamera() {
     return controls.getCamera();
 }
@@ -533,6 +671,7 @@ void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
             }
             controls.poseFreeCamera(world, golden.cameraPosition, target);
             updateDaylight(world);
+            updateStreetLights(world);
 
             if (golden.flashlightOn && !flashlight.isOn(world)) {
                 flashlight.toggle(world);
