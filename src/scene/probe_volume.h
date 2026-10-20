@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/aabb.h"
 #include "math/vec3.h"
 
 // How many probes a volume has along each axis.
@@ -22,3 +23,26 @@ struct ProbeVolume {
     Vec3 spacing{1.0f, 1.0f, 1.0f};
     ProbeCounts counts;
 };
+
+// What changed: light only (a lamp switched, the time of day jumped), or the level's shape (a wall fell), which moves
+// what the probes see as well as how bright it is.
+enum class ProbeEventKind {
+    LightChange,
+    GeometryChange
+};
+
+/*
+* A scene event (render/gpu/ddgi.h, advanceProbeRestarts): a big change the game knows about, which the probes would
+* otherwise only follow over their memory of seconds, or (the adaptive memory) once they can tell it from their noise.
+* The probes in its region restart their average this frame, so they take the new light at once. A component that lasts
+* one frame (signalProbeEvent, scene/lighting.h); keep the region to where the change matters, since a restarted probe
+* is noisier for a moment.
+*/
+struct ProbeEvent {
+    ProbeEventKind kind = ProbeEventKind::LightChange;
+    bool everywhere = true; // every probe; otherwise those inside region
+    Aabb region;
+};
+
+// An event for the probes within reach of a point along each axis, such as a light's range round it.
+ProbeEvent probeEventAround(ProbeEventKind kind, const Vec3& centre, float reach);

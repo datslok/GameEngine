@@ -1,5 +1,6 @@
 #include "gameplay/flashlight.h"
 #include "math/transform.h"
+#include "scene/lighting.h"
 
 #include <cassert>
 #include <cmath>
@@ -46,6 +47,7 @@ namespace {
 
         flashlight.toggle(world);
         assert(!flashlight.isOn(world) && world.isAlive(entity));
+        clearProbeEvents(world);
 
         Flashlight lit;
         lit.create(world, true);
@@ -74,7 +76,33 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Each switch, on or off, is a scene event for the light probes: a light change over the beam's reach round the
+    * flashlight, so its bounce comes and goes at once (render/gpu/ddgi.h, advanceProbeRestarts).
+    */
+    void testEachSwitchIsAProbeEvent() {
+        World world;
+        Flashlight flashlight;
+        flashlight.create(world, false);
+        flashlight.place(world, FlashlightPose{Vec3{4.0f, 1.5f, -2.0f}, Vec3{0.0f, 0.0f, -1.0f}});
+        assert(collectLighting(world, 1.0f).probeEvents.empty());
+
+        for (int switches = 0; switches < 2; ++switches) {
+            flashlight.toggle(world);
+            const std::vector<ProbeEvent> events = collectLighting(world, 1.0f).probeEvents;
+            assert(events.size() == 1);
+            assert(events[0].kind == ProbeEventKind::LightChange && !events[0].everywhere);
+            const float reach = flashlightBeam.range * 0.99f;
+            assert(events[0].region.contains(Vec3{4.0f + reach, 1.5f - reach, -2.0f + reach}));
+            assert(events[0].region.contains(Vec3{4.0f - reach, 1.5f + reach, -2.0f - reach}));
+            clearProbeEvents(world);
+        }
+    }
+}
+
 void testFlashlight() {
+    testEachSwitchIsAProbeEvent();
     testTheFlashlightIsHeldInTheRightHand();
     testTogglingAddsAndRemovesTheBeam();
     testPlacingMovesTheLightAndAimsTheBeam();

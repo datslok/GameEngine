@@ -301,7 +301,9 @@ private:
     void createRayTracing();
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
-    void drawFramesBeforeCapture(const FrameDescription& description, const RenderSettings& settings, int frames);
+    // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
+    // its probe events, which happen once).
+    void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 

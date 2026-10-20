@@ -39,7 +39,14 @@ struct FrameLighting {
     std::vector<PlacedPointLight> pointLights;
     std::vector<PlacedSpotLight> spotLights;
     std::vector<ProbeVolume> probeVolumes; // where global illumination measures bounced light
+    std::vector<ProbeEvent> probeEvents;   // big changes signalled since the last frame, in order
 };
 
 // Gather the World's lights for drawing at alpha (0..1) between the last two ticks.
 FrameLighting collectLighting(World& world, float alpha);
+
+// Tell the light probes about a big change: it reaches the next frame's lighting, then clearProbeEvents removes it.
+void signalProbeEvent(World& world, const ProbeEvent& event);
+
+// Remove every signalled event, once the frame that carries them is described (the engine does this every frame).
+void clearProbeEvents(World& world);

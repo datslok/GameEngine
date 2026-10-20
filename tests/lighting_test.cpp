@@ -132,6 +132,31 @@ namespace {
         assert(nearlyEqual(placed.light.innerAngle, 0.2f));
         assert(nearlyEqual(placed.light.outerAngle, 0.4f));
     }
+
+    /*
+    * A game signals a big change to the light probes for one frame: every event signalled since the last frame reaches
+    * that frame's lighting, in the order signalled, and clearing after the frame is built leaves none for the next.
+    */
+    void testProbeEventsLastOneFrame() {
+        World world;
+        signalProbeEvent(world, ProbeEvent{});
+        signalProbeEvent(world, probeEventAround(ProbeEventKind::GeometryChange, Vec3{1.0f, 2.0f, 3.0f}, 0.5f));
+
+        const FrameLighting lighting = collectLighting(world, 0.0f);
+        assert(lighting.probeEvents.size() == 2);
+        assert(lighting.probeEvents[0].kind == ProbeEventKind::LightChange && lighting.probeEvents[0].everywhere);
+        const ProbeEvent& local = lighting.probeEvents[1];
+        assert(local.kind == ProbeEventKind::GeometryChange && !local.everywhere);
+        assert(nearlyEqual(local.region.minimum, Vec3{0.5f, 1.5f, 2.5f}) && nearlyEqual(local.region.maximum, Vec3{1.5f, 2.5f, 3.5f}));
+
+        clearProbeEvents(world);
+        assert(collectLighting(world, 0.0f).probeEvents.empty());
+        int left = 0;
+        world.each<ProbeEvent>([&](Entity, ProbeEvent&) {
+            ++left;
+        });
+        assert(left == 0);
+    }
 }
 
 void testLighting() {
@@ -142,4 +167,5 @@ void testLighting() {
     testDirectionalLightsAreCopied();
     testPointLightPositionIsInterpolated();
     testProbeVolumesAreCopied();
+    testProbeEventsLastOneFrame();
 }

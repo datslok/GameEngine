@@ -1,5 +1,6 @@
 #include "gameplay/flashlight.h"
 #include "math/transform.h"
+#include "scene/lighting.h"
 
 /*
 * The beam starts beside the eye and passes through the point straight ahead of it, so the middle of the lit patch is
@@ -20,7 +21,13 @@ void Flashlight::create(World& world, bool on) {
     }
 }
 
+/*
+* Each switch tells the light probes within the beam's reach, so its bounce comes and goes at once instead of over their
+* memory (a scene event; the probes check where the light really changed).
+*/
 void Flashlight::toggle(World& world) {
+    signalProbeEvent(world, probeEventAround(ProbeEventKind::LightChange, world.get<Transform>(entity).position, flashlightBeam.range));
+
     if (world.has<SpotLight>(entity)) {
         world.remove<SpotLight>(entity);
         return;

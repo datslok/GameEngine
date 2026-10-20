@@ -45,6 +45,25 @@ void visit(LightLabProbeSettings& settings, SettingsVisitor& visitor);
 // The solar time after some seconds pass at the given speed, kept within one day (0 to 24 hours).
 float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);
 
+// Moving the clock by hand by more than this (the sun about 1.5 degrees) jumps the light: a scene event restarts every
+// light probe, which would otherwise take seconds to follow.
+inline constexpr float labClockJumpHours = 0.1f;
+
+/*
+* The back room's ceiling lamp: a warm bulb (about 2700 K), its reach the room's far corners and a little more, bright
+* enough to read by, picked by eye like the sun. A still light, not fast: its bounce goes into the probes' long memory,
+* which its switch restarts with a scene event.
+*/
+inline const PointLight labLampLight{
+    .colour = Vec3{1.0f, 0.75f, 0.5f},
+    .intensity = 2.0f,
+    .range = 7.0f,
+    .sourceRadius = 0.5f
+};
+
+// The lamp's panel glows this many times its colour while it is on.
+inline constexpr float labLampGlow = 6.0f;
+
 /*
 * The day's light for the sun in a direction: sunlight travelling away from it, fading out as the sun sinks below the
 * horizon and warmer the lower it stands (a stand-in for the atmosphere's reddening), and the sky seen behind everything
@@ -93,9 +112,18 @@ public:
     Entity getFlashlight() const;
     PlayerControls& getControls();
 
+    // The back room's ceiling lamp: its PointLight while on, its fixture's ModelRenderer always.
+    Entity getLamp() const;
+
 private:
     // Point the sun, set the sky and place the sun disc for the current settings and camera.
     void updateDaylight(World& world);
+
+    // Switch the ceiling lamp, and tell the probes within its reach.
+    void toggleLamp(World& world);
+
+    // A light change for every probe when the clock was moved by hand past labClockJumpHours since it was last seen.
+    void signalClockJumps(World& world);
 
     PlayerControls controls;
     LightLabSunSettings sunSettings;
@@ -114,6 +142,12 @@ private:
     // F toggles it, held in the right hand (off at the start, so the golden views keep the sunlit picture): for seeing
     // how a moving light's bounce follows it.
     Flashlight flashlight;
+
+    // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
+    Entity lamp;
+
+    // The solar time as the clock itself has moved it since the last jump was signalled.
+    float clockHoursSeen = 0.0f;
 
     // F4: the engine's bounding boxes and culling readout.
     bool debugViewEnabled = false;

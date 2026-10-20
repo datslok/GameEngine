@@ -60,4 +60,9 @@ void testOverlap() {
     assertOverlap(unitBox, Aabb{Vec3{0.5f, 0.5f, 0.5f}, Vec3{2.0f, 2.0f, 2.0f}}, true);
     assertOverlap(unitBox, Aabb{Vec3{1.0f, -1.0f, -1.0f}, Vec3{2.0f, 1.0f, 1.0f}}, true);
     assertOverlap(unitBox, Aabb{Vec3{-1.0f, -1.0f, 1.5f}, Vec3{1.0f, 1.0f, 2.0f}}, false);
+
+    // A point in a box: inside, on a face or corner (counts), just outside along one axis.
+    assert(unitBox.contains(Vec3{0.2f, -0.5f, 0.9f}));
+    assert(unitBox.contains(Vec3{1.0f, 0.0f, 0.0f}) && unitBox.contains(Vec3{-1.0f, -1.0f, -1.0f}));
+    assert(!unitBox.contains(Vec3{0.0f, 1.01f, 0.0f}) && !unitBox.contains(Vec3{0.0f, 0.0f, -1.01f}));
 }

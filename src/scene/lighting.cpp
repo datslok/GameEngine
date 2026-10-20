@@ -35,5 +35,21 @@ FrameLighting collectLighting(World& world, float alpha) {
         lighting.probeVolumes.push_back(volume);
     });
 
+    world.each<ProbeEvent>([&](Entity, ProbeEvent& event) {
+        lighting.probeEvents.push_back(event);
+    });
+
     return lighting;
+}
+
+// Each event is an entity of its own, so a game can signal several in a frame.
+void signalProbeEvent(World& world, const ProbeEvent& event) {
+    world.add(world.create(), event);
+}
+
+// Destroying inside the walk is queued until it ends.
+void clearProbeEvents(World& world) {
+    world.each<ProbeEvent>([&](Entity entity, ProbeEvent&) {
+        world.destroy(entity);
+    });
 }

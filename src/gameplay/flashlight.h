@@ -41,7 +41,8 @@ public:
     // Make its entity, switched on or off.
     void create(World& world, bool on);
 
-    // Off removes the light rather than dimming it to zero, so the renderer does not spend a seat on it.
+    // Off removes the light rather than dimming it to zero, so the renderer does not spend a seat on it. Either way the
+    // switch is a scene event for the light probes within the beam's reach (signalProbeEvent).
     void toggle(World& world);
     bool isOn(const World& world) const;
 

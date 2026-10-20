@@ -197,6 +197,87 @@ AdaptiveProbeTexel adaptiveProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, f
     return next;
 }
 
+float eventProbeSharingWeight(float weight, float eventWeight, int framesSinceRestart, float longKeep) {
+    float period = historyForShare(longKeep);
+
+    if (framesSinceRestart < 0 || !(period > 0.0)) {
+        return weight;
+    }
+
+    float faded = min(float(framesSinceRestart) / period, 1.0);
+    return max(weight, eventWeight + (weight - eventWeight) * faded);
+}
+
+// A probe's scene event this frame (render/gpu/ddgi.h, GpuProbeRestart): the frames since its irradiance (x) and
+// distances (y) were restarted, negative for none, the share of each it keeps this frame, and the event check (x the
+// threshold, y the memory's growth, z the check's frames) with, in w, the fast atlas's share kept.
+struct ProbeRestart {
+    ivec2 frames;
+    vec2 keeps;
+    vec4 check;
+};
+
+float restartedProbeKeep(float longKeep, float shortKeep, float growth, float frames) {
+    if (frames < 0.0) {
+        return longKeep;
+    }
+
+    float grown = frames == 0.0 ? 0.0 : exp(-1.0 / (growth * frames));
+    return min(longKeep, max(shortKeep, grown));
+}
+
+AdaptiveProbeTexel restartProbeTexel(vec3 eventMean) {
+    return AdaptiveProbeTexel(eventMean, -1.0, eventMean, 0.0);
+}
+
+AdaptiveProbeTexel restartedProbeBlend(AdaptiveProbeTexel texel, vec3 estimate, float keep) {
+    float frames = texel.history;
+    float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
+    float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * ((frames - 1.0) / frames);
+    vec3 stored = blendProbeValue(texel.stored, estimate, keep);
+    return AdaptiveProbeTexel(stored, min(frames + 1.0, float(DDGI_MAX_HISTORY)), stored, sqrt(variance));
+}
+
+AdaptiveProbeTexel eventCheckBlend(AdaptiveProbeTexel texel, vec3 estimate, float longKeep, int framesSinceEvent, float eventThreshold) {
+    float frames = float(framesSinceEvent);
+    float deviation = probeLuminance(estimate) - probeLuminance(texel.recent);
+    float variance = deviation * deviation + (texel.noise * texel.noise - deviation * deviation) * longKeep;
+
+    AdaptiveProbeTexel next;
+    next.recent = blendProbeValue(texel.recent, estimate, frames / (frames + 1.0));
+    next.stored = blendProbeValue(texel.stored, estimate, min(longKeep, texel.history / (texel.history + 1.0)));
+    next.noise = sqrt(variance);
+    next.history = min(texel.history + 1.0, float(DDGI_MAX_HISTORY));
+
+    float band = eventThreshold * texel.noise / sqrt(frames + 1.0) + DDGI_CHANGE_FLOOR_SHARE * probeLuminance(next.stored);
+
+    if (abs(probeLuminance(next.recent) - probeLuminance(next.stored)) > band) {
+        return restartProbeTexel(next.recent);
+    }
+
+    return next;
+}
+
+AdaptiveProbeTexel adaptiveProbeUpdate(AdaptiveProbeTexel texel, vec3 estimate, float longKeep, float windowKeep, float threshold,
+                                       int framesSinceEvent, vec4 check) {
+    AdaptiveProbeTexel own = texel;
+    own.history = abs(texel.history);
+
+    if (texel.history < 0.0 && framesSinceEvent > 0) {
+        float keep = restartedProbeKeep(longKeep, 0.0, check.y, own.history);
+        AdaptiveProbeTexel next = own.history < historyForShare(windowKeep) ? restartedProbeBlend(own, estimate, keep)
+                                                                            : adaptiveProbeBlend(own, estimate, keep, windowKeep, threshold);
+        next.history = -next.history;
+        return next;
+    }
+
+    if (framesSinceEvent >= 0 && float(framesSinceEvent) < check.z) {
+        return eventCheckBlend(own, estimate, longKeep, framesSinceEvent, check.x);
+    }
+
+    return adaptiveProbeBlend(own, estimate, longKeep, windowKeep, threshold);
+}
+
 vec3 probePosition(vec3 origin, vec3 spacing, ivec3 counts, int index) {
     ivec3 grid = ivec3(index % counts.x, (index / counts.x) % counts.y, index / (counts.x * counts.y));
     return origin + spacing * vec3(grid);

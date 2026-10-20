@@ -46,6 +46,15 @@ void main() {
         testOutput(0, vec4(texel.stored, texel.history));
         testOutput(1, vec4(texel.recent, texel.noise));
         testOutput(2, vec4(probeLuminance(third.xyz)));
+    } else if (function == GPU_TEST_PROBE_RESTART) {
+        vec4 sharing = testInput(4);
+        vec4 check = testInput(5);
+        AdaptiveProbeTexel texel = adaptiveProbeUpdate(AdaptiveProbeTexel(first.xyz, first.w, second.xyz, second.w), third.xyz,
+                                                       fourth.x, fourth.y, fourth.z, int(fourth.w), check);
+        testOutput(0, vec4(texel.stored, texel.history));
+        testOutput(1, vec4(texel.recent, texel.noise));
+        testOutput(2, vec4(eventProbeSharingWeight(sharing.x, sharing.y, int(fourth.w), fourth.x), restartedProbeKeep(fourth.x, sharing.z, check.y, fourth.w),
+                           0.0, 0.0));
     } else if (function == GPU_TEST_PROBE_SHARING) {
         vec3 neighbours[DDGI_SHARE_NEIGHBOURS];
         bool visible[DDGI_SHARE_NEIGHBOURS];

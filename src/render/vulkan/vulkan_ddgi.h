@@ -4,6 +4,7 @@
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
+#include "render/vulkan/scene_layout.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "render/vulkan/vulkan_pipeline.h"
@@ -15,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 class VulkanDevice;
 
@@ -30,7 +32,7 @@ struct ProbeSceneSets {
 * from fast lights, RGBA16F, and distances, RG16F, written by compute as storage images, the renderer's first) and the
 * adaptive memory's change statistics beside the still irradiance, the
 * buffers of the frame's probe rays (still light and distance, fast light as half floats, and which probes a fast light
-* reached), and the passes that fill them: ddgi_trace.comp traces every probe's rays, then ddgi_update_irradiance.comp
+* reached), each frame in flight's scene event restarts (GpuProbeRestart), and the passes that fill them: ddgi_trace.comp traces every probe's rays, then ddgi_update_irradiance.comp
 * (both irradiance atlases) and ddgi_update_distance.comp blend them into the atlases, one workgroup per probe. Between
 * updates the atlases are sampled (SurfaceRead): by the main pass, the debug balls and the next frame's trace (last
 * frame's probes, for the light that bounced more than once). They are shared by the frames in flight: barriers order
@@ -54,10 +56,13 @@ public:
     /*
     * Record this frame's probe update for the volume prepare() readied: trace, then blend, leaving the atlases readable
     * for the frame's later passes. fastLights: the frame lists a fast light for the probe rays' hits (ProbeHitLights::
-    * fast), so probes within its reach trace more rays. Outside any rendering block.
+    * fast), so probes within its reach trace more rays. events: the scene events to start this frame (none while the
+    * settings ignore them); frameIndex: the frame in flight, whose upload memory holds the restarts. Outside any
+    * rendering block.
     */
     void update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const ProbeVolume& volume,
-                const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds, bool fastLights);
+                const GlobalIlluminationSettings& settings, const Vec3& sky, float frameSeconds, bool fastLights,
+                std::span<const ProbeEvent> events, std::uint32_t frameIndex);
 
     // Draw the last updated volume's probes as balls into the open rendering block (colour and depth bound, the
     // viewport set), with the scene's set 1 for the camera. Nothing before the first update.
@@ -117,6 +122,11 @@ private:
     // The frame time, ray cycles and rays' clock, carried from frame to frame.
     ProbeSchedule schedule;
 
+    // Every probe's running scene event restart, moved on each frame, and its copy for each frame in flight, which the
+    // update reads where it is written.
+    std::vector<GpuProbeRestart> restarts;
+    std::vector<UploadArray> restartUploads;
+
     // Set by prepare() when the atlases are new: the next update keeps nothing of them.
     bool freshAtlases = false;
 
@@ -132,8 +142,12 @@ private:
 
     void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int probes, int rayStride);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
-               int probes);
-    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, float weight, float fastWeight);
+               int probes, const UploadArray& frameRestarts);
+    void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeVolume& volume, const GlobalIlluminationSettings& settings,
+                     float longKeep, const UploadArray& frameRestarts);
+
+    // Point the set's binding at this frame in flight's restarts.
+    void writeRestarts(VkDescriptorSet set, std::uint32_t binding, const UploadArray& frameRestarts) const;
 
     // Fill the turns buffer: each probe's own turn, or identity rows.
     void writeProbeTurns(int probes, bool independent);
