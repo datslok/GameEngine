@@ -27,6 +27,10 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - An acceleration structure per mesh, compacted, and one rebuilt from every object each frame.
   - A debug view traces one ray per pixel and shows normals, albedo, or front and back faces.
   - The foundation for global illumination. It is optional, so GPUs without it simply leave it off.
+- **Temporal anti-aliasing (TAA):** each frame the picture moves by a different fraction of a pixel, and each pixel averages about the last ten frames, so edges are smooth and thin things stop shimmering.
+  - Each pixel finds where its surface was last frame: from its depth and the two cameras, or from a motion vector a small pass draws for anything that moved.
+  - History that no longer fits is clipped into the range of colours its neighbours show now, so moving things leave little ghosting.
+  - Switchable, with a motion debug view, in the settings (Anti-aliasing).
 - **Reversed-Z depth:** near at 1 and far at 0, so depth precision is nearly even out to the far plane.
 - **Camera-relative rendering:** positions are measured from the camera before they become floats in matrices, so distant scenes do not jitter.
 - Indexed meshes, and textures with mipmaps and trilinear plus anisotropic filtering.
@@ -158,7 +162,7 @@ Several games run on one engine, picked at start-up with `--game`.
 - Numbers the shaders share with C++ are written once.
 - **Profiling** in the F4 view:
   - frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second
-  - the GPU's own time for each render pass, measured with GPU timestamps: the ray tracing scene's build, the light probes, cluster light lists, shadows, depth prepass, main, the ray tracing debug view, the depth measurement for the sun's cascades, bloom, tone mapping, debug lines and the debug UI
+  - the GPU's own time for each render pass, measured with GPU timestamps: the ray tracing scene's build, the light probes, cluster light lists, shadows, depth prepass, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
   - render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
 - **Debug drawing:** lines, boxes, spheres and capsules drawn over the scene, with an F4 debug view.
 - **Unit tests** that run without a GPU or window.

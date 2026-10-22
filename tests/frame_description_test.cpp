@@ -122,6 +122,41 @@ namespace {
         assert(frame.draws.size() == 1);
         assert(placesOriginAt(frame.draws[0].model, 3.0f, 0.0f, 0.0f));
     }
+
+    /*
+    * With a motion history, each draw carries the matrix its part was drawn with last frame (for motion vectors): none on
+    * an entity's first frame or without a history, each part its own, and none for an entity that only reuses a
+    * destroyed one's slot (a new generation).
+    */
+    void testDrawsKnowLastFramesMatrix() {
+        World world;
+        MotionHistory history;
+        const Entity entity = world.create();
+        world.add(entity, placedAt(1.0f, 0.0f, 0.0f));
+        ModelRenderer renderer = makeMeshRenderer(MeshHandle{0});
+        RenderPart second = renderer.parts[0];
+        second.localTransform = Mat4::translation(0.0f, 10.0f, 0.0f);
+        renderer.parts.push_back(second);
+        world.add(entity, renderer);
+
+        const FrameDescription first = buildFrame(world, makeTestCamera(), 0.0f, &history);
+        assert(first.draws.size() == 2 && !first.draws[0].previousModel && !first.draws[1].previousModel);
+
+        world.get<Transform>(entity).position = Vec3{2.0f, 0.0f, 0.0f};
+        const FrameDescription next = buildFrame(world, makeTestCamera(), 0.0f, &history);
+        assert(next.draws[0].previousModel && placesOriginAt(*next.draws[0].previousModel, 1.0f, 0.0f, 0.0f));
+        assert(next.draws[1].previousModel && placesOriginAt(*next.draws[1].previousModel, 1.0f, 10.0f, 0.0f));
+        assert(placesOriginAt(next.draws[0].model, 2.0f, 0.0f, 0.0f));
+
+        assert(!buildFrame(world, makeTestCamera(), 0.0f).draws[0].previousModel);
+
+        world.destroy(entity);
+        const Entity reused = world.create();
+        world.add(reused, placedAt(5.0f, 0.0f, 0.0f));
+        world.add(reused, makeMeshRenderer(MeshHandle{0}));
+        assert(reused.index == entity.index && reused.generation != entity.generation);
+        assert(!buildFrame(world, makeTestCamera(), 0.0f, &history).draws[0].previousModel);
+    }
 }
 
 namespace {
@@ -157,4 +192,5 @@ void testFrameDescription() {
     testStaticModelsDrawStatic();
     testHiddenAndUnplacedModelsAreSkipped();
     testMovingEntitiesAreInterpolated();
+    testDrawsKnowLastFramesMatrix();
 }

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <numbers>
+#include <utility>
 
 /*
 * Initialise the matrix to zero so all components start with defined values.
@@ -297,6 +298,71 @@ std::optional<Mat4> affineInverse(const Mat4& model) {
 
     inverse.values[3][3] = 1.0f;
     return inverse;
+}
+
+/*
+* Gauss-Jordan elimination on the matrix beside the identity: row operations that turn the matrix into the identity
+* turn the identity into the inverse. Each column's pivot is the largest number left in it (partial pivoting), so no
+* small pivot magnifies rounding, and the arithmetic is in doubles, since a projection's numbers span many orders of
+* magnitude (a far plane of 500 m against a near plane of 10 cm). A pivot of zero means a column depends on the others:
+* the matrix squashes space flat and has no inverse.
+*/
+std::optional<Mat4> inverse(const Mat4& matrix) {
+    double left[4][4];
+    double right[4][4];
+
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            left[row][column] = matrix.values[row][column];
+            right[row][column] = row == column ? 1.0 : 0.0;
+        }
+    }
+
+    for (int column = 0; column < 4; ++column) {
+        int pivot = column;
+
+        for (int row = column + 1; row < 4; ++row) {
+            if (std::abs(left[row][column]) > std::abs(left[pivot][column])) {
+                pivot = row;
+            }
+        }
+
+        if (left[pivot][column] == 0.0 || !std::isfinite(left[pivot][column])) {
+            return std::nullopt;
+        }
+
+        std::swap(left[pivot], left[column]);
+        std::swap(right[pivot], right[column]);
+        const double scale = 1.0 / left[column][column];
+
+        for (int entry = 0; entry < 4; ++entry) {
+            left[column][entry] *= scale;
+            right[column][entry] *= scale;
+        }
+
+        for (int row = 0; row < 4; ++row) {
+            if (row == column) {
+                continue;
+            }
+
+            const double factor = left[row][column];
+
+            for (int entry = 0; entry < 4; ++entry) {
+                left[row][entry] -= factor * left[column][entry];
+                right[row][entry] -= factor * right[column][entry];
+            }
+        }
+    }
+
+    Mat4 result;
+
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            result.values[row][column] = static_cast<float>(right[row][column]);
+        }
+    }
+
+    return result;
 }
 
 /*

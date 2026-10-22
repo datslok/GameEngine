@@ -110,6 +110,7 @@ void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
 void testBloom();
+void testTaa();
 void testDisplayOutput();
 void testSettingsFile();
 void testQualityPreset();
@@ -233,6 +234,7 @@ int main(){
     testToneMapping();
     testToneMapUniforms();
     testBloom();
+    testTaa();
     testDisplayOutput();
     testSettingsFile();
     testQualityPreset();

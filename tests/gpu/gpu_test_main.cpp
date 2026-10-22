@@ -24,6 +24,7 @@ int main() {
             gpuTestSoftShadow(runner, report);
             gpuTestToneMapping(runner, report);
             gpuTestBloom(runner, report);
+            gpuTestTaa(runner, report);
             gpuTestDither(runner, report);
             gpuTestOverlay(runner, report);
             gpuTestStars(runner, report);

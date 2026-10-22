@@ -54,6 +54,16 @@ void testGpuTiming() {
         assert(static_cast<int>(GpuPass::RayDebug) < static_cast<int>(GpuPass::Bloom));
     }
 
+    // Temporal anti-aliasing: the velocity pass draws over the finished picture's depth, and the resolve reads the
+    // picture before anything that uses it (eye adaptation, bloom), after the depth measurement, which reads the same depth.
+    {
+        assert(static_cast<int>(GpuPass::RayDebug) + 1 == static_cast<int>(GpuPass::Motion));
+        assert(static_cast<int>(GpuPass::Motion) + 1 == static_cast<int>(GpuPass::DepthRange));
+        assert(static_cast<int>(GpuPass::DepthRange) + 1 == static_cast<int>(GpuPass::Taa));
+        assert(static_cast<int>(GpuPass::Taa) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
+        assert(std::string(gpuPassName(GpuPass::Motion)) == "MOTION" && std::string(gpuPassName(GpuPass::Taa)) == "TAA");
+    }
+
     // The depth prepass is recorded after the shadows and right before the main pass, whose depth it fills.
     {
         assert(static_cast<int>(GpuPass::Shadows) < static_cast<int>(GpuPass::DepthPrepass));
@@ -79,7 +89,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 25, 900, 5, 0, 6, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 25, 900, 5, 0, 12, 6, 30, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -95,7 +105,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1155 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1197 * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

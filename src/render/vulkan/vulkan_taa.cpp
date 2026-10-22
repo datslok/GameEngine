@@ -1,0 +1,134 @@
+#include "render/vulkan/vulkan_taa.h"
+#include "render/gpu/compute_dispatch.h"
+#include "render/vulkan/vulkan_device.h"
+
+namespace {
+    // Motion in NDC per pixel: two 16-bit floats are plenty (and hold TAA_NO_MOTION, under the half-float limit).
+    constexpr VkFormat velocityFormat = VK_FORMAT_R16G16_SFLOAT;
+
+    // The history keeps the scene's own format, so smoothing loses none of its range.
+    constexpr VkFormat historyFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+}
+
+VulkanTaa::VulkanTaa(const VulkanDevice& device, VkSampler nearest, VkSampler filtered):
+    device(device),
+    nearest(nearest),
+    filtered(filtered)
+{
+    ComputePipelineDescription description;
+    description.shader = "assets/shaders/taa.comp.spv";
+    description.sampledImages = 4;
+    description.storageImages = 1;
+    description.pushConstantBytes = sizeof(GpuTaaPass);
+    pipeline = std::make_unique<ComputePipeline>(device, description);
+}
+
+/*
+* The old images may still be read by a frame in flight; the renderer waits for the GPU before calling this on a
+* resize, as it does for its other frame images.
+*/
+void VulkanTaa::ensureSize(std::uint32_t newWidth, std::uint32_t newHeight) {
+    if (width == newWidth && height == newHeight) {
+        return;
+    }
+
+    ImageDescription velocityDescription;
+    velocityDescription.format = velocityFormat;
+    velocityDescription.width = newWidth;
+    velocityDescription.height = newHeight;
+    velocityDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    velocityDescription.name = "TAA velocity";
+    velocity = VulkanImage{device, velocityDescription};
+
+    ImageDescription historyDescription;
+    historyDescription.format = historyFormat;
+    historyDescription.width = newWidth;
+    historyDescription.height = newHeight;
+    historyDescription.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    historyDescription.name = "TAA history";
+
+    for (VulkanImage& image : history) {
+        image = VulkanImage{device, historyDescription};
+    }
+
+    width = newWidth;
+    height = newHeight;
+    historyValid = false;
+}
+
+VulkanImage& VulkanTaa::getVelocity() {
+    return velocity;
+}
+
+bool VulkanTaa::hasHistory() const {
+    return historyValid;
+}
+
+void VulkanTaa::forgetHistory() {
+    historyValid = false;
+}
+
+/*
+* The barriers, each for one use:
+* - the velocity image from the velocity pass's colour target to being read by compute;
+* - the depth from the depth target (or the depth measurement's read) to being read by compute;
+* - last frame's history from being copied from to being read (its copy finished last frame); this frame's from
+*   anything (its contents are all overwritten, so discarded) to being written as a storage image;
+* - after the dispatch, this frame's history to a copy source and the scene to a copy destination (its old contents
+*   discarded, since the copy covers it), then the scene back to being read for eye adaptation, bloom and tone mapping.
+*/
+void VulkanTaa::resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, const GpuTaaPass& pass) {
+    VulkanImage& previous = history[1 - written];
+    VulkanImage& current = history[written];
+
+    velocity.transition(commands, ImageState::ComputeRead);
+    depth.transition(commands, ImageState::DepthComputeRead);
+    previous.transition(commands, ImageState::ComputeRead);
+    current.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
+
+    const VkDescriptorSet set = descriptors.allocate(pipeline->getResourceLayout());
+    const std::array<VkDescriptorImageInfo, 5> images{
+        VkDescriptorImageInfo{nearest, scene.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        VkDescriptorImageInfo{nearest, depth.getView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
+        VkDescriptorImageInfo{nearest, velocity.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        VkDescriptorImageInfo{filtered, previous.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        VkDescriptorImageInfo{VK_NULL_HANDLE, current.getView(), VK_IMAGE_LAYOUT_GENERAL},
+    };
+
+    std::array<VkWriteDescriptorSet, 5> writes{};
+
+    for (std::uint32_t binding = 0; binding < writes.size(); ++binding) {
+        writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[binding].dstSet = set;
+        writes[binding].dstBinding = binding;
+        writes[binding].descriptorCount = 1;
+        writes[binding].descriptorType = binding < 4 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[binding].pImageInfo = &images[binding];
+    }
+
+    vkUpdateDescriptorSets(device.getDevice(), static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    // The history read last frame's result only when there is one.
+    GpuTaaPass recorded = pass;
+    recorded.options[2] = historyValid && pass.options[2] > 0.5f ? 1.0f : 0.0f;
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->get());
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->getLayout(), 0, 1, &set, 0, nullptr);
+    vkCmdPushConstants(commands, pipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(recorded), &recorded);
+    vkCmdDispatch(commands, workgroupCount(width, TAA_GROUP_SIDE), workgroupCount(height, TAA_GROUP_SIDE), 1);
+
+    current.transition(commands, ImageState::TransferSource);
+    scene.transition(commands, ImageState::TransferDestination, ImageContents::Discard);
+
+    VkImageCopy copy{};
+    copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.srcSubresource.layerCount = 1;
+    copy.dstSubresource = copy.srcSubresource;
+    copy.extent = {width, height, 1};
+    vkCmdCopyImage(commands, current.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, scene.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    scene.transition(commands, ImageState::SurfaceRead);
+
+    written = 1 - written;
+    historyValid = true;
+}

@@ -1920,6 +1920,64 @@ Tested:
 - a blue noon, symmetry and proportion, a red sunset, the ground, the ambient's units, the view radius, sunlight through the air, packing and collection;
 - on the GPU every library function against its mirror, and the real passes against the CPU (tables to half-float rounding, the sky view and ambient within 1% through the tables as read back).
 
+## Temporal anti-aliasing
+
+Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirrored by `assets/shaders/taa.glsl`, tested in `taa_test` and `taa_gpu_test`; `render/vulkan/vulkan_taa`): each pixel averages what it saw over about the last ten frames, while the projection moves by a different fraction of a pixel every frame, so edges, thin things and sharp highlights get many samples for the cost of one.
+
+### Jitter
+
+- `taaJitter(frame)`: the Halton (2, 3) point of the frame's place in a cycle of `TAA_JITTER_FRAMES` (16), counted from 1, minus a half: within half a pixel of the centre. `halton(index, base)` is the radical inverse.
+- `jitteredClip(viewProjection, offset, width, height)` adds offset × w to clip x and y (2 / width of NDC a pixel, y negated since pixels count down), so every point on screen moves the same and depth is unchanged.
+- `drawScene` jitters `relativeViewProjection` (the main pass, the depth prepass, the probes' debug balls) by `taaJitter(taaFrame)` when TAA and `TaaSettings::jitter` are on. `viewProjection` (culling, debug lines), the shadow views, the sky's rays and the stars stay unjittered. `motionViewProjection` keeps this frame's camera without the jitter.
+
+### Motion
+
+**Still things and the sky** are reprojected from depth:
+
+- `previousRelativeViewProjection(previous, previousOrigin, currentOrigin)`: last frame's unjittered camera-relative view-projection times the translation by the camera's step, so it takes points measured from this frame's camera (the numbers stay small).
+- `taaReprojection(current, previous)`: previous × `inverse(current)` (`math/mat4`'s general inverse, Gauss-Jordan in doubles with partial pivoting), exactly the identity when the two are equal, so a still picture's history is read where it was written.
+- `reprojectPixel(reprojection, pixel, depth, size)`: the pixel's NDC (`pixelToNdc`; (-1, 1) the top-left corner, as the flipped viewport draws) and depth through the reprojection; valid only when w stays above 0 (in front of last frame's camera). The far plane (depth 0) reprojects by the camera's turn.
+
+**Moving objects** get motion vectors:
+
+- `DrawItem::previousModel`: the matrix the same part was drawn with last frame. `MotionHistory` (`scene/frame_description`) keys parts by entity (slot and generation) and part index; `buildFrame(world, camera, alpha, &history)` fills and remembers them; `Application` owns one (render-only, outside the simulation). None on an entity's first frame.
+- `drawScene` lists the visible draws whose `previousModel` differs from `model` and batches them by mesh after the shadow tiles' entries in the draw list. Set 1 binding 21 (`PreviousModelsBinding`) holds every instance's previous model matrix (its current one when unknown).
+- The velocity pass (`drawMotion`, GpuPass `Motion`, MOTION): the velocity image (`R16G16_SFLOAT`) cleared to `TAA_NO_MOTION` (1000), then `motion.vert`/`motion.frag` draw the moving objects over the main pass's depth (tested `GREATER_OR_EQUAL`, not written; back faces culled; positions only), placing each vertex as the main pass does (jittered) and writing `objectMotion`: this frame's unjittered NDC minus last frame's, from `GpuMotionView` (two matrices, 128 bytes of vertex push constants; the scene layout's push range is the larger of it and `GpuShadowView`). No motion when either clip w is at or below 0.
+- `previousPixelFromMotion(pixel, motion, size)` turns a motion back into last frame's pixel.
+
+### The resolve
+
+`taa.comp` (GpuPass `Taa`, TAA, after the depth measurement and before eye adaptation), 8 × 8 groups (`TAA_GROUP_SIDE`), push constants `GpuTaaPass` (96 bytes: the reprojection, the screen size and its inverses, the current weight, the clip width, whether the history is valid, the motion view):
+
+1. The 3x3 neighbourhood of this frame's colour in YCoCg (`toYCoCg`, `fromYCoCg`: Y = R/4 + G/2 + B/4): its mean and standard deviation.
+2. Last frame's pixel: from the velocity image where it holds a motion (below `TAA_NO_MOTION_TEST`, 500), else by reprojection from depth. Off screen, behind the camera or without a valid history, the pixel starts afresh from this frame.
+3. The history read with Catmull-Rom (`catmullRomWeights`: four weights per axis; nine bilinear reads, the middle two texels of each axis read as one), clamped to positive.
+4. Clipped into the box mean ± `clipSigma` deviations along the line to its centre (`clipToBox`, Playdead's clip; a flat box takes it to the centre).
+5. Blended: `taaBlend(current, history, currentWeight)`, each side times its Karis weight (`karisWeight`, bloom's 1 / (1 + luminance)), so a lone bright sample does not flash.
+6. `showMotion` writes the motion in pixels × `TAA_MOTION_VIEW_SCALE` (0.1) as red and green instead (blue: no history).
+
+`VulkanTaa` owns the velocity image and two `R16G16B16A16_SFLOAT` histories that take turns. The resolve writes this frame's history as a storage image, then copies it over the scene image (which gained `TRANSFER_DST`), so eye adaptation, bloom, tone mapping and captures read the result where they always did. The main pass stores its depth whenever TAA is on.
+
+**Barriers:** the velocity image colour target to compute read; the depth to compute read; last frame's history copy source to compute read; this frame's (discarded) to storage, then to copy source; the scene to copy destination (discarded) and back to `SurfaceRead`.
+
+**History resets:** the first frame, a resize (`ensureSize`), TAA switched off (`forgetHistory`, and last frame's camera forgotten), and the start of every capture, which also restarts the jitter cycle.
+
+### Settings
+
+`TaaSettings` (`RenderSettings::taa`, the Anti-aliasing group):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `enabled` | on | the jitter, the velocity pass and the resolve |
+| `currentWeight` | 0.1 | each new frame's share of the average (about ten frames) |
+| `clipSigma` | 1 | the clip box's half-width in the neighbours' standard deviations |
+| `jitter` | on | off holds the projection still |
+| `showMotion` | off | the motion debug view |
+
+### Golden images
+
+A capture draws `taaSettleFrames` (32, two jitter cycles) before it when TAA is on, more if probes or the cascades' depth fit need more, starting the history and the jitter afresh, so captures repeat exactly. With TAA off nothing is jittered or resolved and the picture is as before.
+
 ## Depth and camera-relative rendering
 
 ### Reversed-Z

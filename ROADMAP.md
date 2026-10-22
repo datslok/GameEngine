@@ -246,10 +246,9 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
   - Details in the build log's `demo-probes` entry
 
 **6e. Image quality**
-- [ ] Motion vectors and temporal anti-aliasing (TAA)
-  - Each pixel's movement since last frame, from `PreviousTransform` (already kept for interpolation) and last frame's camera, and a jittered projection.
-  - TAA averages over frames, which also lets soft shadows, DDGI sampling and screen-space effects use far fewer samples.
-  - Then DLSS and FSR as options (they need the Vulkan renderer's native handles)
+- [x] Motion vectors and temporal anti-aliasing (TAA) (`taa`)
+- [ ] DLSS and FSR as options, on TAA's motion vectors and jitter (they need the Vulkan renderer's native handles)
+  - With TAA in place, soft shadows, DDGI sampling and screen-space effects can use far fewer samples and let the history average them.
 - [ ] Normal map filtering (Toksvig): bumps averaged away in a normal map's smaller mips become extra roughness, so distant bumpy surfaces do not sparkle; alongside TAA
 - [ ] Reflections: parallax-corrected reflection probes first, then screen-space reflections
   - So metals and wet surfaces reflect their surroundings instead of the uniform-sky stand-in.

@@ -4,7 +4,40 @@
 #include <numbers>
 #include <stdexcept>
 
+namespace {
+    bool isIdentity(const Mat4& matrix, float tolerance) {
+        for (int row = 0; row < 4; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                if (std::abs(matrix.values[row][column] - (row == column ? 1.0f : 0.0f)) > tolerance) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /*
+    * The general inverse: a matrix times its inverse is the identity, for a model matrix and for a perspective
+    * projection (whose last row is not 0 0 0 1, which affineInverse cannot take); a matrix that squashes space flat has none.
+    */
+    void testInverse() {
+        const Mat4 model = Mat4::translation(3.0f, -2.0f, 7.0f) * Mat4::rotationY(0.7f) * Mat4::scaling(2.0f, 0.5f, 1.5f);
+        const std::optional<Mat4> modelInverse = inverse(model);
+        assert(modelInverse && isIdentity(model * *modelInverse, 1e-5f) && isIdentity(*modelInverse * model, 1e-5f));
+
+        const Mat4 projection = Mat4::perspective(1.2f, 16.0f / 9.0f, 0.1f, 500.0f) * Mat4::rotationX(-0.2f);
+        const std::optional<Mat4> projectionInverse = inverse(projection);
+        assert(projectionInverse && isIdentity(projection * *projectionInverse, 1e-4f));
+
+        assert(!inverse(Mat4::scaling(1.0f, 0.0f, 1.0f)));
+        assert(Mat4::identity() == Mat4::identity() && !(Mat4::identity() == Mat4::translation(0.0f, 1.0f, 0.0f)));
+    }
+}
+
 void testMat4(){
+    testInverse();
+
     Mat4 zeroMatrix;
     Mat4 identityMatrix = Mat4::identity();
 

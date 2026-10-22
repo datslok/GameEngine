@@ -1,0 +1,39 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs taa.glsl's functions on the cases taa_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "taa.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_TAA_PIXELS) {
+        // Inputs: (ndc, pixel), (size, motion).
+        vec4 points = testInput(0);
+        vec4 screen = testInput(1);
+        testOutput(0, vec4(ndcToPixel(points.xy, screen.xy), pixelToNdc(points.zw, screen.xy)));
+        testOutput(1, vec4(previousPixelFromMotion(points.zw, screen.zw, screen.xy), 0.0, 0.0));
+    } else if (function == GPU_TEST_TAA_COLOURS) {
+        // Inputs: (history, weight), (centre), (extent), (current).
+        vec4 history = testInput(0);
+        testOutput(0, vec4(toYCoCg(history.rgb), 0.0));
+        testOutput(1, vec4(fromYCoCg(history.rgb), 0.0));
+        testOutput(2, vec4(clipToBox(history.rgb, testInput(1).rgb, testInput(2).rgb), 0.0));
+        testOutput(3, vec4(taaBlend(testInput(3).rgb, history.rgb, history.a), 0.0));
+    } else if (function == GPU_TEST_TAA_WEIGHTS) {
+        // Inputs: (t, frame, 0, 0).
+        vec4 point = testInput(0);
+        uint frame = uint(point.y + 0.5);
+        testOutput(0, catmullRomWeights(point.x));
+        testOutput(1, vec4(halton(frame, 2u), halton(frame, 3u), taaJitter(frame)));
+    } else if (function == GPU_TEST_TAA_REPROJECTION) {
+        // Inputs: the reprojection's four columns, (pixel, depth, 0), (size, 0, 0), (current clip), (previous clip).
+        mat4 reprojection = mat4(testInput(0), testInput(1), testInput(2), testInput(3));
+        vec4 pixel = testInput(4);
+        testOutput(0, vec4(reprojectPixel(reprojection, pixel.xy, pixel.z, testInput(5).xy), 0.0));
+        testOutput(1, vec4(objectMotion(testInput(6), testInput(7)), 0.0, 0.0));
+    }
+}

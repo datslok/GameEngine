@@ -25,6 +25,7 @@
 #include "render/vulkan/vulkan_atmosphere.h"
 #include "render/vulkan/vulkan_eye_adaptation.h"
 #include "render/vulkan/vulkan_stars.h"
+#include "render/vulkan/vulkan_taa.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
@@ -215,6 +216,22 @@ private:
     std::optional<GpuEyeAdaptation> lastEyeAdaptation;
     bool eyeAdaptationFresh = true;
     bool capturing = false;
+
+    // Temporal anti-aliasing (render/gpu/taa.h): its images and resolve, the velocity pass's pipeline, the frame's place
+    // in the jitter cycle, this frame's camera-relative view-projection without the jitter, and last frame's camera
+    // (for reprojection; unknown on the first frame, after it was off and when a capture starts).
+    std::unique_ptr<VulkanTaa> taa;
+    std::unique_ptr<VulkanPipeline> motionPipeline;
+    std::uint64_t taaFrame = 0;
+    Mat4 motionViewProjection = Mat4::identity();
+
+    struct PreviousCamera {
+        Mat4 viewProjection = Mat4::identity();
+        Vec3 origin{0.0f, 0.0f, 0.0f};
+        bool known = false;
+    };
+
+    PreviousCamera previousCamera;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
 
@@ -306,10 +323,10 @@ private:
     };
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
-    // rays' hits may need (empty without probes).
+    // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
-                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const RenderSettings& settings,
-                               std::span<const ProbeCascade> probes, const ProbeHitLights& hitLights);
+                               const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
+                               const RenderSettings& settings, std::span<const ProbeCascade> probes, const ProbeHitLights& hitLights);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
@@ -327,6 +344,7 @@ private:
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
+    void drawMotion(FrameContext& frame, const BatchedDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).
     void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);

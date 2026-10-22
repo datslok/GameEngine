@@ -1,5 +1,6 @@
 #include "render/vulkan/scene_layout.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/taa.h"
 #include "render/vulkan/vulkan_check.h"
 
 #include <algorithm>
@@ -39,6 +40,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the sky view table (probe rays that escape)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the atmosphere
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // the probes' cascades (vertex for the debug balls)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // last frame's model matrices (the velocity pass)
     }};
 }
 
@@ -63,8 +65,9 @@ SceneLayout::SceneLayout(VkDevice device, VkDescriptorSetLayout bindlessLayout) 
 
     const std::array<VkDescriptorSetLayout, 2> setLayouts{bindlessLayout, createdLayout};
 
-    // Only the shadow pass pushes anything: each tile's view, for its vertex shader.
-    const VkPushConstantRange shadowView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
+    // Only the shadow pass and the velocity pass push anything: each tile's view, or the two frames' cameras, for their
+    // vertex shaders.
+    const VkPushConstantRange shadowView{VK_SHADER_STAGE_VERTEX_BIT, 0, static_cast<std::uint32_t>(std::max(sizeof(GpuShadowView), sizeof(GpuMotionView)))};
 
     VkPipelineLayoutCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -123,6 +126,7 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     shadowTiles(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     drawList(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    previousModels(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
@@ -154,6 +158,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.atmosphere.describe(),
         views.probeCascades,
+        buffers.previousModels.describe(),
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
