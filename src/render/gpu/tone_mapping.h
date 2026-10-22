@@ -51,9 +51,10 @@ struct ToneMappingSettings {
     * rods' stops, all cones above the cones', a smooth blend between; measured, like the eye adaptation's mean, in the
     * stops of the light before exposure. The light lab's moonlit field is near -8 EV and its sunlit room by day near
     * -6, so the thresholds sit between those (by measurement, since the engine's light has no physical units yet: the
-    * real thresholds are about 0.005 and 3 cd/m2).
+    * real thresholds are about 0.005 and 3 cd/m2). Off by default for now (the user's choice): the night's look waits
+    * for physical light units (ROADMAP phase 14).
     */
-    bool nightVision = true;
+    bool nightVision = false;
     float rodsFullEv = -9.5f;
     float conesFullEv = -7.0f;
     float nightBlueShift = 0.5f;

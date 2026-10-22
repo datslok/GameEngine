@@ -212,6 +212,7 @@ namespace {
         assert(packToneMapping(settings).output[3] == 0.0f);
 
         // Night vision: its thresholds, blue shift and whether it is on.
+        settings.nightVision = true;
         const ToneMapUniformData night = packToneMapping(settings);
         assert(night.nightVision[0] == settings.rodsFullEv && night.nightVision[1] == settings.conesFullEv);
         assert(night.nightVision[2] == settings.nightBlueShift && night.nightVision[3] == 1.0f);
@@ -266,9 +267,9 @@ namespace {
         bad.nightBlueShift = -0.1f;
         assert(refused(bad));
 
-        // On by default, its thresholds in order.
+        // Off by default for now, its thresholds in order.
         const ToneMappingSettings defaults;
-        assert(defaults.nightVision && defaults.rodsFullEv < defaults.conesFullEv);
+        assert(!defaults.nightVision && defaults.rodsFullEv < defaults.conesFullEv);
     }
 }
 

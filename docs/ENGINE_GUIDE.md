@@ -786,7 +786,7 @@ That is why a moonlit night looks grey and cool, never warm. Physically, a moonl
 
 **Where the rods take over.** A pixel goes grey only when both it and the scene the eye is set for are dim. The eye's state is the scene's mean brightness, eased with the same wait-then-adapt timing as the exposure, so colour drains a moment after a light goes out, not at once. A lamp in a dark street is bright, so it keeps its warm colour. A dark corner of a sunlit room keeps its colour too, since the eye is set for the window. All of this works on the light before the exposure, since the receptors see the light itself, not the exposed picture.
 
-**The honest catch.** The thresholds should be real luminances, but the engine's light has no physical units yet, and its moon is thousands of times brighter than the real one. So the thresholds are set by measurement: between the light lab's moonlit field (about -8 EV) and its sunlit room by day (about -6 EV).
+**The honest catch.** The thresholds should be real luminances, but the engine's light has no physical units yet, and its moon is thousands of times brighter than the real one. So the thresholds are set by measurement: between the light lab's moonlit field (about -8 EV) and its sunlit room by day (about -6 EV). For now night vision is off by default (Night vision in F5 turns it on): the night's look waits for physical light units.
 
 ### Global illumination: light that bounces
 
