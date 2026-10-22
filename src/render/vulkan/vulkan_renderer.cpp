@@ -10,6 +10,7 @@
 #include "render/gpu/depth_prepass.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_cache.h"
+#include "render/gpu/taa.h"
 #include "render/gpu/tone_map_uniforms.h"
 #include "render/vulkan/buffer_barrier.h"
 #include "render/vulkan/render_pass.h"
@@ -103,6 +104,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
+    taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     createRayTracing();
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
@@ -130,6 +132,11 @@ void VulkanRenderer::checkFormats() const {
 
     if (!device.supportsFormat(sceneColourFormat, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT)) {
         throw std::runtime_error("This GPU cannot draw into a 16-bit float image, which HDR rendering needs");
+    }
+
+    if (!device.supportsFormat(VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT) ||
+        !device.supportsFormat(sceneColourFormat, VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
+        throw std::runtime_error("This GPU cannot keep the motion and history images temporal anti-aliasing needs");
     }
 
     if (!device.supportsFormat(VK_FORMAT_R16G16_UNORM, VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
@@ -297,6 +304,21 @@ void VulkanRenderer::createPipelines() {
     reset.vertices = {};
     reset.depthCompare = VK_COMPARE_OP_ALWAYS;
     shadowClearPipeline = std::make_unique<VulkanPipeline>(device, layouts, reset);
+
+    // The velocity pass: the objects that moved, drawn again over the main pass's depth (tested, not written; GREATER
+    // OR EQUAL, so their own surfaces pass), only their positions, into the velocity image.
+    PipelineDescription motion;
+    motion.vertexShader = "assets/shaders/motion.vert.spv";
+    motion.fragmentShader = "assets/shaders/motion.frag.spv";
+    motion.sharedLayout = sceneLayout->getPipelineLayout();
+    motion.vertices = shadow.vertices;
+    motion.cullMode = VK_CULL_MODE_BACK_BIT;
+    motion.colourFormat = VK_FORMAT_R16G16_SFLOAT;
+    motion.depthFormat = depthFormat;
+    motion.depthTest = true;
+    motion.depthWrite = false;
+    motion.depthCompare = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    motionPipeline = std::make_unique<VulkanPipeline>(device, layouts, motion);
 
     ComputePipelineDescription clusterLights;
     clusterLights.shader = "assets/shaders/cluster_lights.comp.spv";
@@ -468,7 +490,9 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     sceneDescription.format = sceneColourFormat;
     sceneDescription.width = width;
     sceneDescription.height = height;
-    sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    // Transfer destination: temporal anti-aliasing copies its result back over it.
+    sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     sceneDescription.name = "Scene colour";
     VulkanImage sceneReplacement{device, sceneDescription};
 
@@ -479,6 +503,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     depth = std::move(depthReplacement);
     sceneColour = std::move(sceneReplacement);
     clusterMasks = std::move(masksReplacement);
+    taa->ensureSize(width, height);
     frameWidth = width;
     frameHeight = height;
 }
@@ -833,6 +858,20 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     viewProjection = toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix();
     relativeViewProjection = cameraRelativeViewProjection(camera);
     cameraOrigin = camera.getPosition();
+
+    // Temporal anti-aliasing: the main pass, and everything drawn with it, moves by this frame's jitter; the motion
+    // vectors and the reprojection use the camera without it, and last frame's camera made to take this frame's
+    // camera-relative points (or this frame's, when there is none).
+    const TaaSettings& antiAliasing = settings.taa;
+    motionViewProjection = relativeViewProjection;
+
+    if (antiAliasing.enabled && antiAliasing.jitter) {
+        relativeViewProjection = jitteredClip(relativeViewProjection, taaJitter(taaFrame), static_cast<float>(frameWidth), static_cast<float>(frameHeight));
+    }
+
+    const Mat4 previousViewProjection = previousCamera.known
+                                            ? previousRelativeViewProjection(previousCamera.viewProjection, previousCamera.origin, cameraOrigin)
+                                            : motionViewProjection;
     clusterGrid = makeClusterGrid(camera, static_cast<int>(frameWidth), static_cast<int>(frameHeight));
     const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
@@ -882,6 +921,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
+    // The visible objects that moved since last frame, drawn again by the velocity pass: their entries follow the
+    // shadow tiles' in the draw list.
+    std::vector<std::size_t> moving;
+
+    if (antiAliasing.enabled) {
+        for (std::size_t index : visible) {
+            const DrawItem& draw = description.draws[index];
+
+            if (draw.previousModel && *draw.previousModel != draw.model) {
+                moving.push_back(index);
+            }
+        }
+    }
+
+    const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()));
+
     // The light probes, in cascades round what the game's ProbeCascades follows (the camera): their atlases readied
     // first, since the scene set points at them.
     const GlobalIlluminationSettings& illumination = settings.globalIllumination;
@@ -905,7 +960,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, settings, probes, hitLights);
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, settings, probes, hitLights);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -964,7 +1019,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     beginGpuPass(frame, GpuPass::Main);
     const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, frameWidth, frameHeight);
     const std::optional<StarrySky>& stars = description.lighting.stars;
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes, traceProbes, description.lighting.background,
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || antiAliasing.enabled, traceProbes,
+                 description.lighting.background,
                  air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
 
@@ -980,11 +1036,31 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::RayDebug);
     }
 
+    if (antiAliasing.enabled) {
+        beginGpuPass(frame, GpuPass::Motion);
+        drawMotion(frame, motionDraws, sceneSet, packMotionView(motionViewProjection, previousViewProjection));
+        endGpuPass(frame, GpuPass::Motion);
+    }
+
     // The surfaces this frame shows, for fitting a later frame's cascades: the CPU reads them once this frame is done.
     if (measureDepths) {
         beginGpuPass(frame, GpuPass::DepthRange);
         depthRange->measure(frame.commands, frame.descriptors, frame.frameIndex, depth);
         endGpuPass(frame, GpuPass::DepthRange);
+    }
+
+    // The picture smoothed over frames, before anything reads it. Switched off, it starts afresh when switched on again.
+    if (antiAliasing.enabled) {
+        beginGpuPass(frame, GpuPass::Taa);
+        const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
+        taa->resolve(frame.commands, frame.descriptors, sceneColour, depth,
+                     packTaaPass(reprojection, frameWidth, frameHeight, antiAliasing, previousCamera.known));
+        endGpuPass(frame, GpuPass::Taa);
+        previousCamera = PreviousCamera{motionViewProjection, cameraOrigin, true};
+        ++taaFrame;
+    } else {
+        taa->forgetHistory();
+        previousCamera.known = false;
     }
 
     // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
@@ -1036,14 +1112,18 @@ void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Ca
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           const RenderSettings& settings, std::span<const ProbeCascade> probes, const ProbeHitLights& hitLights) {
+                                           const BatchedDraws& motionDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
+                                           const ProbeHitLights& hitLights) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
+    std::vector<std::array<float, 16>> previousModels;
     instances.reserve(description.draws.size());
+    previousModels.reserve(description.draws.size());
 
     for (const DrawItem& draw : description.draws) {
         checkTexturesUploaded(draw.material);
         instances.push_back(packInstance(draw, materials.add(draw.material)));
+        writeColumnMajor(draw.previousModel.value_or(draw.model), previousModels.emplace_back().data());
     }
 
     std::vector<std::uint32_t> drawList;
@@ -1054,6 +1134,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     drawList.insert(drawList.end(), shadowDraws.drawList.begin(), shadowDraws.drawList.end());
+
+    for (std::size_t index : motionDraws.order) {
+        drawList.push_back(static_cast<std::uint32_t>(index));
+    }
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
     GpuFrameData frameData = makeFrameData(lights, relativeViewProjection, cameraOrigin, clusterGrid, settings.clusteredShading,
@@ -1076,6 +1160,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.spotLights.write(lights.spots);
     buffers.shadowTiles.write(shadows.tileData);
     buffers.drawList.write(drawList);
+    buffers.previousModels.write(previousModels);
 
     const SceneImages images{
         SampledImage{shadowAtlas.getView(), shadowSampler.get(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
@@ -1365,6 +1450,34 @@ void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet scene
 }
 
 /*
+* The velocity pass: the velocity image starts cleared to "no motion" (so everything it does not draw is reprojected by
+* the camera alone), and the moving objects are drawn over the main pass's depth, which is tested and kept, with the two
+* frames' cameras as push constants. The image is left for the resolve, which reads it.
+*/
+void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view) {
+    const VkCommandBuffer commands = frame.commands;
+    VulkanImage& velocity = taa->getVelocity();
+    velocity.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
+    depth.transition(commands, ImageState::DepthTarget);
+
+    const float none = static_cast<float>(TAA_NO_MOTION);
+    const ColourAttachment colour{velocity.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {none, none, 0.0f, 0.0f}};
+    const DepthAttachment depthTest{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+    beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTest);
+    renderingOpen = true;
+
+    if (!motionDraws.batches.empty()) {
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, motionPipeline->get());
+        bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+        vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
+        stats.drawCalls += drawBatches(commands, motionDraws.batches);
+    }
+
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+}
+
+/*
 * One instanced draw per batch: the mesh's buffers bound, and every instance of it drawn at once (gl_InstanceIndex counts
 * from firstInstance, the batch's first entry in the draw list, which names each instance). Returns how many draw calls
 * that took.
@@ -1430,7 +1543,13 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 
     ensureFrameTextures(width, height);
 
-    const int framesBefore = tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0);
+    // Temporal anti-aliasing settles over two jitter cycles; the capture starts it afresh, from the first point of the
+    // cycle, so it repeats exactly.
+    const int framesBefore = std::max(tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0),
+                                      settings.taa.enabled ? taaSettleFrames : 0);
+    taa->forgetHistory();
+    previousCamera.known = false;
+    taaFrame = 0;
 
     // The frame's probe events happen on the first frame drawn, not on every repeat of it.
     FrameDescription repeated = description;

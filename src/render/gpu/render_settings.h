@@ -7,6 +7,7 @@
 #include "render/gpu/light_priority.h"
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/shadow_map.h"
+#include "render/gpu/taa.h"
 #include "render/gpu/tone_mapping.h"
 
 /*
@@ -21,6 +22,7 @@ struct RenderSettings {
     ToneMappingSettings toneMapping;
     DisplaySettings display;
     GlobalIlluminationSettings globalIllumination;
+    TaaSettings taa;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

@@ -1,0 +1,104 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Temporal anti-aliasing's resolve (render/gpu/taa.h): each pixel blends this frame's colour into the history it had
+* last frame. Where that history is: from the velocity image for moving objects, else from the pixel's depth through
+* the two frames' cameras (still things and the sky). It is read with Catmull-Rom (nine bilinear reads standing in for
+* sixteen texels), clipped into the box of the colours its 3x3 neighbours show this frame (their mean plus or minus
+* the clip width in standard deviations, in YCoCg), and blended. With no valid history (the first frame, a surface
+* that was off screen or behind the camera) the pixel starts afresh from this frame. The result is next frame's history.
+*/
+#include "taa.glsl"
+
+layout(local_size_x = TAA_GROUP_SIDE, local_size_y = TAA_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform sampler2D sceneColour; // this frame, exact texels
+layout(set = 0, binding = 1) uniform sampler2D sceneDepth;  // exact texels
+layout(set = 0, binding = 2) uniform sampler2D velocity;    // exact texels: moving objects' motion, or TAA_NO_MOTION
+layout(set = 0, binding = 3) uniform sampler2D history;     // last frame's result, filtered and clamped
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D resolved;
+
+// Must match GpuTaaPass.
+layout(push_constant) uniform Pass {
+    mat4 reprojection;
+    vec4 size;    // xy: the screen in pixels, zw: their inverses
+    vec4 options; // x: the current weight, y: the clip width, z: 1 when the history is valid, w: 1 to show the motion
+} pass;
+
+/*
+* Catmull-Rom over the 4x4 texels round the point, in nine reads: in each direction the middle two texels' weights are
+* both positive, so one bilinear read placed between them (at the second's share of their sum) gives both at once.
+*/
+vec3 sampleHistory(vec2 pixel) {
+    vec2 centre = floor(pixel - 0.5) + 0.5;
+    vec2 fraction = pixel - centre;
+    vec4 across = catmullRomWeights(fraction.x);
+    vec4 down = catmullRomWeights(fraction.y);
+    vec2 middleWeights = vec2(across.y + across.z, down.y + down.z);
+    vec2 middle = (centre + vec2(across.z, down.z) / middleWeights) * pass.size.zw;
+    vec2 first = (centre - 1.0) * pass.size.zw;
+    vec2 last = (centre + 2.0) * pass.size.zw;
+
+    vec3 sum = vec3(0.0);
+    sum += textureLod(history, vec2(first.x, first.y), 0.0).rgb * across.x * down.x;
+    sum += textureLod(history, vec2(middle.x, first.y), 0.0).rgb * middleWeights.x * down.x;
+    sum += textureLod(history, vec2(last.x, first.y), 0.0).rgb * across.w * down.x;
+    sum += textureLod(history, vec2(first.x, middle.y), 0.0).rgb * across.x * middleWeights.y;
+    sum += textureLod(history, vec2(middle.x, middle.y), 0.0).rgb * middleWeights.x * middleWeights.y;
+    sum += textureLod(history, vec2(last.x, middle.y), 0.0).rgb * across.w * middleWeights.y;
+    sum += textureLod(history, vec2(first.x, last.y), 0.0).rgb * across.x * down.w;
+    sum += textureLod(history, vec2(middle.x, last.y), 0.0).rgb * middleWeights.x * down.w;
+    sum += textureLod(history, vec2(last.x, last.y), 0.0).rgb * across.w * down.w;
+
+    // The cubic overshoots at sharp edges, and light is never negative.
+    return max(sum, vec3(0.0));
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 screen = ivec2(pass.size.xy);
+
+    if (texel.x >= screen.x || texel.y >= screen.y) {
+        return;
+    }
+
+    vec2 pixel = vec2(texel) + 0.5;
+    vec3 current = max(texelFetch(sceneColour, texel, 0).rgb, vec3(0.0));
+
+    vec3 sum = vec3(0.0);
+    vec3 sumOfSquares = vec3(0.0);
+
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            ivec2 neighbour = clamp(texel + ivec2(x, y), ivec2(0), screen - 1);
+            vec3 colour = toYCoCg(max(texelFetch(sceneColour, neighbour, 0).rgb, vec3(0.0)));
+            sum += colour;
+            sumOfSquares += colour * colour;
+        }
+    }
+
+    vec3 mean = sum / 9.0;
+    vec3 deviation = sqrt(max(sumOfSquares / 9.0 - mean * mean, vec3(0.0)));
+
+    vec2 motion = texelFetch(velocity, texel, 0).xy;
+    vec3 previous = motion.x > TAA_NO_MOTION_TEST ? reprojectPixel(pass.reprojection, pixel, texelFetch(sceneDepth, texel, 0).r, pass.size.xy)
+                                                   : vec3(previousPixelFromMotion(pixel, motion, pass.size.xy), 1.0);
+    bool onScreen = previous.z > 0.5 && all(greaterThanEqual(previous.xy, vec2(0.0))) && all(lessThanEqual(previous.xy, pass.size.xy));
+
+    vec3 result = current;
+
+    if (pass.options.z > 0.5 && onScreen) {
+        vec3 past = sampleHistory(previous.xy);
+        past = fromYCoCg(clipToBox(toYCoCg(past), mean, deviation * pass.options.y));
+        result = taaBlend(current, past, pass.options.x);
+    }
+
+    // The debug view: how far the pixel moved since last frame, sideways in red and up or down in green; blue where it
+    // has no history (it was behind the camera).
+    if (pass.options.w > 0.5) {
+        result = previous.z > 0.5 ? vec3(abs(pixel - previous.xy) * TAA_MOTION_VIEW_SCALE, 0.0) : vec3(0.0, 0.0, 1.0);
+    }
+
+    imageStore(resolved, texel, vec4(result, 1.0));
+}

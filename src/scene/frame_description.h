@@ -8,6 +8,10 @@
 #include "scene/lighting.h"
 #include "scene/material.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <unordered_map>
 #include <vector>
 
 // A sphere around something, in world space. A negative radius means the size is unknown.
@@ -28,6 +32,43 @@ struct DrawItem {
 
     // Filled in by the engine from the mesh's bounds (attachBoundingSpheres), so views can skip what they cannot see.
     BoundingSphere bounds;
+
+    // The model matrix the same part was drawn with last frame (MotionHistory), so the renderer can tell how it moved
+    // (motion vectors for temporal anti-aliasing). None on its first frame, or without a history: treated as not moving.
+    std::optional<Mat4> previousModel;
+};
+
+/*
+* What every model part was drawn with last frame, so each draw can say how it moved since. Kept by the engine between
+* frames and render-only, so it never touches the simulation. Keyed by the entity (its slot and its generation, so a new
+* entity in a destroyed one's slot starts afresh) and the part's place in its model.
+*/
+class MotionHistory {
+public:
+    // Last frame's matrix for this part, if it was drawn then.
+    std::optional<Mat4> previous(Entity entity, std::size_t part) const;
+
+    // This frame's matrix for this part.
+    void remember(Entity entity, std::size_t part, const Mat4& model);
+
+    // Ends a frame: what it remembered becomes last frame's, and parts it did not draw are forgotten.
+    void endFrame();
+
+private:
+    struct Key {
+        std::uint32_t index = 0;
+        std::uint32_t generation = 0;
+        std::uint64_t part = 0;
+
+        bool operator==(const Key& other) const = default;
+    };
+
+    struct KeyHash {
+        std::size_t operator()(const Key& key) const;
+    };
+
+    std::unordered_map<Key, Mat4, KeyHash> last;
+    std::unordered_map<Key, Mat4, KeyHash> current;
 };
 
 /*
@@ -52,5 +93,6 @@ struct FrameDescription {
     std::vector<DebugLine> debugScreenLines;
 };
 
-// Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks.
-FrameDescription buildFrame(World& world, const Camera& camera, float alpha);
+// Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks. With a history, each draw
+// gets its matrix from last frame, and this frame's are remembered for the next.
+FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history = nullptr);

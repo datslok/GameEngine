@@ -22,6 +22,9 @@ struct Mat4 {
 
     Mat4 operator*(const Mat4& other) const;
 
+    // Exactly the same numbers in every place.
+    bool operator==(const Mat4& other) const = default;
+
     static Mat4 perspective(
         float verticalFovRadians,
         float aspectRatio,
@@ -51,6 +54,10 @@ float handedness(const Mat4& model);
 // The inverse of a model matrix (any translation, rotation and scale; the last row must be 0 0 0 1), or nothing when it
 // squashes space flat. Used to carry a world ray into an object's own coordinates.
 std::optional<Mat4> affineInverse(const Mat4& model);
+
+// The inverse of any matrix, projections included (temporal anti-aliasing takes a pixel and its depth back through the
+// camera), or nothing when it squashes space flat.
+std::optional<Mat4> inverse(const Mat4& matrix);
 
 inline Vec4 Mat4::operator*(const Vec4& vector) const {
     return Vec4{

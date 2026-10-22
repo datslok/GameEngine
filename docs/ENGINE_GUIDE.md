@@ -19,6 +19,7 @@ This guide describes the engine as it is now. It is updated at the end of each r
 - the sky and the air (Beer-Lambert, Rayleigh and Mie scattering, phase functions, single and multiple scattering as a geometric series, the three tables, float precision at a planet's scale)
 - eye adaptation (exposure in stops, a histogram of log brightness and why the middle of it, atomics in shared memory, adapting as an RC circuit, partial compensation)
 - night vision (rods and cones, the Purkinje shift, why a pixel goes grey only when it and the scene are both dim)
+- temporal anti-aliasing (aliasing and the sampling theorem, jitter on a Halton sequence, the history as an exponential average, reprojection and motion vectors, clipping stale history to the neighbours' range, Karis weights and Catmull-Rom)
 - the night sky (the moon's orbit and phase, Lommel-Seeliger's law and the opposition surge, a second sky by linearity, the celestial sphere and sidereal time, magnitudes and blackbody colours, splats that keep a star's light whole)
 - so all of 6c
 - all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps)
@@ -1369,6 +1370,32 @@ from the pixel's CIE XYZ colour. It divides by white's value, so white keeps its
 A lamp in a dark street is bright, so it keeps its warm colour. A dark corner of a sunlit room keeps its colour too, since the eye is set for the window. All of this works on the light before the exposure, since the receptors see the light itself, not the exposed picture.
 
 **The honest catch.** The thresholds should be real luminances, but the engine's light has no physical units yet, and its moon is thousands of times brighter than the real one. So the thresholds are set by measurement: between the light lab's moonlit field (about -8 EV) and its sunlit room by day (about -6 EV). For now night vision is off by default (Night vision in F5 turns it on): the night's look waits for physical light units.
+
+### Temporal anti-aliasing: many samples over time
+
+**The problem.** Each pixel shows the scene at a single point, its centre. That is sampling, and the sampling theorem says detail finer than two pixels cannot be shown faithfully: it **aliases**. Edges come out as stair steps. Thin things, like the light lab's fence, break up, and as the camera moves they shimmer, because whether a wire covers a pixel's centre flips on and off.
+
+The classic cure is more samples per pixel, but that multiplies the shading work.
+
+**Spreading the samples over time.** Each frame the whole picture is shifted by a different fraction of a pixel, the **jitter**. The offsets follow a Halton sequence, a low-discrepancy sequence: each new point lands in the biggest gap left by the earlier ones, so a run of them covers the pixel evenly. Each pixel keeps a running average of what it saw, the **history**, giving each new frame a weight of 0.1:
+
+    history ← history + 0.1 × (this frame − history)
+
+That is the same exponential memory the light probes use: roughly the last ten frames, so about ten samples per pixel for the price of one. Think of a long photographic exposure with a camera that shakes by exactly one pixel.
+
+**When things move.** If the camera or an object moves, the history at a pixel shows something else, and averaging would smear. So each pixel finds where its surface was last frame, **reprojection**:
+
+- For still things and the sky, the pixel's depth gives its position in space, and last frame's camera says where that position was on the screen. One matrix does it: last frame's view-projection times the inverse of this frame's.
+- For moving objects, a small extra pass draws them again and writes each pixel's **motion vector**: where its surface is now minus where it was. The engine remembers every part's matrix from the frame before, for exactly this.
+
+**When the history is wrong.** Even then the history can be stale: a surface that was hidden behind something last frame, or a lamp switched on. The fix is a sanity check per pixel. Its 3x3 neighbours this frame give a range of plausible colours, their mean plus or minus a standard deviation. A history inside that range is kept; one outside is pulled back to its edge. A true history passes, and a stale one is mostly removed.
+
+**Two refinements:**
+
+- A very bright pixel (a sparkle off a metal edge) would dominate an average and flash. So each sample is weighed down by 1 / (1 + its brightness), the same trick bloom uses against fireflies.
+- Reading the history between pixels with plain bilinear filtering would blur it a little more each frame. A Catmull-Rom cubic, which passes exactly through the pixel values, keeps it sharp.
+
+The pass runs after the main pass, so eye adaptation, bloom and tone mapping all see the smoothed picture.
 
 ### Global illumination: light that bounces
 

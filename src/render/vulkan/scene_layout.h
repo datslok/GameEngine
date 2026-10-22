@@ -19,7 +19,8 @@
 * materials, lights, shadow tiles, the draw list, the clusters' light masks and the lights probe rays' hits may need,
 * and the shadow atlas, the BRDF table and the light probes' three atlases.
 * Nothing is bound per draw; each shadow tile pushes its view (GpuShadowView) as a push constant, a few bytes recorded
-* straight into the command buffer.
+* straight into the command buffer, and the velocity pass its two cameras (GpuMotionView), reading each instance's model
+* matrix from last frame (binding 21).
 */
 inline constexpr std::uint32_t bindlessTextureSet = 0;
 inline constexpr std::uint32_t sceneFrameSet = 1;
@@ -47,7 +48,8 @@ enum SceneBinding : std::uint32_t {
     SkyViewBinding = 18,
     AtmosphereBinding = 19,
     ProbeCascadesBinding = 20,
-    SceneBindingCount = 21
+    PreviousModelsBinding = 21,
+    SceneBindingCount = 22
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -112,6 +114,8 @@ struct SceneBuffers {
     UploadArray shadowTiles;
     UploadArray drawList;
     UploadArray probeHitLights;
+    // Each instance's model matrix last frame (column-major, its current one when it did not move), for the velocity pass.
+    UploadArray previousModels;
 
     // The flat ambient light when there is no atmosphere (with one, the atmosphere's own buffer stands in), and the
     // atmosphere's numbers (GpuAtmosphere; present or not, render/gpu/atmosphere.h).

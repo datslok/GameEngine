@@ -271,7 +271,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 }
 
 FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
-    FrameDescription frame = buildFrame(world, game.getCamera(), alpha);
+    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory);
     frame.lightFocus = game.getLightFocus();
 
     // Probe events last one frame: this one carries them.

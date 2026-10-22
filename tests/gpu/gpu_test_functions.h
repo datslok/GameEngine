@@ -106,4 +106,10 @@
 #define GPU_TEST_EYE_STEPS 0
 #define GPU_TEST_EYE_MEAN 1
 
+// taa_test.comp
+#define GPU_TEST_TAA_PIXELS 0
+#define GPU_TEST_TAA_COLOURS 1
+#define GPU_TEST_TAA_WEIGHTS 2
+#define GPU_TEST_TAA_REPROJECTION 3
+
 #endif

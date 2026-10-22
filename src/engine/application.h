@@ -101,6 +101,9 @@ private:
     // Each uploaded mesh's bounds, indexed like MeshHandle, for the bounding box view.
     std::vector<Aabb> boundsByMesh;
 
+    // What every model part was drawn with last frame, so each frame's draws say how they moved (for temporal anti-aliasing).
+    MotionHistory motionHistory;
+
     // After the window and renderer, which it uses until it is destroyed.
     DebugUi debugUi;
 
