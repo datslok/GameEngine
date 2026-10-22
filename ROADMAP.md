@@ -202,12 +202,13 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log):
 - [x] The sun's disc in the sky (`sun-disc`)
 - [x] Sample distribution shadow maps: the cascades end at the farthest surface on screen (`sdsm`)
 
-**Documentation pass (next, before 6d's software tracer)**
-- [ ] Make the docs easy for people to read
-  - Several have very long paragraphs and list items with little or no spacing (`docs/ARCHITECTURE.md` has single paragraphs of about 11,500 characters, `README.md`'s Features list bullets of about 6,000).
-  - Short paragraphs with one idea each, headings, lists and tables, blank lines between.
-  - Covers `README.md`, `ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/BUILDLOG.md`, `docs/ENGINE_GUIDE.md`, `docs/ILLUMINATION.md`, `docs/LUMEN.md` and `docs/RAGDOLLPLAN.md`; not `CLAUDE.md`, which is only for Claude.
-  - Every fact and number kept; one sample section shown first and agreed before the rest
+**Documentation pass**
+- [x] Make the docs easy for people to read (`docs-readability`)
+- [ ] Bring the stale parts of `docs/ARCHITECTURE.md` up to date
+  - The light, HDR and shading section still describes the renderer before the GPU scene: lights pushed as a uniform block (64 point lights), per-draw matrices and fixed texture slots, where today lights live in storage buffers, textures in the bindless array and nothing is bound per object.
+  - Golden image counts ("eight views", "all twelve") may predate the street view.
+  - The MOBA hover text puts the demo's readouts on lines 7 to 9, which the engine now uses (games start at `firstGameReadoutLine` 10).
+  - The sentence about the order of `Application`'s members sits in the Game interface section.
 
 **6d. Global illumination: DDGI** ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, built in the form of its 2021 production follow-up, "Scaling Probe-Based Real-Time Dynamic Global Illumination for Production").
 
