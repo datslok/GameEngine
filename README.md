@@ -45,7 +45,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 
 **What each probe gathers**
 
-- 128 rays a frame by default (set by the quality preset). Over 16 frames the rays take turns through one long spiral, so between them they cover every direction evenly: as calm as three times the rays.
+- 128 rays a frame by default (set by the quality preset; up to 1024). Rays are stored only for the probes traced that frame, so even 1024 rays a probe take about 200 MB. Over 16 frames the rays take turns through one long spiral, so between them they cover every direction evenly: as calm as three times the rays.
 - Rays bring back the sky, and surfaces lit by the sun and the brightest nearby lamps, found by shadow rays.
 - They also bring back the light the probes held last frame, so each frame adds a bounce.
 - What comes back is blended into small octahedral images: the light arriving from every direction, and the distance to the nearest surface.

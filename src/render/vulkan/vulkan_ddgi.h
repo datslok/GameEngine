@@ -156,11 +156,17 @@ private:
     // This frame shares light between probes, still or fast (set by prepare()).
     bool sharing = false;
 
-    // The rays: room for rayCapacity a probe (the most the settings ask for), grown when they ask for more.
+    // The rays: room for rayCapacity a probe (the most the settings ask for) for tracedCapacity probes (the most traced
+    // in a frame, at most maxTracedProbes), grown when either needs more; which probes a fast light reached, per probe.
     VulkanBuffer rays;
     VulkanBuffer fastRays;
     VulkanBuffer nearFastLight;
     int rayCapacity = 0;
+    int tracedCapacity = 0;
+
+    // This frame's traced probes (chooseTracedProbes) and each frame in flight's copy for the GPU: their count, then them.
+    std::vector<std::int32_t> tracedProbes;
+    std::vector<UploadArray> tracedUploads;
 
     // This frame's seeds (ddgi_seed.comp writes, the update reads; room for maxProbeSeeds), the probes they are for,
     // and each frame in flight's list of those probes.
@@ -219,8 +225,8 @@ private:
     // New atlases for cascades of a new size, cleared to zero (no light, no distance) in this frame's commands.
     void createAtlases(VkCommandBuffer commands, std::span<const ProbeCascade> next);
 
-    // Room for this many rays a probe in the ray buffers (waiting for the GPU when they grow).
-    void reserveRays(int raysPerProbe);
+    // Room for this many rays a probe, for this many traced probes, in the ray buffers (waiting for the GPU when they grow).
+    void reserveRays(int raysPerProbe, int traced);
 
     // Keep the records frame in flight frameIndex asked for, now that it has finished.
     void collectRelocation(std::uint32_t frameIndex);
@@ -229,9 +235,9 @@ private:
     void relocate(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int iterations, std::uint32_t frameIndex);
 
     void seed(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, std::uint32_t frameIndex);
-    void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int rayStride);
+    void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int rayStride, const UploadArray& frameTraced);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
-               const UploadArray& frameRestarts, const UploadArray& frameStates, const UploadArray& frameCascades);
+               const UploadArray& frameTraced, const UploadArray& frameRestarts, const UploadArray& frameStates, const UploadArray& frameCascades);
     void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const GlobalIlluminationSettings& settings, float longKeep,
                      const UploadArray& frameRestarts, const UploadArray& frameStates, const UploadArray& frameCascades);
 

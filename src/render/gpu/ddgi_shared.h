@@ -9,10 +9,16 @@
 #define DDGI_IRRADIANCE_TEXELS 8
 #define DDGI_DISTANCE_TEXELS 16
 
-// Rays each probe may trace per frame (the papers measured 32 to 256). The update holds a probe's rays in shared memory,
-// so the largest count sizes that.
+// Rays each probe may trace per frame (the papers measured 32 to 256). The update streams a probe's rays through shared
+// memory this many at a time, so any count up to the most fits it (1024 rays at once would be about 48 KB, NVIDIA's limit).
 #define DDGI_MIN_RAYS 16
-#define DDGI_MAX_RAYS 256
+#define DDGI_MAX_RAYS 1024
+#define DDGI_UPDATE_RAY_CHUNK 256
+
+// The most probes traced in one frame, which sizes the ray buffers (each traced probe's rays at its place in the frame's
+// list). A typical frame traces 3,000 to 6,000 of the 45,000 probes (the rest asleep or off); more want tracing before
+// the first relocation records and with probe states off, and then take turns.
+#define DDGI_MAX_TRACED_PROBES 8192
 
 // Frames that take turns through one spiral of rays: frame f of a cycle traces every DDGI_RAY_CYCLE-th point of a
 // spiral DDGI_RAY_CYCLE times as long, from point f, so each cycle covers the sphere evenly between them. Measured in the

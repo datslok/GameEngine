@@ -18,8 +18,9 @@
 * Light from fast lights (flashlights) is kept apart for the fast atlas: their direct light at the hit, and their light
 * as last frame's fast atlas holds it, so their later bounces keep its short memory too. Probes within reach of a fast
 * light trace the fast count of rays (render/gpu/ddgi.h, probeNearLight); the dispatch has room for the most any probe
-* traces (the stride), and the rest of a probe's room is skipped. Only awake and vigilant probes trace, from where
-* relocation moved them (scene_probe_states.glsl).
+* traces (the stride), and the rest of a probe's room is skipped. Only the frame's list of traced probes trace (awake and
+* vigilant ones, render/gpu/probe_relocation.h, chooseTracedProbes), from where relocation moved them
+* (scene_probe_states.glsl), each probe's rays at its place in the list.
 */
 #include "ray_scene.glsl"
 #include "materials.glsl"
@@ -50,6 +51,11 @@ layout(std430, set = 3, binding = 2) writeonly buffer ProbeNearFastLights {
 
 layout(std430, set = 3, binding = 3) readonly buffer ProbeTurns {
     ProbeTurn probeTurns[];
+};
+
+// The probes traced this frame: how many, then each one's number.
+layout(std430, set = 3, binding = 4) readonly buffer TracedProbes {
+    int tracedProbes[];
 };
 
 // The point lights, then the spotlights, whose light may reach the probes' rays' hits: x numbers into the light buffers,
@@ -116,11 +122,18 @@ vec3 hitLightIrradiance(int listed, vec3 relativeHit, vec3 normal) {
 void main() {
     int stride = volume.counts.w;
     int index = int(gl_GlobalInvocationID.x);
-    int probe = index / stride;
+    int slot = index / stride;
     int ray = index % stride;
 
-    // Off and sleeping probes are not traced (render/gpu/probe_relocation.h); the rest from where relocation moved them.
-    if (probe >= volumeProbeCount() || !probeTraced(probeStates[probe].state)) {
+    // Past the list's end: nothing to trace. The list holds only awake and vigilant probes (off and sleeping ones are
+    // not traced), traced from where relocation moved them.
+    if (slot >= tracedProbes[0]) {
+        return;
+    }
+
+    int probe = tracedProbes[1 + slot];
+
+    if (probe >= volumeProbeCount()) {
         return;
     }
 
