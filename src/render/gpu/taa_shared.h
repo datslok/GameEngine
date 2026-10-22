@@ -13,6 +13,10 @@
 #define TAA_NO_MOTION 1000.0
 #define TAA_NO_MOTION_TEST 500.0
 
+// Upscaling's reconstruction: a sample d output pixels from a pixel's centre weighs exp(-falloff d^2), Karis's
+// Gaussian fit of the Blackman-Harris window (Karis 2014, "High quality temporal supersampling").
+#define TAA_SAMPLE_FALLOFF 2.29
+
 // The resolve pass's workgroups: a square of this many pixels a side, one pixel an invocation.
 #define TAA_GROUP_SIDE 8
 

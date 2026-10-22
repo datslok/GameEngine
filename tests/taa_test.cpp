@@ -133,6 +133,51 @@ namespace {
         assert(objectMotion(Vec4{1.0f, 0.5f, 0.2f, 2.0f}, Vec4{0.2f, 0.5f, 0.1f, -1.0f}).x > static_cast<float>(TAA_NO_MOTION_TEST));
     }
 
+    /*
+    * Upscaling: a render pixel's sample, jittered, lies on the output screen where the unjittered picture shows what it
+    * saw (the jitter undone, then scaled to output pixels), checked against a jittered projection drawn at the render
+    * size; and an output pixel's place on the render screen.
+    */
+    void testUpscaledSamples() {
+        const Vec2 centre = sampleOutputPixel(Vec2{3.5f, 4.5f}, Vec2{}, Vec2{1.0f, 1.0f});
+        assert(centre.x == 3.5f && centre.y == 4.5f);
+        const Vec2 doubled = sampleOutputPixel(Vec2{3.5f, 4.5f}, Vec2{0.25f, -0.5f}, Vec2{2.0f, 2.0f});
+        assert(near(doubled.x, 6.5f, 1e-6f) && near(doubled.y, 10.0f, 1e-6f));
+
+        const Vec2 render{400.0f, 300.0f};
+        const Vec2 output{800.0f, 600.0f};
+        const Vec2 jitter{0.3f, -0.2f};
+        const Camera camera = makeCamera(Vec3{0.0f, 2.0f, 5.0f}, Vec3{0.0f, 0.0f, 0.0f});
+        const Mat4 plain = cameraRelativeViewProjection(camera);
+        const Mat4 jittered = jitteredClip(plain, jitter, render.x, render.y);
+
+        for (const Vec3& point : {Vec3{0.0f, 0.0f, 0.0f}, Vec3{3.0f, 1.0f, -40.0f}, Vec3{-1.0f, 2.5f, 4.0f}}) {
+            const Vec3 drawn = pixelAndDepth(jittered, point, camera.getPosition(), render);
+            const Vec3 shown = pixelAndDepth(plain, point, camera.getPosition(), output);
+            const Vec2 found = sampleOutputPixel(Vec2{drawn.x, drawn.y}, jitter, Vec2{output.x / render.x, output.y / render.y});
+            assert(near(found.x, shown.x, 2e-3f) && near(found.y, shown.y, 2e-3f));
+        }
+
+        const Vec2 onRender = renderPixelOf(Vec2{6.5f, 10.0f}, Vec2{0.5f, 0.5f});
+        assert(onRender.x == 3.25f && onRender.y == 5.0f);
+    }
+
+    /*
+    * The reconstruction's weight for a sample at a squared distance (in output pixels) from the pixel: 1 dead on, falling
+    * with distance (Blackman-Harris's Gaussian fit), never quite zero; and the new frame's share of the blend, the
+    * setting's for a sample dead on, less the further the nearest sample landed.
+    */
+    void testSampleWeights() {
+        assert(taaSampleWeight(0.0f) == 1.0f);
+        assert(near(taaSampleWeight(1.0f), std::exp(-static_cast<float>(TAA_SAMPLE_FALLOFF)), 1e-6f));
+        assert(taaSampleWeight(0.25f) > taaSampleWeight(0.5f) && taaSampleWeight(0.5f) > taaSampleWeight(2.0f) && taaSampleWeight(9.0f) > 0.0f);
+
+        assert(taaCurrentShare(0.1f, 1.0f) == 0.1f);
+        assert(near(taaCurrentShare(0.1f, taaSampleWeight(0.5f)), 0.1f * taaSampleWeight(0.5f), 1e-7f));
+        assert(taaCurrentShare(0.1f, taaSampleWeight(2.0f)) < taaCurrentShare(0.1f, taaSampleWeight(0.5f)));
+        assert(taaCurrentShare(1.0f, 1.0f) == 1.0f);
+    }
+
     // YCoCg: luminance and two colour differences. A grey has none; the conversion goes back exactly.
     void testYCoCg() {
         const Vec3 grey = toYCoCg(Vec3{0.5f, 0.5f, 0.5f});
@@ -221,17 +266,21 @@ namespace {
         assert(refused(bad));
     }
 
-    // What the passes are told: the reprojection and screen, the settings, whether the history may be used.
+    /*
+    * What the passes are told: the reprojection, the output screen, the render screen and this frame's jitter, the
+    * settings, whether the history may be used.
+    */
     void testPacking() {
         TaaSettings settings;
         settings.showMotion = true;
         const Mat4 reprojection = Mat4::translation(1.0f, 2.0f, 3.0f);
-        const GpuTaaPass pass = packTaaPass(reprojection, 640, 360, settings, true);
+        const GpuTaaPass pass = packTaaPass(reprojection, 640, 360, RenderSize{320, 180}, Vec2{0.25f, -0.125f}, settings, true);
         assert(pass.reprojection[12] == 1.0f && pass.reprojection[13] == 2.0f && pass.reprojection[0] == 1.0f); // column-major
         assert(pass.size[0] == 640.0f && pass.size[1] == 360.0f && near(pass.size[2], 1.0f / 640.0f, 1e-9f));
+        assert(pass.render[0] == 320.0f && pass.render[1] == 180.0f && pass.render[2] == 0.25f && pass.render[3] == -0.125f);
         assert(pass.options[0] == settings.currentWeight && pass.options[1] == settings.clipSigma);
         assert(pass.options[2] == 1.0f && pass.options[3] == 1.0f);
-        assert(packTaaPass(reprojection, 640, 360, TaaSettings{}, false).options[2] == 0.0f);
+        assert(packTaaPass(reprojection, 640, 360, RenderSize{640, 360}, Vec2{}, TaaSettings{}, false).options[2] == 0.0f);
 
         const GpuMotionView view = packMotionView(Mat4::translation(4.0f, 0.0f, 0.0f), Mat4::translation(0.0f, 5.0f, 0.0f));
         assert(view.current[12] == 4.0f && view.previous[13] == 5.0f);
@@ -245,6 +294,8 @@ void testTaa() {
     testJitteredProjection();
     testReprojection();
     testMotionToPixels();
+    testUpscaledSamples();
+    testSampleWeights();
     testYCoCg();
     testClipToBox();
     testBlend();

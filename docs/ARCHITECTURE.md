@@ -807,12 +807,13 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `ShadowTileData` as before.
 - A draw list of `uint32` instance numbers.
 
-`GpuFrameData` (304 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
+`GpuFrameData` (320 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
 
 - the camera-relative view-projection, the camera position, ambient, counts, the atlas texel size;
 - the cluster grid (`clusterTiles`, `clusterScreen`, `clusterSlicing`, `viewRight`, `viewUp`, `viewForward`, laid out as `clusters.glsl`'s `ClusterGrid`);
 - `shadingOptions` (x clustered shading, y the heatmap) and `cascadeOptions` (x the cascades' blend band, y 1 to dither between them);
-- then the light probes' numbers (`probeOrigin`, `probeSpacing`, `probeAtlas`, `probeLights`, zero without probes; `packProbeSampling`, see Light probes).
+- then the light probes' numbers (`probeOrigin`, `probeSpacing`, `probeAtlas`, `probeLights`, zero without probes; `packProbeSampling`, see Light probes);
+- and `textureOptions`: x the surface textures' mip bias (`textureLodBias`, see Temporal anti-aliasing, Upscaling), passed to `triangle.frag`'s three `texture()` reads.
 - It is made by `makeFrameData(lights, relativeViewProjection, cameraOrigin, clusters, clusteredShading, clusterHeatmap, shadows)`; the atlas texel size comes from `shadowAtlasSizeFor(shadows)`.
 
 `GpuShadowView` (64 bytes): a tile's world view-projection, the scene layout's one push constant (vertex stage).
@@ -1658,7 +1659,7 @@ Sampling (`render/gpu/ddgi_sampling`, numbers in `ddgi_shared.h`, mirrored by `a
 - `probeShading` (the bias, the bounce energy);
 - `probeAtlas` (the atlases' columns and rows for every cascade's probes together, w how many cascades);
 - `probeLights` (listed points, spots, lights kept per hit, capped at 8).
-- `GpuFrameData` is 304 bytes.
+- `GpuFrameData` is 320 bytes.
 
 ### Shaders
 
@@ -1936,13 +1937,13 @@ Tested:
 
 ## Temporal anti-aliasing
 
-Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirrored by `assets/shaders/taa.glsl`, tested in `taa_test` and `taa_gpu_test`; `render/vulkan/vulkan_taa`): each pixel averages what it saw over about the last ten frames, while the projection moves by a different fraction of a pixel every frame, so edges, thin things and sharp highlights get many samples for the cost of one.
+Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirrored by `assets/shaders/taa.glsl`, tested in `taa_test` and `taa_gpu_test`; `render/vulkan/vulkan_taa`): each pixel averages what it saw over about the last ten frames, while the projection moves by a different fraction of a pixel every frame, so edges, thin things and sharp highlights get many samples for the cost of one. It also upscales (`render-scale`): the scene may be drawn smaller than the output, and the history, at the output's size, is built up from the jittered samples (TAAU; see Upscaling below).
 
 ### Jitter
 
 - `taaJitter(frame)`: the Halton (2, 3) point of the frame's place in a cycle of `TAA_JITTER_FRAMES` (16), counted from 1, minus a half: within half a pixel of the centre. `halton(index, base)` is the radical inverse.
 - `jitteredClip(viewProjection, offset, width, height)` adds offset × w to clip x and y (2 / width of NDC a pixel, y negated since pixels count down), so every point on screen moves the same and depth is unchanged.
-- `drawScene` jitters `relativeViewProjection` (the main pass, the depth prepass, the probes' debug balls) by `taaJitter(taaFrame)` when TAA and `TaaSettings::jitter` are on. `viewProjection` (culling, debug lines), the shadow views, the sky's rays and the stars stay unjittered. `motionViewProjection` keeps this frame's camera without the jitter.
+- `drawScene` jitters `relativeViewProjection` (the main pass, the depth prepass, the probes' debug balls) by `taaJitter(taaFrame)` render pixels (on the render size, `sceneSize`) when TAA and `TaaSettings::jitter` are on, and passes the same jitter to the resolve. `viewProjection` (culling, debug lines), the shadow views, the sky's rays and the stars stay unjittered. `motionViewProjection` keeps this frame's camera without the jitter.
 
 ### Motion
 
@@ -1961,20 +1962,31 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 
 ### The resolve
 
-`taa.comp` (GpuPass `Taa`, TAA, after the depth measurement and before eye adaptation), 8 × 8 groups (`TAA_GROUP_SIDE`), push constants `GpuTaaPass` (96 bytes: the reprojection, the screen size and its inverses, the current weight, the clip width, whether the history is valid, the motion view):
+`taa.comp` (GpuPass `Taa`, TAA, after the depth measurement and before eye adaptation), one invocation per output pixel in 8 × 8 groups (`TAA_GROUP_SIDE`), push constants `GpuTaaPass` (112 bytes: the reprojection, the output size and its inverses, the render size and this frame's jitter, the current weight, the clip width, whether the history is valid, the motion view):
 
-1. The 3x3 neighbourhood of this frame's colour in YCoCg (`toYCoCg`, `fromYCoCg`: Y = R/4 + G/2 + B/4): its mean and standard deviation.
-2. Last frame's pixel: from the velocity image where it holds a motion (below `TAA_NO_MOTION_TEST`, 500), else by reprojection from depth. Off screen, behind the camera or without a valid history, the pixel starts afresh from this frame.
-3. The history read with Catmull-Rom (`catmullRomWeights`: four weights per axis; nine bilinear reads, the middle two texels of each axis read as one), clamped to positive.
-4. Clipped into the box mean ± `clipSigma` deviations along the line to its centre (`clipToBox`, Playdead's clip; a flat box takes it to the centre).
-5. Blended: `taaBlend(current, history, currentWeight)`, each side times its Karis weight (`karisWeight`, bloom's 1 / (1 + luminance)), so a lone bright sample does not flash.
-6. `showMotion` writes the motion in pixels × `TAA_MOTION_VIEW_SCALE` (0.1) as red and green instead (blue: no history).
+1. **This frame's colour, rebuilt** from the 3x3 render pixels round the one whose sample is nearest (render pixel t shows the unjittered picture at t + 0.5 - jitter, so the nearest to the pixel's place r on the render screen, `renderPixelOf`, is floor(r + jitter)). Each weighs `taaSampleWeight(d²)` = exp(-`TAA_SAMPLE_FALLOFF` d²) (2.29: Karis's Gaussian fit of Blackman-Harris), d its sample's distance in output pixels (`sampleOutputPixel`); the colour is their weighted mean.
+2. The same 3x3 pixels in YCoCg (`toYCoCg`, `fromYCoCg`: Y = R/4 + G/2 + B/4): their mean and standard deviation.
+3. Last frame's pixel, at the nearest of the 3x3 to the camera (depth dilation, the largest reversed-Z depth, so a moving object's edge moves with it): from the velocity image there where it holds a motion (below `TAA_NO_MOTION_TEST`, 500), else by reprojecting the output pixel with that depth. Off screen, behind the camera or without a valid history, the pixel starts afresh from this frame.
+4. The history read with Catmull-Rom (`catmullRomWeights`: four weights per axis; nine bilinear reads, the middle two texels of each axis read as one), clamped to positive.
+5. Clipped into the box mean ± `clipSigma` deviations along the line to its centre (`clipToBox`, Playdead's clip; a flat box takes it to the centre).
+6. Blended: `taaBlend(current, history, share)`, each side times its Karis weight (`karisWeight`, bloom's 1 / (1 + luminance)), so a lone bright sample does not flash. The share is `taaCurrentShare(currentWeight, nearest sample's weight)`: the setting's times the nearest sample's weight, so a pixel no sample landed close to this frame keeps its history. At the output's size the nearest sample lies within half a pixel's diagonal (weight 0.32 at worst, about 0.8 on average), so the average runs a few frames longer than the setting alone.
+7. `showMotion` writes the motion in pixels × `TAA_MOTION_VIEW_SCALE` (0.1) as red and green instead (blue: no history).
 
-`VulkanTaa` owns the velocity image and two `R16G16B16A16_SFLOAT` histories that take turns. The resolve writes this frame's history as a storage image, then copies it over the scene image (which gained `TRANSFER_DST`), so eye adaptation, bloom, tone mapping and captures read the result where they always did. The main pass stores its depth whenever TAA is on.
+`VulkanTaa` owns the velocity image (at the render size) and two `R16G16B16A16_SFLOAT` histories at the output size that take turns. The resolve writes this frame's history as a storage image and leaves it readable (`getResult()`): it is the finished picture, `VulkanRenderer::finishedScene`, which eye adaptation, bloom, tone mapping and captures read (the scene image itself while TAA is off). The main pass stores its depth whenever TAA is on.
 
-**Barriers:** the velocity image colour target to compute read; the depth to compute read; last frame's history copy source to compute read; this frame's (discarded) to storage, then to copy source; the scene to copy destination (discarded) and back to `SurfaceRead`.
+**Barriers:** the velocity image colour target to compute read; the depth to compute read; last frame's history from `SurfaceRead` (or a capture's copy source) to compute read; this frame's (discarded) to storage, then to `SurfaceRead`.
 
-**History resets:** the first frame, a resize (`ensureSize`), TAA switched off (`forgetHistory`, and last frame's camera forgotten), and the start of every capture, which also restarts the jitter cycle.
+**History resets:** the first frame, a change of the output's size (`ensureSize`; a new render size remakes only the velocity image and keeps the history), TAA switched off (`forgetHistory`, and last frame's camera forgotten), and the start of every capture, which also restarts the jitter cycle.
+
+### Upscaling
+
+`UpscalingSettings` (`render/gpu/upscaling`, `RenderSettings::upscaling`, the Upscaling group; tested in `upscaling_test`):
+
+- `renderScale` (1 by default, `minRenderScale` 0.33 to 1): the render size's share of the output's, each way. It applies only while TAA is on (`appliedRenderScale`), since the resolve is what upscales; with TAA off the frame is drawn at the output's size.
+- `renderSize(width, height, scale)`: each side rounded, at least one pixel and at most the output's. `ensureFrameTextures(width, height, settings)` keeps the scene image, its depth, the velocity image and the clusters' lists at it (`sceneSize`) and remakes them when it changes, like a resize.
+- At the render size: the depth prepass, main pass, sky, stars, probe balls, ray debug view, velocity pass, clusters and the depth measurement. At the output's: the histories, eye adaptation, bloom, tone mapping, the debug lines and UI. The shadow atlas, the probes and the sky's tables do not depend on the screen.
+- `textureLodBias(render, outputWidth)`, log2 of the render width over the output's (-1 at half), goes to `GpuFrameData::textureOptions.x`: the mips are chosen for the output's pixels, and the history averages the sharper level's detail.
+- The jitter cycle stays 16 frames at every scale. Fewer samples reach each output pixel per cycle as the scale falls (NVIDIA suggests 8 / scale² phases for DLSS); a longer cycle is not tried yet.
 
 ### Settings
 
@@ -1987,6 +1999,7 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 | `clipSigma` | 1 | the clip box's half-width in the neighbours' standard deviations |
 | `jitter` | on | off holds the projection still |
 | `showMotion` | off | the motion debug view |
+| `upscaling.renderScale` | 1 | the render size's share of the output's (Upscaling) |
 
 ### Golden images
 

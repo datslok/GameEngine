@@ -6,6 +6,7 @@
 #include "math/vec3.h"
 #include "math/vec4.h"
 #include "render/gpu/taa_shared.h"
+#include "render/gpu/upscaling.h"
 
 #include <cstdint>
 
@@ -20,6 +21,10 @@
 * draws for anything that moved (its motion vector). History that no longer fits (a surface that was hidden, light that
 * changed) is clipped into the range of colours the pixel's neighbours show this frame, and the blend weighs each sample
 * down by its brightness, so one very bright sample cannot flash.
+*
+* It also upscales (render/gpu/upscaling.h): the current frame may be drawn smaller than the history, so each output
+* pixel rebuilds it from the nearest render pixels, each weighed by how close its jittered sample landed, and takes less
+* of the new frame where none landed close.
 *
 * This is the API-free part, mirrored by assets/shaders/taa.glsl and checked against it by the GPU tests.
 */
@@ -91,6 +96,22 @@ Vec2 previousPixelFromMotion(Vec2 pixel, Vec2 motion, Vec2 size);
 // (TAA_NO_MOTION, so the camera's is used) when either was at or behind its camera.
 Vec2 objectMotion(const Vec4& currentClip, const Vec4& previousClip);
 
+/*
+* Where a render pixel's sample lies on the output screen: the jitter moved the picture by jitter render pixels, so the
+* point seen at renderPixel is the unjittered picture's point at renderPixel - jitter, then scaled to output pixels.
+*/
+Vec2 sampleOutputPixel(Vec2 renderPixel, Vec2 jitter, Vec2 outputPerRender);
+
+// An output pixel's place on the render screen (both counted from the top-left corner).
+Vec2 renderPixelOf(Vec2 outputPixel, Vec2 renderPerOutput);
+
+// The reconstruction's weight for a sample at this squared distance in output pixels from the pixel's centre.
+float taaSampleWeight(float distanceSquared);
+
+// The new frame's share of the blend: the setting's times the nearest sample's weight, so a pixel no sample landed
+// close to this frame leans on its history (which earlier frames' samples filled in).
+float taaCurrentShare(float currentWeight, float nearestSampleWeight);
+
 // Luminance and two colour differences (Y = R/4 + G/2 + B/4), and back. The neighbours' colours spread less in it than
 // in RGB, so the box the history is clipped into fits them more tightly.
 Vec3 toYCoCg(const Vec3& rgb);
@@ -108,17 +129,19 @@ Vec3 taaBlend(const Vec3& current, const Vec3& history, float currentWeight);
 // that passes through the texels, so reading the history with it does not blur it a little more every frame.
 Vec4 catmullRomWeights(float t);
 
-// The resolve pass's push constants (taa.comp): the reprojection (column-major), the screen (width, height and their
-// inverses), and the settings with whether the history may be used.
+// The resolve pass's push constants (taa.comp): the reprojection (column-major), the output screen (width, height and
+// their inverses), the render screen with this frame's jitter, and the settings with whether the history may be used.
 struct GpuTaaPass {
     float reprojection[16];
     float size[4];
+    float render[4];  // xy: the render size in pixels, zw: this frame's jitter in render pixels
     float options[4]; // x: the current weight, y: the clip width, z: 1 when the history is valid, w: 1 to show the motion
 };
 
-static_assert(sizeof(GpuTaaPass) == 96, "GpuTaaPass must match taa.comp's push constants");
+static_assert(sizeof(GpuTaaPass) == 112, "GpuTaaPass must match taa.comp's push constants");
 
-GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint32_t height, const TaaSettings& settings, bool historyValid);
+GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint32_t height, RenderSize render, Vec2 jitter,
+                       const TaaSettings& settings, bool historyValid);
 
 // The velocity pass's push constants (motion.vert): this frame's and last frame's camera-relative view-projections,
 // without the jitter, both taking points measured from this frame's camera.

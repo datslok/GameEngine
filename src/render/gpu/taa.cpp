@@ -121,6 +121,31 @@ Vec2 objectMotion(const Vec4& currentClip, const Vec4& previousClip) {
     return Vec2{currentClip.x / currentClip.w - previousClip.x / previousClip.w, currentClip.y / currentClip.w - previousClip.y / previousClip.w};
 }
 
+Vec2 sampleOutputPixel(Vec2 renderPixel, Vec2 jitter, Vec2 outputPerRender) {
+    return Vec2{(renderPixel.x - jitter.x) * outputPerRender.x, (renderPixel.y - jitter.y) * outputPerRender.y};
+}
+
+Vec2 renderPixelOf(Vec2 outputPixel, Vec2 renderPerOutput) {
+    return Vec2{outputPixel.x * renderPerOutput.x, outputPixel.y * renderPerOutput.y};
+}
+
+/*
+* Blackman-Harris is the window that keeps a picture sharp with the least ringing; this Gaussian is within a few
+* hundredths of it over the 3x3 render pixels the resolve reads, and simpler. The squared distance saves a square root.
+*/
+float taaSampleWeight(float distanceSquared) {
+    return std::exp(-static_cast<float>(TAA_SAMPLE_FALLOFF) * distanceSquared);
+}
+
+/*
+* At the output's size a sample always lands within half a pixel's diagonal of the centre (a weight of 0.32 at worst,
+* 0.8 on average), so the history averages a few frames longer than the setting alone says. Upscaled, a pixel between
+* samples takes almost nothing new and keeps what earlier frames' samples, landing closer, gave it.
+*/
+float taaCurrentShare(float currentWeight, float nearestSampleWeight) {
+    return currentWeight * nearestSampleWeight;
+}
+
 Vec3 toYCoCg(const Vec3& rgb) {
     return Vec3{0.25f * rgb.x + 0.5f * rgb.y + 0.25f * rgb.z, 0.5f * rgb.x - 0.5f * rgb.z, -0.25f * rgb.x + 0.5f * rgb.y - 0.25f * rgb.z};
 }
@@ -156,7 +181,8 @@ Vec4 catmullRomWeights(float t) {
                 t * t * (-0.5f + 0.5f * t)};
 }
 
-GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint32_t height, const TaaSettings& settings, bool historyValid) {
+GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint32_t height, RenderSize render, Vec2 jitter,
+                       const TaaSettings& settings, bool historyValid) {
     validateTaa(settings);
 
     GpuTaaPass pass{};
@@ -165,6 +191,10 @@ GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint3
     pass.size[1] = static_cast<float>(height);
     pass.size[2] = 1.0f / static_cast<float>(width);
     pass.size[3] = 1.0f / static_cast<float>(height);
+    pass.render[0] = static_cast<float>(render.width);
+    pass.render[1] = static_cast<float>(render.height);
+    pass.render[2] = jitter.x;
+    pass.render[3] = jitter.y;
     pass.options[0] = settings.currentWeight;
     pass.options[1] = settings.clipSigma;
     pass.options[2] = historyValid ? 1.0f : 0.0f;

@@ -191,11 +191,17 @@ private:
     ClusterGrid clusterGrid;
     VulkanBuffer clusterMasks;
 
-    // The main pass draws into these, the size of the frame: the lit scene in 16-bit floats, and its depth.
+    // The main pass draws into these, at the render size (render/gpu/upscaling.h): the lit scene in 16-bit floats, and
+    // its depth. The frame's own size is the output's, the swapchain's or a capture's.
     VulkanImage sceneColour;
     VulkanImage depth;
     std::uint32_t frameWidth = 0;
     std::uint32_t frameHeight = 0;
+    RenderSize sceneSize;
+
+    // The picture everything after the scene reads (eye adaptation, bloom, tone mapping, captures), at the frame's
+    // size: temporal anti-aliasing's result, or the scene image itself while it is off. Set by drawScene.
+    VulkanImage* finishedScene = nullptr;
 
     // Shadows: every shadow view in one depth atlas, kept between frames (tiles are redrawn only when they change).
     // Counts frames for the memory allocator, which refreshes the driver's memory figures when it changes.
@@ -292,7 +298,7 @@ private:
     void createShadowAtlas(const ShadowAtlasSize& size);
     void ensureShadowAtlas(const ShadowAtlasSize& size);
     void createFixedTextures();
-    void ensureFrameTextures(std::uint32_t width, std::uint32_t height);
+    void ensureFrameTextures(std::uint32_t width, std::uint32_t height, const RenderSettings& settings);
 
     void updateDisplayOutput(const DisplaySettings& settings);
     bool prepareSwapchain();
