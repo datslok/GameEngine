@@ -469,18 +469,22 @@ void VulkanRenderer::createFixedTextures() {
 }
 
 /*
-* The scene image and its depth follow the frame's size, and so do the clusters' light lists. The GPU may still read
-* the old ones, so it is waited for before they go (only on a resize, or around a golden capture).
+* The scene image and its depth follow the render size (the frame's size times the render scale while temporal
+* anti-aliasing upscales), and so do the clusters' light lists; the history follows the frame's. The GPU may still read
+* the old ones, so it is waited for before they go (only on a resize, a new render scale, or around a golden capture).
 */
-void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t height) {
-    if (depth && frameWidth == width && frameHeight == height) {
+void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t height, const RenderSettings& settings) {
+    validateUpscaling(settings.upscaling);
+    const RenderSize scene = renderSize(width, height, appliedRenderScale(settings.upscaling, settings.taa.enabled));
+
+    if (depth && frameWidth == width && frameHeight == height && sceneSize == scene) {
         return;
     }
 
     ImageDescription depthDescription;
     depthDescription.format = depthFormat;
-    depthDescription.width = width;
-    depthDescription.height = height;
+    depthDescription.width = scene.width;
+    depthDescription.height = scene.height;
     depthDescription.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT; // sampled: measured for the cascades
     depthDescription.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
     depthDescription.name = "Scene depth";
@@ -488,24 +492,24 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
 
     ImageDescription sceneDescription;
     sceneDescription.format = sceneColourFormat;
-    sceneDescription.width = width;
-    sceneDescription.height = height;
-    // Transfer destination: temporal anti-aliasing copies its result back over it.
-    sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                             VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    sceneDescription.width = scene.width;
+    sceneDescription.height = scene.height;
+    // Transfer source: a capture without temporal anti-aliasing copies it out.
+    sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     sceneDescription.name = "Scene colour";
     VulkanImage sceneReplacement{device, sceneDescription};
 
-    VulkanBuffer masksReplacement{device.getAllocator(), clusterMaskBytes(static_cast<int>(width), static_cast<int>(height)),
+    VulkanBuffer masksReplacement{device.getAllocator(), clusterMaskBytes(static_cast<int>(scene.width), static_cast<int>(scene.height)),
                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 
     device.waitIdle();
     depth = std::move(depthReplacement);
     sceneColour = std::move(sceneReplacement);
     clusterMasks = std::move(masksReplacement);
-    taa->ensureSize(width, height);
+    taa->ensureSize(width, height, scene);
     frameWidth = width;
     frameHeight = height;
+    sceneSize = scene;
 }
 
 /*
@@ -792,7 +796,7 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
         }
 
         const VkExtent2D extent = swapchain.getExtent();
-        ensureFrameTextures(extent.width, extent.height);
+        ensureFrameTextures(extent.width, extent.height, settings);
 
         const BloomComposite bloomMix = drawScene(frame, description, settings, ui);
         const std::uint32_t image = *acquiredImage;
@@ -864,15 +868,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // camera-relative points (or this frame's, when there is none).
     const TaaSettings& antiAliasing = settings.taa;
     motionViewProjection = relativeViewProjection;
-
-    if (antiAliasing.enabled && antiAliasing.jitter) {
-        relativeViewProjection = jitteredClip(relativeViewProjection, taaJitter(taaFrame), static_cast<float>(frameWidth), static_cast<float>(frameHeight));
-    }
+    const Vec2 jitter = antiAliasing.enabled && antiAliasing.jitter ? taaJitter(taaFrame) : Vec2{};
+    relativeViewProjection = jitteredClip(relativeViewProjection, jitter, static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
     const Mat4 previousViewProjection = previousCamera.known
                                             ? previousRelativeViewProjection(previousCamera.viewProjection, previousCamera.origin, cameraOrigin)
                                             : motionViewProjection;
-    clusterGrid = makeClusterGrid(camera, static_cast<int>(frameWidth), static_cast<int>(frameHeight));
+    clusterGrid = makeClusterGrid(camera, static_cast<int>(sceneSize.width), static_cast<int>(sceneSize.height));
     const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
     // Sunlight and moonlight (every directional light) reach the camera through the air, which dims and reddens them,
@@ -1017,7 +1019,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
     const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
-    const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, frameWidth, frameHeight);
+    const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, sceneSize.width, sceneSize.height);
     const std::optional<StarrySky>& stars = description.lighting.stars;
     drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || antiAliasing.enabled, traceProbes,
                  description.lighting.background,
@@ -1054,20 +1056,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::Taa);
         const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
         taa->resolve(frame.commands, frame.descriptors, sceneColour, depth,
-                     packTaaPass(reprojection, frameWidth, frameHeight, antiAliasing, previousCamera.known));
+                     packTaaPass(reprojection, frameWidth, frameHeight, sceneSize, jitter, antiAliasing, previousCamera.known));
         endGpuPass(frame, GpuPass::Taa);
         previousCamera = PreviousCamera{motionViewProjection, cameraOrigin, true};
         ++taaFrame;
+        finishedScene = &taa->getResult();
     } else {
         taa->forgetHistory();
         previousCamera.known = false;
+        finishedScene = &sceneColour;
     }
 
     // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
     // mapping. Switched off, it starts afresh when switched on again.
     if (settings.toneMapping.eyeAdaptation) {
         beginGpuPass(frame, GpuPass::EyeAdaptation);
-        eyeAdaptation->adapt(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, settings.toneMapping, description.frameSeconds,
+        eyeAdaptation->adapt(frame.commands, frame.descriptors, frame.frameIndex, *finishedScene, settings.toneMapping, description.frameSeconds,
                              eyeAdaptationFresh || capturing);
         endGpuPass(frame, GpuPass::EyeAdaptation);
         eyeAdaptationFresh = false;
@@ -1079,7 +1083,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
     beginGpuPass(frame, GpuPass::Bloom);
-    const BloomComposite bloomMix = bloom->draw(frame, sceneColour, frameWidth, frameHeight, settings.bloom);
+    const BloomComposite bloomMix = bloom->draw(frame, *finishedScene, frameWidth, frameHeight, settings.bloom);
     endGpuPass(frame, GpuPass::Bloom);
     return bloomMix;
 }
@@ -1148,6 +1152,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                                    illumination.bounceEnergy, illumination.lightsPerHit, hitLights.points, hitLights.spots});
     }
 
+    frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1347,7 +1352,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
     depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
 
     const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {frameWidth, frameHeight}, nullptr, &depthTarget);
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, nullptr, &depthTarget);
     renderingOpen = true;
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline->get());
@@ -1377,7 +1382,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     const VkAttachmentLoadOp depthLoad = afterPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
     const VkAttachmentStoreOp depthStore = keepDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     const DepthAttachment depthTarget{depth.getView(), depthLoad, depthStore, gpuFarDepth};
-    beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTarget);
     renderingOpen = true;
 
     const VulkanPipeline& pipeline = sampleProbes ? (afterPrepass ? *mainAfterPrepassProbesPipeline : *mainProbesPipeline)
@@ -1411,7 +1416,7 @@ void VulkanRenderer::drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSe
 
     const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, {}};
     const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTarget);
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTarget);
     renderingOpen = true;
 
     ddgi->drawProbes(commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, cascade);
@@ -1432,7 +1437,7 @@ void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet scene
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
 
     const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_DONT_CARE, {}};
-    beginRendering(commands, {frameWidth, frameHeight}, &colour, nullptr);
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, nullptr);
     renderingOpen = true;
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, rayDebugPipeline->get());
@@ -1440,7 +1445,7 @@ void VulkanRenderer::drawRayDebugView(FrameContext& frame, VkDescriptorSet scene
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, rayDebugLayout.get(), 0, static_cast<std::uint32_t>(sets.size()),
                             sets.data(), 0, nullptr);
 
-    const GpuRayDebugView rays = packRayDebugView(camera, view, frameWidth, frameHeight);
+    const GpuRayDebugView rays = packRayDebugView(camera, view, sceneSize.width, sceneSize.height);
     vkCmdPushConstants(commands, rayDebugLayout.get(), VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(rays), &rays);
     drawFullScreenTriangle(commands);
 
@@ -1463,7 +1468,7 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionD
     const float none = static_cast<float>(TAA_NO_MOTION);
     const ColourAttachment colour{velocity.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {none, none, 0.0f, 0.0f}};
     const DepthAttachment depthTest{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {frameWidth, frameHeight}, &colour, &depthTest);
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTest);
     renderingOpen = true;
 
     if (!motionDraws.batches.empty()) {
@@ -1493,8 +1498,8 @@ std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vec
 }
 
 /*
-* The tone mapping pass, into the open pass: the full-screen triangle reads the scene texel for texel and mixes in the
-* bloom (half the screen's size, filtered). Without bloom the shader never reads it, but the slot still needs an image,
+* The tone mapping pass, into the open pass: the full-screen triangle reads the finished scene texel for texel and mixes
+* in the bloom (half the screen's size, filtered). Without bloom the shader never reads it, but the slot still needs an image,
 * so the scene stands in.
 */
 void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings,
@@ -1508,8 +1513,8 @@ void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipe
 
     const VulkanImage* bloomResult = bloom->getResult();
     const std::array<SampledImage, 2> images{
-        SampledImage{sceneColour.getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        SampledImage{bloomResult != nullptr ? bloomResult->getView() : sceneColour.getView(), linearSampler.get(),
+        SampledImage{finishedScene->getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        SampledImage{bloomResult != nullptr ? bloomResult->getView() : finishedScene->getView(), linearSampler.get(),
                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
     };
     const std::array<VkDescriptorBufferInfo, 1> buffers{eyeAdaptation->describeAdaptation()};
@@ -1541,7 +1546,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     const std::unique_ptr<VulkanPipeline> capturePipeline = createToneMapPipeline(targetDescription.format);
     VulkanBuffer readback{device.getAllocator(), sceneBytes + finalBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
 
-    ensureFrameTextures(width, height);
+    ensureFrameTextures(width, height, settings);
 
     // Temporal anti-aliasing settles over two jitter cycles; the capture starts it afresh, from the first point of the
     // cycle, so it repeats exactly.
@@ -1581,14 +1586,14 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
         renderingOpen = false;
         finishGpuTimings(frame);
 
-        sceneColour.transition(frame.commands, ImageState::TransferSource);
+        finishedScene->transition(frame.commands, ImageState::TransferSource);
         target.transition(frame.commands, ImageState::TransferSource);
 
         VkBufferImageCopy copy{};
         copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copy.imageSubresource.layerCount = 1;
         copy.imageExtent = {width, height, 1};
-        vkCmdCopyImageToBuffer(frame.commands, sceneColour.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.get(), 1, &copy);
+        vkCmdCopyImageToBuffer(frame.commands, finishedScene->get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.get(), 1, &copy);
 
         copy.bufferOffset = sceneBytes;
         vkCmdCopyImageToBuffer(frame.commands, target.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.get(), 1, &copy);

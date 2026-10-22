@@ -35,5 +35,12 @@ void main() {
         vec4 pixel = testInput(4);
         testOutput(0, vec4(reprojectPixel(reprojection, pixel.xy, pixel.z, testInput(5).xy), 0.0));
         testOutput(1, vec4(objectMotion(testInput(6), testInput(7)), 0.0, 0.0));
+    } else if (function == GPU_TEST_TAA_UPSCALING) {
+        // Inputs: (render pixel, jitter), (output per render, squared distance, current weight).
+        vec4 point = testInput(0);
+        vec4 scales = testInput(1);
+        float weight = taaSampleWeight(scales.z);
+        testOutput(0, vec4(sampleOutputPixel(point.xy, point.zw, scales.xy), renderPixelOf(point.xy, scales.xy)));
+        testOutput(1, vec4(weight, taaCurrentShare(scales.w, weight), 0.0, 0.0));
     }
 }

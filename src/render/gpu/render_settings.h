@@ -9,6 +9,7 @@
 #include "render/gpu/shadow_map.h"
 #include "render/gpu/taa.h"
 #include "render/gpu/tone_mapping.h"
+#include "render/gpu/upscaling.h"
 
 /*
 * Everything about drawing that a game, the debug UI or a player may tune, in one place. The renderer reads it every
@@ -23,6 +24,7 @@ struct RenderSettings {
     DisplaySettings display;
     GlobalIlluminationSettings globalIllumination;
     TaaSettings taa;
+    UpscalingSettings upscaling;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

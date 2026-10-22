@@ -111,6 +111,7 @@ void testToneMapping();
 void testToneMapUniforms();
 void testBloom();
 void testTaa();
+void testUpscaling();
 void testDisplayOutput();
 void testSettingsFile();
 void testQualityPreset();
@@ -235,6 +236,7 @@ int main(){
     testToneMapUniforms();
     testBloom();
     testTaa();
+    testUpscaling();
     testDisplayOutput();
     testSettingsFile();
     testQualityPreset();

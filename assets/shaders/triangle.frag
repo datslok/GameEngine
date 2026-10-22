@@ -397,9 +397,11 @@ void main() {
 
     MaterialData material = materials[materialIndex];
 
-    // Read the textures at this fragment's interpolated UV coordinate. glTF packs roughness in green and metallic in blue.
-    vec4 albedo = texture(textures[nonuniformEXT(material.textureSlots.x)], textureUv) * material.baseColour;
-    vec3 packedSurface = texture(textures[nonuniformEXT(material.textureSlots.y)], textureUv).rgb;
+    // Read the textures at this fragment's interpolated UV coordinate, the mips chosen for the output's pixels rather than
+    // the render size's (the bias). glTF packs roughness in green and metallic in blue.
+    float mipBias = textureOptions.x;
+    vec4 albedo = texture(textures[nonuniformEXT(material.textureSlots.x)], textureUv, mipBias) * material.baseColour;
+    vec3 packedSurface = texture(textures[nonuniformEXT(material.textureSlots.y)], textureUv, mipBias).rgb;
     float metallic = clamp(material.surfaceParameters.x * packedSurface.b, 0.0, 1.0);
     float roughness = clamp(material.surfaceParameters.y * packedSurface.g, BRDF_SMALLEST_ROUGHNESS, 1.0);
 
@@ -419,7 +421,7 @@ void main() {
     vec3 normal = geometricNormal;
 
     if (normalLength > 0.0) {
-        vec3 tilt = decodeNormalTexel(texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv).rgb, material.surfaceParameters.z);
+        vec3 tilt = decodeNormalTexel(texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv, mipBias).rgb, material.surfaceParameters.z);
         vec3 bumped = perturbNormal(worldNormal, worldTangent, tilt);
 
         if (dot(bumped, bumped) > 0.0) {

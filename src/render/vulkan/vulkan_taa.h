@@ -14,18 +14,19 @@ class VulkanDevice;
 
 /*
 * Temporal anti-aliasing's images and its resolve pass (render/gpu/taa.h): the velocity image the velocity pass draws
-* moving objects' motion into, and two history images that take turns (one read as last frame's result while the
-* other is written as this frame's), all the frame's size. The resolve (taa.comp) blends the scene image into the
-* history and copies the result back over the scene image, so everything after it (eye adaptation, bloom, tone
-* mapping, captures) reads the smoothed picture where it always did.
+* moving objects' motion into, at the render size like the scene image, and two history images at the output size that
+* take turns (one read as last frame's result while the other is written as this frame's). The resolve (taa.comp)
+* blends the scene image, upscaling it, into the history, and that result is the finished picture everything after it
+* reads (eye adaptation, bloom, tone mapping, captures).
 */
 class VulkanTaa {
 public:
     // nearest: exact texels, clamped; filtered: bilinear and clamped (the history, read between texels).
     VulkanTaa(const VulkanDevice& device, VkSampler nearest, VkSampler filtered);
 
-    // The images at the frame's size, remade (and the history forgotten) when it changes.
-    void ensureSize(std::uint32_t width, std::uint32_t height);
+    // The history at the output's size, remade (and forgotten) when it changes, and the velocity image at the render
+    // size, remade when that changes (the history is kept: it is still the output's picture).
+    void ensureSize(std::uint32_t outputWidth, std::uint32_t outputHeight, RenderSize render);
 
     VulkanImage& getVelocity();
 
@@ -35,10 +36,13 @@ public:
 
     /*
     * Record the resolve: the scene (readable by fragment and compute shaders), its depth (readable by compute) and the
-    * velocity image (drawn this frame) in, this frame's history out, copied over the scene image, which is left
-    * readable again. The result becomes the history the next resolve reads.
+    * velocity image (drawn this frame) in, this frame's history out, left readable by fragment and compute shaders. It
+    * becomes the history the next resolve reads.
     */
     void resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, const GpuTaaPass& pass);
+
+    // The last resolve's result: the finished picture at the output's size.
+    VulkanImage& getResult();
 
 private:
     const VulkanDevice& device;
@@ -50,6 +54,7 @@ private:
     std::array<VulkanImage, 2> history;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
+    RenderSize velocitySize;
 
     // Which history this frame writes; the other holds last frame's.
     std::uint32_t written = 0;

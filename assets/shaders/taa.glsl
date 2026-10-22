@@ -59,6 +59,22 @@ vec2 objectMotion(vec4 currentClip, vec4 previousClip) {
     return currentClip.xy / currentClip.w - previousClip.xy / previousClip.w;
 }
 
+vec2 sampleOutputPixel(vec2 renderPixel, vec2 jitter, vec2 outputPerRender) {
+    return (renderPixel - jitter) * outputPerRender;
+}
+
+vec2 renderPixelOf(vec2 outputPixel, vec2 renderPerOutput) {
+    return outputPixel * renderPerOutput;
+}
+
+float taaSampleWeight(float distanceSquared) {
+    return exp(-float(TAA_SAMPLE_FALLOFF) * distanceSquared);
+}
+
+float taaCurrentShare(float currentWeight, float nearestSampleWeight) {
+    return currentWeight * nearestSampleWeight;
+}
+
 vec3 toYCoCg(vec3 rgb) {
     return vec3(0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b, 0.5 * rgb.r - 0.5 * rgb.b, -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b);
 }

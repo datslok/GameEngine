@@ -20,6 +20,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 probeShading;           // x: the light probes' self-shadow bias setting, y: the share of probe light a probe ray's hit passes on
     ivec4 probeAtlas;            // xy: the probe atlases' columns and rows, w: how many cascades
     ivec4 probeLights;           // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
+    vec4 textureOptions;         // x: the surface textures' mip bias, sharper while the frame is drawn below the output's size
 };
 
 #endif

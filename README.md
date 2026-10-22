@@ -31,6 +31,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Each pixel finds where its surface was last frame: from its depth and the two cameras, or from a motion vector a small pass draws for anything that moved.
   - History that no longer fits is clipped into the range of colours its neighbours show now, so moving things leave little ghosting.
   - Switchable, with a motion debug view, in the settings (Anti-aliasing).
+  - It also upscales: a render scale (Upscaling, 1 by default, down to 0.33) draws the scene smaller, and TAA builds the full-size picture from the jittered frames, for speed on weaker GPUs.
 - **Reversed-Z depth:** near at 1 and far at 0, so depth precision is nearly even out to the far plane.
 - **Camera-relative rendering:** positions are measured from the camera before they become floats in matrices, so distant scenes do not jitter.
 - Indexed meshes, and textures with mipmaps and trilinear plus anisotropic filtering.
