@@ -759,7 +759,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 
 The same file has:
 
-- `gpuPassName`, giving the readout's short names UI, TLAS, PROBES, CLUSTERS, SHADOW, PREPASS, MAIN, BALLS, RAYS, DEPTHS, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
+- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, PREPASS, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
 - `gpuTimestampCount` (one stamp before the first pass and one after each);
 - `timestampTicksBetween` (the difference masked to the queue's `timestampValidBits`, so a counter that rolls over still gives the right count);
 - and `gpuTimingsFromTicks` (seconds per pass from the device's `timestampPeriod`; the passes add up to `totalSeconds`; not `valid` with zero valid bits).
@@ -777,7 +777,7 @@ The same file has:
 
 - `beginFrame` reads a complete frame's stamps after its fence with `vkGetQueryPoolResults` (64-bit, no wait; `VK_NOT_READY` skips the frame) into `unreportedGpuTimings`.
 - `drawScene` moves them into `RenderStats::gpu`, so each measured frame is reported once, as many frames late as there are in flight.
-- `Application` records them into its `gpuProfiler` (`makeGpuProfiler`: GPU (the total) as section 0, then one section per pass; `recordGpuTimings` skips invalid timings), updated with the CPU profiler and drawn on readout line `gpuProfileReadoutLine` (6) in the F4 view.
+- `Application` records them into its `gpuProfiler` (`makeGpuProfiler`: GPU (the total) as section 0, then one section per pass; `recordGpuTimings` skips invalid timings), updated with the CPU profiler and drawn on readout line `gpuProfileReadoutLine` (9) in the F4 view.
 
 **Debug names:**
 
@@ -807,7 +807,7 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `ShadowTileData` as before.
 - A draw list of `uint32` instance numbers.
 
-`GpuFrameData` (320 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
+`GpuFrameData` (304 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
 
 - the camera-relative view-projection, the camera position, ambient, counts, the atlas texel size;
 - the cluster grid (`clusterTiles`, `clusterScreen`, `clusterSlicing`, `viewRight`, `viewUp`, `viewForward`, laid out as `clusters.glsl`'s `ClusterGrid`);
@@ -1176,12 +1176,14 @@ Placing probes (`ddgi-cascades`; `render/gpu/probe_cascades`, numbers in `ddgi_s
 
 **How many and how dense** is the settings' choice: `probeCascadeLayout(settings)`.
 
-| Setting | Value | Meaning |
+| Setting | Default | Meaning |
 |---|---|---|
-| `probeCascades` | 4 | how many cascades |
+| `probeCascades` | 6 (4 before `ddgi-far-cascades`) | how many cascades |
 | `probeSpacing` | 0.5 m | spacing of the densest |
-| `cascadeProbesAcross` | 21 | probes along both level axes |
-| `cascadeProbesHigh` | 13 | probes up |
+| `densestProbesAcross` | 31 | the densest cascade's probes along both level axes |
+| `densestProbesHigh` | 17 | the densest cascade's probes up |
+| `cascadeProbesAcross` | 21 | every other cascade's probes along both level axes |
+| `cascadeProbesHigh` | 13 | every other cascade's probes up |
 
 - At least 2 a side, the up axis giving way first until a cascade's layer fits the atlas width and one dispatch, then as many cascades as fit, at most `DDGI_MAX_CASCADES` 6.
 - Each cascade has twice the last's spacing (`probeCascadeSpacing`).
@@ -2651,7 +2653,7 @@ lights are components (`scene/light.h`):
   - A `sourceRadius` softens the falloff up close: `intensity / (d² + r²)`.
   - The shader compares cosines, which `packLighting` precomputes and clamps inner to outer.
 - `AmbientLight` (several add up).
-- `SkyBackground` lights nothing: its colour (linear, several add up, black without one) becomes `FrameLighting::background`, the colour the main pass clears the scene image to, so it shows wherever nothing is drawn; a stand-in for 6d's sky.
+- `SkyBackground` lights nothing: its colour (linear, several add up, black without one) becomes `FrameLighting::background`, the colour the main pass clears the scene image to, so it shows wherever nothing is drawn; with an `Atmosphere` in the frame, the sky is drawn over it.
 - Colours are 0..1 tints with a separate unbounded `intensity`.
 
 **Each frame:**
@@ -2686,7 +2688,7 @@ A final pass (`beginToneMapPass`, `fullscreen_triangle.vert` + `tone_map.frag`, 
 
 When `hdr` changes `prepareSwapchain` waits for the GPU, rebuilds the swapchain in the other format and colour space (keeping the present mode; a refused HDR swapchain is logged and marked unsupported) and rebuilds the swapchain-format pipelines (`createScreenPipelines`: tone mapping, debug lines and the overlay), logging the peak and white.
 
-- `ToneMapUniformData` (32 bytes) carries the white level and whether to dither (only on SDR), plus the bloom strength (`parameters.w`, 0 = none) and scale (`output.z`).
+- `ToneMapUniformData` (48 bytes, with night vision's vec4) carries the white level and whether to dither (only on SDR), plus the bloom strength (`parameters.w`, 0 = none) and scale (`output.z`).
 - Debug line colours are multiplied by the white level (`buildDebugLineVertices(lines, colourScale)`).
 - `getDisplayOutput()`.
 
