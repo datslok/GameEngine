@@ -1,4 +1,6 @@
 #include "render/gpu/tone_mapping.h"
+#include "math/smooth_step.h"
+#include "render/gpu/eye_adaptation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +26,51 @@ void validateToneMapping(const ToneMappingSettings& settings, float peakBrightne
     if (!(settings.lowestExposureEv <= settings.highestExposureEv)) {
         throw std::invalid_argument("Eye adaptation's lowest exposure must not be above its highest");
     }
+
+    if (!(settings.rodsFullEv < settings.conesFullEv) || !(settings.nightBlueShift >= 0.0f && settings.nightBlueShift <= 1.0f)) {
+        throw std::invalid_argument("Night vision needs the rods' threshold below the cones' and a blue shift within 0..1");
+    }
+}
+
+namespace {
+    // Larson's formula without white's division: the rods' light in the formula's own units.
+    float scotopicLuminance(const Vec3& linear) {
+        const float x = static_cast<float>(SRGB_TO_X_RED) * linear.x + static_cast<float>(SRGB_TO_X_GREEN) * linear.y +
+                        static_cast<float>(SRGB_TO_X_BLUE) * linear.z;
+        const float y = pixelLuminance(linear);
+        const float z = static_cast<float>(SRGB_TO_Z_RED) * linear.x + static_cast<float>(SRGB_TO_Z_GREEN) * linear.y +
+                        static_cast<float>(SRGB_TO_Z_BLUE) * linear.z;
+
+        if (!(x > 0.0f)) {
+            return 0.0f;
+        }
+
+        return y * (static_cast<float>(SCOTOPIC_A) * (1.0f + (y + z) / x) - static_cast<float>(SCOTOPIC_B));
+    }
+}
+
+/*
+* X, Y and Z are sums of the channels with positive weights, so X is 0 only for black, and (Y + Z) / X is smallest for
+* pure red (0.56), where the bracket is still positive: no colour gives negative rod light.
+*/
+float rodLuminance(const Vec3& linear) {
+    return scotopicLuminance(linear) / scotopicLuminance(Vec3{1.0f, 1.0f, 1.0f});
+}
+
+float rodShare(float pixelEv, float eyeEv, const ToneMappingSettings& settings) {
+    return 1.0f - smoothStep(settings.rodsFullEv, settings.conesFullEv, std::max(pixelEv, eyeEv));
+}
+
+/*
+* The tint is scaled to a luminance of 1, so the grey has the rods' brightness at any blue shift. The blend is written
+* as colour + (grey - colour) share, so a share of 0 leaves the colour exactly as it was.
+*/
+Vec3 nightVision(const Vec3& linear, float eyeEv, const ToneMappingSettings& settings) {
+    const Vec3 nightTint{static_cast<float>(NIGHT_TINT_RED), static_cast<float>(NIGHT_TINT_GREEN), static_cast<float>(NIGHT_TINT_BLUE)};
+    const Vec3 white{1.0f, 1.0f, 1.0f};
+    const Vec3 tint = white + (nightTint * (1.0f / pixelLuminance(nightTint)) - white) * settings.nightBlueShift;
+    const float share = rodShare(std::log2(std::max(pixelLuminance(linear), 1e-10f)), eyeEv, settings);
+    return linear + (tint * rodLuminance(linear) - linear) * share;
 }
 
 namespace {
@@ -155,4 +202,8 @@ void visit(ToneMappingSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Bright adaptation", settings.brightAdaptationSeconds, {.min = 0.0f, .sliderMax = 10.0f, .unit = "s"});
     visitor.field("Lowest exposure", settings.lowestExposureEv, {.min = -16.0f, .max = 16.0f, .sliderMax = 0.0f, .unit = "EV"});
     visitor.field("Highest exposure", settings.highestExposureEv, {.min = -16.0f, .max = 16.0f, .sliderMin = 0.0f, .unit = "EV"});
+    visitor.field("Night vision", settings.nightVision);
+    visitor.field("Rods fully from", settings.rodsFullEv, {.min = -16.0f, .max = 16.0f, .sliderMin = -16.0f, .sliderMax = 0.0f, .unit = "EV"});
+    visitor.field("Cones fully from", settings.conesFullEv, {.min = -16.0f, .max = 16.0f, .sliderMin = -16.0f, .sliderMax = 0.0f, .unit = "EV"});
+    visitor.field("Night blue shift", settings.nightBlueShift, {.min = 0.0f, .max = 1.0f});
 }

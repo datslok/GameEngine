@@ -63,9 +63,10 @@ struct LightLabNightSettings {
 
     // How much of the phase's dimming shows: the phase curve raised to this power (1 real, 0 every phase as bright as
     // full). The real curve leaves a quarter moon 3.5 stops below full, all of which shows once the eye adaptation is at
-    // its highest exposure; 0.5 halves the stops (a quarter moon 1.75 below), as the eye's sense of brightness, roughly a
-    // power of the light, squeezes them. Only the moon changes, so lit rooms keep their exposure.
-    float moonPhaseContrast = 0.5f;
+    // its highest exposure; 0.25 quarters the stops (a quarter moon 0.9 below; chosen by the user by eye), as the eye's
+    // sense of brightness, roughly a power of the light, squeezes them. Only the moon changes, so lit rooms keep their
+    // exposure.
+    float moonPhaseContrast = 0.25f;
 
     // The moon's disc against its real size, for looks only, as the sun's.
     float moonDiscScale = 5.0f;

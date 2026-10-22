@@ -203,6 +203,7 @@ namespace {
         report.check("snapped mean", evTolerance, expectedSnap.meanEv, snapped->meanEv);
         report.check("snapped exposure", evTolerance, expectedSnap.exposureEv, snapped->exposureEv);
         report.check("snapped measured", exactTolerance, 1.0f, snapped->measured);
+        report.check("snapped adapted mean", evTolerance, expectedSnap.adaptedMeanEv, snapped->adaptedMeanEv);
 
         // A frame later, from a different start (darker settings), easing rather than jumping.
         settings.adaptationReference = 0.05f;
@@ -213,6 +214,7 @@ namespace {
             const GpuEyeAdaptation expectedEase = adaptToHistogram(*snapped, counts, settings, 0.1f, false);
             report.check("eased target", evTolerance, expectedEase.targetEv, eased->targetEv);
             report.check("eased exposure", evTolerance, expectedEase.exposureEv, eased->exposureEv);
+            report.check("eased adapted mean", evTolerance, expectedEase.adaptedMeanEv, eased->adaptedMeanEv);
         }
 
         report.check("collected once", exactTolerance, 0.0f, adaptation.collect(0).has_value() ? 1.0f : 0.0f);

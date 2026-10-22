@@ -1,4 +1,7 @@
+#include "render/gpu/eye_adaptation.h"
 #include "render/gpu/tone_mapping.h"
+
+#include "test_levels.h"
 
 #include <cassert>
 #include <cmath>
@@ -121,6 +124,84 @@ namespace {
         }
     }
 
+    /*
+    * The rods' light: Larson's scotopic luminance, scaled so white keeps its brightness and growing with the light. Blue
+    * counts for more than the cones weigh it, red for far less (the Purkinje shift), and black stays black.
+    */
+    void testRodLuminance() {
+        assert(near(rodLuminance(grey(1.0f)), 1.0f, 1e-5f));
+        assert(near(rodLuminance(grey(0.25f)), 0.25f, 1e-6f));
+        assert(rodLuminance(Vec3{}) == 0.0f);
+
+        const Vec3 blue{0.0f, 0.0f, 1.0f};
+        const Vec3 red{1.0f, 0.0f, 0.0f};
+        assert(rodLuminance(blue) > 2.0f * pixelLuminance(blue));
+        assert(rodLuminance(red) < 0.25f * pixelLuminance(red));
+        assert(near(rodLuminance(red * 4.0f), 4.0f * rodLuminance(red), 1e-6f));
+    }
+
+    /*
+    * The rods' share: all of it while both the pixel and the scene the eye is set for are below the rods' threshold,
+    * none once either is above the cones', smoothly less and less between (half way, half).
+    */
+    void testRodShare() {
+        const ToneMappingSettings settings;
+        const float dark = settings.rodsFullEv - 2.0f;
+        const float bright = settings.conesFullEv + 1.0f;
+        const float middle = 0.5f * (settings.rodsFullEv + settings.conesFullEv);
+
+        assert(rodShare(dark, dark, settings) == 1.0f);
+        assert(rodShare(bright, dark, settings) == 0.0f);
+        assert(rodShare(dark, bright, settings) == 0.0f);
+        assert(near(rodShare(middle, dark, settings), 0.5f, 1e-6f));
+        assert(rodShare(middle - 0.5f, dark, settings) > rodShare(middle, dark, settings));
+        assert(rodShare(middle, middle + 0.5f, settings) < rodShare(middle, dark, settings));
+    }
+
+    // A colour with this luminance's stops.
+    Vec3 atStops(const Vec3& colour, float stops) {
+        return colour * (std::exp2(stops) / pixelLuminance(colour));
+    }
+
+    /*
+    * Night vision: in the dark a colour becomes the rods' grey (bluer with the blue shift, at the rods' brightness), in
+    * the light it is left exactly as it was, and between it is a blend of the two.
+    */
+    void testNightVision() {
+        ToneMappingSettings settings;
+        const float darkEye = settings.rodsFullEv - 2.0f;
+        const Vec3 warm{1.0f, 0.5f, 0.1f};
+
+        settings.nightBlueShift = 0.0f;
+        const Vec3 dim = atStops(warm, settings.rodsFullEv - 1.0f);
+        const Vec3 rodGrey = nightVision(dim, darkEye, settings);
+        assert(near(rodGrey.x, rodGrey.y, 1e-9f) && near(rodGrey.y, rodGrey.z, 1e-9f));
+        assert(near(pixelLuminance(rodGrey), rodLuminance(dim), 1e-9f));
+
+        settings.nightBlueShift = 1.0f;
+        const Vec3 blued = nightVision(dim, darkEye, settings);
+        assert(blued.z > blued.y && blued.y > blued.x);
+        assert(near(pixelLuminance(blued), rodLuminance(dim), 1e-9f));
+
+        // White keeps its brightness at any blue shift; black stays black.
+        const Vec3 white = grey(std::exp2(settings.rodsFullEv - 1.0f));
+        assert(near(pixelLuminance(nightVision(white, darkEye, settings)), pixelLuminance(white), 1e-9f));
+        const Vec3 black = nightVision(Vec3{}, darkEye, settings);
+        assert(black.x == 0.0f && black.y == 0.0f && black.z == 0.0f);
+
+        // Bright enough, or an eye set for the light: untouched.
+        const Vec3 lamp = atStops(warm, settings.conesFullEv + 1.0f);
+        const Vec3 lampSeen = nightVision(lamp, darkEye, settings);
+        assert(lampSeen.x == lamp.x && lampSeen.y == lamp.y && lampSeen.z == lamp.z);
+        const Vec3 corner = nightVision(dim, settings.conesFullEv + 1.0f, settings);
+        assert(corner.x == dim.x && corner.y == dim.y && corner.z == dim.z);
+
+        // Between, the blend of the colour and the rods' grey by the rods' share.
+        const Vec3 between = atStops(warm, 0.5f * (settings.rodsFullEv + settings.conesFullEv));
+        const Vec3 seen = nightVision(between, darkEye, settings);
+        const Vec3 rods = nightVision(between, darkEye, ToneMappingSettings{.rodsFullEv = 1.0f, .conesFullEv = 2.0f, .nightBlueShift = 1.0f});
+        assert(near(seen.x, 0.5f * (between.x + rods.x), 1e-9f) && near(seen.z, 0.5f * (between.z + rods.z), 1e-9f));
+    }
 }
 
 void testToneMapping() {
@@ -134,4 +215,7 @@ void testToneMapping() {
     testExposureScalesTheLightFirst();
     testHigherPeakStretchesTheCurve();
     testChannelOrderIsKept();
+    testRodLuminance();
+    testRodShare();
+    testNightVision();
 }

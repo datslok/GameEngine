@@ -69,15 +69,20 @@ struct HeldExposure {
 */
 HeldExposure holdThenAdaptExposure(float currentEv, float targetEv, float heldSeconds, float seconds, const ToneMappingSettings& settings);
 
-// The adapted exposure the passes keep in GPU memory (std430): the exposure, the target and the scene's mean, in stops,
-// and the dark adaptation's wait.
+/*
+* The adapted exposure the passes keep in GPU memory (std430): the exposure, the target and the scene's mean, in stops,
+* and the dark adaptation's wait; and the scene's brightness the eye is set for (night vision's, tone_mapping.h), the
+* mean eased as the exposure is, with its own wait.
+*/
 struct GpuEyeAdaptation {
     float exposureEv = 0.0f;
     float targetEv = 0.0f;
     float meanEv = 0.0f;
     float measured = 0.0f;        // 1 once a frame has been measured
     float darkHeldSeconds = 0.0f; // how long the scene has stayed darker than the eye is set for (holdThenAdaptExposure)
-    float unused[3]{};
+    float adaptedMeanEv = 0.0f;
+    float adaptedMeanHeldSeconds = 0.0f;
+    float unused = 0.0f;
 };
 
 static_assert(sizeof(GpuEyeAdaptation) == 32, "GpuEyeAdaptation must match EyeAdaptation in eye_adaptation.glsl");
@@ -101,6 +106,9 @@ static_assert(sizeof(GpuEyeAdaptationStep) == 48, "GpuEyeAdaptationStep must mat
 // snap: jump straight to the target (the first frame, golden images), since there is nothing to adapt from.
 GpuEyeAdaptationStep packEyeAdaptationStep(const ToneMappingSettings& settings, float seconds, bool snap);
 
-// The whole frame's step on the CPU, as the passes do it: the histogram's mean, the target, the step (or the snap).
+/*
+* The whole frame's step on the CPU, as the passes do it: the histogram's mean, the target, the step (or the snap), and
+* the adapted mean's step.
+*/
 GpuEyeAdaptation adaptToHistogram(const GpuEyeAdaptation& previous, std::span<const std::uint32_t> counts, const ToneMappingSettings& settings,
                                   float seconds, bool snap);

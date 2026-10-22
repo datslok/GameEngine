@@ -5,7 +5,7 @@
 * This frame's adapted exposure (render/gpu/eye_adaptation.h, adaptToHistogram): the mean of the histogram's middle
 * pixels, the exposure that brings it towards the reference, and a step towards that from last frame's exposure, into
 * the dark only after the scene has stayed darker for the delay (or straight there when told to snap, or before
-* anything was measured). One invocation: 256 bins are nothing to sum.
+* anything was measured); the adapted mean likewise, in negated stops. One invocation: 256 bins are nothing to sum.
 */
 #include "eye_adaptation.glsl"
 
@@ -50,5 +50,8 @@ void main() {
     vec2 stepped = jump ? vec2(targetEv, 0.0)
                         : holdThenAdaptExposure(previous.exposureEv, targetEv, previous.darkHeldSeconds, step.seconds, step.darkSeconds, step.brightSeconds,
                                                 step.darkDelaySeconds);
-    adaptation = EyeAdaptation(stepped.x, targetEv, meanEv, 1.0, stepped.y, 0.0, 0.0, 0.0);
+    vec2 eye = jump ? vec2(-meanEv, 0.0)
+                    : holdThenAdaptExposure(-previous.adaptedMeanEv, -meanEv, previous.adaptedMeanHeldSeconds, step.seconds, step.darkSeconds,
+                                            step.brightSeconds, step.darkDelaySeconds);
+    adaptation = EyeAdaptation(stepped.x, targetEv, meanEv, 1.0, stepped.y, -eye.x, eye.y, 0.0);
 }

@@ -34,6 +34,7 @@
 
 // tone_mapping_test.comp
 #define GPU_TEST_TONE_MAP 0
+#define GPU_TEST_NIGHT_VISION 1
 
 // bloom_test.comp
 #define GPU_TEST_KARIS_WEIGHT 0

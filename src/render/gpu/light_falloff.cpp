@@ -1,4 +1,5 @@
 #include "render/gpu/light_falloff.h"
+#include "math/smooth_step.h"
 
 #include <algorithm>
 
@@ -12,8 +13,6 @@ float distanceFalloff(float distance, float range, float sourceRadius) {
     return window * window / (distance * distance + sourceRadius * sourceRadius);
 }
 
-// GLSL's smoothstep as its specification defines it: t clamped to 0..1, then t^2 (3 - 2t).
 float spotCone(float alongBeam, float cosOuter, float cosInner) {
-    const float t = std::clamp((alongBeam - cosOuter) / (cosInner - cosOuter), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
+    return smoothStep(cosOuter, cosInner, alongBeam);
 }

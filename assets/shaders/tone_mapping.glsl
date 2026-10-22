@@ -7,6 +7,9 @@
 // The curves' numbers, shared with render/gpu/tone_mapping.cpp.
 #include "render/gpu/tone_mapping_shared.h"
 
+// pixelLuminance, for night vision.
+#include "eye_adaptation.glsl"
+
 vec3 reinhard(vec3 value) {
     return value / (1.0 + value);
 }
@@ -66,6 +69,34 @@ vec3 applyCurve(int curve, vec3 value) {
 */
 vec3 toneMap(vec3 linear, float exposure, float peak, int curve) {
     return clamp(applyCurve(curve, linear * (exposure / peak)), 0.0, 1.0) * peak;
+}
+
+// Night vision (render/gpu/tone_mapping.h explains each function). Larson's formula in its own units.
+float scotopicLuminance(vec3 linear) {
+    float x = SRGB_TO_X_RED * linear.r + SRGB_TO_X_GREEN * linear.g + SRGB_TO_X_BLUE * linear.b;
+    float y = pixelLuminance(linear);
+    float z = SRGB_TO_Z_RED * linear.r + SRGB_TO_Z_GREEN * linear.g + SRGB_TO_Z_BLUE * linear.b;
+
+    if (!(x > 0.0)) {
+        return 0.0;
+    }
+
+    return y * (SCOTOPIC_A * (1.0 + (y + z) / x) - SCOTOPIC_B);
+}
+
+float rodLuminance(vec3 linear) {
+    return scotopicLuminance(linear) / scotopicLuminance(vec3(1.0));
+}
+
+float rodShare(float pixelEv, float eyeEv, float rodsFullEv, float conesFullEv) {
+    return 1.0 - smoothstep(rodsFullEv, conesFullEv, max(pixelEv, eyeEv));
+}
+
+vec3 nightVision(vec3 linear, float eyeEv, float rodsFullEv, float conesFullEv, float blueShift) {
+    vec3 nightTint = vec3(NIGHT_TINT_RED, NIGHT_TINT_GREEN, NIGHT_TINT_BLUE);
+    vec3 tint = vec3(1.0) + (nightTint * (1.0 / pixelLuminance(nightTint)) - vec3(1.0)) * blueShift;
+    float share = rodShare(log2(max(pixelLuminance(linear), 1e-10)), eyeEv, rodsFullEv, conesFullEv);
+    return linear + (tint * rodLuminance(linear) - linear) * share;
 }
 
 #endif
