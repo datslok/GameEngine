@@ -177,6 +177,20 @@ namespace {
         assert(eased.exposureEv > 0.0f);
         assert(snapped.darkHeldSeconds == 0.0f);
 
+        // The scene's brightness the eye is set for (night vision's): the mean at once when snapped, then eased as the
+        // exposure is, the other way round: into the dark it holds for the delay, into the light it follows at once.
+        assert(near(snapped.adaptedMeanEv, meanEv, 1e-6f) && snapped.adaptedMeanHeldSeconds == 0.0f);
+        const GpuEyeAdaptation lit{0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, {}};
+        const GpuEyeAdaptation waiting = adaptToHistogram(lit, night, settings, 0.5f, false);
+        assert(waiting.adaptedMeanEv == 0.0f && waiting.adaptedMeanHeldSeconds == 0.5f);
+        const GpuEyeAdaptation darkening = adaptToHistogram(waiting, night, settings, 1.0f, false);
+        const HeldExposure expectedDark = holdThenAdaptExposure(0.0f, -meanEv, 0.5f, 1.0f, settings);
+        assert(near(darkening.adaptedMeanEv, -expectedDark.exposureEv, 1e-6f) && darkening.adaptedMeanEv < 0.0f && darkening.adaptedMeanEv > meanEv);
+        const GpuEyeAdaptation deepDark{0.0f, 0.0f, 0.0f, 1.0f, 0.0f, meanEv - 6.0f, 0.0f, {}};
+        const GpuEyeAdaptation lighter = adaptToHistogram(deepDark, night, settings, 0.1f, false);
+        assert(near(lighter.adaptedMeanEv, -adaptExposureEv(6.0f - meanEv, -meanEv, 0.1f, settings), 1e-5f));
+        assert(lighter.adaptedMeanEv > meanEv - 6.0f && lighter.adaptedMeanHeldSeconds == 0.0f);
+
         // An empty histogram keeps the last measurement.
         const GpuEyeAdaptation empty = adaptToHistogram(snapped, histogramOf({}), settings, 0.5f, false);
         assert(near(empty.meanEv, snapped.meanEv, 1e-6f) && near(empty.exposureEv, snapped.exposureEv, 1e-6f));
@@ -196,6 +210,14 @@ namespace {
         assert(packToneMapping(settings).output[3] == 1.0f);
         settings.eyeAdaptation = false;
         assert(packToneMapping(settings).output[3] == 0.0f);
+
+        // Night vision: its thresholds, blue shift and whether it is on.
+        settings.nightVision = true;
+        const ToneMapUniformData night = packToneMapping(settings);
+        assert(night.nightVision[0] == settings.rodsFullEv && night.nightVision[1] == settings.conesFullEv);
+        assert(night.nightVision[2] == settings.nightBlueShift && night.nightVision[3] == 1.0f);
+        settings.nightVision = false;
+        assert(packToneMapping(settings).nightVision[3] == 0.0f);
     }
 
     // The readout: the exposure and the scene's mean in stops, signed, or that the exposure is fixed.
@@ -233,6 +255,21 @@ namespace {
         bad.lowestExposureEv = 3.0f;
         bad.highestExposureEv = 2.0f;
         assert(refused(bad));
+
+        // Night vision: the rods' threshold must lie below the cones', the blue shift within 0..1.
+        bad = ToneMappingSettings{};
+        bad.rodsFullEv = bad.conesFullEv;
+        assert(refused(bad));
+        bad = ToneMappingSettings{};
+        bad.nightBlueShift = 1.5f;
+        assert(refused(bad));
+        bad = ToneMappingSettings{};
+        bad.nightBlueShift = -0.1f;
+        assert(refused(bad));
+
+        // Off by default for now, its thresholds in order.
+        const ToneMappingSettings defaults;
+        assert(!defaults.nightVision && defaults.rodsFullEv < defaults.conesFullEv);
     }
 }
 

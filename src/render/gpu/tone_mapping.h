@@ -44,6 +44,20 @@ struct ToneMappingSettings {
     float brightAdaptationSeconds = 0.7f;
     float lowestExposureEv = -4.0f;
     float highestExposureEv = 1.0f;
+
+    /*
+    * Night vision (nightVision below): in the dark the eye sees with its rods, which see no colour, so dim pixels fade
+    * towards a grey (a little blue, by the blue shift, 0..1) while the eye is set for a dim scene. All rods below the
+    * rods' stops, all cones above the cones', a smooth blend between; measured, like the eye adaptation's mean, in the
+    * stops of the light before exposure. The light lab's moonlit field is near -8 EV and its sunlit room by day near
+    * -6, so the thresholds sit between those (by measurement, since the engine's light has no physical units yet: the
+    * real thresholds are about 0.005 and 3 cd/m2). Off by default for now (the user's choice): the night's look waits
+    * for physical light units (ROADMAP phase 14).
+    */
+    bool nightVision = false;
+    float rodsFullEv = -9.5f;
+    float conesFullEv = -7.0f;
+    float nightBlueShift = 0.5f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
@@ -54,6 +68,27 @@ inline constexpr float sdrPeakBrightness = 1.0f;
 
 // Throws std::invalid_argument for a negative exposure or a peak that is not positive.
 void validateToneMapping(const ToneMappingSettings& settings, float peakBrightness);
+
+/*
+* The rods' light from a linear colour: Ward Larson's scotopic luminance, Y (1.33 (1 + (Y + Z) / X) - 1.68) from CIE XYZ,
+* divided by white's, so white keeps its brightness when the rods take over and only colours shift: blue looks brighter
+* and red darker than by day (the Purkinje shift). Black (X = 0, which no other colour has) is 0.
+*/
+float rodLuminance(const Vec3& linear);
+
+/*
+* How much of a pixel the rods see: 1 - smoothstep(rods' stops, cones' stops, the brighter of the pixel's stops and the
+* scene's the eye is set for). A pixel goes grey only when both are dim: a lamp in a dark street keeps its colour, and
+* so does a dark corner of a sunlit room, the eye set for the window.
+*/
+float rodShare(float pixelEv, float eyeEv, const ToneMappingSettings& settings);
+
+/*
+* Night vision: the colour blended by the rods' share towards the rods' grey, rodLuminance times the night tint (white
+* at no blue shift, NIGHT_TINT at full, luminance 1 either way). Applied to the light before exposure; off, it is not
+* called at all.
+*/
+Vec3 nightVision(const Vec3& linear, float eyeEv, const ToneMappingSettings& settings);
 
 /*
 * One pixel's linear colour (after lighting) to the linear colour the screen should show, 0..peakBrightness.

@@ -58,4 +58,22 @@
 // The curve's output is display-encoded with a plain 2.2 gamma; raising it to this power gives linear light back.
 #define AGX_DISPLAY_GAMMA 2.2
 
+// Night vision. Linear sRGB to CIE XYZ's X and Z (D65; Y is the luminance, pixelLuminance), by rows.
+#define SRGB_TO_X_RED 0.4124
+#define SRGB_TO_X_GREEN 0.3576
+#define SRGB_TO_X_BLUE 0.1805
+#define SRGB_TO_Z_RED 0.0193
+#define SRGB_TO_Z_GREEN 0.1192
+#define SRGB_TO_Z_BLUE 0.9505
+
+// Ward Larson, Rushmeier and Piatko's (1997) fit of the rods' sensitivity: Y (A (1 + (Y + Z) / X) - B).
+#define SCOTOPIC_A 1.33
+#define SCOTOPIC_B 1.68
+
+// The colour the rods' grey takes at full blue shift (by eye; scaled to a luminance of 1 where it is used): moonlit
+// scenes look cool, though the rods see no colour at all.
+#define NIGHT_TINT_RED 0.75
+#define NIGHT_TINT_GREEN 0.9
+#define NIGHT_TINT_BLUE 1.35
+
 #endif

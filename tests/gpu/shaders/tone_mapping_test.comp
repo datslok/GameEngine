@@ -15,5 +15,11 @@ void main() {
         vec4 light = testInput(0);
         vec4 display = testInput(1);
         testOutput(0, vec4(toneMap(light.rgb, light.a, display.x, int(display.y + 0.5)), 0.0));
+    } else if (function == GPU_TEST_NIGHT_VISION) {
+        // Inputs: (light, the eye's stops), (rods' threshold, cones' threshold, blue shift, a pixel's stops).
+        vec4 light = testInput(0);
+        vec4 night = testInput(1);
+        testOutput(0, vec4(nightVision(light.rgb, light.a, night.x, night.y, night.z), rodLuminance(light.rgb)));
+        testOutput(1, vec4(rodShare(night.w, light.a, night.x, night.y), 0.0, 0.0, 0.0));
     }
 }

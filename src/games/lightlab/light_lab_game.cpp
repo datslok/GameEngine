@@ -4,6 +4,7 @@
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
 #include "math/angles.h"
+#include "math/smooth_step.h"
 #include "core/srgb.h"
 #include "math/transform.h"
 #include "scene/celestial.h"
@@ -52,15 +53,6 @@ namespace {
     constexpr float skyDarkBelowDegrees = -6.0f;
     constexpr float skyFullAboveDegrees = 20.0f;
     constexpr float nightSkyShare = 0.03f;
-
-    /*
-    * 0 below edge0, 1 above edge1, and the smooth 3t^2 - 2t^3 between, as GLSL's smoothstep. Kept here rather than
-    * shared: the renderer's copy is part of its mirrored shader maths, which games may not include.
-    */
-    float smoothStep(float edge0, float edge1, float x) {
-        const float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-        return t * t * (3.0f - 2.0f * t);
-    }
 
     // The field's grass, in sRGB like every material colour.
     const Pixel labGrassColour{75, 110, 75};
@@ -231,6 +223,7 @@ void advanceLabClock(LightLabSunSettings& settings, float seconds) {
 
 void visit(LightLabNightSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Moon intensity", settings.moonIntensity, {.min = 0.0f, .sliderMax = 1.0f});
+    visitor.field("Moon phase contrast", settings.moonPhaseContrast, {.min = 0.0f, .max = 1.0f});
     visitor.field("Moon disc size", settings.moonDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
     visitor.field("Star brightness", settings.starBrightness, {.min = 0.0f, .sliderMax = 20.0f, .unit = "millionths"});
     visitor.field("Star contrast", settings.starContrast, {.min = 0.0f, .max = 2.0f});
@@ -244,7 +237,7 @@ DirectionalLight moonlightFor(const Vec3& towardsMoon, const Vec3& towardsSun, c
     DirectionalLight moonlight;
     moonlight.direction = towardsMoon * -1.0f;
     moonlight.colour = labMoonColour;
-    moonlight.intensity = settings.moonIntensity * moonPhaseBrightness(moonPhaseAngle(towardsSun, towardsMoon));
+    moonlight.intensity = settings.moonIntensity * std::pow(moonPhaseBrightness(moonPhaseAngle(towardsSun, towardsMoon)), settings.moonPhaseContrast);
     moonlight.castsShadows = true;
     moonlight.angularRadius = moonAngularRadius;
     moonlight.reflectsSun = true;

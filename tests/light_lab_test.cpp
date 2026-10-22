@@ -552,7 +552,19 @@ namespace {
         assert(moonlightFor(up, up * -1.0f, night, true).intensity == night.moonIntensity);
 
         const DirectionalLight quarter = moonlightFor(up, Vec3{1.0f, 0.0f, 0.0f}, night, true);
-        assert(near(quarter.intensity, night.moonIntensity * moonPhaseBrightness(radiansFromDegrees(90.0f)), 1e-6f));
+        assert(near(quarter.intensity, night.moonIntensity * std::pow(moonPhaseBrightness(radiansFromDegrees(90.0f)), night.moonPhaseContrast), 1e-6f));
+
+        // The phase contrast: 1 the real curve, 0 every phase as bright as full, the default between (a quarter moon
+        // brighter than real, darker than full).
+        LightLabNightSettings real = night;
+        real.moonPhaseContrast = 1.0f;
+        assert(near(moonlightFor(up, Vec3{1.0f, 0.0f, 0.0f}, real, true).intensity, night.moonIntensity * moonPhaseBrightness(radiansFromDegrees(90.0f)), 1e-6f));
+        LightLabNightSettings flat = night;
+        flat.moonPhaseContrast = 0.0f;
+        assert(near(moonlightFor(up, Vec3{1.0f, 0.0f, 0.0f}, flat, true).intensity, night.moonIntensity, 1e-6f));
+        assert(night.moonPhaseContrast > 0.0f && night.moonPhaseContrast < 1.0f);
+        assert(quarter.intensity > moonlightFor(up, Vec3{1.0f, 0.0f, 0.0f}, real, true).intensity && quarter.intensity < night.moonIntensity);
+        assert(moonlightFor(up, up * -1.0f, real, true).intensity == night.moonIntensity);
         assert(quarter.reflectsSun && quarter.castsShadows);
         assert(quarter.angularRadius == moonAngularRadius);
         assert(near(quarter.direction.y, -1.0f, 1e-6f));

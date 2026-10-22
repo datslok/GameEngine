@@ -95,7 +95,10 @@ GpuEyeAdaptationStep packEyeAdaptationStep(const ToneMappingSettings& settings, 
 }
 
 /*
-* With no pixels to measure, the last frame's mean stands (or the reference before any): the exposure holds still.
+* With no pixels to measure, the last frame's mean stands (or the reference before any): the exposure holds still. The
+* adapted mean steps by holdThenAdaptExposure too, in negated stops: a darker scene is a higher exposure-like number,
+* so into the dark it waits and eases at the dark time, into the light it eases at once at the bright one, as the
+* exposure does.
 */
 GpuEyeAdaptation adaptToHistogram(const GpuEyeAdaptation& previous, std::span<const std::uint32_t> counts, const ToneMappingSettings& settings,
                                   float seconds, bool snap) {
@@ -105,5 +108,7 @@ GpuEyeAdaptation adaptToHistogram(const GpuEyeAdaptation& previous, std::span<co
     const bool jump = snap || previous.measured <= 0.0f;
     const HeldExposure stepped = jump ? HeldExposure{targetEv, 0.0f}
                                       : holdThenAdaptExposure(previous.exposureEv, targetEv, previous.darkHeldSeconds, seconds, settings);
-    return GpuEyeAdaptation{stepped.exposureEv, targetEv, meanEv, 1.0f, stepped.heldSeconds, {}};
+    const HeldExposure eye = jump ? HeldExposure{-meanEv, 0.0f}
+                                  : holdThenAdaptExposure(-previous.adaptedMeanEv, -meanEv, previous.adaptedMeanHeldSeconds, seconds, settings);
+    return GpuEyeAdaptation{stepped.exposureEv, targetEv, meanEv, 1.0f, stepped.heldSeconds, -eye.exposureEv, eye.heldSeconds, 0.0f};
 }

@@ -7,17 +7,17 @@
 #include "render/gpu/bloom_shared.h"
 #include "render/gpu/eye_adaptation_shared.h"
 
-// Must match GpuEyeAdaptation: the exposure, its target and the scene's mean in stops, 1 once measured, and the dark
-// adaptation's wait.
+// Must match GpuEyeAdaptation: the exposure, its target and the scene's mean in stops, 1 once measured, the dark
+// adaptation's wait, and the scene's brightness the eye is set for (night vision's) with its own wait.
 struct EyeAdaptation {
     float exposureEv;
     float targetEv;
     float meanEv;
     float measured;
     float darkHeldSeconds;
-    float unused0;
-    float unused1;
-    float unused2;
+    float adaptedMeanEv;
+    float adaptedMeanHeldSeconds;
+    float unused;
 };
 
 float pixelLuminance(vec3 colour) {
