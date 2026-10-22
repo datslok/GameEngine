@@ -169,7 +169,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log):
 
 - SDL_GPU replaced by the engine's own Vulkan 1.3 renderer before global illumination;
 - work that does not touch the graphics API first (6a);
-- DDGI traced with hardware ray queries first, a software tracer as the lower quality setting.
+- DDGI traced with hardware ray queries first, a software tracer as the lower quality setting (moved to phase 14 on Oct 23 2026).
 
 **Done before the re-plan**
 - [x] HDR render target and tone mapping (`hdr-tone-mapping`)
@@ -244,12 +244,6 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
   - The demo's `lamp-field` by 22 (several runs on Oct 22 2026) and its `floodlights` scene image once.
   - Both have many lights at probe rays' hits, so look there first (`keepBrightestLight` ties, the order lights reach a hit, the relocation records read back a frame in flight later).
   - Details in the build log's `demo-probes` entry
-- [ ] A software tracer for GPUs without ray tracing, as the lower quality setting
-  - **What:** a global signed distance field round the camera: clipmaps of sparse 8^3 bricks holding a narrow band of distances, built in compute from the scene's triangles with an eikonal fill, the static level cached apart from what moves.
-  - **Tracing:** sphere marching in place of the probe rays' ray queries, its hits lit from a coarse volume of the scene's albedo and emissive times the probes' light, checked against the ray-traced result.
-  - Probes only need blurry diffuse light, so coarse geometry is enough.
-  - **Why not voxels:** chosen over a voxel grid (Oct 20 2026). Epic tried voxels for Lumen (cone tracing, then bit bricks) and dropped them as leaky and slow for exactly this, and AMD's Brixelizer builds the same at run time.
-  - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/LUMEN.md`
 
 **6e. Image quality**
 - [ ] Motion vectors and temporal anti-aliasing (TAA)
@@ -481,6 +475,14 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 
 ### Lighting and shadows
 
+- [ ] A software tracer for GPUs without ray tracing, as the lower quality setting
+  - **What:** a global signed distance field round the camera: clipmaps of sparse 8^3 bricks holding a narrow band of distances, built in compute from the scene's triangles with an eikonal fill, the static level cached apart from what moves.
+  - **Tracing:** sphere marching in place of the probe rays' ray queries, its hits lit from a coarse volume of the scene's albedo and emissive times the probes' light, checked against the ray-traced result.
+  - Probes only need blurry diffuse light, so coarse geometry is enough.
+  - **Why not voxels:** chosen over a voxel grid (Oct 20 2026). Epic tried voxels for Lumen (cone tracing, then bit bricks) and dropped them as leaky and slow for exactly this, and AMD's Brixelizer builds the same at run time.
+  - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/LUMEN.md`
+  - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
+  - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
 - [ ] Physical light units and a camera exposure for all lights
   - Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers).
   - The exposure would map the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen.
