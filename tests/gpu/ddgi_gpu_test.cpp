@@ -779,6 +779,24 @@ namespace {
         }
 
         {
+            // More rays than one chunk of the update's shared memory (three chunks, the last part-full): the furnace again.
+            GlobalIlluminationSettings many = settings;
+            many.raysPerProbe = 600;
+            const ProbeVolume volume{Vec3{-1.0f, 0.5f, 2.0f}, Vec3{1.0f, 1.0f, 1.5f}, ProbeCounts{2, 1, 1}};
+            FrameLighting lighting;
+            lighting.background = Vec3{0.6f, 0.75f, 1.0f};
+            const ReadAtlases atlases = runProbes(scene, {speck}, lighting, volume, many);
+
+            const std::vector<Vec3> manyRays = firstFrameRays(many.raysPerProbe);
+            const std::vector<RayResult> results(manyRays.size(), RayResult{lighting.background, static_cast<float>(DDGI_RAY_REACH)});
+            const ExpectedProbe expected = expectedProbe(manyRays, results, probeMaxDistance(volume.spacing));
+
+            for (int probe = 0; probe < probeCount(volume.counts); ++probe) {
+                checkProbe(atlases, atlasOf(volume.counts), probe, expected, "furnace, 600 rays", report);
+            }
+        }
+
+        {
             // A wall between two probes 1 m apart: one sealed in a box, the other outside under the sky. Each sees the
             // box's wall 0.6 m or less towards the other, so neither takes the other's light: shared is own, exactly.
             const ProbeVolume volume{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 1.0f, 1.0f}, ProbeCounts{2, 1, 1}};

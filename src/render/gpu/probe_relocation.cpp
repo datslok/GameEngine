@@ -241,6 +241,37 @@ ProbeStateCounts countProbeStates(std::span<const GpuProbeState> states) {
     return counts;
 }
 
+/*
+* The window wraps round the end of the list, and is put back in order afterwards, so the rays of neighbouring probes
+* (traced by neighbouring invocations) stay near each other in memory either way.
+*/
+std::vector<std::int32_t> chooseTracedProbes(std::span<const GpuProbeState> states, int capacity, std::uint64_t turn) {
+    std::vector<std::int32_t> traced;
+
+    for (std::size_t probe = 0; probe < states.size(); ++probe) {
+        if (probeTraced(static_cast<ProbeState>(states[probe].state))) {
+            traced.push_back(static_cast<std::int32_t>(probe));
+        }
+    }
+
+    const std::size_t room = static_cast<std::size_t>(std::max(capacity, 0));
+
+    if (traced.size() <= room) {
+        return traced;
+    }
+
+    const std::size_t start = static_cast<std::size_t>((turn * room) % traced.size());
+    std::vector<std::int32_t> chosen;
+    chosen.reserve(room);
+
+    for (std::size_t taken = 0; taken < room; ++taken) {
+        chosen.push_back(traced[(start + taken) % traced.size()]);
+    }
+
+    std::sort(chosen.begin(), chosen.end());
+    return chosen;
+}
+
 std::vector<int> restartedProbes(std::span<const GpuProbeState> before, std::span<const GpuProbeState> after) {
     std::vector<int> restarted;
 

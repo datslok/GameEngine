@@ -406,6 +406,44 @@ namespace {
     }
 
     /*
+    * The probes traced this frame: every awake and vigilant one, in order, while they fit the room the ray buffers have;
+    * past it, a window of that many that moves on each frame, so every traced probe has its turn within a few frames and
+    * none is traced twice in a frame.
+    */
+    void testChosenTracedProbes() {
+        std::vector<GpuProbeState> states;
+
+        for (int probe = 0; probe < 10; ++probe) {
+            states.push_back(stateRecord(probe % 3 == 0 ? ProbeState::Sleeping : (probe % 3 == 1 ? ProbeState::Vigilant : ProbeState::Awake)));
+        }
+
+        const std::vector<std::int32_t> all = chooseTracedProbes(states, 100, 7);
+        assert((all == std::vector<std::int32_t>{1, 2, 4, 5, 7, 8}));
+        assert(chooseTracedProbes(states, 6, 3) == all);
+
+        std::vector<int> times(states.size(), 0);
+
+        for (std::uint64_t frame = 0; frame < 3; ++frame) {
+            const std::vector<std::int32_t> chosen = chooseTracedProbes(states, 4, frame);
+            assert(chosen.size() == 4 && std::is_sorted(chosen.begin(), chosen.end()));
+            assert(std::adjacent_find(chosen.begin(), chosen.end()) == chosen.end());
+
+            for (const std::int32_t probe : chosen) {
+                assert(probeTraced(static_cast<ProbeState>(states[static_cast<std::size_t>(probe)].state)));
+                ++times[static_cast<std::size_t>(probe)];
+            }
+        }
+
+        // Three frames of four turns over six probes: each traced twice, none left out.
+        for (std::size_t probe = 0; probe < states.size(); ++probe) {
+            assert(times[probe] == (probe % 3 == 0 ? 0 : 2));
+        }
+
+        assert(chooseTracedProbes(states, 4, 1) == chooseTracedProbes(states, 4, 1));
+        assert(chooseTracedProbes(std::vector<GpuProbeState>{stateRecord(ProbeState::Off)}, 4, 0).empty());
+    }
+
+    /*
     * A restarted probe starts outright on its first frame: no share of its stale light kept, in either atlas, and every
     * texel restarts (no event check: its stored light means nothing here), then follows a restart's growing memory.
     */
@@ -497,6 +535,7 @@ void testProbeRelocation() {
     testProbeStates();
     testTracedStates();
     testRestartedProbes();
+    testChosenTracedProbes();
     testWokenProbesRestartOutright();
     testStaticRayMask();
     testMovingBounds();

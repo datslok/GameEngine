@@ -1716,7 +1716,21 @@ It also:
 - reads the relocation this frame in flight asked for when it last ran (`collectRelocation`);
 - asks for every probe when the cascades are new or `probeRelocation` was switched;
 - works out the frame's states (`buildCascadeStates` from the records and `movingBounds(draws)`, `restartedProbes` against last frame's) into the frame in flight's `stateUploads` (`describeProbeStates` for set 1 binding 16) and the cascades into `cascadeUploads`;
+- lists the probes it traces (`chooseTracedProbes`, `render/gpu/probe_relocation`) into the frame in flight's `tracedUploads` (their count, then their numbers), and makes room for their rays (`reserveRays`);
 - and chooses the seeds.
+
+#### The traced probes and the ray buffers
+
+- **The list:** every awake and vigilant probe, in order, while there are at most `maxTracedProbes` (`DDGI_MAX_TRACED_PROBES`, 8,192) of them. A typical frame traces 3,000 to 6,000 of the 45,000. Past the cap (before the first relocation records, when every probe counts as vigilant, and with probe states off), a window of 8,192 that moves on by that many each frame (`updatedFrames` the turn), so every one is traced in turn.
+- **The ray buffers** hold rays only for the listed probes, each at its place in the list (slot × stride + ray): room for the most rays the settings ask for (`rayCapacity`) times the most probes listed (`tracedCapacity`), grown when either needs more (waiting for the GPU then). The flags of which probes a fast light reached stay per probe.
+
+  | Rays a probe | The ray buffers (24 bytes a ray) | For every probe, as before |
+  |---|---|---|
+  | 128 (default) | 25 MB | 138 MB |
+  | 256 (Ultra) | 50 MB | 276 MB |
+  | 1024 (the most) | 201 MB | 1.1 GB |
+
+- **Rays a probe:** `DDGI_MIN_RAYS` 16 to `DDGI_MAX_RAYS` 1024 (it was 256 until `ddgi-more-rays`).
 
 #### update
 
@@ -1734,7 +1748,7 @@ Before the trace:
 
 #### Trace
 
-Trace (`ddgi_trace.comp`, `DDGI_TRACE_GROUP_SIZE` 64 invocations a group, one per ray of the stride): the scene's sets 0 to 2 (textures, the frame's scene, the ray tracing set) plus set 3, the three ray buffers.
+Trace (`ddgi_trace.comp`, `DDGI_TRACE_GROUP_SIZE` 64 invocations a group, one per ray of the stride for each listed probe): the scene's sets 0 to 2 (textures, the frame's scene, the ray tracing set) plus set 3: the three ray buffers, the probes' turns and the traced probes (binding 4).
 
 - Each invocation finds whether a fast hit light is within its probe's reach (`anyFastLightNear`, the lights' positions back in world space), and so its probe's ray count (`volumeRayCount`).
 - Ray 0 writes the probe's flag, and invocations past the probe's count stop at once (with 64-invocation groups and counts that are multiples of 64, whole groups).
@@ -1747,18 +1761,18 @@ Trace (`ddgi_trace.comp`, `DDGI_TRACE_GROUP_SIZE` 64 invocations a group, one pe
     - and last frame's probes at the hit (`probeAmbient`, diffuse only, seen from the probe, in world space) times `bounceEnergy`, the still atlas's into the still sum and the fast atlas's into the fast sum, so each frame adds a bounce.
 - Matte only: probes average gloss away.
 - Shadow rays rather than the shadow atlas, which holds only what the camera sees (the sun's cascades end at the farthest surface on screen).
-- Only awake and vigilant probes trace, from where relocation moved them (set 1 binding 16).
+- Only the listed probes trace (awake and vigilant ones), from where relocation moved them (set 1 binding 16).
 
 #### Update passes
 
 Update (`ddgi_update_irradiance.comp`, `ddgi_update_distance.comp`, both `ddgi_update.glsl` with `PROBE_TEXELS` and `UPDATE_IRRADIANCE`):
 
-- Bindings: the three ray buffers at bindings 0 to 2, the probes' turns at 3, the restarts at 4, the probes' states at 5, the cascades at 6 (for each one's longest distance), the seeds at 7, the atlases from 8.
-- One workgroup per probe, one invocation per inner texel (8 x 8, 16 x 16).
-- The probe's flag gives its ray count (`volumeRayCount`); their directions and results go into shared memory once.
+- Bindings: the three ray buffers at bindings 0 to 2, the probes' turns at 3, the traced probes at 4, the restarts at 5, the probes' states at 6, the cascades at 7 (for each one's longest distance), the seeds at 8, the atlases from 9.
+- One workgroup per listed probe, one invocation per inner texel (8 x 8, 16 x 16).
+- The probe's flag gives its ray count (`volumeRayCount`). Their directions and results go into shared memory `DDGI_UPDATE_RAY_CHUNK` (256) at a time, each texel adding a chunk into its sums in ray order between two barriers, so the sums are the same for any count. 1024 rays at once would take about 48 KB, NVIDIA's limit.
 - Each invocation sums its weights over all of them, keeps its old value when the summed weight is below 1e-6, else blends (irradiance as it is, the still and fast sums into their own atlases with their own shares kept; distances as mean and mean square), and writes in place with `imageStore`.
 - After a barrier the group copies the border from shared memory.
-- An untraced probe's group leaves at once, its atlases kept as they are.
+- A probe not in the list has no group: its atlases are kept as they are.
 
 #### Barriers
 

@@ -154,6 +154,16 @@ std::vector<GpuProbeState> buildProbeStates(const ProbeVolume& volume, std::span
 // The bounds of every draw that is not static and has bounds: what wakes sleeping probes.
 std::vector<BoundingSphere> movingBounds(std::span<const DrawItem> draws);
 
+inline constexpr int maxTracedProbes = DDGI_MAX_TRACED_PROBES;
+
+/*
+* The probes traced this frame, in order: every awake and vigilant one while there are at most capacity of them; past
+* that, capacity of them in a window that starts turn x capacity along the list (round it), so over a few frames every
+* one is traced in turn and none twice in a frame. The trace and the update work through this list, and each probe's
+* rays sit at its place in it.
+*/
+std::vector<std::int32_t> chooseTracedProbes(std::span<const GpuProbeState> states, int capacity, std::uint64_t turn);
+
 /*
 * The probes that hold light from another time or place: traced now but not before (woken, or newly vigilant), or
 * moved. They restart outright (advanceProbeRestarts). None when the sizes differ: a new volume starts fresh anyway.

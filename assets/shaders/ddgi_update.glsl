@@ -2,9 +2,11 @@
 // which define PROBE_TEXELS (texels per side of a probe's square, without its border) and UPDATE_IRRADIANCE (1 for the
 // irradiance atlases, 0 for the distances) before including it.
 //
-// One workgroup per probe, one invocation per texel of its square [2021]: the probe's rays (their directions and what
-// they brought back) are loaded once into shared memory, then each invocation averages all of them with its texel's
-// weights, blends that into the stored value and writes it back in place; once the whole square is done, the border
+// One workgroup per traced probe (the frame's list, render/gpu/probe_relocation.h, chooseTracedProbes), one invocation
+// per texel of its square [2021]: the probe's rays (their directions and what they brought back) are loaded into shared
+// memory DDGI_UPDATE_RAY_CHUNK at a time, each invocation adding each chunk into its texel's weighted sums in ray order
+// (so the sums are the same however many chunks there are), then it blends the average into the stored value and
+// writes it back in place; once the whole square is done, the border
 // is copied from it, so filtering across the square's folded edges reads the right neighbours. The irradiance update
 // does this for two atlases at once from the same rays: the still lights' and the fast lights', each with its own share
 // kept (render/gpu/ddgi.h, GlobalIlluminationSettings::fastIrradianceTimeConstant). With the adaptive memory on (the
@@ -25,8 +27,9 @@
 
 layout(local_size_x = PROBE_TEXELS, local_size_y = PROBE_TEXELS) in;
 
-// What ddgi_trace.comp wrote: the stride's room of rays per probe, and which probes a fast light reached (which traced
-// the fast count of rays); and each probe's own turn of its rays, to find their directions again.
+// What ddgi_trace.comp wrote: the stride's room of rays per traced probe, at its place in the frame's list, and which
+// probes a fast light reached (which traced the fast count of rays); and each probe's own turn of its rays, to find their
+// directions again.
 layout(std430, set = 0, binding = 0) readonly buffer ProbeRays {
     vec4 probeRays[];
 };
@@ -43,18 +46,23 @@ layout(std430, set = 0, binding = 3) readonly buffer ProbeTurns {
     ProbeTurn probeTurns[];
 };
 
+// The probes traced this frame (as the trace read them): how many, then each one's number.
+layout(std430, set = 0, binding = 4) readonly buffer TracedProbes {
+    int tracedProbes[];
+};
+
 // Each probe's scene event restarts (ProbeRestart).
-layout(std430, set = 0, binding = 4) readonly buffer ProbeRestarts {
+layout(std430, set = 0, binding = 5) readonly buffer ProbeRestarts {
     ProbeRestart probeRestarts[];
 };
 
-// Each probe's state (render/gpu/probe_relocation.h): off and sleeping probes traced nothing and keep what they hold.
-layout(std430, set = 0, binding = 5) readonly buffer ProbeStates {
+// Each probe's state (render/gpu/probe_relocation.h): off and sleeping probes are not in the list and keep what they hold.
+layout(std430, set = 0, binding = 6) readonly buffer ProbeStates {
     ProbeState probeStates[];
 };
 
 // The cascades, for the longest distance each one's probes record.
-layout(std430, set = 0, binding = 6) readonly buffer ProbeCascades {
+layout(std430, set = 0, binding = 7) readonly buffer ProbeCascades {
     ProbeCascade probeCascades[];
 };
 
@@ -66,48 +74,35 @@ struct ProbeSeedTexel {
     vec4 fast;
 };
 
-layout(std430, set = 0, binding = 7) readonly buffer ProbeSeeds {
+layout(std430, set = 0, binding = 8) readonly buffer ProbeSeeds {
     ProbeSeedTexel probeSeeds[];
 };
 
 #if UPDATE_IRRADIANCE
-layout(set = 0, binding = 8, rgba16f) uniform image2D atlas;
-layout(set = 0, binding = 9, rgba16f) uniform image2D fastAtlas;
-layout(set = 0, binding = 10, rgba16f) uniform image2D changeAtlas;
+layout(set = 0, binding = 9, rgba16f) uniform image2D atlas;
+layout(set = 0, binding = 10, rgba16f) uniform image2D fastAtlas;
+layout(set = 0, binding = 11, rgba16f) uniform image2D changeAtlas;
 #else
-layout(set = 0, binding = 8, rg16f) uniform image2D atlas;
+layout(set = 0, binding = 9, rg16f) uniform image2D atlas;
 #endif
 
-shared vec3 rayDirections[DDGI_MAX_RAYS];
-shared vec4 rayResults[DDGI_MAX_RAYS];
+shared vec3 rayDirections[DDGI_UPDATE_RAY_CHUNK];
+shared vec4 rayResults[DDGI_UPDATE_RAY_CHUNK];
 shared vec4 square[PROBE_TEXELS][PROBE_TEXELS];
 
 #if UPDATE_IRRADIANCE
-shared vec3 fastRayResults[DDGI_MAX_RAYS];
+shared vec3 fastRayResults[DDGI_UPDATE_RAY_CHUNK];
 shared vec4 fastSquare[PROBE_TEXELS][PROBE_TEXELS];
 #endif
 
 void main() {
-    int probe = int(gl_WorkGroupID.x);
-
-    // The whole workgroup leaves together, before any barrier.
-    if (!probeTraced(probeStates[probe].state)) {
-        return;
-    }
+    // One workgroup per entry of the list, so every one has a probe: the whole workgroup goes on together.
+    int slot = int(gl_WorkGroupID.x);
+    int probe = tracedProbes[1 + slot];
 
     int stride = volume.counts.w;
     int rays = volumeRayCount(probeNearFastLight[probe] != 0);
     int invocations = PROBE_TEXELS * PROBE_TEXELS;
-
-    for (int ray = int(gl_LocalInvocationIndex); ray < rays; ray += invocations) {
-        rayDirections[ray] = volumeRayDirection(ray, rays, probeTurns[probe]);
-        rayResults[ray] = probeRays[probe * stride + ray];
-#if UPDATE_IRRADIANCE
-        fastRayResults[ray] = unpackFastRayLight(fastProbeRays[probe * stride + ray]);
-#endif
-    }
-
-    barrier();
 
     ivec2 texel = ivec2(gl_LocalInvocationID.xy);
     vec3 texelDirection = probeTexelDirection(texel, PROBE_TEXELS);
@@ -132,15 +127,34 @@ void main() {
     float longest = probeCascades[probeCascadeHolding(probe, volume.cascades.x)].origin.w;
 #endif
 
-    for (int ray = 0; ray < rays; ++ray) {
+    // The rays a chunk at a time: loaded together, then added in order by every texel; the second barrier keeps the next
+    // chunk's loads from overwriting rays a texel is still adding.
+    for (int first = 0; first < rays; first += DDGI_UPDATE_RAY_CHUNK) {
+        int count = min(rays - first, DDGI_UPDATE_RAY_CHUNK);
+
+        for (int loaded = int(gl_LocalInvocationIndex); loaded < count; loaded += invocations) {
+            int ray = first + loaded;
+            rayDirections[loaded] = volumeRayDirection(ray, rays, probeTurns[probe]);
+            rayResults[loaded] = probeRays[slot * stride + ray];
 #if UPDATE_IRRADIANCE
-        float weight = irradianceRayWeight(texelDirection, rayDirections[ray]);
-        sum += vec4(rayResults[ray].rgb, 1.0) * weight;
-        fastSum += fastRayResults[ray] * weight;
-#else
-        float distance = distanceForUpdate(rayResults[ray].a, longest);
-        sum += vec4(distance, distance * distance, 0.0, 1.0) * distanceRayWeight(texelDirection, rayDirections[ray]);
+            fastRayResults[loaded] = unpackFastRayLight(fastProbeRays[slot * stride + ray]);
 #endif
+        }
+
+        barrier();
+
+        for (int ray = 0; ray < count; ++ray) {
+#if UPDATE_IRRADIANCE
+            float weight = irradianceRayWeight(texelDirection, rayDirections[ray]);
+            sum += vec4(rayResults[ray].rgb, 1.0) * weight;
+            fastSum += fastRayResults[ray] * weight;
+#else
+            float distance = distanceForUpdate(rayResults[ray].a, longest);
+            sum += vec4(distance, distance * distance, 0.0, 1.0) * distanceRayWeight(texelDirection, rayDirections[ray]);
+#endif
+        }
+
+        barrier();
     }
 
     // No ray came near this texel's direction: keep what it had.

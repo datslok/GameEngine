@@ -239,6 +239,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] The light lab's street: 60 shadowed lamps and lit windows, on at dusk or with K, the test ground for many lights at night (`light-lab-street`)
 - [x] Cascades for large worlds: nested grids following the camera, scrolled as circular buffers, scrolled-in probes seeded from the coarser cascades (`ddgi-cascades`)
 - [x] The demo's light probes: cascades round the camera, the course static, the flying lamps fast (`demo-probes`)
+- [x] Up to 1024 rays a probe, the update streaming them through shared memory and rays kept only for the traced probes (`ddgi-more-rays`)
 - [ ] Golden images that land on one of two pictures
   - The light lab's `street-night` sometimes differs from its reference by the same 73 pixels (5 beyond tolerance, up to 29 half-float steps), in a full `make golden` and on `main` before `demo-probes` too.
   - The demo's `lamp-field` by 22 (several runs on Oct 22 2026) and its `floodlights` scene image once.
