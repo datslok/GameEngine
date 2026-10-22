@@ -231,6 +231,7 @@ void advanceLabClock(LightLabSunSettings& settings, float seconds) {
 
 void visit(LightLabNightSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Moon intensity", settings.moonIntensity, {.min = 0.0f, .sliderMax = 1.0f});
+    visitor.field("Moon phase contrast", settings.moonPhaseContrast, {.min = 0.0f, .max = 1.0f});
     visitor.field("Moon disc size", settings.moonDiscScale, {.min = 0.0f, .sliderMax = 10.0f, .unit = "x real"});
     visitor.field("Star brightness", settings.starBrightness, {.min = 0.0f, .sliderMax = 20.0f, .unit = "millionths"});
     visitor.field("Star contrast", settings.starContrast, {.min = 0.0f, .max = 2.0f});
@@ -244,7 +245,7 @@ DirectionalLight moonlightFor(const Vec3& towardsMoon, const Vec3& towardsSun, c
     DirectionalLight moonlight;
     moonlight.direction = towardsMoon * -1.0f;
     moonlight.colour = labMoonColour;
-    moonlight.intensity = settings.moonIntensity * moonPhaseBrightness(moonPhaseAngle(towardsSun, towardsMoon));
+    moonlight.intensity = settings.moonIntensity * std::pow(moonPhaseBrightness(moonPhaseAngle(towardsSun, towardsMoon)), settings.moonPhaseContrast);
     moonlight.castsShadows = true;
     moonlight.angularRadius = moonAngularRadius;
     moonlight.reflectsSun = true;

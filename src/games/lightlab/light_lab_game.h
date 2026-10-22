@@ -61,6 +61,12 @@ struct LightLabNightSettings {
     // The full moon's light above the air (the sun's is sunIntensity); the phase dims it (scene/moon.h).
     float moonIntensity = 0.05f;
 
+    // How much of the phase's dimming shows: the phase curve raised to this power (1 real, 0 every phase as bright as
+    // full). The real curve leaves a quarter moon 3.5 stops below full, all of which shows once the eye adaptation is at
+    // its highest exposure; 0.5 halves the stops (a quarter moon 1.75 below), as the eye's sense of brightness, roughly a
+    // power of the light, squeezes them. Only the moon changes, so lit rooms keep their exposure.
+    float moonPhaseContrast = 0.5f;
+
     // The moon's disc against its real size, for looks only, as the sun's.
     float moonDiscScale = 5.0f;
 
@@ -88,8 +94,8 @@ void visit(LightLabNightSettings& settings, SettingsVisitor& visitor);
 inline const Vec3 labMoonColour{1.0f, 0.94f, 0.86f};
 
 /*
-* The moon's light from where it stands: from the moon (towardsMoon) at the full moon's intensity dimmed by the phase,
-* which the sun's direction sets, at the moon's angular size, shining by the sun's light (reflectsSun, so its disc is
+* The moon's light from where it stands: from the moon (towardsMoon) at the full moon's intensity dimmed by the phase
+* (as much as the phase contrast lets show), which the sun's direction sets, at the moon's angular size, shining by the sun's light (reflectsSun, so its disc is
 * drawn with its phase). With the atmosphere the renderer dims it on its way down, to nothing below the horizon; without,
 * it fades below the horizon here, as the hand-made sun does.
 */
