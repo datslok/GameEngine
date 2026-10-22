@@ -142,6 +142,9 @@ def readme_controls(readme: str, brief: bool = False) -> str:
             ))
         table.clear()
 
+    # brief keeps only tables, so a heading waits until its table comes: one over notes alone is left out.
+    waiting_heading = None
+
     for line in match.group(1).strip().split("\n"):
         line = line.strip()
         if line.startswith("|"):
@@ -149,15 +152,23 @@ def readme_controls(readme: str, brief: bool = False) -> str:
             # Skip the header row and the |---|---| line under it.
             if cells[0] == "Input" or set(cells[0]) <= {"-"}:
                 continue
+            if waiting_heading:
+                output.extend(["", waiting_heading] if output else [waiting_heading])
+                waiting_heading = None
             table.append((cells[0], brief_action(cells[1]) if brief else cells[1]))
             continue
 
         flush_table()
         is_heading = line.startswith("**") and line.endswith("**")
-        if is_heading:
+        if is_heading and brief:
+            waiting_heading = line.strip("*") + ":"
+        elif is_heading:
             output.append(line.strip("*") + ":")
-        elif line and brief:
+        elif brief:
             continue
+        elif line.startswith("- "):
+            # A list item wraps under its own text, not under the dash.
+            output.append(textwrap.fill(line.replace("**", ""), width=README_WIDTH, subsequent_indent="  "))
         elif line:
             output.append(textwrap.fill(line.replace("**", ""), width=README_WIDTH))
         elif not headed:
