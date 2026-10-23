@@ -253,7 +253,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
   - [x] Full-screen motion vectors and FSR 3.1, behind an upscaler setting, with its sharpening (`fsr`)
   - [x] DLSS through NVIDIA Streamline, after a trial with MinGW (`dlss`)
   - With TAA in place, soft shadows, DDGI sampling and screen-space effects can use far fewer samples and let the history average them.
-- [ ] Normal map filtering (Toksvig): bumps averaged away in a normal map's smaller mips become extra roughness, so distant bumpy surfaces do not sparkle; alongside TAA
+- [x] Normal map filtering (Toksvig) (`toksvig`)
 - [ ] Reflections: parallax-corrected reflection probes first, then screen-space reflections
   - So metals and wet surfaces reflect their surroundings instead of the uniform-sky stand-in.
   - Ray-traced reflections later as an RT setting (phase 14)

@@ -3,6 +3,7 @@
 #include "math/mat4.h"
 #include "math/vec3.h"
 #include "math/vec4.h"
+#include "render/gpu/normal_mapping_shared.h"
 
 /*
 * Normal mapping, mirrored from triangle.vert and triangle.frag so it can be tested: a texture of small tilts applied to
@@ -21,6 +22,14 @@ Vec3 decodeNormalTexel(const Vec3& texel, float scale);
 * as MikkTSpace asks so that the result matches the baker's. Zero when there is no usable direction.
 */
 Vec3 perturbNormal(const Vec3& normal, const Vec4& tangent, const Vec3& tangentSpaceNormal);
+
+/*
+* Normal map filtering (Toksvig 2005): the material's roughness widened by the bumps a smaller mip averaged away. A mip
+* texel is the average of the unit directions under it, shorter than 1 the more they disagree; its spread (1 - L) / L
+* adds twice over to alpha squared (alpha = roughness squared), the scale's square stretching it like the slopes. The
+* texel is 0..1 as sampled; shortening within 8-bit rounding (normal_mapping_shared.h) counts as none. At most 1.
+*/
+float toksvigRoughness(float roughness, const Vec3& texel, float scale);
 
 /*
 * A vertex tangent carried into the world: the model matrix moves it (it lies in the surface, like an edge), normalised

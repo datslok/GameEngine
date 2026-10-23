@@ -38,6 +38,10 @@ struct RenderSettings {
     // red at render/gpu/clusters.h's full scale and above.
     bool clusterHeatmap = false;
 
+    // Normal map filtering (render/gpu/normal_mapping.h, toksvigRoughness): bumps a normal map's smaller mips average away
+    // become extra roughness, so distant bumpy surfaces do not sparkle. Off shows the raw mips, for comparing.
+    bool normalMapFiltering = true;
+
     // A debug view in place of the lit scene: each pixel's first hit by a hardware-traced ray (render/gpu/ray_tracing.h)
     // as its normal, albedo or front or back face, to check the ray tracing scene against the drawn one. Only on GPUs
     // with ray queries; ignored elsewhere.

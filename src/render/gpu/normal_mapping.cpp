@@ -1,5 +1,6 @@
 #include "render/gpu/normal_mapping.h"
 
+#include <algorithm>
 #include <cmath>
 
 Vec3 decodeNormalTexel(const Vec3& texel, float scale) {
@@ -25,6 +26,24 @@ Vec3 perturbNormal(const Vec3& normal, const Vec4& tangent, const Vec3& tangentS
     }
 
     return combined * (1.0f / length);
+}
+
+/*
+* Toksvig's widened Phong lobe, 1/s' = 1/s + (1 - L) / L, carried over to GGX with alpha^2 ~ 2/s. For small tilts the
+* added alpha^2 is about the bumps' mean squared slope, both axes summed: the variances of the material's own lobe and
+* of the bumps add, like two blurs one after the other. The texel is lengthened by the rounding slack first, so a
+* full-size texel adds nothing and the material's roughness comes back exactly.
+*/
+float toksvigRoughness(float roughness, const Vec3& texel, float scale) {
+    const float length = std::min(decodeNormalTexel(texel, 1.0f).length() + static_cast<float>(NORMAL_TOKSVIG_QUANTIZATION_SLACK), 1.0f);
+    const float spread = (1.0f - length) / length * scale * scale;
+
+    if (!(spread > 0.0f)) {
+        return roughness;
+    }
+
+    const float alphaSquared = roughness * roughness * roughness * roughness + 2.0f * spread;
+    return std::min(std::sqrt(std::sqrt(alphaSquared)), 1.0f);
 }
 
 Vec4 transformTangent(const Mat4& model, const Vec4& tangent) {

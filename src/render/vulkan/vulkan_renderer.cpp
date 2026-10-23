@@ -1216,6 +1216,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     }
 
     frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth, frameUpscaler);
+    frameData.textureOptions[1] = settings.normalMapFiltering ? 1.0f : 0.0f;
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
