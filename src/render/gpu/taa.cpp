@@ -7,7 +7,6 @@
 #include <stdexcept>
 
 void visit(TaaSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Temporal anti-aliasing", settings.enabled);
     visitor.field("New frame's weight", settings.currentWeight, {.min = 0.01f, .max = 1.0f, .sliderMax = 0.5f});
     visitor.field("History clip width", settings.clipSigma, {.min = 0.0f, .max = 8.0f, .sliderMax = 3.0f, .unit = "sd"});
     visitor.field("Jitter", settings.jitter);

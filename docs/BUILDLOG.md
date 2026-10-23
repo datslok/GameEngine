@@ -844,6 +844,11 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Captures** draw 32 frames first (two jitter cycles), restarting the history and the cycle, so golden images repeat exactly. Golden images were not run or saved in this branch (only on request): every view's final image will change.
   - **Checked:** the tests (debug and release), and the validation layers in the light lab and the demo (no messages). The GPU test cases for `taa.glsl` are written and built, not run (only on request).
 
+- `taa-choice` (Oct 23 2026): the user asked for TAA to switch off by itself with FSR or DLSS on.
+  - **What ran already:** with FSR or DLSS active the engine's resolve was already skipped; the jitter and velocity pass still run, as both need them. But the TAA checkbox was a master switch (off turned FSR and DLSS off too), and F5 showed TAA on beside DLSS.
+  - **Chosen with the user:** one choice instead of two settings, "Anti-aliasing" in the Upscaling group: Off, TAA, FSR 3.1 or DLSS (`Upscaler::Off` added, `TaaSettings::enabled` removed, `temporalAntiAliasing`). Keeping both and decoupling them was weighed: a smaller change, but two settings for one thing. TAA's tuning moved to its own group, TAA. The F4 readout says NO ANTI-ALIASING when off.
+  - **Checked:** the tests (debug and release; tests first), and the light lab with the validation layers at each of Off, TAA, FSR and DLSS (no messages but FSR's first-frame note).
+
 - `ultra-dlss-defaults` (Oct 23 2026): the user asked for DLSS at Native (DLAA) and the Ultra preset as the new defaults, with sharpness 0.8.
   - **Ultra is now the defaults** (1024 probe rays, near fast lights too, no sharing between probes), and High is listed as Ultra with 256 rays and 0.1 sharing, so retuning a default retunes Ultra.
   - **DLSS at render scale 1:** where DLSS is missing (no RTX GPU, or Streamline's DLLs not fetched) it falls back to TAA as before.

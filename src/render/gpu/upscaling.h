@@ -25,15 +25,20 @@
 // The smallest render scale the settings allow: below a third the history has too few samples per output pixel.
 inline constexpr float minRenderScale = 0.33f;
 
-// Which builds the output from the jittered frames: the engine's own temporal anti-aliasing, AMD's FSR 3.1 or NVIDIA's DLSS.
+/*
+* The one anti-aliasing choice: which builds the output from the jittered frames, the engine's own temporal
+* anti-aliasing, AMD's FSR 3.1 or NVIDIA's DLSS, or none (Off: no jitter, no motion vectors, no history). FSR and DLSS
+* replace TAA's resolve; they still need its jitter and velocity pass.
+*/
 enum class Upscaler {
+    Off,
     Taa,
     Fsr,
     Dlss
 };
 
 // In the order of Upscaler's values.
-inline constexpr std::array<const char*, 3> upscalerNames{"TAA", "FSR 3.1", "DLSS"};
+inline constexpr std::array<const char*, 4> upscalerNames{"Off", "TAA", "FSR 3.1", "DLSS"};
 
 // Which of the vendors' upscalers this PC can run (their libraries loaded, the GPU able).
 struct UpscalerSupport {
@@ -42,13 +47,12 @@ struct UpscalerSupport {
 };
 
 struct UpscalingSettings {
-    // FSR and DLSS only where they are available (activeUpscaler); each needs temporal anti-aliasing on, since its
-    // jitter and velocity pass feed them all. DLSS by default at full size (DLAA; the user's choice on Oct 23 2026),
-    // which falls back to temporal anti-aliasing without an RTX GPU or Streamline's DLLs.
+    // FSR and DLSS only where they are available (activeUpscaler). DLSS by default at full size (DLAA; the user's
+    // choice on Oct 23 2026), which falls back to temporal anti-aliasing without an RTX GPU or Streamline's DLLs.
     Upscaler upscaler = Upscaler::Dlss;
 
     // The render size's share of the output's, across and down (0.5 draws a quarter of the pixels). Only while
-    // temporal anti-aliasing is on, since it is what upscales.
+    // anti-aliasing is on, since it is what upscales.
     float renderScale = 1.0f;
 
     // FSR's sharpening after it upscales (RCAS, robust contrast-adaptive sharpening): 0 for none, up to 1. 0.8 by
@@ -96,10 +100,13 @@ struct RenderSize {
 // The output's size times the scale, each side rounded to the nearest pixel, at least one and at most the output's.
 RenderSize renderSize(std::uint32_t outputWidth, std::uint32_t outputHeight, float scale);
 
-// The scale the frame is drawn at: the setting's while temporal anti-aliasing upscales, else 1.
-float appliedRenderScale(const UpscalingSettings& settings, bool temporalAntiAliasing);
+// Whether the frame is smoothed over time (TAA, FSR or DLSS): jittered, with motion vectors and a history.
+bool temporalAntiAliasing(const UpscalingSettings& settings);
 
-// The upscaler in use: FSR or DLSS when chosen and available, else temporal anti-aliasing.
+// The scale the frame is drawn at: the setting's while anti-aliasing upscales, else 1.
+float appliedRenderScale(const UpscalingSettings& settings);
+
+// The upscaler in use: FSR or DLSS when chosen and available, else temporal anti-aliasing; Off when chosen.
 Upscaler activeUpscaler(const UpscalingSettings& settings, UpscalerSupport support);
 
 // A render size kept within a range, each side on its own (DLSS takes sizes from its mode's smallest to its largest).

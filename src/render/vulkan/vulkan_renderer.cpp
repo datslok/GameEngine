@@ -490,8 +490,8 @@ void VulkanRenderer::createFixedTextures() {
 */
 void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t height, const RenderSettings& settings) {
     validateUpscaling(settings.upscaling);
-    const float scale = appliedRenderScale(settings.upscaling, settings.taa.enabled);
-    const bool dlssUpscales = settings.taa.enabled && activeUpscaler(settings.upscaling, upscalerSupport()) == Upscaler::Dlss;
+    const float scale = appliedRenderScale(settings.upscaling);
+    const bool dlssUpscales = activeUpscaler(settings.upscaling, upscalerSupport()) == Upscaler::Dlss;
     const RenderSize scene = dlssUpscales ? dlss->renderSize(width, height, scale) : renderSize(width, height, scale);
 
     if (depth && frameWidth == width && frameHeight == height && sceneSize == scene) {
@@ -888,10 +888,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // vectors and the reprojection use the camera without it, and last frame's camera made to take this frame's
     // camera-relative points (or this frame's, when there is none). FSR and DLSS, when they upscale, want a longer cycle.
     const TaaSettings& antiAliasing = settings.taa;
-    frameUpscaler = antiAliasing.enabled ? activeUpscaler(settings.upscaling, upscalerSupport()) : Upscaler::Taa;
-    const std::uint32_t jitterPhases = frameUpscaler == Upscaler::Taa ? taaJitterFrames : jitterPhaseCount(sceneSize, frameWidth);
+    const bool temporal = temporalAntiAliasing(settings.upscaling);
+    frameUpscaler = activeUpscaler(settings.upscaling, upscalerSupport());
+    const bool vendorUpscales = frameUpscaler == Upscaler::Fsr || frameUpscaler == Upscaler::Dlss;
+    const std::uint32_t jitterPhases = vendorUpscales ? jitterPhaseCount(sceneSize, frameWidth) : taaJitterFrames;
     motionViewProjection = relativeViewProjection;
-    const Vec2 jitter = antiAliasing.enabled && antiAliasing.jitter ? taaJitter(taaFrame, jitterPhases) : Vec2{};
+    const Vec2 jitter = temporal && antiAliasing.jitter ? taaJitter(taaFrame, jitterPhases) : Vec2{};
     relativeViewProjection = jitteredClip(relativeViewProjection, jitter, static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
     const Mat4 previousViewProjection = previousCamera.known
@@ -950,7 +952,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // shadow tiles' in the draw list.
     std::vector<std::size_t> moving;
 
-    if (antiAliasing.enabled) {
+    if (temporal) {
         for (std::size_t index : visible) {
             const DrawItem& draw = description.draws[index];
 
@@ -1044,7 +1046,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     beginGpuPass(frame, GpuPass::Main);
     const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, sceneSize.width, sceneSize.height);
     const std::optional<StarrySky>& stars = description.lighting.stars;
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || antiAliasing.enabled, traceProbes,
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || temporal, traceProbes,
                  description.lighting.background,
                  air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
@@ -1061,7 +1063,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::RayDebug);
     }
 
-    if (antiAliasing.enabled) {
+    if (temporal) {
         beginGpuPass(frame, GpuPass::Motion);
         drawMotion(frame, motionDraws, sceneSet, packMotionView(motionViewProjection, previousViewProjection));
         endGpuPass(frame, GpuPass::Motion);
@@ -1077,7 +1079,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
     // after the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history
     // while another draws, and all start afresh when temporal anti-aliasing is switched on again. All are timed as TAA.
-    if (antiAliasing.enabled) {
+    if (temporal) {
         beginGpuPass(frame, GpuPass::Taa);
         const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
         bool upscaledByFsr = false;
@@ -1128,7 +1130,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     stats.upscaler = frameUpscaler;
-    stats.renderScale = appliedRenderScale(settings.upscaling, antiAliasing.enabled);
+    stats.renderScale = appliedRenderScale(settings.upscaling);
 
     // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
     // mapping. Switched off, it starts afresh when switched on again.
@@ -1614,7 +1616,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     // Temporal anti-aliasing settles over two jitter cycles; the capture starts it afresh, from the first point of the
     // cycle, so it repeats exactly.
     const int framesBefore = std::max(tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0),
-                                      settings.taa.enabled ? taaSettleFrames : 0);
+                                      temporalAntiAliasing(settings.upscaling) ? taaSettleFrames : 0);
     taa->forgetHistory();
     fsrHistory = false;
     dlssHistory = false;
