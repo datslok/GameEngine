@@ -123,7 +123,7 @@ namespace {
     */
     /*
     * NVIDIA's DLSS models, as Streamline numbers its presets (sl::DLSSPreset): 0 lets DLSS pick per mode (K for DLAA),
-    * then J to M are 10 to 13. Default by default; the user found K trailing at the flashlight beam's edge.
+    * then J to M are 10 to 13. M by default: the user found K trailing at the flashlight beam's edge, M best.
     */
     void testDlssModels() {
         assert(dlssPresetNumber(DlssModel::Default) == 0);
@@ -132,7 +132,7 @@ namespace {
         assert(dlssPresetNumber(DlssModel::L) == 12);
         assert(dlssPresetNumber(DlssModel::M) == 13);
         assert(dlssModelNames.size() == static_cast<std::size_t>(DlssModel::M) + 1);
-        assert(UpscalingSettings{}.dlssModel == DlssModel::Default);
+        assert(UpscalingSettings{}.dlssModel == DlssModel::M);
     }
 
     void testDlssModes() {

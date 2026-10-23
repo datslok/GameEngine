@@ -80,8 +80,9 @@ struct UpscalingSettings {
     // default (the user's choice on Oct 23 2026; it was 0.5). DLSS and TAA do not read it.
     float sharpness = 0.8f;
 
-    // The model DLSS runs, in every mode.
-    DlssModel dlssModel = DlssModel::Default;
+    // The model DLSS runs, in every mode. M by default: it trailed least at the flashlight beam's edge, by the user's
+    // eye (Oct 23 2026), where Default (K at DLAA) trailed.
+    DlssModel dlssModel = DlssModel::M;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

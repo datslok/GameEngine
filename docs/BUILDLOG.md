@@ -847,6 +847,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 - `dlss-model` (Oct 23 2026): the user saw a trail at the edge of the flashlight's beam with DLSS, not with FSR or TAA.
   - **Why:** the flashlight moves with the camera, so its beam stays put on screen while the surfaces slide under it; the motion vectors rightly carry each surface's history along, old beam edge included, and only a check that the history no longer fits throws it away. TAA's clip into the neighbours' colour box does that; DLSS's transformer model K (its default for DLAA) holds history more strongly.
   - **First step, chosen as the cheapest:** a setting for the DLSS model in every mode (`UpscalingSettings::dlssModel`: Default, J, K, L, M), to judge by eye. NVIDIA's notes: J ghosts a little less than K but flickers more, L less than J and K but costs more, M like L, closer to J and K in speed.
+  - **The user's verdict:** M worked best, so it is the default.
   - **Next if it still trails:** a mask telling DLSS to favour this frame where fast lights shine (Streamline's `BiasCurrentColor`; FSR's reactive mask is the same idea).
   - **Checked:** the tests (debug and release; tests first), and the light lab with the validation layers on each model (no messages).
 
