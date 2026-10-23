@@ -29,7 +29,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     vec4 options;               // x: sharp roughness, y: max roughness, z: thickness, w: reach
     vec4 limits;                // x: max steps, y: the pyramid's top level, z: edge fade, w: 1 to show the confidence
     vec4 lens;                  // x: pixel footprint per metre, yz: this frame's jitter in render pixels
-    vec4 probe;                 // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run
+    vec4 probe;                 // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run, w: its far plane
     vec4 probeOrigin;           // xyz: where the probe was taken, measured from the camera
 } pass;
 
@@ -96,22 +96,57 @@ bool march(ScreenRay ray, out HizTrace found) {
     return false;
 }
 
-// The probe's reflection: the parallax search, as searchProbe, from the pixel measured from where the probe was taken.
+// The distance the probe saw towards the ray's point at t.
+float probeDistanceAt(vec3 position, vec3 direction, float t) {
+    return textureLod(probeDistance, parallaxDirection(position, direction, t), 0.0).r;
+}
+
+// The probe's reflection: the parallax search, as searchProbe, from the pixel measured from where the probe was taken:
+// the march to the first step where the ray goes behind what the probe saw, after being in front of it, then halving.
 Reflection reflectFromProbe(Glossy glossy) {
     vec3 position = glossy.position - pass.probeOrigin.xyz;
     vec3 direction = glossy.direction;
-    float t = parallaxStep(position, direction, textureLod(probeDistance, direction, 0.0).r);
+    float ratio = probeMarchRatio(pass.probe.w + length(position));
+    float t = float(PROBE_MARCH_START);
+    bool beenInFront = false;
+    float frontT = 0.0;
+    float frontDistance = 0.0;
+    float behindT = -1.0;
+    float behindDistance = 0.0;
 
-    for (int step = 0; step < PROBE_SEARCH_STEPS && t >= 0.0; ++step) {
-        t = parallaxStep(position, direction, textureLod(probeDistance, parallaxDirection(position, direction, t), 0.0).r);
+    for (int step = 0; step <= PROBE_MARCH_STEPS; ++step, t *= ratio) {
+        float stored = probeDistanceAt(position, direction, t);
+
+        if (parallaxMismatch(position, direction, t, stored) < 0.0) {
+            beenInFront = true;
+            frontT = t;
+            frontDistance = stored;
+        } else if (beenInFront) {
+            behindT = t;
+            behindDistance = stored;
+            break;
+        }
     }
 
-    if (t < 0.0) {
+    if (behindT < 0.0) {
         return Reflection(0.0, vec3(0.0));
     }
 
-    vec3 found = parallaxDirection(position, direction, t);
-    float trust = parallaxConfidence(length(position + direction * t), textureLod(probeDistance, found, 0.0).r);
+    for (int halving = 0; halving < PROBE_REFINE_STEPS; ++halving) {
+        float middle = 0.5 * (frontT + behindT);
+        float stored = probeDistanceAt(position, direction, middle);
+
+        if (parallaxMismatch(position, direction, middle, stored) < 0.0) {
+            frontT = middle;
+            frontDistance = stored;
+        } else {
+            behindT = middle;
+            behindDistance = stored;
+        }
+    }
+
+    vec3 found = parallaxDirection(position, direction, behindT);
+    float trust = parallaxConfidence(frontDistance, behindDistance);
     float rough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
     return Reflection(trust * rough, textureLod(probeLight, found, probeRoughnessLevel(glossy.roughness, pass.probe.y)).rgb);
 }

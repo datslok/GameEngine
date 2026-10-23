@@ -104,50 +104,71 @@ float probeRadialDistance(float viewDistance, const Vec3& unitDirection) {
     return viewDistance / major;
 }
 
-/*
-* |p + d t|^2 = D^2 is t^2 + 2 (p.d) t + |p|^2 - D^2 = 0 for a unit d: the larger root, t = -(p.d) + sqrt((p.d)^2 -
-* |p|^2 + D^2), is where the ray leaves the sphere of radius D round the probe. None if the ray never reaches D (the
-* sphere misses it) or reaches it only behind its start.
-*/
-float parallaxStep(const Vec3& position, const Vec3& direction, float storedDistance) {
-    const float along = position.dot(direction);
-    const float discriminant = along * along - position.dot(position) + storedDistance * storedDistance;
+float parallaxMismatch(const Vec3& position, const Vec3& direction, float t, float storedDistance) {
+    return (position + direction * t).length() - storedDistance;
+}
 
-    if (discriminant < 0.0f) {
-        return -1.0f;
-    }
-
-    const float t = -along + std::sqrt(discriminant);
-    return t >= 0.0f ? t : -1.0f;
+float probeMarchRatio(float end) {
+    return std::pow(end / static_cast<float>(PROBE_MARCH_START), 1.0f / static_cast<float>(PROBE_MARCH_STEPS));
 }
 
 Vec3 parallaxDirection(const Vec3& position, const Vec3& direction, float t) {
     return t >= 0.0f ? (position + direction * t).normalized() : direction;
 }
 
-float parallaxConfidence(float reached, float stored) {
-    const float mismatch = std::fabs(reached - stored) / std::max(stored, 1e-6f);
+float parallaxConfidence(float nearSide, float farSide) {
+    const float mismatch = std::fabs(nearSide - farSide) / std::max(std::max(nearSide, farSide), 1e-6f);
     return 1.0f - smoothStep(static_cast<float>(PROBE_MATCH_SHARE), static_cast<float>(PROBE_MISMATCH_SHARE), mismatch);
 }
 
 /*
-* Each step reads the distance the probe saw towards where the ray now is and moves the ray's point onto that distance:
-* a fixed-point search that settles where the two agree. Where the ray passes something the probe could not see, they
-* never agree, and the confidence says so.
+* The ray meets a surface the first time it goes from in front of what the probe saw to behind it (an equation
+* |P + R t| = D(direction) has other roots further on, through doorways and behind walls, which a solver might settle
+* on). Steps growing by a constant factor keep the march as fine near the start as far out. The ray must have been in
+* front first, since near its start it may sit a hair behind its own surface. At the crossing the probe's distances
+* either side agree for a real surface and jump at an edge it saw past, which the confidence weighs.
 */
-ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, const std::function<float(const Vec3&)>& distanceAt) {
-    float t = parallaxStep(position, direction, distanceAt(direction));
+ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, const std::function<float(const Vec3&)>& distanceAt) {
+    const float ratio = probeMarchRatio(far + position.length());
+    float t = static_cast<float>(PROBE_MARCH_START);
+    bool beenInFront = false;
+    float frontT = 0.0f;
+    float frontDistance = 0.0f;
+    float behindT = -1.0f;
+    float behindDistance = 0.0f;
 
-    for (int step = 0; step < PROBE_SEARCH_STEPS && t >= 0.0f; ++step) {
-        t = parallaxStep(position, direction, distanceAt(parallaxDirection(position, direction, t)));
+    for (int step = 0; step <= PROBE_MARCH_STEPS; ++step, t *= ratio) {
+        const float stored = distanceAt(parallaxDirection(position, direction, t));
+
+        if (parallaxMismatch(position, direction, t, stored) < 0.0f) {
+            beenInFront = true;
+            frontT = t;
+            frontDistance = stored;
+        } else if (beenInFront) {
+            behindT = t;
+            behindDistance = stored;
+            break;
+        }
     }
 
-    if (t < 0.0f) {
+    if (behindT < 0.0f) {
         return ParallaxLookup{direction, 0.0f};
     }
 
-    const Vec3 found = parallaxDirection(position, direction, t);
-    return ParallaxLookup{found, parallaxConfidence((position + direction * t).length(), distanceAt(found))};
+    for (int halving = 0; halving < PROBE_REFINE_STEPS; ++halving) {
+        const float middle = 0.5f * (frontT + behindT);
+        const float stored = distanceAt(parallaxDirection(position, direction, middle));
+
+        if (parallaxMismatch(position, direction, middle, stored) < 0.0f) {
+            frontT = middle;
+            frontDistance = stored;
+        } else {
+            behindT = middle;
+            behindDistance = stored;
+        }
+    }
+
+    return ParallaxLookup{parallaxDirection(position, direction, behindT), parallaxConfidence(frontDistance, behindDistance)};
 }
 
 std::uint32_t probeLevels(std::uint32_t size) {

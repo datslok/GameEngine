@@ -38,24 +38,20 @@ float probeRadialDistance(float viewDistance, vec3 unitDirection) {
     return viewDistance / max(size.x, max(size.y, size.z));
 }
 
-float parallaxStep(vec3 position, vec3 direction, float storedDistance) {
-    float along = dot(position, direction);
-    float discriminant = along * along - dot(position, position) + storedDistance * storedDistance;
+float parallaxMismatch(vec3 position, vec3 direction, float t, float storedDistance) {
+    return length(position + direction * t) - storedDistance;
+}
 
-    if (discriminant < 0.0) {
-        return -1.0;
-    }
-
-    float t = -along + sqrt(discriminant);
-    return t >= 0.0 ? t : -1.0;
+float probeMarchRatio(float end) {
+    return pow(end / float(PROBE_MARCH_START), 1.0 / float(PROBE_MARCH_STEPS));
 }
 
 vec3 parallaxDirection(vec3 position, vec3 direction, float t) {
     return t >= 0.0 ? normalize(position + direction * t) : direction;
 }
 
-float parallaxConfidence(float reached, float stored) {
-    float mismatch = abs(reached - stored) / max(stored, 1e-6);
+float parallaxConfidence(float nearSide, float farSide) {
+    float mismatch = abs(nearSide - farSide) / max(max(nearSide, farSide), 1e-6);
     return 1.0 - smoothstep(float(PROBE_MATCH_SHARE), float(PROBE_MISMATCH_SHARE), mismatch);
 }
 

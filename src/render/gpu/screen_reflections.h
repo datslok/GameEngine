@@ -210,7 +210,7 @@ struct GpuReflectionPass {
     float options[4];     // x: sharp roughness, y: max roughness, z: thickness, w: reach
     float limits[4];      // x: max steps, y: the pyramid's top level, z: edge fade, w: 1 to show the confidence
     float lens[4];        // x: pixel footprint per metre, yz: this frame's jitter in render pixels, w: unused
-    float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run
+    float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run, w: its far plane
     float probeOrigin[4]; // xyz: where the probe was taken, measured from the camera
 };
 

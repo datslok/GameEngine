@@ -349,6 +349,7 @@ GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inv
     pass.probe[0] = frame.probeLevels > 0 ? 1.0f : 0.0f;
     pass.probe[1] = static_cast<float>(frame.probeLevels);
     pass.probe[2] = frame.screenSpace ? 1.0f : 0.0f;
+    pass.probe[3] = settings.probeFar;
     pass.probeOrigin[0] = frame.probeOrigin.x;
     pass.probeOrigin[1] = frame.probeOrigin.y;
     pass.probeOrigin[2] = frame.probeOrigin.z;

@@ -3,6 +3,7 @@
 
 #include "render/gpu/reflection_probe.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -32,9 +33,10 @@ namespace {
     }
 
     /*
-    * The search's step from points near and far from the probe, rays heading out and back past it, stored distances
-    * the ray reaches and misses; the confidence from agreement to far apart. Inputs per case: (position, stored
-    * distance), (direction, t), (reached, stored, 0, 0).
+    * The march's pieces from points near and far from the probe, rays heading out and back past it, in front of and
+    * behind what the probe saw; the confidence from agreement to far apart, and march ratios for captures from a room
+    * to the far distance. Inputs per case: (position, stored distance), (direction, t), (near side, far side, march
+    * end, 0).
     */
     void checkParallax(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{127};
@@ -45,7 +47,7 @@ namespace {
             const float stored = random.between(0.1f, 40.0f);
             inputs.push_back(gpuVec4(position, stored));
             inputs.push_back(gpuVec4(random.direction(), i % 8 == 0 ? -1.0f : random.between(0.0f, 30.0f)));
-            inputs.push_back(GpuVec4{stored * random.between(0.7f, 1.3f), stored, 0.0f, 0.0f});
+            inputs.push_back(GpuVec4{stored * random.between(0.7f, 1.3f), stored, random.between(5.0f, 2000.0f), 0.0f});
         }
 
         const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PROBE_PARALLAX, inputs, 3, 2);
@@ -57,8 +59,9 @@ namespace {
             const Vec3 position = vec3From(in[0]);
             const Vec3 direction = vec3From(in[1]);
             report.check("parallaxDirection", transcendentalTolerance, parallaxDirection(position, direction, in[1][3]), vec3From(out[0]));
-            report.check("parallaxStep", distanceTolerance, parallaxStep(position, direction, in[0][3]), out[0][3]);
+            report.check("parallaxMismatch", distanceTolerance, parallaxMismatch(position, direction, std::max(in[1][3], 0.0f), in[0][3]), out[0][3]);
             report.check("parallaxConfidence", transcendentalTolerance, parallaxConfidence(in[2][0], in[2][1]), out[1][0]);
+            report.check("probeMarchRatio", transcendentalTolerance, probeMarchRatio(in[2][2]), out[1][1]);
         }
     }
 

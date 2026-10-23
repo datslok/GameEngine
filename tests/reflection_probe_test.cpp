@@ -124,14 +124,22 @@ namespace {
         }
     }
 
-    // Where the ray reaches the stored distance from the probe: ahead of its closest approach, or never.
-    void testParallaxStep() {
-        assert(near(parallaxStep(Vec3{}, Vec3{0.0f, 0.0f, 1.0f}, 5.0f), 5.0f, 1e-6f));
-        assert(near(parallaxStep(Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 2.0f), std::sqrt(3.0f), 1e-5f));
-        assert(parallaxStep(Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 0.5f) < 0.0f);
+    /*
+    * How far behind what the probe saw the ray's point is (negative: in front), and the march's steps: growing by the
+    * same factor each step from the start to the end.
+    */
+    void testParallaxMarch() {
+        assert(near(parallaxMismatch(Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.0f), std::sqrt(2.0f) - 1.0f, 1e-6f));
+        assert(near(parallaxMismatch(Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 3.0f), std::sqrt(2.0f) - 3.0f, 1e-6f));
 
-        // Heading back past the probe: the far crossing, ahead of the closest approach.
-        assert(near(parallaxStep(Vec3{3.0f, 0.0f, 0.0f}, Vec3{-1.0f, 0.0f, 0.0f}, 5.0f), 8.0f, 1e-5f));
+        const float ratio = probeMarchRatio(300.0f);
+        float t = static_cast<float>(PROBE_MARCH_START);
+
+        for (int step = 0; step < PROBE_MARCH_STEPS; ++step) {
+            t *= ratio;
+        }
+
+        assert(near(t, 300.0f, 0.01f));
 
         assert(nearVec(parallaxDirection(Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f), Vec3{1.0f, 1.0f, 0.0f}.normalized(), 1e-6f));
         assert(nearVec(parallaxDirection(Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, -1.0f), Vec3{0.0f, 1.0f, 0.0f}, 1e-6f));
@@ -142,29 +150,64 @@ namespace {
         assert(parallaxConfidence(10.0f * (1.0f - PROBE_MISMATCH_SHARE * 1.5f), 10.0f) == 0.0f);
     }
 
+    // The distance the probe at the origin sees to a wall at z = -5 with a doorway (|x| < 0.5, below y = 2) through to a
+    // back wall at z = -10, and sky (the far plane) behind it.
+    float doorwayWall(const Vec3& direction) {
+        constexpr float far = 300.0f;
+
+        if (direction.z > -1e-3f) {
+            return far;
+        }
+
+        const Vec3 onWall = direction * (5.0f / -direction.z);
+        const bool throughDoorway = std::fabs(onWall.x) < 0.5f && onWall.y < 2.0f;
+        return std::min(throughDoorway ? 10.0f / -direction.z : 5.0f / -direction.z, far);
+    }
+
     /*
-    * The search against surroundings the probe saw: a sphere round it, where the answer is exact, a wall and sky, and
-    * a world it could not have seen (everything nearer than the ray's closest approach), which it must not trust.
+    * The search against surroundings the probe saw: a sphere round it, a wall and sky, a doorway the ray passes beside
+    * (the first surface it meets is the wall, though the probe sees the room behind the doorway in the ray's own
+    * direction), a doorway it passes through, and a world the probe could not have seen, which it must not trust.
     */
     void testSearchProbe() {
+        constexpr float far = 300.0f;
         const Vec3 position{2.0f, 0.0f, 0.0f};
         const Vec3 up{0.0f, 0.0f, 1.0f};
-        const ParallaxLookup sphere = searchProbe(position, up, [](const Vec3&) { return 10.0f; });
-        assert(nearVec(sphere.direction, Vec3{2.0f, 0.0f, std::sqrt(96.0f)}.normalized(), 1e-5f) && sphere.confidence == 1.0f);
+        const ParallaxLookup sphere = searchProbe(position, up, far, [](const Vec3&) { return 10.0f; });
+        assert(nearVec(sphere.direction, Vec3{2.0f, 0.0f, std::sqrt(96.0f)}.normalized(), 2e-3f) && sphere.confidence > 0.9f);
 
-        // A wall at z = -5 facing the probe, sky (far away) elsewhere.
-        const auto wall = [](const Vec3& direction) { return direction.z < -1e-3f ? std::min(5.0f / -direction.z, 300.0f) : 300.0f; };
         const Vec3 shiny{3.0f, -1.0f, 0.0f};
         const Vec3 towardsWall = Vec3{0.3f, 0.2f, -1.0f}.normalized();
-        const ParallaxLookup onWall = searchProbe(shiny, towardsWall, wall);
-        const Vec3 hit = shiny + towardsWall * (5.0f / -towardsWall.z);
-        assert(nearVec(onWall.direction, hit.normalized(), 2e-3f) && onWall.confidence > 0.9f);
+        const ParallaxLookup onWall = searchProbe(shiny, towardsWall, far, doorwayWall);
+        const Vec3 wallHit = shiny + towardsWall * (5.0f / -towardsWall.z);
+        assert(nearVec(onWall.direction, wallHit.normalized(), 2e-3f) && onWall.confidence > 0.9f);
 
-        const ParallaxLookup onSky = searchProbe(shiny, Vec3{0.0f, 0.6f, 0.8f}, wall);
+        const ParallaxLookup onSky = searchProbe(shiny, Vec3{0.0f, 0.6f, 0.8f}, far, doorwayWall);
         assert(nearVec(onSky.direction, Vec3{0.0f, 0.6f, 0.8f}, 0.02f) && onSky.confidence > 0.9f);
 
-        const ParallaxLookup hidden = searchProbe(Vec3{5.0f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}.normalized(), [](const Vec3&) { return 2.0f; });
+        // Beside the doorway: the probe sees through it in the ray's own direction (x/z = 0.05), but the ray, starting
+        // 3 m to the side, meets the wall at x = 3.25.
+        const Vec3 beside{3.0f, 0.0f, 0.0f};
+        const Vec3 nearlyStraight = Vec3{0.05f, 0.0f, -1.0f}.normalized();
+        const ParallaxLookup besideDoorway = searchProbe(beside, nearlyStraight, far, doorwayWall);
+        assert(nearVec(besideDoorway.direction, Vec3{3.25f, 0.0f, -5.0f}.normalized(), 2e-3f) && besideDoorway.confidence > 0.9f);
+
+        // Through the doorway to the back wall.
+        const ParallaxLookup throughDoorway = searchProbe(Vec3{0.2f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, far, doorwayWall);
+        assert(nearVec(throughDoorway.direction, Vec3{0.2f, 0.0f, -10.0f}.normalized(), 2e-3f) && throughDoorway.confidence > 0.9f);
+
+        // Everything the probe saw is nearer than any point of the ray: nothing to find.
+        const ParallaxLookup hidden = searchProbe(Vec3{5.0f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}, far, [](const Vec3&) { return 2.0f; });
         assert(hidden.confidence == 0.0f);
+
+        /*
+        * Behind an edge the probe cannot see past: a ray through the doorway at a slant, on into the back room behind
+        * the wall, where the probe sees only the wall's near face. It goes behind what the probe saw where the probe's
+        * line of sight leaves the doorway: the distances on either side jump from the back wall to the wall, so the
+        * crossing is no surface and must not be trusted.
+        */
+        const ParallaxLookup acrossEdge = searchProbe(Vec3{0.0f, 0.0f, -4.9f}, Vec3{1.0f, 0.0f, -1.0f}.normalized(), far, doorwayWall);
+        assert(acrossEdge.confidence < 0.1f);
     }
 
     // Levels down to the smallest size, roughness spread evenly over them, and the source level a sample reads.
@@ -222,7 +265,7 @@ void testReflectionProbe() {
     testCubeAddressing();
     testFaceViews();
     testFaceRays();
-    testParallaxStep();
+    testParallaxMarch();
     testSearchProbe();
     testLevels();
     testPrefilter();

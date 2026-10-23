@@ -2136,7 +2136,14 @@ Six faces in Vulkan's cube order and addressing (+X, -X, +Y, -Y, +Z, -Z; `cubeFa
 
 ### The parallax search
 
-A picture from one point is wrong seen from another. For a pixel at P (measured from the probe) and its mirror direction R, the ray P + R t meets a surface where its distance from the probe equals the distance stored in its own direction (distance impostors, Szirmay-Kalos et al. 2005). `parallaxStep` solves |P + R t| = D for the stored D (the larger root, ahead of the ray's closest approach to the probe), starting as if the probe saw R at infinity, then `PROBE_SEARCH_STEPS` (6) refinements, each reading D in the direction the ray's point now lies. `parallaxConfidence` trusts the result fully while the ray's distance and the stored one agree within 3%, not at all past 15%: where the ray meets something the probe could not see (hidden from the camera's point), they never agree, and the stand-in stays. The light is read in the found direction at the level for the pixel's roughness (`probeRoughnessLevel`), faded by the same roughness fade as screen-space reflections.
+A picture from one point is wrong seen from another. For a pixel at P (measured from the probe) and its mirror direction R, the ray P + R t meets a surface where it first goes behind what the probe saw in the direction of its own point (distance impostors, Szirmay-Kalos et al. 2005), `parallaxMismatch` = |P + R t| - D(direction) going from negative to positive.
+
+- **March:** from `PROBE_MARCH_START` (2 cm) to past the far plane in `PROBE_MARCH_STEPS` (32) steps, each about a third longer than the last (`probeMarchRatio`), so the steps are as fine near the surface as far out. A crossing counts only after the ray has been in front (near its start it may sit a hair behind its own surface).
+- **Halving:** `PROBE_REFINE_STEPS` (8) halvings of the crossing's step, 256 times narrower (under a centimetre at 3 m).
+- **Confidence:** `parallaxConfidence` compares the distances the probe saw on either side of the crossing: a real surface is continuous there (trusted fully within 3%), an edge the probe saw past is a jump (not at all past 15%), where the ray passes behind something the probe cannot see past, and the stand-in stays.
+- **Why not solve the equation directly:** |P + R t| = D has other roots further along the ray, through doorways and behind walls. The first version iterated towards a root and could settle on one of those: the light lab's mirror showed the back room through the wall beside the doorway, the doorway pinched towards the floor, and curved cuts followed the sphere |P + R t| = D round the probe. Tested now with a doorway the ray passes beside, through and across the edge of (`reflection_probe_test`).
+
+The light is read in the found direction at the level for the pixel's roughness (`probeRoughnessLevel`), faded by the same roughness fade as screen-space reflections.
 
 ## Depth and camera-relative rendering
 

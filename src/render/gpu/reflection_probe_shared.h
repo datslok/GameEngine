@@ -9,12 +9,16 @@
 // the camera sees comes nearer than its own near plane.
 #define PROBE_NEAR 0.05
 
-// Steps of the parallax search after its first guess (the naive direction): each refines where the reflected ray
-// meets what the probe saw.
-#define PROBE_SEARCH_STEPS 6
+// The parallax search marches along the reflected ray from this far (metres) to beyond the capture's far plane, in
+// this many steps, each the same factor longer than the last (32 steps to 300 m: about a third longer each), then
+// halves the step where the ray first went behind what the probe saw this many times (256 times narrower).
+#define PROBE_MARCH_START 0.02
+#define PROBE_MARCH_STEPS 32
+#define PROBE_REFINE_STEPS 8
 
-// How far the reflected ray's distance from the probe and the distance the probe saw may disagree, as a share of the
-// latter, before the search is trusted less (fully trusted at the first, not at all at the second).
+// How far the distances the probe saw on either side of that crossing may disagree, as a share of the farther, before
+// the search is trusted less (fully at the first, not at all at the second): a real surface is continuous there, an
+// edge the probe saw past is a jump.
 #define PROBE_MATCH_SHARE 0.03
 #define PROBE_MISMATCH_SHARE 0.15
 

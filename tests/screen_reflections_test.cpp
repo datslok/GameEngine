@@ -422,7 +422,7 @@ namespace {
         assert(pass.limits[0] == static_cast<float>(settings.maxSteps) && pass.limits[1] == 7.0f && pass.limits[2] == settings.edgeFade);
         assert(pass.limits[3] == 0.0f);
         assert(pass.lens[0] == pixelFootprint(viewProjection, 90.0f) && pass.lens[1] == 0.25f && pass.lens[2] == -0.125f);
-        assert(pass.probe[0] == 1.0f && pass.probe[1] == 7.0f && pass.probe[2] == 1.0f);
+        assert(pass.probe[0] == 1.0f && pass.probe[1] == 7.0f && pass.probe[2] == 1.0f && pass.probe[3] == settings.probeFar);
         assert(pass.probeOrigin[0] == 1.0f && pass.probeOrigin[1] == -2.0f && pass.probeOrigin[2] == 3.0f);
 
         // Without a probe this frame (none captured yet, or switched off) and without last frame's picture.

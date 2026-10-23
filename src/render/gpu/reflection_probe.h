@@ -16,8 +16,8 @@
 *
 * A picture taken from one point is wrong seen from anywhere else (parallax): a shiny point P elsewhere wants what its
 * mirror ray meets, not what the probe sees in the same direction. The stored distances fix it (distance impostors,
-* Szirmay-Kalos et al. 2005): the ray P + R t meets a surface where its distance from the probe equals the distance the
-* probe saw in the direction of P + R t, which a few steps solve. Rough surfaces read a blurred copy: each smaller level
+* Szirmay-Kalos et al. 2005): the ray P + R t meets a surface where it first goes behind what the probe saw in the
+* direction of P + R t, which a march along the ray finds. Rough surfaces read a blurred copy: each smaller level
 * of the cube averages the light over a rougher surface's lobe of directions (prefiltering, Karis 2013).
 *
 * The cube follows Vulkan's addressing (the faces +X, -X, +Y, -Y, +Z, -Z, and where a direction lands on each), so the
@@ -60,16 +60,19 @@ GpuRayDebugView packCubeFaceRays(int face, const Vec3& origin, std::uint32_t siz
 // direction: the axis distance over the direction's largest component.
 float probeRadialDistance(float viewDistance, const Vec3& unitDirection);
 
-// The parallax search's step: the t at which the ray position + direction t (from the probe, direction of unit length)
-// is storedDistance from the probe, ahead of the ray's closest approach; -1 if it never comes that far out.
-float parallaxStep(const Vec3& position, const Vec3& direction, float storedDistance);
+// How far the ray's point at t (position + direction t, measured from the probe) is behind the distance the probe saw
+// in its direction: negative while it is in front.
+float parallaxMismatch(const Vec3& position, const Vec3& direction, float t, float storedDistance);
+
+// The factor between the parallax march's steps, from PROBE_MARCH_START to end in PROBE_MARCH_STEPS steps.
+float probeMarchRatio(float end);
 
 // The direction from the probe to the ray's point at t (normalised); the ray's own direction while t is negative.
 Vec3 parallaxDirection(const Vec3& position, const Vec3& direction, float t);
 
-// How far the search is trusted: fully while the ray's distance from the probe (reached) and the stored distance agree
-// within PROBE_MATCH_SHARE of the latter, not at all from PROBE_MISMATCH_SHARE.
-float parallaxConfidence(float reached, float stored);
+// How far a crossing is trusted, from the distances the probe saw on its near and far side: fully while they agree
+// within PROBE_MATCH_SHARE of the farther, not at all from PROBE_MISMATCH_SHARE (an edge the probe saw past).
+float parallaxConfidence(float nearSide, float farSide);
 
 // The search's result: the direction to read the probe in, and how far it is trusted.
 struct ParallaxLookup {
@@ -77,10 +80,13 @@ struct ParallaxLookup {
     float confidence = 0.0f;
 };
 
-// The whole search, as reflections.comp runs it, reading distances through distanceAt (a unit direction from the
-// probe to the distance stored there): a first guess as if the probe saw the ray's end at infinity, then
-// PROBE_SEARCH_STEPS refinements.
-ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, const std::function<float(const Vec3&)>& distanceAt);
+/*
+* The whole search, as reflections.comp runs it, reading distances through distanceAt (a unit direction from the probe
+* to the distance stored there), for a capture reaching far: the march finds the first step where the ray goes behind
+* what the probe saw, after having been in front of it, and halving narrows it down. Nothing found (the ray never in
+* front, or never behind before the far plane) trusts nothing.
+*/
+ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, const std::function<float(const Vec3&)>& distanceAt);
 
 // The prefiltered cube's levels for a face of this size: down to PROBE_SMALLEST_LEVEL_SIZE texels, at least one.
 std::uint32_t probeLevels(std::uint32_t size);
