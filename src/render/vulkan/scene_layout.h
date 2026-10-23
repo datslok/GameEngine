@@ -53,7 +53,8 @@ enum SceneBinding : std::uint32_t {
     MirroredDirectionBinding = 23,
     MirrorPairsBinding = 24,
     AmbientOcclusionBinding = 25,
-    SceneBindingCount = 26
+    GlassBoundsBinding = 26,
+    SceneBindingCount = 27
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -128,6 +129,9 @@ struct SceneBuffers {
 
     // The pairs of a fast light and a shiny surface the mirrored light search runs over (GpuMirrorPairs; none when off).
     UploadArray mirrorPairs;
+
+    // The glass a ray towards a light may cross, tested before tracing it (GpuGlassBounds; none without glass shadows).
+    UploadArray glassBounds;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light

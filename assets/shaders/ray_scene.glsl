@@ -100,20 +100,107 @@ MeshTriangle meshTriangleAt(uint mesh, uint triangle) {
 }
 
 #ifdef RAY_SCENE_MATERIALS
+// The glass and blended surfaces' light (render/gpu/transparency.h).
+#include "transparency.glsl"
+
+// Glass is seen through, never solid: blended (its alpha a coverage) or transmitting (render/gpu/transparency.h).
+bool isTransparentMaterial(MaterialData material) {
+    return (material.extra.y & MATERIAL_BLEND) != 0u || material.transmission.x > 0.0;
+}
+
 // Whether a candidate hit lands on a cut-out's solid texel rather than a hole (render/gpu/alpha_mask.h). Only cut-outs
-// give candidates (their instances are not opaque); the full-size texel is read, as rays have no screen footprint.
+// and glass give candidates (their instances are not opaque); glass is never solid, so rays that see it (those asking
+// for everything) pass through it. The full-size texel is read, as rays have no screen footprint.
 bool candidateIsSolid(rayQueryEXT query) {
     InstanceData instance = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
     MaterialData material = materials[instance.material.x];
+
+    if (isTransparentMaterial(material)) {
+        return false;
+    }
+
     vec2 uv = meshSurfaceAt(instance.material.y, rayQueryGetIntersectionPrimitiveIndexEXT(query, false),
                             rayQueryGetIntersectionBarycentricsEXT(query, false)).uv;
     float alpha = textureLod(textures[nonuniformEXT(material.textureSlots.x)], uv, 0.0).a * material.baseColour.a;
     return !isCutAway(alpha, material.emissive.w);
 }
+
+// The glass a ray may meet (GpuGlassBounds): x the spheres held, y 1 when every ray must be traced.
+layout(std430, set = 1, binding = 26) readonly buffer GlassBounds {
+    uvec4 glassCounts;
+    vec4 glassSpheres[TRANSPARENCY_GLASS_BOUNDS_LIMIT];
+};
+
+// Whether a segment may meet glass by the bounds (glassMayLieBetween in transparency.cpp).
+bool glassMayLieBetween(vec3 from, vec3 direction, float segmentLength) {
+    if (glassCounts.y != 0u) {
+        return true;
+    }
+
+    for (uint i = 0u; i < glassCounts.x; ++i) {
+        if (segmentMeetsSphere(from, direction, segmentLength, glassSpheres[i].xyz, glassSpheres[i].w)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+* The light one glass candidate lets through towards a light along direction: nothing changed by a face turned away from
+* the light (glassFaceCounts), else its coverage, transmission and colour at the hit (full-size texels) and the angle to
+* its smoothed normal.
+*/
+vec3 candidateGlassTransmittance(rayQueryEXT query, vec3 direction) {
+    InstanceData instance = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
+    MaterialData material = materials[instance.material.x];
+
+    if (!glassFaceCounts(rayQueryGetIntersectionFrontFaceEXT(query, false), (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u)) {
+        return vec3(1.0);
+    }
+
+    MeshSurface surface = meshSurfaceAt(instance.material.y, rayQueryGetIntersectionPrimitiveIndexEXT(query, false),
+                                        rayQueryGetIntersectionBarycentricsEXT(query, false));
+    vec4 albedo = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0) * material.baseColour;
+    float metallic = clamp(material.surfaceParameters.x * textureLod(textures[nonuniformEXT(material.textureSlots.y)], surface.uv, 0.0).b, 0.0, 1.0);
+    float transmission = material.transmission.x * textureLod(textures[nonuniformEXT(material.extra.z)], surface.uv, 0.0).r;
+    float coverage = (material.extra.y & MATERIAL_BLEND) != 0u ? albedo.a : 1.0;
+    vec3 normal = mat3(instance.normalMatrix) * surface.normal;
+    float normalLength = length(normal);
+    float cosine = normalLength > 0.0 ? dot(normal, direction) / normalLength : 1.0;
+    return glassLightTransmittance(coverage, transmission, metallic, albedo.rgb, cosine);
+}
+
+/*
+* The share of light (per channel) that passes the glass between a point and a light along direction within reach: the
+* product over every pane the ray crosses, in any order (none is confirmed, so the query walks them all), stopping once
+* nothing passes. Rays the glass's bounds rule out are not traced. 1 without glass.
+*/
+vec3 glassTransmittance(vec3 from, vec3 direction, float reach) {
+    if (!glassMayLieBetween(from, direction, reach)) {
+        return vec3(1.0);
+    }
+
+    vec3 passing = vec3(1.0);
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, RAY_MASK_GLASS, from, 0.0, direction, reach);
+
+    while (rayQueryProceedEXT(query)) {
+        if (rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            passing *= candidateGlassTransmittance(query, direction);
+
+            if (all(lessThanEqual(passing, vec3(0.0)))) {
+                rayQueryTerminateEXT(query);
+            }
+        }
+    }
+
+    return passing;
+}
 #endif
 
 // Runs a query to its nearest solid hit (or, with gl_RayFlagsTerminateOnFirstHitEXT, any solid hit): a hit in a
-// cut-out's hole is passed over. Every ray query in the renderer goes through here.
+// cut-out's hole, or on glass, is passed over. Every ray query in the renderer but glassTransmittance's goes through here.
 void traceRayQuery(rayQueryEXT query) {
     while (rayQueryProceedEXT(query)) {
 #ifdef RAY_SCENE_MATERIALS
@@ -146,5 +233,12 @@ bool reachesLight(vec3 from, vec3 toLight, float reach) {
     traceRayQuery(query);
     return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
 }
+
+#ifdef RAY_SCENE_MATERIALS
+// The share of a light (per channel) reaching a point: none past anything solid, else what the glass on the way passes.
+vec3 lightThrough(vec3 from, vec3 toLight, float reach) {
+    return reachesLight(from, toLight, reach) ? glassTransmittance(from, toLight, reach) : vec3(0.0);
+}
+#endif
 
 #endif

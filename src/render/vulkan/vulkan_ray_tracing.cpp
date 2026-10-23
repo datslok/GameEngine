@@ -158,7 +158,8 @@ void VulkanRayTracing::addMesh(ImmediateCommands& uploads, const VulkanMesh& mes
     VkAccelerationStructureGeometryKHR geometry{};
     geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    // Each triangle a candidate at most once along a ray: glass's tint multiplies in once per pane it crosses.
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR | VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
     geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
     geometry.geometry.triangles.vertexData.deviceAddress = mesh.getVertexAddress();

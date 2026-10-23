@@ -158,6 +158,7 @@ namespace {
     // On by default; a negative scale or a limit outside 0..1 is refused.
     void testTransparencySettings() {
         const TransparencySettings defaults;
+        assert(defaults.glassShadows);
         assert(defaults.reactiveMask && defaults.reactiveScale == 1.0f && defaults.reactiveLimit > 0.0f && defaults.reactiveLimit <= 1.0f);
         validateTransparency(defaults);
 
@@ -178,6 +179,94 @@ namespace {
         assert(refused(bad));
         bad.reactiveLimit = -0.1f;
         assert(refused(bad));
+    }
+
+    // What glass lets through is one function, shared by the blend over the picture and the light crossing it.
+    void testTransmittanceSharedWithBlend() {
+        for (float alpha : {0.0f, 0.3f, 1.0f}) {
+            for (float transmission : {0.0f, 0.6f, 1.0f}) {
+                for (float metallic : {0.0f, 0.5f}) {
+                    const TransparentLight light = transparentBlend(alpha, transmission, metallic, diffuseLight, specularLight, glow, tint, specularAlbedo);
+                    assert(nearVec(transparentTransmittance(alpha, transmission, metallic, tint, specularAlbedo), light.transmittance));
+                }
+            }
+        }
+    }
+
+    /*
+    * Light crossing a pane: what the glass lets through, its reflection's share at that angle by Schlick's Fresnel (4%
+    * head-on for glass, all of it at grazing), whichever side the light comes from.
+    */
+    void testGlassLightTransmittance() {
+        const Vec3 white{1.0f, 1.0f, 1.0f};
+        assert(nearVec(glassLightTransmittance(1.0f, 1.0f, 0.0f, white, 1.0f), Vec3{0.96f, 0.96f, 0.96f}));
+        assert(nearVec(glassLightTransmittance(1.0f, 1.0f, 0.0f, white, -1.0f), Vec3{0.96f, 0.96f, 0.96f}));
+        assert(nearVec(glassLightTransmittance(1.0f, 1.0f, 0.0f, tint, 1.0f), tint * 0.96f));
+        assert(nearVec(glassLightTransmittance(1.0f, 1.0f, 0.0f, white, 0.0f), Vec3{0.0f, 0.0f, 0.0f}));
+
+        const float fresnel = 0.04f + 0.96f * std::pow(1.0f - 0.5f, 5.0f);
+        assert(nearVec(glassLightTransmittance(1.0f, 1.0f, 0.0f, white, 0.5f), white * (1.0f - fresnel)));
+
+        // Metals and opaque surfaces pass nothing; coverage lets the uncovered share through untouched.
+        assert(nearVec(glassLightTransmittance(1.0f, 1.0f, 1.0f, white, 1.0f), Vec3{0.0f, 0.0f, 0.0f}));
+        assert(nearVec(glassLightTransmittance(1.0f, 0.0f, 0.0f, white, 1.0f), Vec3{0.0f, 0.0f, 0.0f}));
+        assert(nearVec(glassLightTransmittance(0.0f, 0.0f, 0.0f, tint, 1.0f), white));
+        assert(nearVec(glassLightTransmittance(0.25f, 0.0f, 0.0f, tint, 1.0f), Vec3{0.75f, 0.75f, 0.75f}));
+    }
+
+    /*
+    * Which faces a ray towards a light counts: those turned towards the light (met from behind by the ray, which runs
+    * from the lit point to the light), as the camera draws only the faces turned towards it, so a pane modelled as a
+    * thin box tints once; a double-sided surface counts from either side, as it is drawn.
+    */
+    void testGlassFaces() {
+        assert(glassFaceCounts(false, false));
+        assert(!glassFaceCounts(true, false));
+        assert(glassFaceCounts(true, true) && glassFaceCounts(false, true));
+    }
+
+    // Whether a segment (a point, a unit direction, a length) passes within a sphere.
+    void testSegmentMeetsSphere() {
+        const Vec3 start{0.0f, 0.0f, 0.0f};
+        const Vec3 east{1.0f, 0.0f, 0.0f};
+        assert(segmentMeetsSphere(start, east, 10.0f, Vec3{5.0f, 0.0f, 0.0f}, 1.0f));
+        assert(segmentMeetsSphere(start, east, 10.0f, Vec3{5.0f, 0.9f, 0.0f}, 1.0f));
+        assert(!segmentMeetsSphere(start, east, 10.0f, Vec3{5.0f, 1.1f, 0.0f}, 1.0f));
+        assert(!segmentMeetsSphere(start, east, 3.0f, Vec3{5.0f, 0.0f, 0.0f}, 1.0f));
+        assert(!segmentMeetsSphere(start, east, 10.0f, Vec3{-5.0f, 0.0f, 0.0f}, 1.0f));
+        assert(segmentMeetsSphere(start, east, 10.0f, Vec3{-0.5f, 0.0f, 0.0f}, 1.0f));
+        assert(segmentMeetsSphere(start, east, 4.5f, Vec3{5.0f, 0.0f, 0.0f}, 1.0f));
+    }
+
+    /*
+    * The glass the shaders test a shadow ray against before tracing it: every transparent draw's bounds (not only those
+    * on screen: a window behind the camera still shades the floor in front of it), none when glass shadows are off. A
+    * draw without bounds, or more glass than the buffer holds, makes every ray traced.
+    */
+    void testGlassBounds() {
+        std::vector<DrawItem> draws{drawAt(0, Vec3{0.0f, 1.0f, -5.0f}, false, false), drawAt(1, Vec3{3.0f, 1.0f, 0.0f}, false, false),
+                                    drawAt(2, Vec3{9.0f, 0.0f, 0.0f})};
+        draws[0].material.transmission = 1.0f;
+
+        const GpuGlassBounds bounds = packGlassBounds(draws, true);
+        assert(bounds.counts[0] == 2 && bounds.counts[1] == 0);
+        assert(bounds.spheres[0][0] == 0.0f && bounds.spheres[0][1] == 1.0f && bounds.spheres[0][2] == -5.0f);
+        assert(bounds.spheres[0][3] == draws[0].bounds.radius && bounds.spheres[1][0] == 9.0f);
+        assert(packGlassBounds(draws, false).counts[0] == 0);
+
+        // A ray through the first pane's sphere may meet glass; one past them all cannot; without glass nothing can.
+        assert(glassMayLieBetween(bounds, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 20.0f));
+        assert(!glassMayLieBetween(bounds, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 20.0f));
+        assert(!glassMayLieBetween(packGlassBounds(draws, false), Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 20.0f));
+
+        DrawItem unbounded = draws[0];
+        unbounded.bounds = BoundingSphere{};
+        const GpuGlassBounds everywhere = packGlassBounds({unbounded}, true);
+        assert(everywhere.counts[1] == 1 && glassMayLieBetween(everywhere, Vec3{}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f));
+
+        const std::vector<DrawItem> crowd(glassBoundsLimit + 1, draws[0]);
+        const GpuGlassBounds crowded = packGlassBounds(crowd, true);
+        assert(crowded.counts[0] == glassBoundsLimit && crowded.counts[1] == 1);
     }
 
     // The mask pass is told the render screen it walks and the settings.
@@ -202,4 +291,9 @@ void testTransparency() {
     testReactiveShare();
     testTransparencySettings();
     testReactivePass();
+    testTransmittanceSharedWithBlend();
+    testGlassLightTransmittance();
+    testGlassFaces();
+    testSegmentMeetsSphere();
+    testGlassBounds();
 }

@@ -316,8 +316,24 @@ namespace {
 
     // Where each main pass pipeline is in mainPipelines: one bit per choice. A cut-out pipeline is only made, and only
     // needed, without the prepass.
-    std::size_t mainPipelineIndex(bool afterPrepass, bool probes, bool reflectionSurfaces, bool cutOut) {
-        return (afterPrepass ? 1u : 0u) | (probes ? 2u : 0u) | (reflectionSurfaces ? 4u : 0u) | (cutOut && !afterPrepass ? 8u : 0u);
+    std::size_t mainPipelineIndex(bool afterPrepass, bool probes, bool reflectionSurfaces, bool cutOut, bool glassRays) {
+        return (afterPrepass ? 1u : 0u) | (probes ? 2u : 0u) | (reflectionSurfaces ? 4u : 0u) | (cutOut && !afterPrepass ? 8u : 0u) |
+               (glassRays ? 16u : 0u);
+    }
+
+    // The main pass's description (createPipelines), which its variants, the prepass and glass start from.
+    PipelineDescription mainPassPipeline(VkPipelineLayout layout, VkFormat colourFormat, VkFormat depthFormat) {
+        PipelineDescription main;
+        main.vertexShader = "assets/shaders/triangle.vert.spv";
+        main.fragmentShader = "assets/shaders/triangle.frag.spv";
+        main.sharedLayout = layout;
+        main.vertices = meshVertices();
+        main.cullMode = VK_CULL_MODE_BACK_BIT;
+        main.dynamicCullMode = true;
+        main.colourFormat = colourFormat;
+        main.depthFormat = depthFormat;
+        setDepthState(main, mainPassDepthState(false));
+        return main;
     }
 
     std::size_t capturePipelineIndex(bool probes, bool cutOut) {
@@ -334,50 +350,9 @@ namespace {
 * reset draws the full-screen triangle at the far depth with a test that always passes, overwriting one tile.
 */
 void VulkanRenderer::createPipelines() {
-    PipelineDescription main;
-    main.vertexShader = "assets/shaders/triangle.vert.spv";
-    main.fragmentShader = "assets/shaders/triangle.frag.spv";
-    main.sharedLayout = sceneLayout->getPipelineLayout(); // everything from the scene's sets
-    main.vertices = meshVertices();
-    main.cullMode = VK_CULL_MODE_BACK_BIT;
-    main.dynamicCullMode = true;
-    main.colourFormat = sceneColourFormat;
-    main.depthFormat = depthFormat;
-    setDepthState(main, mainPassDepthState(false));
-
-    // Each combination: after the prepass or not, sampling the light probes (for frames that have them) or not, writing
-    // the reflection surfaces (their own targets and shader, triangle_surfaces.frag) or not, and without the prepass
-    // drawing cut-outs or not. A pipeline without probes, reflections or cut-outs is the plain shader with no constants,
-    // as before they existed.
-    for (bool afterPrepass : {false, true}) {
-        for (bool probes : {false, true}) {
-            for (bool surfaces : {false, true}) {
-                for (bool cutOut : {false, true}) {
-                    if (cutOut && afterPrepass) {
-                        continue;
-                    }
-
-                    PipelineDescription variant = main;
-                    setDepthState(variant, mainPassDepthState(afterPrepass));
-
-                    if (surfaces) {
-                        variant.fragmentShader = "assets/shaders/triangle_surfaces.frag.spv";
-                        variant.extraColourFormats = reflections->surfaceFormats();
-                    }
-
-                    if (probes || cutOut) {
-                        variant.fragmentConstants = {probes ? 1u : 0u};
-                    }
-
-                    if (cutOut) {
-                        variant.fragmentConstants.push_back(1u); // MATERIAL_CUT_OUT_CONSTANT
-                    }
-
-                    mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces, cutOut)] = std::make_unique<VulkanPipeline>(device, layouts, variant);
-                }
-            }
-        }
-    }
+    // Everything from the scene's sets.
+    const PipelineDescription main = mainPassPipeline(sceneLayout->getPipelineLayout(), sceneColourFormat, depthFormat);
+    createMainPipelines(false, sceneLayout->getPipelineLayout());
 
     for (bool probes : {false, true}) {
         for (bool cutOut : {false, true}) {
@@ -478,6 +453,52 @@ void VulkanRenderer::createPipelines() {
 }
 
 /*
+* Each combination: after the prepass or not, sampling the light probes (for frames that have them) or not, writing the
+* reflection surfaces (their own targets and shader, triangle_surfaces.frag) or not, and without the prepass drawing
+* cut-outs or not. A pipeline without probes, reflections or cut-outs is the plain shader with no constants, as before
+* they existed. The glass ray pipelines are the same with the shaders that also trace glass (triangle_rays.frag,
+* triangle_surfaces_rays.frag), in a layout with the ray tracing set.
+*/
+void VulkanRenderer::createMainPipelines(bool glassRays, VkPipelineLayout layout) {
+    const PipelineDescription main = mainPassPipeline(layout, sceneColourFormat, depthFormat);
+
+    for (bool afterPrepass : {false, true}) {
+        for (bool probes : {false, true}) {
+            for (bool surfaces : {false, true}) {
+                for (bool cutOut : {false, true}) {
+                    if (cutOut && afterPrepass) {
+                        continue;
+                    }
+
+                    PipelineDescription variant = main;
+                    setDepthState(variant, mainPassDepthState(afterPrepass));
+
+                    if (glassRays) {
+                        variant.fragmentShader = "assets/shaders/triangle_rays.frag.spv";
+                    }
+
+                    if (surfaces) {
+                        variant.fragmentShader = glassRays ? "assets/shaders/triangle_surfaces_rays.frag.spv" : "assets/shaders/triangle_surfaces.frag.spv";
+                        variant.extraColourFormats = reflections->surfaceFormats();
+                    }
+
+                    if (probes || cutOut) {
+                        variant.fragmentConstants = {probes ? 1u : 0u};
+                    }
+
+                    if (cutOut) {
+                        variant.fragmentConstants.push_back(1u); // MATERIAL_CUT_OUT_CONSTANT
+                    }
+
+                    mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces, cutOut, glassRays)] =
+                        std::make_unique<VulkanPipeline>(device, layouts, variant);
+                }
+            }
+        }
+    }
+}
+
+/*
 * Ray tracing, when the GPU has ray queries: the acceleration structures, and the debug view's pipeline, the full-screen
 * triangle with ray_debug.frag, whose layout is the scene's two sets (textures, the frame's instances and materials),
 * then the ray tracing set, and its camera as fragment push constants.
@@ -517,21 +538,24 @@ void VulkanRenderer::createRayTracing() {
     mirroredLights = std::make_unique<VulkanMirroredLights>(device, nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout(),
                                                             rayTracing->getSetLayout(), framesInFlight);
 
-    // The reflection probe's capture tracing the sun's shadow past its cascades: the scene's sets and the ray tracing
-    // set, and the scene's push constants (each face's view-projection).
+    // The reflection probe's capture tracing the sun's shadow past its cascades, and the main pass tinting shadowed
+    // lights through glass: the scene's sets and the ray tracing set, and the scene's push constants (each face's
+    // view-projection; the main pass pushes none).
     const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
-    VkPipelineLayoutCreateInfo captureLayoutInfo = layoutInfo;
-    captureLayoutInfo.pPushConstantRanges = &faceView;
-    VkPipelineLayout createdCapture = VK_NULL_HANDLE;
-    vulkanCheck(vkCreatePipelineLayout(device.getDevice(), &captureLayoutInfo, nullptr, &createdCapture), "Probe capture layout creation failed");
-    captureRaysLayout = OwnedHandle<VkPipelineLayout>{device.getDevice(), createdCapture, vkDestroyPipelineLayout};
+    VkPipelineLayoutCreateInfo raysLayoutInfo = layoutInfo;
+    raysLayoutInfo.pPushConstantRanges = &faceView;
+    VkPipelineLayout createdRays = VK_NULL_HANDLE;
+    vulkanCheck(vkCreatePipelineLayout(device.getDevice(), &raysLayoutInfo, nullptr, &createdRays), "Scene rays layout creation failed");
+    sceneRaysLayout = OwnedHandle<VkPipelineLayout>{device.getDevice(), createdRays, vkDestroyPipelineLayout};
 
     for (bool probes : {false, true}) {
         for (bool cutOut : {false, true}) {
             capturePipelines[capturePipelineIndex(probes, cutOut)] = std::make_unique<VulkanPipeline>(
-                device, layouts, capturePipeline(probes, cutOut, "assets/shaders/probe_capture_rays.frag.spv", captureRaysLayout.get()));
+                device, layouts, capturePipeline(probes, cutOut, "assets/shaders/probe_capture_rays.frag.spv", sceneRaysLayout.get()));
         }
     }
+
+    createMainPipelines(true, sceneRaysLayout.get());
 
     // The light probes write their atlases from compute; every GPU with ray queries can, but it is checked anyway.
     const VkFormatFeatureFlags2 atlasUse = VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT;
@@ -1234,10 +1258,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ambientOcclusion->ensureSize(sceneSize);
     }
 
+    // Tinted shadows (render/gpu/transparency.h): on GPUs with ray queries, while glass is anywhere in the world (a window
+    // off screen still shades what is on it), shadowed lights pass through it by rays.
+    const bool glassShadows = rayTracing && settings.transparency.glassShadows &&
+                              std::any_of(description.draws.begin(), description.draws.end(), [](const DrawItem& draw) { return isTransparent(draw.material); });
+
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
-                                                hitLights, mirrorPairs, occlusion, occlusionBlurred);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, glassShadows);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1246,13 +1275,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
-    // probes, the debug view, the reflection probe's capture, ray-traced reflections or mirrored lights.
+    // probes, the debug view, the reflection probe's capture, ray-traced reflections, mirrored lights or glass shadows.
     const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
 
     const bool captureTracesRays = captureProbe && rayTracing;
     const bool reflectionsTraceRays = screenReflections && settings.reflections.rayTraced && reflections->tracesRays();
 
-    if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays || mirrorLight) {
+    if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays || mirrorLight || glassShadows) {
         beginGpuPass(frame, GpuPass::RayScene);
         rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
         endGpuPass(frame, GpuPass::RayScene);
@@ -1317,7 +1346,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, sceneSize.width, sceneSize.height);
     const std::optional<StarrySky>& stars = description.lighting.stars;
     drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || temporal || !transparent.batches.empty(), traceProbes,
-                 screenReflections,
+                 screenReflections, glassShadows ? rayTracing->getSceneSet(frame.frameIndex) : VK_NULL_HANDLE,
                  description.lighting.background,
                  air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
@@ -1513,7 +1542,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
-                                           bool occlusionBlurred) {
+                                           bool occlusionBlurred, bool glassShadows) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1575,6 +1604,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.probeHitLights.write(hitLights.lights);
     const GpuMirrorPairs packedPairs = packMirrorPairs(mirrorPairs, settings.mirroredLights);
     buffers.mirrorPairs.write(&packedPairs, sizeof(packedPairs));
+    const GpuGlassBounds glassBounds = packGlassBounds(description.draws, glassShadows);
+    buffers.glassBounds.write(&glassBounds, sizeof(glassBounds));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
     buffers.directionalLights.write(lights.directional);
@@ -1792,8 +1823,8 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 * Afterwards the scene image becomes readable for bloom and tone mapping.
 */
 void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
-                                  bool keepDepth, bool sampleProbes, bool reflectionSurfaces, const Vec3& background, const GpuRayDebugView* sky,
-                                  const StarrySky* stars) {
+                                  bool keepDepth, bool sampleProbes, bool reflectionSurfaces, VkDescriptorSet glassRaySet, const Vec3& background,
+                                  const GpuRayDebugView* sky, const StarrySky* stars) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
@@ -1816,9 +1847,18 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     renderingOpen = true;
 
     // After the prepass a cut-out's holes have no depth to match, so the plain pipeline draws it too.
-    const VulkanPipeline& pipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, false)];
-    const VulkanPipeline& cutOutPipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, true)];
-    bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+    // With glass rays, the ray tracing set goes beside the scene's two.
+    const bool glassRays = glassRaySet != VK_NULL_HANDLE;
+    const VulkanPipeline& pipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, false, glassRays)];
+    const VulkanPipeline& cutOutPipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, true, glassRays)];
+
+    if (glassRays) {
+        const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, glassRaySet};
+        vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, sceneRaysLayout.get(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(),
+                                0, nullptr);
+    } else {
+        bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+    }
     stats.drawCalls += drawBatches(commands, mainDraws.batches, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
 
     /*

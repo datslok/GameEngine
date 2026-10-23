@@ -20,6 +20,7 @@
 inline constexpr std::uint32_t solidRayMask = RAY_MASK_SOLID;
 inline constexpr std::uint32_t visualOnlyRayMask = RAY_MASK_VISUAL_ONLY;
 inline constexpr std::uint32_t staticRayMask = RAY_MASK_STATIC;
+inline constexpr std::uint32_t glassRayMask = RAY_MASK_GLASS;
 inline constexpr std::uint32_t everythingRayMask = RAY_MASK_EVERYTHING;
 
 // An instance's number has 24 bits.
@@ -27,7 +28,8 @@ inline constexpr std::uint32_t maxRayInstances = 1u << 24;
 
 // Which rays see a drawn object: shadow casters are solid (they block light, so light-gathering rays see them); the
 // rest only rays that want everything drawn (reflections, the debug view). Static shadow casters carry the static bit
-// as well, for light probe relocation. Transparent ones (glass) are in no ray's world for now: every ray passes through.
+// as well, for light probe relocation. Transparent ones (glass) carry only the glass bit: rays that ask for glass pass
+// through each pane, tinted by it (render/gpu/transparency.h); the rest never see it.
 std::uint32_t rayMaskFor(const DrawItem& draw);
 
 /*
@@ -49,7 +51,7 @@ static_assert(sizeof(GpuRayInstance) == 64, "GpuRayInstance must match VkAcceler
 inline constexpr std::uint32_t rayInstanceNotOpaque = 0x8;
 
 // The draw as instance number instanceNumber (the frame's instance i, so a hit finds its GpuInstance), with its mask and
-// the given flags, and not opaque if it is a cut-out. Throws std::out_of_range for a number beyond 24 bits.
+// the given flags, and not opaque if it is a cut-out or glass (each pane a candidate, tinting the light and passed over). Throws std::out_of_range for a number beyond 24 bits.
 GpuRayInstance packRayInstance(const DrawItem& draw, std::uint32_t instanceNumber, std::uint64_t meshStructure, std::uint32_t flags = 0);
 
 /*

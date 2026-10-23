@@ -78,7 +78,7 @@ struct RayHitLight {
 * The light reaching a hit (in the world) facing normal, met by a ray along direction (matte only: the probes' cosine
 * averaging blurs gloss away [2019]): every directional light that reaches it and the brightest few point and spot
 * lights near the probes (render/gpu/ddgi_sampling.h, probeHitLights), each found by a shadow ray (the shadow atlas only
-* holds what the camera sees), and the light from all around as last frame's probes hold it (the flat ambient beyond
+* holds what the camera sees) and tinted by the glass it crosses (lightThrough), and the light from all around as last frame's probes hold it (the flat ambient beyond
 * them), times bounce (the probe rays' bounce energy; 1 for reflections, which see the whole of it).
 */
 RayHitLight lightAtRayHit(vec3 hit, vec3 normal, vec3 direction, float bounce) {
@@ -89,8 +89,8 @@ RayHitLight lightAtRayHit(vec3 hit, vec3 normal, vec3 direction, float bounce) {
         vec3 toLight = directional[i].toLight.xyz;
         float facing = dot(normal, toLight);
 
-        if (facing > 0.0 && reachesLight(shadowFrom, toLight, DDGI_RAY_REACH)) {
-            irradiance += directional[i].radiance.rgb * facing;
+        if (facing > 0.0) {
+            irradiance += directional[i].radiance.rgb * facing * lightThrough(shadowFrom, toLight, DDGI_RAY_REACH);
         }
     }
 
@@ -110,11 +110,17 @@ RayHitLight lightAtRayHit(vec3 hit, vec3 normal, vec3 direction, float bounce) {
         vec3 offset = hitLightOffset(listed, relativeHit + normal * DDGI_SHADOW_RAY_OFFSET);
         float lightDistance = length(offset);
 
-        if (lightDistance > 0.0 && reachesLight(shadowFrom, offset / lightDistance, lightDistance)) {
+        if (lightDistance <= 0.0) {
+            continue;
+        }
+
+        vec3 through = lightThrough(shadowFrom, offset / lightDistance, lightDistance);
+
+        if (any(greaterThan(through, vec3(0.0)))) {
             if (probeHitLights[listed].y != 0) {
-                fastIrradiance += hitLightIrradiance(listed, relativeHit, normal);
+                fastIrradiance += hitLightIrradiance(listed, relativeHit, normal) * through;
             } else {
-                irradiance += hitLightIrradiance(listed, relativeHit, normal);
+                irradiance += hitLightIrradiance(listed, relativeHit, normal) * through;
             }
         }
     }
