@@ -46,16 +46,16 @@ namespace {
         };
     }
 
-    // High is read from the defaults, so retuning a default retunes High with it, and Ultra is High with 1024 probe rays
-    // and no sharing between probes (enough rays of their own).
+    // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra with 256 probe rays
+    // and a little sharing between probes to make up for them.
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
-            case QualityPreset::Ultra: {
-                QualityValues ultra = valuesOf(RenderSettings{});
-                ultra.probeRays = 1024;
-                ultra.fastProbeRays = 1024;
-                ultra.probeSharing = 0.0f;
-                return ultra;
+            case QualityPreset::High: {
+                QualityValues high = valuesOf(RenderSettings{});
+                high.probeRays = 256;
+                high.fastProbeRays = 256;
+                high.probeSharing = 0.1f;
+                return high;
             }
             case QualityPreset::Low:
                 return {.shadowedPoints = 8, .shadowedSpots = 4, .texelTarget = 0.1f, .spotTexelTarget = 0.05f,
@@ -69,7 +69,7 @@ namespace {
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
                         .cascadeProbesAcross = 17, .cascadeProbesHigh = 11};
-            case QualityPreset::High:
+            case QualityPreset::Ultra:
                 break;
         }
 

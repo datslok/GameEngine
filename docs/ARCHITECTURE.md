@@ -1506,7 +1506,7 @@ Tested:
 
 #### Sharing between probes
 
-Sharing between probes (`probeSharing`, 0.1 by default, the High preset (0.5 from `gi-defaults` until `gi-preset-sharing`), 0 off, 0 to 1).
+Sharing between probes (`probeSharing`, off by default, the Ultra preset; High 0.1 (0.5 from `gi-defaults` until `gi-preset-sharing`), 0 off, 0 to 1).
 
 - The fast atlas has its own weight, `fastProbeSharing`, 0.5 on every preset since `ddgi-fast-sharing`, against a flashlight's flicker at 30 fps.
 - Either above 0 runs the pass and turns the probes' rays.
@@ -1561,7 +1561,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 | `cascadeProbesHigh` | 13 | the densest's and the coarser ones'; see Placing probes above |
 | `seedProbes` | true | see Seeds |
 | `shownProbeCascade` | 0 | the debug balls' cascade |
-| `raysPerProbe` | 256 | 16 to 1024; 64 before `gi-defaults`, 128 before `probe-ray-presets` |
+| `raysPerProbe` | 1024 | 16 to 1024, the Ultra preset; 64 before `gi-defaults`, 128 before `probe-ray-presets`, 256 before `ultra-dlss-defaults` |
 | `probeUpdatesPerSecond` | 60 | the ray budget, below; 0 off |
 | `irradianceTimeConstant` | 2 s | chosen by eye in the light lab's dark back room, against flicker; the price is a few seconds' lag when light changes |
 | `distanceTimeConstant` | 1 s | kept steadier |
@@ -1574,10 +1574,10 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 | `eventMemoryGrowth` | 0.5 | a restart's time constant as a share of the time since, 0.05 to 1 |
 | `eventChangeThreshold` | 4 noise units | 0 restarts every texel |
 | `eventCheckSeconds` | 0.5 s | |
-| `probeSharing` | 0.1 | the High preset; Low 0.5, Medium 0.3, Ultra 0; see Sharing below |
+| `probeSharing` | 0 | the Ultra preset; Low 0.5, Medium 0.3, High 0.1; see Sharing below |
 | `fastProbeSharing` | 0.5 | on every preset: the fast atlas's own weight |
 | `fastIrradianceTimeConstant` | 0.1 s | since `gi-defaults`, the user's refinement; first 0.05 s: kept up with the flashlight by eye |
-| `fastRaysPerProbe` | 256 | the High preset (128 before `probe-ray-presets`); first 256, when 64 flickered over three times as much |
+| `fastRaysPerProbe` | 1024 | the Ultra preset (128 before `probe-ray-presets`, 256 before `ultra-dlss-defaults`); first 256, when 64 flickered over three times as much |
 | `fastLights` | true | keep fast lights apart |
 | `fastBlendMaxFrameSeconds` | 1/30 s | |
 | `selfShadowBias` | 0.3 | |
@@ -1996,7 +1996,7 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 
 ### FSR
 
-`UpscalingSettings::upscaler` (`Upscaler::Taa` by default, or `Fsr`, "FSR 3.1" in the settings file) and `sharpness` (0.5, its RCAS sharpening after it upscales; 0 turns it off). FSR runs only while TAA is on (it uses the same jitter and velocity pass) and only where `VulkanFsr::isAvailable()`: `activeUpscaler` falls back to TAA otherwise, and the F4 readout's exposure line ends with the upscaler in use and the render scale (`upscalerText`, e.g. `FSR 3.1 AT 0.67`).
+`UpscalingSettings::upscaler` (`Upscaler::Dlss` by default (TAA where DLSS is missing), or `Taa`, `Fsr`, "FSR 3.1" in the settings file) and `sharpness` (0.8, its RCAS sharpening after it upscales; 0 turns it off). FSR runs only while TAA is on (it uses the same jitter and velocity pass) and only where `VulkanFsr::isAvailable()`: `activeUpscaler` falls back to TAA otherwise, and the F4 readout's exposure line ends with the upscaler in use and the render scale (`upscalerText`, e.g. `FSR 3.1 AT 0.67`).
 
 **The DLL** (`render/vulkan/vulkan_fsr`, `VulkanFsr`): `SDL_LoadObject("amd_fidelityfx_vk.dll")` and the FidelityFX API's C functions by name (`ffxCreateContext`, `ffxDestroyContext`, `ffxDispatch`). A C interface is what lets MSVC's DLL be called from GCC. The makefile copies the DLL beside each build's exe (`$(FSR_DLL)`), and `tools/package_demo.py` packages it. It imports Microsoft's C++ runtime (`MSVCP140`, `VCRUNTIME140`): without it, or without the device features, FSR is unavailable and the game carries on. SDK v1.1.4 is the last line with a Vulkan backend (2.x, with FSR 4, is DirectX 12 only).
 
@@ -2046,8 +2046,8 @@ The textures' mip bias with FSR (and DLSS) is `log2(scale) - 1` (`textureLodBias
 | `jitter` | on | off holds the projection still |
 | `showMotion` | off | the motion debug view |
 | `upscaling.renderScale` | 1 | the render size's share of the output's (Upscaling) |
-| `upscaling.upscaler` | TAA | TAA, FSR 3.1 (FSR) or DLSS (DLSS) |
-| `upscaling.sharpness` | 0.5 | FSR's RCAS sharpening, 0 off (FSR) |
+| `upscaling.upscaler` | DLSS | TAA, FSR 3.1 (FSR) or DLSS (DLSS) |
+| `upscaling.sharpness` | 0.8 | FSR's RCAS sharpening, 0 off (FSR) |
 
 ### Golden images
 

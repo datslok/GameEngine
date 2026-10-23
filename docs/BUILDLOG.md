@@ -844,6 +844,13 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Captures** draw 32 frames first (two jitter cycles), restarting the history and the cycle, so golden images repeat exactly. Golden images were not run or saved in this branch (only on request): every view's final image will change.
   - **Checked:** the tests (debug and release), and the validation layers in the light lab and the demo (no messages). The GPU test cases for `taa.glsl` are written and built, not run (only on request).
 
+- `ultra-dlss-defaults` (Oct 23 2026): the user asked for DLSS at Native (DLAA) and the Ultra preset as the new defaults, with sharpness 0.8.
+  - **Ultra is now the defaults** (1024 probe rays, near fast lights too, no sharing between probes), and High is listed as Ultra with 256 rays and 0.1 sharing, so retuning a default retunes Ultra.
+  - **DLSS at render scale 1:** where DLSS is missing (no RTX GPU, or Streamline's DLLs not fetched) it falls back to TAA as before.
+  - **Sharpness 0.8 is FSR's** (RCAS): DLSS and TAA have no sharpening of their own in the engine, so it shows only when FSR is picked.
+  - **Cost, not measured here:** the default probe work is about four times High's (`probe-ray-presets`), with 201 MB of ray buffers.
+  - **Checked:** the tests (debug and release), the light lab and the demo with the validation layers (no messages, DLSS active). Golden views change again (still stale since `taa`).
+
 - `dlss` (Oct 23 2026): the last step of 6e's DLSS and FSR item: NVIDIA's DLSS as a third upscaler, through Streamline.
   - **NGX or Streamline:** DLSS's own SDK links static libraries built with Microsoft's compiler, which GCC cannot (they call into Microsoft's C++ runtime, and the licence forbids looking inside them). Streamline, NVIDIA's recommended path, is a DLL with `extern "C"` functions and plain structs, loaded as FSR is.
   - **The trial first** (a scratch program, not committed): load the interposer, `slInit` with manual hooking, DLSS's Vulkan requirements, an instance and device made with them, `slSetVulkanInfo`, `slIsFeatureSupported` (yes on the RTX 5080), and `slDLSSGetOptimalSettings` at 2560 x 1440, which came back right in every mode (Quality 1707 x 960, Balanced 1485 x 835, Performance 1280 x 720, Ultra performance 853 x 480): structs pass both ways. `slInit` after `slShutdown` in the same process worked too, which the golden images need (one renderer per game).

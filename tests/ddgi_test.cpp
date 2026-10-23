@@ -1512,8 +1512,9 @@ namespace {
         assert(packed.weight[0] == 0.1f && packed.weight[1] == 0.5f && packed.weight[2] == 0.5f && packed.weight[3] == 0.99f);
         assert(packed.counts[0] == 8 && packed.counts[1] == 8 && packed.counts[2] == 60 && packed.counts[3] == 2);
 
+        // None by default: Ultra's 1024 rays a probe are enough on their own (High shares 0.1).
         const GlobalIlluminationSettings settings;
-        assert(settings.probeSharing == 0.1f);
+        assert(settings.probeSharing == 0.0f);
     }
 
     /*
