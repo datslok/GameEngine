@@ -46,7 +46,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 
 **What each probe gathers**
 
-- 128 rays a frame by default (set by the quality preset; up to 1024). Rays are stored only for the probes traced that frame, so even 1024 rays a probe take about 200 MB. Over 16 frames the rays take turns through one long spiral, so between them they cover every direction evenly: as calm as three times the rays.
+- 256 rays a frame by default (set by the quality preset: Low 32, Medium 64, High 256, Ultra 1024). Rays are stored only for the probes traced that frame, so even 1024 rays a probe take about 200 MB. Over 16 frames the rays take turns through one long spiral, so between them they cover every direction evenly: as calm as three times the rays.
 - Rays bring back the sky, and surfaces lit by the sun and the brightest nearby lamps, found by shadow rays.
 - They also bring back the light the probes held last frame, so each frame adds a bounce.
 - What comes back is blended into small octahedral images: the light arriving from every direction, and the distance to the nearest surface.
@@ -58,7 +58,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Adaptive memory** (optional): each texel measures its own noise, keeps a long memory while its light only wobbles within it, and starts afresh when the light really changes. A steady room is calmer, and a lamp switched on still comes in within a second.
 - **Scene events:** a game tells the probes about a change it knows of (a lamp switched, the clock moved). The probes round it check where the light really changed and start afresh only there: quickly where the change is big, not at all where it hides in the noise. A lamp's bounce comes and goes within a fraction of a second, while dim corners it barely touches stay calm.
 - **Sharing** (optional): neighbouring probes each trace their own directions, so their errors are independent, and read each other's light. It halves the flicker in a dark room at 30 fps, for slightly softer bounce light.
-- **Fast lights** (a flashlight, headlights) keep their bounce in a second set of images with a memory of a twentieth of a second, and the probes near one trace 256 rays. A swung flashlight's bounce follows it instead of trailing behind for seconds. A setting turns this off, leaving fast lights to the main memory, for use with the adaptive memory.
+- **Fast lights** (a flashlight, headlights) keep their bounce in a second set of images with a memory of a twentieth of a second, and the probes near one trace as many rays as the rest (256 by default, 1024 on Ultra) every frame. A swung flashlight's bounce follows it instead of trailing behind for seconds. A setting turns this off, leaving fast lights to the main memory, for use with the adaptive memory.
 
 **Lighting the surfaces**
 

@@ -46,14 +46,14 @@ namespace {
         };
     }
 
-    // High is read from the defaults, so retuning a default retunes High with it, and Ultra is High with 256 probe rays
+    // High is read from the defaults, so retuning a default retunes High with it, and Ultra is High with 1024 probe rays
     // and no sharing between probes (enough rays of their own).
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
             case QualityPreset::Ultra: {
                 QualityValues ultra = valuesOf(RenderSettings{});
-                ultra.probeRays = 256;
-                ultra.fastProbeRays = 256;
+                ultra.probeRays = 1024;
+                ultra.fastProbeRays = 1024;
                 ultra.probeSharing = 0.0f;
                 return ultra;
             }
