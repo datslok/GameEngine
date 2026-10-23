@@ -120,7 +120,35 @@ layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
 layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 #include "ambient_occlusion.glsl"
 
+#ifdef TRANSPARENT
+/*
+* Glass and blended surfaces (render/gpu/transparency.h), drawn after the opaque scene and its reflections, sorted far to
+* near, blended over the picture: the light they add, and with dual-source blending what they let through per channel
+* (picture = added + transmittance x picture); without it a grey share in alpha (picture = added + (1 - alpha) x
+* picture). Their reflection is the reflection probe's light in the mirror direction (its level by roughness), set 2,
+* when the frame has one; the screen's ambient occlusion and mirrored lights are the opaque surface's behind, not theirs.
+*/
+#include "reflection_probe.glsl"
+#include "transparency.glsl"
+const bool transparentView = true;
+
+layout(set = 2, binding = 0) uniform samplerCube transparentProbeLight;
+
+// Must match GpuTransparentView (after triangle.vert's 64 bytes of push constants).
+layout(push_constant) uniform TransparentView {
+    layout(offset = 64) vec4 transparentProbe; // x: 1 when the reflection probe is read, y: its prefiltered levels
+};
+
+#ifdef DUAL_SOURCE_BLENDING
+layout(location = 0, index = 0) out vec4 outputColour;
+layout(location = 0, index = 1) out vec4 transmittanceOutput;
+#else
 layout(location = 0) out vec4 outputColour;
+#endif
+#else
+const bool transparentView = false;
+layout(location = 0) out vec4 outputColour;
+#endif
 
 // The reflection surfaces for the reflection pass (render/gpu/screen_reflections.h), in their own targets: the shaded
 // normal folded onto a square (octahedral, ddgi.glsl), the specular albedo with the roughness, and the stand-in for the
@@ -467,6 +495,10 @@ void main() {
     // without one), read here for the same reason.
     vec3 emissive = texture(textures[nonuniformEXT(material.textureSlots.w)], textureUv, mipBias).rgb * material.emissive.rgb;
     float occlusionTexel = texture(textures[nonuniformEXT(material.extra.x)], textureUv, mipBias).r;
+#ifdef TRANSPARENT
+    // Glass's transmission, its texture's red channel times the factor.
+    float transmission = material.transmission.x * texture(textures[nonuniformEXT(material.extra.z)], textureUv, mipBias).r;
+#endif
 
     // A cut-out's holes are thrown away in its own pipelines (without the depth prepass; after it, the holes have no
     // depth for this pass to match). After every texture read, whose mips need the neighbouring pixels.
@@ -567,7 +599,7 @@ void main() {
 
         // Light reflected onto this pixel by mirrors, as one more light from where it arrives (its shadows already found
         // by the mirrored light pass's rays).
-        if (mirroredLightOptions.x != 0 && !captureView) {
+        if (mirroredLightOptions.x != 0 && !captureView && !transparentView) {
             ivec2 texel = ivec2(gl_FragCoord.xy);
             vec3 arriving = texelFetch(mirroredLight, texel, 0).rgb;
 
@@ -606,6 +638,14 @@ void main() {
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
     }
 
+#ifdef TRANSPARENT
+    // Glass has no screen-space reflection (it is not in the depth image), so its reflection is the probe's light.
+    if (transparentProbe.x > 0.5) {
+        mirrorLight = textureLod(transparentProbeLight, reflect(-toCamera, shadingNormal), probeRoughnessLevel(roughness, transparentProbe.y)).rgb;
+        ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
+    }
+#endif
+
     // Ambient occlusion dims the light from all around in creases and corners (not the direct light, which has its
     // shadows): the diffuse part by the visibility, raised by the light a crease's walls bounce back in (more for bright
     // ones), the reflection's stand-in by the specular occlusion, which the reflection pass's better light keeps (it is
@@ -613,7 +653,7 @@ void main() {
     // capture, which has none of its own view; a material's baked occlusion is, being the surface's own. The two count
     // as whichever is more closed. Without either the light is left exactly as it was.
     float reflectionOcclusion = 1.0;
-    bool screenOcclusion = ambientOcclusionOptions.x != 0 && !captureView;
+    bool screenOcclusion = ambientOcclusionOptions.x != 0 && !captureView && !transparentView;
 
     if (screenOcclusion || material.surfaceParameters.w > 0.0) {
         float screenVisibility = screenOcclusion ? texelFetch(ambientOcclusion, ivec2(gl_FragCoord.xy), 0).r : 1.0;
@@ -624,8 +664,21 @@ void main() {
         ambientReflected = shadeProbeAmbient(point, diffuseLight * diffuseOcclusion, mirrorLight);
     }
 
+#ifdef TRANSPARENT
+    // The diffuse and specular parts apart (the light from all around split as shadeProbeAmbient adds it), for glass to
+    // swap its diffuse part for what is behind. Coverage only for blended materials; an opaque one's alpha is ignored.
+    vec3 ambientSpecular = mirrorLight * point.specularAlbedo;
+    float coverage = (material.extra.y & MATERIAL_BLEND) != 0u ? albedo.a : 1.0;
+    TransparentLight seen = transparentBlend(coverage, transmission, metallic, ambientReflected - ambientSpecular + diffuse, ambientSpecular + specular,
+                                             emissive, albedo.rgb, point.specularAlbedo);
+    outputColour = vec4(seen.added, 1.0 - (seen.transmittance.r + seen.transmittance.g + seen.transmittance.b) / 3.0);
+#ifdef DUAL_SOURCE_BLENDING
+    transmittanceOutput = vec4(seen.transmittance, 1.0);
+#endif
+#else
     // Emitted light is added as is.
     outputColour = vec4(ambientReflected + diffuse + specular + emissive, albedo.a);
+#endif
 
     // A surface without a normal reflects nothing sharply: fully rough, so the stand-in stays.
 #ifdef REFLECTION_SURFACES

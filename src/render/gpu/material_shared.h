@@ -12,6 +12,9 @@
 // A cut-out (glTF's alphaMode MASK): texels whose alpha is under the cutoff are holes.
 #define MATERIAL_CUT_OUT 2u
 
+// Blended (glTF's alphaMode BLEND): its alpha is the share of the pixel it covers (render/gpu/transparency.h).
+#define MATERIAL_BLEND 4u
+
 // The specialization constant that turns a scene fragment shader into its cut-out variant, which throws away the holes.
 // Number 1, after the light probes' (DDGI_SAMPLE_PROBES_CONSTANT), so a pipeline can set both.
 #define MATERIAL_CUT_OUT_CONSTANT 1

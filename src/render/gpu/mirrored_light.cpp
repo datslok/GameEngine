@@ -331,7 +331,7 @@ std::vector<MirrorPair> chooseMirrorPairs(const GpuLights& lights, std::span<con
     for (std::size_t index = 0; index < draws.size(); ++index) {
         const DrawItem& draw = draws[index];
 
-        if (!draw.castsShadows || draw.bounds.radius <= 0.0f || mirrorRoughnessFade(draw.material.roughness, settings.mirrorRoughness) <= 0.0f) {
+        if (!draw.castsShadows || isTransparent(draw.material) || draw.bounds.radius <= 0.0f || mirrorRoughnessFade(draw.material.roughness, settings.mirrorRoughness) <= 0.0f) {
             continue;
         }
 

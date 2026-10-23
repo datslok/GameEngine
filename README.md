@@ -86,6 +86,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
 - **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
 - **Cut-outs and double-sided materials** (glTF's alpha mask and `doubleSided`): leaves, fences and grates with holes, in shadows and ray tracing too, their mips built to keep their coverage so fences do not vanish with distance.
+- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel.
 - **Frustum culling:** each view, camera or shadow, skips what it cannot see.
 
 **Shadows from every light**
@@ -159,7 +160,7 @@ Several games run on one engine, picked at start-up with `--game`.
 
 **The light lab:** a sunlit test ground 800 m across.
 
-- Towers at doubling distances, a thin chain-link fence running to the horizon, a forest, and a two-room building lit through one window.
+- Towers at doubling distances, a thin chain-link fence running to the horizon, a forest, and a two-room building lit through one glazed window.
 - A 300 m street of houses, whose 60 lamps and lit windows come on at dusk.
 - A sun placed by real astronomy, from latitude, day of the year and time of day, that can run through a day. Its glowing disc in the sky is as bright as the light it gives, drawn five times its real size for looks (as is the moon's).
 - At night, the moon in its real place and phase, lighting the sky and casting shadows, and the 9,096 brightest real stars, in their colours, turning with the sky.

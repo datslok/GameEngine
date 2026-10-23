@@ -5,12 +5,14 @@
 #include "scene/asset_handles.h"
 
 /*
-* How a surface's alpha is used (glTF's alphaMode): ignored (Opaque), or a cut-out (Mask) whose texels under the cutoff
-* are holes, for leaves, fences and grates (render/gpu/alpha_mask.h). Blending (glass) is not drawn yet.
+* How a surface's alpha is used (glTF's alphaMode): ignored (Opaque), a cut-out (Mask) whose texels under the cutoff are
+* holes, for leaves, fences and grates (render/gpu/alpha_mask.h), or coverage (Blend): that share of the pixel is the
+* surface and the rest what lies behind, for decals and fading things, drawn after the opaque scene (render/gpu/transparency.h).
 */
 enum class AlphaMode {
     Opaque,
-    Mask
+    Mask,
+    Blend
 };
 
 /*
@@ -62,8 +64,19 @@ struct Material {
     // Both sides drawn (glTF's doubleSided), the back shaded as the front's mirror image: a leaf or a fence seen from
     // behind. One-sided surfaces skip their backs, as a closed mesh's are never seen.
     bool doubleSided = false;
+
+    // Thin glass (KHR_materials_transmission): the share of the light from behind that passes through the non-metal part
+    // (0..1), tinted by the colour, less what its surface reflects; its texture's red channel (linear) multiplies it.
+    // A transmitting material is drawn after the opaque scene, blended over it (render/gpu/transparency.h).
+    float transmission = 0.0f;
+    TextureHandle transmissionTexture;
 };
 
 inline bool isCutOut(const Material& material) {
     return material.alphaMode == AlphaMode::Mask;
+}
+
+// Seen through: blended or transmitting, so drawn after the opaque scene, sorted far to near.
+inline bool isTransparent(const Material& material) {
+    return material.alphaMode == AlphaMode::Blend || material.transmission > 0.0f;
 }

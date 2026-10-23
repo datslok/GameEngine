@@ -196,6 +196,12 @@ namespace {
         // A directional light reaches everywhere (negative radius): every caster.
         assert((castersInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{0, 1, 2, 3}));
 
+        // Glass and blended surfaces cast no shadow (yet), whatever their castsShadows says.
+        std::vector<DrawItem> glazed = draws;
+        glazed[1].material.transmission = 1.0f;
+        glazed[2].material.alphaMode = AlphaMode::Blend;
+        assert((castersInReach(glazed, BoundingSphere{}) == std::vector<std::size_t>{0, 3}));
+
         // The faces then test only those candidates against their frustums, keeping their order.
         const Frustum face = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne);
         assert((shadowCasters(draws, std::vector<std::size_t>{1, 0, 3}, face) == std::vector<std::size_t>{0, 3}));

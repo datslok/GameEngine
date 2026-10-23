@@ -14,6 +14,7 @@
 #include "render/gpu/taa.h"
 #include "render/gpu/tone_map_uniforms.h"
 #include "render/vulkan/buffer_barrier.h"
+#include "render/vulkan/descriptor_helpers.h"
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/vulkan_check.h"
 #include "render/window_display.h"
@@ -442,6 +443,32 @@ void VulkanRenderer::createPipelines() {
     PipelineDescription motionCutOut = motion;
     motionCutOut.fragmentConstants = {0u, 1u}; // MATERIAL_CUT_OUT_CONSTANT
     motionCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, motionCutOut);
+
+    /*
+    * Glass and blended surfaces: the main pass's vertex shader and shading (triangle_transparent.frag), its depth tested
+    * (GREATER, reversed-Z) but not written, blended over the picture: picture = light added + transmittance x picture,
+    * the transmittance the shader's second colour (dual-source blending), or on GPUs without it a grey share in alpha.
+    * Back or front faces culled as each draw says. The layout keeps the scene's sets and adds the reflection probe's
+    * light as set 2, with the vertex shader's push constants and then GpuTransparentView.
+    */
+    transparentSetLayout = createUniformLayout(device.getDevice(), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT,
+                                               "Transparent set layout creation failed");
+    const std::array<VkDescriptorSetLayout, 3> transparentSets{bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), transparentSetLayout.get()};
+    transparentLayout = createPipelineLayout(device.getDevice(), transparentSets, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                             "Transparent layout creation failed", transparentViewOffset + sizeof(GpuTransparentView));
+
+    const bool dualSource = device.supportsDualSourceBlending();
+    PipelineDescription transparent = main;
+    transparent.fragmentShader = dualSource ? "assets/shaders/triangle_transparent.frag.spv" : "assets/shaders/triangle_transparent_grey.frag.spv";
+    transparent.sharedLayout = transparentLayout.get();
+    transparent.depthWrite = false;
+    transparent.depthCompare = VK_COMPARE_OP_GREATER;
+    transparent.blend = dualSource ? BlendMode::DualSourceTransmittance : BlendMode::PremultipliedAlpha;
+
+    for (bool probes : {false, true}) {
+        transparent.fragmentConstants = {probes ? 1u : 0u};
+        transparentPipelines[probes ? 1 : 0] = std::make_unique<VulkanPipeline>(device, layouts, transparent);
+    }
 
     ComputePipelineDescription clusterLights;
     clusterLights.shader = "assets/shaders/cluster_lights.comp.spv";
@@ -1085,10 +1112,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
-    const std::vector<std::size_t> visible = visibleDraws(description.draws, cameraFrustum);
+    // Glass and blended surfaces are left out of every opaque view and drawn last, sorted (render/gpu/transparency.h).
+    const std::vector<std::size_t> seen = visibleDraws(description.draws, cameraFrustum);
+    const std::vector<std::size_t> visible = opaqueDraws(description.draws, seen);
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
-    stats.drawn = visible.size();
-    stats.culled = description.draws.size() - visible.size();
+    stats.drawn = seen.size();
+    stats.culled = description.draws.size() - seen.size();
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
@@ -1133,10 +1162,26 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         for (int face = 0; face < cubeFaceCount; ++face) {
             const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), probeFar) *
                                    Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
-            const std::vector<std::size_t> inView = visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero));
+            const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero)));
             captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstEntry);
             firstEntry += static_cast<std::uint32_t>(inView.size());
         }
+    }
+
+    // The transparent draws the camera sees, far to near, their entries last in the draw list.
+    std::uint32_t transparentEntry = static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size() + motionDraws.order.size());
+
+    for (const BatchedDraws& face : captureDraws) {
+        transparentEntry += static_cast<std::uint32_t>(face.order.size());
+    }
+
+    const SortedTransparentDraws transparent = sortTransparentDraws(description.draws, transparentDraws(description.draws, seen), cameraOrigin,
+                                                                    transparentEntry);
+
+    // Glass binds the reflection probe's light even while it does not read it: a one-texel probe stands in when there
+    // has never been one (reflections off), replaced when reflections make the real one.
+    if (!transparent.batches.empty() && reflectionProbe->getSize() == 0) {
+        reflectionProbe->ensureSize(1);
     }
 
     // The light probes, in cascades round what the game's ProbeCascades follows (the camera): their atlases readied
@@ -1189,7 +1234,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, settings, probes,
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
                                                 hitLights, mirrorPairs, occlusion, occlusionBlurred);
 
     if (ui != nullptr) {
@@ -1269,7 +1314,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     beginGpuPass(frame, GpuPass::Main);
     const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, sceneSize.width, sceneSize.height);
     const std::optional<StarrySky>& stars = description.lighting.stars;
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || temporal, traceProbes, screenReflections,
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || temporal || !transparent.batches.empty(), traceProbes,
+                 screenReflections,
                  description.lighting.background,
                  air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
@@ -1328,6 +1374,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(),
                              screenSpace ? finishedScene : nullptr, *reflectionProbe, pass, reflectionsTraceRays ? &raySets : nullptr);
         endGpuPass(frame, GpuPass::Reflections);
+    }
+
+    // Glass and blended surfaces over the picture with its reflections, before it is smoothed.
+    if (!transparent.batches.empty()) {
+        beginGpuPass(frame, GpuPass::Transparent);
+        drawTransparent(frame, transparent, sceneSet, traceProbes, probeReady);
+        endGpuPass(frame, GpuPass::Transparent);
     }
 
     // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
@@ -1436,7 +1489,8 @@ void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Ca
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           const BatchedDraws& motionDraws, std::span<const BatchedDraws> captureDraws, const RenderSettings& settings,
+                                           const BatchedDraws& motionDraws, std::span<const BatchedDraws> captureDraws,
+                                           const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
                                            bool occlusionBlurred) {
@@ -1470,6 +1524,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         for (std::size_t index : face.order) {
             drawList.push_back(static_cast<std::uint32_t>(index));
         }
+    }
+
+    for (std::size_t index : transparent.order) {
+        drawList.push_back(static_cast<std::uint32_t>(index));
     }
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
@@ -1855,6 +1913,47 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionD
 * sky over its background, as the main pass draws it. The faces are separate images to the GPU, so they need no
 * barriers between them; the probe's own passes follow (finishCapture).
 */
+void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes,
+                                     bool readsProbe) {
+    const VkCommandBuffer commands = frame.commands;
+
+    // The probe's light becomes readable by fragment shaders, and the picture and its depth (tested, not written; stored,
+    // as anti-aliasing reads it) targets again, after the reflections and the depth measurement read them.
+    const SampledImage probeLight = reflectionProbe->fragmentReadableLight(commands);
+    sceneColour.transition(commands, ImageState::ColourTarget);
+    depth.transition(commands, ImageState::DepthTarget);
+
+    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, {}};
+    const DepthAttachment depthTest{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTest);
+    renderingOpen = true;
+
+    const VkDescriptorSet probeSet = frame.descriptors.allocate(transparentSetLayout.get());
+    writeSampledImages(device.getDevice(), probeSet, 0, std::span<const SampledImage>{&probeLight, 1});
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentPipelines[sampleProbes ? 1 : 0]->get());
+    const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, probeSet};
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentLayout.get(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(),
+                            0, nullptr);
+    const GpuTransparentView view = packTransparentView(readsProbe, reflectionProbe->getLevels());
+    vkCmdPushConstants(commands, transparentLayout.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, transparentViewOffset,
+                       sizeof(view), &view);
+
+    // One object at a time, far to near: a double-sided one's back faces (front faces culled), then its front faces.
+    for (const TransparentBatch& batch : transparent.batches) {
+        vkCmdSetCullMode(commands, batch.backFaces ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT);
+        std::uint32_t indexCount = 0;
+        bindMesh(commands, batch.mesh, indexCount);
+        vkCmdDrawIndexed(commands, indexCount, 1, 0, 0, batch.firstInstance);
+        ++stats.drawCalls;
+    }
+
+    // Left readable, as the main pass leaves it, for whatever reads the picture next.
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+    sceneColour.transition(commands, ImageState::SurfaceRead);
+}
+
 void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
                                       float farPlane, const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
@@ -2134,7 +2233,8 @@ void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, s
 
 // The shader would read an empty slot of the texture array for a texture that was never uploaded; better to stop here.
 void VulkanRenderer::checkTexturesUploaded(const Material& material) const {
-    for (TextureHandle handle : {material.texture, material.metallicRoughnessTexture, material.normalTexture}) {
+    for (TextureHandle handle : {material.texture, material.metallicRoughnessTexture, material.normalTexture, material.occlusionTexture,
+                                 material.emissiveTexture, material.transmissionTexture}) {
         if (handle.isValid() && handle.index >= textures.size()) {
             throw std::out_of_range("Material texture handle has not been uploaded");
         }

@@ -57,13 +57,16 @@ void testGpuTiming() {
     // Anti-aliasing (TAA, FSR or DLSS, so its timing is named AA, not TAA): the velocity pass draws over the finished
     // picture's depth, and the resolve reads the picture before anything that uses it (eye adaptation, bloom), after the
     // depth measurement, which reads the same depth. The reflections come between: the probe's capture, then the pass
-    // that reads it with the velocity image and the depth and changes the picture the resolve smooths.
+    // that reads it with the velocity image and the depth and changes the picture the resolve smooths. Glass is blended
+    // over that picture last, so the anti-aliasing smooths it too.
     {
         assert(static_cast<int>(GpuPass::RayDebug) + 1 == static_cast<int>(GpuPass::Motion));
         assert(static_cast<int>(GpuPass::Motion) + 1 == static_cast<int>(GpuPass::DepthRange));
         assert(static_cast<int>(GpuPass::DepthRange) + 1 == static_cast<int>(GpuPass::ReflectionProbe));
         assert(static_cast<int>(GpuPass::ReflectionProbe) + 1 == static_cast<int>(GpuPass::Reflections));
-        assert(static_cast<int>(GpuPass::Reflections) + 1 == static_cast<int>(GpuPass::AntiAliasing));
+        assert(static_cast<int>(GpuPass::Reflections) + 1 == static_cast<int>(GpuPass::Transparent));
+        assert(static_cast<int>(GpuPass::Transparent) + 1 == static_cast<int>(GpuPass::AntiAliasing));
+        assert(std::string(gpuPassName(GpuPass::Transparent)) == "GLASS");
         assert(std::string(gpuPassName(GpuPass::ReflectionProbe)) == "CUBE");
         assert(std::string(gpuPassName(GpuPass::Reflections)) == "SSR");
         assert(static_cast<int>(GpuPass::AntiAliasing) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
@@ -100,7 +103,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 25, 16, 14, 900, 5, 0, 12, 6, 20, 10, 30, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 25, 16, 14, 900, 5, 0, 12, 6, 20, 10, 13, 30, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -116,7 +119,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1257 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1270 * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

@@ -210,6 +210,12 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     fsrFeatures = fsrFeatures && physicalDevice.enable_extensions_if_present(fsrExtensions);
     optionalExtensions = !optional.empty() && physicalDevice.enable_extensions_if_present(optional);
 
+    // Optional: dual-source blending, a fragment shader's two colours both reaching the blend (the light glass adds, and
+    // what it lets through per channel, render/gpu/transparency.h). Every desktop GPU has it; without it glass tints grey.
+    VkPhysicalDeviceFeatures dualSource{};
+    dualSource.dualSrcBlend = VK_TRUE;
+    dualSourceBlending = physicalDevice.enable_features_if_present(dualSource);
+
     // Optional: hardware ray tracing through ray queries (any shader asks what a ray hits), with the acceleration
     // structures it searches. Without them everything ray-traced stays off.
     const std::vector<const char*> rayExtensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
@@ -394,6 +400,10 @@ bool VulkanDevice::reportsMemoryBudget() const {
 
 bool VulkanDevice::supportsRayQueries() const {
     return rayQueries;
+}
+
+bool VulkanDevice::supportsDualSourceBlending() const {
+    return dualSourceBlending;
 }
 
 bool VulkanDevice::supportsFsrFeatures() const {

@@ -497,8 +497,12 @@ namespace {
             return material;
         }
 
-        // Cut-outs (MASK) keep texels whose alpha reaches the cutoff. Blending (BLEND, glass) is not drawn yet: such
-        // materials draw opaque until a sorted pass after the opaque scene exists.
+        // Cut-outs (MASK) keep texels whose alpha reaches the cutoff; blended ones (BLEND) cover the share alpha of each
+        // pixel, drawn after the opaque scene.
+        if (source->alpha_mode == cgltf_alpha_mode_blend) {
+            material.alphaMode = AlphaMode::Blend;
+        }
+
         if (source->alpha_mode == cgltf_alpha_mode_mask) {
             if (!std::isfinite(source->alpha_cutoff) || source->alpha_cutoff < 0.0f) {
                 throw std::runtime_error(
@@ -544,6 +548,12 @@ namespace {
         }
 
         material.emissiveTexture = readTexture(source->emissive_texture, images);
+
+        // Thin glass (KHR_materials_transmission): how much light passes through, and a texture (red) multiplying it.
+        if (source->has_transmission) {
+            material.transmission = readUnitFactor(source->transmission.transmission_factor, "glTF transmission factor must be between 0 and 1");
+            material.transmissionTexture = readTexture(source->transmission.transmission_texture, images);
+        }
 
         const float strength = source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f;
 

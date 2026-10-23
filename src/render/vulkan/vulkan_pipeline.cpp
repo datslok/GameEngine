@@ -219,6 +219,12 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
         blend.alphaBlendOp = VK_BLEND_OP_ADD;
     }
 
+    // The shader's second colour (location 0, index 1) multiplies what is there, per channel.
+    if (description.blend == BlendMode::DualSourceTransmittance) {
+        blend.dstColorBlendFactor = VK_BLEND_FACTOR_SRC1_COLOR;
+        blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC1_ALPHA;
+    }
+
     const bool hasColour = description.colourFormat != VK_FORMAT_UNDEFINED;
 
     // The first target blends as asked; the extra targets are written as they are.

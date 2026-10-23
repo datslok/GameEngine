@@ -78,6 +78,8 @@ namespace {
         source.occlusionTexture.path = imagePath;
         source.occlusionStrength = 0.4f;
         source.emissiveTexture.path = imagePath;
+        source.transmission = 0.7f;
+        source.transmissionTexture.path = imagePath;
         source.flipTextureVertically = false;
 
         const Material material = assets.makeMaterial(source);
@@ -96,6 +98,8 @@ namespace {
         assert(assets.getTexture(material.occlusionTexture).encoding == TextureEncoding::Linear);
         assert(material.occlusionStrength == 0.4f);
         assert(assets.getTexture(material.emissiveTexture).encoding == TextureEncoding::Srgb);
+        assert(material.transmission == 0.7f);
+        assert(material.transmissionTexture == material.occlusionTexture);
 
         // One file read as numbers twice is one texture: occlusion often shares the metallic-roughness image (ORM).
         assert(material.occlusionTexture == material.normalTexture);
@@ -120,11 +124,16 @@ namespace {
         assert(!material.occlusionTexture.isValid());
         assert(material.occlusionStrength == defaults.occlusionStrength);
         assert(!material.emissiveTexture.isValid());
+        assert(material.transmission == defaults.transmission && !material.transmissionTexture.isValid());
         assert(!MaterialSource{}.hasTexture());
 
         MaterialSource glowing;
         glowing.emissiveTexture.path = imagePath;
         assert(glowing.hasTexture());
+
+        MaterialSource glass;
+        glass.transmissionTexture.path = imagePath;
+        assert(glass.hasTexture());
 
         MaterialSource occluded;
         occluded.occlusionTexture.path = imagePath;

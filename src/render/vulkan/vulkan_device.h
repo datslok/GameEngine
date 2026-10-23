@@ -64,6 +64,10 @@ public:
     // without a declared format; render/vulkan/vulkan_fsr.h). On when the GPU has them; without them FSR stays off.
     bool supportsFsrFeatures() const;
 
+    // Whether a fragment shader's two colours can both reach the blend (dualSrcBlend, on when the GPU has it), which
+    // glass uses to tint what is behind it per channel.
+    bool supportsDualSourceBlending() const;
+
     // Whether the optional device extensions it was given are on (all of them; none when one is missing).
     bool hasOptionalExtensions() const;
 
@@ -118,6 +122,7 @@ private:
     bool swapchainColourSpaces = false;
     bool memoryBudget = false;
     bool rayQueries = false;
+    bool dualSourceBlending = false;
     bool fsrFeatures = false;
     bool optionalExtensions = false;
     std::uint32_t scratchAlignment = 1;

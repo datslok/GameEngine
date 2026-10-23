@@ -141,7 +141,7 @@ namespace {
         assert(packed.textures[3] == 5 && packed.extra[0] == 8);
 
         // The rest of extra is kept for later and stays zero, so materials hash alike.
-        assert(packed.extra[1] == 0 && packed.extra[2] == 0 && packed.extra[3] == 0);
+        assert(packed.extra[1] == 0 && packed.extra[2] == whiteTextureSlot && packed.extra[3] == 0);
     }
 }
 
@@ -177,6 +177,33 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Blended materials carry their opacity like cut-outs (no cutoff: they blend instead); thin glass its transmission
+    * (KHR_materials_transmission, 0..1) in transmission.x and its texture's slot in extra.z.
+    */
+    void testTransparentMaterialsArePacked() {
+        Material decal;
+        decal.alphaMode = AlphaMode::Blend;
+        decal.opacity = 0.4f;
+        const GpuMaterial blended = packMaterial(decal);
+        assert(nearlyEqual(blended.baseColour[3], 0.4f) && blended.emissive[3] == 0.0f);
+        assert(blended.extra[1] == MATERIAL_BLEND);
+        assert(isTransparent(decal) && !isCutOut(decal));
+
+        Material glass;
+        glass.transmission = 2.0f;
+        glass.transmissionTexture = TextureHandle{6};
+        const GpuMaterial packed = packMaterial(glass);
+        assert(nearlyEqual(packed.transmission[0], 1.0f) && packed.extra[2] == 7);
+        assert(packed.transmission[1] == 0.0f && packed.transmission[2] == 0.0f && packed.transmission[3] == 0.0f);
+        assert(isTransparent(glass));
+
+        const GpuMaterial plain = packMaterial(Material{});
+        assert(plain.transmission[0] == 0.0f && plain.extra[2] == whiteTextureSlot && !isTransparent(Material{}));
+    }
+}
+
 void testMaterialUniforms() {
     testTexturesBecomeArraySlots();
     testDefaultMaterialDoesNotGlow();
@@ -189,4 +216,5 @@ void testMaterialUniforms() {
     testNormalScaleNeedsATexture();
     testOcclusionStrengthIsPacked();
     testCutOutsArePacked();
+    testTransparentMaterialsArePacked();
 }

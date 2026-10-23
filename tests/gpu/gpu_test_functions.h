@@ -137,4 +137,7 @@
 // alpha_mask_test.comp
 #define GPU_TEST_ALPHA_MASK 0
 
+// transparency_test.comp
+#define GPU_TEST_TRANSPARENT_BLEND 0
+
 #endif

@@ -45,6 +45,7 @@ void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
 void testAlphaMask();
+void testTransparency();
 void testGltfMaterials();
 void testGltfNormalMaps();
 void testSmoothNormals();
@@ -176,6 +177,7 @@ int main(){
     testTextureEncoding();
     testCoverageMips();
     testAlphaMask();
+    testTransparency();
     testGltfMaterials();
     testGltfNormalMaps();
     testSmoothNormals();

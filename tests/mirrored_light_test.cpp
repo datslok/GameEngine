@@ -709,6 +709,13 @@ namespace {
         rougher.mirrorRoughness = 0.8f;
         assert(chooseMirrorPairs(lights, draws, cameraOrigin, rougher).size() == 6);
 
+        // Glass is in no ray's world, so the search could never land on it: smooth as it is, it mirrors no light here.
+        std::vector<DrawItem> glazed = draws;
+        glazed[6].material.transmission = 1.0f;
+        for (const MirrorPair& pair : chooseMirrorPairs(lights, glazed, cameraOrigin, MirroredLightSettings{})) {
+            assert(pair.draw != 6);
+        }
+
         // More than the pass holds: the nearest are kept.
         std::vector<DrawItem> many;
 
