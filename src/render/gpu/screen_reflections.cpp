@@ -21,7 +21,7 @@ void visit(ReflectionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Sharp roughness", settings.sharpRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Max roughness", settings.maxRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "m"});
-    visitor.field("Reach", settings.reach, {.min = 1.0f, .max = 1000.0f, .sliderMax = 300.0f, .unit = "m"});
+    visitor.field("Reach", settings.reach, {.min = 1.0f, .max = 10000.0f, .sliderMax = 2000.0f, .unit = "m"});
     visitor.field("Max steps", settings.maxSteps, {.min = 1, .max = 512, .sliderMax = 256});
     visitor.field("Edge fade", settings.edgeFade, {.min = 0.01f, .max = 1.0f});
     visitor.field("Probe size", settings.probeSize, {.min = 16, .max = 1024, .sliderMin = 64, .sliderMax = 512, .unit = "texels"});
@@ -302,7 +302,8 @@ float reflectionConfidence(const ReflectionHit& hit, Vec2 size, const Reflection
 
     const float distance = 1.0f - smoothStep(static_cast<float>(SSR_DISTANCE_FADE_START) * settings.reach, settings.reach, hit.travelled);
     const float front = 1.0f - smoothStep(-static_cast<float>(SSR_FRONT_FACE_COSINE), 0.0f, hit.facing);
-    return rough * edge * distance * front;
+    const float outwards = 1.0f - smoothStep(static_cast<float>(SSR_TOWARDS_CAMERA_START), static_cast<float>(SSR_TOWARDS_CAMERA_END), hit.towardsCamera);
+    return rough * edge * distance * front * outwards;
 }
 
 /*

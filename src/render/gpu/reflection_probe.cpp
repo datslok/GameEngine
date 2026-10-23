@@ -116,6 +116,38 @@ float ProbeDistanceCube::at(const Vec3& direction, std::uint32_t level) const {
     return levels[level][static_cast<std::size_t>(texel.face)][y * side + x];
 }
 
+// Texel i's centre is at (i + 0.5) / size, so a point s sits between texels floor(s size - 0.5) and the next.
+float ProbeDistanceCube::filtered(const Vec3& direction) const {
+    const CubeTexel texel = cubeTexelOf(direction);
+    const std::vector<float>& face = levels[0][static_cast<std::size_t>(texel.face)];
+    const float x = texel.st.x * static_cast<float>(size) - 0.5f;
+    const float y = texel.st.y * static_cast<float>(size) - 0.5f;
+    const float x0 = std::floor(x);
+    const float y0 = std::floor(y);
+    const float fx = x - x0;
+    const float fy = y - y0;
+    const auto clamped = [&](float value) { return static_cast<std::uint32_t>(std::clamp(value, 0.0f, static_cast<float>(size - 1))); };
+    const auto texelAt = [&](float tx, float ty) { return face[clamped(ty) * size + clamped(tx)]; };
+    const float top = texelAt(x0, y0) * (1.0f - fx) + texelAt(x0 + 1.0f, y0) * fx;
+    const float bottom = texelAt(x0, y0 + 1.0f) * (1.0f - fx) + texelAt(x0 + 1.0f, y0 + 1.0f) * fx;
+    return top * (1.0f - fy) + bottom * fy;
+}
+
+float ProbeDistanceCube::spread(const Vec3& direction) const {
+    const CubeTexel texel = cubeTexelOf(direction);
+    const std::vector<float>& face = levels[0][static_cast<std::size_t>(texel.face)];
+    const float x0 = std::floor(texel.st.x * static_cast<float>(size) - 0.5f);
+    const float y0 = std::floor(texel.st.y * static_cast<float>(size) - 0.5f);
+    const auto clamped = [&](float value) { return static_cast<std::uint32_t>(std::clamp(value, 0.0f, static_cast<float>(size - 1))); };
+    const auto texelAt = [&](float tx, float ty) { return face[clamped(ty) * size + clamped(tx)]; };
+    const float a = texelAt(x0, y0);
+    const float b = texelAt(x0 + 1.0f, y0);
+    const float c = texelAt(x0, y0 + 1.0f);
+    const float d = texelAt(x0 + 1.0f, y0 + 1.0f);
+    const float farthest = std::max({a, b, c, d});
+    return (farthest - std::min({a, b, c, d})) / std::max(farthest, 1e-6f);
+}
+
 ProbeDistanceCube buildProbeDistanceCube(std::uint32_t size, const std::function<float(const Vec3&)>& distance) {
     ProbeDistanceCube cube;
     cube.size = size;
@@ -156,9 +188,63 @@ float probeTexelAngle(std::uint32_t size) {
     return 0.5f * std::numbers::pi_v<float> / static_cast<float>(size);
 }
 
-std::uint32_t probeConeLevel(float angle, std::uint32_t size, std::uint32_t levels) {
-    const float level = std::ceil(std::log2(std::max(angle * static_cast<float>(PROBE_CONE_MARGIN) / probeTexelAngle(size), 1.0f)));
-    return std::min(static_cast<std::uint32_t>(level), levels - 1);
+float probeStartLift(const Vec3& position, const Vec3& normal, std::uint32_t size) {
+    const float distance = position.length();
+    const float facing = distance > 0.0f ? normal.dot(position * (-1.0f / distance)) : 1.0f;
+    const float texels = static_cast<float>(PROBE_START_LIFT_TEXELS) * probeTexelAngle(size) * distance;
+    return texels / std::max(facing, static_cast<float>(PROBE_START_LIFT_SLANT));
+}
+
+float probeEdgeConfidence(float spread) {
+    return 1.0f - smoothStep(static_cast<float>(PROBE_EDGE_JUMP_START), static_cast<float>(PROBE_EDGE_JUMP_END), spread);
+}
+
+float probeViewConfidence(float angle, std::uint32_t size) {
+    const float texel = probeTexelAngle(size);
+    return 1.0f - smoothStep(texel, 2.0f * texel, angle);
+}
+
+CubeCell cubeCellOf(const Vec3& direction, std::uint32_t side) {
+    const CubeTexel texel = cubeTexelOf(direction);
+    const int last = static_cast<int>(side) - 1;
+    const int x = std::clamp(static_cast<int>(texel.st.x * static_cast<float>(side)), 0, last);
+    const int y = std::clamp(static_cast<int>(texel.st.y * static_cast<float>(side)), 0, last);
+    return CubeCell{texel.face, x, y};
+}
+
+/*
+* On a face, sc = (right . q) / (forward . q), so the points with sc = c make the plane (right - c forward) . q = 0
+* through the probe; tc = -(up . q) / (forward . q) likewise makes (-up - c forward) . q = 0. The ray meets each plane
+* once, at t = -(position . n) / (direction . n); a crossing behind the face (forward . q < 0) is the plane's far side,
+* not this cell's edge.
+*/
+float cubeCellExit(const Vec3& position, const Vec3& direction, float from, const CubeCell& cell, std::uint32_t side, float end) {
+    const CubeFaceAxes axes = cubeFaceAxes(cell.face);
+    const float across = static_cast<float>(side);
+    const float edges[4] = {2.0f * static_cast<float>(cell.x) / across - 1.0f, 2.0f * static_cast<float>(cell.x + 1) / across - 1.0f,
+                            2.0f * static_cast<float>(cell.y) / across - 1.0f, 2.0f * static_cast<float>(cell.y + 1) / across - 1.0f};
+    float exit = end;
+
+    for (int edge = 0; edge < 4; ++edge) {
+        const Vec3 normal = edge < 2 ? axes.right - axes.forward * edges[edge] : axes.up * -1.0f - axes.forward * edges[edge];
+        const float approach = direction.dot(normal);
+
+        if (std::fabs(approach) < 1e-12f) {
+            continue;
+        }
+
+        const float t = -position.dot(normal) / approach;
+
+        if (t > from && t < exit && axes.forward.dot(position + direction * t) > 0.0f) {
+            exit = t;
+        }
+    }
+
+    if (exit >= end) {
+        return end;
+    }
+
+    return std::min(exit + std::max(exit * static_cast<float>(PROBE_CELL_CROSSING_SHARE), static_cast<float>(PROBE_CELL_CROSSING)), end);
 }
 
 Vec3 parallaxDirection(const Vec3& position, const Vec3& direction, float t) {
@@ -173,24 +259,25 @@ float parallaxConfidence(float nearSide, float farSide) {
 /*
 * The ray meets a surface the first time it goes from in front of what the probe saw to behind it (an equation
 * |P + R t| = D(direction) has other roots further on, through doorways and behind walls, which a solver might settle
-* on). Near its start the ray may sit a hair behind its own surface, so it first leaves it. A step sweeping more than
-* one of the probe's texels is taken whole only if nothing the probe saw in that cone of directions is nearer than the
-* ray gets: the distances' pyramid answers for the whole cone with two reads (at its ends, on a level wide enough), so
-* a wall seen edge-on, a sliver on the cube, is never stepped over. Otherwise the step halves; once a step sweeps a
-* texel or less the ray's own point decides (anything the probe saw a texel wide or more is met). At the crossing the probe's distances either side agree for a real surface and jump at an edge it saw
-* past, which the confidence weighs.
+* on). Near its start the ray may sit a hair behind its own surface, so it first leaves it. Then it walks the pyramid
+* as screen-space reflections walk theirs: a cell's nearest distance is a sphere nothing in the cell comes inside, so
+* while the ray stays in front of it across the cell (its distance from the probe along a line is greatest at an end)
+* it goes on to the next cell, a level coarser; else a level finer without moving. At level 0 the texel's blended
+* distance where the ray leaves it says whether it went behind; a ray going far behind the texel's exact distance with
+* nothing there to meet has passed behind something the probe saw in front, and cannot be judged. The crossing is
+* narrowed down by halving; the probe's distances either side agree for a real surface (and the four texels blended
+* there are one surface), and jump at an edge it saw past, which the confidence weighs.
 */
 ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, std::uint32_t size, std::uint32_t levels,
-                           const std::function<float(const Vec3&, std::uint32_t)>& distanceAt) {
+                           const std::function<float(const Vec3&, std::uint32_t)>& cellAt,
+                           const std::function<float(const Vec3&)>& filteredAt, const std::function<float(const Vec3&)>& spreadAt) {
     const ParallaxLookup none{direction, 0.0f};
     const auto pointDistance = [&](float t) { return (position + direction * t).length(); };
     float frontT = static_cast<float>(PROBE_MARCH_START);
-    float frontDistance = 0.0f;
     bool inFront = false;
 
     for (int leave = 0; leave < PROBE_LEAVE_STEPS && !inFront; ++leave) {
-        frontDistance = distanceAt(parallaxDirection(position, direction, frontT), 0);
-        inFront = parallaxMismatch(position, direction, frontT, frontDistance) < 0.0f;
+        inFront = parallaxMismatch(position, direction, frontT, filteredAt(parallaxDirection(position, direction, frontT))) < 0.0f;
 
         if (!inFront) {
             frontT *= 2.0f;
@@ -203,50 +290,56 @@ ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float fa
 
     const float end = far + position.length();
     const float texelAngle = probeTexelAngle(size);
-    bool frontDistanceKnown = true;
-    float step = frontT;
+    const std::uint32_t topLevel = levels - 1;
+    std::uint32_t level = 0;
 
-    for (int iteration = 0; iteration < PROBE_MARCH_ITERATIONS && frontT < end; ++iteration) {
-        const float nextT = std::min(frontT + step, end);
+    for (int iteration = 0; iteration < PROBE_MARCH_ITERATIONS; ++iteration) {
         const Vec3 from = parallaxDirection(position, direction, frontT);
-        const Vec3 to = parallaxDirection(position, direction, nextT);
-        const float angle = std::acos(std::clamp(from.dot(to), -1.0f, 1.0f));
 
-        if (angle > texelAngle) {
-            const std::uint32_t level = probeConeLevel(angle, size, levels);
-            const float nearest = std::min(distanceAt(from, level), distanceAt(to, level));
+        // Once the probe's line of sight to the ray is within a texel of the ray's own (it turns towards it as the ray
+        // goes on), the probe sees what the rest of the ray sees: read it along the ray. A ray past the far plane has
+        // escaped the same way.
+        if (std::acos(std::clamp(from.dot(direction), -1.0f, 1.0f)) <= texelAngle || frontT >= end) {
+            return ParallaxLookup{direction, 1.0f};
+        }
 
-            if (std::max(pointDistance(frontT), pointDistance(nextT)) < nearest) {
-                frontT = nextT;
-                frontDistanceKnown = false;
-                step *= 2.0f;
-            } else {
-                step *= 0.5f;
+        const std::uint32_t side = std::max(size >> level, 1u);
+        const float exitT = cubeCellExit(position, direction, frontT, cubeCellOf(from, side), side, end);
+        const float nearest = cellAt(from, level);
+        const float farthest = std::max(pointDistance(frontT), pointDistance(exitT));
+
+        if (farthest < nearest) {
+            frontT = exitT;
+            level = std::min(level + 1, topLevel);
+            continue;
+        }
+
+        if (level > 0) {
+            --level;
+            continue;
+        }
+
+        const Vec3 to = parallaxDirection(position, direction, exitT);
+        const float stored = filteredAt(to);
+
+        if (parallaxMismatch(position, direction, exitT, stored) < 0.0f) {
+            // Far behind the texel's own surface yet in front where it leaves: it passed behind something thin the probe
+            // saw in front of it (a wall seen edge-on), which it cannot judge.
+            if (probeEdgeConfidence(1.0f - nearest / farthest) == 0.0f && probeEdgeConfidence(spreadAt(from)) < 1.0f) {
+                return none;
             }
 
+            frontT = exitT;
             continue;
         }
 
-        const float stored = distanceAt(to, 0);
-
-        if (parallaxMismatch(position, direction, nextT, stored) < 0.0f) {
-            frontT = nextT;
-            frontDistance = stored;
-            frontDistanceKnown = true;
-            step *= 2.0f;
-            continue;
-        }
-
-        float behindT = nextT;
+        float behindT = exitT;
         float behindDistance = stored;
-
-        if (!frontDistanceKnown) {
-            frontDistance = distanceAt(from, 0);
-        }
+        float frontDistance = filteredAt(from);
 
         for (int halving = 0; halving < PROBE_REFINE_STEPS; ++halving) {
             const float middle = 0.5f * (frontT + behindT);
-            const float middleDistance = distanceAt(parallaxDirection(position, direction, middle), 0);
+            const float middleDistance = filteredAt(parallaxDirection(position, direction, middle));
 
             if (parallaxMismatch(position, direction, middle, middleDistance) < 0.0f) {
                 frontT = middle;
@@ -257,7 +350,12 @@ ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float fa
             }
         }
 
-        return ParallaxLookup{parallaxDirection(position, direction, behindT), parallaxConfidence(frontDistance, behindDistance)};
+        // Trusted where the probe's distances agree across the crossing and the texels blended there are one surface, or
+        // where the probe looks at the point along the ray's own line, so it sees what the ray sees.
+        const Vec3 found = parallaxDirection(position, direction, behindT);
+        const float oneSurface = probeEdgeConfidence(spreadAt(found));
+        const float alongTheRay = probeViewConfidence(std::acos(std::clamp(found.dot(direction), -1.0f, 1.0f)), size);
+        return ParallaxLookup{found, std::max(parallaxConfidence(frontDistance, behindDistance) * oneSurface, alongTheRay)};
     }
 
     return none;

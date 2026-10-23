@@ -46,8 +46,8 @@ struct ReflectionSettings {
     // the depth image holds only front faces, so a ray passing behind a thin pole would otherwise hit it.
     float thickness = 0.3f;
 
-    // How far a ray goes (metres); hits fade out over its last fifth.
-    float reach = 100.0f;
+    // How far a ray goes (metres); hits fade out over its last fifth. Hits far away are as good as near ones on screen.
+    float reach = 1000.0f;
 
     // The most steps a ray takes through the depth pyramid before giving up.
     int maxSteps = 64;
@@ -178,10 +178,11 @@ struct ReflectionHit {
     Vec2 pixel;              // where it hit on screen
     float travelled = 0.0f;  // metres from the surface to the hit
     float facing = -1.0f;    // the cosine between the hit surface's normal and the ray: negative from the front
+    float towardsCamera = 0.0f; // the cosine between the ray and the way from its surface back to the camera
 };
 
 // How far the reflection is trusted over the stand-in, 0..1: the roughness fade, times the screen edge fade, times the
-// fade over the reach's end, times the front face test.
+// fade over the reach's end, times the front face test, times the fade for rays heading back towards the camera.
 float reflectionConfidence(const ReflectionHit& hit, Vec2 size, const ReflectionSettings& settings);
 
 // The colour pyramid's level a reflected cone this rough reads after travelling this many pixels: as wide as the cone,

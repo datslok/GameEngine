@@ -318,12 +318,15 @@ namespace {
         assert(caught.hit && near(caught.point.z, -6.0f, 0.15f));
     }
 
-    // Each fade alone: roughness, the screen's edges, the reach's end, and hits from behind.
+    /*
+    * Each fade alone: roughness, the screen's edges, the reach's end, hits from behind, and rays heading back towards
+    * the camera (the screen cannot hold what they really hit, which is behind it).
+    */
     void testConfidence() {
         const ReflectionSettings settings;
         const Vec2 centre{80.0f, 45.0f};
         const auto confidence = [&](float roughness, Vec2 pixel, float travelled, float facing) {
-            return reflectionConfidence(ReflectionHit{roughness, pixel, travelled, facing}, screen, settings);
+            return reflectionConfidence(ReflectionHit{roughness, pixel, travelled, facing, 0.0f}, screen, settings);
         };
 
         assert(confidence(0.1f, centre, 5.0f, -1.0f) == 1.0f);
@@ -343,6 +346,16 @@ namespace {
         assert(confidence(0.1f, centre, 5.0f, 0.0f) == 0.0f);
         assert(confidence(0.1f, centre, 5.0f, 0.5f) == 0.0f);
         assert(confidence(0.1f, centre, 5.0f, -SSR_FRONT_FACE_COSINE) == 1.0f);
+
+        const auto backwards = [&](float towardsCamera) {
+            return reflectionConfidence(ReflectionHit{0.1f, centre, 5.0f, -1.0f, towardsCamera}, screen, settings);
+        };
+        assert(backwards(-1.0f) == 1.0f && backwards(SSR_TOWARDS_CAMERA_START) == 1.0f);
+        assert(backwards(SSR_TOWARDS_CAMERA_END) == 0.0f && backwards(1.0f) == 0.0f);
+        assert(backwards(0.5f * (SSR_TOWARDS_CAMERA_START + SSR_TOWARDS_CAMERA_END)) > 0.0f);
+
+        // Hits far away are fine on screen: the reach is long.
+        assert(settings.reach >= 1000.0f);
     }
 
     // A mirror reads the sharp picture; a rougher surface or a longer ray a blurrier level, one more per doubling.

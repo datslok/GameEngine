@@ -30,6 +30,13 @@
 // Hits fade out over the last fifth of the reach.
 #define SSR_DISTANCE_FADE_START 0.8
 
+// Rays heading back towards the camera can only hit what lies between the surface and the camera, and the screen holds
+// what is beyond those surfaces too: a ray passing just behind something near the camera counts as hitting it. Full
+// trust up to this cosine between the ray and the way back to the camera, none from the second (a mirror seen head-on
+// is left to the probe or to ray tracing).
+#define SSR_TOWARDS_CAMERA_START 0.3
+#define SSR_TOWARDS_CAMERA_END 0.7
+
 // Hits on a surface the ray meets from behind (its normal along the ray) are not real: the picture shows that
 // surface's other side. Full trust from this cosine against the ray down to head-on, none at grazing and behind.
 #define SSR_FRONT_FACE_COSINE 0.2

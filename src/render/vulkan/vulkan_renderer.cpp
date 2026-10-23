@@ -1047,6 +1047,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const float probeFar = settings.reflections.probeFar;
     std::array<BatchedDraws, cubeFaceCount> captureDraws;
 
+    // The probe's images are bound by the reflection pass even with the probe off, so they exist whenever it runs.
+    if (screenReflections && reflectionProbe->getSize() == 0) {
+        reflectionProbe->ensureSize(static_cast<std::uint32_t>(settings.reflections.probeSize));
+    }
+
     if (captureProbe) {
         if (reflectionProbe->getSize() != static_cast<std::uint32_t>(settings.reflections.probeSize)) {
             device.waitIdle();

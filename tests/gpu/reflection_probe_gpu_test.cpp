@@ -34,9 +34,9 @@ namespace {
 
     /*
     * The march's pieces from points near and far from the probe, rays heading out and back past it, in front of and
-    * behind what the probe saw; the confidence from agreement to far apart; cone levels from under a texel to half the
-    * sphere on the presets' cube sizes. Inputs per case: (position, stored distance), (direction, t), (near side, far
-    * side, cone angle, cube size).
+    * behind what the probe saw; the confidence from agreement to far apart; the cells points fall in and where rays leave
+    * them on the presets' cube sizes. Inputs per case: (position, stored distance), (direction, t), (near side, far
+    * side, angle, cube size).
     */
     void checkParallax(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{127};
@@ -51,19 +51,33 @@ namespace {
                                      std::exp2(std::floor(random.between(6.0f, 9.0f)))});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PROBE_PARALLAX, inputs, 3, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PROBE_PARALLAX, inputs, 3, 4);
         const FloatTolerance distanceTolerance{.absolute = 1e-4f, .relative = 1e-4f};
 
-        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 4; ++i) {
             const GpuVec4* in = &inputs[i * 3];
-            const GpuVec4* out = &outputs[i * 2];
+            const GpuVec4* out = &outputs[i * 4];
             const Vec3 position = vec3From(in[0]);
             const Vec3 direction = vec3From(in[1]);
             report.check("parallaxDirection", transcendentalTolerance, parallaxDirection(position, direction, in[1][3]), vec3From(out[0]));
             report.check("parallaxMismatch", distanceTolerance, parallaxMismatch(position, direction, std::max(in[1][3], 0.0f), in[0][3]), out[0][3]);
             report.check("parallaxConfidence", transcendentalTolerance, parallaxConfidence(in[2][0], in[2][1]), out[1][0]);
-            report.check("probeConeLevel", exactTolerance, static_cast<float>(probeConeLevel(in[2][2], static_cast<std::uint32_t>(in[2][3]), 9)), out[1][1]);
+            const std::uint32_t side = static_cast<std::uint32_t>(in[2][3]);
+            const CubeCell cell = cubeCellOf(position.normalized(), side);
+            report.check("cubeCellOf", exactTolerance, Vec3{static_cast<float>(cell.face), static_cast<float>(cell.x), static_cast<float>(cell.y)},
+                         vec3From(out[3]));
+
+            if (cell.face == static_cast<int>(out[3][0]) && cell.x == static_cast<int>(out[3][1]) && cell.y == static_cast<int>(out[3][2])) {
+                report.check("cubeCellExit", distanceTolerance, cubeCellExit(position, direction, 0.0f, cell, side, in[0][3] * 10.0f), out[1][1]);
+            }
             report.check("probeTexelAngle", transcendentalTolerance, probeTexelAngle(static_cast<std::uint32_t>(in[2][3])), out[1][2]);
+            report.check("probeViewConfidence", transcendentalTolerance, probeViewConfidence(in[2][2], static_cast<std::uint32_t>(in[2][3])), out[1][3]);
+            report.check("probeStartLift", transcendentalTolerance, probeStartLift(position, direction, static_cast<std::uint32_t>(in[2][3])), out[2][0]);
+            report.check("probeEdgeConfidence", transcendentalTolerance, probeEdgeConfidence(in[2][1] / 50.0f), out[2][1]);
+            const float texels[4] = {in[2][0], in[2][1], in[0][3], in[2][0] * 0.9f};
+            const float farthest = std::max({texels[0], texels[1], texels[2], texels[3]});
+            const float spread = (farthest - std::min({texels[0], texels[1], texels[2], texels[3]})) / std::max(farthest, 1e-6f);
+            report.check("probeDistanceSpread", arithmeticTolerance, spread, out[2][2]);
         }
     }
 

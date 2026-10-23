@@ -50,12 +50,12 @@ void main() {
         testOutput(3, vec4(passed.position, 0.0));
     } else if (function == GPU_TEST_SSR_SHADING) {
         // Inputs: (roughness, pixel, travelled), (facing, size, sharp roughness), (max roughness, edge fade, reach,
-        // travelled pixels), (scene, confidence), (stand-in), (specular albedo), (hit light).
+        // travelled pixels), (scene, confidence), (stand-in, towards the camera), (specular albedo), (hit light).
         vec4 hit = testInput(0);
         vec4 screen = testInput(1);
         vec4 limits = testInput(2);
         vec4 scene = testInput(3);
-        float confidence = reflectionConfidence(hit.x, hit.yz, hit.w, screen.x, screen.yz, screen.w, limits.x, limits.y, limits.z);
+        float confidence = reflectionConfidence(hit.x, hit.yz, hit.w, screen.x, testInput(4).a, screen.yz, screen.w, limits.x, limits.y, limits.z);
         testOutput(0, vec4(confidence, reflectionConeLevel(hit.x, limits.w), 0.0, 0.0));
         testOutput(1, vec4(reflectedScene(scene.rgb, testInput(4).rgb, testInput(5).rgb, testInput(6).rgb, scene.a), 0.0));
     }

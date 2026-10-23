@@ -58,7 +58,8 @@ layout(set = REFLECTION_SET, binding = 5) uniform sampler2D surfaceStandIn;
 layout(set = REFLECTION_SET, binding = 6) uniform sampler2D velocity;          // moving objects' motion, or TAA_NO_MOTION
 layout(set = REFLECTION_SET, binding = 7) uniform samplerCube probeLight;      // the probe's prefiltered light, trilinear, every level
 layout(set = REFLECTION_SET, binding = 8) uniform samplerCube probeDistance;   // how far the probe saw, and its pyramid: nearest texel, every level
-layout(set = REFLECTION_SET, binding = 9, rgba16f) uniform image2D scene;
+layout(set = REFLECTION_SET, binding = 9) uniform samplerCube probeDistanceBlend; // the same, blended between texels (level 0 read)
+layout(set = REFLECTION_SET, binding = 10, rgba16f) uniform image2D scene;
 
 // What one source of reflection found: how far it is trusted, and the light it reflects.
 struct Reflection {
@@ -113,30 +114,42 @@ bool march(ScreenRay ray, out HizTrace found) {
     return false;
 }
 
-// The distance the probe saw towards a direction, at a level of its pyramid (0: the texel's own).
-float probeDistanceAt(vec3 towards, int level) {
+// The distance the probe saw towards a direction: a level's exact texel (the nearest over its patch of directions),
+// level 0 blended between texels (a surface at a slant reads as continuous), and how far level 0's four texels round
+// it spread (small on a surface, large at an edge between two).
+float probeCellDistance(vec3 towards, int level) {
     return textureLod(probeDistance, towards, float(level)).r;
 }
 
+float probeBlendedDistance(vec3 towards) {
+    return textureLod(probeDistanceBlend, towards, 0.0).r;
+}
+
+float probeSpreadAt(vec3 towards) {
+    return probeDistanceSpread(textureGather(probeDistance, towards));
+}
+
 /*
-* The probe's reflection: the parallax search, as searchProbe, from the pixel measured from where the probe was taken.
-* The ray leaves its surface until it is in front of what the probe saw; steps sweeping more than a texel of the probe
-* are taken whole only if the pyramid holds nothing nearer than the ray over their cone of directions, shorter ones
-* check the ray's point itself; the first step that goes behind is halved down to the crossing.
+* The probe's reflection: the parallax search, as searchProbe, from the pixel measured from where the probe was taken
+* and lifted off its surface. The ray leaves its surface until it is in front of what the probe saw, then walks the
+* distances' pyramid cell by cell (across a cell whose nearest distance it stays in front of, a level up; else a level
+* down; at level 0 into the texel's own surface), and the texel's stretch where it went behind is halved down to the
+* crossing.
 */
 Reflection reflectFromProbe(Glossy glossy) {
     Reflection none = Reflection(0.0, vec3(0.0));
-    vec3 position = glossy.position - pass.probeOrigin.xyz;
-    vec3 direction = glossy.direction;
     float size = pass.probeCube.x;
     int levels = int(pass.probeCube.y);
+    vec3 fromProbe = glossy.position - pass.probeOrigin.xyz;
+    vec3 position = fromProbe + glossy.normal * probeStartLift(fromProbe, glossy.normal, size);
+    vec3 direction = glossy.direction;
+    float rough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
+    float lightLevel = probeRoughnessLevel(glossy.roughness, pass.probe.y);
     float frontT = float(PROBE_MARCH_START);
-    float frontDistance = 0.0;
     bool inFront = false;
 
     for (int leave = 0; leave < PROBE_LEAVE_STEPS && !inFront; ++leave) {
-        frontDistance = probeDistanceAt(parallaxDirection(position, direction, frontT), 0);
-        inFront = parallaxMismatch(position, direction, frontT, frontDistance) < 0.0;
+        inFront = parallaxMismatch(position, direction, frontT, probeBlendedDistance(parallaxDirection(position, direction, frontT))) < 0.0;
 
         if (!inFront) {
             frontT *= 2.0;
@@ -149,50 +162,54 @@ Reflection reflectFromProbe(Glossy glossy) {
 
     float end = pass.probe.w + length(position);
     float texelAngle = probeTexelAngle(size);
-    bool frontDistanceKnown = true;
-    float step = frontT;
+    int level = 0;
 
-    for (int iteration = 0; iteration < PROBE_MARCH_ITERATIONS && frontT < end; ++iteration) {
-        float nextT = min(frontT + step, end);
+    for (int iteration = 0; iteration < PROBE_MARCH_ITERATIONS; ++iteration) {
         vec3 from = parallaxDirection(position, direction, frontT);
-        vec3 to = parallaxDirection(position, direction, nextT);
-        float angle = acos(clamp(dot(from, to), -1.0, 1.0));
 
-        if (angle > texelAngle) {
-            int level = probeConeLevel(angle, size, levels);
-            float nearest = min(probeDistanceAt(from, level), probeDistanceAt(to, level));
+        // Once the probe's line of sight to the ray is within a texel of the ray's own, the probe sees what the rest of
+        // the ray sees: read it along the ray. A ray past the far plane has escaped the same way.
+        if (acos(clamp(dot(from, direction), -1.0, 1.0)) <= texelAngle || frontT >= end) {
+            return Reflection(rough, textureLod(probeLight, direction, lightLevel).rgb);
+        }
 
-            if (max(length(position + direction * frontT), length(position + direction * nextT)) < nearest) {
-                frontT = nextT;
-                frontDistanceKnown = false;
-                step *= 2.0;
-            } else {
-                step *= 0.5;
+        int side = max(int(size) >> level, 1);
+        float exitT = cubeCellExit(position, direction, frontT, cubeCellOf(from, side), side, end);
+        float nearest = probeCellDistance(from, level);
+        float farthest = max(length(position + direction * frontT), length(position + direction * exitT));
+
+        if (farthest < nearest) {
+            frontT = exitT;
+            level = min(level + 1, levels - 1);
+            continue;
+        }
+
+        if (level > 0) {
+            --level;
+            continue;
+        }
+
+        vec3 to = parallaxDirection(position, direction, exitT);
+        float stored = probeBlendedDistance(to);
+
+        if (parallaxMismatch(position, direction, exitT, stored) < 0.0) {
+            // Far behind the texel's own surface yet in front where it leaves: it passed behind something thin the probe
+            // saw in front of it (a wall seen edge-on), which it cannot judge.
+            if (probeEdgeConfidence(1.0 - nearest / farthest) == 0.0 && probeEdgeConfidence(probeSpreadAt(from)) < 1.0) {
+                return none;
             }
 
+            frontT = exitT;
             continue;
         }
 
-        float stored = probeDistanceAt(to, 0);
-
-        if (parallaxMismatch(position, direction, nextT, stored) < 0.0) {
-            frontT = nextT;
-            frontDistance = stored;
-            frontDistanceKnown = true;
-            step *= 2.0;
-            continue;
-        }
-
-        float behindT = nextT;
+        float behindT = exitT;
         float behindDistance = stored;
-
-        if (!frontDistanceKnown) {
-            frontDistance = probeDistanceAt(from, 0);
-        }
+        float frontDistance = probeBlendedDistance(from);
 
         for (int halving = 0; halving < PROBE_REFINE_STEPS; ++halving) {
             float middle = 0.5 * (frontT + behindT);
-            float middleDistance = probeDistanceAt(parallaxDirection(position, direction, middle), 0);
+            float middleDistance = probeBlendedDistance(parallaxDirection(position, direction, middle));
 
             if (parallaxMismatch(position, direction, middle, middleDistance) < 0.0) {
                 frontT = middle;
@@ -203,10 +220,13 @@ Reflection reflectFromProbe(Glossy glossy) {
             }
         }
 
+        // Trusted where the probe's distances agree across the crossing and the texels blended there are one surface,
+        // or where the probe looks at the point along the ray's own line, so it sees what the ray sees.
         vec3 found = parallaxDirection(position, direction, behindT);
-        float trust = parallaxConfidence(frontDistance, behindDistance);
-        float rough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
-        return Reflection(trust * rough, textureLod(probeLight, found, probeRoughnessLevel(glossy.roughness, pass.probe.y)).rgb);
+        float oneSurface = probeEdgeConfidence(probeSpreadAt(found));
+        float trust = max(parallaxConfidence(frontDistance, behindDistance) * oneSurface,
+                          probeViewConfidence(acos(clamp(dot(found, direction), -1.0, 1.0)), size));
+        return Reflection(trust * rough, textureLod(probeLight, found, lightLevel).rgb);
     }
 
     return none;
@@ -245,7 +265,7 @@ Reflection reflectFromRays(Glossy glossy) {
     vec3 fromProbe = hit - pass.probeOrigin.xyz;
     float probeDistanceToHit = length(fromProbe);
     vec3 towardsHit = fromProbe / max(probeDistanceToHit, 1e-6);
-    float seen = pass.probe.x > 0.5 ? parallaxConfidence(probeDistanceToHit, probeDistanceAt(towardsHit, 0)) : 0.0;
+    float seen = pass.probe.x > 0.5 ? parallaxConfidence(probeDistanceToHit, textureLod(probeDistance, towardsHit, 0.0).r) : 0.0;
     vec3 pictured = textureLod(probeLight, towardsHit, level).rgb;
 
     if (seen >= 1.0) {
@@ -281,8 +301,9 @@ Reflection reflectFromScreen(Glossy glossy) {
     float hitDepth = texelFetch(depthPyramid, hitTexel, 0).r;
     vec3 hitPosition = positionAtPixel(pass.inverseViewProjection, hitPixel, hitDepth, size);
     vec3 hitNormal = octahedralDecode(texelFetch(surfaceNormal, hitTexel, 0).xy);
+    float towardsCamera = dot(glossy.direction, -normalize(glossy.position));
     float confidence = reflectionConfidence(glossy.roughness, hitPixel, length(hitPosition - glossy.position), dot(hitNormal, glossy.direction),
-                                            size, pass.options.x, pass.options.y, pass.limits.z, pass.options.w);
+                                            towardsCamera, size, pass.options.x, pass.options.y, pass.limits.z, pass.options.w);
 
     // Where the hit's surface was in last frame's picture, from its centre without this frame's jitter: by its motion if
     // it moved, else through the two cameras; nothing to reflect where it was off that picture or behind its camera.

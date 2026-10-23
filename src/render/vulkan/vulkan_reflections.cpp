@@ -21,12 +21,12 @@ namespace {
     constexpr VkFormat depthPyramidFormat = VK_FORMAT_R32_SFLOAT;
     constexpr VkFormat colourPyramidFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-    // The reflection pass's own set: its record, eight images it samples and the scene image it changes.
+    // The reflection pass's own set: its record, nine images it samples and the scene image it changes.
     ComputePipelineDescription reflectionPass(const char* shader) {
         ComputePipelineDescription reflections;
         reflections.shader = shader;
         reflections.storageBuffers = 1;
-        reflections.sampledImages = 8;
+        reflections.sampledImages = 9;
         reflections.storageImages = 1;
         return reflections;
     }
@@ -248,7 +248,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
     velocity.transition(commands, ImageState::ComputeRead);
     scene.transition(commands, ImageState::ComputeStorage);
 
-    const std::array<ComputeBinding, 10> bindings{
+    const std::array<ComputeBinding, 11> bindings{
         storageBufferBinding(record.get()),
         sampledBinding(nearest, depthPyramid.getView()),
         sampledBinding(pyramidSampler, colourPyramid.getView()),
@@ -258,6 +258,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
         sampledBinding(nearest, velocity.getView()),
         sampledBinding(pyramidSampler, probeLight),
         sampledBinding(nearestLevels, probeDistances),
+        sampledBinding(pyramidSampler, probeDistances),
         storageImageBinding(scene.getView()),
     };
 

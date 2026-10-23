@@ -161,7 +161,7 @@ namespace {
     * The confidence over roughness, the whole screen (edges included), travel to past the reach and every facing; cone
     * levels from a mirror to the roughest; the swap from untrusted to trusted, dark and bright. Inputs per case:
     * (roughness, pixel, travelled), (facing, size, sharp roughness), (max roughness, edge fade, reach, travelled
-    * pixels), (scene, confidence), (stand-in), (specular albedo), (hit light).
+    * pixels), (scene, confidence), (stand-in, towards the camera), (specular albedo), (hit light).
     */
     void checkShading(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{107};
@@ -176,7 +176,7 @@ namespace {
             inputs.push_back(GpuVec4{random.between(-1.0f, 1.0f), size.x, size.y, sharp});
             inputs.push_back(GpuVec4{random.between(sharp + 0.01f, 1.0f), random.between(0.01f, 1.0f), reach, random.between(0.0f, 2000.0f)});
             inputs.push_back(gpuVec4(colour(4.0f), i % 8 == 0 ? 0.0f : random.between(0.0f, 1.0f)));
-            inputs.push_back(gpuVec4(colour(2.0f)));
+            inputs.push_back(gpuVec4(colour(2.0f), random.between(-1.0f, 1.0f)));
             inputs.push_back(gpuVec4(colour(1.0f)));
             inputs.push_back(gpuVec4(colour(50.0f)));
         }
@@ -187,7 +187,7 @@ namespace {
             const GpuVec4* in = &inputs[i * 7];
             const GpuVec4* out = &outputs[i * 2];
             const ReflectionSettings settings{.sharpRoughness = in[1][3], .maxRoughness = in[2][0], .reach = in[2][2], .edgeFade = in[2][1]};
-            const ReflectionHit hit{in[0][0], Vec2{in[0][1], in[0][2]}, in[0][3], in[1][0]};
+            const ReflectionHit hit{in[0][0], Vec2{in[0][1], in[0][2]}, in[0][3], in[1][0], in[4][3]};
             report.check("reflectionConfidence", transcendentalTolerance, reflectionConfidence(hit, Vec2{in[1][1], in[1][2]}, settings), out[0][0]);
             report.check("reflectionConeLevel", transcendentalTolerance, reflectionConeLevel(in[0][0], in[2][3]), out[0][1]);
             report.check("reflectedScene", arithmeticTolerance,

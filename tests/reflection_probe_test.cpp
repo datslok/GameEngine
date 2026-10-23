@@ -199,7 +199,8 @@ namespace {
 
         ParallaxLookup search(const Vec3& position, const Vec3& direction) const {
             return searchProbe(position, direction, 300.0f, cube.size, static_cast<std::uint32_t>(cube.levels.size()),
-                               [&](const Vec3& towards, std::uint32_t level) { return cube.at(towards, level); });
+                               [&](const Vec3& towards, std::uint32_t level) { return cube.at(towards, level); },
+                               [&](const Vec3& towards) { return cube.filtered(towards); }, [&](const Vec3& towards) { return cube.spread(towards); });
         }
     };
 
@@ -225,17 +226,41 @@ namespace {
             }
         }
 
+        // Filtered, a direction between texel centres blends the four round it: at a centre, that texel alone.
+        const ProbeDistanceCube ramp = buildProbeDistanceCube(16, [](const Vec3& direction) { return 2.0f + direction.x; });
+        const Vec3 centre = cubeTexelDirection(4, Vec2{(5.0f + 0.5f) / 16.0f, (7.0f + 0.5f) / 16.0f}).normalized();
+        assert(near(ramp.filtered(centre), ramp.at(centre, 0), 1e-5f));
+        const Vec3 between = cubeTexelDirection(4, Vec2{6.0f / 16.0f, (7.0f + 0.5f) / 16.0f}).normalized();
+        const Vec3 corner = cubeTexelDirection(4, Vec2{6.0f / 16.0f, 7.0f / 16.0f}).normalized();
+        const float lowest = std::min({ramp.at(cubeTexelDirection(4, Vec2{5.5f / 16.0f, 6.5f / 16.0f}).normalized(), 0),
+                                       ramp.at(cubeTexelDirection(4, Vec2{5.5f / 16.0f, 7.5f / 16.0f}).normalized(), 0)});
+        const float highest = std::max({ramp.at(cubeTexelDirection(4, Vec2{6.5f / 16.0f, 6.5f / 16.0f}).normalized(), 0),
+                                        ramp.at(cubeTexelDirection(4, Vec2{6.5f / 16.0f, 7.5f / 16.0f}).normalized(), 0), lowest});
+        assert(near(ramp.spread(corner), (highest - lowest) / highest, 1e-5f));
+        const Vec3 left = cubeTexelDirection(4, Vec2{(5.0f + 0.5f) / 16.0f, (7.0f + 0.5f) / 16.0f}).normalized();
+        const Vec3 right = cubeTexelDirection(4, Vec2{(6.0f + 0.5f) / 16.0f, (7.0f + 0.5f) / 16.0f}).normalized();
+        assert(near(ramp.filtered(between), 0.5f * (ramp.at(left, 0) + ramp.at(right, 0)), 1e-5f));
+
         // Looking up a direction reads its texel at that level; the top level holds each face's nearest.
         assert(near(cube.at(Vec3{1.0f, 0.0f, 0.0f}, 0), 2.0f + 1.0f, 0.01f));
         assert(cube.at(Vec3{1.0f, 0.0f, 0.0f}, 4) <= cube.at(Vec3{1.0f, 0.0f, 0.0f}, 0));
 
-        // The cone level: a texel's worth of angle (with the margin) at the top, one level up per doubling.
-        const float texel = probeTexelAngle(256);
-        assert(near(texel, 0.5f * std::numbers::pi_v<float> / 256.0f, 1e-9f));
-        assert(probeConeLevel(0.0f, 256, 9) == 0);
-        assert(probeConeLevel(texel / static_cast<float>(PROBE_CONE_MARGIN), 256, 9) == 0);
-        assert(probeConeLevel(2.0f * texel / static_cast<float>(PROBE_CONE_MARGIN), 256, 9) == 1);
-        assert(probeConeLevel(3.0f, 256, 9) == 8);
+        assert(near(probeTexelAngle(256), 0.5f * std::numbers::pi_v<float> / 256.0f, 1e-9f));
+
+        /*
+        * Cells and where a ray leaves one: from (0.2, 0, -1) along +x, the -Z face (whose columns run along -x) sees the
+        * ray at sc = -0.2 - t, so with 2 cells a side it is in the left one (sc from -1 to 0) and leaves it at the
+        * face's edge, t = 0.8; with 4 cells (sc from -0.5 to 0) at t = 0.3; a ray along the line of sight never leaves.
+        */
+        const Vec3 start{0.2f, 0.0f, -1.0f};
+        const Vec3 along{1.0f, 0.0f, 0.0f};
+        const CubeCell wide = cubeCellOf(start.normalized(), 2);
+        assert(wide.face == 5 && wide.x == 0);
+        assert(near(cubeCellExit(start, along, 0.0f, wide, 2, 100.0f), 0.8f, 1e-3f) && cubeCellExit(start, along, 0.0f, wide, 2, 100.0f) > 0.8f);
+        const CubeCell narrow = cubeCellOf(start.normalized(), 4);
+        assert(narrow.x == 1 && near(cubeCellExit(start, along, 0.0f, narrow, 4, 100.0f), 0.3f, 1e-3f));
+        assert(cubeCellExit(start, start.normalized(), 0.0f, narrow, 4, 100.0f) == 100.0f);
+        assert(cubeCellExit(start, along, 0.0f, wide, 2, 0.5f) == 0.5f);
     }
 
     /*
@@ -245,6 +270,22 @@ namespace {
     * a wall the probe sees edge-on, standing in its doorway: the march must not step over it into the next room.
     */
     void testSearchProbe() {
+        /*
+        * A floor 1.5 m below the probe, seen at a slant: its distance changes a lot from texel to texel, yet it is one
+        * continuous surface. Mirror rays from a wall 3 m away come down onto it at every steepness, the shallow ones
+        * running over it a long way; each is found and trusted within the walk's steps.
+        */
+        const TestProbe floorOnly{[](const Vec3& direction) { return direction.y < 0.0f ? std::min(1.5f / -direction.y, 300.0f) : 300.0f; }};
+
+        for (int ray = 0; ray < 30; ++ray) {
+            const float drop = 0.05f + 0.03f * static_cast<float>(ray);
+            const Vec3 down = Vec3{0.3f * std::sin(static_cast<float>(ray)), -drop, 1.0f}.normalized();
+            const Vec3 fromWall{0.0f, 0.2f, -3.0f};
+            const ParallaxLookup onFloor = floorOnly.search(fromWall, down);
+            const Vec3 hit = fromWall + down * (1.7f / -down.y);
+            assert(onFloor.confidence > 0.9f && nearVec(onFloor.direction, hit.normalized(), 0.01f));
+        }
+
         const TestProbe sphere{[](const Vec3&) { return 10.0f; }};
         const ParallaxLookup onSphere = sphere.search(Vec3{2.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f});
         assert(nearVec(onSphere.direction, Vec3{2.0f, 0.0f, std::sqrt(96.0f)}.normalized(), 0.01f) && onSphere.confidence > 0.9f);
@@ -287,6 +328,68 @@ namespace {
         */
         const TestProbe inDoorway{standingInDoorway};
         assert(inDoorway.search(Vec3{-0.8f, 0.0f, 4.0f}, Vec3{0.05f, 0.0f, -1.0f}.normalized()).confidence < 0.1f);
+
+        /*
+        * A post 80 m away seen from a point 30 cm from the probe: the ray and the probe look at it along the same line
+        * (within a texel), so the probe sees what the ray sees even where the distances jump from the post to the sky
+        * at its silhouette. Every ray sweeping across its edge is trusted.
+        */
+        const TestProbe farPost{[](const Vec3& direction) {
+            return direction.z < 0.0f && std::fabs(std::atan2(direction.x, -direction.z)) < 0.02f ? 80.0f / -direction.z : 300.0f;
+        }};
+
+        for (int ray = 0; ray <= 20; ++ray) {
+            const float angle = 0.015f + 0.0005f * static_cast<float>(ray);
+            const Vec3 across{std::sin(angle), 0.0f, -std::cos(angle)};
+            assert(farPost.search(Vec3{0.3f, 0.0f, 0.0f}, across).confidence > 0.9f);
+        }
+
+        /*
+        * A ray from a slab on the ground, 4 m ahead of a probe at eye height, rising towards the sky over the ground
+        * beyond: it never meets anything, and once the probe's line of sight to it is within a texel of its own, the
+        * probe sees what it sees. Found along its own direction, and trusted.
+        */
+        const TestProbe ground{[](const Vec3& direction) { return direction.y < 0.0f ? std::min(1.5f / -direction.y, 300.0f) : 300.0f; }};
+
+        for (const float rise : {0.05f, 0.2f, 0.4f}) {
+            const Vec3 skimming = Vec3{0.0f, rise, -1.0f}.normalized();
+            const ParallaxLookup horizon = ground.search(Vec3{0.0f, -1.46f, -4.0f}, skimming);
+            assert(horizon.confidence > 0.9f && nearVec(horizon.direction, skimming, 0.01f));
+        }
+
+        /*
+        * The start's lift off its surface: a couple of the probe's texels at the point's distance, more where the probe
+        * sees the surface at a slant (its distances there change fast from texel to texel), up to a limit.
+        */
+        const float texelAt4 = probeTexelAngle(256) * 4.0f;
+        const Vec3 up{0.0f, 1.0f, 0.0f};
+        assert(near(probeStartLift(Vec3{0.0f, -4.0f, 0.0f}, up, 256), static_cast<float>(PROBE_START_LIFT_TEXELS) * texelAt4, 1e-6f));
+        assert(probeStartLift(Vec3{0.0f, -1.0f, -3.9f}, up, 256) > probeStartLift(Vec3{0.0f, -4.0f, 0.0f}, up, 256));
+        assert(near(probeStartLift(Vec3{0.0f, 0.0f, -4.0f}, up, 256),
+                    static_cast<float>(PROBE_START_LIFT_TEXELS) * texelAt4 / static_cast<float>(PROBE_START_LIFT_SLANT), 1e-6f));
+
+        /*
+        * From a slab on the ground seen at a slant from the probe, rays rising at every angle towards the sky must not
+        * catch on the ground's coarse texels near their start: lifted, every one is found along its own direction.
+        */
+        const Vec3 onSlab{0.0f, -1.46f, -4.0f};
+        const Vec3 lifted = onSlab + up * probeStartLift(onSlab, up, 256);
+
+        for (int ray = 0; ray < 40; ++ray) {
+            const float rise = 0.05f + 0.02f * static_cast<float>(ray);
+            const Vec3 skyward = Vec3{0.1f * std::sin(static_cast<float>(ray)), rise, -1.0f}.normalized();
+            const ParallaxLookup sky = ground.search(lifted, skyward);
+            assert(sky.confidence > 0.9f && nearVec(sky.direction, skyward, 0.01f));
+        }
+
+        // A surface or an edge: four texels spread a little are a surface, spread far an edge between two.
+        assert(probeEdgeConfidence(0.0f) == 1.0f && probeEdgeConfidence(PROBE_EDGE_JUMP_START) == 1.0f);
+        assert(probeEdgeConfidence(PROBE_EDGE_JUMP_END) == 0.0f && probeEdgeConfidence(0.5f) == 0.0f);
+
+        // The view's agreement: full within a texel of the ray's own direction, none past two.
+        const float texel = probeTexelAngle(256);
+        assert(probeViewConfidence(0.0f, 256) == 1.0f && probeViewConfidence(texel, 256) == 1.0f);
+        assert(probeViewConfidence(2.0f * texel, 256) == 0.0f);
 
         // ... but the floor in front of it, in plain view, it finds.
         const Vec3 towardsFloor = Vec3{0.0f, -1.0f, -1.0f}.normalized();
