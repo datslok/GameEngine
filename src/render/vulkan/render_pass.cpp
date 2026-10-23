@@ -4,16 +4,22 @@
 #include <vector>
 
 void beginRendering(VkCommandBuffer commands, VkExtent2D extent, const ColourAttachment* colour, const DepthAttachment* depth) {
-    VkRenderingAttachmentInfo colourInfo{};
+    beginRendering(commands, extent, colour != nullptr ? std::span<const ColourAttachment>{colour, 1} : std::span<const ColourAttachment>{}, depth);
+}
+
+void beginRendering(VkCommandBuffer commands, VkExtent2D extent, std::span<const ColourAttachment> colours, const DepthAttachment* depth) {
+    std::vector<VkRenderingAttachmentInfo> colourInfos(colours.size());
     VkRenderingAttachmentInfo depthInfo{};
 
-    if (colour != nullptr) {
+    for (std::size_t index = 0; index < colours.size(); ++index) {
+        const ColourAttachment& colour = colours[index];
+        VkRenderingAttachmentInfo& colourInfo = colourInfos[index];
         colourInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        colourInfo.imageView = colour->view;
+        colourInfo.imageView = colour.view;
         colourInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        colourInfo.loadOp = colour->load;
+        colourInfo.loadOp = colour.load;
         colourInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colourInfo.clearValue.color = {{colour->clear[0], colour->clear[1], colour->clear[2], colour->clear[3]}};
+        colourInfo.clearValue.color = {{colour.clear[0], colour.clear[1], colour.clear[2], colour.clear[3]}};
     }
 
     if (depth != nullptr) {
@@ -29,8 +35,8 @@ void beginRendering(VkCommandBuffer commands, VkExtent2D extent, const ColourAtt
     info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     info.renderArea.extent = extent;
     info.layerCount = 1;
-    info.colorAttachmentCount = colour != nullptr ? 1 : 0;
-    info.pColorAttachments = colour != nullptr ? &colourInfo : nullptr;
+    info.colorAttachmentCount = static_cast<std::uint32_t>(colourInfos.size());
+    info.pColorAttachments = colourInfos.empty() ? nullptr : colourInfos.data();
     info.pDepthAttachment = depth != nullptr ? &depthInfo : nullptr;
     vkCmdBeginRendering(commands, &info);
 

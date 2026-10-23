@@ -109,6 +109,7 @@ void gpuTestSoftShadow(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestToneMapping(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestBloom(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTaa(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestScreenReflections(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDither(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestOverlay(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestStars(GpuFunctionRunner& runner, GpuCheckReport& report);

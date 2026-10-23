@@ -204,10 +204,26 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
 
     const bool hasColour = description.colourFormat != VK_FORMAT_UNDEFINED;
 
+    // The first target blends as asked; the extra targets are written as they are.
+    std::vector<VkFormat> colourFormats;
+    std::vector<VkPipelineColorBlendAttachmentState> blends;
+
+    if (hasColour) {
+        colourFormats.push_back(description.colourFormat);
+        blends.push_back(blend);
+
+        for (VkFormat format : description.extraColourFormats) {
+            VkPipelineColorBlendAttachmentState extra{};
+            extra.colorWriteMask = blend.colorWriteMask;
+            colourFormats.push_back(format);
+            blends.push_back(extra);
+        }
+    }
+
     VkPipelineColorBlendStateCreateInfo colourBlend{};
     colourBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colourBlend.attachmentCount = hasColour ? 1 : 0;
-    colourBlend.pAttachments = &blend;
+    colourBlend.attachmentCount = static_cast<std::uint32_t>(blends.size());
+    colourBlend.pAttachments = blends.data();
 
     const std::array<VkDynamicState, 2> dynamicStates{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 
@@ -218,8 +234,8 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
 
     VkPipelineRenderingCreateInfo rendering{};
     rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    rendering.colorAttachmentCount = hasColour ? 1 : 0;
-    rendering.pColorAttachmentFormats = &description.colourFormat;
+    rendering.colorAttachmentCount = static_cast<std::uint32_t>(colourFormats.size());
+    rendering.pColorAttachmentFormats = colourFormats.data();
     rendering.depthAttachmentFormat = description.depthFormat;
 
     VkGraphicsPipelineCreateInfo info{};

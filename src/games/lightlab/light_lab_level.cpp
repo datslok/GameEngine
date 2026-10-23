@@ -256,7 +256,11 @@ namespace {
 }
 
 LightLabLayout buildLightLabLayout() {
-    LightLabLayout layout{buildTowers(), buildFence(), buildTrees(), buildBuilding(), {}, {}, {}};
+    LightLabLayout layout{buildTowers(), buildFence(), buildTrees(), buildBuilding(), {}, {}, {}, {}};
     buildStreet(layout);
+
+    const Vec3 slabCentre = (labPolishedSlab.minimum + labPolishedSlab.maximum) * 0.5f;
+    const Vec3 slabHalfSize = (labPolishedSlab.maximum - labPolishedSlab.minimum) * 0.5f;
+    layout.reflectionCorner.push_back(LabBlock{slabCentre, slabHalfSize, LabSurface::Polished});
     return layout;
 }

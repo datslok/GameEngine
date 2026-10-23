@@ -89,6 +89,10 @@ struct PipelineDescription {
     VkFormat colourFormat = VK_FORMAT_UNDEFINED; // none: depth only
     BlendMode blend = BlendMode::None;
 
+    // More colour targets after the first, written by the fragment shader's outputs at locations 1, 2..., never
+    // blended (the main pass's reflection surfaces, render/gpu/screen_reflections.h).
+    std::vector<VkFormat> extraColourFormats;
+
     VkFormat depthFormat = VK_FORMAT_UNDEFINED; // none: no depth target
     bool depthTest = false;
     bool depthWrite = false;

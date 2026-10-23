@@ -56,9 +56,35 @@ namespace {
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
 
         // The ground, the towers, fence, trees, building, the street, its windows and its bulbs' glow (static, and
-        // visual only, so they neither block nor wake the probes).
-        assert(staticModels == 8);
+        // visual only, so they neither block nor wake the probes), the polished slab and the mirror ball.
+        assert(staticModels == 10);
         assert(others > 0);
+    }
+
+    /*
+    * The reflection corner: a polished slab lying on the grass north-east of the start, clear of the towers, and the
+    * mirror ball resting on it, inside its edges.
+    */
+    void testTheReflectionCorner() {
+        const LightLabLayout layout = buildLightLabLayout();
+        assert(layout.reflectionCorner.size() == 1);
+        const LabBlock& slab = layout.reflectionCorner[0];
+        assert(slab.surface == LabSurface::Polished);
+
+        const Aabb bounds = slab.bounds();
+        assert(near(bounds.minimum.y, 0.0f, 1e-6f) && bounds.maximum.y > 0.0f);
+        assert(bounds.minimum.x > 0.0f && bounds.maximum.z < 0.0f);
+
+        assert(near(labMirrorBallCentre.y - labMirrorBallRadius, bounds.maximum.y, 1e-5f));
+        assert(labMirrorBallCentre.x - labMirrorBallRadius > bounds.minimum.x && labMirrorBallCentre.x + labMirrorBallRadius < bounds.maximum.x);
+        assert(labMirrorBallCentre.z - labMirrorBallRadius > bounds.minimum.z && labMirrorBallCentre.z + labMirrorBallRadius < bounds.maximum.z);
+
+        for (const LabBlock& tower : layout.towers) {
+            const Aabb other = tower.bounds();
+            const bool apart = other.maximum.x < bounds.minimum.x || other.minimum.x > bounds.maximum.x ||
+                               other.maximum.z < bounds.minimum.z || other.minimum.z > bounds.maximum.z;
+            assert(apart);
+        }
     }
 
     // The street's houses: the blocks of brick or render.
@@ -887,6 +913,7 @@ namespace {
 
 void testLightLab() {
     testTheLevelIsStatic();
+    testTheReflectionCorner();
     testTheLabsFlashlight();
     testTheBackRoomLamp();
     testTheStreetLights();

@@ -23,6 +23,7 @@ enum class GpuPass {
     RayDebug,
     Motion,
     DepthRange,
+    Reflections,  // screen-space reflections: the depth and colour pyramids and the reflection pass
     AntiAliasing, // TAA, FSR or DLSS, whichever smooths the frame (with the camera motion pass before FSR and DLSS)
     EyeAdaptation,
     Bloom,

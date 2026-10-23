@@ -1,0 +1,156 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Screen-space reflections (render/gpu/screen_reflections.h), one invocation per render pixel, in place on the scene
+* image. A glossy pixel follows its mirror ray through the depth pyramid (the loop traceScreenRay mirrors); where it hits,
+* the hit's surface is found in last frame's picture (by its motion if it moved, else through the two cameras) and read
+* from the colour pyramid's level as wide as the pixel's reflected cone. The stand-in the main pass added is swapped for
+* that light, as far as the hit is trusted (the confidence); where it is not at all, the pixel is left exactly as it was.
+*/
+#include "screen_reflections.glsl"
+
+// octahedralDecode, for the normals the main pass folded onto a square.
+#include "ddgi.glsl"
+
+layout(local_size_x = SSR_GROUP_SIDE, local_size_y = SSR_GROUP_SIDE) in;
+
+// Must match GpuReflectionPass.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 viewProjection;        // camera-relative, as the frame was drawn (jitter included)
+    mat4 inverseViewProjection;
+    mat4 reprojection;          // this frame's clip space (without the jitter) to last frame's
+    vec4 size;                  // xy: the render size in pixels, zw: their inverses
+    vec4 options;               // x: sharp roughness, y: max roughness, z: thickness, w: reach
+    vec4 limits;                // x: max steps, y: the pyramid's top level, z: edge fade, w: 1 to show the confidence
+    vec4 lens;                  // x: pixel footprint per metre, yz: this frame's jitter in render pixels
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D depthPyramid;      // exact texels, every level
+layout(set = 0, binding = 2) uniform sampler2D colourPyramid;     // trilinear, clamped
+layout(set = 0, binding = 3) uniform sampler2D surfaceNormal;     // the main pass's reflection surfaces, exact texels
+layout(set = 0, binding = 4) uniform sampler2D surfaceProperties;
+layout(set = 0, binding = 5) uniform sampler2D surfaceStandIn;
+layout(set = 0, binding = 6) uniform sampler2D velocity;          // moving objects' motion, or TAA_NO_MOTION
+layout(set = 0, binding = 7, rgba16f) uniform image2D scene;
+
+// What a pixel's reflection found: how far it is trusted, and the light it reflects.
+struct Reflection {
+    float confidence;
+    vec3 light;
+};
+
+// The march through the pyramid, as traceScreenRay: out of the start texel, then hizStep until a hit within the
+// thickness, the ray's end or the step limit. Returns whether it hit, and where in found.
+bool march(ScreenRay ray, out HizTrace found) {
+    vec2 size = pass.size.xy;
+    int topLevel = int(pass.limits.y);
+    int maxSteps = int(pass.limits.x);
+    HizTrace trace = passTexel(HizTrace(ray.start, 0.0, 0), ray);
+    found = trace;
+
+    for (int step = 0; step < maxSteps && trace.t <= ray.end; ++step) {
+        ivec2 levelSize = textureSize(depthPyramid, trace.level);
+        ivec2 cell = ivec2(pyramidCell(int(floor(trace.position.x)), trace.level, levelSize.x),
+                           pyramidCell(int(floor(trace.position.y)), trace.level, levelSize.y));
+        float nearest = texelFetch(depthPyramid, cell, trace.level).r;
+        HizTrace next = hizStep(trace, ray, nearest, topLevel);
+
+        if (next.level >= 0) {
+            trace = next;
+            continue;
+        }
+
+        if (next.t > ray.end) {
+            return false;
+        }
+
+        if (withinThickness(viewDistanceAtPixel(pass.inverseViewProjection, next.position.xy, next.position.z, size),
+                            viewDistanceAtPixel(pass.inverseViewProjection, next.position.xy, nearest, size), pass.options.z)) {
+            found = next;
+            return true;
+        }
+
+        trace = passTexel(next, ray);
+    }
+
+    return false;
+}
+
+// The reflection at this pixel: none for the sky, surfaces too rough, mirror rays into the surface and misses.
+Reflection reflectAt(ivec2 texel, float roughness) {
+    Reflection none = Reflection(0.0, vec3(0.0));
+    vec2 size = pass.size.xy;
+    float depth = texelFetch(depthPyramid, texel, 0).r;
+
+    if (!(depth > float(GPU_FAR_DEPTH)) || roughness >= pass.options.y) {
+        return none;
+    }
+
+    vec2 pixel = vec2(texel) + 0.5;
+    vec3 position = positionAtPixel(pass.inverseViewProjection, pixel, depth, size);
+    vec3 normal = octahedralDecode(texelFetch(surfaceNormal, texel, 0).xy);
+    vec3 direction = reflect(normalize(position), normal);
+
+    if (dot(direction, normal) <= 0.0) {
+        return none;
+    }
+
+    // Off the surface by a few pixels' footprint, so the surface it leaves does not hide it.
+    float distance = viewDistanceAtPixel(pass.inverseViewProjection, pixel, depth, size);
+    vec3 start = position + normal * (float(SSR_START_OFFSET_PIXELS) * pass.lens.x * distance);
+    ScreenRay ray = screenRay(pass.viewProjection, start, direction, pass.options.w, size);
+    HizTrace found;
+
+    if (!march(ray, found)) {
+        return none;
+    }
+
+    ivec2 hitTexel = clamp(ivec2(floor(found.position.xy)), ivec2(0), ivec2(size) - 1);
+    vec2 hitPixel = vec2(hitTexel) + 0.5;
+    float hitDepth = texelFetch(depthPyramid, hitTexel, 0).r;
+    vec3 hitPosition = positionAtPixel(pass.inverseViewProjection, hitPixel, hitDepth, size);
+    vec3 hitNormal = octahedralDecode(texelFetch(surfaceNormal, hitTexel, 0).xy);
+    float confidence = reflectionConfidence(roughness, hitPixel, length(hitPosition - position), dot(hitNormal, direction), size,
+                                            pass.options.x, pass.options.y, pass.limits.z, pass.options.w);
+
+    // Where the hit's surface was in last frame's picture, from its centre without this frame's jitter: by its motion if
+    // it moved, else through the two cameras; nothing to reflect where it was off that picture or behind its camera.
+    vec2 unjittered = hitPixel - pass.lens.yz;
+    vec2 motion = texelFetch(velocity, hitTexel, 0).xy;
+    vec3 previous = motion.x > TAA_NO_MOTION_TEST ? reprojectPixel(pass.reprojection, unjittered, hitDepth, size)
+                                                   : vec3(previousPixelFromMotion(unjittered, motion, size), 1.0);
+
+    if (previous.z < 0.5 || any(lessThan(previous.xy, vec2(0.0))) || any(greaterThan(previous.xy, size))) {
+        return none;
+    }
+
+    float level = reflectionConeLevel(roughness, length(found.position.xy - ray.start.xy));
+    return Reflection(confidence, textureLod(colourPyramid, previous.xy * pass.size.zw, level).rgb);
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (texel.x >= int(pass.size.x) || texel.y >= int(pass.size.y)) {
+        return;
+    }
+
+    vec4 surface = texelFetch(surfaceProperties, texel, 0);
+    Reflection reflection = reflectAt(texel, surface.a);
+
+    // The debug view: white where the reflection is trusted, black where the stand-in stays.
+    if (pass.limits.w > 0.5) {
+        imageStore(scene, texel, vec4(vec3(reflection.confidence), 1.0));
+        return;
+    }
+
+    // Untouched where it is not trusted at all, so the picture is exactly the main pass's there.
+    if (!(reflection.confidence > 0.0)) {
+        return;
+    }
+
+    vec4 colour = imageLoad(scene, texel);
+    vec3 standIn = texelFetch(surfaceStandIn, texel, 0).rgb;
+    imageStore(scene, texel, vec4(reflectedScene(colour.rgb, standIn, surface.rgb, reflection.light, reflection.confidence), colour.a));
+}

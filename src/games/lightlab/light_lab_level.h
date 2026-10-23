@@ -25,7 +25,9 @@ enum class LabSurface {
     Brick,    // houses
     Render,   // houses with smooth rendered fronts
     Metal,    // lamp posts, arms and shades
-    Glass     // windows (dark until lit)
+    Glass,    // windows (dark until lit)
+    Polished, // the reflection corner's slab: dark polished stone
+    Chrome    // the mirror ball
 };
 
 struct LabBlock {
@@ -158,6 +160,15 @@ struct LabWindow {
     float tint = 0.0f;
 };
 
+/*
+* The reflection corner north-east of the start, the test ground for reflections (render/gpu/screen_reflections.h): a
+* slab of dark polished stone on the grass, smooth enough to mirror the towers and the sky, and a chrome ball resting on
+* it, which mirrors everything round it.
+*/
+inline const Aabb labPolishedSlab{Vec3{2.0f, 0.0f, -11.0f}, Vec3{8.0f, 0.04f, -5.0f}};
+inline constexpr float labMirrorBallRadius = 0.6f;
+inline const Vec3 labMirrorBallCentre{5.0f, 0.04f + labMirrorBallRadius, -8.5f};
+
 // The level's parts, each group drawn as one entity and all of it solid.
 struct LightLabLayout {
     std::vector<LabBlock> towers;
@@ -167,6 +178,7 @@ struct LightLabLayout {
     std::vector<LabBlock> street; // the road, pavements, houses and lamps' posts, arms and shades
     std::vector<LabWindow> windows;
     std::vector<Vec3> streetLamps; // each lamp's bulb: the north side's west to east, then the south side's
+    std::vector<LabBlock> reflectionCorner; // the polished slab (the mirror ball is a sphere, placed by the game)
 };
 
 LightLabLayout buildLightLabLayout();

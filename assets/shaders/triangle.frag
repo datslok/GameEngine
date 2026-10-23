@@ -44,6 +44,11 @@ layout(location = 4) flat in uint materialIndex;
 // code (with it merely skipped by a branch, the driver compiled the rest a little differently, and a few pixels moved).
 layout(constant_id = DDGI_SAMPLE_PROBES_CONSTANT) const bool probesOn = false;
 
+// Whether this pipeline writes the reflection surfaces for screen-space reflections (render/gpu/screen_reflections.h):
+// pipelines without them have no such targets and none of the code.
+#include "render/gpu/screen_reflections_shared.h"
+layout(constant_id = SSR_WRITE_SURFACES_CONSTANT) const bool writeReflectionSurfaces = false;
+
 // Which lights may reach each cluster, one bit per light (cluster_lights.comp writes them before this pass).
 layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
     uint clusterMasks[];
@@ -75,6 +80,13 @@ layout(set = 1, binding = 8) uniform sampler2D shadowDepths;
 layout(set = 1, binding = 9) uniform sampler2D brdfTable;
 
 layout(location = 0) out vec4 outputColour;
+
+// The reflection surfaces, with writeReflectionSurfaces: the shaded normal folded onto a square (octahedral, ddgi.glsl),
+// the specular albedo with the roughness, and the stand-in for the reflection this pixel added (the probes' or the flat
+// ambient's light in the mirror direction, times the specular albedo), which the reflection pass swaps out.
+layout(location = 1) out vec2 reflectionNormal;
+layout(location = 2) out vec4 reflectionSurface;
+layout(location = 3) out vec3 reflectionStandIn;
 
 // How the surface position changes from this pixel to the next one right and down. Soft shadows use it to follow the
 // surface's slope across their wide filter. Set at the start of main, where every pixel of a 2x2 block runs together
@@ -499,16 +511,24 @@ void main() {
     // direction as the specular part's stand-in until reflections exist), the flat ambient elsewhere; the still and
     // fast lights' atlases added. Without probes, the flat ambient alone.
     vec3 ambientReflected = shadeAmbient(point, flatAmbient());
+    vec3 mirrorLight = flatAmbient();
 
     if (probesOn) {
         vec3 reflected = reflect(-toCamera, shadingNormal);
         ProbeLights probeLights = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, 0, true);
-        ambientReflected = shadeProbeAmbient(point, probeLights.still.diffuse + probeLights.fast.diffuse,
-                                             probeLights.still.specular + probeLights.fast.specular);
+        mirrorLight = probeLights.still.specular + probeLights.fast.specular;
+        ambientReflected = shadeProbeAmbient(point, probeLights.still.diffuse + probeLights.fast.diffuse, mirrorLight);
     }
 
     // Emitted light is added as is.
     outputColour = vec4(ambientReflected + diffuse + specular + material.emissive.rgb, albedo.a);
+
+    // A surface without a normal reflects nothing sharply: fully rough, so the stand-in stays.
+    if (writeReflectionSurfaces) {
+        reflectionNormal = octahedralEncode(shadingNormal);
+        reflectionSurface = vec4(point.specularAlbedo, normalLength > 0.0 ? roughness : 1.0);
+        reflectionStandIn = mirrorLight * point.specularAlbedo;
+    }
 
     // The heatmap debug view: the picture mostly covered by the colour of how many lights this pixel's cluster lists.
     if (shadingOptions.y != 0) {
