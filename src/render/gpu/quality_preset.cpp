@@ -23,6 +23,9 @@ namespace {
         bool reflections = false; // reflections, screen-space reflections' steps and the probe's size
         int reflectionSteps = 0;
         int probeSize = 0;
+        bool ambientOcclusion = false; // ambient occlusion, its slices and its steps
+        int occlusionSlices = 0;
+        int occlusionSteps = 0;
 
         bool operator==(const QualityValues&) const = default;
     };
@@ -48,7 +51,10 @@ namespace {
             .cascadeProbesHigh = settings.globalIllumination.cascadeProbesHigh,
             .reflections = settings.reflections.enabled,
             .reflectionSteps = settings.reflections.maxSteps,
-            .probeSize = settings.reflections.probeSize
+            .probeSize = settings.reflections.probeSize,
+            .ambientOcclusion = settings.ambientOcclusion.enabled,
+            .occlusionSlices = settings.ambientOcclusion.slices,
+            .occlusionSteps = settings.ambientOcclusion.steps
         };
     }
 
@@ -62,6 +68,8 @@ namespace {
                 high.fastProbeRays = 256;
                 high.probeSharing = 0.1f;
                 high.probeSize = 128;
+                high.occlusionSlices = 2;
+                high.occlusionSteps = 4;
                 return high;
             }
             case QualityPreset::Low:
@@ -69,13 +77,15 @@ namespace {
                         .directionalDistance = 60.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32, .probeSharing = 0.5f,
                         .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
-                        .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64};
+                        .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64,
+                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
-                        .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64};
+                        .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64,
+                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3};
             case QualityPreset::Ultra:
                 break;
         }
@@ -106,6 +116,9 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.reflections.enabled = values.reflections;
     settings.reflections.maxSteps = values.reflectionSteps;
     settings.reflections.probeSize = values.probeSize;
+    settings.ambientOcclusion.enabled = values.ambientOcclusion;
+    settings.ambientOcclusion.slices = values.occlusionSlices;
+    settings.ambientOcclusion.steps = values.occlusionSteps;
 }
 
 std::optional<QualityPreset> matchingQualityPreset(const RenderSettings& settings) {

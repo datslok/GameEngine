@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "render/gpu/ambient_occlusion.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/ddgi.h"
 #include "render/gpu/display_output.h"
@@ -34,6 +35,10 @@ struct RenderSettings {
 
     // Lights reflected off mirrors onto what they point at (render/gpu/mirrored_light.h): on GPUs with ray queries.
     MirroredLightSettings mirroredLights;
+
+    // Ambient occlusion (render/gpu/ambient_occlusion.h): the light from all around dimmed in creases and corners, from
+    // the depth prepass's depths.
+    AmbientOcclusionSettings ambientOcclusion;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

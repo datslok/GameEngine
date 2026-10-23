@@ -39,8 +39,9 @@ namespace {
     // The most textures the bindless array holds (see createSceneLayout).
     constexpr std::uint32_t maxBindlessTextures = 16384;
 
-    // Rough mirrors' noise repeats after this many frames: far longer than temporal anti-aliasing remembers.
-    constexpr std::uint64_t mirrorNoiseFrames = 1024;
+    // Noise turned each frame (rough mirrors' footprints, ambient occlusion's slices) repeats after this many frames: far
+    // longer than temporal anti-aliasing remembers.
+    constexpr std::uint64_t noiseCycleFrames = 1024;
 
     // Golden captures write what the screen would get: 8-bit sRGB (as the SDR swapchain) or scRGB half floats.
     VkFormat captureFormat(bool hdr) {
@@ -111,6 +112,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
+    ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     fsr = std::make_unique<VulkanFsr>(device);
@@ -609,6 +611,10 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
 
     if (mirroredLights && mirroredLights->hasImages()) {
         mirroredLights->ensureSize(scene);
+    }
+
+    if (ambientOcclusion->hasImages()) {
+        ambientOcclusion->ensureSize(scene);
     }
 
     fsrHistory = false;
@@ -1119,10 +1125,20 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         mirroredLights->ensureSize(sceneSize);
     }
 
+    // Ambient occlusion (render/gpu/ambient_occlusion.h) from the depth prepass's depths, blurred while there is no
+    // anti-aliasing to average its noise. Its images are made the first time, as the mirrored lights' are.
+    validateAmbientOcclusion(settings.ambientOcclusion);
+    const bool occlusion = settings.ambientOcclusion.enabled && settings.depthPrepass && inverseViewProjection;
+    const bool occlusionBlurred = occlusion && !temporal;
+
+    if (occlusion && !ambientOcclusion->hasImages()) {
+        ambientOcclusion->ensureSize(sceneSize);
+    }
+
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, settings, probes,
-                                                hitLights, mirrorPairs);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1177,6 +1193,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::DepthPrepass);
         drawDepthPrepass(frame, mainDraws, sceneSet);
         endGpuPass(frame, GpuPass::DepthPrepass);
+    }
+
+    if (occlusion) {
+        beginGpuPass(frame, GpuPass::AmbientOcclusion);
+        const std::uint32_t noiseFrame = temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0;
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth,
+                                  packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, sceneSize, settings.ambientOcclusion, noiseFrame),
+                                  occlusionBlurred);
+        endGpuPass(frame, GpuPass::AmbientOcclusion);
     }
 
     if (mirrorLight) {
@@ -1361,7 +1386,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
                                            const BatchedDraws& motionDraws, std::span<const BatchedDraws> captureDraws, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
-                                           const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs) {
+                                           const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
+                                           bool occlusionBlurred) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1408,7 +1434,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).
-    frameData.mirroredLightOptions[1] = static_cast<std::int32_t>(taaFrame % mirrorNoiseFrames);
+    frameData.mirroredLightOptions[1] = static_cast<std::int32_t>(taaFrame % noiseCycleFrames);
+    frameData.ambientOcclusionOptions[0] = occlusion ? 1 : 0;
+    frameData.ambientOcclusionOptions[1] = settings.ambientOcclusion.multipleBounces ? 1 : 0;
+    frameData.ambientOcclusionOptions[2] = settings.ambientOcclusion.specularOcclusion ? 1 : 0;
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1435,6 +1464,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         description.lighting.atmosphere ? atmosphere->sampledSkyView() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledLight() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledDirection() : sampled(*noProbesTexture),
+        occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred) : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2175,6 +2205,8 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     if (mirroredLights) {
         mirroredLights->setFramesInFlight(count);
     }
+
+    ambientOcclusion->setFramesInFlight(count);
 
     // A frame in flight that is no more would never come round to read the probes' relocation it asked for.
     if (ddgi) {

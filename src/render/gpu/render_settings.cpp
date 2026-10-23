@@ -25,6 +25,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("TAA", [&] {
         visit(settings.taa, visitor);
     });
+    visitor.group("Ambient occlusion", [&] {
+        visit(settings.ambientOcclusion, visitor);
+    });
     visitor.group("Reflections", [&] {
         visit(settings.reflections, visitor);
         visit(settings.mirroredLights, visitor);

@@ -40,6 +40,7 @@
 #include "render/vulkan/vulkan_pipeline.h"
 #include "render/vulkan/vulkan_ray_tracing.h"
 #include "render/vulkan/vulkan_mirrored_light.h"
+#include "render/vulkan/vulkan_ambient_occlusion.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
 #include "render/vulkan/vulkan_texture.h"
@@ -221,6 +222,9 @@ private:
     // Lights reflected off mirrors (render/gpu/mirrored_light.h): null without ray queries.
     std::unique_ptr<VulkanMirroredLights> mirroredLights;
 
+    // Ambient occlusion from the depth prepass (render/gpu/ambient_occlusion.h).
+    std::unique_ptr<VulkanAmbientOcclusion> ambientOcclusion;
+
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag). On GPUs with ray queries they trace the sun's shadow past
     // its cascades (probe_capture_rays.frag), in a layout with the ray tracing set as set 2.
@@ -368,11 +372,12 @@ private:
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
-    // reads the mirrored light pass's images when there are any.
+    // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
+    // blurred image when occlusionBlurred.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs);
+                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;

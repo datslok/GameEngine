@@ -1,0 +1,105 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Ambient occlusion (render/gpu/ambient_occlusion.h), one invocation per render pixel, between the depth prepass and the
+* main pass: the loop ambientOcclusionAt mirrors. The pixel's point and normal from the depths (the normal from the
+* neighbours that carry on in line), then slices round the way to the camera, each walked both ways through the depth
+* image for its horizons, and the open arcs between them averaged. Its noise turns with the frame for temporal
+* anti-aliasing to average (still without it, for the blur).
+*/
+#include "screen_reflections.glsl"
+#include "ambient_occlusion.glsl"
+#include "dither.glsl"
+
+layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
+
+// Must match GpuAmbientOcclusionPass.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
+    vec4 size;                  // xy: the render size in pixels, zw: their inverses
+    vec4 lens;                  // x: a pixel's footprint per metre of view distance
+    vec4 options;               // x: radius, y: falloff, z: slices, w: steps
+    ivec4 frame;                // x: the frame, turning the noise
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D depth;                 // exact texels
+layout(set = 0, binding = 2, r8) uniform writeonly image2D occlusion; // the visibility, 0 buried to 1 open
+
+// The point at a texel clamped onto the screen (measured from the camera); the sky counts as the fallback point.
+vec3 pointAt(ivec2 texel, vec3 fallback) {
+    ivec2 clamped = clamp(texel, ivec2(0), ivec2(pass.size.xy) - 1);
+    float texelDepth = texelFetch(depth, clamped, 0).r;
+    return texelDepth == float(GPU_FAR_DEPTH) ? fallback : positionAtPixel(pass.inverseViewProjection, vec2(clamped) + 0.5, texelDepth, pass.size.xy);
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(pass.size.xy);
+
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    float pixelDepth = texelFetch(depth, texel, 0).r;
+    vec2 pixel = vec2(texel) + 0.5;
+    float radius = pass.options.x;
+    float screenRadius = pixelDepth == float(GPU_FAR_DEPTH)
+                             ? 0.0
+                             : aoScreenRadius(radius, pass.lens.x, viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy));
+
+    if (screenRadius < float(AO_MIN_SAMPLE_PIXELS)) {
+        imageStore(occlusion, texel, vec4(1.0));
+        return;
+    }
+
+    vec3 position = positionAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
+    vec3 across = surfaceStep(position, pointAt(texel + ivec2(-1, 0), position), pointAt(texel + ivec2(-2, 0), position),
+                              pointAt(texel + ivec2(1, 0), position), pointAt(texel + ivec2(2, 0), position));
+    vec3 downwards = surfaceStep(position, pointAt(texel + ivec2(0, -1), position), pointAt(texel + ivec2(0, -2), position),
+                                 pointAt(texel + ivec2(0, 1), position), pointAt(texel + ivec2(0, 2), position));
+    vec3 normal = depthNormal(position, across, downwards);
+    vec3 toCamera = normalize(-position);
+
+    vec2 framePixel = pixel + 5.588238 * float(pass.frame.x);
+    float sliceNoise = interleavedGradientNoise(framePixel);
+    float stepNoise = interleavedGradientNoise(framePixel + vec2(23.0, 41.0));
+    int slices = int(pass.options.z);
+    int steps = int(pass.options.w);
+    float visibility = 0.0;
+
+    for (int slice = 0; slice < slices; ++slice) {
+        float angle = 3.14159265 * (float(slice) + sliceNoise) / float(slices);
+        vec2 onScreen = vec2(cos(angle), sin(angle));
+        vec3 direction = positionAtPixel(pass.inverseViewProjection, pixel + onScreen, pixelDepth, pass.size.xy) - position;
+        AoSlice plane = aoSlice(normal, toCamera, direction);
+        float horizons[2] = float[2](lowHorizonCosine(plane, 0), lowHorizonCosine(plane, 1));
+
+        for (int index = 0; index < steps; ++index) {
+            float distance = aoSampleDistance(index, steps, stepNoise, screenRadius);
+
+            for (int side = 0; side < 2; ++side) {
+                ivec2 at = ivec2(floor(pixel + onScreen * (side == 0 ? distance : -distance)));
+
+                if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size))) {
+                    continue;
+                }
+
+                float atDepth = texelFetch(depth, at, 0).r;
+
+                if (atDepth == float(GPU_FAR_DEPTH)) {
+                    continue;
+                }
+
+                vec3 offset = positionAtPixel(pass.inverseViewProjection, vec2(at) + 0.5, atDepth, pass.size.xy) - position;
+                float weight = occluderWeight(length(offset), radius, pass.options.y);
+                float low = lowHorizonCosine(plane, side);
+                horizons[side] = max(horizons[side], low + (horizonCosine(offset, toCamera) - low) * weight);
+            }
+        }
+
+        visibility += sliceVisibility(plane, horizons[0], horizons[1]);
+    }
+
+    imageStore(occlusion, texel, vec4(clamp(visibility / float(slices), 0.0, 1.0)));
+}
