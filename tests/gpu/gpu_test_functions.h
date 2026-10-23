@@ -14,6 +14,7 @@
 #define GPU_TEST_PREPARE_SHADING 3
 #define GPU_TEST_ADD_LIGHT 4
 #define GPU_TEST_FACES_LIGHT 5
+#define GPU_TEST_GGX_SAMPLE 6
 
 // normal_mapping_test.comp
 #define GPU_TEST_DECODE_NORMAL_TEXEL 0
@@ -120,5 +121,10 @@
 #define GPU_TEST_SSR_SCREEN_RAY 2
 #define GPU_TEST_SSR_MARCH 3
 #define GPU_TEST_SSR_SHADING 4
+
+// reflection_probe_test.comp
+#define GPU_TEST_PROBE_CUBE 0
+#define GPU_TEST_PROBE_PARALLAX 1
+#define GPU_TEST_PROBE_LEVELS 2
 
 #endif

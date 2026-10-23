@@ -398,6 +398,9 @@ namespace {
         assert(rejects(ReflectionSettings{.maxSteps = 0}));
         assert(rejects(ReflectionSettings{.edgeFade = 1.5f}));
         assert(rejects(ReflectionSettings{.thickness = std::numeric_limits<float>::quiet_NaN()}));
+        assert(rejects(ReflectionSettings{.probeSize = 100}));
+        assert(rejects(ReflectionSettings{.probeSize = 8}));
+        assert(rejects(ReflectionSettings{.probeFar = 0.01f}));
     }
 
     // The pass's numbers land where reflections.comp reads them.
@@ -405,8 +408,9 @@ namespace {
         const Mat4 viewProjection = cameraRelativeViewProjection(makeCamera());
         const Mat4 inverseViewProjection = *inverse(viewProjection);
         const ReflectionSettings settings;
+        const ReflectionPassFrame frame{.pyramidLevels = 8, .screenSpace = true, .probeLevels = 7, .probeOrigin = Vec3{1.0f, -2.0f, 3.0f}};
         const GpuReflectionPass pass = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize,
-                                                          Vec2{0.25f, -0.125f}, settings, 8);
+                                                          Vec2{0.25f, -0.125f}, settings, frame);
 
         // Column-major: element [column * 4 + row].
         assert(pass.viewProjection[1 * 4 + 0] == viewProjection.values[0][1]);
@@ -418,6 +422,13 @@ namespace {
         assert(pass.limits[0] == static_cast<float>(settings.maxSteps) && pass.limits[1] == 7.0f && pass.limits[2] == settings.edgeFade);
         assert(pass.limits[3] == 0.0f);
         assert(pass.lens[0] == pixelFootprint(viewProjection, 90.0f) && pass.lens[1] == 0.25f && pass.lens[2] == -0.125f);
+        assert(pass.probe[0] == 1.0f && pass.probe[1] == 7.0f && pass.probe[2] == 1.0f);
+        assert(pass.probeOrigin[0] == 1.0f && pass.probeOrigin[1] == -2.0f && pass.probeOrigin[2] == 3.0f);
+
+        // Without a probe this frame (none captured yet, or switched off) and without last frame's picture.
+        const GpuReflectionPass bare = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize, Vec2{}, settings,
+                                                          ReflectionPassFrame{.pyramidLevels = 8, .probeOrigin = Vec3{}});
+        assert(bare.probe[0] == 0.0f && bare.probe[2] == 0.0f);
 
         const GpuPyramidPass pyramid = packPyramidPass(RenderSize{80, 45}, 1, RenderSize{160, 90});
         assert(pyramid.target[0] == 80 && pyramid.target[1] == 45 && pyramid.target[2] == 1);

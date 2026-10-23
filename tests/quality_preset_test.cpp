@@ -35,10 +35,11 @@ namespace {
         assert(RenderSettings{}.globalIllumination.raysPerProbe == 1024 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 1024);
     }
 
-    // Screen-space reflections per preset: off on Low, fewer steps on Medium, the defaults on High and Ultra.
+    // Reflections per preset: off on Low, fewer steps and a smaller probe on Medium, the defaults' probe on Ultra.
     void testPresetsSetReflections() {
         const std::array<bool, 4> enabled{false, true, true, true};
         const std::array<int, 4> steps{32, 32, 64, 64};
+        const std::array<int, 4> probeSizes{64, 64, 128, 256};
 
         for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
             RenderSettings settings;
@@ -46,10 +47,11 @@ namespace {
             applyQualityPreset(settings, preset);
             assert(settings.reflections.enabled == enabled[static_cast<std::size_t>(preset)]);
             assert(settings.reflections.maxSteps == steps[static_cast<std::size_t>(preset)]);
+            assert(settings.reflections.probeSize == probeSizes[static_cast<std::size_t>(preset)]);
             assert(matchingQualityPreset(settings) == preset);
         }
 
-        assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64);
+        assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64 && RenderSettings{}.reflections.probeSize == 256);
     }
 
     // Sharing between probes per preset: more where there are fewer rays, none on Ultra, the default.
@@ -175,7 +177,8 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // High is Ultra with 256 light probe rays and a little sharing, nothing else: the same 4096 cascades and the rest as tuned.
+    // High is Ultra with 256 light probe rays and a little sharing and a reflection probe half as sharp, nothing else: the
+    // same 4096 cascades and the rest as tuned.
     void testHighIsUltraWithFewerProbeRays() {
         RenderSettings high;
         applyQualityPreset(high, QualityPreset::High);
@@ -185,6 +188,7 @@ namespace {
         high.globalIllumination.raysPerProbe = RenderSettings{}.globalIllumination.raysPerProbe;
         high.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
         high.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
+        high.reflections.probeSize = RenderSettings{}.reflections.probeSize;
         assert(matchingQualityPreset(high) == QualityPreset::Ultra);
     }
 

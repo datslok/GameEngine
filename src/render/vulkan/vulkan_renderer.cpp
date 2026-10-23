@@ -96,6 +96,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
 
     // Before the main pass's pipelines, which draw into its surfaces.
     reflections = std::make_unique<VulkanReflections>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get(), framesInFlight);
+    reflectionProbe = std::make_unique<VulkanReflectionProbe>(device, nearestSampler.get(), pyramidSampler.get());
     createPipelines();
     createShadowAtlas(shadowLayout.size());
     createFixedTextures();
@@ -270,6 +271,26 @@ namespace {
         description.depthCompare = vulkanCompare(state.compare);
     }
 
+    /*
+    * The reflection probe's capture: the main pass's vertex shader taking each face's view-projection from push constants,
+    * a capture fragment shader (every light, no surfaces), sampling the light probes or not, its own depth (no prepass), and
+    * front faces culled, since the cube's faces are mirror images and turn every triangle round (reflection_probe.h).
+    */
+    PipelineDescription capturePipeline(bool probes, const char* fragmentShader, VkPipelineLayout layout) {
+        PipelineDescription capture;
+        capture.vertexShader = "assets/shaders/triangle.vert.spv";
+        capture.fragmentShader = fragmentShader;
+        capture.sharedLayout = layout;
+        capture.vertices = meshVertices();
+        capture.cullMode = VK_CULL_MODE_FRONT_BIT;
+        capture.colourFormat = sceneColourFormat;
+        capture.depthFormat = depthFormat;
+        setDepthState(capture, mainPassDepthState(false));
+        capture.vertexConstants = {1u};
+        capture.fragmentConstants = {probes ? 1u : 0u};
+        return capture;
+    }
+
     // Where each main pass pipeline is in mainPipelines: one bit per choice.
     std::size_t mainPipelineIndex(bool afterPrepass, bool probes, bool reflectionSurfaces) {
         return (afterPrepass ? 1u : 0u) | (probes ? 2u : 0u) | (reflectionSurfaces ? 4u : 0u);
@@ -296,8 +317,8 @@ void VulkanRenderer::createPipelines() {
     setDepthState(main, mainPassDepthState(false));
 
     // Each combination: after the prepass or not, sampling the light probes (for frames that have them) or not, writing
-    // the reflection surfaces (their own targets, specialization constant 1) or not. A pipeline without probes or
-    // reflections names no constants, so it compiles exactly as it did before they existed.
+    // the reflection surfaces (their own targets and shader, triangle_surfaces.frag) or not. A pipeline without probes
+    // or reflections is the plain shader with no constants, as before they existed.
     for (bool afterPrepass : {false, true}) {
         for (bool probes : {false, true}) {
             for (bool surfaces : {false, true}) {
@@ -305,15 +326,22 @@ void VulkanRenderer::createPipelines() {
                 setDepthState(variant, mainPassDepthState(afterPrepass));
 
                 if (surfaces) {
-                    variant.fragmentConstants = {probes ? 1u : 0u, 1u};
+                    variant.fragmentShader = "assets/shaders/triangle_surfaces.frag.spv";
                     variant.extraColourFormats = reflections->surfaceFormats();
-                } else if (probes) {
+                }
+
+                if (probes) {
                     variant.fragmentConstants = {1u};
                 }
 
                 mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces)] = std::make_unique<VulkanPipeline>(device, layouts, variant);
             }
         }
+    }
+
+    for (bool probes : {false, true}) {
+        capturePipelines[probes ? 1 : 0] = std::make_unique<VulkanPipeline>(
+            device, layouts, capturePipeline(probes, "assets/shaders/probe_capture.frag.spv", sceneLayout->getPipelineLayout()));
     }
 
     PipelineDescription prepass = main;
@@ -393,6 +421,20 @@ void VulkanRenderer::createRayTracing() {
     description.sharedLayout = rayDebugLayout.get();
     description.colourFormat = sceneColourFormat;
     rayDebugPipeline = std::make_unique<VulkanPipeline>(device, layouts, description);
+
+    // The reflection probe's capture tracing the sun's shadow past its cascades: the scene's sets and the ray tracing
+    // set, and the scene's push constants (each face's view-projection).
+    const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
+    VkPipelineLayoutCreateInfo captureLayoutInfo = layoutInfo;
+    captureLayoutInfo.pPushConstantRanges = &faceView;
+    VkPipelineLayout createdCapture = VK_NULL_HANDLE;
+    vulkanCheck(vkCreatePipelineLayout(device.getDevice(), &captureLayoutInfo, nullptr, &createdCapture), "Probe capture layout creation failed");
+    captureRaysLayout = OwnedHandle<VkPipelineLayout>{device.getDevice(), createdCapture, vkDestroyPipelineLayout};
+
+    for (bool probes : {false, true}) {
+        capturePipelines[probes ? 1 : 0] = std::make_unique<VulkanPipeline>(
+            device, layouts, capturePipeline(probes, "assets/shaders/probe_capture_rays.frag.spv", captureRaysLayout.get()));
+    }
 
     // The light probes write their atlases from compute; every GPU with ray queries can, but it is checked anyway.
     const VkFormatFeatureFlags2 atlasUse = VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT;
@@ -988,6 +1030,32 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()));
 
+    // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
+    // surfaces, so they need the anti-aliasing on; the probe round the camera is captured every frame they run. Each of
+    // its faces draws what its own view holds, those entries following the velocity pass's in the draw list.
+    validateReflections(settings.reflections);
+    const bool screenReflections = temporal && settings.reflections.enabled;
+    const bool captureProbe = screenReflections && settings.reflections.probe;
+    const float probeFar = settings.reflections.probeFar;
+    std::array<BatchedDraws, cubeFaceCount> captureDraws;
+
+    if (captureProbe) {
+        if (reflectionProbe->getSize() != static_cast<std::uint32_t>(settings.reflections.probeSize)) {
+            device.waitIdle();
+            reflectionProbe->ensureSize(static_cast<std::uint32_t>(settings.reflections.probeSize));
+        }
+
+        std::uint32_t firstEntry = static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size() + motionDraws.order.size());
+
+        for (int face = 0; face < cubeFaceCount; ++face) {
+            const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), probeFar) *
+                                   Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
+            const std::vector<std::size_t> inView = visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero));
+            captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstEntry);
+            firstEntry += static_cast<std::uint32_t>(inView.size());
+        }
+    }
+
     // The light probes, in cascades round what the game's ProbeCascades follows (the camera): their atlases readied
     // first, since the scene set points at them.
     const GlobalIlluminationSettings& illumination = settings.globalIllumination;
@@ -1011,7 +1079,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
-    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, settings, probes, hitLights);
+    const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, settings, probes,
+                                                hitLights);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1020,10 +1089,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
-    // probes or the debug view.
+    // probes, the debug view or the reflection probe's capture.
     const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
 
-    if (rayDebug || traceProbes) {
+    const bool captureTracesRays = captureProbe && rayTracing;
+
+    if (rayDebug || traceProbes || captureTracesRays) {
         beginGpuPass(frame, GpuPass::RayScene);
         rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
         endGpuPass(frame, GpuPass::RayScene);
@@ -1065,10 +1136,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthPrepass);
     }
 
-    // Screen-space reflections reflect last frame's smoothed picture, so they need the anti-aliasing on.
-    validateReflections(settings.reflections);
-    const bool screenReflections = temporal && settings.reflections.enabled;
-
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
     const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
@@ -1107,15 +1174,28 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // From this frame's clip space (without the jitter) to last frame's, for the reflections and the anti-aliasing.
     const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
 
-    // The reflections, into the scene image before it is smoothed, from last frame's finished picture (still what
-    // finishedScene points at): none on the first frame, after a resize, or after a frame without anti-aliasing.
-    const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
+    // The reflection probe, captured where the camera is this frame.
+    if (captureProbe) {
+        beginGpuPass(frame, GpuPass::ReflectionProbe);
+        drawProbeCapture(frame, captureDraws, sceneSet, traceProbes, probeFar, description.lighting.background, air.has_value());
+        endGpuPass(frame, GpuPass::ReflectionProbe);
+    }
 
-    if (screenReflections && previousPictureUsable && previousCamera.known && inverseViewProjection) {
+    // The reflections, into the scene image before it is smoothed: the probe's, and the screen's from last frame's
+    // finished picture (still what finishedScene points at), which there is none of on the first frame, after a
+    // resize, or after a frame without anti-aliasing.
+    const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
+    const bool screenSpace = settings.reflections.screenSpace && previousPictureUsable && previousCamera.known;
+    const bool probeReady = captureProbe && reflectionProbe->hasCapture();
+
+    if (screenReflections && (screenSpace || probeReady) && inverseViewProjection) {
         beginGpuPass(frame, GpuPass::Reflections);
+        const ReflectionPassFrame passFrame{reflections->getPyramidLevels(), screenSpace, probeReady ? reflectionProbe->getLevels() : 0u,
+                                            probeReady ? reflectionProbe->getOrigin() - cameraOrigin : Vec3{}};
         const GpuReflectionPass pass = packReflectionPass(relativeViewProjection, *inverseViewProjection, reprojection, sceneSize, jitter,
-                                                          settings.reflections, reflections->getPyramidLevels());
-        reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(), *finishedScene, pass);
+                                                          settings.reflections, passFrame);
+        reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(),
+                             screenSpace ? finishedScene : nullptr, *reflectionProbe, pass);
         endGpuPass(frame, GpuPass::Reflections);
     }
 
@@ -1225,7 +1305,8 @@ void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Ca
 */
 VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights,
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
-                                           const BatchedDraws& motionDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
+                                           const BatchedDraws& motionDraws, std::span<const BatchedDraws> captureDraws, const RenderSettings& settings,
+                                           std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1250,6 +1331,12 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
     for (std::size_t index : motionDraws.order) {
         drawList.push_back(static_cast<std::uint32_t>(index));
+    }
+
+    for (const BatchedDraws& face : captureDraws) {
+        for (std::size_t index : face.order) {
+            drawList.push_back(static_cast<std::uint32_t>(index));
+        }
     }
 
     SceneBuffers& buffers = *frames[frame.frameIndex].scene;
@@ -1616,6 +1703,51 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionD
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
+}
+
+/*
+* The reflection probe's capture: each face drawn into its own layer of the capture (its old contents discarded and
+* cleared to the background), with the capture's pipeline and that face's view-projection as push constants, then the
+* sky over its background, as the main pass draws it. The faces are separate images to the GPU, so they need no
+* barriers between them; the probe's own passes follow (finishCapture).
+*/
+void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
+                                      float farPlane, const Vec3& background, bool sky) {
+    const VkCommandBuffer commands = frame.commands;
+    const std::uint32_t size = reflectionProbe->getSize();
+    const VulkanPipeline& pipeline = *capturePipelines[sampleProbes ? 1 : 0];
+    const VkPipelineLayout layout = pipeline.getLayout();
+    reflectionProbe->beginCapture(commands);
+
+    for (int face = 0; face < cubeFaceCount; ++face) {
+        const ColourAttachment colour = reflectionProbe->faceColour(face, background);
+        const DepthAttachment faceDepth = reflectionProbe->faceDepth(face);
+        beginRendering(commands, {size, size}, &colour, &faceDepth);
+        renderingOpen = true;
+
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
+
+        if (rayTracing) {
+            const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
+            vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0, nullptr);
+        } else {
+            bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+        }
+
+        const GpuShadowView view = packShadowView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane));
+        vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
+        stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches);
+
+        if (sky) {
+            atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(),
+                                packCubeFaceRays(face, cameraOrigin, size));
+        }
+
+        vkCmdEndRendering(commands);
+        renderingOpen = false;
+    }
+
+    reflectionProbe->finishCapture(commands, frame.descriptors, static_cast<float>(PROBE_NEAR), farPlane, cameraOrigin);
 }
 
 /*

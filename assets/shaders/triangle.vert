@@ -3,6 +3,15 @@
 
 #include "frame_data.glsl"
 #include "instances.glsl"
+#include "render/gpu/reflection_probe_shared.h"
+
+// Whether this pipeline draws the reflection probe's capture: each cube face's view-projection comes as push constants
+// (render/gpu/reflection_probe.h, cubeFaceViewProjection), the frame's being the camera's.
+layout(constant_id = PROBE_CAPTURE_VERTEX_CONSTANT) const bool captureView = false;
+
+layout(push_constant) uniform CaptureView {
+    mat4 captureViewProjection;
+};
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
@@ -35,7 +44,7 @@ void main() {
     mat4 model = instance.model;
     model[3].xyz -= cameraOrigin.xyz;
     relativePosition = (model * vec4(position, 1.0)).xyz;
-    gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
+    gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;

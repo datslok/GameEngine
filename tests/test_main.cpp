@@ -112,6 +112,7 @@ void testToneMapUniforms();
 void testBloom();
 void testTaa();
 void testScreenReflections();
+void testReflectionProbe();
 void testUpscaling();
 void testDisplayOutput();
 void testSettingsFile();
@@ -238,6 +239,7 @@ int main(){
     testBloom();
     testTaa();
     testScreenReflections();
+    testReflectionProbe();
     testUpscaling();
     testDisplayOutput();
     testSettingsFile();

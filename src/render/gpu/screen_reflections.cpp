@@ -15,13 +15,17 @@ namespace {
 }
 
 void visit(ReflectionSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Screen-space reflections", settings.enabled);
+    visitor.field("Reflections", settings.enabled);
+    visitor.field("Screen-space", settings.screenSpace);
+    visitor.field("Probe", settings.probe);
     visitor.field("Sharp roughness", settings.sharpRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Max roughness", settings.maxRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 10.0f, .sliderMax = 2.0f, .unit = "m"});
     visitor.field("Reach", settings.reach, {.min = 1.0f, .max = 1000.0f, .sliderMax = 300.0f, .unit = "m"});
     visitor.field("Max steps", settings.maxSteps, {.min = 1, .max = 512, .sliderMax = 256});
     visitor.field("Edge fade", settings.edgeFade, {.min = 0.01f, .max = 1.0f});
+    visitor.field("Probe size", settings.probeSize, {.min = 16, .max = 1024, .sliderMin = 64, .sliderMax = 512, .unit = "texels"});
+    visitor.field("Probe far", settings.probeFar, {.min = 1.0f, .max = 5000.0f, .sliderMax = 1000.0f, .unit = "m"});
     visitor.field("Show confidence", settings.showConfidence);
 }
 
@@ -45,6 +49,14 @@ void validateReflections(const ReflectionSettings& settings) {
 
     if (!(settings.edgeFade > 0.0f && settings.edgeFade <= 1.0f)) {
         throw std::invalid_argument("Screen-space reflections need an edge fade above 0 and at most 1");
+    }
+
+    if (settings.probeSize < 16 || settings.probeSize > 1024 || (settings.probeSize & (settings.probeSize - 1)) != 0) {
+        throw std::invalid_argument("The reflection probe's size must be a power of two from 16 to 1024");
+    }
+
+    if (!(settings.probeFar > static_cast<float>(PROBE_NEAR))) {
+        throw std::invalid_argument("The reflection probe must reach further than its near plane");
     }
 }
 
@@ -307,7 +319,7 @@ Vec3 reflectedScene(const Vec3& scene, const Vec3& standIn, const Vec3& specular
 }
 
 GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inverseViewProjection, const Mat4& reprojection,
-                                     RenderSize render, Vec2 jitter, const ReflectionSettings& settings, std::uint32_t pyramidLevels) {
+                                     RenderSize render, Vec2 jitter, const ReflectionSettings& settings, const ReflectionPassFrame& frame) {
     GpuReflectionPass pass{};
     writeColumnMajor(viewProjection, pass.viewProjection);
     writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
@@ -326,13 +338,20 @@ GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inv
     pass.options[3] = settings.reach;
 
     pass.limits[0] = static_cast<float>(settings.maxSteps);
-    pass.limits[1] = static_cast<float>(pyramidLevels - 1);
+    pass.limits[1] = static_cast<float>(frame.pyramidLevels - 1);
     pass.limits[2] = settings.edgeFade;
     pass.limits[3] = settings.showConfidence ? 1.0f : 0.0f;
 
     pass.lens[0] = pixelFootprint(viewProjection, height);
     pass.lens[1] = jitter.x;
     pass.lens[2] = jitter.y;
+
+    pass.probe[0] = frame.probeLevels > 0 ? 1.0f : 0.0f;
+    pass.probe[1] = static_cast<float>(frame.probeLevels);
+    pass.probe[2] = frame.screenSpace ? 1.0f : 0.0f;
+    pass.probeOrigin[0] = frame.probeOrigin.x;
+    pass.probeOrigin[1] = frame.probeOrigin.y;
+    pass.probeOrigin[2] = frame.probeOrigin.z;
     return pass;
 }
 

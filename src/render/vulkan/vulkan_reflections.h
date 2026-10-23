@@ -6,6 +6,7 @@
 #include "render/vulkan/render_pass.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_memory.h"
+#include "render/vulkan/vulkan_reflection_probe.h"
 #include "volk/volk.h"
 
 #include <array>
@@ -41,11 +42,12 @@ public:
 
     /*
     * Record the pyramids and the reflection pass: the depth (drawn this frame), the velocity image (drawn this frame),
-    * last frame's finished picture (any size; readable) and the scene image (drawn this frame), changed in place and
-    * left readable by fragment and compute shaders, as the main pass leaves it.
+    * last frame's finished picture (any size; readable; null when screen-space reflections do not run), the reflection
+    * probe (read only if the pass says so) and the scene image (drawn this frame), changed in place and left readable
+    * by fragment and compute shaders, as the main pass leaves it.
     */
     void reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene, VulkanImage& depth,
-                 VulkanImage& velocity, VulkanImage& previousPicture, const GpuReflectionPass& pass);
+                 VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe, const GpuReflectionPass& pass);
 
     // The depth pyramid's levels at the current size (packReflectionPass needs them).
     std::uint32_t getPyramidLevels() const;

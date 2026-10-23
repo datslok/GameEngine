@@ -50,7 +50,8 @@ inline constexpr VkPipelineStageFlags2 acquireWaitStage = VK_PIPELINE_STAGE_2_CO
 bool needsBarrier(ImageState from, ImageState to);
 
 /*
-* The barrier between two uses of an image (mip levels firstLevel onwards, levelCount of them; one array layer). The
+* The barrier between two uses of an image (mip levels firstLevel onwards, levelCount of them; every array layer, so a
+* cube's six faces change state together). The
 * source half waits for the old state's stages and flushes only its writes (reads leave nothing to flush); the
 * destination half makes the data visible to everything the new state reads or writes.
 */

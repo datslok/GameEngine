@@ -4,6 +4,7 @@
 #include "math/mat4.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
+#include "render/gpu/reflection_probe.h"
 #include "render/gpu/screen_reflections_shared.h"
 #include "render/gpu/upscaling.h"
 
@@ -31,6 +32,11 @@ struct ReflectionSettings {
     // Off draws no reflection images and runs no pass: the light probes' stand-in alone.
     bool enabled = true;
 
+    // The two sources, each off on its own for comparing: what the screen shows, and the reflection probe round the
+    // camera (render/gpu/reflection_probe.h) for what it does not.
+    bool screenSpace = true;
+    bool probe = true;
+
     // Up to this roughness the reflection is trusted fully; from maxRoughness on not at all (the stand-in, right for
     // blurry reflections, takes over), smoothly between.
     float sharpRoughness = 0.3f;
@@ -50,7 +56,15 @@ struct ReflectionSettings {
     // does not end in a hard line.
     float edgeFade = 0.1f;
 
-    // A debug view: each pixel's confidence in its reflection (white: the reflection, black: the stand-in).
+    // The reflection probe's faces, texels a side (a power of two, 16 to 1024): sharper reflections of what is off
+    // screen, each doubling costing four times the capture.
+    int probeSize = 256;
+
+    // How far the probe's capture sees (metres); beyond it the sky.
+    float probeFar = 300.0f;
+
+    // A debug view: each pixel's confidence in its reflection (white: screen-space reflections, blue: the probe,
+    // black: the stand-in).
     bool showConfidence = false;
 };
 
@@ -58,7 +72,8 @@ struct ReflectionSettings {
 void visit(ReflectionSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for roughness limits out of order or outside 0..1, a negative thickness, no reach, no
-// steps or an edge fade outside 0..1.
+// steps, an edge fade outside 0..1, a probe size that is not a power of two from 16 to 1024 or a probe reaching no
+// further than its near plane.
 void validateReflections(const ReflectionSettings& settings);
 
 // The depth pyramid's levels for a depth image of this size: a full mip chain, at most SSR_MAX_PYRAMID_LEVELS.
@@ -172,25 +187,37 @@ float reflectionConeLevel(float roughness, float travelledPixels);
 // standIn), never below 0; the scene exactly at confidence 0.
 Vec3 reflectedScene(const Vec3& scene, const Vec3& standIn, const Vec3& specularAlbedo, const Vec3& hitLight, float confidence);
 
+// What this frame's reflection pass has to work with besides the settings: the depth pyramid's levels, whether
+// last frame's picture may be reflected (screen-space reflections run), and the probe, if one was captured: its
+// prefiltered levels and where it was taken, measured from this frame's camera.
+struct ReflectionPassFrame {
+    std::uint32_t pyramidLevels = 1;
+    bool screenSpace = false;
+    std::uint32_t probeLevels = 0; // none: no probe
+    Vec3 probeOrigin;
+};
+
 /*
 * The reflection pass's numbers (reflections.comp's storage buffer, std430): the camera-relative view-projection that
 * drew the frame (jitter included) and its inverse, the reprojection to last frame's picture (render/gpu/taa.h), the
-* render size, the settings, the pyramid's top level, the pixel footprint and this frame's jitter.
+* render size, the settings, the pyramid's top level, the pixel footprint, this frame's jitter, and the probe.
 */
 struct GpuReflectionPass {
     float viewProjection[16];
     float inverseViewProjection[16];
     float reprojection[16];
-    float size[4];    // xy: the render size in pixels, zw: their inverses
-    float options[4]; // x: sharp roughness, y: max roughness, z: thickness, w: reach
-    float limits[4];  // x: max steps, y: the pyramid's top level, z: edge fade, w: 1 to show the confidence
-    float lens[4];    // x: pixel footprint per metre, yz: this frame's jitter in render pixels, w: unused
+    float size[4];        // xy: the render size in pixels, zw: their inverses
+    float options[4];     // x: sharp roughness, y: max roughness, z: thickness, w: reach
+    float limits[4];      // x: max steps, y: the pyramid's top level, z: edge fade, w: 1 to show the confidence
+    float lens[4];        // x: pixel footprint per metre, yz: this frame's jitter in render pixels, w: unused
+    float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run
+    float probeOrigin[4]; // xyz: where the probe was taken, measured from the camera
 };
 
-static_assert(sizeof(GpuReflectionPass) == 256, "GpuReflectionPass must match reflections.comp's buffer");
+static_assert(sizeof(GpuReflectionPass) == 288, "GpuReflectionPass must match reflections.comp's buffer");
 
 GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inverseViewProjection, const Mat4& reprojection,
-                                     RenderSize render, Vec2 jitter, const ReflectionSettings& settings, std::uint32_t pyramidLevels);
+                                     RenderSize render, Vec2 jitter, const ReflectionSettings& settings, const ReflectionPassFrame& frame);
 
 // The pyramid passes' push constants: the level written (its size) and the level read (its size).
 struct GpuPyramidPass {

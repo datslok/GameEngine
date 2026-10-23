@@ -233,8 +233,41 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * GGX's sampled facet normals over whole sample sets at every roughness, and directions turned round normals all
+    * over the sphere, straight up and down included. Inputs per case: (sample, samples, alpha, 0), (normal, 0), (local
+    * direction, 0).
+    */
+    void checkGgxSamples(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{109};
+        std::vector<GpuVec4> inputs;
+
+        for (float roughness : roughnessSteps()) {
+            for (std::uint32_t sample = 0; sample < 64; sample += 3) {
+                const Vec3 normal = sample == 0 ? Vec3{0.0f, 1.0f, 0.0f} : sample == 3 ? Vec3{0.0f, -1.0f, 0.0f} : random.direction();
+                inputs.push_back(gpuVec4(static_cast<float>(sample), 64.0f, roughness * roughness));
+                inputs.push_back(gpuVec4(normal));
+                inputs.push_back(gpuVec4(ggxSampleHalfway(sample, 64, roughness * roughness)));
+            }
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_GGX_SAMPLE, inputs, 3, 2);
+
+        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+            const GpuVec4* in = &inputs[i * 3];
+            const GpuVec4* out = &outputs[i * 2];
+            const std::uint32_t sample = static_cast<std::uint32_t>(in[0][0]);
+            report.check("radicalInverse", exactTolerance, radicalInverse(sample), out[0][3]);
+            report.check("ggxSampleHalfway", transcendentalTolerance, ggxSampleHalfway(sample, 64, in[0][2]), vec3From(out[0]));
+            report.check("alongNormal", transcendentalTolerance, alongNormal(vec3From(in[2]), vec3From(in[1])), vec3From(out[1]));
+        }
+    }
+}
+
 void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("brdf.glsl");
+    checkGgxSamples(runner, report);
     checkGgx(runner, report);
     checkSmith(runner, report);
     checkFresnel(runner, report);

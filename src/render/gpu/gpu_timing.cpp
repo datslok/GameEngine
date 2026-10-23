@@ -28,6 +28,8 @@ const char* gpuPassName(GpuPass pass) {
         return "MOTION";
     case GpuPass::DepthRange:
         return "DEPTHS";
+    case GpuPass::ReflectionProbe:
+        return "CUBE";
     case GpuPass::Reflections:
         return "SSR";
     case GpuPass::AntiAliasing:

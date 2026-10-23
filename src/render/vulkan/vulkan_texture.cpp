@@ -20,9 +20,8 @@ VulkanTextureDescription surfaceTexture(TextureEncoding encoding) {
 }
 
 /*
-* The upload: level 0 is copied in from an upload buffer, then each smaller level is blitted from the one above. Every
-* level gets its own barriers: it is written (transfer destination), then read for the next level (transfer source),
-* then left for fragment shaders. The last level is never a source, so it goes straight to being read.
+* The upload: level 0 is copied in from an upload buffer, then each smaller level is blitted from the one above
+* (generateMipmaps), and every level is left for shaders to read.
 */
 VulkanTexture::VulkanTexture(const VulkanDevice& device, ImmediateCommands& uploads, std::uint32_t width, std::uint32_t height,
                              std::span<const std::uint8_t> texels, const VulkanTextureDescription& description):
@@ -67,30 +66,8 @@ VulkanTexture::VulkanTexture(const VulkanDevice& device, ImmediateCommands& uplo
         copy.imageExtent = {width, height, 1};
         vkCmdCopyBufferToImage(commands, staging.get(), handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
-        for (std::uint32_t level = 1; level < levels; ++level) {
-            const std::uint32_t source = level - 1;
-            recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
-                                                      ImageState::TransferSource, ImageContents::Keep, source, 1));
-
-            VkImageBlit blit{};
-            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, source, 0, 1};
-            blit.srcOffsets[1] = {static_cast<std::int32_t>(std::max(width >> source, 1u)),
-                                  static_cast<std::int32_t>(std::max(height >> source, 1u)), 1};
-            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
-            blit.dstOffsets[1] = {static_cast<std::int32_t>(std::max(width >> level, 1u)),
-                                  static_cast<std::int32_t>(std::max(height >> level, 1u)), 1};
-            vkCmdBlitImage(commands, handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1, &blit, VK_FILTER_LINEAR);
-
-            recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferSource,
-                                                      ImageState::SurfaceRead, ImageContents::Keep, source, 1));
-        }
-
-        recordImageBarrier(commands, imageBarrier(handle, VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
-                                                  ImageState::SurfaceRead, ImageContents::Keep, levels - 1, 1));
+        generateMipmaps(commands, image, ImageState::TransferDestination, ImageState::SurfaceRead);
     });
-
-    image.setState(ImageState::SurfaceRead);
 }
 
 VkImageView VulkanTexture::getView() const {

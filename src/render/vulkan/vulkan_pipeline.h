@@ -77,6 +77,9 @@ struct PipelineDescription {
     // the driver compiles the pipeline, so code a constant switches off is not in it at all.
     std::vector<std::uint32_t> fragmentConstants;
 
+    // The same for the vertex shader.
+    std::vector<std::uint32_t> vertexConstants;
+
     ShaderResources resources;
 
     // A pipeline layout made elsewhere and shared (the scene's, render/vulkan/scene_layout.h), used instead of building

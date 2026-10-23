@@ -141,7 +141,8 @@ namespace {
         assert(!needsBarrier(ImageState::DepthComputeRead, ImageState::DepthComputeRead));
     }
 
-    // Mipmaps are made by copying each level from the one above: a barrier per level, so its range is that level alone.
+    // Mipmaps are made by copying each level from the one above: a barrier per level, so its range is that level alone,
+    // in every layer (a cube's six faces change state together).
     void testBarrierCoversChosenLevels() {
         const VkImageMemoryBarrier2 barrier = imageBarrier(someImage(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::TransferDestination,
                                                            ImageState::TransferSource, ImageContents::Keep, 3, 1);
@@ -149,7 +150,7 @@ namespace {
         assert(barrier.subresourceRange.baseMipLevel == 3);
         assert(barrier.subresourceRange.levelCount == 1);
         assert(barrier.subresourceRange.baseArrayLayer == 0);
-        assert(barrier.subresourceRange.layerCount == 1);
+        assert(barrier.subresourceRange.layerCount == VK_REMAINING_ARRAY_LAYERS);
         assert(barrier.srcStageMask == VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT);
         assert(barrier.srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT);
         assert(barrier.dstAccessMask == VK_ACCESS_2_TRANSFER_READ_BIT);

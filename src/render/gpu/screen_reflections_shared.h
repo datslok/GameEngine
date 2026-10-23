@@ -2,7 +2,7 @@
 #define RENDER_GPU_SCREEN_REFLECTIONS_SHARED_H
 
 // Screen-space reflections' numbers, shared by render/gpu/screen_reflections.h and the shaders (screen_reflections.glsl,
-// reflections.comp, depth_pyramid.comp, colour_pyramid.comp and triangle.frag). Only #defines of plain numbers, since
+// reflections.comp, depth_pyramid.comp and colour_pyramid.comp). Only #defines of plain numbers, since
 // GLSL reads them too.
 
 // The passes' workgroups: a square of this many pixels a side, one pixel an invocation.
@@ -33,8 +33,5 @@
 // Hits on a surface the ray meets from behind (its normal along the ray) are not real: the picture shows that
 // surface's other side. Full trust from this cosine against the ray down to head-on, none at grazing and behind.
 #define SSR_FRONT_FACE_COSINE 0.2
-
-// The specialization constant (constant_id) of triangle.frag that has it write the reflection surface images.
-#define SSR_WRITE_SURFACES_CONSTANT 1
 
 #endif

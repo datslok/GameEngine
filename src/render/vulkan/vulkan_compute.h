@@ -5,8 +5,10 @@
 #include "volk/volk.h"
 
 #include <cstdint>
+#include <span>
 
 class VulkanDevice;
+class FrameDescriptors;
 
 // What a compute shader reads and writes: storage buffers at set 0, bindings 0.. storageBuffers - 1, then images it
 // samples (combined image samplers) at the next sampledImages bindings, then images it reads and writes in place
@@ -53,3 +55,18 @@ private:
 
     VkPipelineLayout createLayout(VkDevice handle, const ComputePipelineDescription& description);
 };
+
+// One binding of a compute pass's set 0: a storage buffer, a sampled image or a storage image.
+struct ComputeBinding {
+    VkDescriptorType type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    VkDescriptorImageInfo image{};
+    VkDescriptorBufferInfo buffer{};
+};
+
+ComputeBinding storageBufferBinding(VkBuffer buffer);
+ComputeBinding sampledBinding(VkSampler sampler, VkImageView view, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+ComputeBinding storageImageBinding(VkImageView view);
+
+// A fresh set 0 for one dispatch, its bindings numbered in order, and the pipeline bound with it.
+void bindComputeSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors& descriptors, const ComputePipeline& pipeline,
+                    std::span<const ComputeBinding> bindings);

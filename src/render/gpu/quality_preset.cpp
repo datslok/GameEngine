@@ -20,8 +20,9 @@ namespace {
         int densestProbesHigh = 0;
         int cascadeProbesAcross = 0;
         int cascadeProbesHigh = 0;
-        bool reflections = false; // screen-space reflections, and their steps
+        bool reflections = false; // reflections, screen-space reflections' steps and the probe's size
         int reflectionSteps = 0;
+        int probeSize = 0;
 
         bool operator==(const QualityValues&) const = default;
     };
@@ -46,12 +47,13 @@ namespace {
             .cascadeProbesAcross = settings.globalIllumination.cascadeProbesAcross,
             .cascadeProbesHigh = settings.globalIllumination.cascadeProbesHigh,
             .reflections = settings.reflections.enabled,
-            .reflectionSteps = settings.reflections.maxSteps
+            .reflectionSteps = settings.reflections.maxSteps,
+            .probeSize = settings.reflections.probeSize
         };
     }
 
     // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra with 256 probe rays
-    // and a little sharing between probes to make up for them.
+    // and a little sharing between probes to make up for them, and a reflection probe half as sharp.
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
             case QualityPreset::High: {
@@ -59,6 +61,7 @@ namespace {
                 high.probeRays = 256;
                 high.fastProbeRays = 256;
                 high.probeSharing = 0.1f;
+                high.probeSize = 128;
                 return high;
             }
             case QualityPreset::Low:
@@ -66,13 +69,13 @@ namespace {
                         .directionalDistance = 60.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32, .probeSharing = 0.5f,
                         .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
-                        .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32};
+                        .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
-                        .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32};
+                        .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64};
             case QualityPreset::Ultra:
                 break;
         }
@@ -102,6 +105,7 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.globalIllumination.cascadeProbesHigh = values.cascadeProbesHigh;
     settings.reflections.enabled = values.reflections;
     settings.reflections.maxSteps = values.reflectionSteps;
+    settings.reflections.probeSize = values.probeSize;
 }
 
 std::optional<QualityPreset> matchingQualityPreset(const RenderSettings& settings) {
