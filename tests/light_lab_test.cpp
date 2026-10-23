@@ -68,7 +68,7 @@ namespace {
     */
     void testTheReflectionCorner() {
         const LightLabLayout layout = buildLightLabLayout();
-        assert(layout.reflectors.size() == 2);
+        assert(layout.reflectors.size() == 3);
         const LabBlock& slab = layout.reflectors[0];
         assert(slab.surface == LabSurface::Polished);
 

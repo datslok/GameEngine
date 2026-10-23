@@ -2111,7 +2111,7 @@ Reflections in reflections build up a bounce a frame, since last frame's picture
 | `probeFar` | 300 m | how far the probe's capture sees |
 | `showConfidence` | off | the debug view: white where screen-space reflections are trusted, blue where the probe is |
 
-Timed as SSR (`GpuPass::Reflections`), between the probe's capture and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) and the sunlit room's mirror facing the doorway (`labMirror`) are the places to judge them.
+Timed as SSR (`GpuPass::Reflections`), between the probe's capture and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) and the sunlit room's mirror facing the doorway (`labMirror`), with a brushed steel panel beside it (`labSteelPanel`, roughness 0.2: a rough mirror for mirrored lights' footprints), are the places to judge them.
 
 ## Reflection probe
 

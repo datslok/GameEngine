@@ -129,6 +129,13 @@ namespace {
             material.metallic = 1.0f;
             material.roughness = 0.0f;
             break;
+        case LabSurface::BrushedSteel:
+            // Steel's reflectance (about 0.56 linear), rough enough for a footprint (past MIRROR_FOOTPRINT_ROUGHNESS)
+            // and still under the mirrored lights' default limit.
+            material.colour = Pixel{196, 199, 204};
+            material.metallic = 1.0f;
+            material.roughness = 0.2f;
+            break;
         }
         return material;
     }

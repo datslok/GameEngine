@@ -261,5 +261,6 @@ LightLabLayout buildLightLabLayout() {
 
     layout.reflectors.push_back(spanning(labPolishedSlab.minimum, labPolishedSlab.maximum, LabSurface::Polished));
     layout.reflectors.push_back(spanning(labMirror.minimum, labMirror.maximum, LabSurface::Mirror));
+    layout.reflectors.push_back(spanning(labSteelPanel.minimum, labSteelPanel.maximum, LabSurface::BrushedSteel));
     return layout;
 }
