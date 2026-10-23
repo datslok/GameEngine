@@ -44,8 +44,12 @@ struct GpuRayInstance {
 
 static_assert(sizeof(GpuRayInstance) == 64, "GpuRayInstance must match VkAccelerationStructureInstanceKHR");
 
+// Vulkan's VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR (checked there): every hit on the instance is a candidate the
+// shader decides on, as a cut-out's must be (its texel's alpha tested), instead of being taken at once.
+inline constexpr std::uint32_t rayInstanceNotOpaque = 0x8;
+
 // The draw as instance number instanceNumber (the frame's instance i, so a hit finds its GpuInstance), with its mask and
-// the given flags. Throws std::out_of_range for a number beyond 24 bits.
+// the given flags, and not opaque if it is a cut-out. Throws std::out_of_range for a number beyond 24 bits.
 GpuRayInstance packRayInstance(const DrawItem& draw, std::uint32_t instanceNumber, std::uint64_t meshStructure, std::uint32_t flags = 0);
 
 /*

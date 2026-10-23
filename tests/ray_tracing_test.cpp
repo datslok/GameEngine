@@ -57,6 +57,12 @@ namespace {
         }
 
         assert(threw);
+
+        // A cut-out is not opaque to rays: every hit on it is a candidate the shader tests against its alpha first.
+        DrawItem fence = drawAt(model);
+        fence.material.alphaMode = AlphaMode::Mask;
+        assert(packRayInstance(fence, 3, 1, 0x2).recordAndFlags == ((0x2u | rayInstanceNotOpaque) << 24));
+        assert(packRayInstance(drawAt(model), 3, 1).recordAndFlags == 0);
     }
 
     /*

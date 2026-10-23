@@ -89,6 +89,10 @@ struct PipelineDescription {
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkCullModeFlags cullMode = VK_CULL_MODE_NONE;
 
+    // The cull mode set while drawing (vkCmdSetCullMode) instead of fixed here: the scene's pipelines draw double-sided
+    // batches without culling and the rest with cullMode, which the drawing code then sets itself.
+    bool dynamicCullMode = false;
+
     VkFormat colourFormat = VK_FORMAT_UNDEFINED; // none: depth only
     BlendMode blend = BlendMode::None;
 

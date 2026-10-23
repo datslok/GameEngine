@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/coverage_mips.h"
 #include "core/raw_image.h"
 #include "scene/asset_handles.h"
 
@@ -17,6 +18,10 @@ struct ImageData {
 
     // Whether the bytes are sRGB colour or plain numbers, which decides the GPU format they are uploaded in.
     TextureEncoding encoding = TextureEncoding::Srgb;
+
+    // The smaller mip levels, when built on the CPU (a cut-out's, keeping its coverage: core/coverage_mips.h). Empty:
+    // the GPU makes them by averaging.
+    std::vector<ImageLevel> mips{};
 };
 
 // Flip rows by default to use bottom-left UV coordinates.

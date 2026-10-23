@@ -22,9 +22,13 @@ layout(push_constant) uniform MotionView {
 } view;
 
 layout(location = 0) in vec3 position;
+layout(location = 2) in vec2 uv;
 
 layout(location = 0) out vec4 currentClip;
 layout(location = 1) out vec4 previousClip;
+// For a cut-out's holes (motion.frag): its texture coordinates and material.
+layout(location = 2) out vec2 textureUv;
+layout(location = 3) flat out uint materialIndex;
 
 invariant gl_Position;
 
@@ -41,4 +45,6 @@ void main() {
     before[3].xyz -= cameraOrigin.xyz;
     currentClip = view.current * vec4(relativePosition, 1.0);
     previousClip = view.previous * (before * vec4(position, 1.0));
+    textureUv = uv;
+    materialIndex = instances[instance].material.x;
 }

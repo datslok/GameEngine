@@ -433,7 +433,7 @@ namespace {
     */
     struct GltfImages {
         std::filesystem::path directory;
-        std::map<const cgltf_image*, std::shared_ptr<const std::vector<std::uint8_t>>> embedded;
+        std::map<const cgltf_image*, std::shared_ptr<const std::vector<std::uint8_t>>> embedded{};
     };
 
     /*
@@ -497,12 +497,20 @@ namespace {
             return material;
         }
 
-        // Our renderer currently supports opaque materials only.
-        if (source->alpha_mode != cgltf_alpha_mode_opaque) {
-            throw std::runtime_error(
-                "glTF transparency and alpha masking are not supported yet"
-            );
+        // Cut-outs (MASK) keep texels whose alpha reaches the cutoff. Blending (BLEND, glass) is not drawn yet: such
+        // materials draw opaque until a sorted pass after the opaque scene exists.
+        if (source->alpha_mode == cgltf_alpha_mode_mask) {
+            if (!std::isfinite(source->alpha_cutoff) || source->alpha_cutoff < 0.0f) {
+                throw std::runtime_error(
+                    "glTF alpha cutoff must be a number of at least 0"
+                );
+            }
+
+            material.alphaMode = AlphaMode::Mask;
+            material.alphaCutoff = source->alpha_cutoff;
         }
+
+        material.doubleSided = source->double_sided;
 
         const cgltf_pbr_metallic_roughness& properties = source->pbr_metallic_roughness;
 
@@ -511,6 +519,7 @@ namespace {
             colourChannelToByte(properties.base_color_factor[1]),
             colourChannelToByte(properties.base_color_factor[2])
         };
+        material.opacity = readUnitFactor(properties.base_color_factor[3], "glTF base colour alpha must be between 0 and 1");
         material.metallic = readUnitFactor(properties.metallic_factor, "glTF metallic factor must be between 0 and 1");
         material.roughness = readUnitFactor(properties.roughness_factor, "glTF roughness factor must be between 0 and 1");
         material.colourTexture = readTexture(properties.base_color_texture, images);

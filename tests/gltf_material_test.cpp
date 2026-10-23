@@ -47,7 +47,7 @@ namespace {
     "materials": [
         {
             "pbrMetallicRoughness": {
-                "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+                "baseColorFactor": [1.0, 1.0, 1.0, 0.8],
                 "metallicFactor": 0.25,
                 "roughnessFactor": 0.75,
                 "metallicRoughnessTexture": { "index": 0 }
@@ -55,6 +55,9 @@ namespace {
             "normalTexture": { "index": 0, "scale": 0.5 },
             "occlusionTexture": { "index": 0, "strength": 0.75 },
             "emissiveTexture": { "index": 0 },
+            "alphaMode": "MASK",
+            "alphaCutoff": 0.3,
+            "doubleSided": true,
             "emissiveFactor": [0.5, 0.25, 0.0],
             "extensions": { "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 } }
         },
@@ -73,6 +76,58 @@ namespace {
     ]
 }
 )json";
+
+    // The document with one piece of text swapped for another, written beside the first and loaded.
+    Model loadVariant(const std::filesystem::path& directory, const char* name, const std::string& from, const std::string& to) {
+        std::string variant = document;
+        variant.replace(variant.find(from), from.size(), to);
+
+        {
+            std::ofstream output{directory / name};
+            output << variant;
+        }
+
+        return loadGltf((directory / name).string());
+    }
+
+    /*
+    * Khronos's alpha test model (Ed Mackey, AGI, CC BY 4.0): an opaque bed, cut-outs at cutoffs 0.25, 0.5 (the default)
+    * and 0.75, blended and opaque rows, every one but the bed double-sided. Its nine parts, one per mesh.
+    */
+    void testAlphaBlendModeModel() {
+        const Model model = loadGltf("assets/models/AlphaBlendModeTest.glb");
+        assert(model.parts.size() == 9);
+
+        int masked = 0;
+        int doubleSided = 0;
+        bool cutoffs[3] = {false, false, false};
+
+        for (const ModelPart& part : model.parts) {
+            const MaterialSource& material = part.material;
+            doubleSided += material.doubleSided ? 1 : 0;
+
+            if (material.alphaMode == AlphaMode::Mask) {
+                ++masked;
+                cutoffs[0] = cutoffs[0] || nearlyEqual(material.alphaCutoff, 0.25f);
+                cutoffs[1] = cutoffs[1] || nearlyEqual(material.alphaCutoff, 0.5f);
+                cutoffs[2] = cutoffs[2] || nearlyEqual(material.alphaCutoff, 0.75f);
+            }
+        }
+
+        assert(masked == 3 && cutoffs[0] && cutoffs[1] && cutoffs[2]);
+        assert(doubleSided == 8);
+    }
+
+    bool throwsWhenLoaded(const std::filesystem::path& directory, const char* name, const std::string& from, const std::string& to) {
+        try {
+            loadVariant(directory, name, from, to);
+        }
+        catch (const std::runtime_error&) {
+            return true;
+        }
+
+        return false;
+    }
 }
 
 void testGltfMaterials() {
@@ -117,6 +172,10 @@ void testGltfMaterials() {
         assert(full.occlusionTexture.path == full.metallicRoughnessTexture.path);
         assert(nearlyEqual(full.occlusionStrength, 0.75f));
         assert(full.emissiveTexture.path == full.metallicRoughnessTexture.path);
+        assert(full.alphaMode == AlphaMode::Mask);
+        assert(nearlyEqual(full.alphaCutoff, 0.3f));
+        assert(full.doubleSided);
+        assert(nearlyEqual(full.opacity, 0.8f));
 
         const MaterialSource& withoutFactors = model.parts[1].material;
         assert(nearlyEqual(withoutFactors.metallic, 1.0f));
@@ -127,32 +186,23 @@ void testGltfMaterials() {
         assert(!withoutFactors.occlusionTexture.isSet());
         assert(nearlyEqual(withoutFactors.occlusionStrength, 1.0f));
         assert(!withoutFactors.emissiveTexture.isSet());
+        assert(withoutFactors.alphaMode == AlphaMode::Opaque);
+        assert(nearlyEqual(withoutFactors.alphaCutoff, 0.5f));
+        assert(!withoutFactors.doubleSided);
+        assert(nearlyEqual(withoutFactors.opacity, 1.0f));
 
         const MaterialSource& withoutMaterial = model.parts[2].material;
         assert(nearlyEqual(withoutMaterial.metallic, 1.0f));
         assert(nearlyEqual(withoutMaterial.roughness, 1.0f));
         assert(withoutMaterial.colour.r == 255);
 
-        // glTF's occlusion strength is a share, 0..1, like the factors.
-        std::string tooStrong = document;
-        const std::string strength = "\"strength\": 0.75";
-        tooStrong.replace(tooStrong.find(strength), strength.size(), "\"strength\": 1.5");
+        // glTF's occlusion strength is a share, 0..1, like the factors, and a cutoff is at least 0.
+        assert(throwsWhenLoaded(directory, "too_strong.gltf", "\"strength\": 0.75", "\"strength\": 1.5"));
+        assert(throwsWhenLoaded(directory, "negative_cutoff.gltf", "\"alphaCutoff\": 0.3", "\"alphaCutoff\": -0.1"));
 
-        {
-            std::ofstream output{directory / "too_strong.gltf"};
-            output << tooStrong;
-        }
-
-        bool threw = false;
-
-        try {
-            loadGltf((directory / "too_strong.gltf").string());
-        }
-        catch (const std::runtime_error&) {
-            threw = true;
-        }
-
-        assert(threw);
+        // Blending is not drawn yet (it needs a sorted pass after the opaque scene): such materials draw opaque until then.
+        const Model blended = loadVariant(directory, "blended.gltf", "\"alphaMode\": \"MASK\"", "\"alphaMode\": \"BLEND\"");
+        assert(blended.parts[0].material.alphaMode == AlphaMode::Opaque);
     }
     catch (...) {
         std::filesystem::remove_all(directory);
@@ -160,4 +210,6 @@ void testGltfMaterials() {
     }
 
     std::filesystem::remove_all(directory);
+
+    testAlphaBlendModeModel();
 }

@@ -517,7 +517,7 @@ The shader skips a light, and so its shadow lookups, for pixels beyond its range
 
 ### The shadow pass and the lookups
 
-- The shadow pass is one render pass with a depth-only pipeline (`shadow.vert`/`shadow.frag`, positions only, no culling).
+- The shadow pass is one render pass with a depth-only pipeline (`shadow.vert`/`shadow.frag`, positions only, no culling), and one for cut-outs (`shadow_cut_out.vert`/`cut_out.frag`, with texture coordinates, throwing away the holes; see Cut-outs and double-sided surfaces).
   - No hardware depth bias: its slope-scaled part detached shadows from pillars seen edge-on by small tiles.
   - The viewport is moved to each tile, the tile's world view pushed as a push constant (`GpuShadowView`), and its casters drawn one instanced draw per mesh.
 - The main shader samples the atlas as `sampler2DShadow` (fragment sampler slot 1, compare `GREATER_OR_EQUAL` for reversed-Z, linear).
@@ -623,7 +623,7 @@ Kept from SDL_GPU, so the port drew the same pictures:
   - nearest (scene for tone mapping, the overlay);
   - linear clamped (bloom);
   - shadow compare (`GREATER_OR_EQUAL`, linear) and shadow raw depth (nearest).
-- **Mipmaps** are blits from the level above with a linear filter, each level `max(1, size >> level)` (SDL let a non-square texture's short side reach 0 in its smallest levels).
+- **Mipmaps** are blits from the level above with a linear filter, each level `max(1, size >> level)` (SDL let a non-square texture's short side reach 0 in its smallest levels), except a cut-out's, built on the CPU to keep its coverage (`ImageData::mips`) and copied in with level 0.
 
 ### Uniform blocks
 
@@ -694,7 +694,7 @@ A frame (`render`) runs these steps:
 
 - depth to `DepthTarget` (discarded);
 - a rendering block with no colour attachment that clears depth to far and stores it;
-- `depthPrepassPipeline`: the main pass's `triangle.vert` and vertex layout with no fragment shader and no colour format; `GREATER`, written (`prepassDepthState`);
+- `depthPrepassPipeline`: the main pass's `triangle.vert` and vertex layout with no fragment shader and no colour format; `GREATER`, written (`prepassDepthState`); `depthPrepassCutOutPipeline` the same with `cut_out.frag`, for cut-outs;
 - and the same `drawBatches` as the main pass, so the depth image holds the nearest surface at every pixel.
 
 **Main pass:** scene to `ColourTarget` (discarded, cleared to 0, 0, 0, 1) and depth to `DepthTarget`:
@@ -830,7 +830,8 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 
 ### Batching
 
-- Batching: `batchByMesh(draws, chosen, firstInstance)` stable-sorts the chosen draw indices by mesh (each mesh's draws keep their order, so a frame always gives the same draw list) and cuts the runs into `DrawBatch`es {mesh, firstInstance, instanceCount}.
+- Batching: `batchByMesh(draws, chosen, firstInstance)` stable-sorts the chosen draw indices by how they are drawn (plain, double-sided, cut-out, double-sided cut-out) and then by mesh (each mesh's draws keep their order, so a frame always gives the same draw list) and cuts the runs into `DrawBatch`es {mesh, firstInstance, instanceCount, cutOut, doubleSided}.
+- `drawBatches(commands, batches, BatchPipelines{plain, cutOut, cull})` binds the pass's pipeline for each batch's style when it changes (cut-outs last, so once) and sets the cull mode when it changes (`vkCmdSetCullMode`: the scene's pipelines have `PipelineDescription::dynamicCullMode`), none for double-sided batches.
 - `drawBatches` binds each mesh's buffers and calls `vkCmdDrawIndexed(indexCount, instanceCount, 0, 0, firstInstance)`, so `gl_InstanceIndex` is the draw list entry.
 - The draw list is the main pass's visible draws in batch order (entries from 0), then each redrawn shadow tile's casters in batch order (`prepareShadowDraws`, entries from the main pass's count).
 
@@ -1968,7 +1969,7 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 
 - `DrawItem::previousModel`: the matrix the same part was drawn with last frame. `MotionHistory` (`scene/frame_description`) keys parts by entity (slot and generation) and part index; `buildFrame(world, camera, alpha, &history)` fills and remembers them; `Application` owns one (render-only, outside the simulation). None on an entity's first frame.
 - `drawScene` lists the visible draws whose `previousModel` differs from `model` and batches them by mesh after the shadow tiles' entries in the draw list. Set 1 binding 21 (`PreviousModelsBinding`) holds every instance's previous model matrix (its current one when unknown).
-- The velocity pass (`drawMotion`, GpuPass `Motion`, MOTION): the velocity image (`R16G16_SFLOAT`) cleared to `TAA_NO_MOTION` (1000), then `motion.vert`/`motion.frag` draw the moving objects over the main pass's depth (tested `GREATER_OR_EQUAL`, not written; back faces culled; positions only), placing each vertex as the main pass does (jittered) and writing `objectMotion`: this frame's unjittered NDC minus last frame's, from `GpuMotionView` (two matrices, 128 bytes of vertex push constants; the scene layout's push range is the larger of it and `GpuShadowView`). No motion when either clip w is at or below 0.
+- The velocity pass (`drawMotion`, GpuPass `Motion`, MOTION): the velocity image (`R16G16_SFLOAT`) cleared to `TAA_NO_MOTION` (1000), then `motion.vert`/`motion.frag` draw the moving objects over the main pass's depth (tested `GREATER_OR_EQUAL`, not written; back faces culled but a double-sided batch's; positions and texture coordinates, a cut-out's holes thrown away in `motionCutOutPipeline`), placing each vertex as the main pass does (jittered) and writing `objectMotion`: this frame's unjittered NDC minus last frame's, from `GpuMotionView` (two matrices, 128 bytes of vertex push constants; the scene layout's push range is the larger of it and `GpuShadowView`). No motion when either clip w is at or below 0.
 - `previousPixelFromMotion(pixel, motion, size)` turns a motion back into last frame's pixel.
 
 ### The resolve
@@ -2073,7 +2074,7 @@ With reflections on (and anti-aliasing on, since they reflect last frame's smoot
 | Properties | `R8G8B8A8_UNORM` | the specular albedo, and the roughness (1 without a normal) |
 | Stand-in | `B10G11R11_UFLOAT` (RGBA16F where it cannot be drawn into) | the probes' (or flat ambient's) light in the mirror direction times the specular albedo: what the pixel added for its reflection |
 
-They are not cleared; the reflection pass reads only pixels with a surface. The renderer keeps eight main pipelines (`mainPipelines`, `mainPipelineIndex`: after the prepass or not, probes or not, surfaces or not), and `PipelineDescription::extraColourFormats` names the extra targets. The sky's and stars' pipelines draw into the scene image alone, so with the surfaces they are drawn in a second rendering block after the main one, which loads the colour and depth (the depth stored for it).
+They are not cleared; the reflection pass reads only pixels with a surface. The renderer keeps twelve main pipelines (`mainPipelines`, `mainPipelineIndex`: after the prepass or not, probes or not, surfaces or not, and without the prepass cut-outs or not), and `PipelineDescription::extraColourFormats` names the extra targets. The sky's and stars' pipelines draw into the scene image alone, so with the surfaces they are drawn in a second rendering block after the main one, which loads the colour and depth (the depth stored for it).
 
 ### The pyramids
 
@@ -2326,6 +2327,7 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 **From the loaders.** Loaders produce `Model`s whose parts hold a shared `Mesh` and a `MaterialSource`:
 
 - colour, `metallic`, `roughness`, linear `emissive`;
+- `alphaMode`, `alphaCutoff`, `opacity` and `doubleSided` (see Cut-outs and double-sided surfaces);
 - and five `TextureSource`s, `colourTexture`, `metallicRoughnessTexture`, `normalTexture` (with `normalScale`, glTF's `normalTexture.scale`, default 1), `occlusionTexture` (with `occlusionStrength`, glTF's `occlusionTexture.strength`, default 1) and `emissiveTexture`, each a path or embedded bytes, sharing one flip.
 
 **To a `Material`.** `AssetManager::makeMaterial` turns that into a `Material`:
@@ -2335,19 +2337,42 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - an optional `metallicRoughnessTexture` (glTF packing: roughness in green, metallic in blue, multiplying the numbers);
 - an optional linear `normalTexture` with `normalScale`;
 - an optional linear `occlusionTexture` (baked occlusion in red: how open each texel is to the light from all around, 0 buried to 1 open) with `occlusionStrength` (0..1);
-- and `emissive`, with an optional sRGB `emissiveTexture` multiplying it (screens, dials, painted lights).
+- `emissive`, with an optional sRGB `emissiveTexture` multiplying it (screens, dials, painted lights);
+- and `alphaMode` (`Opaque` by default, or `Mask`), `alphaCutoff` (0.5), `opacity` (1) and `doubleSided` (false), with `isCutOut(material)`.
 - It loads the colour and emissive textures as `TextureEncoding::Srgb` and the metallic-roughness, normal and occlusion ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`. Occlusion packed into the metallic-roughness image (ORM: occlusion, roughness, metallic in red, green, blue) is the same file or bytes read the same way, so it is one texture.
 
-**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor` and `KHR_materials_emissive_strength` (`readTexture` handles every texture, files and embedded alike). Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
+**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor`, `KHR_materials_emissive_strength`, the base colour factor's alpha (as `opacity`), `alphaMode` with `alphaCutoff` (at least 0) and `doubleSided` (`readTexture` handles every texture, files and embedded alike). `BLEND` loads as opaque until blended materials are drawn. Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
 
 **On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (80 bytes, std430):
 
-- base colour;
+- base colour, its alpha a cut-out's opacity (1 for opaque materials);
 - `surface` = metallic and roughness clamped to 0..1 and the normal scale (0 when there is no normal texture, so the white stand-in tilts nothing), and the occlusion strength (clamped to 0..1, and 0 when there is no occlusion texture, which tells the main pass to leave the light from all around alone);
-- emissive (multiplied by the emissive texture in the shaders);
+- emissive (multiplied by the emissive texture in the shaders), w a cut-out's cutoff (0 for opaque materials, keeping every texel);
 - `textures`: the slots of the colour, metallic-roughness, normal and emissive textures in the bindless array, `bindlessTextureSlot` = handle + 1, `whiteTextureSlot` 0 for none.
-- and `moreTextures`: x the occlusion texture's slot, the rest 0, kept for later textures.
+- and `extra`: x the occlusion texture's slot, y the flags (`MATERIAL_DOUBLE_SIDED` 1, `MATERIAL_CUT_OUT` 2, `render/gpu/material_shared.h`), the rest 0.
 - One entry per different material in the frame's material buffer (see GPU scene).
+
+### Cut-outs and double-sided surfaces
+
+**What they are.** A cut-out (glTF's `alphaMode: MASK`) is a sheet with holes: leaves, a fence's wire, a grate, drawn as flat polygons whose texture's alpha says where the holes are. A texel is kept, fully opaque, where its alpha (the colour texture's times `opacity`) reaches `alphaCutoff`, else thrown away (`isCutAway`, `render/gpu/alpha_mask`, mirrored in `alpha_mask.glsl`). No blending or sorting: the rest is opaque like any surface. Such sheets are usually double-sided (glTF's `doubleSided`): both sides drawn, the back shaded as the front's mirror image (`facingSign`: its normal and whole tangent frame turned round, so a normal map's bumps stand out of the side seen).
+
+**Keeping their coverage at a distance** (`core/coverage_mips`, Castaño 2010). A smaller mip averages a wire with the holes beside it, so a few levels down everything sinks under the cutoff and fences vanish. A cut-out's colour texture gets its mips built on the CPU when loaded (`coveragePreservingMips`): each level halved from the last one as averaged (`halveImage`: 2 x 2 blocks, an odd edge folded in, sRGB colour averaged as light), then its alpha alone scaled so the share of texels passing the cutoff (`alphaCoverage`) stays the full size's. The scale is found by bisection on a 256-bin alpha histogram: the coverage nearest the target, then of the scales giving it, the one nearest 1 (solid stays solid). The cutoff the texels meet is the material's over its opacity. `AssetManager::loadTexture` and `addTexture` take it as `coverageCutoff`, part of both texture caches' keys (the same file on an opaque material is a texture of its own), into `ImageData::mips`, which `VulkanTexture` copies in instead of blitting.
+
+**Drawing them.** `batchByMesh` sorts each view's draws by style, cut-outs last, and `drawBatches` switches pipeline and cull mode per batch:
+
+| Pass | Plain batches | Cut-out batches |
+|---|---|---|
+| Depth prepass | no fragment shader | `cut_out.frag` (the colour texture's alpha with the frame's mip bias, `fragmentCutAway` in `cut_out_fragment.glsl`) |
+| Main pass after the prepass | as before | the same pipeline: the holes have no depth for its `EQUAL` test to match |
+| Main pass without it, the probe capture | as before | the specialization constant `MATERIAL_CUT_OUT_CONSTANT` (1) adds a discard after every texture read |
+| Shadow pass | `shadow.vert`, no fragment shader work | `shadow_cut_out.vert` with texture coordinates, `cut_out.frag` |
+| Velocity pass | `motion.frag` | its cut-out constant, so what moves behind the holes keeps its motion |
+
+Double-sided batches cull nothing (`vkCmdSetCullMode`); the rest keep the pass's culling (back faces; front faces in the capture, whose faces are mirror images, which also swaps `gl_FrontFacing`, so the shading flips it back).
+
+**Rays.** A cut-out's ray instance is not opaque (`rayInstanceNotOpaque`, Vulkan's `FORCE_NO_OPAQUE`), and every ray query runs through `traceRayQuery` (`ray_scene.glsl`), which confirms a candidate hit only where its texel is solid (`candidateIsSolid`: the full-size texel, as rays have no screen footprint). Opaque instances still commit at once. `committedHitFacesRay` counts either side of a double-sided surface as its front, so probe rays, relocation, mirrored lights and traced reflections never take a leaf for the inside of a wall. These need the material buffer and textures, which every renderer pass with rays binds as sets 0 and 1 (`RAY_SCENE_MATERIALS`); a shader that binds the ray scene elsewhere (the GPU tests') gets neither.
+
+**Tests**: `coverage_mips_test` (halving data and sRGB, odd sizes, coverage, leaves keeping their share where plain averaging loses it, colour untouched, solid and clear unchanged), `alpha_mask_test`, the loader's and asset manager's, `material_uniforms_test`, `gpu_scene_test` (batching by style), `ray_tracing_test` (the flag), `light_lab_test` (the chain-link); GPU tests in `alpha_mask_gpu_test` (written and built, not run).
 
 ## Input
 
@@ -2581,7 +2606,7 @@ Its level (`games/lightlab/light_lab_level`) is plain boxes, `LabBlock {centre, 
 What is in it:
 
 - **Towers** at `labTowerDistances` (5, 10, ..., 320 m), each 0.1 times its distance wide and 0.4 tall, fanned 9 degrees apart from -27 so none hides another and all look the same size from the start.
-- **A fence** of 0.1 m posts every 4 m from z = -4 to -300 at x = -6 with one 6 cm rail at 1 m.
+- **A fence** of 0.1 m posts every 4 m from z = -4 to -300 at x = -6 with one 6 cm rail at 1 m, and a chain-link between them: one double-sided cut-out panel (`chainLinkPanel`, as tall as the posts) whose galvanised wire texture is made in code (`chainLinkImage`, 256 texels a 0.5 m tile, 8 diamonds a tile each way, 3 mm wire with soft edges, `chainLinkAlpha`), its mips built to keep the wire's coverage, so sun shadows, light probes and far mips all meet holes.
 - **400 trees** (trunk and crown, sized 0.8 to 1.3) spread evenly over the ring 40 to 380 m out.
   - Placed by hashing each attempt's number (`Fnv1aHash` then `mixBits`, never a generator's running state).
   - Skipping the view wedge to the north (34 degrees either side plus 15 m) and 15 m round the building.
@@ -2968,7 +2993,7 @@ Colour is gamma-correct: shading happens in linear light.
 - `Material::colour` bytes are sRGB like image files; `packMaterial` decodes them with `srgbByteToLinear` (`core/srgb`).
 - glTF colour factors are linear, so the loader encodes them with `linearToSrgbByte`.
 - Light colours, intensities and `emissive` are linear.
-- `VulkanTexture` uploads RGBA pixels with a full mip chain (`mipLevelCount`, `render/gpu/mip_levels`; each smaller level blitted from the one above) and samples them with trilinear and 16x anisotropic filtering. The sampler's `maxLod` is `VK_LOD_CLAMP_NONE`: 0 would lock sampling to the full-size level.
+- `VulkanTexture` uploads RGBA pixels with a full mip chain (`mipLevelCount`, `render/gpu/mip_levels`; each smaller level blitted from the one above, or copied in when built on the CPU: a cut-out's) and samples them with trilinear and 16x anisotropic filtering. The sampler's `maxLod` is `VK_LOD_CLAMP_NONE`: 0 would lock sampling to the full-size level.
 - `Material::emissive` (a `Vec3`, black by default) is light the surface gives off itself, added after lighting. With a black `colour` the surface shows only its glow and never changes with lighting (the demo's moon and MOBA marker).
 - `GpuMaterial` is 80 bytes.
 - `Mesh::sphere(segments, rings)` builds a unit UV sphere with smooth normals.

@@ -134,4 +134,7 @@
 // ambient_occlusion_test.comp
 #define GPU_TEST_AMBIENT_OCCLUSION 0
 
+// alpha_mask_test.comp
+#define GPU_TEST_ALPHA_MASK 0
+
 #endif

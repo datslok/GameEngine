@@ -43,13 +43,12 @@ struct MirrorHit {
 bool projectOntoMirror(vec3 start, vec3 target, int draw, out MirrorHit hit) {
     vec3 direction = normalize(target - start);
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_SOLID, start + cameraOrigin.xyz, 0.0, direction, mirrorRayReach);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, RAY_MASK_SOLID, start + cameraOrigin.xyz, 0.0, direction, mirrorRayReach);
 
-    while (rayQueryProceedEXT(query)) {
-    }
+    traceRayQuery(query);
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT ||
-        rayQueryGetIntersectionInstanceCustomIndexEXT(query, true) != draw || !rayQueryGetIntersectionFrontFaceEXT(query, true)) {
+        rayQueryGetIntersectionInstanceCustomIndexEXT(query, true) != draw || !committedHitFacesRay(query)) {
         return false;
     }
 

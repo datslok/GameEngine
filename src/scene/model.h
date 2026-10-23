@@ -50,6 +50,12 @@ struct MaterialSource {
     Vec3 emissive{0.0f, 0.0f, 0.0f}; // linear light
     TextureSource emissiveTexture;   // sRGB, multiplying emissive
 
+    // Cut-outs and double-sided surfaces; the defaults are Material's own.
+    AlphaMode alphaMode = Material{}.alphaMode;
+    float alphaCutoff = Material{}.alphaCutoff;
+    float opacity = Material{}.opacity;
+    bool doubleSided = Material{}.doubleSided;
+
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 

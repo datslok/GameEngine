@@ -248,16 +248,15 @@ Reflection reflectFromRays(Glossy glossy) {
     vec3 origin = glossy.position + cameraOrigin.xyz + glossy.normal * lift;
 
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, direction, pass.probe.w);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, direction, pass.probe.w);
 
-    while (rayQueryProceedEXT(query)) {
-    }
+    traceRayQuery(query);
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
         return Reflection(rough, pass.background.rgb + skyLightTowards(direction));
     }
 
-    if (!rayQueryGetIntersectionFrontFaceEXT(query, true)) {
+    if (!committedHitFacesRay(query)) {
         return Reflection(rough, vec3(0.0));
     }
 

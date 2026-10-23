@@ -4,6 +4,7 @@
 #include "scene/collision_mesh.h"
 #include "scene/smooth_normals.h"
 
+#include <limits>
 #include <span>
 #include <stdexcept>
 
@@ -53,8 +54,8 @@ MeshHandle AssetManager::loadMesh(const std::string& path, MeshLoadOptions optio
     return handle;
 }
 
-TextureHandle AssetManager::loadTexture(const std::string& path, bool flipVertically, TextureEncoding encoding) {
-    const auto key = std::make_tuple(path, flipVertically, encoding);
+TextureHandle AssetManager::loadTexture(const std::string& path, bool flipVertically, TextureEncoding encoding, std::optional<float> coverageCutoff) {
+    const auto key = std::make_tuple(path, flipVertically, encoding, coverageCutoff);
 
     if (const auto found = texturesByPath.find(key); found != texturesByPath.end()) {
         return found->second;
@@ -63,18 +64,19 @@ TextureHandle AssetManager::loadTexture(const std::string& path, bool flipVertic
     ImageData image = loadImage(path, flipVertically);
     image.encoding = encoding;
 
-    const TextureHandle handle = addTexture(std::move(image));
+    const TextureHandle handle = addTexture(std::move(image), coverageCutoff);
     texturesByPath.emplace(key, handle);
 
     return handle;
 }
 
-TextureHandle AssetManager::loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically, TextureEncoding encoding) {
+TextureHandle AssetManager::loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically, TextureEncoding encoding,
+                                        std::optional<float> coverageCutoff) {
     if (!encodedImage) {
         throw std::invalid_argument("Cannot load a texture from a null image buffer");
     }
 
-    const auto key = std::make_pair(encodedImage.get(), encoding);
+    const auto key = std::make_tuple(encodedImage.get(), encoding, coverageCutoff);
 
     if (const auto found = texturesByBuffer.find(key); found != texturesByBuffer.end()) {
         return found->second;
@@ -83,33 +85,37 @@ TextureHandle AssetManager::loadTexture(std::shared_ptr<const std::vector<std::u
     ImageData image = loadImageFromMemory(std::span<const std::uint8_t>{encodedImage->data(), encodedImage->size()}, flipVertically);
     image.encoding = encoding;
 
-    const TextureHandle handle = addTexture(std::move(image));
+    const TextureHandle handle = addTexture(std::move(image), coverageCutoff);
     texturesByBuffer.emplace(key, handle);
     keptBuffers.push_back(std::move(encodedImage));
 
     return handle;
 }
 
-TextureHandle AssetManager::loadTexture(const TextureSource& source, bool flipVertically, TextureEncoding encoding) {
+TextureHandle AssetManager::loadTexture(const TextureSource& source, bool flipVertically, TextureEncoding encoding, std::optional<float> coverageCutoff) {
     if (!source.path.empty() && source.embeddedImage) {
         throw std::invalid_argument("A texture must come from either a file or an embedded image");
     }
 
     if (!source.path.empty()) {
-        return loadTexture(source.path, flipVertically, encoding);
+        return loadTexture(source.path, flipVertically, encoding, coverageCutoff);
     }
 
     if (source.embeddedImage) {
-        return loadTexture(source.embeddedImage, flipVertically, encoding);
+        return loadTexture(source.embeddedImage, flipVertically, encoding, coverageCutoff);
     }
 
     return TextureHandle{};
 }
 
-TextureHandle AssetManager::addTexture(ImageData image) {
+TextureHandle AssetManager::addTexture(ImageData image, std::optional<float> coverageCutoff) {
     if (image.width == 0 || image.height == 0 ||
         image.pixels.size() != static_cast<std::size_t>(image.width) * image.height * 4) {
         throw std::invalid_argument("Texture needs four bytes for each of its pixels");
+    }
+
+    if (coverageCutoff) {
+        image.mips = coveragePreservingMips(ImageLevel{image.width, image.height, image.pixels}, image.encoding == TextureEncoding::Srgb, *coverageCutoff);
     }
 
     const TextureHandle handle{static_cast<std::uint32_t>(textures.size())};
@@ -130,6 +136,9 @@ const Model& AssetManager::loadModel(const std::string& path) {
 * The colour and emissive textures hold colours (sRGB), the metallic-roughness and occlusion textures numbers and the
 * normal map directions (all linear). All are read with the same UVs, so they share the flip. Occlusion packed into the
 * metallic-roughness image (ORM) is the same file or bytes read the same way, so the cache gives it the same texture.
+* A cut-out's colour texture holds its alpha, so its mips are built to keep its coverage at the cutoff its texels
+* meet, the material's cutoff over its opacity (the shader tests texel alpha times opacity); with no opacity nothing
+* passes. The same file on an opaque material is a texture of its own.
 */
 Material AssetManager::makeMaterial(const MaterialSource& source) {
     Material material;
@@ -137,13 +146,23 @@ Material AssetManager::makeMaterial(const MaterialSource& source) {
     material.metallic = source.metallic;
     material.roughness = source.roughness;
     material.emissive = source.emissive;
-    material.texture = loadTexture(source.colourTexture, source.flipTextureVertically, TextureEncoding::Srgb);
+    std::optional<float> coverageCutoff;
+
+    if (source.alphaMode == AlphaMode::Mask) {
+        coverageCutoff = source.opacity > 0.0f ? source.alphaCutoff / source.opacity : std::numeric_limits<float>::infinity();
+    }
+
+    material.texture = loadTexture(source.colourTexture, source.flipTextureVertically, TextureEncoding::Srgb, coverageCutoff);
     material.metallicRoughnessTexture = loadTexture(source.metallicRoughnessTexture, source.flipTextureVertically, TextureEncoding::Linear);
     material.normalTexture = loadTexture(source.normalTexture, source.flipTextureVertically, TextureEncoding::Linear);
     material.normalScale = source.normalScale;
     material.occlusionTexture = loadTexture(source.occlusionTexture, source.flipTextureVertically, TextureEncoding::Linear);
     material.occlusionStrength = source.occlusionStrength;
     material.emissiveTexture = loadTexture(source.emissiveTexture, source.flipTextureVertically, TextureEncoding::Srgb);
+    material.alphaMode = source.alphaMode;
+    material.alphaCutoff = source.alphaCutoff;
+    material.opacity = source.opacity;
+    material.doubleSided = source.doubleSided;
 
     return material;
 }

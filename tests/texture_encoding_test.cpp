@@ -1,4 +1,6 @@
 #include "assets/asset_manager.h"
+#include "core/coverage_mips.h"
+#include "render/gpu/mip_levels.h"
 
 #include <cassert>
 #include <cmath>
@@ -146,9 +148,47 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * A cut-out's colour texture keeps its holes' share at every distance: its smaller mips are built on the CPU with
+    * their alpha scaled (core/coverage_mips.h) for the cutoff the texture's alpha meets, the material's cutoff over its
+    * opacity, since the shader tests texel alpha times opacity. The same file on an opaque material is a texture of its
+    * own whose mips the GPU makes.
+    */
+    void testCutOutTexturesKeepTheirCoverage() {
+        AssetManager assets;
+
+        MaterialSource source;
+        source.colourTexture.path = imagePath;
+        source.alphaMode = AlphaMode::Mask;
+        source.alphaCutoff = 0.4f;
+        source.opacity = 0.8f;
+        source.doubleSided = true;
+
+        const Material material = assets.makeMaterial(source);
+        assert(material.alphaMode == AlphaMode::Mask);
+        assert(material.alphaCutoff == 0.4f && material.opacity == 0.8f && material.doubleSided);
+
+        const ImageData& cutOut = assets.getTexture(material.texture);
+        assert(cutOut.mips.size() + 1 == mipLevelCount(cutOut.width, cutOut.height));
+
+        const ImageLevel full{cutOut.width, cutOut.height, cutOut.pixels};
+        const std::vector<ImageLevel> expected = coveragePreservingMips(full, true, 0.5f);
+        assert(cutOut.mips[0].pixels == expected[0].pixels);
+
+        MaterialSource opaque;
+        opaque.colourTexture.path = imagePath;
+        const Material plain = assets.makeMaterial(opaque);
+        assert(plain.texture != material.texture);
+        assert(assets.getTexture(plain.texture).mips.empty());
+        assert(assets.makeMaterial(source).texture == material.texture);
+    }
+}
+
 void testTextureEncoding() {
     testEncodingIsPartOfTheCacheKey();
     testAddedTexturesDefaultToSrgb();
     testMakeMaterialReadsThePhysicalProperties();
     testMaterialSourceDefaultsMatchMaterial();
+    testCutOutTexturesKeepTheirCoverage();
 }

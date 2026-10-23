@@ -242,11 +242,11 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     colourBlend.attachmentCount = static_cast<std::uint32_t>(blends.size());
     colourBlend.pAttachments = blends.data();
 
-    const std::array<VkDynamicState, 2> dynamicStates{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    const std::array<VkDynamicState, 3> dynamicStates{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE};
 
     VkPipelineDynamicStateCreateInfo dynamic{};
     dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamic.dynamicStateCount = static_cast<std::uint32_t>(dynamicStates.size());
+    dynamic.dynamicStateCount = description.dynamicCullMode ? 3u : 2u;
     dynamic.pDynamicStates = dynamicStates.data();
 
     VkPipelineRenderingCreateInfo rendering{};

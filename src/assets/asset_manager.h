@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -43,20 +44,23 @@ public:
     // Load an OBJ file, or return the handle from the first time it was loaded with the same options.
     MeshHandle loadMesh(const std::string& path, MeshLoadOptions options = {});
 
-    // Load an image file, or return the handle from the first time it was loaded with the same flip setting and encoding.
-    // Rows are flipped by default to match bottom-left UV coordinates (OBJ); glTF textures use flipVertically = false.
-    // Colour images are sRGB; data images (metallic-roughness) are TextureEncoding::Linear.
-    TextureHandle loadTexture(const std::string& path, bool flipVertically = true, TextureEncoding encoding = TextureEncoding::Srgb);
+    // Load an image file, or return the handle from the first time it was loaded with the same flip setting, encoding and
+    // coverage cutoff. Rows are flipped by default to match bottom-left UV coordinates (OBJ); glTF textures use
+    // flipVertically = false. Colour images are sRGB; data images (metallic-roughness) are TextureEncoding::Linear. With a
+    // coverage cutoff (a cut-out's colour texture) its mips are built here to keep that cutoff's coverage (ImageData::mips).
+    TextureHandle loadTexture(const std::string& path, bool flipVertically = true, TextureEncoding encoding = TextureEncoding::Srgb,
+                              std::optional<float> coverageCutoff = {});
 
-    // Decode an image held in memory (embedded in a .glb). The same byte buffer and encoding always give the same handle.
-    TextureHandle loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically, TextureEncoding encoding = TextureEncoding::Srgb);
+    // Decode an image held in memory (embedded in a .glb). The same byte buffer, encoding and cutoff always give the same handle.
+    TextureHandle loadTexture(std::shared_ptr<const std::vector<std::uint8_t>> encodedImage, bool flipVertically,
+                              TextureEncoding encoding = TextureEncoding::Srgb, std::optional<float> coverageCutoff = {});
 
     // Load whichever a source names, a file or embedded bytes; "none" for a source that names neither. Throws
     // std::invalid_argument for one that names both.
-    TextureHandle loadTexture(const TextureSource& source, bool flipVertically, TextureEncoding encoding);
+    TextureHandle loadTexture(const TextureSource& source, bool flipVertically, TextureEncoding encoding, std::optional<float> coverageCutoff = {});
 
-    // Register an image made in code.
-    TextureHandle addTexture(ImageData image);
+    // Register an image made in code, with its mips built to keep a cut-out's coverage when given a cutoff.
+    TextureHandle addTexture(ImageData image, std::optional<float> coverageCutoff = {});
 
     // Load a glTF/GLB model, or return the one loaded the first time. The reference stays valid for the manager's lifetime.
     const Model& loadModel(const std::string& path);
@@ -91,9 +95,9 @@ private:
     // Keyed by path, whether smoothed, and crease angle (0 when not smoothed, since it is unused then).
     std::map<std::tuple<std::string, bool, float>, MeshHandle> meshesByPath;
     std::map<const Mesh*, MeshHandle> meshesByPointer;
-    std::map<std::tuple<std::string, bool, TextureEncoding>, TextureHandle> texturesByPath;
+    std::map<std::tuple<std::string, bool, TextureEncoding, std::optional<float>>, TextureHandle> texturesByPath;
 
     // Keyed by the buffer's address. The buffers are kept alive here, so an address cannot be reused by a different image.
-    std::map<std::pair<const std::vector<std::uint8_t>*, TextureEncoding>, TextureHandle> texturesByBuffer;
+    std::map<std::tuple<const std::vector<std::uint8_t>*, TextureEncoding, std::optional<float>>, TextureHandle> texturesByBuffer;
     std::vector<std::shared_ptr<const std::vector<std::uint8_t>>> keptBuffers;
 };

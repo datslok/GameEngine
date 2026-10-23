@@ -8,6 +8,7 @@
 #include "render/gpu/compute_dispatch.h"
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/depth_prepass.h"
+#include "render/gpu/material_shared.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/taa.h"
@@ -285,25 +286,40 @@ namespace {
     * The reflection probe's capture: the main pass's vertex shader taking each face's view-projection from push constants,
     * a capture fragment shader (every light, no surfaces), sampling the light probes or not, its own depth (no prepass), and
     * front faces culled, since the cube's faces are mirror images and turn every triangle round (reflection_probe.h).
+    * Its cut-out variant throws away the holes. The cull mode is set while drawing (double-sided batches cull nothing).
     */
-    PipelineDescription capturePipeline(bool probes, const char* fragmentShader, VkPipelineLayout layout) {
+    PipelineDescription capturePipeline(bool probes, bool cutOut, const char* fragmentShader, VkPipelineLayout layout) {
         PipelineDescription capture;
         capture.vertexShader = "assets/shaders/triangle.vert.spv";
         capture.fragmentShader = fragmentShader;
         capture.sharedLayout = layout;
         capture.vertices = meshVertices();
         capture.cullMode = VK_CULL_MODE_FRONT_BIT;
+        capture.dynamicCullMode = true;
         capture.colourFormat = sceneColourFormat;
         capture.depthFormat = depthFormat;
         setDepthState(capture, mainPassDepthState(false));
         capture.vertexConstants = {1u};
         capture.fragmentConstants = {probes ? 1u : 0u};
+
+        if (cutOut) {
+            capture.fragmentConstants.push_back(1u); // MATERIAL_CUT_OUT_CONSTANT
+        }
+
         return capture;
     }
 
-    // Where each main pass pipeline is in mainPipelines: one bit per choice.
-    std::size_t mainPipelineIndex(bool afterPrepass, bool probes, bool reflectionSurfaces) {
-        return (afterPrepass ? 1u : 0u) | (probes ? 2u : 0u) | (reflectionSurfaces ? 4u : 0u);
+    // The fragment constants above are given by number: the probes' first, then the cut-outs'.
+    static_assert(DDGI_SAMPLE_PROBES_CONSTANT == 0 && MATERIAL_CUT_OUT_CONSTANT == 1, "the fragment constants' numbers changed");
+
+    // Where each main pass pipeline is in mainPipelines: one bit per choice. A cut-out pipeline is only made, and only
+    // needed, without the prepass.
+    std::size_t mainPipelineIndex(bool afterPrepass, bool probes, bool reflectionSurfaces, bool cutOut) {
+        return (afterPrepass ? 1u : 0u) | (probes ? 2u : 0u) | (reflectionSurfaces ? 4u : 0u) | (cutOut && !afterPrepass ? 8u : 0u);
+    }
+
+    std::size_t capturePipelineIndex(bool probes, bool cutOut) {
+        return (probes ? 1u : 0u) | (cutOut ? 2u : 0u);
     }
 }
 
@@ -322,36 +338,50 @@ void VulkanRenderer::createPipelines() {
     main.sharedLayout = sceneLayout->getPipelineLayout(); // everything from the scene's sets
     main.vertices = meshVertices();
     main.cullMode = VK_CULL_MODE_BACK_BIT;
+    main.dynamicCullMode = true;
     main.colourFormat = sceneColourFormat;
     main.depthFormat = depthFormat;
     setDepthState(main, mainPassDepthState(false));
 
     // Each combination: after the prepass or not, sampling the light probes (for frames that have them) or not, writing
-    // the reflection surfaces (their own targets and shader, triangle_surfaces.frag) or not. A pipeline without probes
-    // or reflections is the plain shader with no constants, as before they existed.
+    // the reflection surfaces (their own targets and shader, triangle_surfaces.frag) or not, and without the prepass
+    // drawing cut-outs or not. A pipeline without probes, reflections or cut-outs is the plain shader with no constants,
+    // as before they existed.
     for (bool afterPrepass : {false, true}) {
         for (bool probes : {false, true}) {
             for (bool surfaces : {false, true}) {
-                PipelineDescription variant = main;
-                setDepthState(variant, mainPassDepthState(afterPrepass));
+                for (bool cutOut : {false, true}) {
+                    if (cutOut && afterPrepass) {
+                        continue;
+                    }
 
-                if (surfaces) {
-                    variant.fragmentShader = "assets/shaders/triangle_surfaces.frag.spv";
-                    variant.extraColourFormats = reflections->surfaceFormats();
+                    PipelineDescription variant = main;
+                    setDepthState(variant, mainPassDepthState(afterPrepass));
+
+                    if (surfaces) {
+                        variant.fragmentShader = "assets/shaders/triangle_surfaces.frag.spv";
+                        variant.extraColourFormats = reflections->surfaceFormats();
+                    }
+
+                    if (probes || cutOut) {
+                        variant.fragmentConstants = {probes ? 1u : 0u};
+                    }
+
+                    if (cutOut) {
+                        variant.fragmentConstants.push_back(1u); // MATERIAL_CUT_OUT_CONSTANT
+                    }
+
+                    mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces, cutOut)] = std::make_unique<VulkanPipeline>(device, layouts, variant);
                 }
-
-                if (probes) {
-                    variant.fragmentConstants = {1u};
-                }
-
-                mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces)] = std::make_unique<VulkanPipeline>(device, layouts, variant);
             }
         }
     }
 
     for (bool probes : {false, true}) {
-        capturePipelines[probes ? 1 : 0] = std::make_unique<VulkanPipeline>(
-            device, layouts, capturePipeline(probes, "assets/shaders/probe_capture.frag.spv", sceneLayout->getPipelineLayout()));
+        for (bool cutOut : {false, true}) {
+            capturePipelines[capturePipelineIndex(probes, cutOut)] = std::make_unique<VulkanPipeline>(
+                device, layouts, capturePipeline(probes, cutOut, "assets/shaders/probe_capture.frag.spv", sceneLayout->getPipelineLayout()));
+        }
     }
 
     PipelineDescription prepass = main;
@@ -359,6 +389,11 @@ void VulkanRenderer::createPipelines() {
     prepass.colourFormat = VK_FORMAT_UNDEFINED;
     setDepthState(prepass, prepassDepthState());
     depthPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepass);
+
+    // Cut-outs' depth needs their holes thrown away (cut_out.frag), so they have a fragment shader; nothing else does.
+    PipelineDescription prepassCutOut = prepass;
+    prepassCutOut.fragmentShader = "assets/shaders/cut_out.frag.spv";
+    depthPrepassCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepassCutOut);
 
     PipelineDescription shadow;
     shadow.vertexShader = "assets/shaders/shadow.vert.spv";
@@ -370,28 +405,43 @@ void VulkanRenderer::createPipelines() {
     shadow.depthTest = true;
     shadow.depthWrite = true;
     shadow.depthCompare = VK_COMPARE_OP_GREATER;
+    shadow.dynamicCullMode = true;
     shadowPipeline = std::make_unique<VulkanPipeline>(device, layouts, shadow);
 
+    // Cut-outs cast shadows only where they are solid: their texture coordinates and material go to cut_out.frag.
+    PipelineDescription shadowCutOut = shadow;
+    shadowCutOut.vertexShader = "assets/shaders/shadow_cut_out.vert.spv";
+    shadowCutOut.fragmentShader = "assets/shaders/cut_out.frag.spv";
+    shadowCutOut.vertices.attributes.push_back({2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, uv))});
+    shadowCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, shadowCutOut);
+
     PipelineDescription reset = shadow;
+    reset.dynamicCullMode = false;
     reset.vertexShader = "assets/shaders/fullscreen_triangle.vert.spv";
     reset.vertices = {};
     reset.depthCompare = VK_COMPARE_OP_ALWAYS;
     shadowClearPipeline = std::make_unique<VulkanPipeline>(device, layouts, reset);
 
     // The velocity pass: the objects that moved, drawn again over the main pass's depth (tested, not written; GREATER
-    // OR EQUAL, so their own surfaces pass), only their positions, into the velocity image.
+    // OR EQUAL, so their own surfaces pass), their positions (and texture coordinates, for cut-outs' holes) into the
+    // velocity image. Its cut-out variant throws away the holes.
     PipelineDescription motion;
     motion.vertexShader = "assets/shaders/motion.vert.spv";
     motion.fragmentShader = "assets/shaders/motion.frag.spv";
     motion.sharedLayout = sceneLayout->getPipelineLayout();
-    motion.vertices = shadow.vertices;
+    motion.vertices = shadowCutOut.vertices;
     motion.cullMode = VK_CULL_MODE_BACK_BIT;
+    motion.dynamicCullMode = true;
     motion.colourFormat = VK_FORMAT_R16G16_SFLOAT;
     motion.depthFormat = depthFormat;
     motion.depthTest = true;
     motion.depthWrite = false;
     motion.depthCompare = VK_COMPARE_OP_GREATER_OR_EQUAL;
     motionPipeline = std::make_unique<VulkanPipeline>(device, layouts, motion);
+
+    PipelineDescription motionCutOut = motion;
+    motionCutOut.fragmentConstants = {0u, 1u}; // MATERIAL_CUT_OUT_CONSTANT
+    motionCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, motionCutOut);
 
     ComputePipelineDescription clusterLights;
     clusterLights.shader = "assets/shaders/cluster_lights.comp.spv";
@@ -449,8 +499,10 @@ void VulkanRenderer::createRayTracing() {
     captureRaysLayout = OwnedHandle<VkPipelineLayout>{device.getDevice(), createdCapture, vkDestroyPipelineLayout};
 
     for (bool probes : {false, true}) {
-        capturePipelines[probes ? 1 : 0] = std::make_unique<VulkanPipeline>(
-            device, layouts, capturePipeline(probes, "assets/shaders/probe_capture_rays.frag.spv", captureRaysLayout.get()));
+        for (bool cutOut : {false, true}) {
+            capturePipelines[capturePipelineIndex(probes, cutOut)] = std::make_unique<VulkanPipeline>(
+                device, layouts, capturePipeline(probes, cutOut, "assets/shaders/probe_capture_rays.frag.spv", captureRaysLayout.get()));
+        }
     }
 
     // The light probes write their atlases from compute; every GPU with ray queries can, but it is checked anyway.
@@ -1618,12 +1670,12 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowClearPipeline->get());
         drawFullScreenTriangle(commands);
-        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline->get());
 
+        // The tile's view goes to the shadow pipelines too: they share the scene's layout, so the push constants carry over.
         const GpuShadowView view = packShadowView(tile.matrix);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
-        stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches);
+        stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
         shadowMemory.remember(tile, drawing.signature);
     }
 
@@ -1645,9 +1697,8 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
     beginRendering(commands, {sceneSize.width, sceneSize.height}, nullptr, &depthTarget);
     renderingOpen = true;
 
-    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPrepassPipeline->get());
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
-    stats.drawCalls += drawBatches(commands, mainDraws.batches);
+    stats.drawCalls += drawBatches(commands, mainDraws.batches, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
 
     vkCmdEndRendering(commands);
     renderingOpen = false;
@@ -1686,10 +1737,11 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     beginRendering(commands, {sceneSize.width, sceneSize.height}, colours, &depthTarget);
     renderingOpen = true;
 
-    const VulkanPipeline& pipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces)];
-    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
+    // After the prepass a cut-out's holes have no depth to match, so the plain pipeline draws it too.
+    const VulkanPipeline& pipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, false)];
+    const VulkanPipeline& cutOutPipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces, true)];
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
-    stats.drawCalls += drawBatches(commands, mainDraws.batches);
+    stats.drawCalls += drawBatches(commands, mainDraws.batches, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
 
     /*
     * With the reflection surfaces, the sky's and the stars' pipelines (which draw into the scene image alone) need a
@@ -1788,10 +1840,9 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionD
     renderingOpen = true;
 
     if (!motionDraws.batches.empty()) {
-        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, motionPipeline->get());
         bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-        stats.drawCalls += drawBatches(commands, motionDraws.batches);
+        stats.drawCalls += drawBatches(commands, motionDraws.batches, {motionPipeline->get(), motionCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
     }
 
     vkCmdEndRendering(commands);
@@ -1808,7 +1859,8 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
                                       float farPlane, const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
     const std::uint32_t size = reflectionProbe->getSize();
-    const VulkanPipeline& pipeline = *capturePipelines[sampleProbes ? 1 : 0];
+    const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false)];
+    const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true)]->get(), VK_CULL_MODE_FRONT_BIT};
     const VkPipelineLayout layout = pipeline.getLayout();
     reflectionProbe->beginCapture(commands);
 
@@ -1817,8 +1869,6 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
         const DepthAttachment faceDepth = reflectionProbe->faceDepth(face);
         beginRendering(commands, {size, size}, &colour, &faceDepth);
         renderingOpen = true;
-
-        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
 
         if (rayTracing) {
             const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
@@ -1829,7 +1879,7 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
 
         const GpuShadowView view = packShadowView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane));
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-        stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches);
+        stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches, capturing);
 
         if (sky) {
             atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(),
@@ -1845,11 +1895,30 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
 
 /*
 * One instanced draw per batch: the mesh's buffers bound, and every instance of it drawn at once (gl_InstanceIndex counts
-* from firstInstance, the batch's first entry in the draw list, which names each instance). Returns how many draw calls
-* that took.
+* from firstInstance, the batch's first entry in the draw list, which names each instance). Each batch is drawn by the
+* pass's pipeline for how it is drawn, bound when it changes (cut-outs come last, so at most once), and the cull mode set
+* when it changes: none for double-sided batches. The scene's sets and push constants stay bound across the pipelines,
+* which share their layout. Returns how many draw calls that took.
 */
-std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const {
+std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const {
+    VkPipeline bound = VK_NULL_HANDLE;
+    VkCullModeFlags cull = VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
+
     for (const DrawBatch& batch : batches) {
+        const VkPipeline wanted = batch.cutOut ? pipelines.cutOut : pipelines.plain;
+
+        if (wanted != bound) {
+            vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, wanted);
+            bound = wanted;
+        }
+
+        const VkCullModeFlags wantedCull = batch.doubleSided ? static_cast<VkCullModeFlags>(VK_CULL_MODE_NONE) : pipelines.cull;
+
+        if (wantedCull != cull) {
+            vkCmdSetCullMode(commands, wantedCull);
+            cull = wantedCull;
+        }
+
         std::uint32_t indexCount = 0;
         bindMesh(commands, batch.mesh, indexCount);
         vkCmdDrawIndexed(commands, indexCount, batch.instanceCount, 0, 0, batch.firstInstance);
@@ -2092,12 +2161,12 @@ void VulkanRenderer::uploadMesh(const IndexedMesh& mesh) {
     }
 }
 
-void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding) {
+void VulkanRenderer::uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips) {
     if (recording) {
         throw std::logic_error("Upload textures before beginning a frame");
     }
 
-    textures.push_back(std::make_unique<VulkanTexture>(device, uploads, width, height, pixels, surfaceTexture(encoding)));
+    textures.push_back(std::make_unique<VulkanTexture>(device, uploads, width, height, pixels, surfaceTexture(encoding), mips));
     const TextureHandle handle{static_cast<std::uint32_t>(textures.size() - 1)};
     bindlessTextures->write(bindlessTextureSlot(handle), textures.back()->getView(), surfaceSampler.get());
 }

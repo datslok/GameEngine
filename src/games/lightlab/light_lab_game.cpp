@@ -136,6 +136,14 @@ namespace {
             material.metallic = 1.0f;
             material.roughness = 0.2f;
             break;
+        case LabSurface::ChainLink:
+            // Galvanised steel's dull grey (its colour is the texture's); the wire's holes come with its texture.
+            material.metallic = 1.0f;
+            material.roughness = 0.45f;
+            material.alphaMode = AlphaMode::Mask;
+            material.alphaCutoff = labChainLinkCutoff;
+            material.doubleSided = true;
+            break;
         }
         return material;
     }
@@ -334,6 +342,12 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(makeMeshRenderer(assets.addMesh(Mesh::plane(labGroundHalfSize)), grass));
     addStatic(blocksRenderer(cube, layout.towers));
     addStatic(blocksRenderer(cube, layout.fence));
+
+    // The chain-link between the fence's posts: its wire texture made here, its mips built to keep the wire's coverage.
+    const ImageLevel wire = chainLinkImage();
+    Material chainLink = surfaceMaterial(LabSurface::ChainLink);
+    chainLink.texture = assets.addTexture(ImageData{wire.width, wire.height, wire.pixels, TextureEncoding::Srgb}, labChainLinkCutoff);
+    addStatic(makeMeshRenderer(assets.addMesh(chainLinkPanel()), chainLink));
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
     addStatic(blocksRenderer(cube, layout.street));

@@ -116,10 +116,9 @@ void main() {
 
     // No minimum distance: a probe cannot hit itself, and skipping near hits lets rays slip through walls [2021].
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_SOLID, origin, 0.0, direction, DDGI_RAY_REACH);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, RAY_MASK_SOLID, origin, 0.0, direction, DDGI_RAY_REACH);
 
-    while (rayQueryProceedEXT(query)) {
-    }
+    traceRayQuery(query);
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
         probeRays[index] = vec4(volume.sky.rgb + skyLightTowards(direction), DDGI_RAY_REACH);
@@ -129,7 +128,7 @@ void main() {
 
     float distance = rayQueryGetIntersectionTEXT(query, true);
 
-    if (!rayQueryGetIntersectionFrontFaceEXT(query, true)) {
+    if (!committedHitFacesRay(query)) {
         probeRays[index] = vec4(0.0, 0.0, 0.0, -distance);
         fastProbeRays[index] = packFastRayLight(vec3(0.0));
         return;
