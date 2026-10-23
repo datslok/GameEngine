@@ -121,6 +121,20 @@ namespace {
     * DLSS works in its named modes, each taking render sizes in a range round its own: a scale picks the mode nearest it
     * (0.75 is Quality, 0.4 Ultra performance), and the render size is kept inside the mode's range.
     */
+    /*
+    * NVIDIA's DLSS models, as Streamline numbers its presets (sl::DLSSPreset): 0 lets DLSS pick per mode (K for DLAA),
+    * then J to M are 10 to 13. Default by default; the user found K trailing at the flashlight beam's edge.
+    */
+    void testDlssModels() {
+        assert(dlssPresetNumber(DlssModel::Default) == 0);
+        assert(dlssPresetNumber(DlssModel::J) == 10);
+        assert(dlssPresetNumber(DlssModel::K) == 11);
+        assert(dlssPresetNumber(DlssModel::L) == 12);
+        assert(dlssPresetNumber(DlssModel::M) == 13);
+        assert(dlssModelNames.size() == static_cast<std::size_t>(DlssModel::M) + 1);
+        assert(UpscalingSettings{}.dlssModel == DlssModel::Default);
+    }
+
     void testDlssModes() {
         assert(nearestUpscalingMode(1.0f) == UpscalingMode::Native);
         assert(nearestUpscalingMode(0.67f) == UpscalingMode::Quality);
@@ -154,7 +168,8 @@ namespace {
         const DlssFrameInputs inputs = makeDlssFrameInputs(RenderSize{1280, 720}, 2560, 1440, Vec2{0.25f, -0.125f}, lens, reprojection,
                                                            DlssCamera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f},
                                                                       Vec3{0.0f, 0.0f, -1.0f}, 0.1f, 500.0f, 1.0f, 16.0f / 9.0f},
-                                                           true);
+                                                           true, DlssModel::L);
+        assert(inputs.preset == dlssPresetNumber(DlssModel::L));
 
         const Vec2 previousNdc{-0.2f, 0.4f};
         const Vec2 currentNdc{0.1f, 0.3f};
@@ -305,6 +320,7 @@ void testUpscaling() {
     testJitterPhases();
     testActiveUpscaler();
     testDlssLodBias();
+    testDlssModels();
     testDlssModes();
     testDlssFrameInputs();
     testFsrFrameInputs();

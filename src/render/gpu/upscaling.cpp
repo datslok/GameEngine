@@ -23,6 +23,7 @@ void visit(UpscalingSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Anti-aliasing", settings.upscaler, upscalerNames);
     visitor.field("Render scale", settings.renderScale, {.min = minRenderScale, .max = 1.0f});
     visitor.field("FSR sharpness", settings.sharpness, {.min = 0.0f, .max = 1.0f});
+    visitor.choice("DLSS model", settings.dlssModel, dlssModelNames);
 }
 
 // Written so not a number fails them too.
@@ -160,7 +161,7 @@ std::array<float, 16> streamlineMatrix(const Mat4& matrix) {
 * -m.x / 2 and +m.y / 2. A matrix that cannot be inverted (never a real lens or camera step) gives the identity.
 */
 DlssFrameInputs makeDlssFrameInputs(RenderSize render, std::uint32_t outputWidth, std::uint32_t outputHeight, Vec2 jitter, const Mat4& viewToClip,
-                                    const Mat4& reprojection, const DlssCamera& camera, bool reset) {
+                                    const Mat4& reprojection, const DlssCamera& camera, bool reset, DlssModel model) {
     DlssFrameInputs inputs;
     inputs.renderSize = render;
     inputs.outputWidth = outputWidth;
@@ -173,5 +174,12 @@ DlssFrameInputs makeDlssFrameInputs(RenderSize render, std::uint32_t outputWidth
     inputs.prevClipToClip = streamlineMatrix(inverse(reprojection).value_or(Mat4::identity()));
     inputs.camera = camera;
     inputs.reset = reset;
+    inputs.preset = dlssPresetNumber(model);
     return inputs;
+}
+
+// Streamline numbers J to M from 10 (A to I were removed or deprecated), so the four follow on from J.
+std::uint32_t dlssPresetNumber(DlssModel model) {
+    constexpr std::uint32_t presetJ = 10;
+    return model == DlssModel::Default ? 0 : presetJ + static_cast<std::uint32_t>(model) - static_cast<std::uint32_t>(DlssModel::J);
 }

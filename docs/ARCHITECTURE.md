@@ -2047,6 +2047,7 @@ The textures' mip bias with FSR (and DLSS) is `log2(scale) - 1` (`textureLodBias
 | `upscaling.renderScale` | 1 | the render size's share of the output's (Upscaling) |
 | `upscaling.upscaler` | DLSS | the anti-aliasing choice: Off, TAA, FSR 3.1 (FSR) or DLSS (DLSS) |
 | `upscaling.sharpness` | 0.8 | FSR's RCAS sharpening, 0 off (FSR) |
+| `upscaling.dlssModel` | Default | the DLSS model in every mode: Default (DLSS picks: K for DLAA), J, K, L or M (`dlssPresetNumber`, Streamline's preset numbers) |
 
 ### Golden images
 

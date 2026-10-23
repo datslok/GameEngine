@@ -1098,7 +1098,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             const DlssCamera lens{cameraOrigin, camera.getUp(), camera.getRight(), camera.getForward(), camera.getNearPlane(),
                                   camera.getFarPlane(), camera.getVerticalFov(), camera.getAspectRatio()};
             const DlssFrameInputs inputs = makeDlssFrameInputs(sceneSize, frameWidth, frameHeight, jitter, toGpuDepthRange(camera.getProjectionMatrix()),
-                                                               reprojection, lens, !dlssHistory || !previousCamera.known);
+                                                               reprojection, lens, !dlssHistory || !previousCamera.known, settings.upscaling.dlssModel);
             upscaledByDlss = dlss->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), inputs,
                                             nearestUpscalingMode(settings.upscaling.renderScale), static_cast<std::uint32_t>(taaFrame));
         }
