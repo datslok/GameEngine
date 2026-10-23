@@ -27,6 +27,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Shader sources are compiled to .spv at build time; the game only loads the .spv files.
 SKIPPED_ASSET_SUFFIXES = {".vert", ".frag", ".glsl"}
 
+# AMD's FSR 3.1 upscaler (external/fidelityfx): the game loads it with LoadLibrary when it starts, so no import table
+# names it either. It needs Microsoft's C++ runtime, which most PCs have and the check below finds in Windows; without
+# it the game runs and FSR is simply unavailable.
+FSR_DLL = REPO_ROOT / "external" / "fidelityfx" / "bin" / "amd_fidelityfx_vk.dll"
+
 # SDL3_image does not link its image decoders. It loads them with LoadLibrary the first time an image
 # of that type is opened, so they never appear in an import table. Each image format maps to the
 # start of the decoder DLL names SDL3_image looks for.
@@ -398,6 +403,9 @@ def main() -> int:
         shutil.copy2(path, stage / path.name)
         loaded_at_runtime = path in decoders
         print(f"  {path.name}{'  (loaded at runtime by SDL3_image)' if loaded_at_runtime else ''}")
+
+    shutil.copy2(FSR_DLL, stage / FSR_DLL.name)
+    print(f"  {FSR_DLL.name}  (loaded at runtime for FSR 3.1)")
 
     # The second game is the same exe with a command-line option; a batch file gives it a double-click of its own.
     demo = stage / DEMO_LAUNCHER

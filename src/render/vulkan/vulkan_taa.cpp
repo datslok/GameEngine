@@ -21,6 +21,13 @@ VulkanTaa::VulkanTaa(const VulkanDevice& device, VkSampler nearest, VkSampler fi
     description.storageImages = 1;
     description.pushConstantBytes = sizeof(GpuTaaPass);
     pipeline = std::make_unique<ComputePipeline>(device, description);
+
+    ComputePipelineDescription fill;
+    fill.shader = "assets/shaders/motion_fill.comp.spv";
+    fill.sampledImages = 1;
+    fill.storageImages = 1;
+    fill.pushConstantBytes = sizeof(GpuMotionFillPass);
+    fillPipeline = std::make_unique<ComputePipeline>(device, fill);
 }
 
 /*
@@ -33,7 +40,8 @@ void VulkanTaa::ensureSize(std::uint32_t newWidth, std::uint32_t newHeight, Rend
         velocityDescription.format = velocityFormat;
         velocityDescription.width = render.width;
         velocityDescription.height = render.height;
-        velocityDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        // Storage: the camera motion pass fills it in place.
+        velocityDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
         velocityDescription.name = "TAA velocity";
         velocity = VulkanImage{device, velocityDescription};
         velocitySize = render;
@@ -74,6 +82,39 @@ bool VulkanTaa::hasHistory() const {
 
 void VulkanTaa::forgetHistory() {
     historyValid = false;
+}
+
+/*
+* The barriers: the velocity image from the velocity pass's colour target to a storage image read and written in place,
+* and the depth to being read by compute.
+*/
+void VulkanTaa::fillCameraMotion(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth, const GpuMotionFillPass& pass) {
+    velocity.transition(commands, ImageState::ComputeStorage);
+    depth.transition(commands, ImageState::DepthComputeRead);
+
+    const VkDescriptorSet set = descriptors.allocate(fillPipeline->getResourceLayout());
+    const std::array<VkDescriptorImageInfo, 2> images{
+        VkDescriptorImageInfo{nearest, depth.getView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
+        VkDescriptorImageInfo{VK_NULL_HANDLE, velocity.getView(), VK_IMAGE_LAYOUT_GENERAL},
+    };
+
+    std::array<VkWriteDescriptorSet, 2> writes{};
+
+    for (std::uint32_t binding = 0; binding < writes.size(); ++binding) {
+        writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[binding].dstSet = set;
+        writes[binding].dstBinding = binding;
+        writes[binding].descriptorCount = 1;
+        writes[binding].descriptorType = binding == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[binding].pImageInfo = &images[binding];
+    }
+
+    vkUpdateDescriptorSets(device.getDevice(), static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, fillPipeline->get());
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, fillPipeline->getLayout(), 0, 1, &set, 0, nullptr);
+    vkCmdPushConstants(commands, fillPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
+    vkCmdDispatch(commands, workgroupCount(velocitySize.width, TAA_GROUP_SIDE), workgroupCount(velocitySize.height, TAA_GROUP_SIDE), 1);
 }
 
 /*

@@ -41,6 +41,13 @@ public:
     */
     void resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, const GpuTaaPass& pass);
 
+    /*
+    * Record the camera motion pass (motion_fill.comp): every velocity pixel the velocity pass left at "no motion" gets
+    * the camera's motion from its depth, so the image holds a motion everywhere, as FSR needs. The depth (readable by
+    * compute) and the velocity image (drawn this frame) in, the velocity image left as a storage image.
+    */
+    void fillCameraMotion(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth, const GpuMotionFillPass& pass);
+
     // The last resolve's result: the finished picture at the output's size.
     VulkanImage& getResult();
 
@@ -49,6 +56,7 @@ private:
     VkSampler nearest;
     VkSampler filtered;
     std::unique_ptr<ComputePipeline> pipeline;
+    std::unique_ptr<ComputePipeline> fillPipeline;
 
     VulkanImage velocity;
     std::array<VulkanImage, 2> history;

@@ -60,6 +60,9 @@ std::string videoMemoryText(const VideoMemory& memory);
 // "EXPOSURE FIXED" while it does not adapt.
 std::string exposureText(const std::optional<GpuEyeAdaptation>& adaptation);
 
+// The upscaler drawing the frame and the render scale it draws at, after the exposure on its line.
+std::string upscalerText(Upscaler upscaler, float renderScale);
+
 // The camera's line: its position in metres and the unit direction it looks, "CAMERA -10.0 1.7 9.0  LOOK -0.98 -0.05 0.20",
 // for setting up the same view elsewhere (a golden image's).
 std::string cameraText(const Vec3& position, const Vec3& forward);

@@ -29,7 +29,7 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * shadow tile counts each mesh once; CALLS counts the instanced draws they took, one per mesh per view), the point
 * lights (all of them, those that reach into view, and those that got a seat in the shader and a shadow), the shadow
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
-* states, the video memory, and the eye's exposure.
+* states, the video memory, and the eye's exposure with the upscaler.
 */
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
@@ -55,7 +55,15 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
     debugText(debug, debugReadoutLine(probeReadoutLine), debugReadoutTextHeight, probeStatsText(stats.probes), boundingBoxColour);
     debugText(debug, debugReadoutLine(videoMemoryReadoutLine), debugReadoutTextHeight, videoMemoryText(stats.videoMemory), boundingBoxColour);
-    debugText(debug, debugReadoutLine(exposureReadoutLine), debugReadoutTextHeight, exposureText(stats.eyeAdaptation), boundingBoxColour);
+    debugText(debug, debugReadoutLine(exposureReadoutLine), debugReadoutTextHeight,
+              exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale), boundingBoxColour);
+}
+
+// Hundredths of the scale: the slider's own steps.
+std::string upscalerText(Upscaler upscaler, float renderScale) {
+    char text[48];
+    std::snprintf(text, sizeof(text), "%s AT %.2f", upscalerNames[static_cast<std::size_t>(upscaler)], renderScale);
+    return text;
 }
 // Signed and to a tenth of a stop: finer would only flicker as the exposure eases.
 std::string exposureText(const std::optional<GpuEyeAdaptation>& adaptation) {

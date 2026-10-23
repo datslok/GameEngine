@@ -18,6 +18,8 @@
 *.so
 *.dylib
 *.dll
+# AMD's signed FSR 3.1 DLL is vendored (external/fidelityfx/VERSION.txt).
+!external/fidelityfx/bin/amd_fidelityfx_vk.dll
 
 # Fortran module files
 *.mod

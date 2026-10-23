@@ -87,7 +87,7 @@ One description of every tunable value, walked by several visitors.
 - No `imgui.ini`, keyboard navigation off (the game keeps its keys), sizes and font scaled by `SDL_GetWindowDisplayScale`.
 - `build(walk, render, requests)` returns `nullptr` while closed (nothing runs). Open, it:
   - runs the backends' `NewFrame`s (the renderer's through `beginDebugUiFrame`);
-  - shows one window "Settings (F5)" with the quality preset combo (`Custom` when `matchingQualityPreset` finds none);
+  - shows one window "Settings (F5)" with the quality preset combo (`Custom` when `matchingQualityPreset` finds none) and the upscaling mode combo (which sets `renderScale`; `Custom` when `matchingUpscalingMode` finds none);
   - has Save and Reset buttons (reported in `DebugUiRequests`, carried out by `Application`, which sets the status line);
   - then runs the walk through `ImGuiSettingsVisitor`. Top-level groups are collapsing headers (open), deeper ones tree nodes, each with its own ID scope. Floats and ints are sliders (`%.4g` plus unit), clamped to the hard limits after Ctrl+click typing. Start-up fields are disabled with a tooltip.
 
@@ -565,6 +565,7 @@ Libraries (vendored unmodified, versions in each folder's `VERSION.txt`, matched
 - **VMA** (`external/vma`, implementation compiled once in `vk_mem_alloc.cpp` with dynamic function fetching, three warnings silenced for it) allocates memory.
 - **ImGui's Vulkan backend** (`external/imgui/imgui_impl_vulkan.cpp`, built with `IMGUI_IMPL_VULKAN_USE_VOLK`).
 - **Validation layers** come from MSYS2 (`mingw-w64-ucrt-x86_64-vulkan-validation-layers`, in `C:\msys64\ucrt64\bin`, which the loader does not search, so the makefile exports `VK_ADD_LAYER_PATH`).
+- **FSR 3.1** (`external/fidelityfx`: AMD's FidelityFX API headers and signed `amd_fidelityfx_vk.dll` from SDK v1.1.4) is loaded at run time, not linked (see Temporal anti-aliasing, FSR).
 
 ### Files
 
@@ -578,6 +579,8 @@ Files:
   - validation layers when `validation` and installed, errors counted, validation and performance warnings logged, the loader's own warnings dropped;
   - required features `dynamicRendering`, `synchronization2`, `samplerAnisotropy`, `depthClamp`, and for bindless textures `runtimeDescriptorArray`, `shaderSampledImageArrayNonUniformIndexing`, `descriptorBindingPartiallyBound`, `descriptorBindingSampledImageUpdateAfterBind`, `descriptorBindingUpdateUnusedWhilePending`, and `bufferDeviceAddress` (required by Vulkan 1.3 itself);
   - optional ray queries (see Ray tracing) (`getBindlessTextureLimit`: the smallest update-after-bind sampler and sampled image limit);
+  - `subgroupSizeControl` and `computeFullSubgroups` (required by Vulkan 1.3 itself), and for FSR (`supportsFsrFeatures`) `shaderFloat16`, `shaderInt16`, `shaderStorageImageReadWithoutFormat` and `WriteWithoutFormat`, asked for first and dropped only when no GPU has them, plus the extensions `VK_KHR_get_memory_requirements2` and `VK_KHR_dedicated_allocation` (core since 1.1, but FSR fetches `vkGetBufferMemoryRequirements2KHR` by its suffixed name, which a device returns only with them on; without them FSR crashed in its context creation);
+  - one validation warning skipped: `rw_luma_history`, a bug in AMD's DLL (its shader declares the image `rgba8`, FSR creates it RGBA16F), so the engine's own messages still stand out;
   - discrete GPU preferred; one queue for drawing, copies and presenting; VMA;
   - helpers for semaphores, fences, samplers, command pools and SPIR-V modules.
 - `owned_handle` (`OwnedHandle<T>`: one device object and its destroy function).
@@ -1983,10 +1986,28 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 `UpscalingSettings` (`render/gpu/upscaling`, `RenderSettings::upscaling`, the Upscaling group; tested in `upscaling_test`):
 
 - `renderScale` (1 by default, `minRenderScale` 0.33 to 1): the render size's share of the output's, each way. It applies only while TAA is on (`appliedRenderScale`), since the resolve is what upscales; with TAA off the frame is drawn at the output's size.
+- **Modes** (`UpscalingMode`, `upscalingModeNames`): Native, Quality, Balanced, Performance and Ultra performance, FSR's and DLSS's names for render scales 1, 1/1.5, 1/1.7, 1/2 and 1/3 (`upscalingModeScale`). Not stored: the debug UI's combo sets the scale, and `matchingUpscalingMode` reads a scale back as its mode within 0.005 (half a slider step), else Custom. The quality presets leave the scale alone.
 - `renderSize(width, height, scale)`: each side rounded, at least one pixel and at most the output's. `ensureFrameTextures(width, height, settings)` keeps the scene image, its depth, the velocity image and the clusters' lists at it (`sceneSize`) and remakes them when it changes, like a resize.
 - At the render size: the depth prepass, main pass, sky, stars, probe balls, ray debug view, velocity pass, clusters and the depth measurement. At the output's: the histories, eye adaptation, bloom, tone mapping, the debug lines and UI. The shadow atlas, the probes and the sky's tables do not depend on the screen.
 - `textureLodBias(render, outputWidth)`, log2 of the render width over the output's (-1 at half), goes to `GpuFrameData::textureOptions.x`: the mips are chosen for the output's pixels, and the history averages the sharper level's detail.
-- The jitter cycle stays 16 frames at every scale. Fewer samples reach each output pixel per cycle as the scale falls (NVIDIA suggests 8 / scale² phases for DLSS); a longer cycle is not tried yet.
+- The jitter cycle stays 16 frames at every scale for the engine's own resolve. Fewer samples reach each output pixel per cycle as the scale falls (NVIDIA suggests 8 / scale² phases for DLSS); a longer cycle is not tried yet for it. FSR gets its own (`jitterPhaseCount`, below).
+
+### FSR
+
+`UpscalingSettings::upscaler` (`Upscaler::Taa` by default, or `Fsr`, "FSR 3.1" in the settings file) and `sharpness` (0.5, its RCAS sharpening after it upscales; 0 turns it off). FSR runs only while TAA is on (it uses the same jitter and velocity pass) and only where `VulkanFsr::isAvailable()`: `activeUpscaler` falls back to TAA otherwise, and the F4 readout's exposure line ends with the upscaler in use and the render scale (`upscalerText`, e.g. `FSR 3.1 AT 0.67`).
+
+**The DLL** (`render/vulkan/vulkan_fsr`, `VulkanFsr`): `SDL_LoadObject("amd_fidelityfx_vk.dll")` and the FidelityFX API's C functions by name (`ffxCreateContext`, `ffxDestroyContext`, `ffxDispatch`). A C interface is what lets MSVC's DLL be called from GCC. The makefile copies the DLL beside each build's exe (`$(FSR_DLL)`), and `tools/package_demo.py` packages it. It imports Microsoft's C++ runtime (`MSVCP140`, `VCRUNTIME140`): without it, or without the device features, FSR is unavailable and the game carries on. SDK v1.1.4 is the last line with a Vulkan backend (2.x, with FSR 4, is DirectX 12 only).
+
+**The context** is made at the first FSR frame for renders up to the output's size (`maxRenderSize` = `maxUpscaleSize` = the output, so a new render scale needs no new context), with `HIGH_DYNAMIC_RANGE`, `DEPTH_INVERTED` and `AUTO_EXPOSURE` (as AMD recommends; the engine's own exposure is not passed), and `DEBUG_CHECKING` in debug builds, its messages in the log. `ensureSize` (from `ensureFrameTextures`, GPU idle) remakes the output image (`R16G16B16A16_SFLOAT`, storage, sampled, transfer source) and drops the context when the output's size changes.
+
+**Each frame** (`drawScene`, timed as the TAA pass):
+
+1. The jitter cycle is `jitterPhaseCount(render, outputWidth)` = ceil(8 n²) phases, n the output over the render width (8 at full size, 18 at 1.5, 32 at 2, 72 at 3), as AMD's table.
+2. The camera motion pass (`motion_fill.comp`, `VulkanTaa::fillCameraMotion`, `GpuMotionFillPass`): every velocity pixel still at `TAA_NO_MOTION` gets `cameraMotion(reprojection, pixel, depth, size)` (this frame's NDC minus last frame's; none behind last frame's camera), so the velocity image (now with `STORAGE`) holds a motion everywhere.
+3. `VulkanFsr::dispatch` with `makeFsrFrameInputs`: the jitter in render pixels (FSR's convention is `jitteredClip`'s), `motionVectorScale` = (-w/2, +h/2) of the render size (turning NDC now minus then into render pixels from now to then, y down), the frame time in milliseconds, the sharpening, near and far swapped (FSR names them by depth for reversed-Z), the vertical field of view, and `reset` when FSR did not draw the last frame (`fsrHistory`) or the camera is unknown. The colour, depth and velocity are moved to `ComputeRead` (`SHADER_READ_ONLY_OPTIMAL`, depth too) and the output to `ComputeStorage` (`GENERAL`), the states it is told and returns them to; then the output to `SurfaceRead`, and it is `finishedScene`.
+4. The engine's history is forgotten while FSR draws (and FSR's dropped while TAA does), so each starts afresh when switched back. If the context cannot be made, FSR becomes unavailable and the frame falls back to the resolve.
+
+The textures' mip bias with FSR is `log2(scale) - 1` (`textureLodBias(..., Upscaler::Fsr)`), AMD's recommendation. No reactive or transparency mask is given yet (the sky and stars have depth and camera motion; transparency comes later in 6e). Golden captures use whatever the settings say (TAA by default).
 
 ### Settings
 
@@ -2000,6 +2021,8 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 | `jitter` | on | off holds the projection still |
 | `showMotion` | off | the motion debug view |
 | `upscaling.renderScale` | 1 | the render size's share of the output's (Upscaling) |
+| `upscaling.upscaler` | TAA | TAA or FSR 3.1 (FSR) |
+| `upscaling.sharpness` | 0.5 | FSR's RCAS sharpening, 0 off (FSR) |
 
 ### Golden images
 

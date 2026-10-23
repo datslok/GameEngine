@@ -25,6 +25,7 @@
 #include "render/vulkan/vulkan_atmosphere.h"
 #include "render/vulkan/vulkan_eye_adaptation.h"
 #include "render/vulkan/vulkan_stars.h"
+#include "render/vulkan/vulkan_fsr.h"
 #include "render/vulkan/vulkan_taa.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
@@ -238,6 +239,12 @@ private:
     };
 
     PreviousCamera previousCamera;
+
+    // AMD's FSR 3.1 (render/vulkan/vulkan_fsr.h), which upscales in place of the resolve when chosen and available; the
+    // upscaler this frame uses, and whether FSR also drew the last frame (else its history is dropped).
+    std::unique_ptr<VulkanFsr> fsr;
+    Upscaler frameUpscaler = Upscaler::Taa;
+    bool fsrHistory = false;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
 

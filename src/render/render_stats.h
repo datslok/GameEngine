@@ -3,6 +3,7 @@
 #include "render/gpu/eye_adaptation.h"
 #include "render/gpu/gpu_timing.h"
 #include "render/gpu/probe_relocation.h"
+#include "render/gpu/upscaling.h"
 #include "render/gpu/video_memory.h"
 
 #include <cstddef>
@@ -50,4 +51,8 @@ struct RenderStats {
     // The eye's adapted exposure as an earlier frame left it (as many back as there are frames in flight), while it
     // adapts (render/gpu/eye_adaptation.h).
     std::optional<GpuEyeAdaptation> eyeAdaptation;
+
+    // The upscaler that drew the frame (TAA when FSR was asked for but is unavailable) and the render scale it drew at.
+    Upscaler upscaler = Upscaler::Taa;
+    float renderScale = 1.0f;
 };

@@ -4,6 +4,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 
@@ -130,6 +131,11 @@ void VulkanDevice::createInstance(bool validation) {
 * pending), and buffer device addresses (a buffer's place in the GPU's memory, which shaders can follow like a pointer
 * and acceleration structures are built from). Every desktop GPU with Vulkan 1.3 drivers has these. A discrete GPU is
 * preferred over an integrated one.
+*
+* FSR 3.1's shaders take their paths from what the GPU supports, not from what was turned on, so the features they use
+* (16-bit floats and integers, storage images read and written without a declared format) are asked for first, and
+* the GPU is chosen without them only when none has them (FSR then stays off). Subgroup size control, which its 64-wide
+* shaders need on AMD GPUs, is part of every Vulkan 1.3 driver.
 */
 void VulkanDevice::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
@@ -142,6 +148,8 @@ void VulkanDevice::selectPhysicalDevice() {
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
     features13.shaderDemoteToHelperInvocation = VK_TRUE; // what discard compiles to for Vulkan 1.3 (required there)
+    features13.subgroupSizeControl = VK_TRUE;            // required by Vulkan 1.3 itself
+    features13.computeFullSubgroups = VK_TRUE;           // required by Vulkan 1.3 itself
 
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -152,13 +160,29 @@ void VulkanDevice::selectPhysicalDevice() {
     features12.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
     features12.bufferDeviceAddress = VK_TRUE; // required by Vulkan 1.3 itself, so every GPU here has it
 
-    vkb::PhysicalDeviceSelector selector{instance, surface};
-    auto selected = selector.set_minimum_version(1, 3)
-        .prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
-        .set_required_features(features)
-        .set_required_features_12(features12)
-        .set_required_features_13(features13)
-        .select();
+    const auto select = [&](const VkPhysicalDeviceFeatures& chosen, const VkPhysicalDeviceVulkan12Features& chosen12) {
+        vkb::PhysicalDeviceSelector selector{instance, surface};
+        return selector.set_minimum_version(1, 3)
+            .prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
+            .set_required_features(chosen)
+            .set_required_features_12(chosen12)
+            .set_required_features_13(features13)
+            .select();
+    };
+
+    VkPhysicalDeviceFeatures withFsr = features;
+    withFsr.shaderInt16 = VK_TRUE;
+    withFsr.shaderStorageImageReadWithoutFormat = VK_TRUE;
+    withFsr.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+    VkPhysicalDeviceVulkan12Features withFsr12 = features12;
+    withFsr12.shaderFloat16 = VK_TRUE;
+
+    auto selected = select(withFsr, withFsr12);
+    fsrFeatures = static_cast<bool>(selected);
+
+    if (!selected) {
+        selected = select(features, features12);
+    }
 
     if (!selected) {
         throw bootstrapError("No GPU supports what the Vulkan renderer needs", selected.error());
@@ -169,6 +193,11 @@ void VulkanDevice::selectPhysicalDevice() {
     // Optional: the driver's own count of each memory heap's use and budget, for the F4 readout. Every current desktop
     // driver has it; without it VMA estimates from what it allocated itself.
     memoryBudget = physicalDevice.enable_extension_if_present(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
+    // FSR 3.1 calls vkGetBufferMemoryRequirements2KHR whenever the GPU lists dedicated allocations, and a device returns
+    // that name (core since Vulkan 1.1 without the suffix) only with its extensions on. Without them FSR stays off.
+    const std::vector<const char*> fsrExtensions{VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME};
+    fsrFeatures = fsrFeatures && physicalDevice.enable_extensions_if_present(fsrExtensions);
 
     // Optional: hardware ray tracing through ray queries (any shader asks what a ray hits), with the acceleration
     // structures it searches. Without them everything ray-traced stays off.
@@ -297,6 +326,13 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDevice::onValidationMessage(VkDebugUtilsMes
         return VK_FALSE;
     }
 
+    // A bug in AMD's signed FSR 3.1 DLL (SDK v1.1.4, external/fidelityfx): its shader declares the luma history storage
+    // image rgba8 while FSR makes it RGBA16F. Undefined by the spec; drivers store through the image's own format. Only
+    // this message, and only while it is a warning, so anything from the engine's own passes still shows.
+    if (!error && data != nullptr && data->pMessage != nullptr && std::strstr(data->pMessage, "\"rw_luma_history\"") != nullptr) {
+        return VK_FALSE;
+    }
+
     if (error && userData != nullptr) {
         static_cast<VulkanDevice*>(userData)->validationErrors.fetch_add(1);
     }
@@ -347,6 +383,10 @@ bool VulkanDevice::reportsMemoryBudget() const {
 
 bool VulkanDevice::supportsRayQueries() const {
     return rayQueries;
+}
+
+bool VulkanDevice::supportsFsrFeatures() const {
+    return fsrFeatures;
 }
 
 std::uint32_t VulkanDevice::getScratchAlignment() const {

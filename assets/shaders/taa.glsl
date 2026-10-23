@@ -22,9 +22,13 @@ float halton(uint index, uint base) {
     return result;
 }
 
-vec2 taaJitter(uint frame) {
-    uint index = frame % uint(TAA_JITTER_FRAMES) + 1u;
+vec2 taaJitter(uint frame, uint phases) {
+    uint index = frame % max(phases, 1u) + 1u;
     return vec2(halton(index, 2u) - 0.5, halton(index, 3u) - 0.5);
+}
+
+vec2 taaJitter(uint frame) {
+    return taaJitter(frame, uint(TAA_JITTER_FRAMES));
 }
 
 vec2 ndcToPixel(vec2 ndc, vec2 size) {
@@ -45,6 +49,17 @@ vec3 reprojectPixel(mat4 reprojection, vec2 pixel, float depth, vec2 size) {
     }
 
     return vec3(ndcToPixel(clip.xy / clip.w, size), 1.0);
+}
+
+vec2 cameraMotion(mat4 reprojection, vec2 pixel, float depth, vec2 size) {
+    vec2 ndc = pixelToNdc(pixel, size);
+    vec4 clip = reprojection * vec4(ndc, depth, 1.0);
+
+    if (!(clip.w > 0.0)) {
+        return vec2(0.0);
+    }
+
+    return ndc - clip.xy / clip.w;
 }
 
 vec2 previousPixelFromMotion(vec2 pixel, vec2 motion, vec2 size) {

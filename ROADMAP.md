@@ -250,7 +250,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Motion vectors and temporal anti-aliasing (TAA) (`taa`)
 - [ ] DLSS and FSR as options, on TAA's motion vectors and jitter (they need the Vulkan renderer's native handles)
   - [x] A render scale, with TAA upscaling (TAAU) (`render-scale`)
-  - [ ] Full-screen motion vectors and FSR 3.1, behind an upscaler setting (TAA, FSR, DLSS), with its sharpening
+  - [x] Full-screen motion vectors and FSR 3.1, behind an upscaler setting, with its sharpening (`fsr`)
   - [ ] DLSS, after a trial of NVIDIA's SDK with MinGW
   - With TAA in place, soft shadows, DDGI sampling and screen-space effects can use far fewer samples and let the history average them.
 - [ ] Normal map filtering (Toksvig): bumps averaged away in a normal map's smaller mips become extra roughness, so distant bumpy surfaces do not sparkle; alongside TAA

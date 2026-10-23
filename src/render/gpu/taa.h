@@ -62,8 +62,8 @@ void validateTaa(const TaaSettings& settings);
 float halton(std::uint32_t index, std::uint32_t base);
 
 // This frame's jitter in pixels, each within half a pixel of the centre: the Halton (2, 3) point of the frame's place
-// in the cycle (counted from 1, since point 0 is the corner).
-Vec2 taaJitter(std::uint64_t frame);
+// in a cycle of phases frames (counted from 1, since point 0 is the corner). FSR wants longer cycles when it upscales.
+Vec2 taaJitter(std::uint64_t frame, std::uint32_t phases = taaJitterFrames);
 
 // A view-projection whose picture lands pixelOffset pixels over (x right, y down the screen), on a screen of this size:
 // clip x and y move by the offset times w, so every point on screen moves the same, near or far, and depth does not change.
@@ -88,6 +88,13 @@ struct Reprojected {
 };
 
 Reprojected reprojectPixel(const Mat4& reprojection, Vec2 pixel, float depth, Vec2 size);
+
+/*
+* The camera's motion at a pixel and its depth, as the velocity image holds a motion (this frame's NDC minus last
+* frame's), for the pixels no moving object covered: none for a point at or behind last frame's camera. FSR needs it in
+* every pixel; the engine's own resolve reprojects such pixels itself.
+*/
+Vec2 cameraMotion(const Mat4& reprojection, Vec2 pixel, float depth, Vec2 size);
 
 // Where an object drawn into the velocity image covered last frame: its motion is this frame's NDC minus last frame's.
 Vec2 previousPixelFromMotion(Vec2 pixel, Vec2 motion, Vec2 size);
@@ -153,3 +160,14 @@ struct GpuMotionView {
 static_assert(sizeof(GpuMotionView) == 128, "GpuMotionView must fit the 128 bytes of push constants every GPU has");
 
 GpuMotionView packMotionView(const Mat4& current, const Mat4& previous);
+
+// The camera motion pass's push constants (motion_fill.comp): the reprojection (column-major) and the render screen it
+// walks (width, height).
+struct GpuMotionFillPass {
+    float reprojection[16];
+    float size[4];
+};
+
+static_assert(sizeof(GpuMotionFillPass) == 80, "GpuMotionFillPass must match motion_fill.comp's push constants");
+
+GpuMotionFillPass packMotionFillPass(const Mat4& reprojection, RenderSize render);

@@ -44,8 +44,8 @@ float halton(std::uint32_t index, std::uint32_t base) {
 }
 
 // Bases 2 and 3 for x and y: two different primes, so the points do not line up along a diagonal.
-Vec2 taaJitter(std::uint64_t frame) {
-    const std::uint32_t index = static_cast<std::uint32_t>(frame % taaJitterFrames) + 1;
+Vec2 taaJitter(std::uint64_t frame, std::uint32_t phases) {
+    const std::uint32_t index = static_cast<std::uint32_t>(frame % std::max(phases, std::uint32_t{1})) + 1;
     return Vec2{halton(index, 2) - 0.5f, halton(index, 3) - 0.5f};
 }
 
@@ -106,6 +106,19 @@ Reprojected reprojectPixel(const Mat4& reprojection, Vec2 pixel, float depth, Ve
     }
 
     return Reprojected{ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size), true};
+}
+
+// The same point through the reprojection as reprojectPixel, kept in NDC: no pixels and back, so a still camera gives
+// exactly none.
+Vec2 cameraMotion(const Mat4& reprojection, Vec2 pixel, float depth, Vec2 size) {
+    const Vec2 ndc = pixelToNdc(pixel, size);
+    const Vec4 clip = reprojection * Vec4{ndc.x, ndc.y, depth, 1.0f};
+
+    if (!(clip.w > 0.0f)) {
+        return Vec2{};
+    }
+
+    return Vec2{ndc.x - clip.x / clip.w, ndc.y - clip.y / clip.w};
 }
 
 Vec2 previousPixelFromMotion(Vec2 pixel, Vec2 motion, Vec2 size) {
@@ -199,6 +212,14 @@ GpuTaaPass packTaaPass(const Mat4& reprojection, std::uint32_t width, std::uint3
     pass.options[1] = settings.clipSigma;
     pass.options[2] = historyValid ? 1.0f : 0.0f;
     pass.options[3] = settings.showMotion ? 1.0f : 0.0f;
+    return pass;
+}
+
+GpuMotionFillPass packMotionFillPass(const Mat4& reprojection, RenderSize render) {
+    GpuMotionFillPass pass{};
+    writeColumnMajor(reprojection, pass.reprojection);
+    pass.size[0] = static_cast<float>(render.width);
+    pass.size[1] = static_cast<float>(render.height);
     return pass;
 }
 

@@ -137,6 +137,26 @@ namespace {
 
         ImGui::EndCombo();
     }
+
+    // The upscaling modes, which set the render scale, showing "Custom" for a scale between them.
+    void drawUpscalingMode(UpscalingSettings& upscaling) {
+        const std::optional<UpscalingMode> current = matchingUpscalingMode(upscaling.renderScale);
+        const char* preview = current ? upscalingModeNames[static_cast<std::size_t>(*current)] : "Custom";
+
+        if (!ImGui::BeginCombo("Upscaling mode", preview)) {
+            return;
+        }
+
+        for (std::size_t index = 0; index < upscalingModeNames.size(); ++index) {
+            const UpscalingMode mode = static_cast<UpscalingMode>(index);
+
+            if (ImGui::Selectable(upscalingModeNames[index], current == mode)) {
+                upscaling.renderScale = upscalingModeScale(mode);
+            }
+        }
+
+        ImGui::EndCombo();
+    }
 }
 
 /*
@@ -226,6 +246,7 @@ ImDrawData* DebugUi::build(const SettingsWalk& settings, RenderSettings& render,
 
     if (ImGui::Begin("Settings (F5)", &open)) {
         drawQualityPreset(render);
+        drawUpscalingMode(render.upscaling);
 
         requests.save = ImGui::Button("Save");
         ImGui::SameLine();
