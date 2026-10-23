@@ -39,11 +39,12 @@ public:
     void ensureSize(std::uint32_t outputWidth, std::uint32_t outputHeight);
 
     /*
-    * Record FSR: colour and velocity readable, depth readable by compute, the output written as a storage image and left
+    * Record FSR: colour, velocity and the reactive mask readable, depth readable by compute, the output written as a storage image and left
     * readable by fragment and compute shaders. Returns false (and FSR becomes unavailable) when its context cannot be
     * made; nothing is recorded then.
     */
-    bool dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, const FsrFrameInputs& inputs);
+    bool dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, VulkanImage& reactive,
+                  const FsrFrameInputs& inputs);
 
     // The last dispatch's result: the finished picture at the output's size.
     VulkanImage& getOutput();

@@ -1,0 +1,34 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The reactive mask (render/gpu/transparency.h), one invocation per render pixel: the share of its light the glass and
+* blended surfaces changed, from the picture before them (copied just before they were drawn) and after, for
+* anti-aliasing to trust its history less there (FSR's reactive mask, DLSS's bias towards the current colour, the
+* engine's own resolve).
+*/
+#include "transparency.glsl"
+
+layout(local_size_x = TRANSPARENCY_REACTIVE_GROUP_SIDE, local_size_y = TRANSPARENCY_REACTIVE_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform sampler2D opaqueScene;  // the picture before the transparent surfaces, exact texels
+layout(set = 0, binding = 1) uniform sampler2D blendedScene; // the picture after them, exact texels
+layout(set = 0, binding = 2, r16f) uniform writeonly image2D reactive;
+
+// Must match GpuReactivePass.
+layout(push_constant) uniform Pass {
+    vec4 size;    // xy: the render screen in pixels
+    vec4 options; // x: the scale, y: the limit
+} pass;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (texel.x >= int(pass.size.x) || texel.y >= int(pass.size.y)) {
+        return;
+    }
+
+    vec3 opaque = texelFetch(opaqueScene, texel, 0).rgb;
+    vec3 blended = texelFetch(blendedScene, texel, 0).rgb;
+    imageStore(reactive, texel, vec4(reactiveShare(opaque, blended, pass.options.x, pass.options.y)));
+}

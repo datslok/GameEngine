@@ -35,11 +35,13 @@ public:
     void forgetHistory();
 
     /*
-    * Record the resolve: the scene (readable by fragment and compute shaders), its depth (readable by compute) and the
-    * velocity image (drawn this frame) in, this frame's history out, left readable by fragment and compute shaders. It
+    * Record the resolve: the scene (readable by fragment and compute shaders), its depth (readable by compute), the
+    * velocity image (drawn this frame) and the reactive mask (readable by compute) in, this frame's history out, left
+    * readable by fragment and compute shaders. It
     * becomes the history the next resolve reads.
     */
-    void resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, const GpuTaaPass& pass);
+    void resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, VulkanImage& reactive,
+                 const GpuTaaPass& pass);
 
     /*
     * Record the camera motion pass (motion_fill.comp): every velocity pixel the velocity pass left at "no motion" gets

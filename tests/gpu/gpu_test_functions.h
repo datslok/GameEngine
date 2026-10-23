@@ -139,5 +139,6 @@
 
 // transparency_test.comp
 #define GPU_TEST_TRANSPARENT_BLEND 0
+#define GPU_TEST_REACTIVE_SHARE 1
 
 #endif

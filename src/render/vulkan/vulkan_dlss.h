@@ -79,12 +79,12 @@ public:
     void ensureSize(std::uint32_t outputWidth, std::uint32_t outputHeight);
 
     /*
-    * Record DLSS: colour, depth and velocity readable by compute, the output written as a storage image and left
+    * Record DLSS: colour, depth, velocity and the reactive mask readable by compute, the output written as a storage image and left
     * readable by fragment and compute shaders. Returns false (and DLSS becomes unavailable) when Streamline refuses
     * the frame; nothing but barriers is recorded then.
     */
-    bool dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, const DlssFrameInputs& inputs,
-                  UpscalingMode mode, std::uint32_t frameIndex);
+    bool dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, VulkanImage& reactive,
+                  const DlssFrameInputs& inputs, UpscalingMode mode, std::uint32_t frameIndex);
 
     // The last dispatch's result: the finished picture at the output's size.
     VulkanImage& getOutput();

@@ -117,6 +117,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
+    reactiveMask = std::make_unique<VulkanReactiveMask>(device, nearestSampler.get());
     fsr = std::make_unique<VulkanFsr>(device);
     dlss = std::make_unique<VulkanDlss>(device, streamline);
 
@@ -684,6 +685,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     sceneColour = std::move(sceneReplacement);
     clusterMasks = std::move(masksReplacement);
     taa->ensureSize(width, height, scene);
+    reactiveMask->ensureSize(scene);
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
     reflections->ensureSize(scene);
@@ -1376,11 +1378,29 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Reflections);
     }
 
-    // Glass and blended surfaces over the picture with its reflections, before it is smoothed.
+    // Glass and blended surfaces over the picture with its reflections, before it is smoothed. With anti-aliasing, the
+    // picture before them is kept and compared with the one after (the reactive mask, timed with them), so the
+    // anti-aliasing trusts its history less where they changed it; without them, or with the mask off, it says nothing.
+    const bool measureReactive = temporal && settings.transparency.reactiveMask && !transparent.batches.empty();
+
     if (!transparent.batches.empty()) {
         beginGpuPass(frame, GpuPass::Transparent);
+
+        if (measureReactive) {
+            reactiveMask->keepOpaque(frame.commands, sceneColour);
+        }
+
         drawTransparent(frame, transparent, sceneSet, traceProbes, probeReady);
+
+        if (measureReactive) {
+            reactiveMask->measure(frame.commands, frame.descriptors, sceneColour, packReactivePass(sceneSize, settings.transparency));
+        }
+
         endGpuPass(frame, GpuPass::Transparent);
+    }
+
+    if (temporal && !measureReactive) {
+        reactiveMask->clear(frame.commands);
     }
 
     // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
@@ -1399,13 +1419,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             const FsrFrameInputs inputs = makeFsrFrameInputs(sceneSize, frameWidth, frameHeight, jitter, description.frameSeconds,
                                                              camera.getNearPlane(), camera.getFarPlane(), camera.getVerticalFov(),
                                                              !fsrHistory || !previousCamera.known, settings.upscaling);
-            upscaledByFsr = fsr->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), inputs);
+            upscaledByFsr = fsr->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), reactiveMask->getMask(), inputs);
         } else if (frameUpscaler == Upscaler::Dlss) {
             const DlssCamera lens{cameraOrigin, camera.getUp(), camera.getRight(), camera.getForward(), camera.getNearPlane(),
                                   camera.getFarPlane(), camera.getVerticalFov(), camera.getAspectRatio()};
             const DlssFrameInputs inputs = makeDlssFrameInputs(sceneSize, frameWidth, frameHeight, jitter, toGpuDepthRange(camera.getProjectionMatrix()),
                                                                reprojection, lens, !dlssHistory || !previousCamera.known, settings.upscaling.dlssModel);
-            upscaledByDlss = dlss->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), inputs,
+            upscaledByDlss = dlss->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), reactiveMask->getMask(), inputs,
                                             nearestUpscalingMode(settings.upscaling.renderScale), static_cast<std::uint32_t>(taaFrame));
         }
 
@@ -1417,7 +1437,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             finishedScene = &dlss->getOutput();
         } else {
             frameUpscaler = Upscaler::Taa;
-            taa->resolve(frame.commands, frame.descriptors, sceneColour, depth,
+            taa->resolve(frame.commands, frame.descriptors, sceneColour, depth, reactiveMask->getMask(),
                          packTaaPass(reprojection, frameWidth, frameHeight, sceneSize, jitter, antiAliasing, previousCamera.known));
             finishedScene = &taa->getResult();
         }

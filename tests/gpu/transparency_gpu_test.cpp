@@ -44,9 +44,35 @@ namespace {
             report.check("transparentBlend", arithmeticTolerance, expected.transmittance, vec3From(outputs[i * 2 + 1]));
         }
     }
+
+    /*
+    * The reactive mask's share: pictures from black to very bright, the glass's picture darker, brighter or the same,
+    * scales up to 3 and limits across 0..1. Inputs per case: the picture before, the picture after, (scale, limit).
+    * Output: x the share.
+    */
+    void checkReactiveShare(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{311};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 256; ++i) {
+            const Vec3 before = i % 13 == 0 ? Vec3{0.0f, 0.0f, 0.0f} : randomColour(random, i % 2 == 0 ? 1.0f : 1000.0f);
+            const Vec3 after = i % 5 == 0 ? before : before * random.between(0.0f, 3.0f) + randomColour(random, 0.1f);
+            inputs.push_back(gpuVec4(before, 0.0f));
+            inputs.push_back(gpuVec4(after, 0.0f));
+            inputs.push_back(GpuVec4{random.between(0.0f, 3.0f), i % 7 == 0 ? 1.0f : random.between(0.0f, 1.0f), 0.0f, 0.0f});
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_REACTIVE_SHARE, inputs, 3, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4* in = &inputs[i * 3];
+            report.check("reactiveShare", arithmeticTolerance, reactiveShare(vec3From(in[0]), vec3From(in[1]), in[2][0], in[2][1]), outputs[i][0]);
+        }
+    }
 }
 
 void gpuTestTransparency(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("transparency.glsl");
     checkBlend(runner, report);
+    checkReactiveShare(runner, report);
 }

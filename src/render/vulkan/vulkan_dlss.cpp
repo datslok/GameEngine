@@ -378,10 +378,12 @@ void VulkanDlss::ensureSize(std::uint32_t outputWidth, std::uint32_t outputHeigh
 * token and viewport, then the evaluation. The images are put in the layouts they are tagged with first (colour, depth
 * and velocity SHADER_READ_ONLY_OPTIMAL, the output GENERAL); DLSS records its own barriers and returns them there.
 * Its matrices take no jitter (it is passed on its own), its motions are this frame's to last frame's in shares of the
-* screen (the inputs' scale), its depth is reversed, and the camera's motion is already in the velocity image.
+* screen (the inputs' scale), its depth is reversed, and the camera's motion is already in the velocity image. The
+* reactive mask (render/gpu/transparency.h) goes in as its bias towards the current colour: how far to trust its history
+* at each pixel, where glass changed it.
 */
-bool VulkanDlss::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, const DlssFrameInputs& inputs,
-                          UpscalingMode mode, std::uint32_t frameIndex) {
+bool VulkanDlss::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, VulkanImage& reactive,
+                          const DlssFrameInputs& inputs, UpscalingMode mode, std::uint32_t frameIndex) {
     if (!available) {
         return false;
     }
@@ -448,21 +450,24 @@ bool VulkanDlss::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanI
     colour.transition(commands, ImageState::ComputeRead);
     depth.transition(commands, ImageState::ComputeRead);
     velocity.transition(commands, ImageState::ComputeRead);
+    reactive.transition(commands, ImageState::ComputeRead);
     output.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
     sl::Resource colourIn = slResource(colour, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     sl::Resource depthIn = slResource(depth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     sl::Resource motion = slResource(velocity, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    sl::Resource bias = slResource(reactive, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     sl::Resource colourOut = slResource(output, VK_IMAGE_LAYOUT_GENERAL);
     const sl::Extent renderExtent{0, 0, inputs.renderSize.width, inputs.renderSize.height};
     const sl::Extent outputExtent{0, 0, inputs.outputWidth, inputs.outputHeight};
 
-    // Valid until the frame is presented, as all four are (the next frame writes them again): Streamline then reads
+    // Valid until the frame is presented, as all five are (the next frame writes them again): Streamline then reads
     // them where they are, where a shorter lifecycle would have it copy each first.
-    const std::array<sl::ResourceTag, 4> tags{
+    const std::array<sl::ResourceTag, 5> tags{
         sl::ResourceTag{&colourIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent},
         sl::ResourceTag{&depthIn, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent},
         sl::ResourceTag{&motion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent},
+        sl::ResourceTag{&bias, sl::kBufferTypeBiasCurrentColorHint, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent},
         sl::ResourceTag{&colourOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, &outputExtent},
     };
 

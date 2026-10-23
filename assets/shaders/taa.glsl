@@ -90,6 +90,10 @@ float taaCurrentShare(float currentWeight, float nearestSampleWeight) {
     return currentWeight * nearestSampleWeight;
 }
 
+float taaReactiveShare(float currentShare, float reactive) {
+    return currentShare + (1.0 - currentShare) * reactive;
+}
+
 vec3 toYCoCg(vec3 rgb) {
     return vec3(0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b, 0.5 * rgb.r - 0.5 * rgb.b, -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b);
 }

@@ -12,6 +12,7 @@
 #include "render/gpu/shadow_map.h"
 #include "render/gpu/taa.h"
 #include "render/gpu/tone_mapping.h"
+#include "render/gpu/transparency.h"
 #include "render/gpu/upscaling.h"
 
 /*
@@ -39,6 +40,9 @@ struct RenderSettings {
     // Ambient occlusion (render/gpu/ambient_occlusion.h): the light from all around dimmed in creases and corners, from
     // the depth prepass's depths.
     AmbientOcclusionSettings ambientOcclusion;
+
+    // Glass and blended surfaces (render/gpu/transparency.h): the reactive mask that keeps anti-aliasing from smearing them.
+    TransparencySettings transparency;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.
