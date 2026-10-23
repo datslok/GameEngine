@@ -26,6 +26,8 @@ namespace {
         bool ambientOcclusion = false; // ambient occlusion, its slices and its steps
         int occlusionSlices = 0;
         int occlusionSteps = 0;
+        bool rayTracedReflections = false; // the ray-traced features (Ultra's only)
+        bool mirroredLights = false;
 
         bool operator==(const QualityValues&) const = default;
     };
@@ -54,18 +56,21 @@ namespace {
             .probeSize = settings.reflections.probeSize,
             .ambientOcclusion = settings.ambientOcclusion.enabled,
             .occlusionSlices = settings.ambientOcclusion.slices,
-            .occlusionSteps = settings.ambientOcclusion.steps
+            .occlusionSteps = settings.ambientOcclusion.steps,
+            .rayTracedReflections = settings.reflections.rayTraced,
+            .mirroredLights = settings.mirroredLights.enabled
         };
     }
 
-    // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra with 256 probe rays
-    // and a little sharing between probes to make up for them, and a reflection probe half as sharp.
+    // Ultra is read from the defaults, so retuning a default retunes Ultra with it, and High is Ultra without the
+    // ray-traced reflections and mirrored lights, with a little sharing between probes, a reflection probe half as
+    // sharp and lighter ambient occlusion.
     QualityValues presetValues(QualityPreset preset) {
         switch (preset) {
             case QualityPreset::High: {
                 QualityValues high = valuesOf(RenderSettings{});
-                high.probeRays = 256;
-                high.fastProbeRays = 256;
+                high.rayTracedReflections = false;
+                high.mirroredLights = false;
                 high.probeSharing = 0.1f;
                 high.probeSize = 128;
                 high.occlusionSlices = 2;
@@ -78,14 +83,14 @@ namespace {
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32, .probeSharing = 0.5f,
                         .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
                         .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64,
-                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3};
+                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
                         .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64,
-                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3};
+                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Ultra:
                 break;
         }
@@ -119,6 +124,8 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.ambientOcclusion.enabled = values.ambientOcclusion;
     settings.ambientOcclusion.slices = values.occlusionSlices;
     settings.ambientOcclusion.steps = values.occlusionSteps;
+    settings.reflections.rayTraced = values.rayTracedReflections;
+    settings.mirroredLights.enabled = values.mirroredLights;
 }
 
 std::optional<QualityPreset> matchingQualityPreset(const RenderSettings& settings) {

@@ -441,8 +441,8 @@ namespace {
         assert(pass.probeCube[0] == 256.0f && pass.probeCube[1] == 9.0f);
         assert(pass.background[0] == 0.1f && pass.background[1] == 0.2f && pass.background[2] == 0.3f);
 
-        // Ray-traced reflections are a ray tracing setting: off by default, as every ray-traced feature is.
-        assert(!ReflectionSettings{}.rayTraced);
+        // Ray-traced reflections are on by default (the Ultra preset's; ignored without ray queries).
+        assert(ReflectionSettings{}.rayTraced);
 
         // Without a probe this frame (none captured yet, or switched off) and without last frame's picture.
         const GpuReflectionPass bare = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize, Vec2{}, settings,
