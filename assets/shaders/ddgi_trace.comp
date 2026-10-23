@@ -64,17 +64,6 @@ layout(std430, set = 1, binding = 14) readonly buffer ProbeHitLights {
     ivec2 probeHitLights[];
 };
 
-// Whether nothing solid lies between a point and a light along toLight within reach: the first hit anywhere settles it.
-bool reachesLight(vec3 from, vec3 toLight, float reach) {
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SOLID, from, 0.0, toLight, reach);
-
-    while (rayQueryProceedEXT(query)) {
-    }
-
-    return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
-}
-
 // Listed light number of the hit lights: its position and range, measured from the camera (as the light buffers are).
 vec4 hitLightPositionRange(int listed) {
     int light = probeHitLights[listed].x;

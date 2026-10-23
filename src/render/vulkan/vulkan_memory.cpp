@@ -2,6 +2,7 @@
 #include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -117,17 +118,22 @@ VulkanImage::VulkanImage(const VulkanDevice& device, const ImageDescription& des
     allocator(device.getAllocator()),
     description(description)
 {
-    if (description.width == 0 || description.height == 0 || description.levels == 0) {
-        throw std::invalid_argument("Image dimensions and level count must be positive");
+    if (description.width == 0 || description.height == 0 || description.levels == 0 || description.layers == 0) {
+        throw std::invalid_argument("Image dimensions, level and layer counts must be positive");
+    }
+
+    if (description.cube && (description.layers != 6 || description.width != description.height)) {
+        throw std::invalid_argument("A cube image needs six square layers");
     }
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.flags = description.cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.format = description.format;
     imageInfo.extent = {description.width, description.height, 1};
     imageInfo.mipLevels = description.levels;
-    imageInfo.arrayLayers = 1;
+    imageInfo.arrayLayers = description.layers;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.usage = description.usage;
@@ -143,11 +149,11 @@ VulkanImage::VulkanImage(const VulkanDevice& device, const ImageDescription& des
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.viewType = description.cube ? VK_IMAGE_VIEW_TYPE_CUBE : description.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = description.format;
         viewInfo.subresourceRange.aspectMask = description.aspect;
         viewInfo.subresourceRange.levelCount = description.levels;
-        viewInfo.subresourceRange.layerCount = 1;
+        viewInfo.subresourceRange.layerCount = description.layers;
 
         VkImageView created = VK_NULL_HANDLE;
         vulkanCheck(vkCreateImageView(device.getDevice(), &viewInfo, nullptr, &created), "Image view creation failed");
@@ -238,6 +244,43 @@ void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& b
     dependency.imageMemoryBarrierCount = 1;
     dependency.pImageMemoryBarriers = &barrier;
     vkCmdPipelineBarrier2(commands, &dependency);
+}
+
+/*
+* Every level gets its own barriers: it is written (transfer destination), then read for the next level (transfer
+* source), then left in the final state. The last level is never a source, so it goes straight to the final state.
+*/
+void generateMipmaps(VkCommandBuffer commands, VulkanImage& image, ImageState levelZero, ImageState finalState) {
+    const VkImage handle = image.get();
+    const ImageDescription& description = image.getDescription();
+    const std::uint32_t levels = description.levels;
+    const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    if (levels > 1) {
+        recordImageBarrier(commands, imageBarrier(handle, aspect, ImageState::Undefined, ImageState::TransferDestination, ImageContents::Discard, 1,
+                                                  levels - 1));
+    }
+
+    for (std::uint32_t level = 1; level < levels; ++level) {
+        const std::uint32_t source = level - 1;
+        recordImageBarrier(commands, imageBarrier(handle, aspect, source == 0 ? levelZero : ImageState::TransferDestination, ImageState::TransferSource,
+                                                  ImageContents::Keep, source, 1));
+
+        VkImageBlit blit{};
+        blit.srcSubresource = {aspect, source, 0, description.layers};
+        blit.srcOffsets[1] = {static_cast<std::int32_t>(std::max(description.width >> source, 1u)),
+                              static_cast<std::int32_t>(std::max(description.height >> source, 1u)), 1};
+        blit.dstSubresource = {aspect, level, 0, description.layers};
+        blit.dstOffsets[1] = {static_cast<std::int32_t>(std::max(description.width >> level, 1u)),
+                              static_cast<std::int32_t>(std::max(description.height >> level, 1u)), 1};
+        vkCmdBlitImage(commands, handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+        recordImageBarrier(commands, imageBarrier(handle, aspect, ImageState::TransferSource, finalState, ImageContents::Keep, source, 1));
+    }
+
+    recordImageBarrier(commands, imageBarrier(handle, aspect, levels > 1 ? ImageState::TransferDestination : levelZero, finalState,
+                                              ImageContents::Keep, levels - 1, 1));
+    image.setState(finalState);
 }
 
 void transitionImage(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageState& state, ImageState to,

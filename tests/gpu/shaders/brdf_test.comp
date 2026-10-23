@@ -43,5 +43,10 @@ void main() {
         testOutput(3, vec4(shadeProbeAmbient(point, radiance, radiance.zyx), 0.0)); // the probe light as diffuse, reversed as specular
     } else if (function == GPU_TEST_FACES_LIGHT) {
         testOutput(0, vec4(facesLight(shadingPoint(), testInput(5).xyz) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_GGX_SAMPLE) {
+        // Inputs: (sample, samples, alpha, 0), (normal, 0), (local direction, 0).
+        uint index = uint(a.x + 0.5);
+        testOutput(0, vec4(ggxSampleHalfway(index, uint(a.y + 0.5), a.z), radicalInverse(index)));
+        testOutput(1, vec4(alongNormal(testInput(2).xyz, testInput(1).xyz), 0.0));
     }
 }

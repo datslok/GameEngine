@@ -216,6 +216,13 @@ private:
     std::unique_ptr<VulkanReflections> reflections;
     bool previousPictureUsable = false;
 
+    // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
+    // without and with the light probes (probe_capture.frag). On GPUs with ray queries they trace the sun's shadow past
+    // its cascades (probe_capture_rays.frag), in a layout with the ray tracing set as set 2.
+    std::unique_ptr<VulkanReflectionProbe> reflectionProbe;
+    std::array<std::unique_ptr<VulkanPipeline>, 2> capturePipelines;
+    OwnedHandle<VkPipelineLayout> captureRaysLayout;
+
     // Shadows: every shadow view in one depth atlas, kept between frames (tiles are redrawn only when they change).
     // Counts frames for the memory allocator, which refreshes the driver's memory figures when it changes.
     std::uint32_t memoryFrameNumber = 0;
@@ -354,9 +361,11 @@ private:
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
+    // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
-                               const RenderSettings& settings, std::span<const ProbeCascade> probes, const ProbeHitLights& hitLights);
+                               std::span<const BatchedDraws> captureDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
+                               const ProbeHitLights& hitLights);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
@@ -377,6 +386,11 @@ private:
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     void drawMotion(FrameContext& frame, const BatchedDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
+
+    // The reflection probe's six faces from the camera, each with its draws, then its sky (none: the background alone)
+    // over them, and the probe's distances and prefiltered light made from them.
+    void drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
+                          float farPlane, const Vec3& background, bool sky);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).
     void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);

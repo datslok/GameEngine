@@ -1,0 +1,57 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* One level of the reflection probe's prefiltered cube (render/gpu/reflection_probe.h, prefilterTexel), one invocation
+* per texel of each face: the captured light averaged over the level's roughness's GGX lobe round the texel's
+* direction, each sample read from the captured cube's level as wide as the solid angle it stands for (filtered
+* importance sampling), weighted by n.l. The top level, for mirrors, reads the capture's own direction.
+*/
+#include "brdf.glsl"
+#include "reflection_probe.glsl"
+
+layout(local_size_x = PROBE_GROUP_SIDE, local_size_y = PROBE_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform samplerCube captured;               // the capture with its mips, trilinear
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray level; // the level written, its six faces
+
+// Must match GpuPrefilterPass.
+layout(push_constant) uniform Pass {
+    vec4 target; // x: the level's size, y: the level, z: its roughness
+    vec4 source; // x: the captured cube's size, y: its levels
+} pass;
+
+void main() {
+    ivec3 texel = ivec3(gl_GlobalInvocationID);
+    int size = int(pass.target.x);
+
+    if (texel.x >= size || texel.y >= size) {
+        return;
+    }
+
+    vec3 direction = normalize(cubeTexelDirection(texel.z, (vec2(texel.xy) + 0.5) / float(size)));
+    float roughness = pass.target.z;
+    float alpha = roughness * roughness;
+    float topSourceLevel = pass.source.y - 1.0;
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+
+    for (uint index = 0u; index < uint(PROBE_PREFILTER_SAMPLES); ++index) {
+        vec3 halfway = alongNormal(ggxSampleHalfway(index, uint(PROBE_PREFILTER_SAMPLES), alpha), direction);
+        float vDotH = dot(direction, halfway);
+        vec3 toLight = halfway * (2.0 * vDotH) - direction;
+        float nDotL = dot(direction, toLight);
+
+        if (nDotL <= 0.0) {
+            continue;
+        }
+
+        float sourceLevel = roughness > 0.0
+                                ? prefilterSourceLevel(ggxDistribution(vDotH, alpha) * 0.25, float(PROBE_PREFILTER_SAMPLES), pass.source.x)
+                                : 0.0;
+        sum += textureLod(captured, toLight, min(sourceLevel, topSourceLevel)).rgb * nDotL;
+        weight += nDotL;
+    }
+
+    imageStore(level, texel, vec4(weight > 0.0 ? sum / weight : vec3(0.0), 1.0));
+}

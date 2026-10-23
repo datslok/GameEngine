@@ -409,7 +409,50 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * GGX's sampled facet normals: unit length, all along the normal for a mirror, spread more the rougher, and evenly
+    * round the normal (their sideways parts average out). Turned round another normal, they keep their angle to it.
+    */
+    void testGgxSamples() {
+        assert(radicalInverse(1) == 0.5f && radicalInverse(2) == 0.25f && radicalInverse(3) == 0.75f);
+
+        for (const float alpha : {0.0f, 0.01f, 0.25f, 1.0f}) {
+            Vec3 sum;
+            float sumCosine = 0.0f;
+            constexpr std::uint32_t samples = 256;
+
+            for (std::uint32_t sample = 0; sample < samples; ++sample) {
+                const Vec3 halfway = ggxSampleHalfway(sample, samples, alpha);
+                assert(near(halfway.length(), 1.0f, 1e-5f) && halfway.y >= 0.0f);
+                sum = sum + halfway;
+                sumCosine += halfway.y;
+
+                if (alpha == 0.0f) {
+                    assert(nearVec(halfway, up, 1e-6f));
+                }
+            }
+
+            assert(std::fabs(sum.x) / samples < 0.02f && std::fabs(sum.z) / samples < 0.02f);
+            assert(alpha < 0.3f || sumCosine / samples < 0.9f);
+        }
+
+        const Vec3 normal = Vec3{0.3f, -0.5f, 0.8f}.normalized();
+        assert(nearVec(alongNormal(up, normal), normal, 1e-6f));
+
+        for (const Vec3 local : {Vec3{0.6f, 0.8f, 0.0f}, Vec3{0.0f, 0.6f, -0.8f}, Vec3{-0.48f, 0.6f, 0.64f}}) {
+            const Vec3 turned = alongNormal(local, normal);
+            assert(near(turned.length(), 1.0f, 1e-5f) && near(turned.dot(normal), local.y, 1e-5f));
+        }
+
+        // Straight down and up, where the frame has to pick another helper axis.
+        assert(nearVec(alongNormal(up, Vec3{0.0f, -1.0f, 0.0f}), Vec3{0.0f, -1.0f, 0.0f}, 1e-6f));
+        assert(near(alongNormal(Vec3{0.6f, 0.8f, 0.0f}, up).dot(up), 0.8f, 1e-6f));
+    }
+}
+
 void testBrdf() {
+    testGgxSamples();
     testRoughnessIsClampedAndSquared();
     testFresnelLimits();
     testReflectanceAtNormal();

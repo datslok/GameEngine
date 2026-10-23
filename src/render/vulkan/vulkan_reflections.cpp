@@ -21,48 +21,6 @@ namespace {
     constexpr VkFormat depthPyramidFormat = VK_FORMAT_R32_SFLOAT;
     constexpr VkFormat colourPyramidFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-    // One binding of a compute pass's set 0: a buffer, a sampled image or a storage image.
-    struct Binding {
-        VkDescriptorType type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        VkDescriptorImageInfo image{};
-        VkDescriptorBufferInfo buffer{};
-    };
-
-    Binding sampledBinding(VkSampler sampler, VkImageView view, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        return Binding{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VkDescriptorImageInfo{sampler, view, layout}, {}};
-    }
-
-    Binding storageBinding(VkImageView view) {
-        return Binding{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VkDescriptorImageInfo{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL}, {}};
-    }
-
-    // A fresh set 0 for one dispatch, its bindings numbered in order, bound to the pipeline.
-    void bindSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors& descriptors, const ComputePipeline& pipeline,
-                 std::span<const Binding> bindings) {
-        const VkDescriptorSet set = descriptors.allocate(pipeline.getResourceLayout());
-        std::vector<VkWriteDescriptorSet> writes(bindings.size());
-
-        for (std::uint32_t index = 0; index < bindings.size(); ++index) {
-            const Binding& binding = bindings[index];
-            VkWriteDescriptorSet& write = writes[index];
-            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write.dstSet = set;
-            write.dstBinding = index;
-            write.descriptorCount = 1;
-            write.descriptorType = binding.type;
-
-            if (binding.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-                write.pBufferInfo = &binding.buffer;
-            } else {
-                write.pImageInfo = &binding.image;
-            }
-        }
-
-        vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
-        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.get());
-        vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &set, 0, nullptr);
-    }
-
     /*
     * Between two levels of a pyramid: the level just written by compute made visible to the next dispatch, which reads
     * it as a storage image (the depth pyramid) or samples it in the general layout (the colour pyramid). Only that level;
@@ -104,7 +62,7 @@ VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler neare
     ComputePipelineDescription reflections;
     reflections.shader = "assets/shaders/reflections.comp.spv";
     reflections.storageBuffers = 1;
-    reflections.sampledImages = 6;
+    reflections.sampledImages = 8;
     reflections.storageImages = 1;
     reflectionPipeline = std::make_unique<ComputePipeline>(device, reflections);
 
@@ -214,13 +172,13 @@ void VulkanReflections::buildDepthPyramid(VkCommandBuffer commands, FrameDescrip
     for (std::uint32_t level = 0; level < depthLevels.size(); ++level) {
         const RenderSize target = pyramidLevelSize(size, level);
         const RenderSize source = pyramidLevelSize(size, level == 0 ? 0 : level - 1);
-        const std::array<Binding, 3> bindings{
+        const std::array<ComputeBinding, 3> bindings{
             sampledBinding(nearest, depth.getView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL),
-            storageBinding(depthLevels[level == 0 ? 0 : level - 1].get()),
-            storageBinding(depthLevels[level].get()),
+            storageImageBinding(depthLevels[level == 0 ? 0 : level - 1].get()),
+            storageImageBinding(depthLevels[level].get()),
         };
 
-        bindSet(commands, device.getDevice(), descriptors, *depthPyramidPipeline, bindings);
+        bindComputeSet(commands, device.getDevice(), descriptors, *depthPyramidPipeline, bindings);
         const GpuPyramidPass pass = packPyramidPass(target, level, source);
         vkCmdPushConstants(commands, depthPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
         vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
@@ -242,12 +200,12 @@ void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescri
         const RenderSize target = pyramidLevelSize(size, level);
         const ImageDescription& picture = previousPicture.getDescription();
         const RenderSize source = level == 0 ? RenderSize{picture.width, picture.height} : pyramidLevelSize(size, level - 1);
-        const std::array<Binding, 2> bindings{
+        const std::array<ComputeBinding, 2> bindings{
             level == 0 ? sampledBinding(linear, previousPicture.getView()) : sampledBinding(linear, colourLevels[level - 1].get(), VK_IMAGE_LAYOUT_GENERAL),
-            storageBinding(colourLevels[level].get()),
+            storageImageBinding(colourLevels[level].get()),
         };
 
-        bindSet(commands, device.getDevice(), descriptors, *colourPyramidPipeline, bindings);
+        bindComputeSet(commands, device.getDevice(), descriptors, *colourPyramidPipeline, bindings);
         const GpuPyramidPass pass = packPyramidPass(target, level, source);
         vkCmdPushConstants(commands, colourPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
         vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
@@ -260,37 +218,46 @@ void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescri
 /*
 * The barriers, besides the pyramids': the surfaces and the velocity image from being drawn into to being read by
 * compute, and the scene image from being read (it was left readable by the main pass) to being read and written in
-* place, and back to being readable by fragment and compute shaders afterwards.
+* place, and back to being readable by fragment and compute shaders afterwards. Without last frame's picture the colour
+* pyramid is not built, only made bindable (its contents discarded: the pass does not read it then).
 */
 void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene,
-                                VulkanImage& depth, VulkanImage& velocity, VulkanImage& previousPicture, const GpuReflectionPass& pass) {
+                                VulkanImage& depth, VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe,
+                                const GpuReflectionPass& pass) {
     VulkanBuffer& record = passRecords.at(frameIndex);
     std::memcpy(record.getMapped(), &pass, sizeof(pass));
     record.flush();
 
     buildDepthPyramid(commands, descriptors, depth);
-    buildColourPyramid(commands, descriptors, previousPicture);
 
+    if (previousPicture != nullptr) {
+        buildColourPyramid(commands, descriptors, *previousPicture);
+    } else {
+        colourPyramid.transition(commands, ImageState::ComputeRead, ImageContents::Discard);
+    }
+
+    const VkImageView probeLight = probe.readableLight(commands);
+    const VkImageView probeDistances = probe.readableDistances(commands);
     normals.transition(commands, ImageState::ComputeRead);
     properties.transition(commands, ImageState::ComputeRead);
     standIns.transition(commands, ImageState::ComputeRead);
     velocity.transition(commands, ImageState::ComputeRead);
     scene.transition(commands, ImageState::ComputeStorage);
 
-    Binding passBinding;
-    passBinding.buffer = VkDescriptorBufferInfo{record.get(), 0, VK_WHOLE_SIZE};
-    const std::array<Binding, 8> bindings{
-        passBinding,
+    const std::array<ComputeBinding, 10> bindings{
+        storageBufferBinding(record.get()),
         sampledBinding(nearest, depthPyramid.getView()),
         sampledBinding(pyramidSampler, colourPyramid.getView()),
         sampledBinding(nearest, normals.getView()),
         sampledBinding(nearest, properties.getView()),
         sampledBinding(nearest, standIns.getView()),
         sampledBinding(nearest, velocity.getView()),
-        storageBinding(scene.getView()),
+        sampledBinding(pyramidSampler, probeLight),
+        sampledBinding(nearest, probeDistances),
+        storageImageBinding(scene.getView()),
     };
 
-    bindSet(commands, device.getDevice(), descriptors, *reflectionPipeline, bindings);
+    bindComputeSet(commands, device.getDevice(), descriptors, *reflectionPipeline, bindings);
     vkCmdDispatch(commands, workgroupCount(size.width, SSR_GROUP_SIDE), workgroupCount(size.height, SSR_GROUP_SIDE), 1);
 
     scene.transition(commands, ImageState::SurfaceRead);

@@ -21,6 +21,7 @@ This guide describes the engine as it is now. It is updated at the end of each r
 - night vision (rods and cones, the Purkinje shift, why a pixel goes grey only when it and the scene are both dim)
 - temporal anti-aliasing (aliasing and the sampling theorem, jitter on a Halton sequence, the history as an exponential average, reprojection and motion vectors, clipping stale history to the neighbours' range, Karis weights and Catmull-Rom)
 - upscaling (drawing small and rebuilding big from jittered frames, reconstruction weights, the mip bias, the vendors' upscalers FSR and DLSS, calling a library built by another compiler through a C interface, and keeping licensed binaries out of a public repository)
+- reflections (the split sum, screen-space reflections marched through a depth pyramid, last frame's picture and a colour pyramid as wide as the reflected cone, a reflection probe captured at the camera, parallax corrected from its own distances, prefiltering by importance sampling, the chain of fallbacks and their confidences)
 - the night sky (the moon's orbit and phase, Lommel-Seeliger's law and the opposition surge, a second sky by linearity, the celestial sphere and sidereal time, magnitudes and blackbody colours, splats that keep a star's light whole)
 - so all of 6c
 - all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps)
@@ -1576,6 +1577,28 @@ In the light lab, standing on the ground, about 3,300 of the 33,500 probes are t
 **Units, with no fudge factors.** Pixel values in this engine are π times the physical radiance, and a light's value is the irradiance it gives a surface facing it.
 
 A probe averages the pixel values its rays bring back, with cosine weights, and divides by the sum of the weights; the average of L cos θ over the hemisphere, divided by the average of cos θ, is E / π, and the π in the pixel values cancels it. So the stored number is the irradiance itself and drops straight into the slot the flat ambient had. A probe under a uniform sky drawn at B stores B (the furnace test).
+
+### Reflections: mirrors from the screen and from a probe
+
+**What is missing without them.** A shiny surface sends most of the light from one direction (its mirror direction) to the eye. The light probes store light averaged over a whole hemisphere, so reading them in the mirror direction gives the right brightness but a picture as blurred as the roughest surface's: a polished floor shows a soft glow where it should show the room. Rough surfaces are fine with that; smooth ones need a sharper source.
+
+**The split sum.** The specular light from all around is an integral over incoming directions of the light times the BRDF. Real-time engines split it in two (Karis 2013): the BRDF part, which depends only on the view angle and roughness and lives in a precomputed table (the same one the rest of the shading uses), and the light part, the incoming light pre-blurred to match the roughness. Reflections are all about the second half.
+
+**Screen-space reflections: the picture already drawn.** Every pixel on screen already knows its colour, so a reflection of something on screen can be read off last frame's finished picture. Each glossy pixel follows its mirror ray across the screen and looks for where the ray passes behind the surface the depth image holds there: that surface is what it reflects.
+
+- Walking the ray a pixel at a time would take hundreds of steps. Instead the depth image is reduced into a **depth pyramid** (a mip chain where each texel keeps the nearest depth of the four below it), a quadtree over the screen. Where the ray is in front of everything in a big cell, nothing there can block it, so it jumps across the whole cell; only near surfaces does it look closer. Twenty to forty steps cross the screen.
+- The march works on screen, in pixels and depth, because a straight line in space stays straight on screen and the stored depth (reversed-Z) changes linearly along it: it is linear in 1/distance, as screen positions are.
+- The depth image keeps only front faces. A ray passing behind a pole would look like a hit, so a hit counts only if the ray is less than a **thickness** behind the surface.
+- Rough surfaces read a blurred copy: a **colour pyramid** of last frame's picture, at the level as wide as the reflected cone (its angle grows with roughness) where it lands. Using last frame's picture also gives reflections in reflections, one more bounce a frame.
+
+**The reflection probe: what the screen does not show.** Behind the camera, off the screen's edges and behind other things, the screen has nothing to offer. A **reflection probe** is a 360-degree photograph taken at one point: six square pictures, one per face of a cube (a cubemap). The engine takes it where the camera is, every frame, so it is always up to date, flashlight included. Placing it automatically keeps the lighting free of per-level work.
+
+- **Parallax.** A photograph from one point is wrong seen from anywhere else, the way a window's reflection shifts as you move. So each texel also stores how far away its surface was. A shiny point P elsewhere wants what its mirror ray P + R t hits: the point whose distance from the probe equals the distance the probe stored in that point's own direction. That is one equation in one unknown; each step reads the stored distance where the ray's point now lies and moves the point onto that distance, a fixed-point iteration that settles in a few steps. Where the ray hits something the probe could not see, the two distances never agree, and the result is not trusted.
+- **Blur by pre-integration.** The cube is copied into smaller levels, each the light averaged over a rougher surface's lobe of directions (prefiltering). The average is a Monte Carlo integral with samples drawn where the lobe is strongest (importance sampling); each sample reads a blurrier level of the photograph as the lobe spreads, so a few dozen samples give a smooth result instead of sparkle (filtered importance sampling).
+- **Shadows behind the camera.** The sun's shadow cascades cover only what the camera looks at, so the photograph's other faces would show everything sunlit, through walls and roofs. On GPUs with ray tracing, the capture traces the sun's shadow with one ray where the cascades do not reach.
+- **Mirror images.** A cube's faces are stored mirrored compared with an ordinary camera's picture (a convention from the early graphics APIs), so drawing a face turns every triangle round, and the capture culls the other side.
+
+**A chain of fallbacks, each with a confidence.** Each source says how far it trusts itself, from 0 to 1: screen-space reflections fade near the screen's edges, at the end of their reach, on rough surfaces and on surfaces hit from behind; the probe fades where its search did not settle. The pixel starts with the light probes' stand-in, swaps in the probe's light as far as it is trusted, then the screen's on top. Where nothing is trusted the pixel is left exactly as it was drawn, so the fallbacks never flicker against each other.
 
 ---
 

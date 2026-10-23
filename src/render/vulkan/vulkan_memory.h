@@ -66,6 +66,10 @@ struct ImageDescription {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t levels = 1;
+
+    // Array layers; a cube has six (+X, -X, +Y, -Y, +Z, -Z) and its view samples them as one cube.
+    std::uint32_t layers = 1;
+    bool cube = false;
     VkImageUsageFlags usage = 0;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     const char* name = nullptr; // for RenderDoc, Nsight and validation messages (a string literal: it is kept)
@@ -113,6 +117,13 @@ private:
 
 // One image barrier, recorded on its own.
 void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier);
+
+/*
+* Every smaller level of an image made from level 0 (in state levelZero), each blitted from the one above with linear
+* filtering (in every layer at once), and every level left in finalState. Levels 1 onwards are overwritten whatever
+* they held.
+*/
+void generateMipmaps(VkCommandBuffer commands, VulkanImage& image, ImageState levelZero, ImageState finalState);
 
 // For images the renderer does not own (the swapchain's): record the barrier and update the state it keeps for them.
 void transitionImage(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageState& state, ImageState to,

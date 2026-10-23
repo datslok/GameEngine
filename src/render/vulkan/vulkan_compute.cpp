@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_compute.h"
+#include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
 
@@ -98,4 +99,42 @@ VkDescriptorSetLayout ComputePipeline::getResourceLayout() const {
 
 std::uint32_t ComputePipeline::getPushConstantBytes() const {
     return pushConstantBytes;
+}
+
+ComputeBinding storageBufferBinding(VkBuffer buffer) {
+    return ComputeBinding{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, {}, VkDescriptorBufferInfo{buffer, 0, VK_WHOLE_SIZE}};
+}
+
+ComputeBinding sampledBinding(VkSampler sampler, VkImageView view, VkImageLayout layout) {
+    return ComputeBinding{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VkDescriptorImageInfo{sampler, view, layout}, {}};
+}
+
+ComputeBinding storageImageBinding(VkImageView view) {
+    return ComputeBinding{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VkDescriptorImageInfo{VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL}, {}};
+}
+
+void bindComputeSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors& descriptors, const ComputePipeline& pipeline,
+                    std::span<const ComputeBinding> bindings) {
+    const VkDescriptorSet set = descriptors.allocate(pipeline.getResourceLayout());
+    std::vector<VkWriteDescriptorSet> writes(bindings.size());
+
+    for (std::uint32_t index = 0; index < bindings.size(); ++index) {
+        const ComputeBinding& binding = bindings[index];
+        VkWriteDescriptorSet& write = writes[index];
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = set;
+        write.dstBinding = index;
+        write.descriptorCount = 1;
+        write.descriptorType = binding.type;
+
+        if (binding.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+            write.pBufferInfo = &binding.buffer;
+        } else {
+            write.pImageInfo = &binding.image;
+        }
+    }
+
+    vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.get());
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &set, 0, nullptr);
 }

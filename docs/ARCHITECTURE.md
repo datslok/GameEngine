@@ -2055,11 +2055,11 @@ A capture draws `taaSettleFrames` (32, two jitter cycles) before it when anti-al
 
 ## Screen-space reflections
 
-Glossy surfaces reflect what is on screen (`render/gpu/screen_reflections`, `screen_reflections.glsl`, mirrored; `VulkanReflections`). Until now the specular part of the light from all around was the light probes' irradiance in the mirror direction, a reflection as blurred as the roughest surface's; it stays as the stand-in wherever screen-space reflections find nothing.
+Glossy surfaces reflect what is on screen (`render/gpu/screen_reflections`, `screen_reflections.glsl`, mirrored; `VulkanReflections`), and what is round the camera through the reflection probe (next section). Until now the specular part of the light from all around was the light probes' irradiance in the mirror direction, a reflection as blurred as the roughest surface's; it stays as the stand-in wherever neither finds anything.
 
 ### The main pass's surfaces
 
-With reflections on (and anti-aliasing on, since they reflect last frame's smoothed picture), the main pass writes three more targets at the render size, through `triangle.frag`'s outputs 1 to 3, behind specialization constant 1 (`SSR_WRITE_SURFACES_CONSTANT`), so pipelines without them hold none of the code:
+With reflections on (and anti-aliasing on, since they reflect last frame's smoothed picture), the main pass writes three more targets at the render size, through outputs 1 to 3 of `triangle_surfaces.frag` (the main pass's shading, `scene_surface.glsl`, with `REFLECTION_SURFACES` defined), so pipelines without them hold none of the code:
 
 | Target | Format | Holds |
 |---|---|---|
@@ -2085,7 +2085,7 @@ They are not cleared; the reflection pass reads only pixels with a surface. The 
 5. The hit's surface is found in last frame's picture by its motion if it moved, else through the two cameras, from its centre without this frame's jitter (`reprojectPixel`, as TAA).
 6. The light is read from the colour pyramid at `reflectionConeLevel`: the reflected cone's half angle has tangent `SSR_CONE_SPREAD` alpha (GGX's lobe at half its peak, the mirror turning twice as far), and the level is log2 of its width after the pixels travelled.
 7. `reflectionConfidence` multiplies four fades: roughness (full to `sharpRoughness`, none from `maxRoughness`), the screen's edges (`edgeFade` of the half-width), the reach's last fifth, and hits on a surface met from behind (none past a cosine of -0.2).
-8. `reflectedScene`: scene + confidence (specular albedo x light - stand-in), never below 0. At confidence 0 the pixel is not written, so it is exactly the main pass's.
+8. `reflectedScene`: scene + confidence (specular albedo x light - stand-in), never below 0. The probe's light goes in first, by its own confidence, and its blend with the stand-in (`blendedStandIn`) is what this light then replaces. Where neither is trusted at all the pixel is not written, so it is exactly the main pass's.
 
 Reflections in reflections build up a bounce a frame, since last frame's picture holds last frame's reflections. The pass runs only when last frame's picture is usable (`previousPictureUsable`: last frame was smoothed and nothing was remade since).
 
@@ -2102,9 +2102,41 @@ Reflections in reflections build up a bounce a frame, since last frame's picture
 | `reach` | 100 m | how far a ray goes |
 | `maxSteps` | 64 | steps through the pyramid (Medium 32) |
 | `edgeFade` | 0.1 | the share of the half-width near the screen's edges where hits fade |
-| `showConfidence` | off | the debug view: white where the reflection is trusted |
+| `screenSpace` | on | screen-space reflections (off: the probe alone) |
+| `probe` | on | the reflection probe (off: screen-space reflections alone) |
+| `probeSize` | 256 | the probe's faces in texels (High 128, Medium 64) |
+| `probeFar` | 300 m | how far the probe's capture sees |
+| `showConfidence` | off | the debug view: white where screen-space reflections are trusted, blue where the probe is |
 
-Timed as SSR (`GpuPass::Reflections`), between the depth measurement and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) is the place to judge them.
+Timed as SSR (`GpuPass::Reflections`), between the probe's capture and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) is the place to judge them.
+
+## Reflection probe
+
+One 360-degree picture taken where the camera is, every frame reflections run, for what the screen cannot reflect (`render/gpu/reflection_probe`, `reflection_probe.glsl`, mirrored; `VulkanReflectionProbe`). Placed automatically: no boxes to place per level.
+
+### The cube
+
+Six faces in Vulkan's cube order and addressing (+X, -X, +Y, -Y, +Z, -Z; `cubeFaceAxes`, `cubeTexelOf`, `cubeTexelDirection`), so shaders read it as a `samplerCube`. A face's camera has rows right, up and minus forward with a square 90-degree lens (`cubeFaceViewProjection`, reversed-Z from `PROBE_NEAR` 0.05 m to `probeFar`): the cube's faces are mirror images of an ordinary camera's, so the capture culls front faces.
+
+| Image | Format | Holds |
+|---|---|---|
+| Capture | RGBA16F cube, full mips | the light each face sees (its mips for the prefilter) |
+| Depth | D32 array of 6 | each face's depth |
+| Distances | R32F cube | how far from the probe each texel's surface is (`probeRadialDistance`); the far plane for the sky |
+| Light | RGBA16F cube, `probeLevels` (down to 4 texels) | the light prefiltered for a roughness per level, 0 to 1 |
+
+### The capture
+
+`drawProbeCapture`, timed as CUBE (`GpuPass::ReflectionProbe`), after the depth measurement:
+
+1. Each face's draws are culled against its own frustum and listed after the velocity pass's in the frame's draw list.
+2. Each face is drawn with the main pass's shading: `triangle.vert` takes the face's view-projection from push constants (specialization constant `PROBE_CAPTURE_VERTEX_CONSTANT`), and `probe_capture.frag` (`scene_surface.glsl` with `PROBE_CAPTURE`) shades every light rather than the clusters' lists (those are the camera's) with no heatmap. The sky is drawn over each face's background (`packCubeFaceRays`); the stars are not.
+3. The sun's cascades are fitted to the camera's view, so the capture sees surfaces they do not cover, which would be lit through walls and roofs. On GPUs with ray queries `probe_capture_rays.frag` traces the sun's shadow there instead (`sunBeyondCascades`, `reachesLight`, shared with the light probes' trace; the ray tracing scene is built for it), in a layout with the ray tracing set; without them it counts as lit, as beyond the shadow distance.
+4. `finishCapture`: the capture's mips (`generateMipmaps`, shared with texture uploads), the distances (`probe_distance.comp`), and the prefiltered levels (`probe_prefilter.comp`, `prefilterTexel`): each texel averages 64 GGX samples round its direction for its level's roughness (Karis's split sum: normal and view along the direction), each read from the capture's level as wide as its share of the lobe (`prefilterSourceLevel`, filtered importance sampling), weighted by n.l. The GGX samples (`ggxSampleHalfway`, `radicalInverse`, `alongNormal`) are the BRDF table's.
+
+### The parallax search
+
+A picture from one point is wrong seen from another. For a pixel at P (measured from the probe) and its mirror direction R, the ray P + R t meets a surface where its distance from the probe equals the distance stored in its own direction (distance impostors, Szirmay-Kalos et al. 2005). `parallaxStep` solves |P + R t| = D for the stored D (the larger root, ahead of the ray's closest approach to the probe), starting as if the probe saw R at infinity, then `PROBE_SEARCH_STEPS` (6) refinements, each reading D in the direction the ray's point now lies. `parallaxConfidence` trusts the result fully while the ray's distance and the stored one agree within 3%, not at all past 15%: where the ray meets something the probe could not see (hidden from the camera's point), they never agree, and the stand-in stays. The light is read in the found direction at the level for the pixel's roughness (`probeRoughnessLevel`), faded by the same roughness fade as screen-space reflections.
 
 ## Depth and camera-relative rendering
 

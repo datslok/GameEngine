@@ -1,0 +1,32 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs reflection_probe.glsl's functions on the cases reflection_probe_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "reflection_probe.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_PROBE_CUBE) {
+        // Inputs: (face, s, t, view distance).
+        vec4 texel = testInput(0);
+        vec3 direction = cubeTexelDirection(int(texel.x + 0.5), texel.yz);
+        testOutput(0, vec4(direction, probeRadialDistance(texel.w, normalize(direction))));
+    } else if (function == GPU_TEST_PROBE_PARALLAX) {
+        // Inputs: (position, stored distance), (direction, t), (reached, stored, 0, 0).
+        vec4 position = testInput(0);
+        vec4 direction = testInput(1);
+        vec4 distances = testInput(2);
+        testOutput(0, vec4(parallaxDirection(position.xyz, direction.xyz, direction.w), parallaxStep(position.xyz, direction.xyz, position.w)));
+        testOutput(1, vec4(parallaxConfidence(distances.x, distances.y), 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_PROBE_LEVELS) {
+        // Inputs: (roughness, levels, pdf, samples), (size, confidence, 0, 0), (stand-in), (specular albedo), (light).
+        vec4 levels = testInput(0);
+        vec4 blend = testInput(1);
+        testOutput(0, vec4(probeRoughnessLevel(levels.x, levels.y), prefilterSourceLevel(levels.z, levels.w, blend.x), 0.0, 0.0));
+        testOutput(1, vec4(blendedStandIn(testInput(2).rgb, testInput(3).rgb, testInput(4).rgb, blend.y), 0.0));
+    }
+}

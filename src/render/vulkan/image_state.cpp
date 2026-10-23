@@ -81,6 +81,6 @@ VkImageMemoryBarrier2 imageBarrier(VkImage image, VkImageAspectFlags aspect, Ima
     barrier.subresourceRange.baseMipLevel = firstLevel;
     barrier.subresourceRange.levelCount = levelCount;
     barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
     return barrier;
 }

@@ -19,20 +19,6 @@ namespace {
     }
 
     /*
-    * The Hammersley point set: the k-th point is (k + 0.5) / count against the bits of k mirrored behind the binary
-    * point (the van der Corput sequence). It spreads points over the unit square far more evenly than random numbers
-    * do, so an average over them converges about as 1 / count instead of 1 / sqrt(count).
-    */
-    float radicalInverse(std::uint32_t bits) {
-        bits = (bits << 16u) | (bits >> 16u);
-        bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
-        bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
-        bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
-        bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-        return static_cast<float>(bits) * 2.3283064365386963e-10f;
-    }
-
-    /*
     * One texel: the specular albedo's scale and bias at one view cosine and roughness, with the normal along +y.
     * Facet normals h are drawn with probability D(h) (n.h) (the GGX inversion: cos^2 theta = (1 - u) / (1 + (alpha^2 - 1) u)),
     * so each reflected light direction l arrives with density D (n.h) / (4 v.h) and its share of D V F (n.l) is
@@ -41,17 +27,12 @@ namespace {
     */
     Vec2 integrateTexel(float nDotV, float alpha, std::uint32_t samples) {
         const Vec3 toCamera{std::sqrt(1.0f - nDotV * nDotV), nDotV, 0.0f};
-        const float alphaSquared = alpha * alpha;
         double scale = 0.0;
         double bias = 0.0;
 
         for (std::uint32_t sample = 0; sample < samples; ++sample) {
-            const float u = (static_cast<float>(sample) + 0.5f) / static_cast<float>(samples);
-            const float angle = 2.0f * pi * radicalInverse(sample);
-            const float cosineSquared = (1.0f - u) / (1.0f + (alphaSquared - 1.0f) * u);
-            const float cosine = std::sqrt(cosineSquared);
-            const float sine = std::sqrt(std::max(1.0f - cosineSquared, 0.0f));
-            const Vec3 halfway{sine * std::cos(angle), cosine, sine * std::sin(angle)};
+            const Vec3 halfway = ggxSampleHalfway(sample, samples, alpha);
+            const float cosine = halfway.y;
 
             const float vDotH = toCamera.dot(halfway);
             const Vec3 toLight = halfway * (2.0f * vDotH) - toCamera;
@@ -69,6 +50,35 @@ namespace {
 
         return Vec2{static_cast<float>(scale / samples), static_cast<float>(bias / samples)};
     }
+}
+
+float radicalInverse(std::uint32_t bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return static_cast<float>(bits) * 2.3283064365386963e-10f;
+}
+
+Vec3 ggxSampleHalfway(std::uint32_t sample, std::uint32_t samples, float alpha) {
+    const float u = (static_cast<float>(sample) + 0.5f) / static_cast<float>(samples);
+    const float angle = 2.0f * pi * radicalInverse(sample);
+    const float cosineSquared = (1.0f - u) / (1.0f + (alpha * alpha - 1.0f) * u);
+    const float cosine = std::sqrt(cosineSquared);
+    const float sine = std::sqrt(std::max(1.0f - cosineSquared, 0.0f));
+    return Vec3{sine * std::cos(angle), cosine, sine * std::sin(angle)};
+}
+
+/*
+* A helper axis that is never along the normal (x for a normal near +y or -y, else y) gives the frame's other two
+* axes by cross products.
+*/
+Vec3 alongNormal(const Vec3& local, const Vec3& normal) {
+    const Vec3 helper = std::fabs(normal.y) < 0.999f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+    const Vec3 tangent = helper.cross(normal).normalized();
+    const Vec3 bitangent = normal.cross(tangent);
+    return tangent * local.x + normal * local.y + bitangent * local.z;
 }
 
 float clampRoughness(float roughness) {

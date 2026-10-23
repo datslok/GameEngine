@@ -65,6 +65,23 @@ Vec3 schlickFresnel(const Vec3& f0, float cosine);
 // The reflectance head-on: dielectricReflectance for non-metals, the base colour for metals, blended by metallic.
 Vec3 reflectanceAtNormal(const SurfaceProperties& surface);
 
+/*
+* The van der Corput radical inverse: the bits of a number mirrored behind the binary point (1 to 0.5, 2 to 0.25, 3 to
+* 0.75). With (k + 0.5) / count it makes the Hammersley point set, which spreads points over the unit square far more
+* evenly than random numbers do, so an average over them converges about as 1 / count instead of 1 / sqrt(count).
+*/
+float radicalInverse(std::uint32_t bits);
+
+/*
+* The sample-th of samples GGX facet normals round a normal along +y, drawn with probability D(h) (n.h) along the
+* Hammersley set: the GGX inversion cos^2 theta = (1 - u) / (1 + (alpha^2 - 1) u), turned by 2 pi times the radical
+* inverse. The BRDF table and the reflection probe's prefilter both average over them.
+*/
+Vec3 ggxSampleHalfway(std::uint32_t sample, std::uint32_t samples, float alpha);
+
+// A direction given round +y turned to lie round a unit normal instead, through any frame with the normal as its y.
+Vec3 alongNormal(const Vec3& local, const Vec3& normal);
+
 // The single-scattering specular BRDF D V F for unit vectors, zero where either the light or the eye is below the surface.
 Vec3 specularBrdf(const Vec3& f0, float alpha, const Vec3& normal, const Vec3& toLight, const Vec3& toCamera);
 

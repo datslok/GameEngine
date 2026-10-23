@@ -1,0 +1,35 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The reflection probe's distances (render/gpu/reflection_probe.h), one invocation per texel of each face: the capture's
+* depth turned into how far from the probe the surface is, along the texel's own direction, for the parallax search.
+* Where the capture saw nothing (the sky) the distance is the capture's far plane.
+*/
+#include "render/gpu/depth_shared.h"
+#include "reflection_probe.glsl"
+#include "soft_shadow.glsl"
+
+layout(local_size_x = PROBE_GROUP_SIDE, local_size_y = PROBE_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform sampler2DArray captureDepth;      // the six faces' depths, exact texels
+layout(set = 0, binding = 1, r32f) uniform writeonly image2DArray distances; // the six faces' distances
+
+// x: the face's size, y: the capture's near plane, z: its far plane.
+layout(push_constant) uniform Pass {
+    vec4 lens;
+} pass;
+
+void main() {
+    ivec3 texel = ivec3(gl_GlobalInvocationID);
+    int size = int(pass.lens.x);
+
+    if (texel.x >= size || texel.y >= size) {
+        return;
+    }
+
+    float depth = texelFetch(captureDepth, texel, 0).r;
+    vec3 direction = normalize(cubeTexelDirection(texel.z, (vec2(texel.xy) + 0.5) / float(size)));
+    float distance = depth > float(GPU_FAR_DEPTH) ? probeRadialDistance(linearShadowDepth(depth, pass.lens.y, pass.lens.z), direction) : pass.lens.z;
+    imageStore(distances, texel, vec4(distance));
+}

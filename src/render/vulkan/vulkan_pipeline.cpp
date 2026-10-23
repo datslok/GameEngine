@@ -129,20 +129,37 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
     stages[1].module = fragmentShader.get();
     stages[1].pName = "main";
 
-    // The fragment shader's specialization constants: constant_id i takes value i, each 32 bits.
-    std::vector<VkSpecializationMapEntry> constantEntries;
+    // Each shader's specialization constants: constant_id i takes value i, each 32 bits.
+    const auto mapEntries = [](const std::vector<std::uint32_t>& constants) {
+        std::vector<VkSpecializationMapEntry> entries;
 
-    for (std::uint32_t id = 0; id < description.fragmentConstants.size(); ++id) {
-        constantEntries.push_back(VkSpecializationMapEntry{id, id * static_cast<std::uint32_t>(sizeof(std::uint32_t)), sizeof(std::uint32_t)});
-    }
+        for (std::uint32_t id = 0; id < constants.size(); ++id) {
+            entries.push_back(VkSpecializationMapEntry{id, id * static_cast<std::uint32_t>(sizeof(std::uint32_t)), sizeof(std::uint32_t)});
+        }
+
+        return entries;
+    };
+
+    const std::vector<VkSpecializationMapEntry> vertexEntries = mapEntries(description.vertexConstants);
+    const std::vector<VkSpecializationMapEntry> fragmentEntries = mapEntries(description.fragmentConstants);
+
+    VkSpecializationInfo vertexSpecialization{};
+    vertexSpecialization.mapEntryCount = static_cast<std::uint32_t>(vertexEntries.size());
+    vertexSpecialization.pMapEntries = vertexEntries.data();
+    vertexSpecialization.dataSize = description.vertexConstants.size() * sizeof(std::uint32_t);
+    vertexSpecialization.pData = description.vertexConstants.data();
 
     VkSpecializationInfo fragmentSpecialization{};
-    fragmentSpecialization.mapEntryCount = static_cast<std::uint32_t>(constantEntries.size());
-    fragmentSpecialization.pMapEntries = constantEntries.data();
+    fragmentSpecialization.mapEntryCount = static_cast<std::uint32_t>(fragmentEntries.size());
+    fragmentSpecialization.pMapEntries = fragmentEntries.data();
     fragmentSpecialization.dataSize = description.fragmentConstants.size() * sizeof(std::uint32_t);
     fragmentSpecialization.pData = description.fragmentConstants.data();
 
-    if (!constantEntries.empty()) {
+    if (!vertexEntries.empty()) {
+        stages[0].pSpecializationInfo = &vertexSpecialization;
+    }
+
+    if (!fragmentEntries.empty()) {
         stages[1].pSpecializationInfo = &fragmentSpecialization;
     }
 

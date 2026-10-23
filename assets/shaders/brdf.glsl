@@ -33,6 +33,29 @@ vec3 schlickFresnel(vec3 f0, float cosine) {
     return f0 + (1.0 - f0) * grazing;
 }
 
+// The van der Corput radical inverse: the bits mirrored behind the binary point (Hammersley points' second coordinate).
+float radicalInverse(uint bits) {
+    return float(bitfieldReverse(bits)) * 2.3283064365386963e-10;
+}
+
+// The index-th of samples GGX facet normals round a normal along +y (the GGX inversion along the Hammersley set).
+vec3 ggxSampleHalfway(uint index, uint samples, float alpha) {
+    float u = (float(index) + 0.5) / float(samples);
+    float angle = 2.0 * pi * radicalInverse(index);
+    float cosineSquared = (1.0 - u) / (1.0 + (alpha * alpha - 1.0) * u);
+    float cosine = sqrt(cosineSquared);
+    float sine = sqrt(max(1.0 - cosineSquared, 0.0));
+    return vec3(sine * cos(angle), cosine, sine * sin(angle));
+}
+
+// A direction given round +y turned to lie round a unit normal, through a frame with a helper axis never along it.
+vec3 alongNormal(vec3 local, vec3 normal) {
+    vec3 helper = abs(normal.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(helper, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return tangent * local.x + normal * local.y + bitangent * local.z;
+}
+
 // The cosine between the normal and the way to the eye, kept just above zero so an eye along the surface stays finite.
 float viewCosine(vec3 normal, vec3 toCamera) {
     return clamp(dot(normal, toCamera), BRDF_SMALLEST_VIEW_COSINE, 1.0);

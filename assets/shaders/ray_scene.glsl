@@ -19,6 +19,17 @@
 
 layout(set = RAY_SCENE_SET, binding = 0) uniform accelerationStructureEXT rayScene;
 
+// Whether nothing solid lies between a point and a light along toLight within reach: the first hit anywhere settles it.
+bool reachesLight(vec3 from, vec3 toLight, float reach) {
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SOLID, from, 0.0, toLight, reach);
+
+    while (rayQueryProceedEXT(query)) {
+    }
+
+    return rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
 // A mesh's buffers by address: MeshVertex as floats (MESH_VERTEX_FLOATS each, no padding, so read as a float array
 // rather than a struct, whose vec3s std430 would pad) and three 32-bit indices per triangle. Addresses are kept as two
 // 32-bit halves (GL_EXT_buffer_reference_uvec2), so shaders need no 64-bit integers.
