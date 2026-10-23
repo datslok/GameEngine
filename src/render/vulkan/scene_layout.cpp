@@ -44,6 +44,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the light mirrors reflect onto each pixel
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the way it arrives
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the mirror pairs (fragment for the probe's traced capture)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // ambient occlusion
     }};
 }
 
@@ -166,6 +167,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
         buffers.mirrorPairs.describe(),
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -179,6 +181,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[SkyViewBinding] = imageInfo(images.skyView);
     imageInfos[MirroredLightBinding] = imageInfo(images.mirroredLight);
     imageInfos[MirroredDirectionBinding] = imageInfo(images.mirroredDirection);
+    imageInfos[AmbientOcclusionBinding] = imageInfo(images.ambientOcclusion);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

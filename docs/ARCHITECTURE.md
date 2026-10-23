@@ -820,7 +820,8 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `shadingOptions` (x clustered shading, y the heatmap) and `cascadeOptions` (x the cascades' blend band, y 1 to dither between them);
 - then the light probes' numbers (`probeOrigin`, `probeSpacing`, `probeAtlas`, `probeLights`, zero without probes; `packProbeSampling`, see Light probes);
 - `textureOptions`: x the surface textures' mip bias (`textureLodBias`, see Temporal anti-aliasing, Upscaling), passed to `triangle.frag`'s three `texture()` reads;
-- and `mirroredLightOptions`: x 1 while the main pass adds the mirrored light pass's images, y the frame (the TAA frame mod 1024), turning rough mirrors' samples (see Mirrored lights).
+- `mirroredLightOptions`: x 1 while the main pass adds the mirrored light pass's images, y the frame (the TAA frame mod 1024), turning rough mirrors' samples (see Mirrored lights);
+- and `ambientOcclusionOptions`: x 1 while the main pass reads ambient occlusion, y 1 with multiple bounces, z 1 with specular occlusion (see Ambient occlusion).
 - It is made by `makeFrameData(lights, relativeViewProjection, cameraOrigin, clusters, clusteredShading, clusterHeatmap, shadows)`; the atlas texel size comes from `shadowAtlasSizeFor(shadows)`.
 
 `GpuShadowView` (64 bytes): a tile's world view-projection, the scene layout's one push constant (vertex stage).
@@ -2223,6 +2224,42 @@ Light that reaches a surface by way of one reflection off a shiny one: a flashli
 | Reflection probe capture | 0.58 ms | 0.91 ms | 0.92 ms |
 
 The bounce scales with the fast rays a probe traces (1024 on Ultra, 256 on High). **Not yet**: the image light for flat mirrors without ray tracing.
+
+## Ambient occlusion
+
+How much of the light from all around reaches a point past the small things next to it: creases, the foot of a wall, the gap under a block. The light probes give the light from all around and their visibility catches walls and rooms, but they sit 0.5 m apart at best; ambient occlusion supplies the visibility below that. `render/gpu/ambient_occlusion` (mirrored by `ambient_occlusion.glsl`, numbers in `ambient_occlusion_shared.h`), `render/vulkan/vulkan_ambient_occlusion`, `ambient_occlusion.comp` and `ambient_occlusion_blur.comp`.
+
+**Settings** (`AmbientOcclusionSettings`, `RenderSettings::ambientOcclusion`, F5 Ambient occlusion):
+
+| Setting | Default | |
+|---|---|---|
+| `enabled` | on | needs the depth prepass; off on the Low preset |
+| `radius` | 0.5 m | how far occluders count: about the densest probes' spacing, which handle what is bigger |
+| `falloff` | 0.6 | the outer share of the radius over which an occluder's weight fades to nothing (`occluderWeight`), so the reach has no hard border |
+| `slices`, `steps` | 3, 6 | slices a pixel each frame, steps along each side (presets: High 2 and 4, Medium 2 and 3; at most `AO_MAX_SLICES` 8 and `AO_MAX_STEPS` 16) |
+| `multipleBounces` | on | a crease's walls bounce light back in (`multiBounceOcclusion`) |
+| `specularOcclusion` | on | the reflection dims in creases too (`specularOcclusion`) |
+
+**The method** (ground-truth ambient occlusion, Jimenez, Wu, Pesce and Jarabo 2016), per pixel of the render size, from the prepass's depth alone:
+
+- **The point and its normal.** The point from the depth (`positionAtPixel`, camera-relative). The normal from the steps to the neighbours across and down (`depthNormal`): each way, of the two neighbours, the one whose next neighbour carries on in line with it (`surfaceStep`; a straight line of pixels across a plane is a straight line in space). Taking the nearer neighbour instead failed at a wall's foot, where the wall's pixel above is nearer than the foreshortened floor's below: the floor took the wall's normal, and the test's long-radius occlusion there came out 0.62 instead of 0.5. A neighbour off screen or on the sky counts as the pixel itself and gives way.
+- **Slices.** A slice is the plane through the point holding the way to the camera, turned round it by an angle; on screen, a line through the pixel. Its angles are spread over half a turn and turned by interleaved gradient noise of the pixel and the frame (the TAA frame mod 1024; still while there is no anti-aliasing), so the frames average many.
+- **Horizons.** Each side walks `steps` texels along the line (`aoSampleDistance`: quadratic in the step, dense near the pixel, staggered by noise, never under `AO_MIN_SAMPLE_PIXELS` 1.5), out to the radius on screen (`aoScreenRadius`, from the pixel footprint per metre and the view distance, at most `AO_MAX_SCREEN_RADIUS` 256). Each sample's point gives the cosine of its angle from the way to the camera (`horizonCosine`), pulled towards the surface's own horizon (`lowHorizonCosine`: the normal's angle plus or minus a right angle) by its falloff weight; each side keeps the highest. Samples off screen or on the sky count as open.
+- **The open arc.** With the normal projected into the slice (`aoSlice`: angle n from the way to the camera, length l), the cosine-weighted open share between the horizons h0 and h1 is l times the integral of cos(θ − n) |sin θ| from h0 to h1, each side (cos n + 2h sin n − cos(2h − n)) / 4, the horizons kept within a right angle of the normal (`sliceVisibility`). Averaged over slices round the way to the camera this is the cosine-weighted visibility exactly, 1 for an open surface whatever its tilt (tested over 2000 slices).
+- **The blur** (`ambient_occlusion_blur.comp`, only without anti-aliasing): the mean over 5 x 5 texels (`AO_BLUR_RADIUS` 2), each weighted by how near its view distance is to the pixel's (`aoBlurWeight`, nothing past `AO_BLUR_DEPTH_SHARE` 10%), so it does not bleed across edges.
+
+**The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility v at its pixel and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
+
+- the diffuse part by `multiBounceOcclusion(v, matte colour)` (Jimenez's fit: max(v, ((a v + b) v + c) v) with a, b, c lines in the albedo, `AO_BOUNCE_*`), or v alone with `multipleBounces` off;
+- the reflection's stand-in by `specularOcclusion(n·v, v, roughness)` (Lagarde and de Rousiers 2014: (n·v + v)^(2^(−16 r − 1)) − 1 + v, clamped), and the specular albedo it hands the reflection pass by the same, so the better light the reflection pass swaps in stays dimmed.
+
+With it off every factor is exactly 1 and the picture is as before, bit for bit.
+
+**The pass** (`VulkanAmbientOcclusion::occlude`, timed as AO, right after the depth prepass, before the mirrored lights): `AO_GROUP_SIDE` (8) square groups. Its own set 0: the pass record (`GpuAmbientOcclusionPass`: the camera-relative view-projection's inverse with the jitter, the size, the pixel footprint per metre, the radius, falloff, slices and steps, and the frame), the depth (exact texels) and an R8 image; the blur adds the noisy image and writes a second one. Barriers: the depth from the prepass to compute reading; the images from last frame's reads to storage writes, contents discarded; the noisy image to compute reading for the blur; the one the main pass reads to fragment reading. The images are made the first time the pass runs and remade with the frame's size.
+
+**Tests**: `ambient_occlusion_test` (the closed form against quadrature; an open surface averages exactly 1 tilted or not; half the sky blocked gives a half; the normal at a wall's foot keeps the floor's slope; the screen radius, steps, falloff, bounces, specular occlusion and blur weight; and the pass's loop through a drawn depth image of a floor and a 2 m wall: open floor 1, a metre from the wall over 0.98, the foot under 0.85 with the default radius and 0.506 against 0.5 with a long one, the sky open), `quality_preset_test`, `gpu_timing_test`; GPU tests in `ambient_occlusion_gpu_test` (written and built, not run).
+
+**Not measured yet**: its cost and its look in the game. **Not yet**: half resolution, if the cost calls for it.
 
 ## Depth and camera-relative rendering
 

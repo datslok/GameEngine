@@ -131,4 +131,7 @@
 #define GPU_TEST_MIRROR 0
 #define GPU_TEST_MIRROR_FOOTPRINT 1
 
+// ambient_occlusion_test.comp
+#define GPU_TEST_AMBIENT_OCCLUSION 0
+
 #endif

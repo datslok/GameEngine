@@ -52,7 +52,8 @@ enum SceneBinding : std::uint32_t {
     MirroredLightBinding = 22,
     MirroredDirectionBinding = 23,
     MirrorPairsBinding = 24,
-    SceneBindingCount = 25
+    AmbientOcclusionBinding = 25,
+    SceneBindingCount = 26
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -141,6 +142,7 @@ struct SceneImages {
     SampledImage skyView; // the atmosphere's sky view table, or a stand-in without one
     SampledImage mirroredLight;     // the light mirrors reflect onto each pixel, and the way it arrives (stand-ins without)
     SampledImage mirroredDirection;
+    SampledImage ambientOcclusion;  // the visibility in creases and corners (a stand-in without)
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

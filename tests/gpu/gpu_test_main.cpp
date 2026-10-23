@@ -28,6 +28,7 @@ int main() {
             gpuTestScreenReflections(runner, report);
             gpuTestReflectionProbe(runner, report);
             gpuTestMirroredLight(runner, report);
+            gpuTestAmbientOcclusion(runner, report);
             gpuTestDither(runner, report);
             gpuTestOverlay(runner, report);
             gpuTestStars(runner, report);

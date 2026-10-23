@@ -54,6 +54,26 @@ namespace {
         assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64 && RenderSettings{}.reflections.probeSize == 256);
     }
 
+    // Ambient occlusion per preset: off on Low, fewer slices and steps on Medium and High, the defaults on Ultra.
+    void testPresetsSetAmbientOcclusion() {
+        const std::array<bool, 4> enabled{false, true, true, true};
+        const std::array<int, 4> slices{2, 2, 2, 3};
+        const std::array<int, 4> steps{3, 3, 4, 6};
+
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            RenderSettings settings;
+            settings.ambientOcclusion.enabled = !enabled[static_cast<std::size_t>(preset)];
+            applyQualityPreset(settings, preset);
+            assert(settings.ambientOcclusion.enabled == enabled[static_cast<std::size_t>(preset)]);
+            assert(settings.ambientOcclusion.slices == slices[static_cast<std::size_t>(preset)]);
+            assert(settings.ambientOcclusion.steps == steps[static_cast<std::size_t>(preset)]);
+            assert(matchingQualityPreset(settings) == preset);
+        }
+
+        const AmbientOcclusionSettings defaults = RenderSettings{}.ambientOcclusion;
+        assert(defaults.enabled && defaults.slices == 3 && defaults.steps == 6);
+    }
+
     // Sharing between probes per preset: more where there are fewer rays, none on Ultra, the default.
     void testPresetsSetProbeSharing() {
         const std::array<float, 4> sharing{0.5f, 0.3f, 0.1f, 0.0f};
@@ -177,8 +197,8 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // High is Ultra with 256 light probe rays and a little sharing and a reflection probe half as sharp, nothing else: the
-    // same 4096 cascades and the rest as tuned.
+    // High is Ultra with 256 light probe rays and a little sharing, a reflection probe half as sharp and fewer ambient
+    // occlusion slices and steps, nothing else: the same 4096 cascades and the rest as tuned.
     void testHighIsUltraWithFewerProbeRays() {
         RenderSettings high;
         applyQualityPreset(high, QualityPreset::High);
@@ -189,6 +209,8 @@ namespace {
         high.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
         high.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
         high.reflections.probeSize = RenderSettings{}.reflections.probeSize;
+        high.ambientOcclusion.slices = RenderSettings{}.ambientOcclusion.slices;
+        high.ambientOcclusion.steps = RenderSettings{}.ambientOcclusion.steps;
         assert(matchingQualityPreset(high) == QualityPreset::Ultra);
     }
 
@@ -218,6 +240,7 @@ void testQualityPreset() {
     testPresetsSetTheProbeRays();
     testPresetsSetProbeSharing();
     testPresetsSetReflections();
+    testPresetsSetAmbientOcclusion();
     testPresetsSetTheProbeCascades();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();

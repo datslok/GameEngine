@@ -114,6 +114,7 @@ void testTaa();
 void testScreenReflections();
 void testReflectionProbe();
 void testMirroredLight();
+void testAmbientOcclusion();
 void testUpscaling();
 void testDisplayOutput();
 void testSettingsFile();
@@ -242,6 +243,7 @@ int main(){
     testScreenReflections();
     testReflectionProbe();
     testMirroredLight();
+    testAmbientOcclusion();
     testUpscaling();
     testDisplayOutput();
     testSettingsFile();

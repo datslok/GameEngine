@@ -1,0 +1,41 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs ambient_occlusion.glsl's functions on the cases ambient_occlusion_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "ambient_occlusion.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_AMBIENT_OCCLUSION) {
+        // Inputs: (normal, radius), (toCamera, falloff), (direction, distance), (offset, noise), (centre, roughness),
+        // (before, nDotV), (before next, visibility), (after, footprint), (after next, view distance), (albedo, horizon
+        // cosine 0), (horizon cosine 1, screen radius, step, count).
+        vec4 normal = testInput(0);
+        vec4 toCamera = testInput(1);
+        vec4 direction = testInput(2);
+        vec4 offset = testInput(3);
+        vec4 centre = testInput(4);
+        vec4 before = testInput(5);
+        vec4 beforeNext = testInput(6);
+        vec4 after = testInput(7);
+        vec4 afterNext = testInput(8);
+        vec4 albedo = testInput(9);
+        vec4 last = testInput(10);
+        AoSlice slice = aoSlice(normal.xyz, toCamera.xyz, direction.xyz);
+
+        testOutput(0, vec4(occluderWeight(direction.w, normal.w, toCamera.w), lowHorizonCosine(slice, 0), lowHorizonCosine(slice, 1),
+                           horizonCosine(offset.xyz, toCamera.xyz)));
+        testOutput(1, vec4(slice.axis, slice.normalAngle));
+        testOutput(2, vec4(slice.projectedLength, sliceVisibility(slice, albedo.w, last.x), aoScreenRadius(normal.w, after.w, afterNext.w),
+                           aoSampleDistance(int(last.z), int(last.w), offset.w, last.y)));
+
+        vec3 step = surfaceStep(centre.xyz, before.xyz, beforeNext.xyz, after.xyz, afterNext.xyz);
+        testOutput(3, vec4(step, specularOcclusion(before.w, beforeNext.w, centre.w)));
+        testOutput(4, vec4(depthNormal(centre.xyz, step, offset.xyz), aoBlurWeight(afterNext.w, afterNext.w * 1.04)));
+        testOutput(5, vec4(multiBounceOcclusion(beforeNext.w, albedo.rgb), 0.0));
+    }
+}

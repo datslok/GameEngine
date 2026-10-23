@@ -1,0 +1,68 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Ambient occlusion's blur (render/gpu/ambient_occlusion.h), while there is no anti-aliasing to average its noise: each
+* pixel the mean of the texels within AO_BLUR_RADIUS each way, each weighted by how near its view distance is to the
+* pixel's (aoBlurWeight), so the occlusion does not bleed across edges onto surfaces in front or behind.
+*/
+#include "screen_reflections.glsl"
+#include "ambient_occlusion.glsl"
+
+layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
+
+// The occlusion pass's record (GpuAmbientOcclusionPass): only the camera and the size are read here.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 inverseViewProjection;
+    vec4 size;
+    vec4 lens;
+    vec4 options;
+    ivec4 frame;
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D depth;                 // exact texels
+layout(set = 0, binding = 2) uniform sampler2D noisy;                 // the occlusion pass's result, exact texels
+layout(set = 0, binding = 3, r8) uniform writeonly image2D occlusion;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(pass.size.xy);
+
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    float pixelDepth = texelFetch(depth, texel, 0).r;
+
+    if (pixelDepth == float(GPU_FAR_DEPTH)) {
+        imageStore(occlusion, texel, vec4(1.0));
+        return;
+    }
+
+    float centre = viewDistanceAtPixel(pass.inverseViewProjection, vec2(texel) + 0.5, pixelDepth, pass.size.xy);
+    float sum = 0.0;
+    float weights = 0.0;
+
+    for (int y = -AO_BLUR_RADIUS; y <= AO_BLUR_RADIUS; ++y) {
+        for (int x = -AO_BLUR_RADIUS; x <= AO_BLUR_RADIUS; ++x) {
+            ivec2 at = texel + ivec2(x, y);
+
+            if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size))) {
+                continue;
+            }
+
+            float atDepth = texelFetch(depth, at, 0).r;
+
+            if (atDepth == float(GPU_FAR_DEPTH)) {
+                continue;
+            }
+
+            float weight = aoBlurWeight(centre, viewDistanceAtPixel(pass.inverseViewProjection, vec2(at) + 0.5, atDepth, pass.size.xy));
+            sum += texelFetch(noisy, at, 0).r * weight;
+            weights += weight;
+        }
+    }
+
+    // The pixel itself always weighs 1, so weights is never 0.
+    imageStore(occlusion, texel, vec4(sum / weights));
+}

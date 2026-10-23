@@ -109,6 +109,11 @@ layout(set = 1, binding = 9) uniform sampler2D brdfTable;
 layout(set = 1, binding = 22) uniform sampler2D mirroredLight;
 layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
 
+// The visibility in creases and corners (ambient_occlusion.comp), read while ambientOcclusionOptions.x is 1, and the fits
+// that turn it into the occlusion of the light from all around and of the reflection.
+layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
+#include "ambient_occlusion.glsl"
+
 layout(location = 0) out vec4 outputColour;
 
 // The reflection surfaces for the reflection pass (render/gpu/screen_reflections.h), in their own targets: the shaded
@@ -569,12 +574,29 @@ void main() {
     // fast lights' atlases added. Without probes, the flat ambient alone.
     vec3 ambientReflected = shadeAmbient(point, flatAmbient());
     vec3 mirrorLight = flatAmbient();
+    vec3 diffuseLight = flatAmbient();
 
     if (probesOn) {
         vec3 reflected = reflect(-toCamera, shadingNormal);
         ProbeLights probeLights = probeAmbient(relativePosition, geometricNormal, shadingNormal, reflected, toCamera, 0, true);
         mirrorLight = probeLights.still.specular + probeLights.fast.specular;
-        ambientReflected = shadeProbeAmbient(point, probeLights.still.diffuse + probeLights.fast.diffuse, mirrorLight);
+        diffuseLight = probeLights.still.diffuse + probeLights.fast.diffuse;
+        ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
+    }
+
+    // Ambient occlusion dims the light from all around in creases and corners (not the direct light, which has its
+    // shadows): the diffuse part by the visibility, raised by the light a crease's walls bounce back in (more for bright
+    // ones), the reflection's stand-in by the specular occlusion, which the reflection pass's better light keeps (it is
+    // in the specular albedo the reflection surfaces hand on). Not in the reflection probe's capture, which has no
+    // occlusion of its own view.
+    float reflectionOcclusion = 1.0;
+
+    if (ambientOcclusionOptions.x != 0 && !captureView) {
+        float visibility = texelFetch(ambientOcclusion, ivec2(gl_FragCoord.xy), 0).r;
+        vec3 diffuseOcclusion = ambientOcclusionOptions.y != 0 ? multiBounceOcclusion(visibility, matteColour(albedo.rgb, metallic)) : vec3(visibility);
+        reflectionOcclusion = ambientOcclusionOptions.z != 0 ? specularOcclusion(point.nDotV, visibility, roughness) : 1.0;
+        mirrorLight *= reflectionOcclusion;
+        ambientReflected = shadeProbeAmbient(point, diffuseLight * diffuseOcclusion, mirrorLight);
     }
 
     // Emitted light is added as is.
@@ -583,7 +605,7 @@ void main() {
     // A surface without a normal reflects nothing sharply: fully rough, so the stand-in stays.
 #ifdef REFLECTION_SURFACES
     reflectionNormal = octahedralEncode(shadingNormal);
-    reflectionSurface = vec4(point.specularAlbedo, normalLength > 0.0 ? roughness : 1.0);
+    reflectionSurface = vec4(point.specularAlbedo * reflectionOcclusion, normalLength > 0.0 ? roughness : 1.0);
     reflectionStandIn = mirrorLight * point.specularAlbedo;
 #endif
 
