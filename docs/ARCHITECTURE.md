@@ -99,8 +99,8 @@ Quality presets (`render/gpu/quality_preset`): `QualityPreset` Low, Medium, High
 |---|---|---|---|---|---|---|---|---|
 | Low | 8, 4 | 0.1, 0.05 | 60 | 3 | 2048 | 4 | 32, 32 | 0.5 |
 | Medium | 24, 8 | 0.06, 0.03 | 120 | 3 | 2048 | 5 | 64, 64 | 0.3 |
-| High | = `RenderSettings{}`, the default | | | | 4096 cascades in the grown 384 MB atlas | | 128, 128 rays | sharing 0.1 |
-| Ultra | = High | | | | | | 256, 256 rays | no sharing |
+| High | = `RenderSettings{}`, the default | | | | 4096 cascades in the grown 384 MB atlas | | 256, 256 rays | sharing 0.1 |
+| Ultra | = High | | | | | | 1024, 1024 rays | no sharing |
 
 - Low: 2 cascades of 1024 left 30 cm walls with ragged sunlit edges, and 1024 saved no memory.
 - High has been the default since `gi-quality-presets`, before which Ultra was the default and High had 2048 cascades.
@@ -1354,7 +1354,7 @@ Fast lights (`PointLight::fast`, `SpotLight::fast`; the flashlight is fast): the
   - from still lights (sun, sky, emissive, lamps, the still atlas's bounce);
   - and from fast lights (their direct light at the hit and the fast atlas's bounce, so their later bounces keep the short memory too).
 - These are blended into two irradiance atlases with their own time constants (`irradianceTimeConstant` 2 s, `fastIrradianceTimeConstant` 0.1 s), and summed where they are read.
-- Probes within reach of a fast light (`probeNearLight(probe, light, range, reach)`: closer than its range plus `probeMaxDistance`, as the hit lights are chosen) trace `fastRaysPerProbe` (128 by default, 256 on Ultra), the rest `raysPerProbe` (128 by default).
+- Probes within reach of a fast light (`probeNearLight(probe, light, range, reach)`: closer than its range plus `probeMaxDistance`, as the hit lights are chosen) trace `fastRaysPerProbe` (256 by default, 1024 on Ultra), the rest `raysPerProbe` (256 by default, 1024 on Ultra).
 - The fast blend counts a frame as at most `fastBlendMaxFrameSeconds` (1/30 s), so a hitch cannot replace its history with one noisy frame.
 
 **The frame's schedule.** `ProbeSchedule` carries the frame number. `scheduleProbeFrame(schedule, settings, frameSeconds, fastLights, fresh)` makes the frame's `ProbeFrame` (all but the sky):
@@ -1559,7 +1559,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 | `cascadeProbesHigh` | 13 | the densest's and the coarser ones'; see Placing probes above |
 | `seedProbes` | true | see Seeds |
 | `shownProbeCascade` | 0 | the debug balls' cascade |
-| `raysPerProbe` | 128 | 16 to 256; 64 before `gi-defaults` |
+| `raysPerProbe` | 256 | 16 to 1024; 64 before `gi-defaults`, 128 before `probe-ray-presets` |
 | `probeUpdatesPerSecond` | 60 | the ray budget, below; 0 off |
 | `irradianceTimeConstant` | 2 s | chosen by eye in the light lab's dark back room, against flicker; the price is a few seconds' lag when light changes |
 | `distanceTimeConstant` | 1 s | kept steadier |
@@ -1575,7 +1575,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 | `probeSharing` | 0.1 | the High preset; Low 0.5, Medium 0.3, Ultra 0; see Sharing below |
 | `fastProbeSharing` | 0.5 | on every preset: the fast atlas's own weight |
 | `fastIrradianceTimeConstant` | 0.1 s | since `gi-defaults`, the user's refinement; first 0.05 s: kept up with the flashlight by eye |
-| `fastRaysPerProbe` | 128 | the High preset; first 256, when 64 flickered over three times as much |
+| `fastRaysPerProbe` | 256 | the High preset (128 before `probe-ray-presets`); first 256, when 64 flickered over three times as much |
 | `fastLights` | true | keep fast lights apart |
 | `fastBlendMaxFrameSeconds` | 1/30 s | |
 | `selfShadowBias` | 0.3 | |

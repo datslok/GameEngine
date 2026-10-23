@@ -844,6 +844,10 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Captures** draw 32 frames first (two jitter cycles), restarting the history and the cycle, so golden images repeat exactly. Golden images were not run or saved in this branch (only on request): every view's final image will change.
   - **Checked:** the tests (debug and release), and the validation layers in the light lab and the demo (no messages). The GPU test cases for `taa.glsl` are written and built, not run (only on request).
 
+- `probe-ray-presets` (Oct 23 2026): the user asked for 256 probe rays on High and 1024 on Ultra (they were 128 and 256), for probes near fast lights too. High is the defaults, so the default is now 256 rays a probe. Low and Medium stay at 32 and 64.
+  - **Cost, not measured here:** tracing and updating go with the rays, so High's probe work about doubles and Ultra's is about four times the old Ultra's. The ray buffers hold rays only for the frame's traced probes (at most 8,192): 50 MB at 256, 201 MB at 1024.
+  - **Checked:** the tests (debug and release), and the light lab with the validation layers at 256 and at 1024 rays (no messages). Golden views with probes change again (still stale since `taa`).
+
 - `fsr` (Oct 23 2026): the second step of 6e's DLSS and FSR item: AMD's FSR 3.1 as an upscaler beside the engine's own TAA, with full-screen motion vectors for it.
   - **Which FSR:** SDK v1.1.4 (May 2025, FSR 3.1.4) is the last line with a Vulkan backend; SDK 2.x (FSR 4, RX 9000 only) is DirectX 12 only. MIT licence, and a prebuilt DLL signed by AMD, vendored in `external/fidelityfx` (the user chose to commit it rather than download it).
   - **MinGW:** the FidelityFX API is five C functions behind typed, chained structs (like Vulkan's `pNext`), so the DLL, built with MSVC, is loaded with `SDL_LoadObject` and called through function pointers; C++ ABIs differ between compilers, C's do not on 64-bit Windows. Nothing links against AMD's `.lib`, and the game runs without the DLL.

@@ -20,9 +20,9 @@ namespace {
         assert(settings.globalIllumination.raysPerProbe == defaults.globalIllumination.raysPerProbe);
     }
 
-    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, 128 (the defaults) and 256.
+    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, 256 (the defaults) and 1024.
     void testPresetsSetTheProbeRays() {
-        const std::array<int, 4> rays{32, 64, 128, 256};
+        const std::array<int, 4> rays{32, 64, 256, 1024};
 
         for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
             RenderSettings settings;
@@ -32,7 +32,7 @@ namespace {
             assert(settings.globalIllumination.fastRaysPerProbe == expected);
         }
 
-        assert(RenderSettings{}.globalIllumination.raysPerProbe == 128 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 128);
+        assert(RenderSettings{}.globalIllumination.raysPerProbe == 256 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 256);
     }
 
     // Sharing between probes per preset: more where there are fewer rays, none on Ultra; High's 0.1 is the default.
