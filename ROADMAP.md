@@ -260,7 +260,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Mirrored lights, the rest: one shared search, its bounce into the probes, the lit spot in reflections, metals' matte colour, rough mirrors by a Gaussian footprint (`mirrored-light-bounce`)
 - [ ] Mirrored lights without ray tracing: the image light for flat mirrors
 - [x] Ambient occlusion (GTAO) from the prepass's depth, for the small creases DDGI's coarse grid cannot resolve (`gtao`)
-- [ ] glTF occlusion and emissive textures (the loader reads only the factors today)
+- [x] glTF occlusion and emissive textures (`gltf-occlusion-emissive`)
 - [ ] Alpha test and transparency: glTF's `alphaMode` (mask for foliage and fences, blend for glass) and a sorted transparent pass after the opaque scene
 - [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
 

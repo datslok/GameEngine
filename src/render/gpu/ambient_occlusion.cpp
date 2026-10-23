@@ -138,6 +138,10 @@ float specularOcclusion(float nDotV, float visibility, float roughness) {
     return std::clamp(std::pow(nDotV + visibility, std::exp2(-16.0f * roughness - 1.0f)) - 1.0f + visibility, 0.0f, 1.0f);
 }
 
+float surfaceVisibility(float screenVisibility, float occlusionTexel, float occlusionStrength) {
+    return std::min(screenVisibility, 1.0f + occlusionStrength * (occlusionTexel - 1.0f));
+}
+
 float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return std::max(1.0f - std::abs(neighbourDistance - centreDistance) / (static_cast<float>(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0f);
 }

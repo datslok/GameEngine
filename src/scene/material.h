@@ -29,7 +29,18 @@ struct Material {
     TextureHandle normalTexture;
     float normalScale = 1.0f;
 
+    // Optional baked occlusion (glTF's occlusionTexture): a linear texture whose red channel is how much of the light
+    // from all around reaches each texel (0 buried, 1 open), worked out offline from the model's full detail. It dims only
+    // that light, like the screen's ambient occlusion (render/gpu/ambient_occlusion.h), whichever of the two is more
+    // closed. occlusionStrength (0..1) blends from no effect (0) to the texture's full effect (1).
+    TextureHandle occlusionTexture;
+    float occlusionStrength = 1.0f;
+
     // Light the surface gives off itself (0..1 per channel, or more for very bright), added whatever lights the scene has.
     // Black means it does not glow. A glowing object with a black colour shows only its emitted light, so it never changes with lighting.
     Vec3 emissive{0.0f, 0.0f, 0.0f};
+
+    // Optional pattern for the glow (glTF's emissiveTexture): an sRGB colour texture multiplying emissive, for screens,
+    // dials and painted lights. No handle means the colour above everywhere.
+    TextureHandle emissiveTexture;
 };

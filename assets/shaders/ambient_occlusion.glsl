@@ -110,6 +110,11 @@ float specularOcclusion(float nDotV, float visibility, float roughness) {
     return clamp(pow(nDotV + visibility, exp2(-16.0 * roughness - 1.0)) - 1.0 + visibility, 0.0, 1.0);
 }
 
+// The screen's visibility or the material's baked one, whichever is more closed (not their product).
+float surfaceVisibility(float screenVisibility, float occlusionTexel, float occlusionStrength) {
+    return min(screenVisibility, 1.0 + occlusionStrength * (occlusionTexel - 1.0));
+}
+
 float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return max(1.0 - abs(neighbourDistance - centreDistance) / (float(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0);
 }

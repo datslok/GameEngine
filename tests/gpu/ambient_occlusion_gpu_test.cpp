@@ -68,6 +68,7 @@ namespace {
             report.check("depthNormal", angleTolerance, depthNormal(centre, step, vec3From(in[3])), vec3From(out[4]));
             report.check("aoBlurWeight", arithmeticTolerance, aoBlurWeight(in[8][3], in[8][3] * 1.04f), out[4][3]);
             report.check("multiBounceOcclusion", arithmeticTolerance, multiBounceOcclusion(in[6][3], vec3From(in[9])), vec3From(out[5]));
+            report.check("surfaceVisibility", arithmeticTolerance, surfaceVisibility(in[6][3], in[4][3], in[1][3]), out[5][3]);
         }
     }
 }

@@ -11,6 +11,30 @@ namespace {
     bool nearlyEqual(float actual, float expected) {
         return std::abs(actual - expected) < 0.00001f;
     }
+
+    /*
+    * The water bottle (Khronos's sample, CC0) packs occlusion, roughness and metallic in one image (ORM) that two of its
+    * texture slots name, and glows through an emissive texture at full factor. Both slots get the same bytes, so the
+    * image is decoded and uploaded once.
+    */
+    void testWaterBottleSharesItsPackedImage() {
+        const Model model = loadGltf("assets/models/WaterBottle.glb");
+        assert(model.parts.size() == 1);
+
+        const MaterialSource& material = model.parts[0].material;
+        assert(material.occlusionTexture.embeddedImage != nullptr);
+        assert(material.occlusionTexture.embeddedImage == material.metallicRoughnessTexture.embeddedImage);
+        assert(nearlyEqual(material.occlusionStrength, 1.0f));
+        assert(material.emissiveTexture.embeddedImage != nullptr);
+        assert(material.emissiveTexture.embeddedImage != material.colourTexture.embeddedImage);
+        assert(nearlyEqual(material.emissive.x, 1.0f) && nearlyEqual(material.emissive.y, 1.0f) && nearlyEqual(material.emissive.z, 1.0f));
+
+        AssetManager assets;
+        const ModelRenderer renderer = assets.makeModelRenderer(model);
+        const Material& made = renderer.parts[0].material;
+        assert(made.occlusionTexture == made.metallicRoughnessTexture);
+        assert(assets.getTextureCount() == 4);
+    }
 }
 
 void testGltfTextures() {
@@ -81,4 +105,6 @@ void testGltfTextures() {
     assert(nearlyEqual(worldOrigin.x, 0.0f));
     assert(nearlyEqual(worldOrigin.y, 1.0f));
     assert(nearlyEqual(worldOrigin.z, -6.0f));
+
+    testWaterBottleSharesItsPackedImage();
 }

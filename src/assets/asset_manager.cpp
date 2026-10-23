@@ -127,8 +127,9 @@ const Model& AssetManager::loadModel(const std::string& path) {
 }
 
 /*
-* The colour texture holds colours (sRGB), the metallic-roughness texture numbers and the normal map directions (both
-* linear). All are read with the same UVs, so they share the flip.
+* The colour and emissive textures hold colours (sRGB), the metallic-roughness and occlusion textures numbers and the
+* normal map directions (all linear). All are read with the same UVs, so they share the flip. Occlusion packed into the
+* metallic-roughness image (ORM) is the same file or bytes read the same way, so the cache gives it the same texture.
 */
 Material AssetManager::makeMaterial(const MaterialSource& source) {
     Material material;
@@ -140,6 +141,9 @@ Material AssetManager::makeMaterial(const MaterialSource& source) {
     material.metallicRoughnessTexture = loadTexture(source.metallicRoughnessTexture, source.flipTextureVertically, TextureEncoding::Linear);
     material.normalTexture = loadTexture(source.normalTexture, source.flipTextureVertically, TextureEncoding::Linear);
     material.normalScale = source.normalScale;
+    material.occlusionTexture = loadTexture(source.occlusionTexture, source.flipTextureVertically, TextureEncoding::Linear);
+    material.occlusionStrength = source.occlusionStrength;
+    material.emissiveTexture = loadTexture(source.emissiveTexture, source.flipTextureVertically, TextureEncoding::Srgb);
 
     return material;
 }

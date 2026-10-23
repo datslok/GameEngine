@@ -188,6 +188,17 @@ namespace {
         assert(headOn > grazing && headOn <= 1.0f && grazing >= 0.0f);
     }
 
+    // A material's baked occlusion (glTF: 1 + strength (texel - 1)) and the screen's both estimate how open the point
+    // is, so the more closed one counts, not their product, which would darken a crease both see twice.
+    void testSurfaceVisibility() {
+        assert(surfaceVisibility(1.0f, 1.0f, 1.0f) == 1.0f);
+        assert(surfaceVisibility(1.0f, 0.2f, 0.0f) == 1.0f);
+        assert(near(surfaceVisibility(1.0f, 0.2f, 1.0f), 0.2f, 1e-6f));
+        assert(near(surfaceVisibility(1.0f, 0.2f, 0.5f), 0.6f, 1e-6f));
+        assert(near(surfaceVisibility(0.4f, 0.2f, 0.5f), 0.4f, 1e-6f));
+        assert(near(surfaceVisibility(0.7f, 0.5f, 1.0f), 0.5f, 1e-6f));
+    }
+
     void testBlurWeight() {
         assert(aoBlurWeight(5.0f, 5.0f) == 1.0f);
         assert(near(aoBlurWeight(5.0f, 5.25f), 0.5f, 1e-5f));
@@ -334,6 +345,7 @@ void testAmbientOcclusion() {
     testScreenSteps();
     testMultipleBounces();
     testSpecularOcclusion();
+    testSurfaceVisibility();
     testBlurWeight();
     testFloorAndWall();
     testPackPass();
