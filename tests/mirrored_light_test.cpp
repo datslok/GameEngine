@@ -84,7 +84,7 @@ namespace {
 
     void testSettings() {
         const MirroredLightSettings defaults;
-        assert(!defaults.enabled);
+        assert(defaults.enabled);
         assert(defaults.bounce);
         assert(defaults.mirrorRoughness == 0.25f);
         validateMirroredLights(defaults);

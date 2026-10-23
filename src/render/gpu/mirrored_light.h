@@ -55,8 +55,9 @@
 
 struct MirroredLightSettings {
     // On GPUs with ray queries: fast lights (the flashlight) reflected off smooth shiny surfaces light what they point at.
-    // Off by default, as every ray-traced feature; ignored without ray queries or without the depth prepass.
-    bool enabled = false;
+    // On by default (the Ultra preset's, the user's choice on Oct 23 2026; off below Ultra); ignored without ray queries
+    // or without the depth prepass.
+    bool enabled = true;
 
     // Whether the light probes bounce it on (ddgi_mirror.comp): the lit spot lights the room round it. Costs a ray and
     // the search for each fast probe ray's hit near a fast light (about 2 ms at 2560 x 1440 on the Ultra preset's 1024

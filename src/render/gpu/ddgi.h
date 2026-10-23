@@ -82,9 +82,10 @@ struct GlobalIlluminationSettings {
     bool seedProbes = true;
 
     // Rays each probe traces per frame. More converge faster and flicker less; the time constants below average over
-    // rays per second of history, so a slower GPU can trace fewer with longer time constants. 1024 by default (the Ultra
-    // quality preset, the user's choice on Oct 23 2026; it was 256, High's), 256 on High.
-    int raysPerProbe = 1024;
+    // rays per second of history, so a slower GPU can trace fewer with longer time constants. 256 by default (the Ultra
+    // and High quality presets; the user's choice on Oct 23 2026, after a day at 1024 while the ray-traced features took
+    // their place in Ultra's budget).
+    int raysPerProbe = 256;
 
     /*
     * A ray budget: the still probes trace raysPerProbe rays this many times a second at most, so above that frame rate
@@ -194,11 +195,11 @@ struct GlobalIlluminationSettings {
     * at 60, against 0.25% for the still light alone; 0.2 s would add none, for a longer trail). Probes within reach of a
     * fast light trace fastRaysPerProbe rays, since a short memory averages fewer frames (the rest still trace
     * raysPerProbe); 64 flickered over three times as much. In the dense probe test every probe is within the
-    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64. 1024 by default (the Ultra quality preset),
-    * 256 on High.
+    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64. 256 by default (the Ultra and High quality
+    * presets).
     */
     float fastIrradianceTimeConstant = 0.1f;
-    int fastRaysPerProbe = 1024;
+    int fastRaysPerProbe = 256;
 
     // Keep fast lights apart as above. Off, they are lights like any other: their bounce goes into the still atlas under
     // its memory (with the adaptive memory, restarting when it changes enough to tell from the noise), no probe traces

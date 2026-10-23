@@ -20,9 +20,10 @@ namespace {
         assert(settings.globalIllumination.raysPerProbe == defaults.globalIllumination.raysPerProbe);
     }
 
-    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, 256 and 1024 (the defaults).
+    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, then 256 on High and Ultra (the
+    // defaults).
     void testPresetsSetTheProbeRays() {
-        const std::array<int, 4> rays{32, 64, 256, 1024};
+        const std::array<int, 4> rays{32, 64, 256, 256};
 
         for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
             RenderSettings settings;
@@ -32,7 +33,7 @@ namespace {
             assert(settings.globalIllumination.fastRaysPerProbe == expected);
         }
 
-        assert(RenderSettings{}.globalIllumination.raysPerProbe == 1024 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 1024);
+        assert(RenderSettings{}.globalIllumination.raysPerProbe == 256 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 256);
     }
 
     // Reflections per preset: off on Low, fewer steps and a smaller probe on Medium, the defaults' probe on Ultra.
@@ -52,6 +53,21 @@ namespace {
         }
 
         assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64 && RenderSettings{}.reflections.probeSize == 256);
+    }
+
+    // The ray-traced features (on GPUs with ray queries; ignored elsewhere) per preset: Ultra only, as the defaults.
+    void testPresetsSetRayTracedFeatures() {
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            const bool on = preset == QualityPreset::Ultra;
+            RenderSettings settings;
+            settings.reflections.rayTraced = !on;
+            settings.mirroredLights.enabled = !on;
+            applyQualityPreset(settings, preset);
+            assert(settings.reflections.rayTraced == on && settings.mirroredLights.enabled == on);
+            assert(matchingQualityPreset(settings) == preset);
+        }
+
+        assert(RenderSettings{}.reflections.rayTraced && RenderSettings{}.mirroredLights.enabled);
     }
 
     // Ambient occlusion per preset: off on Low, fewer slices and steps on Medium and High, the defaults on Ultra.
@@ -197,16 +213,18 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // High is Ultra with 256 light probe rays and a little sharing, a reflection probe half as sharp and fewer ambient
-    // occlusion slices and steps, nothing else: the same 4096 cascades and the rest as tuned.
-    void testHighIsUltraWithFewerProbeRays() {
+    // High is Ultra without the ray-traced reflections and mirrored lights, with a little probe sharing, a reflection
+    // probe half as sharp and fewer ambient occlusion slices and steps, nothing else: the same 256 probe rays, the same
+    // 4096 cascades and the rest as tuned.
+    void testHighIsUltraLighter() {
         RenderSettings high;
         applyQualityPreset(high, QualityPreset::High);
         assert(high.shadows.cascadeResolution == RenderSettings{}.shadows.cascadeResolution);
+        assert(high.globalIllumination.raysPerProbe == RenderSettings{}.globalIllumination.raysPerProbe);
         assert(matchingQualityPreset(high) == QualityPreset::High);
 
-        high.globalIllumination.raysPerProbe = RenderSettings{}.globalIllumination.raysPerProbe;
-        high.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
+        high.reflections.rayTraced = RenderSettings{}.reflections.rayTraced;
+        high.mirroredLights.enabled = RenderSettings{}.mirroredLights.enabled;
         high.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
         high.reflections.probeSize = RenderSettings{}.reflections.probeSize;
         high.ambientOcclusion.slices = RenderSettings{}.ambientOcclusion.slices;
@@ -235,12 +253,13 @@ namespace {
 }
 
 void testQualityPreset() {
-    testHighIsUltraWithFewerProbeRays();
+    testHighIsUltraLighter();
     testUltraIsTheDefaults();
     testPresetsSetTheProbeRays();
     testPresetsSetProbeSharing();
     testPresetsSetReflections();
     testPresetsSetAmbientOcclusion();
+    testPresetsSetRayTracedFeatures();
     testPresetsSetTheProbeCascades();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();

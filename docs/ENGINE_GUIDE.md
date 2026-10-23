@@ -1430,7 +1430,7 @@ Irradiance changes slowly from place to place and with the normal's direction, l
 - an 8 x 8 picture of the irradiance arriving from around each direction;
 - a 16 x 16 picture of how far away the nearest surface is in each direction, as its mean and its mean square.
 
-**How probes learn.** Every frame each probe shoots 256 rays by default (the quality presets set it: Low 32, Medium 64, Ultra 1024) along a spiral of directions (a Fibonacci spiral, whose points spread evenly over the sphere).
+**How probes learn.** Every frame each probe shoots 256 rays by default (the quality presets set it: Low 32, Medium 64, High and Ultra 256; up to 1024 by hand) along a spiral of directions (a Fibonacci spiral, whose points spread evenly over the sphere).
 
 Sixteen frames in a row take turns through one long spiral of 1,024 points, each frame every sixteenth point from its own start, so between them they cover the sphere evenly, and the long spiral turns by a random rotation every sixteen frames so its gaps move and, over time, nothing is missed. It is the difference between sixteen people each throwing darts at random and sixteen people each taking every sixteenth square of a grid: the same number of darts, far less luck.
 
@@ -1502,7 +1502,7 @@ Each ray brings back both parts separately, each part is blended into its own se
 
 The bounce read from last frame's probes is split the same way, still into still and fast into fast, so the flashlight's second and third bounces follow it too.
 
-A short memory averages fewer frames, so it is noisier (the 1/√(rays × frames) again); probes within reach of a fast light trace rays for it every frame (`fastRaysPerProbe`: 256 by default, 1024 on Ultra). With no fast light anywhere, the fast pictures stay exactly zero and the picture is exactly what it was before they existed.
+A short memory averages fewer frames, so it is noisier (the 1/√(rays × frames) again); probes within reach of a fast light trace rays for it every frame (`fastRaysPerProbe`: 256 by default). With no fast light anywhere, the fast pictures stay exactly zero and the picture is exactly what it was before they existed.
 
 One idea that measured worse: giving the fast part a shorter cycle of turns through the spiral, so that a few whole cycles fit in its short memory.
 

@@ -65,8 +65,9 @@ struct ReflectionSettings {
 
     // On GPUs with ray queries: each glossy pixel's mirror ray traced through the scene, so what it hits is exact,
     // lit with the probe's picture where the probe saw it and as the light probes' rays light their hits elsewhere
-    // (matte), in place of the probe's search. Off by default, as every ray-traced feature; ignored without ray queries.
-    bool rayTraced = false;
+    // (matte), in place of the probe's search. On by default (the Ultra preset's, the user's choice on Oct 23 2026; off
+    // below Ultra); ignored without ray queries.
+    bool rayTraced = true;
 
     // A debug view: each pixel's confidence in its reflection (white: screen-space reflections, blue: the probe,
     // black: the stand-in).

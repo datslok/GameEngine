@@ -99,8 +99,10 @@ Quality presets (`render/gpu/quality_preset`): `QualityPreset` Low, Medium, High
 |---|---|---|---|---|---|---|---|---|
 | Low | 8, 4 | 0.1, 0.05 | 60 | 3 | 2048 | 4 | 32, 32 | 0.5 |
 | Medium | 24, 8 | 0.06, 0.03 | 120 | 3 | 2048 | 5 | 64, 64 | 0.3 |
-| High | = `RenderSettings{}`, the default | | | | 4096 cascades in the grown 384 MB atlas | | 256, 256 rays | sharing 0.1 |
-| Ultra | = High | | | | | | 1024, 1024 rays | no sharing |
+| High | = Ultra | | | | 4096 cascades in the grown 384 MB atlas | | 256, 256 rays | sharing 0.1 |
+| Ultra | = `RenderSettings{}`, the default | | | | | | 256, 256 rays | no sharing |
+
+The table also sets reflections (off on Low; Medium 32 steps and a 64-texel probe, High a 128-texel one, Ultra 64 steps and 256), ambient occlusion (off on Low; slices and steps Medium 2 and 3, High 2 and 4, Ultra 3 and 6) and, on Ultra only, the ray-traced features: ray-traced reflections and mirrored lights (`ultra-rt-defaults`, Oct 23 2026, when Ultra's probe rays went from 1024 back to 256, High's).
 
 - Low: 2 cascades of 1024 left 30 cm walls with ragged sunlit edges, and 1024 saved no memory.
 - High has been the default since `gi-quality-presets`, before which Ultra was the default and High had 2048 cascades.
@@ -1359,7 +1361,7 @@ Fast lights (`PointLight::fast`, `SpotLight::fast`; the flashlight is fast): the
   - from still lights (sun, sky, emissive, lamps, the still atlas's bounce);
   - and from fast lights (their direct light at the hit and the fast atlas's bounce, so their later bounces keep the short memory too).
 - These are blended into two irradiance atlases with their own time constants (`irradianceTimeConstant` 2 s, `fastIrradianceTimeConstant` 0.1 s), and summed where they are read.
-- Probes within reach of a fast light (`probeNearLight(probe, light, range, reach)`: closer than its range plus `probeMaxDistance`, as the hit lights are chosen) trace `fastRaysPerProbe` (256 by default, 1024 on Ultra), the rest `raysPerProbe` (256 by default, 1024 on Ultra).
+- Probes within reach of a fast light (`probeNearLight(probe, light, range, reach)`: closer than its range plus `probeMaxDistance`, as the hit lights are chosen) trace `fastRaysPerProbe` (256 by default), the rest `raysPerProbe` (256 by default, 1024 on Ultra).
 - The fast blend counts a frame as at most `fastBlendMaxFrameSeconds` (1/30 s), so a hitch cannot replace its history with one noisy frame.
 
 **The frame's schedule.** `ProbeSchedule` carries the frame number. `scheduleProbeFrame(schedule, settings, frameSeconds, fastLights, fresh)` makes the frame's `ProbeFrame` (all but the sky):
@@ -1564,7 +1566,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 | `cascadeProbesHigh` | 13 | the densest's and the coarser ones'; see Placing probes above |
 | `seedProbes` | true | see Seeds |
 | `shownProbeCascade` | 0 | the debug balls' cascade |
-| `raysPerProbe` | 1024 | 16 to 1024, the Ultra preset; 64 before `gi-defaults`, 128 before `probe-ray-presets`, 256 before `ultra-dlss-defaults` |
+| `raysPerProbe` | 256 | 16 to 1024, the Ultra and High presets; 64 before `gi-defaults`, 128 before `probe-ray-presets`, 1024 from `ultra-dlss-defaults` to `ultra-rt-defaults` |
 | `probeUpdatesPerSecond` | 60 | the ray budget, below; 0 off |
 | `irradianceTimeConstant` | 2 s | chosen by eye in the light lab's dark back room, against flicker; the price is a few seconds' lag when light changes |
 | `distanceTimeConstant` | 1 s | kept steadier |
@@ -1580,7 +1582,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 | `probeSharing` | 0 | the Ultra preset; Low 0.5, Medium 0.3, High 0.1; see Sharing below |
 | `fastProbeSharing` | 0.5 | on every preset: the fast atlas's own weight |
 | `fastIrradianceTimeConstant` | 0.1 s | since `gi-defaults`, the user's refinement; first 0.05 s: kept up with the flashlight by eye |
-| `fastRaysPerProbe` | 1024 | the Ultra preset (128 before `probe-ray-presets`, 256 before `ultra-dlss-defaults`); first 256, when 64 flickered over three times as much |
+| `fastRaysPerProbe` | 256 | the Ultra and High presets (128 before `probe-ray-presets`, 1024 from `ultra-dlss-defaults` to `ultra-rt-defaults`); first 256, when 64 flickered over three times as much |
 | `fastLights` | true | keep fast lights apart |
 | `fastBlendMaxFrameSeconds` | 1/30 s | |
 | `selfShadowBias` | 0.3 | |
@@ -2153,7 +2155,7 @@ A picture from one point is wrong seen from another. For a pixel at P (measured 
 
 ### Ray-traced reflections
 
-On GPUs with ray queries, `ReflectionSettings::rayTraced` (off by default, as every ray-traced feature) runs `reflections_rays.comp` (`reflections_pass.glsl` with `REFLECTION_RAYS`) in place of the probe's search: each glossy pixel's mirror ray is traced through the scene, glowing stand-ins for lights included (mask 0xFF), as far as `probeFar`.
+On GPUs with ray queries, `ReflectionSettings::rayTraced` (on by default: the Ultra preset's, off below it) runs `reflections_rays.comp` (`reflections_pass.glsl` with `REFLECTION_RAYS`) in place of the probe's search: each glossy pixel's mirror ray is traced through the scene, glowing stand-ins for lights included (mask 0xFF), as far as `probeFar`.
 
 - A miss brings back the sky: the frame's background plus the atmosphere's light in that direction.
 - A back face brings back nothing.
@@ -2180,7 +2182,7 @@ Light that reaches a surface by way of one reflection off a shiny one: a flashli
 
 | Setting | Default | |
 |---|---|---|
-| `enabled` | off | on GPUs with ray queries, with the depth prepass on; off by default, as every ray-traced feature |
+| `enabled` | on | on GPUs with ray queries, with the depth prepass on; the Ultra preset's, off below it |
 | `bounce` | on | the light probes bounce it on (`ddgi_mirror.comp`) |
 | `mirrorRoughness` | 0.25 | surfaces up to this roughness reflect lights, fading out over `MIRROR_ROUGHNESS_FADE` (0.05) more (`mirrorRoughnessFade`); past `MIRROR_FOOTPRINT_ROUGHNESS` (0.1) from a footprint |
 
@@ -2223,7 +2225,7 @@ Light that reaches a surface by way of one reflection off a shiny one: a flashli
 | Probes (with the bounce) | 5.92 ms | 7.96 ms | 7.45 ms |
 | Reflection probe capture | 0.58 ms | 0.91 ms | 0.92 ms |
 
-The bounce scales with the fast rays a probe traces (1024 on Ultra, 256 on High). **Not yet**: the image light for flat mirrors without ray tracing.
+The bounce scales with the fast rays a probe traces (measured at 1024; 256 by default since `ultra-rt-defaults`, about a quarter of the cost). **Not yet**: the image light for flat mirrors without ray tracing.
 
 ## Ambient occlusion
 
