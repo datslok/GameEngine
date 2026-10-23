@@ -113,6 +113,7 @@ void testBloom();
 void testTaa();
 void testScreenReflections();
 void testReflectionProbe();
+void testMirroredLight();
 void testUpscaling();
 void testDisplayOutput();
 void testSettingsFile();
@@ -240,6 +241,7 @@ int main(){
     testTaa();
     testScreenReflections();
     testReflectionProbe();
+    testMirroredLight();
     testUpscaling();
     testDisplayOutput();
     testSettingsFile();

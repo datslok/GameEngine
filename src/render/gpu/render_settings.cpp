@@ -27,6 +27,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     });
     visitor.group("Reflections", [&] {
         visit(settings.reflections, visitor);
+        visit(settings.mirroredLights, visitor);
     });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);

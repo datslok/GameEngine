@@ -18,6 +18,7 @@ enum class GpuPass {
     Clusters,
     Shadows,
     DepthPrepass,
+    MirroredLights, // light reflected off mirrors onto what the prepass drew (render/gpu/mirrored_light.h)
     Main,
     ProbeBalls,
     RayDebug,

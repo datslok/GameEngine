@@ -49,7 +49,9 @@ enum SceneBinding : std::uint32_t {
     AtmosphereBinding = 19,
     ProbeCascadesBinding = 20,
     PreviousModelsBinding = 21,
-    SceneBindingCount = 22
+    MirroredLightBinding = 22,
+    MirroredDirectionBinding = 23,
+    SceneBindingCount = 24
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -133,6 +135,8 @@ struct SceneImages {
     SampledImage probeDistance;
     SampledImage probeFastIrradiance;
     SampledImage skyView; // the atmosphere's sky view table, or a stand-in without one
+    SampledImage mirroredLight;     // the light mirrors reflect onto each pixel, and the way it arrives (stand-ins without)
+    SampledImage mirroredDirection;
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

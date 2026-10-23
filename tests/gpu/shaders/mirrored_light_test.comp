@@ -1,0 +1,44 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs mirrored_light.glsl's functions on the cases mirrored_light_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "mirrored_light.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_MIRROR) {
+        // Inputs: (receiver, range), (light, source radius), (point, path length), (normal), (curvature),
+        // (edge 1, normal length), (edge 2), (normal change 1), (normal change 2), (intensity, sphere radius).
+        vec4 receiver = testInput(0);
+        vec4 light = testInput(1);
+        vec4 point = testInput(2);
+        vec4 curvature = testInput(4);
+        vec4 edge1 = testInput(5);
+        vec4 extra = testInput(9);
+        TangentFrame frame = tangentFrame(testInput(3).xyz);
+        MirrorSurface surface = MirrorSurface(point.xyz, frame, curvature);
+
+        testOutput(0, vec4(frame.tangent, isFlatMirror(curvature) ? 1.0 : 0.0));
+        testOutput(1, vec4(frame.bitangent, mirrorIncidence(receiver.xyz, surface)));
+        testOutput(2, vec4(mirrorConstraint(receiver.xyz, light.xyz, surface), mirrorSpreadArea(receiver.xyz, light.xyz, surface),
+                           mirrorPairMayReach(receiver.xyz, point.xyz, extra.w, light.xyz, receiver.w) ? 1.0 : 0.0));
+        testOutput(3, mirrorJacobian(receiver.xyz, light.xyz, surface));
+
+        vec3 target;
+        bool stepped = mirrorNewtonTarget(receiver.xyz, light.xyz, surface, target);
+        testOutput(4, vec4(target, stepped ? 1.0 : 0.0));
+
+        vec3 image;
+        bool imaged = planeMirrorPoint(receiver.xyz, light.xyz, point.xyz, frame.normal, image);
+        testOutput(5, vec4(image, imaged ? 1.0 : 0.0));
+
+        testOutput(6, vec4(mirroredIrradiance(extra.rgb, vec3(0.9, 0.8, 0.7), point.w * point.w * 0.5, point.w, receiver.w, light.w), 0.0));
+
+        vec4 triangle = triangleCurvature(edge1.xyz, testInput(6).xyz, testInput(7).xyz, testInput(8).xyz, edge1.w, frame);
+        testOutput(7, vec4(triangle.x, triangle.y, triangle.w, 0.0));
+    }
+}

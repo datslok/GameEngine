@@ -5,6 +5,9 @@
 * the shapes, and the GPU tests (tests/gpu) can check the shader against them.
 */
 
+// The window that ends a light at its range: (1 - (distance / range)^4) clamped to 0..1. range must be positive.
+float rangeWindow(float distance, float range);
+
 /*
 * Inverse square falloff softened near the light by the size of its source, 1 / (distance^2 + sourceRadius^2), times
 * the window (1 - (distance / range)^4)^2, clamped to 0 beyond the range, so the light ends exactly at its range with

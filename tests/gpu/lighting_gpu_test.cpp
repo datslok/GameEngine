@@ -26,6 +26,7 @@ namespace {
 
         for (std::size_t i = 0; i < inputs.size(); ++i) {
             report.check("distanceFalloff", arithmeticTolerance, distanceFalloff(inputs[i][0], inputs[i][1], inputs[i][2]), outputs[i][0]);
+            report.check("rangeWindow", arithmeticTolerance, rangeWindow(inputs[i][0], inputs[i][1]), outputs[i][1]);
         }
     }
 

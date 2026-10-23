@@ -71,9 +71,10 @@ struct GpuFrameData {
     std::int32_t probeAtlas[4];     // xy: the probe atlases' columns and rows (ddgi.h, probeAtlasGrid), w: how many cascades
     std::int32_t probeLights[4];    // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
     float textureOptions[4];        // x: the surface textures' mip bias (render/gpu/upscaling.h, textureLodBias), y: 1 filters normal maps (Toksvig)
+    std::int32_t mirroredLightOptions[4]; // x: 1 when the main pass adds the light mirrors reflect (render/gpu/mirrored_light.h)
 };
 
-static_assert(sizeof(GpuFrameData) == 320, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 336, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

@@ -5,6 +5,7 @@
 #include "render/gpu/ddgi.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
+#include "render/gpu/mirrored_light.h"
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/shadow_map.h"
@@ -30,6 +31,9 @@ struct RenderSettings {
     // Screen-space reflections (render/gpu/screen_reflections.h): they need the anti-aliasing on (TAA, FSR or DLSS),
     // whose finished picture of last frame they reflect.
     ReflectionSettings reflections;
+
+    // Lights reflected off mirrors onto what they point at (render/gpu/mirrored_light.h): on GPUs with ray queries.
+    MirroredLightSettings mirroredLights;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

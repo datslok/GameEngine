@@ -754,6 +754,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 | `Clusters` | the clusters' light lists, a compute pass |
 | `Shadows` | |
 | `DepthPrepass` | |
+| `MirroredLights` | MIRROR: light reflected off mirrors onto what the prepass drew, only while the pass runs |
 | `Main` | |
 | `ProbeBalls` | the probes' debug balls |
 | `RayDebug` | the ray tracing debug view |
@@ -764,7 +765,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 
 The same file has:
 
-- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, PREPASS, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
+- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, PREPASS, MIRROR, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
 - `gpuTimestampCount` (one stamp before the first pass and one after each);
 - `timestampTicksBetween` (the difference masked to the queue's `timestampValidBits`, so a counter that rolls over still gives the right count);
 - and `gpuTimingsFromTicks` (seconds per pass from the device's `timestampPeriod`; the passes add up to `totalSeconds`; not `valid` with zero valid bits).
@@ -812,13 +813,14 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `ShadowTileData` as before.
 - A draw list of `uint32` instance numbers.
 
-`GpuFrameData` (320 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
+`GpuFrameData` (336 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
 
 - the camera-relative view-projection, the camera position, ambient, counts, the atlas texel size;
 - the cluster grid (`clusterTiles`, `clusterScreen`, `clusterSlicing`, `viewRight`, `viewUp`, `viewForward`, laid out as `clusters.glsl`'s `ClusterGrid`);
 - `shadingOptions` (x clustered shading, y the heatmap) and `cascadeOptions` (x the cascades' blend band, y 1 to dither between them);
 - then the light probes' numbers (`probeOrigin`, `probeSpacing`, `probeAtlas`, `probeLights`, zero without probes; `packProbeSampling`, see Light probes);
-- and `textureOptions`: x the surface textures' mip bias (`textureLodBias`, see Temporal anti-aliasing, Upscaling), passed to `triangle.frag`'s three `texture()` reads.
+- `textureOptions`: x the surface textures' mip bias (`textureLodBias`, see Temporal anti-aliasing, Upscaling), passed to `triangle.frag`'s three `texture()` reads;
+- and `mirroredLightOptions`: x 1 while the main pass adds the mirrored light pass's images (see Mirrored lights).
 - It is made by `makeFrameData(lights, relativeViewProjection, cameraOrigin, clusters, clusteredShading, clusterHeatmap, shadows)`; the atlas texel size comes from `shadowAtlasSizeFor(shadows)`.
 
 `GpuShadowView` (64 bytes): a tile's world view-projection, the scene layout's one push constant (vertex stage).
@@ -2158,6 +2160,36 @@ On GPUs with ray queries, `ReflectionSettings::rayTraced` (off by default, as ev
 The pass's own set comes after the scene's two sets and the ray tracing set (`ComputePipelineDescription::sharedSets`), which the renderer binds (`ReflectionRaySets`); the ray tracing scene is built for it. Screen-space reflections still go on top.
 
 The light is read in the found direction at the level for the pixel's roughness (`probeRoughnessLevel`), faded by the same roughness fade as screen-space reflections.
+
+## Mirrored lights
+
+Light that reaches a surface by way of one reflection off a smooth shiny one: a flashlight shone into a mirror lighting the floor it points at (a caustic). Direct lighting only follows straight lines, and the light probes' rays see a mirror's own dull diffuse colour, so neither carries it. `render/gpu/mirrored_light` (mirrored by `mirrored_light.glsl`, numbers in `mirrored_light_shared.h`), `render/vulkan/vulkan_mirrored_light` and `mirrored_light.comp`.
+
+**Settings** (`MirroredLightSettings`, `RenderSettings::mirroredLights`, F5 Reflections):
+
+| Setting | Default | |
+|---|---|---|
+| `enabled` | off | on GPUs with ray queries, with the depth prepass on; off by default, as every ray-traced feature |
+| `mirrorRoughness` | 0.1 | surfaces up to this roughness reflect lights, as perfect mirrors |
+
+**Pairs** (`chooseMirrorPairs`, CPU, each frame): each fast light (`GpuLights::fastPoints`, `fastSpots`: the flashlight, the demo's flying lamps) with each shadow-casting draw no rougher than `mirrorRoughness` whose bounding sphere its range (and a spotlight's cone, `coneTouchesSphere`) reaches, nearest first by the gap between the light and the sphere, at most `MIRROR_MAX_PAIRS` (16). The surfaces are found from their materials: nothing is flagged. Without pairs the pass does not run and the frame is drawn exactly as before.
+
+**The search** (manifold next event estimation, Hanika, Droske and Fascione 2015), per pixel and pair, from the pixel's point x (from the prepass's depth) to the light L by way of a point y on the surface:
+
+- The law of reflection at y: the half vector h = unit(x − y) + unit(L − y) lies along the normal, so its components along the tangents (`tangentFrame`, Duff et al. 2017) are zero: the constraint c(y) (`mirrorConstraint`).
+- Its Jacobian over moves d in the tangent plane (`mirrorJacobian`): J d = −T P d − (h·n) S d, with P = (I − ωx ωxᵀ)/dx + (I − ωL ωLᵀ)/dL from the two unit vectors and S the surface's shape operator (dn = S dy). S comes from the hit triangle's corners (`triangleCurvature`): the interpolated normal changes linearly over the triangle, so its change along each tangent follows from the edges and the corner normals' differences (least squares through the edges' Gram matrix), over the interpolated normal's length; zero for a flat triangle, about 1/R on a sphere mesh.
+- The steps (`solveMirrorPath`, `mirrored_light.comp`'s loop): a ray from x (lifted towards the camera by `MIRROR_RAY_OFFSET` + `MIRROR_RAY_OFFSET_PER_METRE` per metre) towards the pair's bounding sphere's centre puts the first guess on the surface. It must hit the pair's draw first, from the front (mask `RAY_MASK_SOLID`), which also proves the way from x clear. Then the flat mirror step (`planeMirrorPoint`: where the line to L's image behind the tangent plane crosses it, exact for a flat mirror). On a flat surface (`isFlatMirror`: curvature under `MIRROR_FLAT_CURVATURE`) a step that does not land on the surface means there is no point of reflection: without that, pixels whose reflection point lies off the mirror's edge crept towards the edge for up to 40 rays, and the pass took 3.2 ms instead of 0.7. Then Newton steps (`mirrorNewtonTarget`: y − J⁻¹ c, cast back onto the surface by a ray from x), each halved up to `MIRROR_BACKTRACKS` (4) times while it falls off, at most `MIRROR_MAX_STEPS` (8), until |c| is within `MIRROR_SOLVE_TOLERANCE` (0.001), with x and L both in front of the surface.
+- A shadow ray from y (lifted along its normal) to the light.
+
+**The brightness**: the light's intensity I sends I dΩ into the solid angle round its ray to y, landing on an area dA at x across the ray, so the irradiance there is I dΩ/dA. By implicit differentiation of the constraint, dA/dΩ = dx² dL² |det J| / cos²θ: the spread area (`mirrorSpreadArea`). For a flat mirror it is (dx + dL)², the light's image's squared distance; head-on off a ball of radius R it is (dx + dL + 2 dx dL/R)² (the mirror equation); a concave mirror focuses it to 0. It takes the place of distance² in the lights' falloff (`mirroredIrradiance`): I × cone × Fresnel × `rangeWindow`(dx + dL)² / (area + sourceRadius²), so a flat mirror gives exactly the light's image with the engine's falloff, and a focus stays finite (a surface cannot be lit brighter than by the source filling its sky). The reflectance is Schlick's Fresnel from the mirror's material at the hit (base colour and metallic, read as the main pass reads them) at the angle of incidence.
+
+**The pass** (`VulkanMirroredLights::light`, timed as MIRROR, between the depth prepass and the main pass): one invocation per render pixel, `MIRROR_GROUP_SIDE` (8) square. Its own set 3 after the scene's sets and the ray tracing set: the pass record (`GpuMirroredLightPass`: the camera-relative view-projection's inverse with the jitter, the size, the pairs' count and the pairs, each its light's kind and slot, its draw and its bounds measured from the camera), the depth (exact texels), and two render-size images: the light arriving (RGBA16F) and its direction folded onto a square (RG16F, `octahedralEncode`), the pairs' directions blended by brightness (exact for one pair). Barriers: the depth from the prepass to compute reading (the main pass turns it back into a depth target, kept); the images from last frame's fragment reads to storage writes, contents discarded, then to fragment reads. The images are made the first time the pass runs and remade with the frame's size after that.
+
+**The main pass** reads them (set 1 bindings 22 and 23, `MirroredLightBinding`, `MirroredDirectionBinding`; the probe stand-in texture while the pass does not run) at its own pixel while `mirroredLightOptions.x` is 1 (not in the reflection probe's capture), and adds the light with `addLight` from the stored direction, so diffuse and glossy surfaces both respond (a glossy floor shows the mirrored flashlight's highlight).
+
+**Tests**: `mirrored_light_test` (a flat mirror is exactly the image light; off the mirror's edge, behind it, and the flat early exit after two rays; the ball's point obeys the law of reflection and its Jacobian matches finite differences; the head-on ball's spread area; and the spread area checked against the light itself, 2.25 million rays from the light reflected off an exact sphere and counted landing round the receiver, which agreed within 0.3%); GPU tests in `mirrored_light_gpu_test`.
+
+**Measured** (RTX 5080, 2560 x 1440, the flashlight shone into the light lab's mirror, about a third of the screen lit by it): 0.68 ms. **Not yet**: the mirrored light's bounce (the light probes' rays do not use it), reflections showing the lit spot (the probe's capture and traced reflections' hits do not include it), the image light for flat mirrors without ray tracing, and rough surfaces, treated as perfect mirrors up to `mirrorRoughness` (the slab's spot is sharper than it should be).
 
 ## Depth and camera-relative rendering
 

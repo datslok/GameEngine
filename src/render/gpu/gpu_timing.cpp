@@ -18,6 +18,8 @@ const char* gpuPassName(GpuPass pass) {
         return "SHADOW";
     case GpuPass::DepthPrepass:
         return "PREPASS";
+    case GpuPass::MirroredLights:
+        return "MIRROR";
     case GpuPass::Main:
         return "MAIN";
     case GpuPass::ProbeBalls:

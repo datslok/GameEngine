@@ -100,6 +100,11 @@ layout(set = 1, binding = 8) uniform sampler2D shadowDepths;
 // The specular albedo table (render/gpu/brdf.h): scale and bias for the reflectance head-on, over n.v and roughness.
 layout(set = 1, binding = 9) uniform sampler2D brdfTable;
 
+// The light mirrors reflect onto each pixel and the way it arrives, folded onto a square (mirrored_light.comp), read
+// while mirroredLightOptions.x is 1.
+layout(set = 1, binding = 22) uniform sampler2D mirroredLight;
+layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
+
 layout(location = 0) out vec4 outputColour;
 
 // The reflection surfaces for the reflection pass (render/gpu/screen_reflections.h), in their own targets: the shaded
@@ -526,6 +531,17 @@ void main() {
 
             for (int i = 0; i < counts.z; ++i) {
                 addSpotLight(i, point, geometricNormal, diffuse, specular);
+            }
+        }
+
+        // Light reflected onto this pixel by mirrors, as one more light from where it arrives (its shadows already found
+        // by the mirrored light pass's rays).
+        if (mirroredLightOptions.x != 0 && !captureView) {
+            ivec2 texel = ivec2(gl_FragCoord.xy);
+            vec3 arriving = texelFetch(mirroredLight, texel, 0).rgb;
+
+            if (any(greaterThan(arriving, vec3(0.0)))) {
+                addLight(arriving, octahedralDecode(texelFetch(mirroredDirection, texel, 0).xy), point, diffuse, specular);
             }
         }
     }

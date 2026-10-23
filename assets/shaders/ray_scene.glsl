@@ -82,4 +82,24 @@ MeshSurface meshSurfaceAt(uint mesh, uint triangle, vec2 barycentrics) {
     return surface;
 }
 
+// A triangle's corners in the mesh's own coordinates: their positions and normals, for how a smoothed surface curves.
+struct MeshTriangle {
+    vec3 positions[3];
+    vec3 normals[3];
+};
+
+MeshTriangle meshTriangleAt(uint mesh, uint triangle) {
+    MeshFloats floats = MeshFloats(meshes[mesh].vertices);
+    MeshIndices indices = MeshIndices(meshes[mesh].indices);
+    MeshTriangle corners;
+
+    for (uint corner = 0u; corner < 3u; ++corner) {
+        uint vertex = indices.values[triangle * 3u + corner];
+        corners.positions[corner] = meshVec3(floats, vertex, MESH_VERTEX_POSITION);
+        corners.normals[corner] = meshVec3(floats, vertex, MESH_VERTEX_NORMAL);
+    }
+
+    return corners;
+}
+
 #endif
