@@ -5,7 +5,8 @@
 
 // The reflection probe's capture (render/gpu/reflection_probe.h) on GPUs with ray queries: the main pass's shading, with
 // the sun's shadow traced by a ray where its cascades (fitted to the camera's view) do not reach, so what is behind the
-// camera is not lit through walls and roofs.
+// camera is not lit through walls and roofs. Shadowed lights are tinted by glass on the way, as in the main pass.
 #define PROBE_CAPTURE
 #define PROBE_CAPTURE_RAYS
+#define GLASS_SHADOW_RAYS
 #include "scene_surface.glsl"

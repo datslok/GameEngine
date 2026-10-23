@@ -64,13 +64,15 @@ namespace {
         assert(packRayInstance(fence, 3, 1, 0x2).recordAndFlags == ((0x2u | rayInstanceNotOpaque) << 24));
         assert(packRayInstance(drawAt(model), 3, 1).recordAndFlags == 0);
 
-        // Glass and blended surfaces are not in any ray's world for now: probe rays, shadow rays and reflections pass
-        // through them.
+        // Glass and blended surfaces are seen only by rays that ask for glass (they tint the light passing them, never
+        // stop it), static or not, and every hit on them is a candidate, so a ray can pass through each pane in turn.
         DrawItem window = drawAt(model);
         window.material.transmission = 1.0f;
         window.isStatic = true;
-        assert(rayMaskFor(window) == 0);
-        assert((packRayInstance(window, 3, 1).indexAndMask >> 24) == 0);
+        assert(rayMaskFor(window) == glassRayMask);
+        assert((packRayInstance(window, 3, 1).indexAndMask >> 24) == glassRayMask);
+        assert(packRayInstance(window, 3, 1).recordAndFlags == (rayInstanceNotOpaque << 24));
+        assert((glassRayMask & (solidRayMask | visualOnlyRayMask | staticRayMask)) == 0);
     }
 
     /*

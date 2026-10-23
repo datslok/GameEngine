@@ -5,7 +5,7 @@
 
 std::uint32_t rayMaskFor(const DrawItem& draw) {
     if (isTransparent(draw.material)) {
-        return 0;
+        return glassRayMask;
     }
 
     if (!draw.castsShadows) {
@@ -29,7 +29,7 @@ GpuRayInstance packRayInstance(const DrawItem& draw, std::uint32_t instanceNumbe
     }
 
     instance.indexAndMask = instanceNumber | (rayMaskFor(draw) << 24);
-    instance.recordAndFlags = ((flags | (isCutOut(draw.material) ? rayInstanceNotOpaque : 0u)) & 0xFFu) << 24;
+    instance.recordAndFlags = ((flags | (isCutOut(draw.material) || isTransparent(draw.material) ? rayInstanceNotOpaque : 0u)) & 0xFFu) << 24;
     instance.accelerationStructure = meshStructure;
     return instance;
 }

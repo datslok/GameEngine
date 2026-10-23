@@ -86,7 +86,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
 - **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
 - **Cut-outs and double-sided materials** (glTF's alpha mask and `doubleSided`): leaves, fences and grates with holes, in shadows and ray tracing too, their mips built to keep their coverage so fences do not vanish with distance.
-- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel, with a reactive mask so TAA, FSR and DLSS do not smear it.
+- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel, with a reactive mask so TAA, FSR and DLSS do not smear it; on ray-tracing GPUs light passing through glass takes its colour (shadows, bounce light and reflections).
 - **Frustum culling:** each view, camera or shadow, skips what it cannot see.
 
 **Shadows from every light**

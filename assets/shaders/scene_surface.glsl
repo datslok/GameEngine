@@ -1,7 +1,9 @@
 // The main pass's shading of one fragment, shared by its variants, which differ only in what they define first:
 // triangle.frag (the main pass), triangle_surfaces.frag (the main pass writing the reflection surfaces:
-// REFLECTION_SURFACES), and the reflection probe's capture, probe_capture.frag and probe_capture_rays.frag (with the
-// sun's shadow traced past its cascades: PROBE_CAPTURE, PROBE_CAPTURE_RAYS).
+// REFLECTION_SURFACES), their copies tinting shadowed lights through glass by rays (triangle_rays.frag,
+// triangle_surfaces_rays.frag: GLASS_SHADOW_RAYS), the reflection probe's capture, probe_capture.frag and
+// probe_capture_rays.frag (with the sun's shadow traced past its cascades and glass's tint: PROBE_CAPTURE,
+// PROBE_CAPTURE_RAYS, GLASS_SHADOW_RAYS), and glass itself (triangle_transparent.frag: TRANSPARENT).
 
 // Numbers shared with the C++ side, written once (the makefile passes -Isrc to glslc).
 #include "render/gpu/shader_shared.h"
@@ -58,6 +60,20 @@ layout(constant_id = MATERIAL_CUT_OUT_CONSTANT) const bool cutOut = false;
 const bool captureView = true;
 #else
 const bool captureView = false;
+#endif
+
+#ifdef GLASS_SHADOW_RAYS
+/*
+* Tinted shadows (render/gpu/transparency.h), in the variants on GPUs with ray queries used while glass is in the world:
+* glass casts no shadow map, so a shadowed light's light is also passed through the glass between the point and the
+* light, by a ray that sees only glass (in world space). It needs no lift off the surface: the point's own surface is
+* not glass, which is not in the depth image the main pass draws over.
+*/
+#include "ray_scene.glsl"
+
+vec3 glassShadow(vec3 toLight, float reach) {
+    return glassTransmittance(relativePosition + cameraOrigin.xyz, toLight, reach);
+}
 #endif
 
 #ifdef PROBE_CAPTURE_RAYS
@@ -411,6 +427,12 @@ void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 d
 
     if (firstTile >= 0) {
         radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius), points[i].shadowStrength);
+#ifdef GLASS_SHADOW_RAYS
+        // To the bulb's surface, not its centre, so glass round the bulb itself does not tint its own light.
+        if (any(greaterThan(radiance, vec3(0.0)))) {
+            radiance *= mix(vec3(1.0), glassShadow(toLight, max(distance - points[i].emitterRadius, 0.0)), points[i].shadowStrength);
+        }
+#endif
     }
 
     addLight(radiance, toLight, point, diffuse, specular);
@@ -440,6 +462,11 @@ void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 di
 
     if (tile >= 0) {
         radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius), spots[i].shadowStrength);
+#ifdef GLASS_SHADOW_RAYS
+        if (any(greaterThan(radiance, vec3(0.0)))) {
+            radiance *= mix(vec3(1.0), glassShadow(toLight, max(distance - spots[i].emitterRadius, 0.0)), spots[i].shadowStrength);
+        }
+#endif
     }
     addLight(radiance, toLight, point, diffuse, specular);
 }
@@ -557,6 +584,11 @@ void main() {
 
             if (tile >= 0) {
                 radiance *= sunShadow(tile, directional[i].cascadeCount, geometricNormal, directional[i].toLight.xyz, directional[i].tanAngularRadius);
+#ifdef GLASS_SHADOW_RAYS
+                if (any(greaterThan(radiance, vec3(0.0)))) {
+                    radiance *= glassShadow(directional[i].toLight.xyz, float(PROBE_SHADOW_RAY_REACH));
+                }
+#endif
             }
 
             addLight(radiance, directional[i].toLight.xyz, point, diffuse, specular);

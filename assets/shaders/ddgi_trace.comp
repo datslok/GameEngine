@@ -120,8 +120,10 @@ void main() {
 
     traceRayQuery(query);
 
+    // Glass between the probe and what the ray meets tints what it brings back (render/gpu/transparency.h).
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
-        probeRays[index] = vec4(volume.sky.rgb + skyLightTowards(direction), DDGI_RAY_REACH);
+        vec3 sky = volume.sky.rgb + skyLightTowards(direction);
+        probeRays[index] = vec4(sky * glassTransmittance(origin, direction, DDGI_RAY_REACH), DDGI_RAY_REACH);
         fastProbeRays[index] = packFastRayLight(vec3(0.0));
         return;
     }
@@ -138,6 +140,7 @@ void main() {
                                           rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
                                           rayQueryGetIntersectionBarycentricsEXT(query, true), direction);
     RayHitLight light = lightAtRayHit(origin + direction * distance, surface.normal, direction, probeShading.y);
-    probeRays[index] = vec4(surface.emissive + surface.albedo * light.still, distance);
-    fastProbeRays[index] = packFastRayLight(surface.albedo * light.fast);
+    vec3 passing = glassTransmittance(origin, direction, distance);
+    probeRays[index] = vec4((surface.emissive + surface.albedo * light.still) * passing, distance);
+    fastProbeRays[index] = packFastRayLight(surface.albedo * light.fast * passing);
 }

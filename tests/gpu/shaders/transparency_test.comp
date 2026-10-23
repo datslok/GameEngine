@@ -21,5 +21,13 @@ void main() {
         // Inputs: the picture before, the picture after, (scale, limit).
         vec4 settings = testInput(2);
         testOutput(0, vec4(reactiveShare(testInput(0).rgb, testInput(1).rgb, settings.x, settings.y), 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_GLASS_RAYS) {
+        // Inputs: (alpha, transmission, metallic, cosine), base colour, the segment's start, (its direction, length),
+        // (the sphere's centre, radius).
+        vec4 shares = testInput(0);
+        vec4 segment = testInput(3);
+        vec4 sphere = testInput(4);
+        testOutput(0, vec4(glassLightTransmittance(shares.x, shares.y, shares.z, testInput(1).rgb, shares.w), 0.0));
+        testOutput(1, vec4(segmentMeetsSphere(testInput(2).xyz, segment.xyz, segment.w, sphere.xyz, sphere.w) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
     }
 }

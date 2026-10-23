@@ -1,4 +1,5 @@
 #include "render/gpu/transparency.h"
+#include "render/gpu/brdf.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,8 +10,30 @@ TransparentLight transparentBlend(float alpha, float transmission, float metalli
                                   const Vec3& emissive, const Vec3& baseColour, const Vec3& specularAlbedo) {
     const float passing = transmission * (1.0f - metallic);
     const Vec3 surface = diffuseLight * (1.0f - passing) + specularLight + emissive;
+    return TransparentLight{surface * alpha, transparentTransmittance(alpha, transmission, metallic, baseColour, specularAlbedo)};
+}
+
+Vec3 transparentTransmittance(float alpha, float transmission, float metallic, const Vec3& baseColour, const Vec3& specularAlbedo) {
+    const float passing = transmission * (1.0f - metallic);
     const Vec3 through = baseColour * (Vec3{1.0f, 1.0f, 1.0f} - specularAlbedo) * passing;
-    return TransparentLight{surface * alpha, through * alpha + Vec3{1.0f, 1.0f, 1.0f} * (1.0f - alpha)};
+    return through * alpha + Vec3{1.0f, 1.0f, 1.0f} * (1.0f - alpha);
+}
+
+// The reflectance head-on is glass's 4% (metals' own colour), as the shading's prepareShading takes it.
+Vec3 glassLightTransmittance(float alpha, float transmission, float metallic, const Vec3& baseColour, float cosine) {
+    const Vec3 dielectric{BRDF_DIELECTRIC_REFLECTANCE, BRDF_DIELECTRIC_REFLECTANCE, BRDF_DIELECTRIC_REFLECTANCE};
+    const Vec3 headOn = dielectric + (baseColour - dielectric) * metallic;
+    return transparentTransmittance(alpha, transmission, metallic, baseColour, schlickFresnel(headOn, std::abs(cosine)));
+}
+
+bool glassFaceCounts(bool rayMeetsFront, bool doubleSided) {
+    return !rayMeetsFront || doubleSided;
+}
+
+// The segment's nearest point to the centre: the centre's place along it, held within its ends.
+bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius) {
+    const float along = std::clamp((centre - from).dot(direction), 0.0f, length);
+    return (from + direction * along - centre).lengthSquared() <= radius * radius;
 }
 
 namespace {
@@ -76,6 +99,7 @@ GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevel
 }
 
 void visit(TransparencySettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Glass shadows", settings.glassShadows);
     visitor.field("Reactive mask", settings.reactiveMask);
     visitor.field("Reactive scale", settings.reactiveScale, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f});
     visitor.field("Reactive limit", settings.reactiveLimit, {.min = 0.0f, .max = 1.0f});
@@ -106,6 +130,50 @@ float reactiveShare(const Vec3& opaque, const Vec3& blended, float scale, float 
 
     const float changed = std::max(channelShare(opaque.x, blended.x), std::max(channelShare(opaque.y, blended.y), channelShare(opaque.z, blended.z)));
     return std::clamp(changed * scale, 0.0f, limit);
+}
+
+GpuGlassBounds packGlassBounds(const std::vector<DrawItem>& draws, bool enabled) {
+    GpuGlassBounds bounds{};
+
+    if (!enabled) {
+        return bounds;
+    }
+
+    for (const DrawItem& draw : draws) {
+        if (!isTransparent(draw.material)) {
+            continue;
+        }
+
+        if (draw.bounds.radius < 0.0f || bounds.counts[0] == glassBoundsLimit) {
+            bounds.counts[1] = 1;
+        }
+
+        if (draw.bounds.radius >= 0.0f && bounds.counts[0] < glassBoundsLimit) {
+            float* sphere = bounds.spheres[bounds.counts[0]++];
+            sphere[0] = draw.bounds.centre.x;
+            sphere[1] = draw.bounds.centre.y;
+            sphere[2] = draw.bounds.centre.z;
+            sphere[3] = draw.bounds.radius;
+        }
+    }
+
+    return bounds;
+}
+
+bool glassMayLieBetween(const GpuGlassBounds& bounds, const Vec3& from, const Vec3& direction, float length) {
+    if (bounds.counts[1] != 0) {
+        return true;
+    }
+
+    for (std::uint32_t i = 0; i < bounds.counts[0]; ++i) {
+        const float* sphere = bounds.spheres[i];
+
+        if (segmentMeetsSphere(from, direction, length, Vec3{sphere[0], sphere[1], sphere[2]}, sphere[3])) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 GpuReactivePass packReactivePass(RenderSize render, const TransparencySettings& settings) {

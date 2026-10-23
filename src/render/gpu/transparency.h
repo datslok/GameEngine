@@ -37,6 +37,27 @@ struct TransparentLight {
 TransparentLight transparentBlend(float alpha, float transmission, float metallic, const Vec3& diffuseLight, const Vec3& specularLight,
                                   const Vec3& emissive, const Vec3& baseColour, const Vec3& specularAlbedo);
 
+// The share of what is behind that still shows (transparentBlend's transmittance): one function for the blend over the
+// picture and the light crossing glass on its way to a surface (glassLightTransmittance), so the two cannot disagree.
+Vec3 transparentTransmittance(float alpha, float transmission, float metallic, const Vec3& baseColour, const Vec3& specularAlbedo);
+
+/*
+* Tinted shadows: the light crossing one pane at an angle whose cosine to its normal is cosine (either side): what the
+* glass lets through, the reflected share being Schlick's Fresnel at that angle (a beam meets a smooth surface at one
+* angle, where the view's blend uses the specular albedo, its average over the rough lobe). Metals pass nothing.
+*/
+Vec3 glassLightTransmittance(float alpha, float transmission, float metallic, const Vec3& baseColour, float cosine);
+
+/*
+* Whether a pane a ray towards a light meets counts: a face turned towards the light (the ray, running from the lit point
+* to the light, meets it from behind), as the camera draws only faces turned towards it, so a pane modelled as a thin
+* box tints the light once, as it tints the view once; a double-sided surface counts from both sides.
+*/
+bool glassFaceCounts(bool rayMeetsFront, bool doubleSided);
+
+// Whether the segment from a point along a unit direction for length passes within radius of centre.
+bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius);
+
 // The chosen draws (indices into draws) that are opaque, and those that are transparent (isTransparent), in the order chosen.
 std::vector<std::size_t> opaqueDraws(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen);
 std::vector<std::size_t> transparentDraws(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen);
@@ -89,6 +110,10 @@ GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevel
 * share of the new frame (taaReactiveShare).
 */
 struct TransparencySettings {
+    // Glass tints the light passing through it on its way to a surface (the main pass's shadowed lights, the probes' and
+    // reflections' rays), by rays that see only glass. On GPUs with ray queries; ignored elsewhere.
+    bool glassShadows = true;
+
     // Off leaves the history trusted everywhere, as before the mask, for comparing.
     bool reactiveMask = true;
 
@@ -123,3 +148,24 @@ struct GpuReactivePass {
 static_assert(sizeof(GpuReactivePass) == 32, "GpuReactivePass must match reactive_mask.comp's push constants");
 
 GpuReactivePass packReactivePass(RenderSize render, const TransparencySettings& settings);
+
+/*
+* The glass a ray towards a light is tested against before it is traced (scene set 1, binding 26): most pixels see a
+* light past no glass at all, and a sphere test is far cheaper than a ray. counts: x the spheres held, y 1 when every
+* ray must be traced (a glass draw without bounds, or more glass than the buffer holds). Spheres: world centre, radius.
+*/
+inline constexpr std::size_t glassBoundsLimit = TRANSPARENCY_GLASS_BOUNDS_LIMIT;
+
+struct GpuGlassBounds {
+    std::uint32_t counts[4];
+    float spheres[TRANSPARENCY_GLASS_BOUNDS_LIMIT][4];
+};
+
+static_assert(sizeof(GpuGlassBounds) == 16 + 16 * TRANSPARENCY_GLASS_BOUNDS_LIMIT, "GpuGlassBounds must match ray_scene.glsl's GlassBounds");
+
+// Every transparent draw's bounds, on screen or not (a window behind the camera still shades the floor in front of it);
+// none when disabled.
+GpuGlassBounds packGlassBounds(const std::vector<DrawItem>& draws, bool enabled);
+
+// Whether a segment may meet glass by the bounds, as the shaders test it before tracing.
+bool glassMayLieBetween(const GpuGlassBounds& bounds, const Vec3& from, const Vec3& direction, float length);

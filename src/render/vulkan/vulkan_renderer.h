@@ -198,9 +198,11 @@ private:
 
     // The main pass alone (finding the nearest surface itself) or after the depth prepass (shading only it), sampling
     // the light probes or not, writing the reflection surfaces or not, and without the prepass drawing cut-outs (throwing
-    // away their holes) or not: every combination, indexed by mainPipelineIndex. And the prepass and the shadow pass,
-    // each with its cut-out pipeline (cut_out.frag), which the others need none of.
-    std::array<std::unique_ptr<VulkanPipeline>, 16> mainPipelines;
+    // away their holes) or not: every combination, indexed by mainPipelineIndex; on GPUs with ray queries each again
+    // tinting its shadowed lights through glass by rays (triangle_rays.frag, in sceneRaysLayout), for frames with glass in
+    // the world. And the prepass and the shadow pass, each with its cut-out pipeline (cut_out.frag), which the others need
+    // none of.
+    std::array<std::unique_ptr<VulkanPipeline>, 32> mainPipelines;
     std::unique_ptr<VulkanPipeline> depthPrepassPipeline;
     std::unique_ptr<VulkanPipeline> depthPrepassCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
@@ -241,10 +243,11 @@ private:
 
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag), each for cut-outs too, indexed by capturePipelineIndex. On GPUs with ray queries they trace the sun's shadow past
-    // its cascades (probe_capture_rays.frag), in a layout with the ray tracing set as set 2.
+    // its cascades (probe_capture_rays.frag), in a layout with the ray tracing set as set 2, which the main pass's glass
+    // ray pipelines share.
     std::unique_ptr<VulkanReflectionProbe> reflectionProbe;
     std::array<std::unique_ptr<VulkanPipeline>, 4> capturePipelines;
-    OwnedHandle<VkPipelineLayout> captureRaysLayout;
+    OwnedHandle<VkPipelineLayout> sceneRaysLayout;
 
     // Shadows: every shadow view in one depth atlas, kept between frames (tiles are redrawn only when they change).
     // Counts frames for the memory allocator, which refreshes the driver's memory figures when it changes.
@@ -359,6 +362,8 @@ private:
     void createSamplers();
     void createSceneLayout();
     void createPipelines();
+    // The main pass's pipelines in this layout, tinting shadowed lights through glass by rays or not.
+    void createMainPipelines(bool glassRays, VkPipelineLayout layout);
     void createScreenPipelines(VkFormat format);
     std::unique_ptr<VulkanPipeline> createToneMapPipeline(VkFormat format);
     void createShadowAtlas(const ShadowAtlasSize& size);
@@ -399,12 +404,13 @@ private:
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
     // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
-    // blurred image when occlusionBlurred.
+    // blurred image when occlusionBlurred. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred);
+                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
+                               bool glassShadows);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
@@ -417,8 +423,11 @@ private:
     // with stars, when the frame has them, over it.
     // reflectionSurfaces: the main pass also writes the reflection surfaces, and the sky and stars are drawn after it,
     // in a pass of their own (their pipelines draw into the scene image alone).
+    // glassRaySet: the frame's ray tracing set while shadowed lights are tinted through glass (the glass ray pipelines),
+    // else none.
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
-                      bool sampleProbes, bool reflectionSurfaces, const Vec3& background, const GpuRayDebugView* sky, const StarrySky* stars);
+                      bool sampleProbes, bool reflectionSurfaces, VkDescriptorSet glassRaySet, const Vec3& background, const GpuRayDebugView* sky,
+                      const StarrySky* stars);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;

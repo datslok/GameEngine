@@ -45,6 +45,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the way it arrives
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the mirror pairs (fragment for the probe's traced capture)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // ambient occlusion
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the glass a ray towards a light may cross
     }};
 }
 
@@ -133,7 +134,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     previousModels(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    glassBounds(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -168,6 +170,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.mirrorPairs.describe(),
         VkDescriptorBufferInfo{},
+        buffers.glassBounds.describe(),
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

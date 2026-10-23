@@ -12,6 +12,9 @@
 
 // Solid things that are part of the static level carry this bit too: light probes relocate against them alone.
 #define RAY_MASK_STATIC 4
+
+// Glass and blended surfaces: seen only by rays that ask for them, which pass through every pane, tinted by each.
+#define RAY_MASK_GLASS 8
 #define RAY_MASK_EVERYTHING 255
 
 // A mesh's vertices as floats (MeshVertex: position, normal, uv, tangent), read through the vertex buffer's address.

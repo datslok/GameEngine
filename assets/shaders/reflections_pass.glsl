@@ -239,6 +239,7 @@ Reflection reflectFromProbe(Glossy glossy) {
 * the probe reaches. Escaping, it brings back the sky; on a back face, nothing; on a front face, the probe's picture of
 * that point as far as the probe saw it there (its distance agreeing), else the hit lit as the light probes' rays light
 * theirs (matte, the whole of last frame's probe light as well as the direct light), with the light mirrors reflect onto it.
+* Glass on the way tints it (render/gpu/transparency.h).
 */
 Reflection reflectFromRays(Glossy glossy) {
     float rough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
@@ -253,7 +254,7 @@ Reflection reflectFromRays(Glossy glossy) {
     traceRayQuery(query);
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
-        return Reflection(rough, pass.background.rgb + skyLightTowards(direction));
+        return Reflection(rough, (pass.background.rgb + skyLightTowards(direction)) * glassTransmittance(origin, direction, pass.probe.w));
     }
 
     if (!committedHitFacesRay(query)) {
@@ -261,6 +262,7 @@ Reflection reflectFromRays(Glossy glossy) {
     }
 
     float distance = rayQueryGetIntersectionTEXT(query, true);
+    vec3 passing = glassTransmittance(origin, direction, distance);
     vec3 hit = glossy.position + glossy.normal * lift + direction * distance;
     vec3 fromProbe = hit - pass.probeOrigin.xyz;
     float probeDistanceToHit = length(fromProbe);
@@ -269,7 +271,7 @@ Reflection reflectFromRays(Glossy glossy) {
     vec3 pictured = textureLod(probeLight, towardsHit, level).rgb;
 
     if (seen >= 1.0) {
-        return Reflection(rough, pictured);
+        return Reflection(rough, pictured * passing);
     }
 
     RayHitSurface surface = rayHitSurface(rayQueryGetIntersectionInstanceCustomIndexEXT(query, true),
@@ -278,7 +280,7 @@ Reflection reflectFromRays(Glossy glossy) {
     RayHitLight light = lightAtRayHit(hit + cameraOrigin.xyz, surface.normal, direction, 1.0);
     vec3 mirrored = mirroredLightAtRayHit(hit + cameraOrigin.xyz, surface.normal, glossy.pixel);
     vec3 shaded = surface.emissive + surface.albedo * (light.still + light.fast + mirrored);
-    return Reflection(rough, mix(shaded, pictured, seen));
+    return Reflection(rough, mix(shaded, pictured, seen) * passing);
 }
 #endif
 
