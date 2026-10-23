@@ -59,8 +59,8 @@ namespace {
         assert(assets.getTexture(assets.addTexture(image)).encoding == TextureEncoding::Linear);
     }
 
-    // A material's factors arrive as they are; its colour texture is sRGB, its metallic-roughness and
-    // normal textures linear (numbers and directions, not colours).
+    // A material's factors arrive as they are; its colour and emissive textures are sRGB, its metallic-roughness,
+    // normal and occlusion textures linear (numbers and directions, not colours).
     void testMakeMaterialReadsThePhysicalProperties() {
         AssetManager assets;
 
@@ -73,6 +73,9 @@ namespace {
         source.metallicRoughnessTexture.embeddedImage = readImageBytes();
         source.normalTexture.path = imagePath;
         source.normalScale = 0.6f;
+        source.occlusionTexture.path = imagePath;
+        source.occlusionStrength = 0.4f;
+        source.emissiveTexture.path = imagePath;
         source.flipTextureVertically = false;
 
         const Material material = assets.makeMaterial(source);
@@ -88,6 +91,13 @@ namespace {
         assert(assets.getTexture(material.metallicRoughnessTexture).encoding == TextureEncoding::Linear);
         assert(assets.getTexture(material.normalTexture).encoding == TextureEncoding::Linear);
         assert(material.normalScale == 0.6f);
+        assert(assets.getTexture(material.occlusionTexture).encoding == TextureEncoding::Linear);
+        assert(material.occlusionStrength == 0.4f);
+        assert(assets.getTexture(material.emissiveTexture).encoding == TextureEncoding::Srgb);
+
+        // One file read as numbers twice is one texture: occlusion often shares the metallic-roughness image (ORM).
+        assert(material.occlusionTexture == material.normalTexture);
+        assert(material.emissiveTexture == material.texture);
 
         // The same flip as the colour texture: both are read with the same UVs.
         assert(material.texture == assets.loadTexture(imagePath, false));
@@ -105,7 +115,18 @@ namespace {
         assert(!material.metallicRoughnessTexture.isValid());
         assert(!material.normalTexture.isValid());
         assert(material.normalScale == defaults.normalScale);
+        assert(!material.occlusionTexture.isValid());
+        assert(material.occlusionStrength == defaults.occlusionStrength);
+        assert(!material.emissiveTexture.isValid());
         assert(!MaterialSource{}.hasTexture());
+
+        MaterialSource glowing;
+        glowing.emissiveTexture.path = imagePath;
+        assert(glowing.hasTexture());
+
+        MaterialSource occluded;
+        occluded.occlusionTexture.path = imagePath;
+        assert(occluded.hasTexture());
 
         MaterialSource both;
         both.metallicRoughnessTexture.path = imagePath;

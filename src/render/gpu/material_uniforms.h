@@ -19,12 +19,13 @@ std::uint32_t bindlessTextureSlot(TextureHandle texture);
 */
 struct GpuMaterial {
     float baseColour[4];     // rgba, 0..1
-    float surface[4];        // x: metallic, y: roughness, both 0..1; z: normal map scale (0 without a normal map)
-    float emissive[4];       // rgb: light the surface gives off itself
-    std::uint32_t textures[4]; // slots in the texture array: x colour, y metallic-roughness, z normal map
+    float surface[4];        // x: metallic, y: roughness, both 0..1; z: normal map scale (0 without a normal map); w: occlusion strength, 0..1 (0 without an occlusion texture)
+    float emissive[4];       // rgb: light the surface gives off itself, multiplied by the emissive texture
+    std::uint32_t textures[4]; // slots in the texture array: x colour, y metallic-roughness, z normal map, w emissive
+    std::uint32_t moreTextures[4]; // x: occlusion; the rest 0, kept for later textures
 };
 
-static_assert(sizeof(GpuMaterial) == 64, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 80, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

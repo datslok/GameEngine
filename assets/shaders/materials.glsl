@@ -14,9 +14,10 @@ layout(set = 0, binding = 0) uniform sampler2D textures[];
 // Must match GpuMaterial in render/gpu/material_uniforms.h.
 struct MaterialData {
     vec4 baseColour;
-    vec4 surfaceParameters; // x: metallic, y: roughness, z: normal map scale (0 without a normal map)
-    vec4 emissive;          // rgb: light the surface gives off itself
-    uvec4 textureSlots;     // in the texture array: x colour, y metallic-roughness (linear), z normal map (linear)
+    vec4 surfaceParameters; // x: metallic, y: roughness, z: normal map scale (0 without a normal map), w: occlusion strength (0 without an occlusion texture)
+    vec4 emissive;          // rgb: light the surface gives off itself, multiplied by the emissive texture
+    uvec4 textureSlots;     // in the texture array: x colour, y metallic-roughness (linear), z normal map (linear), w emissive (sRGB)
+    uvec4 moreTextureSlots; // x: baked occlusion (linear, red channel); the rest unused
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

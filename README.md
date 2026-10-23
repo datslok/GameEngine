@@ -83,7 +83,8 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 
 - **Lights as components:** directional, point, spot and ambient. Up to 1024 point lights and 256 spotlights at once.
 - **Physically based materials** (glTF metallic-roughness): GGX microfacet highlights with Smith shadowing and Schlick Fresnel, Lambert diffuse, and energy compensation for light that bounces between microfacets, so nothing is lost or created at any roughness.
-- **Emissive** (glowing) materials.
+- **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
+- **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
 - **Frustum culling:** each view, camera or shadow, skips what it cannot see.
 
 **Shadows from every light**
@@ -153,7 +154,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 
 Several games run on one engine, picked at start-up with `--game`.
 
-**The demo:** a night scene with lamps, floodlights, a gallery of normal-mapped models and an obstacle course.
+**The demo:** a night scene with lamps, floodlights, a gallery of glTF test models (normal maps, a water bottle with a glowing label and baked occlusion) and an obstacle course.
 
 **The light lab:** a sunlit test ground 800 m across.
 
@@ -437,8 +438,8 @@ docs/             ENGINE_GUIDE.md: how the engine works and why, for people lear
                   RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
 tools/            package_demo.py (the shareable zip), fetch_streamline.py (DLSS's DLLs), make_glb_demo.py
 assets/
-  models/         OBJ and glTF test models (the normal map gallery: Khronos's CompareNormal,
-                  NormalTangentTest and NormalTangentMirrorTest)
+  models/         OBJ and glTF test models (the gallery: Khronos's CompareNormal,
+                  NormalTangentTest, NormalTangentMirrorTest and WaterBottle)
   shaders/        GLSL shaders (compiled to .spv by make) and the shader libraries they include
                   (.glsl: BRDF, normal mapping, lighting, soft shadows, cascades, depth range, ray tracing,
                   light probes, atmosphere, stars, eye adaptation, tone mapping, bloom, dither, overlay, clusters)
@@ -472,4 +473,4 @@ build/            Build output (git-ignored)
 - **NVIDIA DLSS**, through [NVIDIA Streamline](https://github.com/NVIDIA-RTX/Streamline) v2.14.16 (Streamline MIT; DLSS under the NVIDIA RTX SDK licence). NVIDIA, the NVIDIA logo and DLSS are trademarks of NVIDIA Corporation.
 - The Yale Bright Star Catalogue, 5th revised edition (Hoffleit and Warren 1991, from the [CDS](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)), for the stars (`assets/stars/`)
 - [SDL3](https://www.libsdl.org/) and SDL3_image
-- The duck model and the normal map gallery are from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): CompareNormal by Eric Chadwick and DGG (CC0), NormalTangentTest and NormalTangentMirrorTest by Ed Mackey, © 2018 Analytical Graphics, Inc. ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+- The duck model and the gallery are from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): WaterBottle by Microsoft (CC0), CompareNormal by Eric Chadwick and DGG (CC0), NormalTangentTest and NormalTangentMirrorTest by Ed Mackey, © 2018 Analytical Graphics, Inc. ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))

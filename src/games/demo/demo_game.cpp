@@ -64,7 +64,8 @@ namespace {
     // The normal map gallery: Khronos's glTF test models floating at eye height in a row left of the path ahead, each
     // turned to the path's middle line at a point this far nearer the start, so they face the start and the flashlight shows their bumps.
     // CompareNormal shows the same shape without and with a normal map; NormalTangentTest's tangents are generated
-    // (MikkTSpace); NormalTangentMirrorTest's come from the file, and half of its pictures are mirrored.
+    // (MikkTSpace); NormalTangentMirrorTest's come from the file, and half of its pictures are mirrored. WaterBottle
+    // (Microsoft, CC0) glows through an emissive texture and has baked occlusion packed with its metallic-roughness.
     struct Exhibit {
         const char* path;
         Vec3 position;
@@ -73,7 +74,8 @@ namespace {
     const Exhibit galleryExhibits[] = {
         {"assets/models/CompareNormal.glb", Vec3{-3.2f, 1.3f, -3.2f}},
         {"assets/models/NormalTangentTest.glb", Vec3{-3.2f, 1.3f, -1.2f}},
-        {"assets/models/NormalTangentMirrorTest.glb", Vec3{-3.2f, 1.3f, -5.2f}}
+        {"assets/models/NormalTangentMirrorTest.glb", Vec3{-3.2f, 1.3f, -5.2f}},
+        {"assets/models/WaterBottle.glb", Vec3{-3.2f, 1.3f, -7.2f}}
     };
     constexpr float galleryExhibitSize = 1.5f; // the longest side
     constexpr float galleryFacingDistance = 3.0f;

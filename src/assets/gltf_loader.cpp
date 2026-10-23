@@ -11,6 +11,7 @@
 #include <utility>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <vector>
 
 namespace {
@@ -338,7 +339,7 @@ namespace {
         return linearToSrgbByte(value);
     }
 
-    // glTF's factors (metallic, roughness, emissive) are shares, 0..1.
+    // glTF's factors (metallic, roughness, emissive, occlusion strength) are shares, 0..1.
     float readUnitFactor(float value, const char* message) {
         if (!std::isfinite(value) || value < 0.0f || value > 1.0f) {
             throw std::runtime_error(message);
@@ -426,10 +427,20 @@ namespace {
     }
 
     /*
+    * The file's folder, which image paths are relative to, and each embedded image copied once: several texture slots
+    * often name one image (occlusion packed with metallic-roughness, ORM), and handing them all the same bytes lets the
+    * AssetManager, which caches embedded images by buffer, decode and upload it once.
+    */
+    struct GltfImages {
+        std::filesystem::path directory;
+        std::map<const cgltf_image*, std::shared_ptr<const std::vector<std::uint8_t>>> embedded;
+    };
+
+    /*
     * Where one of a material's textures comes from: nothing for an empty slot, else an external file or embedded bytes.
     * Only the first UV set and textures without a transform are supported.
     */
-    TextureSource readTexture(const cgltf_texture_view& view, const std::filesystem::path& modelDirectory) {
+    TextureSource readTexture(const cgltf_texture_view& view, GltfImages& images) {
         TextureSource texture;
 
         if (view.texture == nullptr) {
@@ -457,9 +468,15 @@ namespace {
         }
 
         if (image->buffer_view == nullptr) {
-            texture.path = readImagePath(*image, modelDirectory);
+            texture.path = readImagePath(*image, images.directory);
         } else {
-            texture.embeddedImage = readEmbeddedImage(*image);
+            auto [found, added] = images.embedded.try_emplace(image);
+
+            if (added) {
+                found->second = readEmbeddedImage(*image);
+            }
+
+            texture.embeddedImage = found->second;
         }
 
         return texture;
@@ -470,7 +487,7 @@ namespace {
     * metallic 1, roughness 1, no glow), with or without a pbrMetallicRoughness block; a part with no material gets the
     * same defaults. KHR_materials_emissive_strength lets the glow go past 1.
     */
-    MaterialSource readMaterial(const cgltf_material* source, const std::filesystem::path& modelDirectory) {
+    MaterialSource readMaterial(const cgltf_material* source, GltfImages& images) {
         MaterialSource material;
         material.flipTextureVertically = false;
         material.metallic = gltfDefaultFactor;
@@ -496,9 +513,9 @@ namespace {
         };
         material.metallic = readUnitFactor(properties.metallic_factor, "glTF metallic factor must be between 0 and 1");
         material.roughness = readUnitFactor(properties.roughness_factor, "glTF roughness factor must be between 0 and 1");
-        material.colourTexture = readTexture(properties.base_color_texture, modelDirectory);
-        material.metallicRoughnessTexture = readTexture(properties.metallic_roughness_texture, modelDirectory);
-        material.normalTexture = readTexture(source->normal_texture, modelDirectory);
+        material.colourTexture = readTexture(properties.base_color_texture, images);
+        material.metallicRoughnessTexture = readTexture(properties.metallic_roughness_texture, images);
+        material.normalTexture = readTexture(source->normal_texture, images);
 
         if (material.normalTexture.isSet()) {
             if (!std::isfinite(source->normal_texture.scale)) {
@@ -509,6 +526,15 @@ namespace {
 
             material.normalScale = source->normal_texture.scale;
         }
+
+        // Occlusion in the texture's red channel, whatever else the image packs (ORM).
+        material.occlusionTexture = readTexture(source->occlusion_texture, images);
+
+        if (material.occlusionTexture.isSet()) {
+            material.occlusionStrength = readUnitFactor(source->occlusion_texture.scale, "glTF occlusion strength must be between 0 and 1");
+        }
+
+        material.emissiveTexture = readTexture(source->emissive_texture, images);
 
         const float strength = source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f;
 
@@ -528,7 +554,7 @@ namespace {
         return material;
     }
 
-    void appendNode(const cgltf_node& node, Model& model, const std::filesystem::path& modelDirectory) {
+    void appendNode(const cgltf_node& node, Model& model, GltfImages& images) {
         if (node.skin != nullptr) {
             throw std::runtime_error(
                 "Skinned glTF meshes are not supported yet"
@@ -551,7 +577,7 @@ namespace {
                     std::make_shared<Mesh>(std::move(mesh));
 
                 part.transform = transform;
-                part.material = readMaterial(primitive.material, modelDirectory);
+                part.material = readMaterial(primitive.material, images);
 
                 if (part.material.hasTexture() && cgltf_find_accessor(&primitive, cgltf_attribute_type_texcoord, 0) == nullptr) {
                     throw std::runtime_error(
@@ -565,7 +591,7 @@ namespace {
 
         // Visit each child node too.
         for (std::size_t index = 0; index < node.children_count; ++index) {
-            appendNode(*node.children[index], model, modelDirectory);
+            appendNode(*node.children[index], model, images);
         }
     }
 }
@@ -628,10 +654,10 @@ Model loadGltf(const std::string& filename) {
 
     Model model;
 
-    const std::filesystem::path modelDirectory = std::filesystem::path{filename}.parent_path();
+    GltfImages images{std::filesystem::path{filename}.parent_path()};
 
     for (std::size_t index = 0; index < scene->nodes_count; ++index) {
-        appendNode(*scene->nodes[index], model, modelDirectory);
+        appendNode(*scene->nodes[index], model, images);
     }
 
     return model;

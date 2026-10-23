@@ -36,6 +36,6 @@ void main() {
         vec3 step = surfaceStep(centre.xyz, before.xyz, beforeNext.xyz, after.xyz, afterNext.xyz);
         testOutput(3, vec4(step, specularOcclusion(before.w, beforeNext.w, centre.w)));
         testOutput(4, vec4(depthNormal(centre.xyz, step, offset.xyz), aoBlurWeight(afterNext.w, afterNext.w * 1.04)));
-        testOutput(5, vec4(multiBounceOcclusion(beforeNext.w, albedo.rgb), 0.0));
+        testOutput(5, vec4(multiBounceOcclusion(beforeNext.w, albedo.rgb), surfaceVisibility(beforeNext.w, centre.w, toCamera.w)));
     }
 }

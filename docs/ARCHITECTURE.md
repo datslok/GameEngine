@@ -806,7 +806,7 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 
 - `GpuInstance` (160 bytes: world model matrix, normal matrix, handedness, material number, mesh number (for ray hits); `packInstance(draw, material)`).
   - One per `DrawItem` of the frame, instance i being draw i, the same for every view (ray tracing instances and GPU culling can read the same records later).
-- `GpuMaterial` (64 bytes, see Assets and materials), deduplicated per frame by `MaterialTable::add` (an FNV-1a hash of the packed bytes, then a full comparison; packing has no padding).
+- `GpuMaterial` (80 bytes, see Assets and materials), deduplicated per frame by `MaterialTable::add` (an FNV-1a hash of the packed bytes, then a full comparison; packing has no padding).
 - Lights, in `GpuLights` from `packLighting` with `ambient` and `counts`, shadows filled in by `attachShadows`:
   - `GpuDirectionalLight` (48: direction towards the light, radiance, `shadowTile` (its first cascade), `cascadeCount`, `tanAngularRadius`);
   - `GpuPointLight` (48: position and range, radiance and source radius, `firstShadowTile`, `shadowStrength`, `emitterRadius`);
@@ -1766,7 +1766,7 @@ Trace (`ddgi_trace.comp`, `DDGI_TRACE_GROUP_SIZE` 64 invocations a group, one pe
 - Each ray goes from its probe against solid instances (`RAY_MASK_SOLID`, no minimum distance, reach `DDGI_RAY_REACH`):
   - **a miss** brings back the sky (`FrameLighting::background`) at the full reach;
   - **a back face** no light, at minus its distance;
-  - **a front face** its material's emissive plus its base colour (texture at full size times the factor) times the irradiance there, which is the sum of:
+  - **a front face** its material's emissive (times its emissive texture at full size) plus its base colour (texture at full size times the factor) times the irradiance there, which is the sum of:
     - each directional light's radiance times the cosine when a shadow ray (`gl_RayFlagsTerminateOnFirstHitEXT`, from `DDGI_SHADOW_RAY_OFFSET` (1 cm) out along the normal) reaches it;
     - the brightest `lightsPerHit` of the listed point and spot lights (ranked unshadowed, still and fast together), each with a shadow ray to its centre (its glowing stand-in is not solid), a fast one's light into the fast sum;
     - and last frame's probes at the hit (`probeAmbient`, diffuse only, seen from the probe, in world space) times `bounceEnergy`, the still atlas's into the still sum and the fast atlas's into the fast sum, so each frame adds a bounce.
@@ -2250,16 +2250,16 @@ How much of the light from all around reaches a point past the small things next
 - **The open arc.** With the normal projected into the slice (`aoSlice`: angle n from the way to the camera, length l), the cosine-weighted open share between the horizons h0 and h1 is l times the integral of cos(θ − n) |sin θ| from h0 to h1, each side (cos n + 2h sin n − cos(2h − n)) / 4, the horizons kept within a right angle of the normal (`sliceVisibility`). Averaged over slices round the way to the camera this is the cosine-weighted visibility exactly, 1 for an open surface whatever its tilt (tested over 2000 slices).
 - **The blur** (`ambient_occlusion_blur.comp`, only without anti-aliasing): the mean over 5 x 5 texels (`AO_BLUR_RADIUS` 2), each weighted by how near its view distance is to the pixel's (`aoBlurWeight`, nothing past `AO_BLUR_DEPTH_SHARE` 10%), so it does not bleed across edges.
 
-**The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility v at its pixel and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
+**The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility at its pixel, takes the more closed of it and the material's baked occlusion where it has one (`surfaceVisibility`: min(screen, 1 + strength (texel − 1)), glTF's formula; the minimum, not the product, since both estimate the same open share and a crease both see would darken twice; the baked one also in the reflection probe's capture, being the surface's own) as v, and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
 
 - the diffuse part by `multiBounceOcclusion(v, matte colour)` (Jimenez's fit: max(v, ((a v + b) v + c) v) with a, b, c lines in the albedo, `AO_BOUNCE_*`), or v alone with `multipleBounces` off;
 - the reflection's stand-in by `specularOcclusion(n·v, v, roughness)` (Lagarde and de Rousiers 2014: (n·v + v)^(2^(−16 r − 1)) − 1 + v, clamped), and the specular albedo it hands the reflection pass by the same, so the better light the reflection pass swaps in stays dimmed.
 
-With it off every factor is exactly 1 and the picture is as before, bit for bit.
+With it off and no baked occlusion every factor is exactly 1 and the picture is as before, bit for bit (the block runs only with the screen's occlusion on or a strength above 0). Ray hits (probe rays, traced reflections) leave baked occlusion out: a small effect on lighting that coarse, for a texture read per ray.
 
 **The pass** (`VulkanAmbientOcclusion::occlude`, timed as AO, right after the depth prepass, before the mirrored lights): `AO_GROUP_SIDE` (8) square groups. Its own set 0: the pass record (`GpuAmbientOcclusionPass`: the camera-relative view-projection's inverse with the jitter, the size, the pixel footprint per metre, the radius, falloff, slices and steps, and the frame), the depth (exact texels) and an R8 image; the blur adds the noisy image and writes a second one. Barriers: the depth from the prepass to compute reading; the images from last frame's reads to storage writes, contents discarded; the noisy image to compute reading for the blur; the one the main pass reads to fragment reading. The images are made the first time the pass runs and remade with the frame's size.
 
-**Tests**: `ambient_occlusion_test` (the closed form against quadrature; an open surface averages exactly 1 tilted or not; half the sky blocked gives a half; the normal at a wall's foot keeps the floor's slope; the screen radius, steps, falloff, bounces, specular occlusion and blur weight; and the pass's loop through a drawn depth image of a floor and a 2 m wall: open floor 1, a metre from the wall over 0.98, the foot under 0.85 with the default radius and 0.506 against 0.5 with a long one, the sky open), `quality_preset_test`, `gpu_timing_test`; GPU tests in `ambient_occlusion_gpu_test` (written and built, not run).
+**Tests**: `ambient_occlusion_test` (the closed form against quadrature; an open surface averages exactly 1 tilted or not; half the sky blocked gives a half; the normal at a wall's foot keeps the floor's slope; the screen radius, steps, falloff, bounces, specular occlusion, the baked occlusion's minimum and blur weight; and the pass's loop through a drawn depth image of a floor and a 2 m wall: open floor 1, a metre from the wall over 0.98, the foot under 0.85 with the default radius and 0.506 against 0.5 with a long one, the sky open), `quality_preset_test`, `gpu_timing_test`; GPU tests in `ambient_occlusion_gpu_test` (written and built, not run).
 
 **Not measured yet**: its cost and its look in the game. **Not yet**: half resolution, if the cost calls for it.
 
@@ -2326,7 +2326,7 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 **From the loaders.** Loaders produce `Model`s whose parts hold a shared `Mesh` and a `MaterialSource`:
 
 - colour, `metallic`, `roughness`, linear `emissive`;
-- and three `TextureSource`s, `colourTexture`, `metallicRoughnessTexture` and `normalTexture` (with `normalScale`, glTF's `normalTexture.scale`, default 1), each a path or embedded bytes, sharing one flip.
+- and five `TextureSource`s, `colourTexture`, `metallicRoughnessTexture`, `normalTexture` (with `normalScale`, glTF's `normalTexture.scale`, default 1), `occlusionTexture` (with `occlusionStrength`, glTF's `occlusionTexture.strength`, default 1) and `emissiveTexture`, each a path or embedded bytes, sharing one flip.
 
 **To a `Material`.** `AssetManager::makeMaterial` turns that into a `Material`:
 
@@ -2334,17 +2334,19 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - `metallic` 0 and `roughness` 0.5 by default (the old Blinn-Phong default, shininess 32, matches roughness 0.5);
 - an optional `metallicRoughnessTexture` (glTF packing: roughness in green, metallic in blue, multiplying the numbers);
 - an optional linear `normalTexture` with `normalScale`;
-- and `emissive`.
-- It loads the colour texture as `TextureEncoding::Srgb` and the metallic-roughness and normal ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`.
+- an optional linear `occlusionTexture` (baked occlusion in red: how open each texel is to the light from all around, 0 buried to 1 open) with `occlusionStrength` (0..1);
+- and `emissive`, with an optional sRGB `emissiveTexture` multiplying it (screens, dials, painted lights).
+- It loads the colour and emissive textures as `TextureEncoding::Srgb` and the metallic-roughness, normal and occlusion ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`. Occlusion packed into the metallic-roughness image (ORM: occlusion, roughness, metallic in red, green, blue) is the same file or bytes read the same way, so it is one texture.
 
-**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, `emissiveFactor` and `KHR_materials_emissive_strength` (`readTexture` handles both textures, files and embedded alike). A part with no material gets glTF's defaults, metallic and roughness 1.
+**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor` and `KHR_materials_emissive_strength` (`readTexture` handles every texture, files and embedded alike). Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
 
-**On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (64 bytes, std430):
+**On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (80 bytes, std430):
 
 - base colour;
-- `surface` = metallic and roughness clamped to 0..1 and the normal scale (0 when there is no normal texture, so the white stand-in tilts nothing);
-- emissive;
-- and `textures`: the slots of the colour, metallic-roughness and normal textures in the bindless array, `bindlessTextureSlot` = handle + 1, `whiteTextureSlot` 0 for none.
+- `surface` = metallic and roughness clamped to 0..1 and the normal scale (0 when there is no normal texture, so the white stand-in tilts nothing), and the occlusion strength (clamped to 0..1, and 0 when there is no occlusion texture, which tells the main pass to leave the light from all around alone);
+- emissive (multiplied by the emissive texture in the shaders);
+- `textures`: the slots of the colour, metallic-roughness, normal and emissive textures in the bindless array, `bindlessTextureSlot` = handle + 1, `whiteTextureSlot` 0 for none.
+- and `moreTextures`: x the occlusion texture's slot, the rest 0, kept for later textures.
 - One entry per different material in the frame's material buffer (see GPU scene).
 
 ## Input
@@ -2968,7 +2970,7 @@ Colour is gamma-correct: shading happens in linear light.
 - Light colours, intensities and `emissive` are linear.
 - `VulkanTexture` uploads RGBA pixels with a full mip chain (`mipLevelCount`, `render/gpu/mip_levels`; each smaller level blitted from the one above) and samples them with trilinear and 16x anisotropic filtering. The sampler's `maxLod` is `VK_LOD_CLAMP_NONE`: 0 would lock sampling to the full-size level.
 - `Material::emissive` (a `Vec3`, black by default) is light the surface gives off itself, added after lighting. With a black `colour` the surface shows only its glow and never changes with lighting (the demo's moon and MOBA marker).
-- `GpuMaterial` is 64 bytes.
+- `GpuMaterial` is 80 bytes.
 - `Mesh::sphere(segments, rings)` builds a unit UV sphere with smooth normals.
 
 ## Loaders

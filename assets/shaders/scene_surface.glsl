@@ -457,6 +457,10 @@ void main() {
     // The normal map is read here, outside any branch, so its mip comes from the neighbouring pixels' coordinates; bumps
     // its smaller mips averaged away widen the roughness (Toksvig).
     vec3 normalTexel = texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv, mipBias).rgb;
+    // The glow's pattern (white without one, so the emissive colour alone) and the baked occlusion in red (white, open,
+    // without one), read here for the same reason.
+    vec3 emissive = texture(textures[nonuniformEXT(material.textureSlots.w)], textureUv, mipBias).rgb * material.emissive.rgb;
+    float occlusionTexel = texture(textures[nonuniformEXT(material.moreTextureSlots.x)], textureUv, mipBias).r;
 
     if (textureOptions.y > 0.0) {
         roughness = toksvigRoughness(roughness, normalTexel, material.surfaceParameters.z);
@@ -587,12 +591,15 @@ void main() {
     // Ambient occlusion dims the light from all around in creases and corners (not the direct light, which has its
     // shadows): the diffuse part by the visibility, raised by the light a crease's walls bounce back in (more for bright
     // ones), the reflection's stand-in by the specular occlusion, which the reflection pass's better light keeps (it is
-    // in the specular albedo the reflection surfaces hand on). Not in the reflection probe's capture, which has no
-    // occlusion of its own view.
+    // in the specular albedo the reflection surfaces hand on). The screen's occlusion is not in the reflection probe's
+    // capture, which has none of its own view; a material's baked occlusion is, being the surface's own. The two count
+    // as whichever is more closed. Without either the light is left exactly as it was.
     float reflectionOcclusion = 1.0;
+    bool screenOcclusion = ambientOcclusionOptions.x != 0 && !captureView;
 
-    if (ambientOcclusionOptions.x != 0 && !captureView) {
-        float visibility = texelFetch(ambientOcclusion, ivec2(gl_FragCoord.xy), 0).r;
+    if (screenOcclusion || material.surfaceParameters.w > 0.0) {
+        float screenVisibility = screenOcclusion ? texelFetch(ambientOcclusion, ivec2(gl_FragCoord.xy), 0).r : 1.0;
+        float visibility = surfaceVisibility(screenVisibility, occlusionTexel, material.surfaceParameters.w);
         vec3 diffuseOcclusion = ambientOcclusionOptions.y != 0 ? multiBounceOcclusion(visibility, matteColour(albedo.rgb, metallic)) : vec3(visibility);
         reflectionOcclusion = ambientOcclusionOptions.z != 0 ? specularOcclusion(point.nDotV, visibility, roughness) : 1.0;
         mirrorLight *= reflectionOcclusion;
@@ -600,7 +607,7 @@ void main() {
     }
 
     // Emitted light is added as is.
-    outputColour = vec4(ambientReflected + diffuse + specular + material.emissive.rgb, albedo.a);
+    outputColour = vec4(ambientReflected + diffuse + specular + emissive, albedo.a);
 
     // A surface without a normal reflects nothing sharply: fully rough, so the stand-in stays.
 #ifdef REFLECTION_SURFACES

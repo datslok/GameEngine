@@ -43,13 +43,19 @@ struct MaterialSource {
     TextureSource normalTexture;
     float normalScale = Material{}.normalScale;
 
+    // Baked occlusion (linear, red channel) and how strongly it applies. The default strength is Material's own.
+    TextureSource occlusionTexture;
+    float occlusionStrength = Material{}.occlusionStrength;
+
     Vec3 emissive{0.0f, 0.0f, 0.0f}; // linear light
+    TextureSource emissiveTexture;   // sRGB, multiplying emissive
 
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
-        return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet();
+        return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet() || occlusionTexture.isSet() ||
+               emissiveTexture.isSet();
     }
 };
 

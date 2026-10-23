@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 
 namespace {
     void writeFloat(std::ostream& output, float value) {
@@ -26,8 +27,8 @@ namespace {
 
     /*
     * Three primitives sharing one triangle: a full metallic-roughness material (factors, a metallic-roughness texture,
-    * a normal map with its scale, an emissive colour made brighter by KHR_materials_emissive_strength), a material with no
-    * pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
+    * a normal map with its scale, an occlusion texture with its strength, an emissive texture, and an emissive colour
+    * made brighter by KHR_materials_emissive_strength), a material with no pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
     */
     const char* const document = R"json(
 {
@@ -52,6 +53,8 @@ namespace {
                 "metallicRoughnessTexture": { "index": 0 }
             },
             "normalTexture": { "index": 0, "scale": 0.5 },
+            "occlusionTexture": { "index": 0, "strength": 0.75 },
+            "emissiveTexture": { "index": 0 },
             "emissiveFactor": [0.5, 0.25, 0.0],
             "extensions": { "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 } }
         },
@@ -111,6 +114,9 @@ void testGltfMaterials() {
         assert(full.hasTexture());
         assert(full.normalTexture.path == full.metallicRoughnessTexture.path);
         assert(nearlyEqual(full.normalScale, 0.5f));
+        assert(full.occlusionTexture.path == full.metallicRoughnessTexture.path);
+        assert(nearlyEqual(full.occlusionStrength, 0.75f));
+        assert(full.emissiveTexture.path == full.metallicRoughnessTexture.path);
 
         const MaterialSource& withoutFactors = model.parts[1].material;
         assert(nearlyEqual(withoutFactors.metallic, 1.0f));
@@ -118,11 +124,35 @@ void testGltfMaterials() {
         assert(!withoutFactors.hasTexture());
         assert(!withoutFactors.normalTexture.isSet());
         assert(nearlyEqual(withoutFactors.normalScale, 1.0f));
+        assert(!withoutFactors.occlusionTexture.isSet());
+        assert(nearlyEqual(withoutFactors.occlusionStrength, 1.0f));
+        assert(!withoutFactors.emissiveTexture.isSet());
 
         const MaterialSource& withoutMaterial = model.parts[2].material;
         assert(nearlyEqual(withoutMaterial.metallic, 1.0f));
         assert(nearlyEqual(withoutMaterial.roughness, 1.0f));
         assert(withoutMaterial.colour.r == 255);
+
+        // glTF's occlusion strength is a share, 0..1, like the factors.
+        std::string tooStrong = document;
+        const std::string strength = "\"strength\": 0.75";
+        tooStrong.replace(tooStrong.find(strength), strength.size(), "\"strength\": 1.5");
+
+        {
+            std::ofstream output{directory / "too_strong.gltf"};
+            output << tooStrong;
+        }
+
+        bool threw = false;
+
+        try {
+            loadGltf((directory / "too_strong.gltf").string());
+        }
+        catch (const std::runtime_error&) {
+            threw = true;
+        }
+
+        assert(threw);
     }
     catch (...) {
         std::filesystem::remove_all(directory);

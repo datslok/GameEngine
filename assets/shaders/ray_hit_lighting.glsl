@@ -62,7 +62,10 @@ RayHitSurface rayHitSurface(int instanceIndex, int primitive, vec2 barycentrics,
     MaterialData material = materials[instance.material.x];
     vec3 baseColour = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
     float metallic = clamp(material.surfaceParameters.x * textureLod(textures[nonuniformEXT(material.textureSlots.y)], surface.uv, 0.0).b, 0.0, 1.0);
-    return RayHitSurface(normal, matteColour(baseColour, metallic), material.emissive.rgb);
+    // The glow's pattern too, so a lit screen or dial lights the room through the probes. Baked occlusion is left out:
+    // a small effect on lighting this coarse, for one more texture read per ray.
+    vec3 emissive = textureLod(textures[nonuniformEXT(material.textureSlots.w)], surface.uv, 0.0).rgb * material.emissive.rgb;
+    return RayHitSurface(normal, matteColour(baseColour, metallic), emissive);
 }
 
 // The irradiance reaching a hit, kept apart by whether fast lights (flashlights) gave it.

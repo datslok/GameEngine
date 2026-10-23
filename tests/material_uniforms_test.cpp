@@ -23,6 +23,9 @@ namespace {
         assert(!material.metallicRoughnessTexture.isValid());
         assert(!material.normalTexture.isValid());
         assert(nearlyEqual(material.normalScale, 1.0f));
+        assert(!material.occlusionTexture.isValid());
+        assert(nearlyEqual(material.occlusionStrength, 1.0f));
+        assert(!material.emissiveTexture.isValid());
     }
 
     // Byte colours are sRGB like image files, so the shader gets them decoded to linear light, with full opacity.
@@ -74,6 +77,24 @@ namespace {
         material.normalTexture = TextureHandle{3};
         assert(nearlyEqual(packMaterial(material).surface, 0.0f, 0.5f, 0.8f, 0.0f));
     }
+
+    // The occlusion strength goes in surface.w, clamped to glTF's 0..1. Like the normal scale it goes as 0 without a
+    // texture, which tells the shader to leave the light from all around as it was.
+    void testOcclusionStrengthIsPacked() {
+        Material material;
+        material.occlusionStrength = 0.3f;
+        assert(nearlyEqual(packMaterial(material).surface[3], 0.0f));
+
+        material.occlusionTexture = TextureHandle{1};
+        material.occlusionStrength = 0.3f;
+        assert(nearlyEqual(packMaterial(material).surface[3], 0.3f));
+
+        material.occlusionStrength = 2.0f;
+        assert(nearlyEqual(packMaterial(material).surface[3], 1.0f));
+
+        material.occlusionStrength = -1.0f;
+        assert(nearlyEqual(packMaterial(material).surface[3], 0.0f));
+    }
 }
 
 namespace {
@@ -106,13 +127,20 @@ namespace {
 
         const GpuMaterial plain = packMaterial(Material{});
         assert(plain.textures[0] == whiteTextureSlot && plain.textures[1] == whiteTextureSlot && plain.textures[2] == whiteTextureSlot);
+        assert(plain.textures[3] == whiteTextureSlot && plain.moreTextures[0] == whiteTextureSlot);
 
         Material textured;
         textured.texture = TextureHandle{2};
         textured.metallicRoughnessTexture = TextureHandle{7};
         textured.normalTexture = TextureHandle{9};
+        textured.emissiveTexture = TextureHandle{4};
+        textured.occlusionTexture = TextureHandle{7};
         const GpuMaterial packed = packMaterial(textured);
         assert(packed.textures[0] == 3 && packed.textures[1] == 8 && packed.textures[2] == 10);
+        assert(packed.textures[3] == 5 && packed.moreTextures[0] == 8);
+
+        // The rest of the extra slots are kept for later textures and stay zero, so materials hash alike.
+        assert(packed.moreTextures[1] == 0 && packed.moreTextures[2] == 0 && packed.moreTextures[3] == 0);
     }
 }
 
@@ -126,4 +154,5 @@ void testMaterialUniforms() {
     testCustomSurfaceIsPacked();
     testSurfaceIsClamped();
     testNormalScaleNeedsATexture();
+    testOcclusionStrengthIsPacked();
 }

@@ -117,6 +117,11 @@ Vec3 multiBounceOcclusion(float visibility, const Vec3& albedo);
 // How much of the reflection's stand-in a crease lets through, from the view's cosine, the visibility and the roughness.
 float specularOcclusion(float nDotV, float visibility, float roughness);
 
+// The visibility the main pass uses: the screen's (1 without it) or the material's baked one (glTF's
+// 1 + strength (texel - 1)), whichever is more closed. Both estimate the same open share, so taking their product would
+// darken a crease both see twice.
+float surfaceVisibility(float screenVisibility, float occlusionTexel, float occlusionStrength);
+
 // A neighbour's weight in the blur: 1 at the pixel's own view distance, falling to 0 at AO_BLUR_DEPTH_SHARE of it away.
 float aoBlurWeight(float centreDistance, float neighbourDistance);
 
