@@ -74,11 +74,11 @@ namespace {
             inputs.push_back(GpuVec4{static_cast<float>(i) / 100.0f, static_cast<float>(i), 0.0f, 0.0f});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAA_WEIGHTS, inputs, 1, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAA_WEIGHTS, inputs, 1, 3);
 
-        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
             const GpuVec4& in = inputs[i];
-            const GpuVec4* out = &outputs[i * 2];
+            const GpuVec4* out = &outputs[i * 3];
             const std::uint32_t frame = static_cast<std::uint32_t>(in[1]);
             const Vec2 jitter = taaJitter(frame);
             const Vec4 weights = catmullRomWeights(in[0]);
@@ -86,6 +86,11 @@ namespace {
             report.check("catmullRomWeights", arithmeticTolerance, weights.w, out[0][3]);
             report.check("halton", arithmeticTolerance, Vec3{halton(frame, 2), halton(frame, 3), 0.0f}, Vec3{out[1][0], out[1][1], 0.0f});
             report.check("taaJitter", arithmeticTolerance, Vec3{jitter.x, jitter.y, 0.0f}, Vec3{out[1][2], out[1][3], 0.0f});
+
+            // Cycles of FSR's lengths, 8 to 72 phases.
+            const std::uint32_t phases = 8 + frame % 65;
+            const Vec2 cycled = taaJitter(frame, phases);
+            report.check("taaJitter phases", arithmeticTolerance, Vec3{cycled.x, cycled.y, 0.0f}, Vec3{out[2][0], out[2][1], 0.0f});
         }
     }
 
@@ -118,12 +123,13 @@ namespace {
             inputs.push_back(GpuVec4{random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f), random.between(0.0f, 5.0f), random.between(-1.0f, 5.0f)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAA_REPROJECTION, inputs, 8, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAA_REPROJECTION, inputs, 8, 3);
         const FloatTolerance pixelTolerance{.absolute = 1e-2f, .relative = 1e-4f};
+        const FloatTolerance ndcTolerance{.absolute = 1e-5f, .relative = 1e-4f};
 
-        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
             const GpuVec4* in = &inputs[i * 8];
-            const GpuVec4* out = &outputs[i * 2];
+            const GpuVec4* out = &outputs[i * 3];
             const Reprojected found = reprojectPixel(reprojections[i], Vec2{in[4][0], in[4][1]}, in[4][2], Vec2{in[5][0], in[5][1]});
             const Vec2 motion = objectMotion(Vec4{in[6][0], in[6][1], in[6][2], in[6][3]}, Vec4{in[7][0], in[7][1], in[7][2], in[7][3]});
             report.check("reprojectPixel valid", exactTolerance, found.valid ? 1.0f : 0.0f, out[0][2]);
@@ -133,6 +139,11 @@ namespace {
             }
 
             report.check("objectMotion", transcendentalTolerance, Vec3{motion.x, motion.y, 0.0f}, Vec3{out[1][0], out[1][1], 0.0f});
+
+            if (found.valid && out[0][2] > 0.5f) {
+                const Vec2 camera = cameraMotion(reprojections[i], Vec2{in[4][0], in[4][1]}, in[4][2], Vec2{in[5][0], in[5][1]});
+                report.check("cameraMotion", ndcTolerance, Vec3{camera.x, camera.y, 0.0f}, Vec3{out[2][0], out[2][1], 0.0f});
+            }
         }
     }
 }

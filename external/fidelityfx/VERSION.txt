@@ -1,0 +1,8 @@
+AMD FidelityFX SDK v1.1.4 (May 2025), https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
+The FidelityFX API's headers (ffx-api/include/ffx_api, the upscaler's, the frame generation ones they include, and the
+Vulkan backend's; the DirectX 12 ones left out), the licence (MIT), and AMD's prebuilt, signed amd_fidelityfx_vk.dll
+(PrebuiltSignedDLL, FSR 3.1.4; file version 1.0.1.41314, signed by Advanced Micro Devices), all unmodified.
+v1.1.x is the SDK's last line with a Vulkan backend: SDK 2.x (FSR 4) is DirectX 12 only.
+The game loads the DLL at run time (render/vulkan/vulkan_fsr.cpp); the makefile copies it beside each build's exe. It
+imports Microsoft's C++ runtime (MSVCP140, VCRUNTIME140), present on most Windows PCs; without it FSR is unavailable.
+To update: copy the same files from a newer v1.1.x tag and note it here.

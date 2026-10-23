@@ -51,6 +51,10 @@ public:
     bool supportsRayQueries() const;
     std::uint32_t getScratchAlignment() const;
 
+    // Whether the features FSR 3.1's shaders use are on (16-bit floats and integers, storage images read and written
+    // without a declared format; render/vulkan/vulkan_fsr.h). On when the GPU has them; without them FSR stays off.
+    bool supportsFsrFeatures() const;
+
     // Each memory heap's numbers from VMA (see render/gpu/video_memory.h). The driver's figures are fetched again when
     // startMemoryFrame is called, once a frame.
     std::vector<HeapMemory> getHeapMemory() const;
@@ -102,6 +106,7 @@ private:
     bool swapchainColourSpaces = false;
     bool memoryBudget = false;
     bool rayQueries = false;
+    bool fsrFeatures = false;
     std::uint32_t scratchAlignment = 1;
     bool debugUtils = false;
     std::uint32_t timestampValidBits = 0;

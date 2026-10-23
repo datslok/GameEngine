@@ -1,0 +1,36 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The camera motion pass (render/gpu/taa.h, cameraMotion): the velocity pass drew only the objects that moved, leaving
+* "no motion" everywhere else, which the engine's own resolve reprojects from depth. FSR wants a motion in every pixel,
+* so each pixel still at "no motion" gets the camera's, from its depth and the reprojection between the two frames.
+*/
+#include "taa.glsl"
+
+layout(local_size_x = TAA_GROUP_SIDE, local_size_y = TAA_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform sampler2D sceneDepth; // at the render size, exact texels
+layout(set = 0, binding = 1, rg16f) uniform image2D velocity;
+
+// Must match GpuMotionFillPass.
+layout(push_constant) uniform Pass {
+    mat4 reprojection;
+    vec4 size; // xy: the render screen in pixels
+} pass;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (texel.x >= int(pass.size.x) || texel.y >= int(pass.size.y)) {
+        return;
+    }
+
+    vec2 motion = imageLoad(velocity, texel).xy;
+
+    if (motion.x > TAA_NO_MOTION_TEST) {
+        vec2 pixel = vec2(texel) + 0.5;
+        motion = cameraMotion(pass.reprojection, pixel, texelFetch(sceneDepth, texel, 0).r, pass.size.xy);
+        imageStore(velocity, texel, vec4(motion, 0.0, 0.0));
+    }
+}

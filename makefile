@@ -78,12 +78,21 @@ SHADER_BINARIES := $(addsuffix .spv,$(SHADER_SOURCES))
 GPU_TEST_SHADER_SOURCES := $(wildcard tests/gpu/shaders/*.comp)
 GPU_TEST_SHADER_BINARIES := $(addsuffix .spv,$(GPU_TEST_SHADER_SOURCES))
 
+# AMD's FSR 3.1 (external/fidelityfx): the game loads its DLL at run time from beside the exe, so each build folder gets
+# a copy.
+FSR_DLL_SOURCE := external/fidelityfx/bin/amd_fidelityfx_vk.dll
+FSR_DLL := $(BUILD_DIR)/amd_fidelityfx_vk.dll
+
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
 .PHONY: all run test shaders clean release run-release test-release golden golden-save gputest gputest-release
 
-all: $(TARGET) shaders
+all: $(TARGET) $(FSR_DLL) shaders
+
+$(FSR_DLL): $(FSR_DLL_SOURCE)
+	@mkdir -p $(BUILD_DIR)
+	cp $< $@
 
 # Linking only joins the compiled objects, which takes a moment.
 $(TARGET): $(ENGINE_OBJECTS) $(MAIN_OBJECT)
@@ -150,7 +159,7 @@ tests/gpu/shaders/%.spv: tests/gpu/shaders/% $(MAKEFILE_PATH)
 GAME ?=
 GAME_OPTION := $(if $(GAME),--game $(GAME))
 
-run: $(TARGET) shaders
+run: $(TARGET) $(FSR_DLL) shaders
 	./$(TARGET) $(GAME_OPTION)
 
 test: $(TEST_TARGET) shaders
@@ -159,15 +168,15 @@ test: $(TEST_TARGET) shaders
 # Golden images (src/engine/golden.h): golden-save renders every game's fixed views as the references in
 # tests/golden/<GPU>/<game>/, golden compares fresh captures with them (captures and difference heatmaps go to
 # build/golden/<GPU>/<game>/). They need a GPU.
-golden: $(TARGET) shaders
+golden: $(TARGET) $(FSR_DLL) shaders
 	./$(TARGET) --golden-check $(GAME_OPTION)
 
-golden-save: $(TARGET) shaders
+golden-save: $(TARGET) $(FSR_DLL) shaders
 	./$(TARGET) --golden-save $(GAME_OPTION)
 
 # The GPU test tier (tests/gpu): every shader library's functions run in compute shaders on fixed inputs and compared
 # with their C++ mirrors, then the golden images. Needs a GPU, so it is not part of make test.
-gputest: $(GPU_TEST_TARGET) $(GPU_TEST_SHADER_BINARIES) $(TARGET) shaders
+gputest: $(GPU_TEST_TARGET) $(GPU_TEST_SHADER_BINARIES) $(TARGET) $(FSR_DLL) shaders
 	./$(GPU_TEST_TARGET)
 	./$(TARGET) --golden-check
 
@@ -186,4 +195,4 @@ gputest-release:
 	$(MAKE) BUILD=release gputest
 
 clean:
-	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)
+	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/amd_fidelityfx_vk.dll build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)

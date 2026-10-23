@@ -105,6 +105,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
+    fsr = std::make_unique<VulkanFsr>(device);
     createRayTracing();
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
@@ -507,6 +508,8 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     sceneColour = std::move(sceneReplacement);
     clusterMasks = std::move(masksReplacement);
     taa->ensureSize(width, height, scene);
+    fsr->ensureSize(width, height);
+    fsrHistory = false;
     frameWidth = width;
     frameHeight = height;
     sceneSize = scene;
@@ -865,10 +868,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Temporal anti-aliasing: the main pass, and everything drawn with it, moves by this frame's jitter; the motion
     // vectors and the reprojection use the camera without it, and last frame's camera made to take this frame's
-    // camera-relative points (or this frame's, when there is none).
+    // camera-relative points (or this frame's, when there is none). FSR, when it upscales, wants a longer cycle.
     const TaaSettings& antiAliasing = settings.taa;
+    frameUpscaler = antiAliasing.enabled ? activeUpscaler(settings.upscaling, fsr->isAvailable()) : Upscaler::Taa;
+    const std::uint32_t jitterPhases = frameUpscaler == Upscaler::Fsr ? jitterPhaseCount(sceneSize, frameWidth) : taaJitterFrames;
     motionViewProjection = relativeViewProjection;
-    const Vec2 jitter = antiAliasing.enabled && antiAliasing.jitter ? taaJitter(taaFrame) : Vec2{};
+    const Vec2 jitter = antiAliasing.enabled && antiAliasing.jitter ? taaJitter(taaFrame, jitterPhases) : Vec2{};
     relativeViewProjection = jitteredClip(relativeViewProjection, jitter, static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
 
     const Mat4 previousViewProjection = previousCamera.known
@@ -1051,21 +1056,45 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthRange);
     }
 
-    // The picture smoothed over frames, before anything reads it. Switched off, it starts afresh when switched on again.
+    // The picture smoothed over frames (and upscaled), before anything reads it: by FSR when it is the upscaler, after
+    // the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history while
+    // the other draws, and both start afresh when temporal anti-aliasing is switched on again. Both are timed as TAA.
     if (antiAliasing.enabled) {
         beginGpuPass(frame, GpuPass::Taa);
         const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
-        taa->resolve(frame.commands, frame.descriptors, sceneColour, depth,
-                     packTaaPass(reprojection, frameWidth, frameHeight, sceneSize, jitter, antiAliasing, previousCamera.known));
+        bool upscaledByFsr = false;
+
+        if (frameUpscaler == Upscaler::Fsr) {
+            taa->fillCameraMotion(frame.commands, frame.descriptors, depth, packMotionFillPass(reprojection, sceneSize));
+            const FsrFrameInputs inputs = makeFsrFrameInputs(sceneSize, frameWidth, frameHeight, jitter, description.frameSeconds,
+                                                             camera.getNearPlane(), camera.getFarPlane(), camera.getVerticalFov(),
+                                                             !fsrHistory || !previousCamera.known, settings.upscaling);
+            upscaledByFsr = fsr->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), inputs);
+        }
+
+        if (upscaledByFsr) {
+            taa->forgetHistory();
+            finishedScene = &fsr->getOutput();
+        } else {
+            frameUpscaler = Upscaler::Taa;
+            taa->resolve(frame.commands, frame.descriptors, sceneColour, depth,
+                         packTaaPass(reprojection, frameWidth, frameHeight, sceneSize, jitter, antiAliasing, previousCamera.known));
+            finishedScene = &taa->getResult();
+        }
+
         endGpuPass(frame, GpuPass::Taa);
+        fsrHistory = upscaledByFsr;
         previousCamera = PreviousCamera{motionViewProjection, cameraOrigin, true};
         ++taaFrame;
-        finishedScene = &taa->getResult();
     } else {
         taa->forgetHistory();
+        fsrHistory = false;
         previousCamera.known = false;
         finishedScene = &sceneColour;
     }
+
+    stats.upscaler = frameUpscaler;
+    stats.renderScale = appliedRenderScale(settings.upscaling, antiAliasing.enabled);
 
     // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
     // mapping. Switched off, it starts afresh when switched on again.
@@ -1152,7 +1181,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                                    illumination.bounceEnergy, illumination.lightsPerHit, hitLights.points, hitLights.spots});
     }
 
-    frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth);
+    frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth, frameUpscaler);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1553,6 +1582,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     const int framesBefore = std::max(tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0),
                                       settings.taa.enabled ? taaSettleFrames : 0);
     taa->forgetHistory();
+    fsrHistory = false;
     previousCamera.known = false;
     taaFrame = 0;
 

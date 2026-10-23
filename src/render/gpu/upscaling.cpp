@@ -4,14 +4,28 @@
 #include <cmath>
 #include <stdexcept>
 
-void visit(UpscalingSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Render scale", settings.renderScale, {.min = minRenderScale, .max = 1.0f});
+namespace {
+    // AMD's recommended mip bias for FSR is a level sharper than the scale's own.
+    constexpr float fsrExtraLodBias = -1.0f;
+
+    // FSR's jitter cycle at full size, growing with the square of the upscaling.
+    constexpr double fsrBasePhaseCount = 8.0;
 }
 
-// Written so not a number fails it too.
+void visit(UpscalingSettings& settings, SettingsVisitor& visitor) {
+    visitor.choice("Upscaler", settings.upscaler, upscalerNames);
+    visitor.field("Render scale", settings.renderScale, {.min = minRenderScale, .max = 1.0f});
+    visitor.field("FSR sharpness", settings.sharpness, {.min = 0.0f, .max = 1.0f});
+}
+
+// Written so not a number fails them too.
 void validateUpscaling(const UpscalingSettings& settings) {
     if (!(settings.renderScale >= minRenderScale && settings.renderScale <= 1.0f)) {
         throw std::invalid_argument("Upscaling needs a render scale from 0.33 to 1");
+    }
+
+    if (!(settings.sharpness >= 0.0f && settings.sharpness <= 1.0f)) {
+        throw std::invalid_argument("Upscaling needs a sharpness from 0 to 1");
     }
 }
 
@@ -30,11 +44,47 @@ float appliedRenderScale(const UpscalingSettings& settings, bool temporalAntiAli
     return temporalAntiAliasing ? settings.renderScale : 1.0f;
 }
 
+Upscaler activeUpscaler(const UpscalingSettings& settings, bool fsrAvailable) {
+    return settings.upscaler == Upscaler::Fsr && fsrAvailable ? Upscaler::Fsr : Upscaler::Taa;
+}
+
 // From the sizes as rounded, so the bias matches the pixels actually drawn.
-float textureLodBias(RenderSize render, std::uint32_t outputWidth) {
+float textureLodBias(RenderSize render, std::uint32_t outputWidth, Upscaler upscaler) {
+    const float extra = upscaler == Upscaler::Fsr ? fsrExtraLodBias : 0.0f;
+
     if (render.width == outputWidth || outputWidth == 0) {
-        return 0.0f;
+        return extra;
     }
 
-    return std::log2(static_cast<float>(render.width) / static_cast<float>(outputWidth));
+    return std::log2(static_cast<float>(render.width) / static_cast<float>(outputWidth)) + extra;
+}
+
+// In doubles, so exact ratios (2, 3) give exact counts rather than one more from rounding.
+std::uint32_t jitterPhaseCount(RenderSize render, std::uint32_t outputWidth) {
+    const double ratio = static_cast<double>(std::max(outputWidth, std::uint32_t{1})) / static_cast<double>(std::max(render.width, std::uint32_t{1}));
+    return static_cast<std::uint32_t>(std::ceil(fsrBasePhaseCount * ratio * ratio));
+}
+
+/*
+* FSR reads a motion vector m as m times the scale, in render pixels from where the pixel is now to where it was. Ours
+* is NDC now minus NDC then; a pixel is 2 / width of NDC across and counts down the screen while NDC y counts up, so
+* the step back in pixels is -m.x width / 2 across and +m.y height / 2 down. With reversed-Z, FSR names the planes by
+* the depths they hold: the far plane, at depth 0, is its "near" (it sorts them itself, but its checks warn otherwise).
+*/
+FsrFrameInputs makeFsrFrameInputs(RenderSize render, std::uint32_t outputWidth, std::uint32_t outputHeight, Vec2 jitter, float frameSeconds,
+                                  float cameraNear, float cameraFar, float verticalFov, bool reset, const UpscalingSettings& settings) {
+    FsrFrameInputs inputs;
+    inputs.renderSize = render;
+    inputs.outputWidth = outputWidth;
+    inputs.outputHeight = outputHeight;
+    inputs.jitter = jitter;
+    inputs.motionVectorScale = Vec2{-0.5f * static_cast<float>(render.width), 0.5f * static_cast<float>(render.height)};
+    inputs.frameMilliseconds = frameSeconds * 1000.0f;
+    inputs.sharpen = settings.sharpness > 0.0f;
+    inputs.sharpness = settings.sharpness;
+    inputs.cameraNear = cameraFar;
+    inputs.cameraFar = cameraNear;
+    inputs.verticalFov = verticalFov;
+    inputs.reset = reset;
+    return inputs;
 }

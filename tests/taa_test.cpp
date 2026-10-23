@@ -50,6 +50,15 @@ namespace {
 
         assert(taaJitter(taaJitterFrames).x == taaJitter(0).x && taaJitter(taaJitterFrames + 3).y == taaJitter(3).y);
         assert(std::abs(sum.x / taaJitterFrames) < 0.05f && std::abs(sum.y / taaJitterFrames) < 0.05f);
+
+        // A cycle of another length: the same Halton points, repeating after it, never the corner (index 0).
+        for (std::uint64_t frame = 0; frame < 40; ++frame) {
+            const Vec2 longer = taaJitter(frame, 32);
+            assert(longer.x == taaJitter(frame % 32, 32).x && longer.y == taaJitter(frame + 32, 32).y);
+            assert(longer.x != -0.5f || longer.y != -0.5f);
+        }
+
+        assert(taaJitter(5, taaJitterFrames).x == taaJitter(5).x && taaJitter(20, 32).x != taaJitter(20).x);
     }
 
     // Pixels count from the top-left corner, as the flipped viewport draws: NDC (-1, 1) is that corner, y down the screen.
@@ -119,6 +128,22 @@ namespace {
                                                previousRelativeViewProjection(cameraRelativeViewProjection(turned), turned.getPosition(), ahead.getPosition()));
         const Vec3 seen = pixelAndDepth(cameraRelativeViewProjection(ahead), Vec3{0.0f, 1.7f, -5.0f}, ahead.getPosition(), size);
         assert(!reprojectPixel(backwards, Vec2{seen.x, seen.y}, seen.z, size).valid);
+
+        // The camera's motion at a pixel, as the velocity image holds it (this frame's NDC minus last frame's): none
+        // for a still camera, the point's own step for a moved one, none for a point last frame's camera did not see.
+        const Vec2 stillMotion = cameraMotion(unmoved, Vec2{100.0f, 200.0f}, 0.3f, size);
+        assert(stillMotion.x == 0.0f && stillMotion.y == 0.0f);
+
+        for (const Vec3& point : {Vec3{1000.0f, 1.0f, 0.0f}, Vec3{1003.0f, 0.0f, -20.0f}}) {
+            const Vec3 now = pixelAndDepth(currentMatrix, point, current.getPosition(), size);
+            const Vec3 before = pixelAndDepth(previousMatrix, point, previous.getPosition(), size);
+            const Vec2 motion = cameraMotion(reprojection, Vec2{now.x, now.y}, now.z, size);
+            const Vec2 expected = pixelToNdc(Vec2{now.x, now.y}, size) - pixelToNdc(Vec2{before.x, before.y}, size);
+            assert(near(motion.x, expected.x, 1e-4f) && near(motion.y, expected.y, 1e-4f));
+        }
+
+        const Vec2 unseen = cameraMotion(backwards, Vec2{seen.x, seen.y}, seen.z, size);
+        assert(unseen.x == 0.0f && unseen.y == 0.0f);
     }
 
     // An object's motion (this frame's NDC minus last frame's) turned into the pixel it covered last frame.
@@ -284,6 +309,10 @@ namespace {
 
         const GpuMotionView view = packMotionView(Mat4::translation(4.0f, 0.0f, 0.0f), Mat4::translation(0.0f, 5.0f, 0.0f));
         assert(view.current[12] == 4.0f && view.previous[13] == 5.0f);
+
+        // The camera motion pass: the reprojection and the render screen it walks.
+        const GpuMotionFillPass fill = packMotionFillPass(reprojection, RenderSize{320, 180});
+        assert(fill.reprojection[12] == 1.0f && fill.size[0] == 320.0f && fill.size[1] == 180.0f);
     }
 }
 
