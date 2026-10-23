@@ -40,6 +40,27 @@ enum class Upscaler {
 // In the order of Upscaler's values.
 inline constexpr std::array<const char*, 4> upscalerNames{"Off", "TAA", "FSR 3.1", "DLSS"};
 
+/*
+* NVIDIA's DLSS models (Streamline's presets). Default lets DLSS pick per mode (the transformer model K for DLAA,
+* Quality and Balanced, M for Performance, L for Ultra performance). NVIDIA's notes: J ghosts a little less than K but
+* flickers more; L ghosts less than J and K, sharper and steadier but slower; M is like L, closer to J and K in speed.
+* K trailed at the edge of the flashlight's beam (the light moves with the camera, so the surface's history carries the
+* old edge), where FSR and TAA did not.
+*/
+enum class DlssModel {
+    Default,
+    J,
+    K,
+    L,
+    M
+};
+
+// In the order of DlssModel's values.
+inline constexpr std::array<const char*, 5> dlssModelNames{"Default", "J", "K", "L", "M"};
+
+// Streamline's number for the model (sl::DLSSPreset): 0 for its default, 10 to 13 for J to M.
+std::uint32_t dlssPresetNumber(DlssModel model);
+
 // Which of the vendors' upscalers this PC can run (their libraries loaded, the GPU able).
 struct UpscalerSupport {
     bool fsr = false;
@@ -58,6 +79,10 @@ struct UpscalingSettings {
     // FSR's sharpening after it upscales (RCAS, robust contrast-adaptive sharpening): 0 for none, up to 1. 0.8 by
     // default (the user's choice on Oct 23 2026; it was 0.5). DLSS and TAA do not read it.
     float sharpness = 0.8f;
+
+    // The model DLSS runs, in every mode. M by default: it trailed least at the flashlight beam's edge, by the user's
+    // eye (Oct 23 2026), where Default (K at DLAA) trailed.
+    DlssModel dlssModel = DlssModel::M;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
@@ -187,7 +212,8 @@ struct DlssFrameInputs {
     std::array<float, 16> prevClipToClip{};
     DlssCamera camera;
     bool reset = false;
+    std::uint32_t preset = 0; // the model, as Streamline numbers it (dlssPresetNumber)
 };
 
 DlssFrameInputs makeDlssFrameInputs(RenderSize render, std::uint32_t outputWidth, std::uint32_t outputHeight, Vec2 jitter, const Mat4& viewToClip,
-                                    const Mat4& reprojection, const DlssCamera& camera, bool reset);
+                                    const Mat4& reprojection, const DlssCamera& camera, bool reset, DlssModel model);

@@ -41,6 +41,10 @@ struct StreamlineFunctions {
     PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
 };
 
+// dlssPresetNumber (render/gpu/upscaling.h) numbers the models as Streamline does, without including its headers.
+static_assert(static_cast<std::uint32_t>(sl::DLSSPreset::eDefault) == 0 && static_cast<std::uint32_t>(sl::DLSSPreset::ePresetJ) == 10 &&
+              static_cast<std::uint32_t>(sl::DLSSPreset::ePresetM) == 13, "DlssModel must match Streamline's DLSSPreset numbers");
+
 namespace {
     // The engine's own id for NVIDIA's records (any fixed GUID identifies a custom engine's project).
     constexpr const char* projectId = "a0f57b54-1daf-4934-90ae-c4035c19df04";
@@ -425,6 +429,14 @@ bool VulkanDlss::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanI
     options.outputHeight = inputs.outputHeight;
     options.colorBuffersHDR = sl::Boolean::eTrue;
     options.useAutoExposure = sl::Boolean::eTrue;
+    // The chosen model in every mode, so a custom scale's nearest mode runs it too; DLSS rebuilds itself on a change.
+    const sl::DLSSPreset preset = static_cast<sl::DLSSPreset>(inputs.preset);
+    options.dlaaPreset = preset;
+    options.qualityPreset = preset;
+    options.balancedPreset = preset;
+    options.performancePreset = preset;
+    options.ultraPerformancePreset = preset;
+    options.ultraQualityPreset = preset;
 
     if (setOptions == nullptr || functions->setConstants(constants, *frame, viewport) != sl::Result::eOk ||
         reinterpret_cast<PFun_slDLSSSetOptions*>(setOptions)(viewport, options) != sl::Result::eOk) {

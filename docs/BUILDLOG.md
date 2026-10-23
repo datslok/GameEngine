@@ -844,6 +844,13 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Captures** draw 32 frames first (two jitter cycles), restarting the history and the cycle, so golden images repeat exactly. Golden images were not run or saved in this branch (only on request): every view's final image will change.
   - **Checked:** the tests (debug and release), and the validation layers in the light lab and the demo (no messages). The GPU test cases for `taa.glsl` are written and built, not run (only on request).
 
+- `dlss-model` (Oct 23 2026): the user saw a trail at the edge of the flashlight's beam with DLSS, not with FSR or TAA.
+  - **Why:** the flashlight moves with the camera, so its beam stays put on screen while the surfaces slide under it; the motion vectors rightly carry each surface's history along, old beam edge included, and only a check that the history no longer fits throws it away. TAA's clip into the neighbours' colour box does that; DLSS's transformer model K (its default for DLAA) holds history more strongly.
+  - **First step, chosen as the cheapest:** a setting for the DLSS model in every mode (`UpscalingSettings::dlssModel`: Default, J, K, L, M), to judge by eye. NVIDIA's notes: J ghosts a little less than K but flickers more, L less than J and K but costs more, M like L, closer to J and K in speed.
+  - **The user's verdict:** M worked best, so it is the default.
+  - **If it ever trails again:** a mask telling DLSS to favour this frame where fast lights shine (Streamline's `BiasCurrentColor`; FSR's reactive mask is the same idea).
+  - **Checked:** the tests (debug and release; tests first), and the light lab with the validation layers on each model (no messages).
+
 - `taa-choice` (Oct 23 2026): the user asked for TAA to switch off by itself with FSR or DLSS on.
   - **What ran already:** with FSR or DLSS active the engine's resolve was already skipped; the jitter and velocity pass still run, as both need them. But the TAA checkbox was a master switch (off turned FSR and DLSS off too), and F5 showed TAA on beside DLSS.
   - **Chosen with the user:** one choice instead of two settings, "Anti-aliasing" in the Upscaling group: Off, TAA, FSR 3.1 or DLSS (`Upscaler::Off` added, `TaaSettings::enabled` removed, `temporalAntiAliasing`). Keeping both and decoupling them was weighed: a smaller change, but two settings for one thing. TAA's tuning moved to its own group, TAA. The F4 readout says NO ANTI-ALIASING when off.
