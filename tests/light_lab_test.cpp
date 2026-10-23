@@ -56,7 +56,8 @@ namespace {
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
 
         // The ground, the towers, fence, trees, building, the street, its windows and its bulbs' glow (static, and
-        // visual only, so they neither block nor wake the probes), the polished slab and the mirror ball.
+        // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror) and the
+        // mirror ball.
         assert(staticModels == 10);
         assert(others > 0);
     }
@@ -67,8 +68,8 @@ namespace {
     */
     void testTheReflectionCorner() {
         const LightLabLayout layout = buildLightLabLayout();
-        assert(layout.reflectionCorner.size() == 1);
-        const LabBlock& slab = layout.reflectionCorner[0];
+        assert(layout.reflectors.size() == 2);
+        const LabBlock& slab = layout.reflectors[0];
         assert(slab.surface == LabSurface::Polished);
 
         const Aabb bounds = slab.bounds();
@@ -911,9 +912,29 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The mirror: hung on the sunlit room's south wall, facing the doorway from the back room across the room, as wide
+    * as the doorway is and wider, thin, and clear of the floor and ceiling.
+    */
+    void testTheMirror() {
+        const LightLabLayout layout = buildLightLabLayout();
+        const LabBlock& mirror = layout.reflectors[1];
+        assert(mirror.surface == LabSurface::Mirror);
+
+        const Aabb bounds = mirror.bounds();
+        assert(near(bounds.maximum.z, labSunlitRoom.maximum.z, 1e-5f) && bounds.maximum.z - bounds.minimum.z < 0.05f);
+        assert(near((bounds.minimum.x + bounds.maximum.x) * 0.5f, (labInnerDoorway.minimum.x + labInnerDoorway.maximum.x) * 0.5f, 1e-4f));
+        assert(bounds.maximum.x - bounds.minimum.x > labInnerDoorway.maximum.x - labInnerDoorway.minimum.x);
+        assert(bounds.minimum.x > labSunlitRoom.minimum.x && bounds.maximum.x < labSunlitRoom.maximum.x);
+        assert(bounds.minimum.y > labFloorTop && bounds.maximum.y < labRoomHeight);
+    }
+}
+
 void testLightLab() {
     testTheLevelIsStatic();
     testTheReflectionCorner();
+    testTheMirror();
     testTheLabsFlashlight();
     testTheBackRoomLamp();
     testTheStreetLights();

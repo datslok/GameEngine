@@ -16,7 +16,7 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
 
 - `EngineSettings` (`engine/engine_settings.h`) is owned by `Application` (constructor argument, `getSettings()`). Its fields:
   - `ticksPerSecond` 120 and `maxFrameSeconds` 0.25, both read only at start-up;
-  - `targetFPS` 240, 0 = unlimited;
+  - `targetFPS` 120, 0 = unlimited;
   - `presentMode`, applied when it changes;
   - `framesInFlight` (2), applied when it changes;
   - `gpuValidation`, read at start-up and passed to the renderer's constructor (Vulkan's validation layers when installed; MSYS2's, which the makefile points the loader at; see VulkanRenderer). It defaults to `isDebugBuild` from `core/build_info.h`, which the makefile sets by defining `ENGINE_DEBUG_BUILD` in debug builds only;
@@ -2108,7 +2108,7 @@ Reflections in reflections build up a bounce a frame, since last frame's picture
 | `probeFar` | 300 m | how far the probe's capture sees |
 | `showConfidence` | off | the debug view: white where screen-space reflections are trusted, blue where the probe is |
 
-Timed as SSR (`GpuPass::Reflections`), between the probe's capture and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) is the place to judge them.
+Timed as SSR (`GpuPass::Reflections`), between the probe's capture and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) and the sunlit room's mirror facing the doorway (`labMirror`) are the places to judge them.
 
 ## Reflection probe
 

@@ -21,7 +21,7 @@ struct EngineSettings {
 
     // With mailbox presentation the loop is no longer held back by vsync, so this cap sets the real frame rate.
     // 0 means unlimited. Read every frame.
-    std::uint64_t targetFPS = 240;
+    std::uint64_t targetFPS = 120;
 
     // Low latency without tearing. Falls back to vsync on GPUs without mailbox support. Applied whenever it changes.
     PresentMode presentMode = PresentMode::Mailbox;

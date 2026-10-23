@@ -92,4 +92,4 @@ Notes for upcoming work:
 
 ## Known small issues and ideas
 
-- Latency: the renderer allows two frames in flight by default (`EngineSettings::framesInFlight`, 1 for the least latency, switchable live), and `Application` requests `PresentMode::Mailbox` (falls back to vsync if unsupported), so `EngineSettings::targetFPS` (240) is the real frame cap. `PresentMode::Immediate` is lower latency still but tears.
+- Latency: the renderer allows two frames in flight by default (`EngineSettings::framesInFlight`, 1 for the least latency, switchable live), and `Application` requests `PresentMode::Mailbox` (falls back to vsync if unsupported), so `EngineSettings::targetFPS` (120) is the real frame cap. `PresentMode::Immediate` is lower latency still but tears.
