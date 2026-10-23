@@ -31,6 +31,9 @@ namespace {
     // The window (1 - (d / range)^4)^2 reaches exactly 0 at the range and stays there, and the light only ever dims with distance.
     void testWindowEndsAtTheRange() {
         assert(distanceFalloff(10.0f, 10.0f, 1.0f) == 0.0f);
+        assert(rangeWindow(10.0f, 10.0f) == 0.0f && rangeWindow(15.0f, 10.0f) == 0.0f && rangeWindow(0.0f, 10.0f) == 1.0f);
+        assert(nearlyEqual(rangeWindow(5.0f, 10.0f), 1.0f - 0.0625f));
+        assert(distanceFalloff(5.0f, 10.0f, 1.0f) == rangeWindow(5.0f, 10.0f) * rangeWindow(5.0f, 10.0f) / 26.0f);
         assert(distanceFalloff(15.0f, 10.0f, 1.0f) == 0.0f);
 
         float previous = distanceFalloff(0.0f, 10.0f, 1.0f);

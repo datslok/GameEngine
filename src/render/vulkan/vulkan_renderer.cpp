@@ -430,6 +430,10 @@ void VulkanRenderer::createRayTracing() {
     // Reflections tracing each mirror ray, reading the scene's sets and the ray tracing set before their own.
     reflections->enableRayTracing(bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), rayTracing->getSetLayout());
 
+    // Lights reflected off mirrors, found by rays from what the depth prepass drew, before the main pass shades them.
+    mirroredLights = std::make_unique<VulkanMirroredLights>(device, nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout(),
+                                                            rayTracing->getSetLayout(), framesInFlight);
+
     // The reflection probe's capture tracing the sun's shadow past its cascades: the scene's sets and the ray tracing
     // set, and the scene's push constants (each face's view-projection).
     const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
@@ -599,6 +603,11 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
     reflections->ensureSize(scene);
+
+    if (mirroredLights && mirroredLights->hasImages()) {
+        mirroredLights->ensureSize(scene);
+    }
+
     fsrHistory = false;
     dlssHistory = false;
     previousPictureUsable = false;
@@ -1090,10 +1099,27 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         stats.probes = countProbeStates(ddgi->getProbeStates());
     }
 
+    // Lights reflected off mirrors (render/gpu/mirrored_light.h): each fast light with each smooth shiny surface it
+    // reaches, the light found by rays from what the depth prepass drew. Its images are made the first time (nothing
+    // reads them before), and remade with the frame's size after that.
+    validateMirroredLights(settings.mirroredLights);
+    const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
+    std::vector<MirrorPair> mirrorPairs;
+
+    if (mirroredLights && settings.mirroredLights.enabled && settings.depthPrepass && inverseViewProjection) {
+        mirrorPairs = chooseMirrorPairs(lights, description.draws, cameraOrigin, settings.mirroredLights);
+    }
+
+    const bool mirrorLight = !mirrorPairs.empty();
+
+    if (mirrorLight && !mirroredLights->hasImages()) {
+        mirroredLights->ensureSize(sceneSize);
+    }
+
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, settings, probes,
-                                                hitLights);
+                                                hitLights, mirrorLight);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1102,13 +1128,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
-    // probes, the debug view, the reflection probe's capture or ray-traced reflections.
+    // probes, the debug view, the reflection probe's capture, ray-traced reflections or mirrored lights.
     const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
 
     const bool captureTracesRays = captureProbe && rayTracing;
     const bool reflectionsTraceRays = screenReflections && settings.reflections.rayTraced && reflections->tracesRays();
 
-    if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays) {
+    if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays || mirrorLight) {
         beginGpuPass(frame, GpuPass::RayScene);
         rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
         endGpuPass(frame, GpuPass::RayScene);
@@ -1148,6 +1174,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::DepthPrepass);
         drawDepthPrepass(frame, mainDraws, sceneSet);
         endGpuPass(frame, GpuPass::DepthPrepass);
+    }
+
+    if (mirrorLight) {
+        beginGpuPass(frame, GpuPass::MirroredLights);
+        const MirroredLightSets mirrorSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
+        mirroredLights->light(frame.commands, frame.descriptors, frame.frameIndex, depth,
+                              packMirroredLightPass(*inverseViewProjection, sceneSize, mirrorPairs), mirrorSets);
+        endGpuPass(frame, GpuPass::MirroredLights);
     }
 
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
@@ -1198,7 +1232,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The reflections, into the scene image before it is smoothed: the probe's, and the screen's from last frame's
     // finished picture (still what finishedScene points at), which there is none of on the first frame, after a
     // resize, or after a frame without anti-aliasing.
-    const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
     const bool screenSpace = settings.reflections.screenSpace && previousPictureUsable && previousCamera.known;
     const bool probeReady = captureProbe && reflectionProbe->hasCapture();
 
@@ -1325,7 +1358,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
                                            const BatchedDraws& motionDraws, std::span<const BatchedDraws> captureDraws, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
-                                           const ProbeHitLights& hitLights) {
+                                           const ProbeHitLights& hitLights, bool mirrorLight) {
     MaterialTable materials;
     std::vector<GpuInstance> instances;
     std::vector<std::array<float, 16>> previousModels;
@@ -1368,6 +1401,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
 
     frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth, frameUpscaler);
     frameData.textureOptions[1] = settings.normalMapFiltering ? 1.0f : 0.0f;
+    frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1390,6 +1424,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         !probes.empty() ? ddgi->sampledDistance() : sampled(*noProbesTexture),
         !probes.empty() ? ddgi->sampledFastIrradiance() : sampled(*noProbesTexture),
         description.lighting.atmosphere ? atmosphere->sampledSkyView() : sampled(*noProbesTexture),
+        mirrorLight ? mirroredLights->sampledLight() : sampled(*noProbesTexture),
+        mirrorLight ? mirroredLights->sampledDirection() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2125,6 +2161,10 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
 
     if (rayTracing) {
         rayTracing->setFramesInFlight(count);
+    }
+
+    if (mirroredLights) {
+        mirroredLights->setFramesInFlight(count);
     }
 
     // A frame in flight that is no more would never come round to read the probes' relocation it asked for.

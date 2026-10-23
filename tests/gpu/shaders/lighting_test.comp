@@ -13,7 +13,7 @@ void main() {
     vec4 a = testInput(0);
 
     if (function == GPU_TEST_DISTANCE_FALLOFF) {
-        testOutput(0, vec4(distanceFalloff(a.x, a.y, a.z)));
+        testOutput(0, vec4(distanceFalloff(a.x, a.y, a.z), rangeWindow(a.x, a.y), 0.0, 0.0));
     } else if (function == GPU_TEST_SPOT_CONE) {
         testOutput(0, vec4(spotCone(a.x, a.y, a.z)));
     } else if (function == GPU_TEST_POINT_SHADOW_FACE) {

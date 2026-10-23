@@ -5,13 +5,18 @@
 #ifndef LIGHTING_GLSL
 #define LIGHTING_GLSL
 
+// The window that ends a light at its range: 1 - (distance / range)^4, clamped to 0..1.
+float rangeWindow(float distance, float range) {
+    float ratio = distance / range;
+    return clamp(1.0 - ratio * ratio * ratio * ratio, 0.0, 1.0);
+}
+
 /*
 * Inverse square falloff, softened near the light by the size of its source (a point light uses 1, which keeps it finite at the light),
 * times a window that reaches exactly 0 at range with no visible edge.
 */
 float distanceFalloff(float distance, float range, float sourceRadius) {
-    float ratio = distance / range;
-    float window = clamp(1.0 - ratio * ratio * ratio * ratio, 0.0, 1.0);
+    float window = rangeWindow(distance, range);
     return window * window / (distance * distance + sourceRadius * sourceRadius);
 }
 

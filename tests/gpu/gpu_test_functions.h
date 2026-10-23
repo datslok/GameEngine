@@ -127,4 +127,7 @@
 #define GPU_TEST_PROBE_PARALLAX 1
 #define GPU_TEST_PROBE_LEVELS 2
 
+// mirrored_light_test.comp
+#define GPU_TEST_MIRROR 0
+
 #endif

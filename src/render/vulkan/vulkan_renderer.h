@@ -39,6 +39,7 @@
 #include "render/vulkan/vulkan_overlay.h"
 #include "render/vulkan/vulkan_pipeline.h"
 #include "render/vulkan/vulkan_ray_tracing.h"
+#include "render/vulkan/vulkan_mirrored_light.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
 #include "render/vulkan/vulkan_texture.h"
@@ -217,6 +218,9 @@ private:
     std::unique_ptr<VulkanReflections> reflections;
     bool previousPictureUsable = false;
 
+    // Lights reflected off mirrors (render/gpu/mirrored_light.h): null without ray queries.
+    std::unique_ptr<VulkanMirroredLights> mirroredLights;
+
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag). On GPUs with ray queries they trace the sun's shadow past
     // its cascades (probe_capture_rays.frag), in a layout with the ray tracing set as set 2.
@@ -363,10 +367,11 @@ private:
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
+    // mirrorLight: whether the mirrored light pass runs this frame, so the main pass reads its images.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights);
+                               const ProbeHitLights& hitLights, bool mirrorLight);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;

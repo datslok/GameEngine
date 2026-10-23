@@ -41,6 +41,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the atmosphere
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex | fragment | compute}, // the probes' cascades (vertex for the debug balls)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // last frame's model matrices (the velocity pass)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the light mirrors reflect onto each pixel
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the way it arrives
     }};
 }
 
@@ -159,6 +161,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         buffers.atmosphere.describe(),
         views.probeCascades,
         buffers.previousModels.describe(),
+        VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -170,6 +174,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[ProbeDistanceBinding] = imageInfo(images.probeDistance);
     imageInfos[ProbeFastIrradianceBinding] = imageInfo(images.probeFastIrradiance);
     imageInfos[SkyViewBinding] = imageInfo(images.skyView);
+    imageInfos[MirroredLightBinding] = imageInfo(images.mirroredLight);
+    imageInfos[MirroredDirectionBinding] = imageInfo(images.mirroredDirection);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

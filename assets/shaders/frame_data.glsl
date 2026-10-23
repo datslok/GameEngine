@@ -21,6 +21,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     ivec4 probeAtlas;            // xy: the probe atlases' columns and rows, w: how many cascades
     ivec4 probeLights;           // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
     vec4 textureOptions;         // x: the surface textures' mip bias, sharper while the frame is drawn below the output's size, y: 1 filters normal maps (Toksvig)
+    ivec4 mirroredLightOptions;  // x: 1 when the main pass adds the light mirrors reflect (mirrored_light.comp)
 };
 
 #endif
