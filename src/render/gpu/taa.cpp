@@ -158,6 +158,14 @@ float taaCurrentShare(float currentWeight, float nearestSampleWeight) {
     return currentWeight * nearestSampleWeight;
 }
 
+/*
+* A reactive share r of the pixel is the glass's own light, which the history (reprojected as the surface behind moved)
+* does not hold, so that part comes from this frame alone; the rest blends as usual. r = 1 drops the history.
+*/
+float taaReactiveShare(float currentShare, float reactive) {
+    return currentShare + (1.0f - currentShare) * reactive;
+}
+
 Vec3 toYCoCg(const Vec3& rgb) {
     return Vec3{0.25f * rgb.x + 0.5f * rgb.y + 0.25f * rgb.z, 0.5f * rgb.x - 0.5f * rgb.z, -0.25f * rgb.x + 0.5f * rgb.y - 0.25f * rgb.z};
 }

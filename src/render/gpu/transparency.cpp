@@ -1,6 +1,8 @@
 #include "render/gpu/transparency.h"
 
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 #include <utility>
 
 TransparentLight transparentBlend(float alpha, float transmission, float metallic, const Vec3& diffuseLight, const Vec3& specularLight,
@@ -71,4 +73,43 @@ SortedTransparentDraws sortTransparentDraws(const std::vector<DrawItem>& draws, 
 
 GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevels) {
     return GpuTransparentView{{readsProbe ? 1.0f : 0.0f, static_cast<float>(probeLevels), 0.0f, 0.0f}};
+}
+
+void visit(TransparencySettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Reactive mask", settings.reactiveMask);
+    visitor.field("Reactive scale", settings.reactiveScale, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f});
+    visitor.field("Reactive limit", settings.reactiveLimit, {.min = 0.0f, .max = 1.0f});
+}
+
+// The comparisons are written so not a number fails them too.
+void validateTransparency(const TransparencySettings& settings) {
+    if (!(settings.reactiveScale >= 0.0f)) {
+        throw std::invalid_argument("The reactive mask's scale must not be negative");
+    }
+
+    if (!(settings.reactiveLimit >= 0.0f && settings.reactiveLimit <= 1.0f)) {
+        throw std::invalid_argument("The reactive mask's limit must be within 0..1");
+    }
+}
+
+/*
+* Glass over a wall either takes light away (tint, the reflection's share of what passes) or adds it (its reflection,
+* its glow); either way the share of the brighter picture that changed is how much of the pixel is the glass's own, so
+* how little the history (which moved as the wall did) still fits.
+*/
+float reactiveShare(const Vec3& opaque, const Vec3& blended, float scale, float limit) {
+    const auto channelShare = [](float before, float after) {
+        before = std::max(before, 0.0f);
+        after = std::max(after, 0.0f);
+        return std::abs(after - before) / std::max(std::max(before, after), static_cast<float>(TRANSPARENCY_REACTIVE_FLOOR));
+    };
+
+    const float changed = std::max(channelShare(opaque.x, blended.x), std::max(channelShare(opaque.y, blended.y), channelShare(opaque.z, blended.z)));
+    return std::clamp(changed * scale, 0.0f, limit);
+}
+
+GpuReactivePass packReactivePass(RenderSize render, const TransparencySettings& settings) {
+    validateTransparency(settings);
+    return GpuReactivePass{{static_cast<float>(render.width), static_cast<float>(render.height), 0.0f, 0.0f},
+                           {settings.reactiveScale, settings.reactiveLimit, 0.0f, 0.0f}};
 }

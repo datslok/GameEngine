@@ -262,7 +262,10 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] glTF occlusion and emissive textures (`gltf-occlusion-emissive`)
 - [x] Cut-outs (glTF's alpha mask, with coverage-preserving mips) and double-sided materials, the light lab's chain-link fence (`alpha-mask`)
 - [x] Glass and blended surfaces: glTF's alpha blend and thin glass (KHR_materials_transmission) by dual-source blending, sorted per object, the light lab's window pane (`glass`)
-- [ ] Transparency, the rest: FSR's reactive mask and DLSS's hint for moving glass, tinted shadows through glass, refraction
+- [x] Glass under anti-aliasing: a reactive mask from the picture before and after the glass, read by TAA, FSR and DLSS (`transparency-motion`)
+- [ ] Tinted shadows through glass: a ray towards the sun and shadowed spot lights in the main pass that sees only glass, and glass tinting the light-gathering rays (probes, reflections, mirrored lights) instead of being skipped
+  - On GPUs with ray queries (the user's choice, Oct 24 2026); coloured shadow maps (a half-size transmittance atlas) could follow as the fallback without them.
+- [ ] Refraction: frosted glass (rough transmission) and thick glass (`KHR_materials_volume`, `KHR_materials_ior`: Snell's law through the thickness, Beer's law tint) read from a mip chain of this frame's opaque picture
 - [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
 
 **Milestone** (in the light lab's building)**:**

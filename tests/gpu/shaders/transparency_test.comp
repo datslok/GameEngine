@@ -17,5 +17,9 @@ void main() {
                                                   testInput(4).rgb, testInput(5).rgb);
         testOutput(0, vec4(light.added, 0.0));
         testOutput(1, vec4(light.transmittance, 0.0));
+    } else if (function == GPU_TEST_REACTIVE_SHARE) {
+        // Inputs: the picture before, the picture after, (scale, limit).
+        vec4 settings = testInput(2);
+        testOutput(0, vec4(reactiveShare(testInput(0).rgb, testInput(1).rgb, settings.x, settings.y), 0.0, 0.0, 0.0));
     }
 }

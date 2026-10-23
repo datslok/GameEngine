@@ -1,6 +1,9 @@
 #pragma once
 
+#include "core/settings_visitor.h"
 #include "math/vec3.h"
+#include "render/gpu/transparency_shared.h"
+#include "render/gpu/upscaling.h"
 #include "scene/asset_handles.h"
 #include "scene/frame_description.h"
 
@@ -76,3 +79,47 @@ static_assert(sizeof(GpuTransparentView) == 16, "GpuTransparentView must match s
 inline constexpr std::uint32_t transparentViewOffset = 64;
 
 GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevels);
+
+/*
+* The reactive mask. Anti-aliasing (TAA, FSR, DLSS) rebuilds each pixel from past frames, finding where it was by the
+* motion of what the depth image holds; glass is not in it, so a glass pixel moves as the wall behind it does, and
+* moving glass, or a reflection sliding over it, smears. The mask tells them how far to distrust the history at each
+* pixel: the share of its light the transparent surfaces changed, measured from the picture before them and after.
+* FSR takes it as its reactive mask, DLSS as its bias towards the current colour, the engine's own resolve as a larger
+* share of the new frame (taaReactiveShare).
+*/
+struct TransparencySettings {
+    // Off leaves the history trusted everywhere, as before the mask, for comparing.
+    bool reactiveMask = true;
+
+    // Strengthens or weakens the measured share (1 as measured), for judging the trade: more stops smears sooner, but
+    // leaves glass as unsmoothed as one frame.
+    float reactiveScale = 1.0f;
+
+    // The most the mask says: just under 1 keeps a little history even where glass makes the whole pixel, so its edges
+    // stay smoothed.
+    float reactiveLimit = 0.9f;
+};
+
+// Its fields, for the debug UI and the settings file (core/settings_visitor.h).
+void visit(TransparencySettings& settings, SettingsVisitor& visitor);
+
+// Throws std::invalid_argument for a negative scale or a limit outside 0..1.
+void validateTransparency(const TransparencySettings& settings);
+
+/*
+* One pixel's mask: in each channel the change the transparent surfaces made, as a share of the brighter of before and
+* after (a share, so the same at any exposure, which is not known yet when it is measured), the most changed channel,
+* times the scale, at most the limit. Negative light counts as none.
+*/
+float reactiveShare(const Vec3& opaque, const Vec3& blended, float scale, float limit);
+
+// The mask pass's push constants (reactive_mask.comp): the render screen it walks (width, height), the settings.
+struct GpuReactivePass {
+    float size[4];
+    float options[4]; // x: the scale, y: the limit
+};
+
+static_assert(sizeof(GpuReactivePass) == 32, "GpuReactivePass must match reactive_mask.comp's push constants");
+
+GpuReactivePass packReactivePass(RenderSize render, const TransparencySettings& settings);

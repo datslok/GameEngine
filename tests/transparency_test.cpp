@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -125,6 +126,68 @@ namespace {
         assert(packTransparentView(false, 0).probe[0] == 0.0f);
     }
 
+    /*
+    * The reactive mask: the share of a pixel's light the transparent surfaces changed, from the picture before and after
+    * them, in its most changed channel. Untouched pixels are 0; a pixel the glass made wholly its own reaches the limit.
+    */
+    void testReactiveShare() {
+        const Vec3 behind{0.5f, 0.4f, 0.3f};
+        assert(reactiveShare(behind, behind, 1.0f, 0.9f) == 0.0f);
+        assert(near(reactiveShare(behind, Vec3{0.0f, 0.0f, 0.0f}, 1.0f, 0.9f), 0.9f));
+        assert(near(reactiveShare(behind, Vec3{0.0f, 0.0f, 0.0f}, 1.0f, 1.0f), 1.0f));
+
+        // Half the light gone, or the light doubled: half of the brighter of the two is the glass's.
+        assert(near(reactiveShare(behind, behind * 0.5f, 1.0f, 1.0f), 0.5f));
+        assert(near(reactiveShare(behind, behind * 2.0f, 1.0f, 1.0f), 0.5f));
+
+        // The most changed channel counts: only red halved.
+        assert(near(reactiveShare(behind, Vec3{0.25f, 0.4f, 0.3f}, 1.0f, 1.0f), 0.5f));
+
+        // A share of the light, so the same at any brightness (the exposure is not known yet when it is measured).
+        assert(near(reactiveShare(behind * 1000.0f, behind * 500.0f, 1.0f, 1.0f), 0.5f, 1e-5f));
+        assert(near(reactiveShare(behind * 1e-3f, behind * 5e-4f, 1.0f, 1.0f), 0.5f, 1e-5f));
+
+        // Black stays black: nothing to share. The scale strengthens it up to the limit; negative light counts as none.
+        assert(reactiveShare(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, 1.0f, 0.9f) == 0.0f);
+        assert(near(reactiveShare(behind, behind * 0.75f, 2.0f, 1.0f), 0.5f));
+        assert(near(reactiveShare(behind, behind * 0.25f, 2.0f, 0.9f), 0.9f));
+        assert(reactiveShare(behind, behind * 0.25f, 0.0f, 0.9f) == 0.0f);
+        assert(near(reactiveShare(Vec3{-1.0f, 0.4f, 0.3f}, Vec3{0.0f, 0.4f, 0.3f}, 1.0f, 1.0f), 0.0f));
+    }
+
+    // On by default; a negative scale or a limit outside 0..1 is refused.
+    void testTransparencySettings() {
+        const TransparencySettings defaults;
+        assert(defaults.reactiveMask && defaults.reactiveScale == 1.0f && defaults.reactiveLimit > 0.0f && defaults.reactiveLimit <= 1.0f);
+        validateTransparency(defaults);
+
+        const auto refused = [](TransparencySettings settings) {
+            try {
+                validateTransparency(settings);
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+
+        TransparencySettings bad;
+        bad.reactiveScale = -0.5f;
+        assert(refused(bad));
+        bad = TransparencySettings{};
+        bad.reactiveLimit = 1.5f;
+        assert(refused(bad));
+        bad.reactiveLimit = -0.1f;
+        assert(refused(bad));
+    }
+
+    // The mask pass is told the render screen it walks and the settings.
+    void testReactivePass() {
+        TransparencySettings settings;
+        settings.reactiveScale = 1.5f;
+        settings.reactiveLimit = 0.8f;
+        const GpuReactivePass pass = packReactivePass(RenderSize{320, 180}, settings);
+        assert(pass.size[0] == 320.0f && pass.size[1] == 180.0f && pass.options[0] == 1.5f && pass.options[1] == 0.8f);
+    }
 }
 
 void testTransparency() {
@@ -136,4 +199,7 @@ void testTransparency() {
     testSortedFarToNear();
     testUnboundedDrawsSortByTheirOrigin();
     testTransparentView();
+    testReactiveShare();
+    testTransparencySettings();
+    testReactivePass();
 }

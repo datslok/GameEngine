@@ -152,7 +152,7 @@ namespace {
     /*
     * Upscaling: render pixels anywhere on a 4K screen, jitters within half a pixel, scales from a third to one,
     * squared distances from dead on to far past the 3x3 texels' reach. Inputs per case: (render pixel, jitter),
-    * (output per render, squared distance, current weight).
+    * (output per render, squared distance, current weight), (reactive share).
     */
     void checkUpscaling(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{83};
@@ -162,13 +162,14 @@ namespace {
             const float scale = random.between(1.0f, 3.0f);
             inputs.push_back(GpuVec4{random.between(0.0f, 3840.0f), random.between(0.0f, 2160.0f), random.between(-0.5f, 0.5f), random.between(-0.5f, 0.5f)});
             inputs.push_back(GpuVec4{scale, scale * random.between(0.95f, 1.05f), i % 16 == 0 ? 0.0f : random.between(0.0f, 20.0f), random.between(0.01f, 1.0f)});
+            inputs.push_back(GpuVec4{i % 4 == 0 ? 0.0f : random.between(0.0f, 1.0f), 0.0f, 0.0f, 0.0f});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAA_UPSCALING, inputs, 2, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TAA_UPSCALING, inputs, 3, 2);
         const FloatTolerance pixelTolerance{.absolute = 1e-3f, .relative = 1e-5f};
 
         for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
-            const GpuVec4* in = &inputs[i * 2];
+            const GpuVec4* in = &inputs[i * 3];
             const GpuVec4* out = &outputs[i * 2];
             const Vec2 scales{in[1][0], in[1][1]};
             const Vec2 sample = sampleOutputPixel(Vec2{in[0][0], in[0][1]}, Vec2{in[0][2], in[0][3]}, scales);
@@ -178,6 +179,7 @@ namespace {
             report.check("renderPixelOf", pixelTolerance, Vec3{onRender.x, onRender.y, 0.0f}, Vec3{out[0][2], out[0][3], 0.0f});
             report.check("taaSampleWeight", transcendentalTolerance, weight, out[1][0]);
             report.check("taaCurrentShare", transcendentalTolerance, taaCurrentShare(in[1][3], weight), out[1][1]);
+            report.check("taaReactiveShare", transcendentalTolerance, taaReactiveShare(taaCurrentShare(in[1][3], weight), in[2][0]), out[1][2]);
         }
     }
 }

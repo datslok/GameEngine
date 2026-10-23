@@ -201,6 +201,11 @@ namespace {
         assert(near(taaCurrentShare(0.1f, taaSampleWeight(0.5f)), 0.1f * taaSampleWeight(0.5f), 1e-7f));
         assert(taaCurrentShare(0.1f, taaSampleWeight(2.0f)) < taaCurrentShare(0.1f, taaSampleWeight(0.5f)));
         assert(taaCurrentShare(1.0f, 1.0f) == 1.0f);
+
+        // Where the reactive mask says glass changed the pixel, the new frame takes that share of what history had.
+        assert(taaReactiveShare(0.1f, 0.0f) == 0.1f);
+        assert(taaReactiveShare(0.1f, 1.0f) == 1.0f);
+        assert(near(taaReactiveShare(0.1f, 0.5f), 0.55f, 1e-7f));
     }
 
     // YCoCg: luminance and two colour differences. A grey has none; the conversion goes back exactly.

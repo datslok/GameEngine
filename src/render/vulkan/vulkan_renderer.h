@@ -29,6 +29,7 @@
 #include "render/vulkan/vulkan_dlss.h"
 #include "render/vulkan/vulkan_fsr.h"
 #include "render/vulkan/vulkan_taa.h"
+#include "render/vulkan/vulkan_reactive_mask.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
@@ -269,6 +270,10 @@ private:
     // in the jitter cycle, this frame's camera-relative view-projection without the jitter, and last frame's camera
     // (for reprojection; unknown on the first frame, after it was off and when a capture starts).
     std::unique_ptr<VulkanTaa> taa;
+
+    // The reactive mask (render/gpu/transparency.h): where glass changed the picture, for the anti-aliasing to trust its
+    // history less there.
+    std::unique_ptr<VulkanReactiveMask> reactiveMask;
     std::unique_ptr<VulkanPipeline> motionPipeline;
     std::unique_ptr<VulkanPipeline> motionCutOutPipeline;
 

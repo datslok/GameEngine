@@ -17,7 +17,7 @@ VulkanTaa::VulkanTaa(const VulkanDevice& device, VkSampler nearest, VkSampler fi
 {
     ComputePipelineDescription description;
     description.shader = "assets/shaders/taa.comp.spv";
-    description.sampledImages = 4;
+    description.sampledImages = 5;
     description.storageImages = 1;
     description.pushConstantBytes = sizeof(GpuTaaPass);
     pipeline = std::make_unique<ComputePipeline>(device, description);
@@ -119,39 +119,42 @@ void VulkanTaa::fillCameraMotion(VkCommandBuffer commands, FrameDescriptors& des
 
 /*
 * The barriers, each for one use:
-* - the velocity image from the velocity pass's colour target to being read by compute;
+* - the velocity image from the velocity pass's colour target to being read by compute (the reactive mask already is);
 * - the depth from the depth target (or the depth measurement's read) to being read by compute;
 * - last frame's history from being read (by last frame's eye adaptation, bloom and tone mapping, or copied by a
 *   capture) to being read by compute; this frame's from anything (its contents are all overwritten, so discarded) to
 *   being written as a storage image;
 * - after the dispatch, this frame's history to being read by eye adaptation, bloom and tone mapping.
 */
-void VulkanTaa::resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, const GpuTaaPass& pass) {
+void VulkanTaa::resolve(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& scene, VulkanImage& depth, VulkanImage& reactive,
+                        const GpuTaaPass& pass) {
     VulkanImage& previous = history[1 - written];
     VulkanImage& current = history[written];
 
     velocity.transition(commands, ImageState::ComputeRead);
+    reactive.transition(commands, ImageState::ComputeRead);
     depth.transition(commands, ImageState::DepthComputeRead);
     previous.transition(commands, ImageState::ComputeRead);
     current.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
     const VkDescriptorSet set = descriptors.allocate(pipeline->getResourceLayout());
-    const std::array<VkDescriptorImageInfo, 5> images{
+    const std::array<VkDescriptorImageInfo, 6> images{
         VkDescriptorImageInfo{nearest, scene.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         VkDescriptorImageInfo{nearest, depth.getView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
         VkDescriptorImageInfo{nearest, velocity.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         VkDescriptorImageInfo{filtered, previous.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        VkDescriptorImageInfo{nearest, reactive.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         VkDescriptorImageInfo{VK_NULL_HANDLE, current.getView(), VK_IMAGE_LAYOUT_GENERAL},
     };
 
-    std::array<VkWriteDescriptorSet, 5> writes{};
+    std::array<VkWriteDescriptorSet, 6> writes{};
 
     for (std::uint32_t binding = 0; binding < writes.size(); ++binding) {
         writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[binding].dstSet = set;
         writes[binding].dstBinding = binding;
         writes[binding].descriptorCount = 1;
-        writes[binding].descriptorType = binding < 4 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[binding].descriptorType = binding < 5 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[binding].pImageInfo = &images[binding];
     }
 

@@ -9,7 +9,8 @@
 * cameras (still things and the sky), both read at the nearest of those render pixels to the camera, so a moving
 * object's edge moves with it. The history is read with Catmull-Rom (nine bilinear reads standing in for sixteen
 * texels), clipped into the box of the colours the 3x3 render pixels show this frame (their mean plus or minus the clip
-* width in standard deviations, in YCoCg), and blended, taking less of this frame where no sample landed close. With no
+* width in standard deviations, in YCoCg), and blended, taking less of this frame where no sample landed close and more
+* where the reactive mask says glass changed the pixel (render/gpu/transparency.h). With no
 * valid history (the first frame, a surface that was off screen or behind the camera) the pixel starts afresh from this
 * frame. The result is next frame's history.
 */
@@ -21,7 +22,8 @@ layout(set = 0, binding = 0) uniform sampler2D sceneColour; // this frame at the
 layout(set = 0, binding = 1) uniform sampler2D sceneDepth;  // at the render size, exact texels
 layout(set = 0, binding = 2) uniform sampler2D velocity;    // at the render size, exact texels: moving objects' motion, or TAA_NO_MOTION
 layout(set = 0, binding = 3) uniform sampler2D history;     // last frame's result at the output size, filtered and clamped
-layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D resolved;
+layout(set = 0, binding = 4) uniform sampler2D reactive;    // at the render size, exact texels: the share glass changed
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D resolved;
 
 // Must match GpuTaaPass.
 layout(push_constant) uniform Pass {
@@ -126,7 +128,8 @@ void main() {
     if (pass.options.z > 0.5 && onScreen) {
         vec3 past = sampleHistory(previous.xy);
         past = fromYCoCg(clipToBox(toYCoCg(past), mean, deviation * pass.options.y));
-        result = taaBlend(current, past, taaCurrentShare(pass.options.x, nearestSampleWeight));
+        float share = taaReactiveShare(taaCurrentShare(pass.options.x, nearestSampleWeight), texelFetch(reactive, centre, 0).r);
+        result = taaBlend(current, past, share);
     }
 
     // The debug view: how far the pixel moved since last frame, sideways in red and up or down in green; blue where it

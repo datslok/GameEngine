@@ -32,6 +32,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visit(settings.reflections, visitor);
         visit(settings.mirroredLights, visitor);
     });
+    visitor.group("Transparency", [&] {
+        visit(settings.transparency, visitor);
+    });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);
         visitor.field("Clustered shading", settings.clusteredShading);

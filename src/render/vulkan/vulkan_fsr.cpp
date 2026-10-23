@@ -159,12 +159,15 @@ void VulkanFsr::dropContext() {
 }
 
 /*
-* The states FSR is told the images are in, and leaves them in: the colour, velocity and depth read by compute
+* The states FSR is told the images are in, and leaves them in: the colour, velocity, reactive mask and depth read by
+* compute
 * (SHADER_READ_ONLY_OPTIMAL, which a depth image may take too), the output a storage image (GENERAL). After it, the
 * output becomes readable for eye adaptation, bloom and tone mapping. Its motion vectors are this frame's place to last
-* frame's in render pixels: ours times the inputs' scale.
+* frame's in render pixels: ours times the inputs' scale. The reactive mask (render/gpu/transparency.h) is how far to
+* trust its history at each pixel, where glass changed it.
 */
-bool VulkanFsr::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, const FsrFrameInputs& inputs) {
+bool VulkanFsr::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanImage& depth, VulkanImage& velocity, VulkanImage& reactive,
+                         const FsrFrameInputs& inputs) {
     if (!available || (context == nullptr && !makeContext())) {
         return false;
     }
@@ -172,6 +175,7 @@ bool VulkanFsr::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanIm
     colour.transition(commands, ImageState::ComputeRead);
     depth.transition(commands, ImageState::ComputeRead);
     velocity.transition(commands, ImageState::ComputeRead);
+    reactive.transition(commands, ImageState::ComputeRead);
     output.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
     ffxDispatchDescUpscale upscale{};
@@ -180,6 +184,7 @@ bool VulkanFsr::dispatch(VkCommandBuffer commands, VulkanImage& colour, VulkanIm
     upscale.color = fsrResource(colour, FFX_API_RESOURCE_USAGE_READ_ONLY, FFX_API_RESOURCE_STATE_COMPUTE_READ);
     upscale.depth = fsrResource(depth, FFX_API_RESOURCE_USAGE_READ_ONLY, FFX_API_RESOURCE_STATE_COMPUTE_READ);
     upscale.motionVectors = fsrResource(velocity, FFX_API_RESOURCE_USAGE_READ_ONLY, FFX_API_RESOURCE_STATE_COMPUTE_READ);
+    upscale.reactive = fsrResource(reactive, FFX_API_RESOURCE_USAGE_READ_ONLY, FFX_API_RESOURCE_STATE_COMPUTE_READ);
     upscale.output = fsrResource(output, FFX_API_RESOURCE_USAGE_UAV, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
     upscale.jitterOffset = {inputs.jitter.x, inputs.jitter.y};
     upscale.motionVectorScale = {inputs.motionVectorScale.x, inputs.motionVectorScale.y};

@@ -118,6 +118,10 @@ float taaSampleWeight(float distanceSquared);
 // close to this frame leans on its history (which earlier frames' samples filled in).
 float taaCurrentShare(float currentWeight, float nearestSampleWeight);
 
+// The new frame's share where the reactive mask (render/gpu/transparency.h) says transparent surfaces made that share
+// of the pixel: the history keeps only its part of the rest, since it moved as what is behind them did.
+float taaReactiveShare(float currentShare, float reactive);
+
 // Luminance and two colour differences (Y = R/4 + G/2 + B/4), and back. The neighbours' colours spread less in it than
 // in RGB, so the box the history is clipped into fits them more tightly.
 Vec3 toYCoCg(const Vec3& rgb);
