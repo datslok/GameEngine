@@ -844,6 +844,13 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Captures** draw 32 frames first (two jitter cycles), restarting the history and the cycle, so golden images repeat exactly. Golden images were not run or saved in this branch (only on request): every view's final image will change.
   - **Checked:** the tests (debug and release), and the validation layers in the light lab and the demo (no messages). The GPU test cases for `taa.glsl` are written and built, not run (only on request).
 
+- `ultra-dlss-defaults` (Oct 23 2026): the user asked for DLSS at Native (DLAA) and the Ultra preset as the new defaults, with sharpness 0.8.
+  - **Ultra is now the defaults** (1024 probe rays, near fast lights too, no sharing between probes), and High is listed as Ultra with 256 rays and 0.1 sharing, so retuning a default retunes Ultra.
+  - **DLSS at render scale 1:** where DLSS is missing (no RTX GPU, or Streamline's DLLs not fetched) it falls back to TAA as before.
+  - **Sharpness 0.8 is FSR's** (RCAS): DLSS and TAA have no sharpening of their own in the engine, so it shows only when FSR is picked.
+  - **Cost, not measured here:** the default probe work is about four times High's (`probe-ray-presets`), with 201 MB of ray buffers.
+  - **Checked:** the tests (debug and release), the light lab and the demo with the validation layers (no messages, DLSS active). Golden views change again (still stale since `taa`).
+
 - `toksvig` (Oct 23 2026): normal map filtering, 6e's next item. A smaller mip averages the bumps under each texel into one direction, so a distant bumpy surface shaded like a smooth mirror whose highlight broke into flickering dots.
   - **How (Toksvig 2005):** the average of unit directions is shorter than 1 the more they disagree. Its spread (1 - L) / L widens a Phong lobe as 1/s' = 1/s + spread; with GGX's alpha² ≈ 2/s it adds 2 · spread to alpha² (alpha = roughness²). For small tilts that is about the bumps' mean squared slope: the variances of the material's lobe and the bumps add, like two blurs one after the other.
   - **The mips already kept the length:** they are blitted on the GPU with a linear filter and never renormalised, and decoding (2c - 1) is linear, so averaging texels averages directions. No loader change was needed.

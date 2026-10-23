@@ -82,9 +82,9 @@ struct GlobalIlluminationSettings {
     bool seedProbes = true;
 
     // Rays each probe traces per frame. More converge faster and flicker less; the time constants below average over
-    // rays per second of history, so a slower GPU can trace fewer with longer time constants. 256 by default (the High
-    // quality preset, the user's choice on Oct 23 2026; it was 128), 1024 on Ultra.
-    int raysPerProbe = 256;
+    // rays per second of history, so a slower GPU can trace fewer with longer time constants. 1024 by default (the Ultra
+    // quality preset, the user's choice on Oct 23 2026; it was 256, High's), 256 on High.
+    int raysPerProbe = 1024;
 
     /*
     * A ray budget: the still probes trace raysPerProbe rays this many times a second at most, so above that frame rate
@@ -176,9 +176,10 @@ struct GlobalIlluminationSettings {
     * for bounce light a little blurrier (about two cells across instead of one). Each probe then also turns its rays
     * its own way (probeRayTurn), so neighbours' errors are independent; with one shared turn they would all err alike
     * and sharing would remove nothing. The probes keep accumulating their own unshared light; only what is read (the
-    * main pass, the debug balls, the next frame's bounce) is shared. 0: off, everything exactly as before.
+    * main pass, the debug balls, the next frame's bounce) is shared. 0: off, everything exactly as before. Off by
+    * default (Ultra: 1024 rays a probe are enough on their own); High shares 0.1.
     */
-    float probeSharing = 0.1f;
+    float probeSharing = 0.0f;
 
     // The same for fast lights' light (the fast atlas) on its own weight: their short memory averages few frames, so
     // their bounce flickers most at low frame rates (a flashlight at 30 fps), and sharing makes up for it. The quality
@@ -193,11 +194,11 @@ struct GlobalIlluminationSettings {
     * at 60, against 0.25% for the still light alone; 0.2 s would add none, for a longer trail). Probes within reach of a
     * fast light trace fastRaysPerProbe rays, since a short memory averages fewer frames (the rest still trace
     * raysPerProbe); 64 flickered over three times as much. In the dense probe test every probe is within the
-    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64. 256 by default (the High quality preset),
-    * 1024 on Ultra.
+    * flashlight's reach, and 256 rays cost about 2 ms more a frame than 64. 1024 by default (the Ultra quality preset),
+    * 256 on High.
     */
     float fastIrradianceTimeConstant = 0.1f;
-    int fastRaysPerProbe = 256;
+    int fastRaysPerProbe = 1024;
 
     // Keep fast lights apart as above. Off, they are lights like any other: their bounce goes into the still atlas under
     // its memory (with the adaptive memory, restarting when it changes enough to tell from the noise), no probe traces

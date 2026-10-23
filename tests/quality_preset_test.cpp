@@ -7,20 +7,20 @@
 #include <optional>
 
 namespace {
-    // High is the engine as it is tuned: its defaults.
-    void testHighIsTheDefaults() {
+    // Ultra is the engine as it is tuned: its defaults (the user's choice on Oct 23 2026; it was High).
+    void testUltraIsTheDefaults() {
         const RenderSettings defaults;
-        assert(matchingQualityPreset(defaults) == QualityPreset::High);
+        assert(matchingQualityPreset(defaults) == QualityPreset::Ultra);
 
         RenderSettings settings;
         settings.shadows.texelTarget = 0.5f;
         settings.globalIllumination.raysPerProbe = 200;
-        applyQualityPreset(settings, QualityPreset::High);
+        applyQualityPreset(settings, QualityPreset::Ultra);
         assert(settings.shadows.texelTarget == defaults.shadows.texelTarget);
         assert(settings.globalIllumination.raysPerProbe == defaults.globalIllumination.raysPerProbe);
     }
 
-    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, 256 (the defaults) and 1024.
+    // The light probes' rays per preset, the same for probes near fast lights: 32, 64, 256 and 1024 (the defaults).
     void testPresetsSetTheProbeRays() {
         const std::array<int, 4> rays{32, 64, 256, 1024};
 
@@ -32,10 +32,10 @@ namespace {
             assert(settings.globalIllumination.fastRaysPerProbe == expected);
         }
 
-        assert(RenderSettings{}.globalIllumination.raysPerProbe == 256 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 256);
+        assert(RenderSettings{}.globalIllumination.raysPerProbe == 1024 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 1024);
     }
 
-    // Sharing between probes per preset: more where there are fewer rays, none on Ultra; High's 0.1 is the default.
+    // Sharing between probes per preset: more where there are fewer rays, none on Ultra, the default.
     void testPresetsSetProbeSharing() {
         const std::array<float, 4> sharing{0.5f, 0.3f, 0.1f, 0.0f};
 
@@ -46,7 +46,7 @@ namespace {
             assert(matchingQualityPreset(settings) == preset);
         }
 
-        assert(RenderSettings{}.globalIllumination.probeSharing == 0.1f);
+        assert(RenderSettings{}.globalIllumination.probeSharing == 0.0f);
 
         // Fast lights' sharing is the same on every preset.
         RenderSettings fast;
@@ -56,8 +56,8 @@ namespace {
     }
 
     /*
-    * The light probes' cascades per preset: High (the defaults) six from half a metre to 16 m, a densest of 31 x 17 x 31
-    * and five of 21 x 13 x 21, Ultra the same, Medium five (to 8 m), a densest of 25 x 15 x 25 and four of 17 x 11 x 17,
+    * The light probes' cascades per preset: Ultra (the defaults) and High six from half a metre to 16 m, a densest of 31 x 17 x 31
+    * and five of 21 x 13 x 21, Medium five (to 8 m), a densest of 25 x 15 x 25 and four of 17 x 11 x 17,
     * Low four from a metre (to 8 m), a densest of 19 x 11 x 19 and three of 15 x 9 x 15; each lower one holds fewer probes.
     */
     void testPresetsSetTheProbeCascades() {
@@ -158,17 +158,17 @@ namespace {
         assert(matchingQualityPreset(settings) == std::nullopt);
     }
 
-    // Ultra is High with more light probe rays and no sharing, nothing else: the same 4096 cascades and the rest as tuned.
-    void testUltraIsHighWithMoreProbeRays() {
-        RenderSettings ultra;
-        applyQualityPreset(ultra, QualityPreset::Ultra);
-        assert(ultra.shadows.cascadeResolution == RenderSettings{}.shadows.cascadeResolution);
-        assert(matchingQualityPreset(ultra) == QualityPreset::Ultra);
+    // High is Ultra with 256 light probe rays and a little sharing, nothing else: the same 4096 cascades and the rest as tuned.
+    void testHighIsUltraWithFewerProbeRays() {
+        RenderSettings high;
+        applyQualityPreset(high, QualityPreset::High);
+        assert(high.shadows.cascadeResolution == RenderSettings{}.shadows.cascadeResolution);
+        assert(matchingQualityPreset(high) == QualityPreset::High);
 
-        ultra.globalIllumination.raysPerProbe = RenderSettings{}.globalIllumination.raysPerProbe;
-        ultra.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
-        ultra.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
-        assert(matchingQualityPreset(ultra) == QualityPreset::High);
+        high.globalIllumination.raysPerProbe = RenderSettings{}.globalIllumination.raysPerProbe;
+        high.globalIllumination.fastRaysPerProbe = RenderSettings{}.globalIllumination.fastRaysPerProbe;
+        high.globalIllumination.probeSharing = RenderSettings{}.globalIllumination.probeSharing;
+        assert(matchingQualityPreset(high) == QualityPreset::Ultra);
     }
 
     /*
@@ -192,8 +192,8 @@ namespace {
 }
 
 void testQualityPreset() {
-    testUltraIsHighWithMoreProbeRays();
-    testHighIsTheDefaults();
+    testHighIsUltraWithFewerProbeRays();
+    testUltraIsTheDefaults();
     testPresetsSetTheProbeRays();
     testPresetsSetProbeSharing();
     testPresetsSetTheProbeCascades();

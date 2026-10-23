@@ -43,15 +43,17 @@ struct UpscalerSupport {
 
 struct UpscalingSettings {
     // FSR and DLSS only where they are available (activeUpscaler); each needs temporal anti-aliasing on, since its
-    // jitter and velocity pass feed them all.
-    Upscaler upscaler = Upscaler::Taa;
+    // jitter and velocity pass feed them all. DLSS by default at full size (DLAA; the user's choice on Oct 23 2026),
+    // which falls back to temporal anti-aliasing without an RTX GPU or Streamline's DLLs.
+    Upscaler upscaler = Upscaler::Dlss;
 
     // The render size's share of the output's, across and down (0.5 draws a quarter of the pixels). Only while
     // temporal anti-aliasing is on, since it is what upscales.
     float renderScale = 1.0f;
 
-    // FSR's sharpening after it upscales (RCAS, robust contrast-adaptive sharpening): 0 for none, up to 1.
-    float sharpness = 0.5f;
+    // FSR's sharpening after it upscales (RCAS, robust contrast-adaptive sharpening): 0 for none, up to 1. 0.8 by
+    // default (the user's choice on Oct 23 2026; it was 0.5). DLSS and TAA do not read it.
+    float sharpness = 0.8f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

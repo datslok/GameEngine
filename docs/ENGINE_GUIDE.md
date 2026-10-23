@@ -1472,7 +1472,7 @@ What it cannot do is beat the statistics: where a probe sees a dim patch with a 
 
 It only works if their errors are independent. If every probe shot its rays in the same directions, a lucky ray hitting a bright patch from one probe would be lucky from its neighbours too, and averaging would remove nothing, so each probe also turns its rays its own fixed way.
 
-The average weighs the probe itself 1 and each of its six face neighbours by a setting (`probeSharing`: 0.1 by default, more on the lower quality presets, which trace fewer rays, and none on Ultra; fast lights' light has its own weight, 0.5, since its short memory flickers most), counting a neighbour only if the probe can see it (its stored distance towards it reaches most of the way, so a wall between them keeps them apart).
+The average weighs the probe itself 1 and each of its six face neighbours by a setting (`probeSharing`: none by default (the Ultra preset), 0.1 on High and more on the lower presets, which trace fewer rays; fast lights' light has its own weight, 0.5, since its short memory flickers most), counting a neighbour only if the probe can see it (its stored distance towards it reaches most of the way, so a wall between them keeps them apart).
 
 The averaged light goes into separate pictures that everything reads, while each probe keeps learning its own unblurred light, so the blur never piles up over time.
 

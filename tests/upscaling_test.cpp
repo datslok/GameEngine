@@ -70,6 +70,7 @@ namespace {
     void testActiveUpscaler() {
         const UpscalerSupport both{.fsr = true, .dlss = true};
         UpscalingSettings settings;
+        settings.upscaler = Upscaler::Taa;
         assert(activeUpscaler(settings, both) == Upscaler::Taa);
         settings.upscaler = Upscaler::Fsr;
         assert(activeUpscaler(settings, both) == Upscaler::Fsr);
@@ -188,12 +189,13 @@ namespace {
         assert(!makeFsrFrameInputs(render, 2560, 1440, Vec2{}, 0.01f, 0.1f, 500.0f, 1.0f, false, settings).sharpen);
     }
 
-    // The defaults draw at full size with temporal anti-aliasing; a scale or sharpness outside its limits (or not a
-    // number) is refused.
+    // The defaults are DLSS at full size (DLAA, the Native mode; temporal anti-aliasing where DLSS is missing) with FSR's
+    // sharpness at 0.8; a scale or sharpness outside its limits (or not a number) is refused.
     void testSettings() {
         const UpscalingSettings defaults;
-        assert(defaults.renderScale == 1.0f && defaults.upscaler == Upscaler::Taa);
-        assert(defaults.sharpness >= 0.0f && defaults.sharpness <= 1.0f);
+        assert(defaults.renderScale == 1.0f && defaults.upscaler == Upscaler::Dlss);
+        assert(matchingUpscalingMode(defaults.renderScale) == UpscalingMode::Native);
+        assert(defaults.sharpness == 0.8f);
         validateUpscaling(defaults);
 
         UpscalingSettings sharp;

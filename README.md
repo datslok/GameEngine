@@ -182,8 +182,8 @@ Several games run on one engine, picked at start-up with `--game`.
 |---|---|---|---|
 | Low | 2048 | 32 | 0.5 |
 | Medium | 2048 | 64 | 0.3 |
-| High (the default) | 4096 | 128 | 0.1 |
-| Ultra | 4096 | 256 | none |
+| High | 4096 | 256 | 0.1 |
+| Ultra (the default) | 4096 | 1024 | none |
 
 ## Requirements
 
