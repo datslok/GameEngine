@@ -258,7 +258,6 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
   - A lattice of probes round the camera (for what the camera's own point cannot see) if gaps show.
 - [x] Light reflected by mirrors: manifold next event estimation on ray-tracing GPUs (`mirrored-lights`)
 - [x] Mirrored lights, the rest: one shared search, its bounce into the probes, the lit spot in reflections, metals' matte colour, rough mirrors by a Gaussian footprint (`mirrored-light-bounce`)
-- [ ] Mirrored lights without ray tracing: the image light for flat mirrors
 - [x] Ambient occlusion (GTAO) from the prepass's depth, for the small creases DDGI's coarse grid cannot resolve (`gtao`)
 - [x] glTF occlusion and emissive textures (`gltf-occlusion-emissive`)
 - [x] Cut-outs (glTF's alpha mask, with coverage-preserving mips) and double-sided materials, the light lab's chain-link fence (`alpha-mask`)
@@ -490,6 +489,8 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/LUMEN.md`
   - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
   - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
+- [ ] Mirrored lights without ray tracing: the image light for flat mirrors
+  - **Moved here from 6e** (Oct 24 2026, the user's choice): only GPUs without ray tracing would use it, as with the software tracer; the rest of image quality comes first.
 - [ ] Physical light units and a camera exposure for all lights
   - Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers).
   - The exposure would map the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen.
