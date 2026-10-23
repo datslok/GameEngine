@@ -20,26 +20,15 @@ namespace {
     // The depth pyramid keeps the depth image's 32-bit floats; the colour pyramid the scene's 16-bit floats.
     constexpr VkFormat depthPyramidFormat = VK_FORMAT_R32_SFLOAT;
     constexpr VkFormat colourPyramidFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-
-    /*
-    * Between two levels of a pyramid: the level just written by compute made visible to the next dispatch, which reads
-    * it as a storage image (the depth pyramid) or samples it in the general layout (the colour pyramid). Only that level;
-    * the image stays in the general layout throughout.
-    */
-    void levelWritten(VkCommandBuffer commands, const VulkanImage& image, std::uint32_t level) {
-        VkImageMemoryBarrier2 barrier = imageBarrier(image.get(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::ComputeStorage, ImageState::ComputeStorage,
-                                                     ImageContents::Keep, level, 1);
-        barrier.dstAccessMask |= VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        recordImageBarrier(commands, barrier);
-    }
 }
 
-VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid,
+VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid, VkSampler nearestLevels,
                                      std::uint32_t framesInFlight):
     device(device),
     nearest(nearest),
     linear(linear),
-    pyramidSampler(pyramid)
+    pyramidSampler(pyramid),
+    nearestLevels(nearestLevels)
 {
     if (device.supportsFormat(compactStandInFormat, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT)) {
         standInFormat = compactStandInFormat;
@@ -182,7 +171,7 @@ void VulkanReflections::buildDepthPyramid(VkCommandBuffer commands, FrameDescrip
         const GpuPyramidPass pass = packPyramidPass(target, level, source);
         vkCmdPushConstants(commands, depthPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
         vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
-        levelWritten(commands, depthPyramid, level);
+        computeLevelWritten(commands, depthPyramid, level);
     }
 
     depthPyramid.transition(commands, ImageState::ComputeRead);
@@ -209,7 +198,7 @@ void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescri
         const GpuPyramidPass pass = packPyramidPass(target, level, source);
         vkCmdPushConstants(commands, colourPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
         vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
-        levelWritten(commands, colourPyramid, level);
+        computeLevelWritten(commands, colourPyramid, level);
     }
 
     colourPyramid.transition(commands, ImageState::ComputeRead);
@@ -253,7 +242,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
         sampledBinding(nearest, standIns.getView()),
         sampledBinding(nearest, velocity.getView()),
         sampledBinding(pyramidSampler, probeLight),
-        sampledBinding(nearest, probeDistances),
+        sampledBinding(nearestLevels, probeDistances),
         storageImageBinding(scene.getView()),
     };
 

@@ -6,8 +6,10 @@
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/reflection_probe_shared.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 /*
 * The reflection probe: a 360-degree picture of the surroundings taken where the camera is, for the reflections the
@@ -64,8 +66,29 @@ float probeRadialDistance(float viewDistance, const Vec3& unitDirection);
 // in its direction: negative while it is in front.
 float parallaxMismatch(const Vec3& position, const Vec3& direction, float t, float storedDistance);
 
-// The factor between the parallax march's steps, from PROBE_MARCH_START to end in PROBE_MARCH_STEPS steps.
-float probeMarchRatio(float end);
+/*
+* The probe's distances on the CPU, as the capture and the distance passes leave them on the GPU: level 0 the distance
+* at each texel's centre, each level above the nearest of the 2x2 texels below it (a pyramid like screen-space
+* reflections' depth pyramid), so one texel of a level says how near anything is over its whole patch of directions.
+*/
+struct ProbeDistanceCube {
+    std::uint32_t size = 0;
+    std::vector<std::array<std::vector<float>, 6>> levels; // [level][face][y * side + x]
+
+    // The texel a direction falls in at a level, as a samplerCube reads it with nearest filtering.
+    float at(const Vec3& direction, std::uint32_t level) const;
+};
+
+// A cube of this size (a power of two) from the distance a scene has in each direction, with its whole pyramid.
+ProbeDistanceCube buildProbeDistanceCube(std::uint32_t size, const std::function<float(const Vec3&)>& distance);
+
+// The angle one texel at a face's centre spans on a cube of this size: (pi / 2) / size.
+float probeTexelAngle(std::uint32_t size);
+
+// The pyramid's level whose texels are PROBE_CONE_MARGIN times as wide as a cone of this angle (radians), on a cube
+// of this size, so the texels that hold the cone's two ends cover all of it between (twice for a face's corners,
+// where texels are narrower, and twice for an arc crossing a texel's corner); at most the top level.
+std::uint32_t probeConeLevel(float angle, std::uint32_t size, std::uint32_t levels);
 
 // The direction from the probe to the ray's point at t (normalised); the ray's own direction while t is negative.
 Vec3 parallaxDirection(const Vec3& position, const Vec3& direction, float t);
@@ -81,12 +104,14 @@ struct ParallaxLookup {
 };
 
 /*
-* The whole search, as reflections.comp runs it, reading distances through distanceAt (a unit direction from the probe
-* to the distance stored there), for a capture reaching far: the march finds the first step where the ray goes behind
-* what the probe saw, after having been in front of it, and halving narrows it down. Nothing found (the ray never in
-* front, or never behind before the far plane) trusts nothing.
+* The whole search, as reflections.comp runs it, reading the distances' pyramid through distanceAt (a unit direction
+* from the probe and a level), for a capture reaching far, on a cube of this size and levels: the ray leaves its
+* surface until it is in front of what the probe saw; then it marches, each step checked against the cone of the
+* probe's directions it sweeps, so nothing the probe saw nearer (a wall seen edge-on) is stepped over; the first step
+* where it goes behind what the probe saw is narrowed down by halving. Nothing found trusts nothing.
 */
-ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, const std::function<float(const Vec3&)>& distanceAt);
+ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, std::uint32_t size, std::uint32_t levels,
+                           const std::function<float(const Vec3&, std::uint32_t)>& distanceAt);
 
 // The prefiltered cube's levels for a face of this size: down to PROBE_SMALLEST_LEVEL_SIZE texels, at least one.
 std::uint32_t probeLevels(std::uint32_t size);

@@ -108,8 +108,57 @@ float parallaxMismatch(const Vec3& position, const Vec3& direction, float t, flo
     return (position + direction * t).length() - storedDistance;
 }
 
-float probeMarchRatio(float end) {
-    return std::pow(end / static_cast<float>(PROBE_MARCH_START), 1.0f / static_cast<float>(PROBE_MARCH_STEPS));
+float ProbeDistanceCube::at(const Vec3& direction, std::uint32_t level) const {
+    const CubeTexel texel = cubeTexelOf(direction);
+    const std::uint32_t side = std::max(size >> level, 1u);
+    const std::uint32_t x = std::min(static_cast<std::uint32_t>(std::max(texel.st.x, 0.0f) * static_cast<float>(side)), side - 1);
+    const std::uint32_t y = std::min(static_cast<std::uint32_t>(std::max(texel.st.y, 0.0f) * static_cast<float>(side)), side - 1);
+    return levels[level][static_cast<std::size_t>(texel.face)][y * side + x];
+}
+
+ProbeDistanceCube buildProbeDistanceCube(std::uint32_t size, const std::function<float(const Vec3&)>& distance) {
+    ProbeDistanceCube cube;
+    cube.size = size;
+    const std::uint32_t levelCount = mipLevelCount(size, size);
+    cube.levels.resize(levelCount);
+
+    for (int face = 0; face < cubeFaceCount; ++face) {
+        std::vector<float>& top = cube.levels[0][static_cast<std::size_t>(face)];
+        top.resize(static_cast<std::size_t>(size) * size);
+
+        for (std::uint32_t y = 0; y < size; ++y) {
+            for (std::uint32_t x = 0; x < size; ++x) {
+                const Vec2 st{(static_cast<float>(x) + 0.5f) / static_cast<float>(size), (static_cast<float>(y) + 0.5f) / static_cast<float>(size)};
+                top[y * size + x] = distance(cubeTexelDirection(face, st).normalized());
+            }
+        }
+
+        for (std::uint32_t level = 1; level < levelCount; ++level) {
+            const std::uint32_t side = std::max(size >> level, 1u);
+            const std::uint32_t belowSide = side * 2;
+            const std::vector<float>& below = cube.levels[level - 1][static_cast<std::size_t>(face)];
+            std::vector<float>& texels = cube.levels[level][static_cast<std::size_t>(face)];
+            texels.resize(static_cast<std::size_t>(side) * side);
+
+            for (std::uint32_t y = 0; y < side; ++y) {
+                for (std::uint32_t x = 0; x < side; ++x) {
+                    texels[y * side + x] = std::min({below[2 * y * belowSide + 2 * x], below[2 * y * belowSide + 2 * x + 1],
+                                                     below[(2 * y + 1) * belowSide + 2 * x], below[(2 * y + 1) * belowSide + 2 * x + 1]});
+                }
+            }
+        }
+    }
+
+    return cube;
+}
+
+float probeTexelAngle(std::uint32_t size) {
+    return 0.5f * std::numbers::pi_v<float> / static_cast<float>(size);
+}
+
+std::uint32_t probeConeLevel(float angle, std::uint32_t size, std::uint32_t levels) {
+    const float level = std::ceil(std::log2(std::max(angle * static_cast<float>(PROBE_CONE_MARGIN) / probeTexelAngle(size), 1.0f)));
+    return std::min(static_cast<std::uint32_t>(level), levels - 1);
 }
 
 Vec3 parallaxDirection(const Vec3& position, const Vec3& direction, float t) {
@@ -124,51 +173,94 @@ float parallaxConfidence(float nearSide, float farSide) {
 /*
 * The ray meets a surface the first time it goes from in front of what the probe saw to behind it (an equation
 * |P + R t| = D(direction) has other roots further on, through doorways and behind walls, which a solver might settle
-* on). Steps growing by a constant factor keep the march as fine near the start as far out. The ray must have been in
-* front first, since near its start it may sit a hair behind its own surface. At the crossing the probe's distances
-* either side agree for a real surface and jump at an edge it saw past, which the confidence weighs.
+* on). Near its start the ray may sit a hair behind its own surface, so it first leaves it. A step sweeping more than
+* one of the probe's texels is taken whole only if nothing the probe saw in that cone of directions is nearer than the
+* ray gets: the distances' pyramid answers for the whole cone with two reads (at its ends, on a level wide enough), so
+* a wall seen edge-on, a sliver on the cube, is never stepped over. Otherwise the step halves; once a step sweeps a
+* texel or less the ray's own point decides (anything the probe saw a texel wide or more is met). At the crossing the probe's distances either side agree for a real surface and jump at an edge it saw
+* past, which the confidence weighs.
 */
-ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, const std::function<float(const Vec3&)>& distanceAt) {
-    const float ratio = probeMarchRatio(far + position.length());
-    float t = static_cast<float>(PROBE_MARCH_START);
-    bool beenInFront = false;
-    float frontT = 0.0f;
+ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, std::uint32_t size, std::uint32_t levels,
+                           const std::function<float(const Vec3&, std::uint32_t)>& distanceAt) {
+    const ParallaxLookup none{direction, 0.0f};
+    const auto pointDistance = [&](float t) { return (position + direction * t).length(); };
+    float frontT = static_cast<float>(PROBE_MARCH_START);
     float frontDistance = 0.0f;
-    float behindT = -1.0f;
-    float behindDistance = 0.0f;
+    bool inFront = false;
 
-    for (int step = 0; step <= PROBE_MARCH_STEPS; ++step, t *= ratio) {
-        const float stored = distanceAt(parallaxDirection(position, direction, t));
+    for (int leave = 0; leave < PROBE_LEAVE_STEPS && !inFront; ++leave) {
+        frontDistance = distanceAt(parallaxDirection(position, direction, frontT), 0);
+        inFront = parallaxMismatch(position, direction, frontT, frontDistance) < 0.0f;
 
-        if (parallaxMismatch(position, direction, t, stored) < 0.0f) {
-            beenInFront = true;
-            frontT = t;
-            frontDistance = stored;
-        } else if (beenInFront) {
-            behindT = t;
-            behindDistance = stored;
-            break;
+        if (!inFront) {
+            frontT *= 2.0f;
         }
     }
 
-    if (behindT < 0.0f) {
-        return ParallaxLookup{direction, 0.0f};
+    if (!inFront) {
+        return none;
     }
 
-    for (int halving = 0; halving < PROBE_REFINE_STEPS; ++halving) {
-        const float middle = 0.5f * (frontT + behindT);
-        const float stored = distanceAt(parallaxDirection(position, direction, middle));
+    const float end = far + position.length();
+    const float texelAngle = probeTexelAngle(size);
+    bool frontDistanceKnown = true;
+    float step = frontT;
 
-        if (parallaxMismatch(position, direction, middle, stored) < 0.0f) {
-            frontT = middle;
-            frontDistance = stored;
-        } else {
-            behindT = middle;
-            behindDistance = stored;
+    for (int iteration = 0; iteration < PROBE_MARCH_ITERATIONS && frontT < end; ++iteration) {
+        const float nextT = std::min(frontT + step, end);
+        const Vec3 from = parallaxDirection(position, direction, frontT);
+        const Vec3 to = parallaxDirection(position, direction, nextT);
+        const float angle = std::acos(std::clamp(from.dot(to), -1.0f, 1.0f));
+
+        if (angle > texelAngle) {
+            const std::uint32_t level = probeConeLevel(angle, size, levels);
+            const float nearest = std::min(distanceAt(from, level), distanceAt(to, level));
+
+            if (std::max(pointDistance(frontT), pointDistance(nextT)) < nearest) {
+                frontT = nextT;
+                frontDistanceKnown = false;
+                step *= 2.0f;
+            } else {
+                step *= 0.5f;
+            }
+
+            continue;
         }
+
+        const float stored = distanceAt(to, 0);
+
+        if (parallaxMismatch(position, direction, nextT, stored) < 0.0f) {
+            frontT = nextT;
+            frontDistance = stored;
+            frontDistanceKnown = true;
+            step *= 2.0f;
+            continue;
+        }
+
+        float behindT = nextT;
+        float behindDistance = stored;
+
+        if (!frontDistanceKnown) {
+            frontDistance = distanceAt(from, 0);
+        }
+
+        for (int halving = 0; halving < PROBE_REFINE_STEPS; ++halving) {
+            const float middle = 0.5f * (frontT + behindT);
+            const float middleDistance = distanceAt(parallaxDirection(position, direction, middle), 0);
+
+            if (parallaxMismatch(position, direction, middle, middleDistance) < 0.0f) {
+                frontT = middle;
+                frontDistance = middleDistance;
+            } else {
+                behindT = middle;
+                behindDistance = middleDistance;
+            }
+        }
+
+        return ParallaxLookup{parallaxDirection(position, direction, behindT), parallaxConfidence(frontDistance, behindDistance)};
     }
 
-    return ParallaxLookup{parallaxDirection(position, direction, behindT), parallaxConfidence(frontDistance, behindDistance)};
+    return none;
 }
 
 std::uint32_t probeLevels(std::uint32_t size) {

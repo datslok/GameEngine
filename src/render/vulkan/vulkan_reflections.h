@@ -24,8 +24,10 @@ class VulkanDevice;
 */
 class VulkanReflections {
 public:
-    // nearest: exact texels, clamped; linear: bilinear, clamped, one level; pyramid: trilinear, clamped, every level.
-    VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid, std::uint32_t framesInFlight);
+    // nearest: exact texels, clamped; linear: bilinear, clamped, one level; pyramid: trilinear, clamped, every level;
+    // nearestLevels: exact texels, clamped, every level (the probe's distance pyramid).
+    VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid, VkSampler nearestLevels,
+                      std::uint32_t framesInFlight);
 
     // One pass record per frame in flight, since the CPU writes the next frame's while the GPU may read the last.
     void setFramesInFlight(std::uint32_t count);
@@ -57,6 +59,7 @@ private:
     VkSampler nearest;
     VkSampler linear;
     VkSampler pyramidSampler;
+    VkSampler nearestLevels;
     VkFormat standInFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     std::unique_ptr<ComputePipeline> depthPyramidPipeline;

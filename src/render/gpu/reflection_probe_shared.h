@@ -9,11 +9,16 @@
 // the camera sees comes nearer than its own near plane.
 #define PROBE_NEAR 0.05
 
-// The parallax search marches along the reflected ray from this far (metres) to beyond the capture's far plane, in
-// this many steps, each the same factor longer than the last (32 steps to 300 m: about a third longer each), then
+// The parallax search leaves the surface from this far along the reflected ray (metres), doubling at most this many
+// times until the ray is in front of what the probe saw; then marches on, at most this many steps: a step sweeping no
+// more than one of the probe's texels checks the ray's point itself, a longer one is taken whole only if the cone of
+// the probe's directions it sweeps holds nothing nearer than the ray (read from the distances' pyramid, a level with
+// texels this many times the cone's width), steps doubling after each taken and halving after each refused; then it
 // halves the step where the ray first went behind what the probe saw this many times (256 times narrower).
 #define PROBE_MARCH_START 0.02
-#define PROBE_MARCH_STEPS 32
+#define PROBE_LEAVE_STEPS 8
+#define PROBE_CONE_MARGIN 4.0
+#define PROBE_MARCH_ITERATIONS 128
 #define PROBE_REFINE_STEPS 8
 
 // How far the distances the probe saw on either side of that crossing may disagree, as a share of the farther, before

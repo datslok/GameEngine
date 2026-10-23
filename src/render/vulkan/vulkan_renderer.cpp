@@ -95,7 +95,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     createSceneLayout();
 
     // Before the main pass's pipelines, which draw into its surfaces.
-    reflections = std::make_unique<VulkanReflections>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get(), framesInFlight);
+    reflections = std::make_unique<VulkanReflections>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get(), nearestLevelsSampler.get(),
+                                                      framesInFlight);
     reflectionProbe = std::make_unique<VulkanReflectionProbe>(device, nearestSampler.get(), pyramidSampler.get());
     createPipelines();
     createShadowAtlas(shadowLayout.size());
@@ -235,6 +236,10 @@ void VulkanRenderer::createSamplers() {
     VkSamplerCreateInfo pyramid = samplerInfo(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     pyramid.maxLod = VK_LOD_CLAMP_NONE;
     pyramidSampler = device.createSampler(pyramid);
+
+    VkSamplerCreateInfo nearestLevels = samplerInfo(VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    nearestLevels.maxLod = VK_LOD_CLAMP_NONE;
+    nearestLevelsSampler = device.createSampler(nearestLevels);
 
     VkSamplerCreateInfo shadow = samplerInfo(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     shadow.compareEnable = VK_TRUE;
@@ -1191,7 +1196,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (screenReflections && (screenSpace || probeReady) && inverseViewProjection) {
         beginGpuPass(frame, GpuPass::Reflections);
         const ReflectionPassFrame passFrame{reflections->getPyramidLevels(), screenSpace, probeReady ? reflectionProbe->getLevels() : 0u,
-                                            probeReady ? reflectionProbe->getOrigin() - cameraOrigin : Vec3{}};
+                                            probeReady ? reflectionProbe->getOrigin() - cameraOrigin : Vec3{}, reflectionProbe->getSize(),
+                                            reflectionProbe->getDistanceLevels()};
         const GpuReflectionPass pass = packReflectionPass(relativeViewProjection, *inverseViewProjection, reprojection, sceneSize, jitter,
                                                           settings.reflections, passFrame);
         reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(),

@@ -283,6 +283,13 @@ void generateMipmaps(VkCommandBuffer commands, VulkanImage& image, ImageState le
     image.setState(finalState);
 }
 
+void computeLevelWritten(VkCommandBuffer commands, const VulkanImage& image, std::uint32_t level) {
+    VkImageMemoryBarrier2 barrier = imageBarrier(image.get(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::ComputeStorage, ImageState::ComputeStorage,
+                                                 ImageContents::Keep, level, 1);
+    barrier.dstAccessMask |= VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    recordImageBarrier(commands, barrier);
+}
+
 void transitionImage(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageState& state, ImageState to,
                      ImageContents contents) {
     if (!needsBarrier(state, to)) {

@@ -195,6 +195,8 @@ struct ReflectionPassFrame {
     bool screenSpace = false;
     std::uint32_t probeLevels = 0; // none: no probe
     Vec3 probeOrigin;
+    std::uint32_t probeSize = 0;
+    std::uint32_t probeDistanceLevels = 0;
 };
 
 /*
@@ -212,9 +214,10 @@ struct GpuReflectionPass {
     float lens[4];        // x: pixel footprint per metre, yz: this frame's jitter in render pixels, w: unused
     float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run, w: its far plane
     float probeOrigin[4]; // xyz: where the probe was taken, measured from the camera
+    float probeCube[4];   // x: the probe's faces in texels, y: its distance pyramid's levels
 };
 
-static_assert(sizeof(GpuReflectionPass) == 288, "GpuReflectionPass must match reflections.comp's buffer");
+static_assert(sizeof(GpuReflectionPass) == 304, "GpuReflectionPass must match reflections.comp's buffer");
 
 GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inverseViewProjection, const Mat4& reprojection,
                                      RenderSize render, Vec2 jitter, const ReflectionSettings& settings, const ReflectionPassFrame& frame);

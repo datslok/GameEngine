@@ -34,9 +34,9 @@ namespace {
 
     /*
     * The march's pieces from points near and far from the probe, rays heading out and back past it, in front of and
-    * behind what the probe saw; the confidence from agreement to far apart, and march ratios for captures from a room
-    * to the far distance. Inputs per case: (position, stored distance), (direction, t), (near side, far side, march
-    * end, 0).
+    * behind what the probe saw; the confidence from agreement to far apart; cone levels from under a texel to half the
+    * sphere on the presets' cube sizes. Inputs per case: (position, stored distance), (direction, t), (near side, far
+    * side, cone angle, cube size).
     */
     void checkParallax(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{127};
@@ -47,7 +47,8 @@ namespace {
             const float stored = random.between(0.1f, 40.0f);
             inputs.push_back(gpuVec4(position, stored));
             inputs.push_back(gpuVec4(random.direction(), i % 8 == 0 ? -1.0f : random.between(0.0f, 30.0f)));
-            inputs.push_back(GpuVec4{stored * random.between(0.7f, 1.3f), stored, random.between(5.0f, 2000.0f), 0.0f});
+            inputs.push_back(GpuVec4{stored * random.between(0.7f, 1.3f), stored, std::exp2(random.between(-10.0f, 1.0f)),
+                                     std::exp2(std::floor(random.between(6.0f, 9.0f)))});
         }
 
         const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PROBE_PARALLAX, inputs, 3, 2);
@@ -61,7 +62,8 @@ namespace {
             report.check("parallaxDirection", transcendentalTolerance, parallaxDirection(position, direction, in[1][3]), vec3From(out[0]));
             report.check("parallaxMismatch", distanceTolerance, parallaxMismatch(position, direction, std::max(in[1][3], 0.0f), in[0][3]), out[0][3]);
             report.check("parallaxConfidence", transcendentalTolerance, parallaxConfidence(in[2][0], in[2][1]), out[1][0]);
-            report.check("probeMarchRatio", transcendentalTolerance, probeMarchRatio(in[2][2]), out[1][1]);
+            report.check("probeConeLevel", exactTolerance, static_cast<float>(probeConeLevel(in[2][2], static_cast<std::uint32_t>(in[2][3]), 9)), out[1][1]);
+            report.check("probeTexelAngle", transcendentalTolerance, probeTexelAngle(static_cast<std::uint32_t>(in[2][3])), out[1][2]);
         }
     }
 

@@ -43,10 +43,11 @@ public:
     */
     void finishCapture(VkCommandBuffer commands, FrameDescriptors& descriptors, float nearPlane, float farPlane, const Vec3& origin);
 
-    // Whether a capture is ready to read, where it was taken, and its prefiltered levels.
+    // Whether a capture is ready to read, where it was taken, its prefiltered levels and its distance pyramid's levels.
     bool hasCapture() const;
     const Vec3& getOrigin() const;
     std::uint32_t getLevels() const;
+    std::uint32_t getDistanceLevels() const;
 
     // The prefiltered light and the distances, as the reflection pass binds them: made readable first if nothing was
     // ever captured into them (they are bound even while unused).
@@ -58,17 +59,18 @@ private:
     VkSampler nearest;
     VkSampler trilinear;
     std::unique_ptr<ComputePipeline> distancePipeline;
+    std::unique_ptr<ComputePipeline> distanceMinPipeline;
     std::unique_ptr<ComputePipeline> prefilterPipeline;
 
     std::uint32_t size = 0;
     VulkanImage capture;    // the faces' light, with mips (filtered importance sampling reads them)
     VulkanImage depth;      // the faces' depths
-    VulkanImage distances;  // how far the probe saw, per texel
+    VulkanImage distances;  // how far the probe saw, per texel, and above it the nearest over each block (a pyramid)
     VulkanImage light;      // the prefiltered light, a level per roughness
 
     std::vector<OwnedHandle<VkImageView>> captureFaces; // each face's top level, a colour target
     std::vector<OwnedHandle<VkImageView>> depthFaces;   // each face's depth target
-    OwnedHandle<VkImageView> distanceFaces;             // the distances' six faces as an array, written by compute
+    std::vector<OwnedHandle<VkImageView>> distanceLevels; // each distance level's six faces as an array, written by compute
     std::vector<OwnedHandle<VkImageView>> lightLevels;  // each prefiltered level's six faces as an array
 
     bool captured = false;

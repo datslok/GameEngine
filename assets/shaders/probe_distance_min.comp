@@ -1,0 +1,33 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* One level of the reflection probe's distance pyramid (render/gpu/reflection_probe.h, buildProbeDistanceCube), one
+* invocation per texel of each face: the nearest of the 2x2 texels below, so a texel says how near anything the probe
+* saw is over its whole patch of directions. The parallax search steps over a cone of directions only where nothing in
+* it is nearer than the ray.
+*/
+#include "render/gpu/reflection_probe_shared.h"
+
+layout(local_size_x = PROBE_GROUP_SIDE, local_size_y = PROBE_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0, r32f) uniform readonly image2DArray finer;  // the level below, its six faces
+layout(set = 0, binding = 1, r32f) uniform writeonly image2DArray level; // the level written
+
+// x: this level's size.
+layout(push_constant) uniform Pass {
+    ivec4 size;
+} pass;
+
+void main() {
+    ivec3 texel = ivec3(gl_GlobalInvocationID);
+
+    if (texel.x >= pass.size.x || texel.y >= pass.size.x) {
+        return;
+    }
+
+    ivec3 below = ivec3(texel.xy * 2, texel.z);
+    float nearest = min(min(imageLoad(finer, below).r, imageLoad(finer, below + ivec3(1, 0, 0)).r),
+                        min(imageLoad(finer, below + ivec3(0, 1, 0)).r, imageLoad(finer, below + ivec3(1, 1, 0)).r));
+    imageStore(level, texel, vec4(nearest));
+}

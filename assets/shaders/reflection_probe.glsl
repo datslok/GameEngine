@@ -42,8 +42,13 @@ float parallaxMismatch(vec3 position, vec3 direction, float t, float storedDista
     return length(position + direction * t) - storedDistance;
 }
 
-float probeMarchRatio(float end) {
-    return pow(end / float(PROBE_MARCH_START), 1.0 / float(PROBE_MARCH_STEPS));
+float probeTexelAngle(float size) {
+    return 0.5 * 3.14159265358979 / size;
+}
+
+int probeConeLevel(float angle, float size, int levels) {
+    float level = ceil(log2(max(angle * float(PROBE_CONE_MARGIN) / probeTexelAngle(size), 1.0)));
+    return min(int(level), levels - 1);
 }
 
 vec3 parallaxDirection(vec3 position, vec3 direction, float t) {
