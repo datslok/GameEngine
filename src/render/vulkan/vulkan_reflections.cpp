@@ -21,25 +21,24 @@ namespace {
     constexpr VkFormat depthPyramidFormat = VK_FORMAT_R32_SFLOAT;
     constexpr VkFormat colourPyramidFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-    /*
-    * Between two levels of a pyramid: the level just written by compute made visible to the next dispatch, which reads
-    * it as a storage image (the depth pyramid) or samples it in the general layout (the colour pyramid). Only that level;
-    * the image stays in the general layout throughout.
-    */
-    void levelWritten(VkCommandBuffer commands, const VulkanImage& image, std::uint32_t level) {
-        VkImageMemoryBarrier2 barrier = imageBarrier(image.get(), VK_IMAGE_ASPECT_COLOR_BIT, ImageState::ComputeStorage, ImageState::ComputeStorage,
-                                                     ImageContents::Keep, level, 1);
-        barrier.dstAccessMask |= VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        recordImageBarrier(commands, barrier);
+    // The reflection pass's own set: its record, nine images it samples and the scene image it changes.
+    ComputePipelineDescription reflectionPass(const char* shader) {
+        ComputePipelineDescription reflections;
+        reflections.shader = shader;
+        reflections.storageBuffers = 1;
+        reflections.sampledImages = 9;
+        reflections.storageImages = 1;
+        return reflections;
     }
 }
 
-VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid,
+VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid, VkSampler nearestLevels,
                                      std::uint32_t framesInFlight):
     device(device),
     nearest(nearest),
     linear(linear),
-    pyramidSampler(pyramid)
+    pyramidSampler(pyramid),
+    nearestLevels(nearestLevels)
 {
     if (device.supportsFormat(compactStandInFormat, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT)) {
         standInFormat = compactStandInFormat;
@@ -59,14 +58,19 @@ VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler neare
     colourLevels.pushConstantBytes = sizeof(GpuPyramidPass);
     colourPyramidPipeline = std::make_unique<ComputePipeline>(device, colourLevels);
 
-    ComputePipelineDescription reflections;
-    reflections.shader = "assets/shaders/reflections.comp.spv";
-    reflections.storageBuffers = 1;
-    reflections.sampledImages = 8;
-    reflections.storageImages = 1;
-    reflectionPipeline = std::make_unique<ComputePipeline>(device, reflections);
+    reflectionPipeline = std::make_unique<ComputePipeline>(device, reflectionPass("assets/shaders/reflections.comp.spv"));
 
     setFramesInFlight(framesInFlight);
+}
+
+void VulkanReflections::enableRayTracing(VkDescriptorSetLayout textures, VkDescriptorSetLayout scene, VkDescriptorSetLayout rayScene) {
+    ComputePipelineDescription rays = reflectionPass("assets/shaders/reflections_rays.comp.spv");
+    rays.sharedSets = {textures, scene, rayScene};
+    rayReflectionPipeline = std::make_unique<ComputePipeline>(device, rays);
+}
+
+bool VulkanReflections::tracesRays() const {
+    return rayReflectionPipeline != nullptr;
 }
 
 void VulkanReflections::setFramesInFlight(std::uint32_t count) {
@@ -182,7 +186,7 @@ void VulkanReflections::buildDepthPyramid(VkCommandBuffer commands, FrameDescrip
         const GpuPyramidPass pass = packPyramidPass(target, level, source);
         vkCmdPushConstants(commands, depthPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
         vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
-        levelWritten(commands, depthPyramid, level);
+        computeLevelWritten(commands, depthPyramid, level);
     }
 
     depthPyramid.transition(commands, ImageState::ComputeRead);
@@ -209,7 +213,7 @@ void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescri
         const GpuPyramidPass pass = packPyramidPass(target, level, source);
         vkCmdPushConstants(commands, colourPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
         vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
-        levelWritten(commands, colourPyramid, level);
+        computeLevelWritten(commands, colourPyramid, level);
     }
 
     colourPyramid.transition(commands, ImageState::ComputeRead);
@@ -223,7 +227,7 @@ void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescri
 */
 void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene,
                                 VulkanImage& depth, VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe,
-                                const GpuReflectionPass& pass) {
+                                const GpuReflectionPass& pass, const ReflectionRaySets* rays) {
     VulkanBuffer& record = passRecords.at(frameIndex);
     std::memcpy(record.getMapped(), &pass, sizeof(pass));
     record.flush();
@@ -244,7 +248,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
     velocity.transition(commands, ImageState::ComputeRead);
     scene.transition(commands, ImageState::ComputeStorage);
 
-    const std::array<ComputeBinding, 10> bindings{
+    const std::array<ComputeBinding, 11> bindings{
         storageBufferBinding(record.get()),
         sampledBinding(nearest, depthPyramid.getView()),
         sampledBinding(pyramidSampler, colourPyramid.getView()),
@@ -253,11 +257,21 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
         sampledBinding(nearest, standIns.getView()),
         sampledBinding(nearest, velocity.getView()),
         sampledBinding(pyramidSampler, probeLight),
-        sampledBinding(nearest, probeDistances),
+        sampledBinding(nearestLevels, probeDistances),
+        sampledBinding(pyramidSampler, probeDistances),
         storageImageBinding(scene.getView()),
     };
 
-    bindComputeSet(commands, device.getDevice(), descriptors, *reflectionPipeline, bindings);
+    const bool traced = rays != nullptr && rayReflectionPipeline;
+    const ComputePipeline& pipeline = traced ? *rayReflectionPipeline : *reflectionPipeline;
+    bindComputeSet(commands, device.getDevice(), descriptors, pipeline, bindings);
+
+    if (traced) {
+        const std::array<VkDescriptorSet, 3> sets{rays->textures, rays->scene, rays->rayScene};
+        vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0,
+                                nullptr);
+    }
+
     vkCmdDispatch(commands, workgroupCount(size.width, SSR_GROUP_SIDE), workgroupCount(size.height, SSR_GROUP_SIDE), 1);
 
     scene.transition(commands, ImageState::SurfaceRead);

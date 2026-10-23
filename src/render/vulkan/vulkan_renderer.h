@@ -174,6 +174,7 @@ private:
     OwnedHandle<VkSampler> nearestSampler;     // exact texels, clamped (the scene for tone mapping, the overlay)
     OwnedHandle<VkSampler> linearSampler;      // bilinear, clamped, one level (bloom)
     OwnedHandle<VkSampler> pyramidSampler;     // trilinear, clamped, every level (the reflections' colour pyramid)
+    OwnedHandle<VkSampler> nearestLevelsSampler; // exact texels, clamped, every level (the reflection probe's distance pyramid)
     OwnedHandle<VkSampler> shadowSampler;      // compares depths, blending the four nearest results
     OwnedHandle<VkSampler> shadowDepthSampler; // raw depths, exact texels (the soft shadow blocker search)
 

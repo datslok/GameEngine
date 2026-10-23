@@ -140,8 +140,8 @@ bool withinThickness(float rayDistance, float surfaceDistance, float thickness) 
 }
 
 // As reflectionConfidence's ReflectionHit and ReflectionSettings: the roughness limits, the edge fade and the reach.
-float reflectionConfidence(float roughness, vec2 pixel, float travelled, float facing, vec2 size, float sharpRoughness,
-                           float maxRoughness, float edgeFade, float reach) {
+float reflectionConfidence(float roughness, vec2 pixel, float travelled, float facing, float towardsCamera, vec2 size,
+                           float sharpRoughness, float maxRoughness, float edgeFade, float reach) {
     float rough = 1.0 - smoothstep(sharpRoughness, maxRoughness, roughness);
 
     vec2 uv = pixel / size;
@@ -150,7 +150,8 @@ float reflectionConfidence(float roughness, vec2 pixel, float travelled, float f
 
     float distance = 1.0 - smoothstep(float(SSR_DISTANCE_FADE_START) * reach, reach, travelled);
     float front = 1.0 - smoothstep(-float(SSR_FRONT_FACE_COSINE), 0.0, facing);
-    return rough * edge * distance * front;
+    float outwards = 1.0 - smoothstep(float(SSR_TOWARDS_CAMERA_START), float(SSR_TOWARDS_CAMERA_END), towardsCamera);
+    return rough * edge * distance * front * outwards;
 }
 
 float reflectionConeLevel(float roughness, float travelledPixels) {

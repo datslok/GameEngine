@@ -27,7 +27,8 @@ enum class LabSurface {
     Metal,    // lamp posts, arms and shades
     Glass,    // windows (dark until lit)
     Polished, // the reflection corner's slab: dark polished stone
-    Chrome    // the mirror ball
+    Chrome,   // the mirror ball
+    Mirror    // the sunlit room's mirror: silvered glass
 };
 
 struct LabBlock {
@@ -169,6 +170,11 @@ inline const Aabb labPolishedSlab{Vec3{2.0f, 0.0f, -11.0f}, Vec3{8.0f, 0.04f, -5
 inline constexpr float labMirrorBallRadius = 0.6f;
 inline const Vec3 labMirrorBallCentre{5.0f, 0.04f + labMirrorBallRadius, -8.5f};
 
+// A tall mirror on the sunlit room's south wall, facing the doorway from the back room across the room, so the
+// doorway and the room are seen in it (2 cm thick, standing out from the wall).
+inline constexpr float labMirrorThickness = 0.02f;
+inline const Aabb labMirror{Vec3{-20.7f, 0.6f, 14.7f - labMirrorThickness}, Vec3{-19.3f, 2.4f, 14.7f}};
+
 // The level's parts, each group drawn as one entity and all of it solid.
 struct LightLabLayout {
     std::vector<LabBlock> towers;
@@ -178,7 +184,7 @@ struct LightLabLayout {
     std::vector<LabBlock> street; // the road, pavements, houses and lamps' posts, arms and shades
     std::vector<LabWindow> windows;
     std::vector<Vec3> streetLamps; // each lamp's bulb: the north side's west to east, then the south side's
-    std::vector<LabBlock> reflectionCorner; // the polished slab (the mirror ball is a sphere, placed by the game)
+    std::vector<LabBlock> reflectors; // the polished slab, then the mirror (the mirror ball is a sphere, placed by the game)
 };
 
 LightLabLayout buildLightLabLayout();

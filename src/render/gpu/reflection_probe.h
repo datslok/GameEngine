@@ -6,8 +6,10 @@
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/reflection_probe_shared.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <vector>
 
 /*
 * The reflection probe: a 360-degree picture of the surroundings taken where the camera is, for the reflections the
@@ -16,8 +18,8 @@
 *
 * A picture taken from one point is wrong seen from anywhere else (parallax): a shiny point P elsewhere wants what its
 * mirror ray meets, not what the probe sees in the same direction. The stored distances fix it (distance impostors,
-* Szirmay-Kalos et al. 2005): the ray P + R t meets a surface where its distance from the probe equals the distance the
-* probe saw in the direction of P + R t, which a few steps solve. Rough surfaces read a blurred copy: each smaller level
+* Szirmay-Kalos et al. 2005): the ray P + R t meets a surface where it first goes behind what the probe saw in the
+* direction of P + R t, which a march along the ray finds. Rough surfaces read a blurred copy: each smaller level
 * of the cube averages the light over a rougher surface's lobe of directions (prefiltering, Karis 2013).
 *
 * The cube follows Vulkan's addressing (the faces +X, -X, +Y, -Y, +Z, -Z, and where a direction lands on each), so the
@@ -60,16 +62,58 @@ GpuRayDebugView packCubeFaceRays(int face, const Vec3& origin, std::uint32_t siz
 // direction: the axis distance over the direction's largest component.
 float probeRadialDistance(float viewDistance, const Vec3& unitDirection);
 
-// The parallax search's step: the t at which the ray position + direction t (from the probe, direction of unit length)
-// is storedDistance from the probe, ahead of the ray's closest approach; -1 if it never comes that far out.
-float parallaxStep(const Vec3& position, const Vec3& direction, float storedDistance);
+// How far the ray's point at t (position + direction t, measured from the probe) is behind the distance the probe saw
+// in its direction: negative while it is in front.
+float parallaxMismatch(const Vec3& position, const Vec3& direction, float t, float storedDistance);
+
+/*
+* The probe's distances on the CPU, as the capture and the distance passes leave them on the GPU: level 0 the distance
+* at each texel's centre, each level above the nearest of the 2x2 texels below it (a pyramid like screen-space
+* reflections' depth pyramid), so one texel of a level says how near anything is over its whole patch of directions.
+*/
+struct ProbeDistanceCube {
+    std::uint32_t size = 0;
+    std::vector<std::array<std::vector<float>, 6>> levels; // [level][face][y * side + x]
+
+    // The texel a direction falls in at a level, as a samplerCube reads it with nearest filtering.
+    float at(const Vec3& direction, std::uint32_t level) const;
+
+    // Level 0 blended between the four texel centres round a direction, as a samplerCube reads it with linear
+    // filtering (within its face: the GPU also blends across a face's edge, which this clamps).
+    float filtered(const Vec3& direction) const;
+
+    // How far those four texels spread, as a share of the farthest (textureGather's four, min to max).
+    float spread(const Vec3& direction) const;
+};
+
+// A cube of this size (a power of two) from the distance a scene has in each direction, with its whole pyramid.
+ProbeDistanceCube buildProbeDistanceCube(std::uint32_t size, const std::function<float(const Vec3&)>& distance);
+
+// The angle one texel at a face's centre spans on a cube of this size: (pi / 2) / size.
+float probeTexelAngle(std::uint32_t size);
+
+// The cell of a level (side cells across each face) a direction falls in: its face and column and row.
+struct CubeCell {
+    int face = 0;
+    int x = 0;
+    int y = 0;
+};
+
+CubeCell cubeCellOf(const Vec3& direction, std::uint32_t side);
+
+/*
+* Where a ray (position + direction t, measured from the probe) leaves a cell as the probe sees it, after from: a
+* cell's four edges are planes through the probe (sc or tc constant on its face), each crossed at one t; the first ahead
+* that lies on the face's own side, PROBE_CELL_CROSSING past it so the ray is inside the next cell; at most end.
+*/
+float cubeCellExit(const Vec3& position, const Vec3& direction, float from, const CubeCell& cell, std::uint32_t side, float end);
 
 // The direction from the probe to the ray's point at t (normalised); the ray's own direction while t is negative.
 Vec3 parallaxDirection(const Vec3& position, const Vec3& direction, float t);
 
-// How far the search is trusted: fully while the ray's distance from the probe (reached) and the stored distance agree
-// within PROBE_MATCH_SHARE of the latter, not at all from PROBE_MISMATCH_SHARE.
-float parallaxConfidence(float reached, float stored);
+// How far a crossing is trusted, from the distances the probe saw on its near and far side: fully while they agree
+// within PROBE_MATCH_SHARE of the farther, not at all from PROBE_MISMATCH_SHARE (an edge the probe saw past).
+float parallaxConfidence(float nearSide, float farSide);
 
 // The search's result: the direction to read the probe in, and how far it is trusted.
 struct ParallaxLookup {
@@ -77,10 +121,37 @@ struct ParallaxLookup {
     float confidence = 0.0f;
 };
 
-// The whole search, as reflections.comp runs it, reading distances through distanceAt (a unit direction from the
-// probe to the distance stored there): a first guess as if the probe saw the ray's end at infinity, then
-// PROBE_SEARCH_STEPS refinements.
-ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, const std::function<float(const Vec3&)>& distanceAt);
+/*
+* How far a pixel's mirror ray starts off its surface (along its unit normal), measured from the probe: the probe's
+* distances hold one value per texel, so near its start the ray could seem to touch its own surface (or what lies just
+* beyond it) where the probe sees that surface at a slant. PROBE_START_LIFT_TEXELS of the probe's texels at the point's
+* distance, over the cosine between the normal and the way to the probe, that cosine no less than
+* PROBE_START_LIFT_SLANT.
+*/
+float probeStartLift(const Vec3& position, const Vec3& normal, std::uint32_t size);
+
+// Whether the four texels a crossing's blended distance is made of are one surface: 1 while they spread by less than
+// PROBE_EDGE_JUMP_START of the farthest, 0 from PROBE_EDGE_JUMP_END (a blend between two surfaces at an edge).
+float probeEdgeConfidence(float spread);
+
+// How far the probe's view of a found point can stand for the ray's, from the angle between the probe's direction to it
+// and the ray's own: fully within a texel (the probe sees what the ray sees, whatever its distances do), not at all from
+// two. Far things seen from near the probe are trusted this way even across silhouettes.
+float probeViewConfidence(float angle, std::uint32_t size);
+
+/*
+* The whole search, as reflections.comp runs it, reading the distances through cellAt (a unit direction from the probe
+* and a pyramid level: that level's exact texel, the nearest distance over its patch of directions), filteredAt (level 0
+* blended between texels, so a surface seen at a slant reads as continuous) and spreadAt (how far level 0's four texels
+* round a direction spread: small on a surface, large at an edge between two), for a capture reaching far, on a cube of this size and levels: the ray leaves its
+* surface until it is in front of what the probe saw; then it walks the pyramid cell by cell (cubeCellExit), as
+* screen-space reflections walk the depth pyramid: across a cell whose nearest distance it stays in front of, a level
+* up; else a level down, and at level 0 into the texel's own surface; where it goes behind what the probe saw, the
+* texel's stretch of the ray is narrowed down by halving. Nothing found trusts nothing.
+*/
+ParallaxLookup searchProbe(const Vec3& position, const Vec3& direction, float far, std::uint32_t size, std::uint32_t levels,
+                           const std::function<float(const Vec3&, std::uint32_t)>& cellAt,
+                           const std::function<float(const Vec3&)>& filteredAt, const std::function<float(const Vec3&)>& spreadAt);
 
 // The prefiltered cube's levels for a face of this size: down to PROBE_SMALLEST_LEVEL_SIZE texels, at least one.
 std::uint32_t probeLevels(std::uint32_t size);

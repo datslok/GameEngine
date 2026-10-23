@@ -318,12 +318,15 @@ namespace {
         assert(caught.hit && near(caught.point.z, -6.0f, 0.15f));
     }
 
-    // Each fade alone: roughness, the screen's edges, the reach's end, and hits from behind.
+    /*
+    * Each fade alone: roughness, the screen's edges, the reach's end, hits from behind, and rays heading back towards
+    * the camera (the screen cannot hold what they really hit, which is behind it).
+    */
     void testConfidence() {
         const ReflectionSettings settings;
         const Vec2 centre{80.0f, 45.0f};
         const auto confidence = [&](float roughness, Vec2 pixel, float travelled, float facing) {
-            return reflectionConfidence(ReflectionHit{roughness, pixel, travelled, facing}, screen, settings);
+            return reflectionConfidence(ReflectionHit{roughness, pixel, travelled, facing, 0.0f}, screen, settings);
         };
 
         assert(confidence(0.1f, centre, 5.0f, -1.0f) == 1.0f);
@@ -343,6 +346,16 @@ namespace {
         assert(confidence(0.1f, centre, 5.0f, 0.0f) == 0.0f);
         assert(confidence(0.1f, centre, 5.0f, 0.5f) == 0.0f);
         assert(confidence(0.1f, centre, 5.0f, -SSR_FRONT_FACE_COSINE) == 1.0f);
+
+        const auto backwards = [&](float towardsCamera) {
+            return reflectionConfidence(ReflectionHit{0.1f, centre, 5.0f, -1.0f, towardsCamera}, screen, settings);
+        };
+        assert(backwards(-1.0f) == 1.0f && backwards(SSR_TOWARDS_CAMERA_START) == 1.0f);
+        assert(backwards(SSR_TOWARDS_CAMERA_END) == 0.0f && backwards(1.0f) == 0.0f);
+        assert(backwards(0.5f * (SSR_TOWARDS_CAMERA_START + SSR_TOWARDS_CAMERA_END)) > 0.0f);
+
+        // Hits far away are fine on screen: the reach is long.
+        assert(settings.reach >= 1000.0f);
     }
 
     // A mirror reads the sharp picture; a rougher surface or a longer ray a blurrier level, one more per doubling.
@@ -408,7 +421,8 @@ namespace {
         const Mat4 viewProjection = cameraRelativeViewProjection(makeCamera());
         const Mat4 inverseViewProjection = *inverse(viewProjection);
         const ReflectionSettings settings;
-        const ReflectionPassFrame frame{.pyramidLevels = 8, .screenSpace = true, .probeLevels = 7, .probeOrigin = Vec3{1.0f, -2.0f, 3.0f}};
+        const ReflectionPassFrame frame{.pyramidLevels = 8, .screenSpace = true, .probeLevels = 7, .probeOrigin = Vec3{1.0f, -2.0f, 3.0f},
+                                        .probeSize = 256, .probeDistanceLevels = 9, .background = Vec3{0.1f, 0.2f, 0.3f}};
         const GpuReflectionPass pass = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize,
                                                           Vec2{0.25f, -0.125f}, settings, frame);
 
@@ -422,12 +436,17 @@ namespace {
         assert(pass.limits[0] == static_cast<float>(settings.maxSteps) && pass.limits[1] == 7.0f && pass.limits[2] == settings.edgeFade);
         assert(pass.limits[3] == 0.0f);
         assert(pass.lens[0] == pixelFootprint(viewProjection, 90.0f) && pass.lens[1] == 0.25f && pass.lens[2] == -0.125f);
-        assert(pass.probe[0] == 1.0f && pass.probe[1] == 7.0f && pass.probe[2] == 1.0f);
+        assert(pass.probe[0] == 1.0f && pass.probe[1] == 7.0f && pass.probe[2] == 1.0f && pass.probe[3] == settings.probeFar);
         assert(pass.probeOrigin[0] == 1.0f && pass.probeOrigin[1] == -2.0f && pass.probeOrigin[2] == 3.0f);
+        assert(pass.probeCube[0] == 256.0f && pass.probeCube[1] == 9.0f);
+        assert(pass.background[0] == 0.1f && pass.background[1] == 0.2f && pass.background[2] == 0.3f);
+
+        // Ray-traced reflections are a ray tracing setting: off by default, as every ray-traced feature is.
+        assert(!ReflectionSettings{}.rayTraced);
 
         // Without a probe this frame (none captured yet, or switched off) and without last frame's picture.
         const GpuReflectionPass bare = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize, Vec2{}, settings,
-                                                          ReflectionPassFrame{.pyramidLevels = 8, .probeOrigin = Vec3{}});
+                                                          ReflectionPassFrame{.pyramidLevels = 8, .probeOrigin = Vec3{}, .probeSize = 0, .probeDistanceLevels = 0, .background = Vec3{}});
         assert(bare.probe[0] == 0.0f && bare.probe[2] == 0.0f);
 
         const GpuPyramidPass pyramid = packPyramidPass(RenderSize{80, 45}, 1, RenderSize{160, 90});

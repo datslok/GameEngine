@@ -125,6 +125,13 @@ void recordImageBarrier(VkCommandBuffer commands, const VkImageMemoryBarrier2& b
 */
 void generateMipmaps(VkCommandBuffer commands, VulkanImage& image, ImageState levelZero, ImageState finalState);
 
+/*
+* Between two levels of a pyramid built by compute one level at a time, the image kept in the general layout: the
+* level just written made visible to the next dispatch, which reads it as a storage image or samples it. Only that
+* level, in every layer.
+*/
+void computeLevelWritten(VkCommandBuffer commands, const VulkanImage& image, std::uint32_t level);
+
 // For images the renderer does not own (the swapchain's): record the barrier and update the state it keeps for them.
 void transitionImage(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageState& state, ImageState to,
                      ImageContents contents = ImageContents::Keep);

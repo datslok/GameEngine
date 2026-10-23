@@ -124,6 +124,11 @@ namespace {
             material.metallic = 1.0f;
             material.roughness = 0.05f;
             break;
+        case LabSurface::Mirror:
+            material.colour = Pixel{250, 250, 250};
+            material.metallic = 1.0f;
+            material.roughness = 0.0f;
+            break;
         }
         return material;
     }
@@ -325,7 +330,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
     addStatic(blocksRenderer(cube, layout.street));
-    addStatic(blocksRenderer(cube, layout.reflectionCorner));
+    addStatic(blocksRenderer(cube, layout.reflectors));
 
     // The mirror ball, finely divided so its outline and the reflections across it stay smooth.
     ModelRenderer mirrorBall;

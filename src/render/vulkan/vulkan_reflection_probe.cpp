@@ -32,6 +32,12 @@ VulkanReflectionProbe::VulkanReflectionProbe(const VulkanDevice& device, VkSampl
     distance.pushConstantBytes = sizeof(GpuProbeDistancePass);
     distancePipeline = std::make_unique<ComputePipeline>(device, distance);
 
+    ComputePipelineDescription distanceMin;
+    distanceMin.shader = "assets/shaders/probe_distance_min.comp.spv";
+    distanceMin.storageImages = 2;
+    distanceMin.pushConstantBytes = sizeof(std::int32_t) * 4;
+    distanceMinPipeline = std::make_unique<ComputePipeline>(device, distanceMin);
+
     ComputePipelineDescription prefilter;
     prefilter.shader = "assets/shaders/probe_prefilter.comp.spv";
     prefilter.sampledImages = 1;
@@ -80,7 +86,7 @@ void VulkanReflectionProbe::ensureSize(std::uint32_t newSize) {
     capture = cube(lightFormat, mipLevelCount(newSize, newSize),
                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                    "Reflection probe capture");
-    distances = cube(distanceFormat, 1, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, "Reflection probe distances");
+    distances = cube(distanceFormat, mipLevelCount(newSize, newSize), VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, "Reflection probe distances");
     light = cube(lightFormat, probeLevels(newSize), VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, "Reflection probe light");
 
     ImageDescription depthDescription;
@@ -102,7 +108,11 @@ void VulkanReflectionProbe::ensureSize(std::uint32_t newSize) {
         depthFaces.push_back(makeView(depth, VK_IMAGE_VIEW_TYPE_2D, 0, face, 1));
     }
 
-    distanceFaces = makeView(distances, VK_IMAGE_VIEW_TYPE_2D_ARRAY, 0, 0, cubeFaceCount);
+    distanceLevels.clear();
+
+    for (std::uint32_t level = 0; level < distances.getDescription().levels; ++level) {
+        distanceLevels.push_back(makeView(distances, VK_IMAGE_VIEW_TYPE_2D_ARRAY, level, 0, cubeFaceCount));
+    }
 
     for (std::uint32_t level = 0; level < light.getDescription().levels; ++level) {
         lightLevels.push_back(makeView(light, VK_IMAGE_VIEW_TYPE_2D_ARRAY, level, 0, cubeFaceCount));
@@ -136,7 +146,8 @@ DepthAttachment VulkanReflectionProbe::faceDepth(int face) const {
 * - the capture's mips are blitted from its drawn top level (generateMipmaps), and every level left for compute to read;
 * - the depths from being drawn into to being read by compute;
 * - the distances and the prefiltered light from being read (last frame) to being written as storage images, their
-*   old contents discarded, and after their dispatches to being read by compute (the reflection pass).
+*   old contents discarded, each distance level made visible to the next one's pass, and after their dispatches to
+*   being read by compute (the reflection pass).
 * The prefiltered levels all read the capture alone, so they need nothing between them.
 */
 void VulkanReflectionProbe::finishCapture(VkCommandBuffer commands, FrameDescriptors& descriptors, float nearPlane, float farPlane,
@@ -148,12 +159,26 @@ void VulkanReflectionProbe::finishCapture(VkCommandBuffer commands, FrameDescrip
 
     const std::array<ComputeBinding, 2> distanceBindings{
         sampledBinding(nearest, depth.getView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL),
-        storageImageBinding(distanceFaces.get()),
+        storageImageBinding(distanceLevels[0].get()),
     };
     bindComputeSet(commands, device.getDevice(), descriptors, *distancePipeline, distanceBindings);
     const GpuProbeDistancePass lens{{static_cast<float>(size), nearPlane, farPlane, 0.0f}};
     vkCmdPushConstants(commands, distancePipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(lens), &lens);
     vkCmdDispatch(commands, workgroupCount(size, PROBE_GROUP_SIDE), workgroupCount(size, PROBE_GROUP_SIDE), cubeFaceCount);
+
+    // The distances' pyramid: each level the nearest of the four texels below it.
+    for (std::uint32_t level = 1; level < distanceLevels.size(); ++level) {
+        computeLevelWritten(commands, distances, level - 1);
+        const std::uint32_t levelSize = std::max(size >> level, 1u);
+        const std::array<ComputeBinding, 2> levelBindings{
+            storageImageBinding(distanceLevels[level - 1].get()),
+            storageImageBinding(distanceLevels[level].get()),
+        };
+        bindComputeSet(commands, device.getDevice(), descriptors, *distanceMinPipeline, levelBindings);
+        const std::array<std::int32_t, 4> levelPass{static_cast<std::int32_t>(levelSize), 0, 0, 0};
+        vkCmdPushConstants(commands, distanceMinPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(levelPass), levelPass.data());
+        vkCmdDispatch(commands, workgroupCount(levelSize, PROBE_GROUP_SIDE), workgroupCount(levelSize, PROBE_GROUP_SIDE), cubeFaceCount);
+    }
 
     const std::uint32_t levels = light.getDescription().levels;
     const std::uint32_t sourceLevels = capture.getDescription().levels;
@@ -186,6 +211,10 @@ const Vec3& VulkanReflectionProbe::getOrigin() const {
 
 std::uint32_t VulkanReflectionProbe::getLevels() const {
     return light.getDescription().levels;
+}
+
+std::uint32_t VulkanReflectionProbe::getDistanceLevels() const {
+    return distances.getDescription().levels;
 }
 
 // Never captured into: readable with nothing in it (the reflection pass reads it only once a capture is there).

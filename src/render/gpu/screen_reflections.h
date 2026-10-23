@@ -46,8 +46,8 @@ struct ReflectionSettings {
     // the depth image holds only front faces, so a ray passing behind a thin pole would otherwise hit it.
     float thickness = 0.3f;
 
-    // How far a ray goes (metres); hits fade out over its last fifth.
-    float reach = 100.0f;
+    // How far a ray goes (metres); hits fade out over its last fifth. Hits far away are as good as near ones on screen.
+    float reach = 1000.0f;
 
     // The most steps a ray takes through the depth pyramid before giving up.
     int maxSteps = 64;
@@ -62,6 +62,11 @@ struct ReflectionSettings {
 
     // How far the probe's capture sees (metres); beyond it the sky.
     float probeFar = 300.0f;
+
+    // On GPUs with ray queries: each glossy pixel's mirror ray traced through the scene, so what it hits is exact,
+    // lit with the probe's picture where the probe saw it and as the light probes' rays light their hits elsewhere
+    // (matte), in place of the probe's search. Off by default, as every ray-traced feature; ignored without ray queries.
+    bool rayTraced = false;
 
     // A debug view: each pixel's confidence in its reflection (white: screen-space reflections, blue: the probe,
     // black: the stand-in).
@@ -173,10 +178,11 @@ struct ReflectionHit {
     Vec2 pixel;              // where it hit on screen
     float travelled = 0.0f;  // metres from the surface to the hit
     float facing = -1.0f;    // the cosine between the hit surface's normal and the ray: negative from the front
+    float towardsCamera = 0.0f; // the cosine between the ray and the way from its surface back to the camera
 };
 
 // How far the reflection is trusted over the stand-in, 0..1: the roughness fade, times the screen edge fade, times the
-// fade over the reach's end, times the front face test.
+// fade over the reach's end, times the front face test, times the fade for rays heading back towards the camera.
 float reflectionConfidence(const ReflectionHit& hit, Vec2 size, const ReflectionSettings& settings);
 
 // The colour pyramid's level a reflected cone this rough reads after travelling this many pixels: as wide as the cone,
@@ -195,6 +201,9 @@ struct ReflectionPassFrame {
     bool screenSpace = false;
     std::uint32_t probeLevels = 0; // none: no probe
     Vec3 probeOrigin;
+    std::uint32_t probeSize = 0;
+    std::uint32_t probeDistanceLevels = 0;
+    Vec3 background; // the light behind everything, for ray-traced reflections that escape to the sky
 };
 
 /*
@@ -210,11 +219,13 @@ struct GpuReflectionPass {
     float options[4];     // x: sharp roughness, y: max roughness, z: thickness, w: reach
     float limits[4];      // x: max steps, y: the pyramid's top level, z: edge fade, w: 1 to show the confidence
     float lens[4];        // x: pixel footprint per metre, yz: this frame's jitter in render pixels, w: unused
-    float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run
+    float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run, w: its far plane
     float probeOrigin[4]; // xyz: where the probe was taken, measured from the camera
+    float probeCube[4];   // x: the probe's faces in texels, y: its distance pyramid's levels
+    float background[4];  // rgb: the light behind everything (ray-traced reflections that escape)
 };
 
-static_assert(sizeof(GpuReflectionPass) == 288, "GpuReflectionPass must match reflections.comp's buffer");
+static_assert(sizeof(GpuReflectionPass) == 320, "GpuReflectionPass must match reflections.comp's buffer");
 
 GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inverseViewProjection, const Mat4& reprojection,
                                      RenderSize render, Vec2 jitter, const ReflectionSettings& settings, const ReflectionPassFrame& frame);

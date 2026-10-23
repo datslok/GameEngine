@@ -31,6 +31,9 @@
 #include "ddgi_volume.glsl"
 #include "scene_probes.glsl"
 
+// A hit surface and the light reaching it (shared with the reflections' rays).
+#include "ray_hit_lighting.glsl"
+
 layout(local_size_x = DDGI_TRACE_GROUP_SIZE) in;
 
 // One vec4 per ray, stride rays a probe: rgb the light brought back from still lights, a the distance (negative for a
@@ -58,23 +61,6 @@ layout(std430, set = 3, binding = 4) readonly buffer TracedProbes {
     int tracedProbes[];
 };
 
-// The point lights, then the spotlights, whose light may reach the probes' rays' hits: x numbers into the light buffers,
-// y 1 for a fast light (render/gpu/ddgi_sampling.h, GpuProbeHitLight).
-layout(std430, set = 1, binding = 14) readonly buffer ProbeHitLights {
-    ivec2 probeHitLights[];
-};
-
-// Listed light number of the hit lights: its position and range, measured from the camera (as the light buffers are).
-vec4 hitLightPositionRange(int listed) {
-    int light = probeHitLights[listed].x;
-    return listed < probeLights.x ? points[light].positionRange : spots[light].positionRange;
-}
-
-// Listed light number of the hit lights' offset from a surface, both measured from the camera.
-vec3 hitLightOffset(int listed, vec3 relativeHit) {
-    return hitLightPositionRange(listed).xyz - relativeHit;
-}
-
 // Whether a fast light listed for the hits is within reach of the probe (probeNearLight), both measured from the camera;
 // reach is the longest distance the probe's cascade records.
 bool anyFastLightNear(vec3 probe, float reach) {
@@ -91,21 +77,6 @@ bool anyFastLightNear(vec3 probe, float reach) {
     }
 
     return false;
-}
-
-// The irradiance listed light number gives the surface, before its shadow ray.
-vec3 hitLightIrradiance(int listed, vec3 relativeHit, vec3 normal) {
-    int light = probeHitLights[listed].x;
-    vec3 offset = hitLightOffset(listed, relativeHit);
-
-    if (listed < probeLights.x) {
-        PointLightData point = points[light];
-        return pointLightAtHit(offset, point.positionRange.w, point.radiance.rgb, point.radiance.w, normal);
-    }
-
-    SpotLightData spot = spots[light];
-    return spotLightAtHit(offset, spot.positionRange.w, spot.radianceCosInner.rgb, spot.sourceRadius, spot.directionCosOuter.xyz,
-                          spot.directionCosOuter.w, spot.radianceCosInner.w, normal);
 }
 
 void main() {
@@ -164,61 +135,10 @@ void main() {
         return;
     }
 
-    InstanceData instance = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, true)];
-    MeshSurface surface = meshSurfaceAt(instance.material.y, rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
-                                        rayQueryGetIntersectionBarycentricsEXT(query, true));
-    vec3 normal = normalize(mat3(instance.normalMatrix) * surface.normal);
-
-    // The face was met from its front, so its shading normal should face the ray too; smoothing can tip it past.
-    if (dot(normal, direction) > 0.0) {
-        normal = -normal;
-    }
-
-    MaterialData material = materials[instance.material.x];
-    vec3 albedo = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
-    vec3 hit = origin + direction * distance;
-    vec3 shadowFrom = hit + normal * DDGI_SHADOW_RAY_OFFSET;
-    vec3 irradiance = vec3(0.0);
-
-    for (int i = 0; i < counts.x; ++i) {
-        vec3 toLight = directional[i].toLight.xyz;
-        float facing = dot(normal, toLight);
-
-        if (facing > 0.0 && reachesLight(shadowFrom, toLight, DDGI_RAY_REACH)) {
-            irradiance += directional[i].radiance.rgb * facing;
-        }
-    }
-
-    // The brightest point and spot lights here, then a shadow ray to each (to its centre: its glowing stand-in is not solid).
-    vec3 relativeHit = hit - cameraOrigin.xyz;
-    BrightestLights kept;
-    kept.count = 0;
-
-    for (int listed = 0; listed < probeLights.x + probeLights.y; ++listed) {
-        keepBrightestLight(kept, probeLights.z, listed, hitLightStrength(hitLightIrradiance(listed, relativeHit, normal)));
-    }
-
-    vec3 fastIrradiance = vec3(0.0);
-
-    for (int slot = 0; slot < kept.count; ++slot) {
-        int listed = kept.lights[slot];
-        vec3 offset = hitLightOffset(listed, relativeHit + normal * DDGI_SHADOW_RAY_OFFSET);
-        float lightDistance = length(offset);
-
-        if (lightDistance > 0.0 && reachesLight(shadowFrom, offset / lightDistance, lightDistance)) {
-            if (probeHitLights[listed].y != 0) {
-                fastIrradiance += hitLightIrradiance(listed, relativeHit, normal);
-            } else {
-                irradiance += hitLightIrradiance(listed, relativeHit, normal);
-            }
-        }
-    }
-
-    // Last frame's probes at the hit, every cascade; each atlas's light passed on into its own.
-    ProbeLights bounced = probeAmbient(relativeHit, normal, normal, normal, -direction, 0, false);
-    irradiance += bounced.still.diffuse * probeShading.y;
-    fastIrradiance += bounced.fast.diffuse * probeShading.y;
-
-    probeRays[index] = vec4(material.emissive.rgb + albedo * irradiance, distance);
-    fastProbeRays[index] = packFastRayLight(albedo * fastIrradiance);
+    RayHitSurface surface = rayHitSurface(rayQueryGetIntersectionInstanceCustomIndexEXT(query, true),
+                                          rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
+                                          rayQueryGetIntersectionBarycentricsEXT(query, true), direction);
+    RayHitLight light = lightAtRayHit(origin + direction * distance, surface.normal, direction, probeShading.y);
+    probeRays[index] = vec4(surface.emissive + surface.albedo * light.still, distance);
+    fastProbeRays[index] = packFastRayLight(surface.albedo * light.fast);
 }
