@@ -114,4 +114,11 @@
 #define GPU_TEST_TAA_REPROJECTION 3
 #define GPU_TEST_TAA_UPSCALING 4
 
+// screen_reflections_test.comp
+#define GPU_TEST_SSR_PYRAMID 0
+#define GPU_TEST_SSR_POSITION 1
+#define GPU_TEST_SSR_SCREEN_RAY 2
+#define GPU_TEST_SSR_MARCH 3
+#define GPU_TEST_SSR_SHADING 4
+
 #endif

@@ -1,0 +1,62 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs screen_reflections.glsl's functions on the cases screen_reflections_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "screen_reflections.glsl"
+
+mat4 testMatrix(uint first) {
+    return mat4(testInput(first), testInput(first + 1u), testInput(first + 2u), testInput(first + 3u));
+}
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_SSR_PYRAMID) {
+        // Inputs: (coarse, coarse size, fine size, level), (texel, level size, depth a, depth b).
+        vec4 cells = testInput(0);
+        vec4 texel = testInput(1);
+        testOutput(0, vec4(float(pyramidLastFine(int(cells.x), int(cells.y), int(cells.z))),
+                           float(pyramidCell(int(texel.x), int(cells.w), int(texel.y))), nearerDepth(texel.z, texel.w), 0.0));
+    } else if (function == GPU_TEST_SSR_POSITION) {
+        // Inputs: the inverse view-projection's four columns, (pixel, depth, 0), (size, 0, 0).
+        vec4 pixel = testInput(4);
+        vec2 size = testInput(5).xy;
+        mat4 inverseViewProjection = testMatrix(0u);
+        testOutput(0, vec4(positionAtPixel(inverseViewProjection, pixel.xy, pixel.z, size),
+                           viewDistanceAtPixel(inverseViewProjection, pixel.xy, pixel.z, size)));
+    } else if (function == GPU_TEST_SSR_SCREEN_RAY) {
+        // Inputs: the view-projection's four columns, (position, reach), (direction, 0), (size, 0, 0).
+        vec4 position = testInput(4);
+        ScreenRay ray = screenRay(testMatrix(0u), position.xyz, testInput(5).xyz, position.w, testInput(6).xy);
+        testOutput(0, vec4(ray.start, ray.end));
+        testOutput(1, vec4(ray.step, 0.0));
+    } else if (function == GPU_TEST_SSR_MARCH) {
+        // Inputs: (ray start, t), (ray step, cell nearest), (position, level), (top level, cell size, ray distance,
+        // surface distance), (thickness, 0, 0, 0).
+        vec4 start = testInput(0);
+        vec4 step = testInput(1);
+        vec4 position = testInput(2);
+        vec4 limits = testInput(3);
+        ScreenRay ray = ScreenRay(start.xyz, step.xyz, 1.0);
+        HizTrace trace = HizTrace(position.xyz, start.w, int(position.w));
+        HizTrace stepped = hizStep(trace, ray, step.w, int(limits.x));
+        HizTrace passed = passTexel(trace, ray);
+        testOutput(0, vec4(cellExit(position.xy, step.xy, limits.y), withinThickness(limits.z, limits.w, testInput(4).x) ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(1, vec4(stepped.position, stepped.t));
+        testOutput(2, vec4(float(stepped.level), passed.t, float(passed.level), 0.0));
+        testOutput(3, vec4(passed.position, 0.0));
+    } else if (function == GPU_TEST_SSR_SHADING) {
+        // Inputs: (roughness, pixel, travelled), (facing, size, sharp roughness), (max roughness, edge fade, reach,
+        // travelled pixels), (scene, confidence), (stand-in), (specular albedo), (hit light).
+        vec4 hit = testInput(0);
+        vec4 screen = testInput(1);
+        vec4 limits = testInput(2);
+        vec4 scene = testInput(3);
+        float confidence = reflectionConfidence(hit.x, hit.yz, hit.w, screen.x, screen.yz, screen.w, limits.x, limits.y, limits.z);
+        testOutput(0, vec4(confidence, reflectionConeLevel(hit.x, limits.w), 0.0, 0.0));
+        testOutput(1, vec4(reflectedScene(scene.rgb, testInput(4).rgb, testInput(5).rgb, testInput(6).rgb, scene.a), 0.0));
+    }
+}

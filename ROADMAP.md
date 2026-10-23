@@ -254,8 +254,10 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
   - [x] DLSS through NVIDIA Streamline, after a trial with MinGW (`dlss`)
   - With TAA in place, soft shadows, DDGI sampling and screen-space effects can use far fewer samples and let the history average them.
 - [x] Normal map filtering (Toksvig) (`toksvig`)
-- [ ] Reflections: parallax-corrected reflection probes first, then screen-space reflections
+- [ ] Reflections: screen-space reflections first, then reflection probes for what the screen does not show (order changed with the user on Oct 23 2026)
   - So metals and wet surfaces reflect their surroundings instead of the uniform-sky stand-in.
+  - [x] Screen-space reflections (`ssr`)
+  - [ ] Reflection probes placed automatically round the camera (no hand-placed boxes), each corrected for parallax by marching its own depth
   - Ray-traced reflections later as an RT setting (phase 14)
 - [ ] Ambient occlusion (GTAO) from the prepass's depth, for the small creases DDGI's coarse grid cannot resolve
 - [ ] glTF occlusion and emissive textures (the loader reads only the factors today)

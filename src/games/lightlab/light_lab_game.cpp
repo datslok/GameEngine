@@ -115,6 +115,15 @@ namespace {
             material.colour = Pixel{20, 24, 30};
             material.roughness = 0.1f;
             break;
+        case LabSurface::Polished:
+            material.colour = Pixel{30, 30, 34};
+            material.roughness = 0.08f;
+            break;
+        case LabSurface::Chrome:
+            material.colour = Pixel{245, 245, 245};
+            material.metallic = 1.0f;
+            material.roughness = 0.05f;
+            break;
         }
         return material;
     }
@@ -316,6 +325,14 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
     addStatic(blocksRenderer(cube, layout.street));
+    addStatic(blocksRenderer(cube, layout.reflectionCorner));
+
+    // The mirror ball, finely divided so its outline and the reflections across it stay smooth.
+    ModelRenderer mirrorBall;
+    mirrorBall.parts.push_back(RenderPart{assets.addMesh(Mesh::sphere(96, 48)), surfaceMaterial(LabSurface::Chrome),
+                                          Mat4::translation(labMirrorBallCentre.x, labMirrorBallCentre.y, labMirrorBallCentre.z) *
+                                              Mat4::scaling(labMirrorBallRadius, labMirrorBallRadius, labMirrorBallRadius)});
+    addStatic(std::move(mirrorBall));
 
     // The windows, one part each in the layout's order, so switching finds each lit one's glow by its number.
     std::vector<LabBlock> panes;

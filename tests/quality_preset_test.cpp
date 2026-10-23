@@ -35,6 +35,23 @@ namespace {
         assert(RenderSettings{}.globalIllumination.raysPerProbe == 1024 && RenderSettings{}.globalIllumination.fastRaysPerProbe == 1024);
     }
 
+    // Screen-space reflections per preset: off on Low, fewer steps on Medium, the defaults on High and Ultra.
+    void testPresetsSetReflections() {
+        const std::array<bool, 4> enabled{false, true, true, true};
+        const std::array<int, 4> steps{32, 32, 64, 64};
+
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            RenderSettings settings;
+            settings.reflections.enabled = !enabled[static_cast<std::size_t>(preset)];
+            applyQualityPreset(settings, preset);
+            assert(settings.reflections.enabled == enabled[static_cast<std::size_t>(preset)]);
+            assert(settings.reflections.maxSteps == steps[static_cast<std::size_t>(preset)]);
+            assert(matchingQualityPreset(settings) == preset);
+        }
+
+        assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64);
+    }
+
     // Sharing between probes per preset: more where there are fewer rays, none on Ultra, the default.
     void testPresetsSetProbeSharing() {
         const std::array<float, 4> sharing{0.5f, 0.3f, 0.1f, 0.0f};
@@ -196,6 +213,7 @@ void testQualityPreset() {
     testUltraIsTheDefaults();
     testPresetsSetTheProbeRays();
     testPresetsSetProbeSharing();
+    testPresetsSetReflections();
     testPresetsSetTheProbeCascades();
     testLowerPresetsCostLess();
     testPresetsKeepTasteSettings();

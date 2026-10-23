@@ -2053,6 +2053,59 @@ The textures' mip bias with FSR (and DLSS) is `log2(scale) - 1` (`textureLodBias
 
 A capture draws `taaSettleFrames` (32, two jitter cycles) before it when anti-aliasing is on, more if probes or the cascades' depth fit need more, starting the history and the jitter afresh, so captures repeat exactly. With anti-aliasing off nothing is jittered or resolved and the picture is as before.
 
+## Screen-space reflections
+
+Glossy surfaces reflect what is on screen (`render/gpu/screen_reflections`, `screen_reflections.glsl`, mirrored; `VulkanReflections`). Until now the specular part of the light from all around was the light probes' irradiance in the mirror direction, a reflection as blurred as the roughest surface's; it stays as the stand-in wherever screen-space reflections find nothing.
+
+### The main pass's surfaces
+
+With reflections on (and anti-aliasing on, since they reflect last frame's smoothed picture), the main pass writes three more targets at the render size, through `triangle.frag`'s outputs 1 to 3, behind specialization constant 1 (`SSR_WRITE_SURFACES_CONSTANT`), so pipelines without them hold none of the code:
+
+| Target | Format | Holds |
+|---|---|---|
+| Normal | `R16G16_SFLOAT` | the shaded normal, octahedral (`octahedralEncode`) |
+| Properties | `R8G8B8A8_UNORM` | the specular albedo, and the roughness (1 without a normal) |
+| Stand-in | `B10G11R11_UFLOAT` (RGBA16F where it cannot be drawn into) | the probes' (or flat ambient's) light in the mirror direction times the specular albedo: what the pixel added for its reflection |
+
+They are not cleared; the reflection pass reads only pixels with a surface. The renderer keeps eight main pipelines (`mainPipelines`, `mainPipelineIndex`: after the prepass or not, probes or not, surfaces or not), and `PipelineDescription::extraColourFormats` names the extra targets. The sky's and stars' pipelines draw into the scene image alone, so with the surfaces they are drawn in a second rendering block after the main one, which loads the colour and depth (the depth stored for it).
+
+### The pyramids
+
+- **Depth pyramid** (`depth_pyramid.comp`, R32F, a full mip chain at most 16 levels): level 0 copies the depth image, each level above keeps the nearest depth (in reversed-Z the largest) of the 2x2 texels below, and at the far edge of an odd level also the texel left over (`pyramidLastFine`), so every texel has a cell above it (`pyramidCell` clamps). One dispatch a level, each level made visible to the next by its own barrier.
+- **Colour pyramid** (`colour_pyramid.comp`, RGBA16F, the same levels): level 0 is last frame's finished picture (`finishedScene`, still last frame's when the pass runs: TAA's history, FSR's or DLSS's output) resampled to the render size, each level above one bilinear read between the 2x2 below.
+
+### The march
+
+`reflections.comp`, one invocation per render pixel, in place on the scene image (which gained storage use):
+
+1. Skip the sky, pixels at or past `maxRoughness`, and mirror rays into the surface (normal maps can tilt them).
+2. The ray starts `SSR_START_OFFSET_PIXELS` pixel footprints off the surface along its normal (`pixelFootprint`: the world size of a pixel per metre, from the view-projection's second row), so the surface it leaves does not hide it.
+3. `screenRay` projects it: pixel x and y and reversed-Z depth are all linear in t on screen (depth is affine in 1/w, as x/w and y/w are), so it is cut like a box by the screen's edges and the depth range, after its far end is cut to `SSR_NEAREST_W` in front of the camera.
+4. `hizStep` marches through the pyramid (McGuire and Mara 2014, Uludag 2014): in front of a cell's nearest depth the ray skips to where it reaches that depth (a level finer) or out of the cell (a level coarser); at or behind it, a level finer without moving; below level 0 it has hit. A hit more than `thickness` behind the surface (in view distance) is something the ray passes behind, and the march goes on (`passTexel`). Up to `maxSteps` steps (`traceScreenRay` is the loop's CPU mirror).
+5. The hit's surface is found in last frame's picture by its motion if it moved, else through the two cameras, from its centre without this frame's jitter (`reprojectPixel`, as TAA).
+6. The light is read from the colour pyramid at `reflectionConeLevel`: the reflected cone's half angle has tangent `SSR_CONE_SPREAD` alpha (GGX's lobe at half its peak, the mirror turning twice as far), and the level is log2 of its width after the pixels travelled.
+7. `reflectionConfidence` multiplies four fades: roughness (full to `sharpRoughness`, none from `maxRoughness`), the screen's edges (`edgeFade` of the half-width), the reach's last fifth, and hits on a surface met from behind (none past a cosine of -0.2).
+8. `reflectedScene`: scene + confidence (specular albedo x light - stand-in), never below 0. At confidence 0 the pixel is not written, so it is exactly the main pass's.
+
+Reflections in reflections build up a bounce a frame, since last frame's picture holds last frame's reflections. The pass runs only when last frame's picture is usable (`previousPictureUsable`: last frame was smoothed and nothing was remade since).
+
+### Settings
+
+`ReflectionSettings` (`RenderSettings::reflections`, the Reflections group):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `enabled` | on | off: no surfaces, no pass (Low turns it off) |
+| `sharpRoughness` | 0.3 | trusted fully up to here |
+| `maxRoughness` | 0.6 | not at all from here (the stand-in) |
+| `thickness` | 0.3 m | how far behind a surface a ray may be and still hit it |
+| `reach` | 100 m | how far a ray goes |
+| `maxSteps` | 64 | steps through the pyramid (Medium 32) |
+| `edgeFade` | 0.1 | the share of the half-width near the screen's edges where hits fade |
+| `showConfidence` | off | the debug view: white where the reflection is trusted |
+
+Timed as SSR (`GpuPass::Reflections`), between the depth measurement and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) is the place to judge them.
+
 ## Depth and camera-relative rendering
 
 ### Reversed-Z

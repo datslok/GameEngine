@@ -30,6 +30,9 @@ struct DepthAttachment {
 */
 void beginRendering(VkCommandBuffer commands, VkExtent2D extent, const ColourAttachment* colour, const DepthAttachment* depth);
 
+// The same with several colour targets, at the fragment shader's output locations 0, 1... in order.
+void beginRendering(VkCommandBuffer commands, VkExtent2D extent, std::span<const ColourAttachment> colours, const DepthAttachment* depth);
+
 // A texture as a draw reads it: its view, how it is filtered, and the layout it is in.
 struct SampledImage {
     VkImageView view = VK_NULL_HANDLE;

@@ -39,12 +39,14 @@
 #include "render/vulkan/vulkan_overlay.h"
 #include "render/vulkan/vulkan_pipeline.h"
 #include "render/vulkan/vulkan_ray_tracing.h"
+#include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
 #include "render/vulkan/vulkan_texture.h"
 #include "scene/asset_handles.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -171,6 +173,7 @@ private:
     OwnedHandle<VkSampler> tableSampler;       // lookup tables: bilinear, clamped
     OwnedHandle<VkSampler> nearestSampler;     // exact texels, clamped (the scene for tone mapping, the overlay)
     OwnedHandle<VkSampler> linearSampler;      // bilinear, clamped, one level (bloom)
+    OwnedHandle<VkSampler> pyramidSampler;     // trilinear, clamped, every level (the reflections' colour pyramid)
     OwnedHandle<VkSampler> shadowSampler;      // compares depths, blending the four nearest results
     OwnedHandle<VkSampler> shadowDepthSampler; // raw depths, exact texels (the soft shadow blocker search)
 
@@ -179,11 +182,10 @@ private:
     std::unique_ptr<BindlessTextures> bindlessTextures;
     std::unique_ptr<SceneLayout> sceneLayout;
 
-    // The main pass alone (finding the nearest surface itself) and after the depth prepass (shading only it), and the prepass.
-    std::unique_ptr<VulkanPipeline> mainPipeline;
-    std::unique_ptr<VulkanPipeline> mainAfterPrepassPipeline;
-    std::unique_ptr<VulkanPipeline> mainProbesPipeline;             // the same two, sampling the light probes
-    std::unique_ptr<VulkanPipeline> mainAfterPrepassProbesPipeline;
+    // The main pass alone (finding the nearest surface itself) or after the depth prepass (shading only it), sampling
+    // the light probes or not, writing the reflection surfaces or not: every combination, indexed by mainPipelineIndex.
+    // And the prepass.
+    std::array<std::unique_ptr<VulkanPipeline>, 8> mainPipelines;
     std::unique_ptr<VulkanPipeline> depthPrepassPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
@@ -208,6 +210,11 @@ private:
     // The picture everything after the scene reads (eye adaptation, bloom, tone mapping, captures), at the frame's
     // size: temporal anti-aliasing's result, or the scene image itself while it is off. Set by drawScene.
     VulkanImage* finishedScene = nullptr;
+
+    // Screen-space reflections (render/gpu/screen_reflections.h), and whether last frame's finished picture may be
+    // reflected: it was smoothed (so it is not the scene image this frame draws over) and nothing was remade since.
+    std::unique_ptr<VulkanReflections> reflections;
+    bool previousPictureUsable = false;
 
     // Shadows: every shadow view in one depth atlas, kept between frames (tiles are redrawn only when they change).
     // Counts frames for the memory allocator, which refreshes the driver's memory figures when it changes.
@@ -360,8 +367,10 @@ private:
     // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
     // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone),
     // with stars, when the frame has them, over it.
+    // reflectionSurfaces: the main pass also writes the reflection surfaces, and the sky and stars are drawn after it,
+    // in a pass of their own (their pipelines draw into the scene image alone).
     void drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass, bool keepDepth,
-                      bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky, const StarrySky* stars);
+                      bool sampleProbes, bool reflectionSurfaces, const Vec3& background, const GpuRayDebugView* sky, const StarrySky* stars);
     void updateSunShadowFit(const ShadowSettings& settings, const Camera& camera);
     void createRayTracing();
     GpuAtmosphere packFrameAtmosphere(const FrameDescription& description, const GpuLights& lights) const;

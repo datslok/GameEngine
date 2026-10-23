@@ -93,6 +93,9 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     createFrames();
     createSamplers();
     createSceneLayout();
+
+    // Before the main pass's pipelines, which draw into its surfaces.
+    reflections = std::make_unique<VulkanReflections>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get(), framesInFlight);
     createPipelines();
     createShadowAtlas(shadowLayout.size());
     createFixedTextures();
@@ -228,6 +231,10 @@ void VulkanRenderer::createSamplers() {
     nearestSampler = device.createSampler(samplerInfo(VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
     linearSampler = device.createSampler(samplerInfo(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
 
+    VkSamplerCreateInfo pyramid = samplerInfo(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    pyramid.maxLod = VK_LOD_CLAMP_NONE;
+    pyramidSampler = device.createSampler(pyramid);
+
     VkSamplerCreateInfo shadow = samplerInfo(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     shadow.compareEnable = VK_TRUE;
     shadow.compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
@@ -262,6 +269,11 @@ namespace {
         description.depthWrite = state.write;
         description.depthCompare = vulkanCompare(state.compare);
     }
+
+    // Where each main pass pipeline is in mainPipelines: one bit per choice.
+    std::size_t mainPipelineIndex(bool afterPrepass, bool probes, bool reflectionSurfaces) {
+        return (afterPrepass ? 1u : 0u) | (probes ? 2u : 0u) | (reflectionSurfaces ? 4u : 0u);
+    }
 }
 
 /*
@@ -282,19 +294,27 @@ void VulkanRenderer::createPipelines() {
     main.colourFormat = sceneColourFormat;
     main.depthFormat = depthFormat;
     setDepthState(main, mainPassDepthState(false));
-    mainPipeline = std::make_unique<VulkanPipeline>(device, layouts, main);
 
-    PipelineDescription afterPrepass = main;
-    setDepthState(afterPrepass, mainPassDepthState(true));
-    mainAfterPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, afterPrepass);
+    // Each combination: after the prepass or not, sampling the light probes (for frames that have them) or not, writing
+    // the reflection surfaces (their own targets, specialization constant 1) or not. A pipeline without probes or
+    // reflections names no constants, so it compiles exactly as it did before they existed.
+    for (bool afterPrepass : {false, true}) {
+        for (bool probes : {false, true}) {
+            for (bool surfaces : {false, true}) {
+                PipelineDescription variant = main;
+                setDepthState(variant, mainPassDepthState(afterPrepass));
 
-    // The same two sampling the light probes, for frames that have them.
-    PipelineDescription withProbes = main;
-    withProbes.fragmentConstants = {1};
-    mainProbesPipeline = std::make_unique<VulkanPipeline>(device, layouts, withProbes);
-    PipelineDescription afterPrepassWithProbes = afterPrepass;
-    afterPrepassWithProbes.fragmentConstants = {1};
-    mainAfterPrepassProbesPipeline = std::make_unique<VulkanPipeline>(device, layouts, afterPrepassWithProbes);
+                if (surfaces) {
+                    variant.fragmentConstants = {probes ? 1u : 0u, 1u};
+                    variant.extraColourFormats = reflections->surfaceFormats();
+                } else if (probes) {
+                    variant.fragmentConstants = {1u};
+                }
+
+                mainPipelines[mainPipelineIndex(afterPrepass, probes, surfaces)] = std::make_unique<VulkanPipeline>(device, layouts, variant);
+            }
+        }
+    }
 
     PipelineDescription prepass = main;
     prepass.fragmentShader = nullptr;
@@ -512,7 +532,9 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     sceneDescription.width = scene.width;
     sceneDescription.height = scene.height;
     // Transfer source: a capture without temporal anti-aliasing copies it out.
-    sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    // Storage: screen-space reflections change it in place.
+    sceneDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                             VK_IMAGE_USAGE_STORAGE_BIT;
     sceneDescription.name = "Scene colour";
     VulkanImage sceneReplacement{device, sceneDescription};
 
@@ -526,8 +548,10 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     taa->ensureSize(width, height, scene);
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
+    reflections->ensureSize(scene);
     fsrHistory = false;
     dlssHistory = false;
+    previousPictureUsable = false;
     frameWidth = width;
     frameHeight = height;
     sceneSize = scene;
@@ -1041,12 +1065,16 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthPrepass);
     }
 
+    // Screen-space reflections reflect last frame's smoothed picture, so they need the anti-aliasing on.
+    validateReflections(settings.reflections);
+    const bool screenReflections = temporal && settings.reflections.enabled;
+
     const bool measureDepths = settings.shadows.fitCascadesToDepth;
     const bool showProbes = traceProbes && illumination.showProbes;
     beginGpuPass(frame, GpuPass::Main);
     const GpuRayDebugView skyRays = packRayDebugView(camera, RayDebugView::Off, sceneSize.width, sceneSize.height);
     const std::optional<StarrySky>& stars = description.lighting.stars;
-    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || temporal, traceProbes,
+    drawMainPass(frame, mainDraws, sceneSet, settings.depthPrepass, measureDepths || showProbes || temporal, traceProbes, screenReflections,
                  description.lighting.background,
                  air ? &skyRays : nullptr, stars ? &*stars : nullptr);
     endGpuPass(frame, GpuPass::Main);
@@ -1076,12 +1104,26 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthRange);
     }
 
+    // From this frame's clip space (without the jitter) to last frame's, for the reflections and the anti-aliasing.
+    const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
+
+    // The reflections, into the scene image before it is smoothed, from last frame's finished picture (still what
+    // finishedScene points at): none on the first frame, after a resize, or after a frame without anti-aliasing.
+    const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
+
+    if (screenReflections && previousPictureUsable && previousCamera.known && inverseViewProjection) {
+        beginGpuPass(frame, GpuPass::Reflections);
+        const GpuReflectionPass pass = packReflectionPass(relativeViewProjection, *inverseViewProjection, reprojection, sceneSize, jitter,
+                                                          settings.reflections, reflections->getPyramidLevels());
+        reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(), *finishedScene, pass);
+        endGpuPass(frame, GpuPass::Reflections);
+    }
+
     // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
     // after the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history
     // while another draws, and all start afresh when temporal anti-aliasing is switched on again. All are timed as AA.
     if (temporal) {
         beginGpuPass(frame, GpuPass::AntiAliasing);
-        const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
         bool upscaledByFsr = false;
         bool upscaledByDlss = false;
 
@@ -1120,12 +1162,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         fsrHistory = upscaledByFsr;
         dlssHistory = upscaledByDlss;
         previousCamera = PreviousCamera{motionViewProjection, cameraOrigin, true};
+        previousPictureUsable = true;
         ++taaFrame;
     } else {
         taa->forgetHistory();
         fsrHistory = false;
         dlssHistory = false;
         previousCamera.known = false;
+        previousPictureUsable = false;
         finishedScene = &sceneColour;
     }
 
@@ -1439,23 +1483,49 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
 * Afterwards the scene image becomes readable for bloom and tone mapping.
 */
 void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet, bool afterPrepass,
-                                  bool keepDepth, bool sampleProbes, const Vec3& background, const GpuRayDebugView* sky, const StarrySky* stars) {
+                                  bool keepDepth, bool sampleProbes, bool reflectionSurfaces, const Vec3& background, const GpuRayDebugView* sky,
+                                  const StarrySky* stars) {
     const VkCommandBuffer commands = frame.commands;
     sceneColour.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
     depth.transition(commands, ImageState::DepthTarget, afterPrepass ? ImageContents::Keep : ImageContents::Discard);
 
-    const ColourAttachment colour{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {background.x, background.y, background.z, 1.0f}};
+    // The scene image first, then the reflection surfaces when they are written.
+    std::vector<ColourAttachment> colours{
+        ColourAttachment{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {background.x, background.y, background.z, 1.0f}}};
+
+    if (reflectionSurfaces) {
+        const std::array<ColourAttachment, 3> surfaces = reflections->beginSurfaces(commands);
+        colours.insert(colours.end(), surfaces.begin(), surfaces.end());
+    }
+
+    // The sky drawn in a pass of its own afterwards tests the depths, so they are kept for it.
+    const bool skyAfter = reflectionSurfaces && sky != nullptr;
     const VkAttachmentLoadOp depthLoad = afterPrepass ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
-    const VkAttachmentStoreOp depthStore = keepDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    const VkAttachmentStoreOp depthStore = keepDepth || skyAfter ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     const DepthAttachment depthTarget{depth.getView(), depthLoad, depthStore, gpuFarDepth};
-    beginRendering(commands, {sceneSize.width, sceneSize.height}, &colour, &depthTarget);
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, colours, &depthTarget);
     renderingOpen = true;
 
-    const VulkanPipeline& pipeline = sampleProbes ? (afterPrepass ? *mainAfterPrepassProbesPipeline : *mainProbesPipeline)
-                                                  : (afterPrepass ? *mainAfterPrepassPipeline : *mainPipeline);
+    const VulkanPipeline& pipeline = *mainPipelines[mainPipelineIndex(afterPrepass, sampleProbes, reflectionSurfaces)];
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     stats.drawCalls += drawBatches(commands, mainDraws.batches);
+
+    /*
+    * With the reflection surfaces, the sky's and the stars' pipelines (which draw into the scene image alone) need a
+    * pass of their own: the barriers between make the main pass's colour and depth writes visible to it, which keeps
+    * both, and the depth stored only when it is read later.
+    */
+    if (skyAfter) {
+        vkCmdEndRendering(commands);
+        sceneColour.transition(commands, ImageState::ColourTarget);
+        depth.transition(commands, ImageState::DepthTarget);
+
+        const ColourAttachment kept{sceneColour.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, {}};
+        const VkAttachmentStoreOp skyDepthStore = keepDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        const DepthAttachment keptDepth{depth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, skyDepthStore, gpuFarDepth};
+        beginRendering(commands, {sceneSize.width, sceneSize.height}, &kept, &keptDepth);
+    }
 
     if (sky != nullptr) {
         const VkDescriptorBufferInfo air = frames[frame.frameIndex].scene->atmosphere.describe();
@@ -1900,6 +1970,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     createFrames();
     debugLines->setFramesInFlight(count);
     depthRange->setFramesInFlight(count);
+    reflections->setFramesInFlight(count);
     eyeAdaptation->setFramesInFlight(count);
 
     if (rayTracing) {
