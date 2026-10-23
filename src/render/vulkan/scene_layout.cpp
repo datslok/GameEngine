@@ -43,6 +43,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // last frame's model matrices (the velocity pass)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the light mirrors reflect onto each pixel
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the way it arrives
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the mirror pairs (fragment for the probe's traced capture)
     }};
 }
 
@@ -130,7 +131,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     probeHitLights(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     previousModels(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -163,6 +165,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         buffers.previousModels.describe(),
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
+        buffers.mirrorPairs.describe(),
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };

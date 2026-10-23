@@ -39,6 +39,9 @@ namespace {
     // The most textures the bindless array holds (see createSceneLayout).
     constexpr std::uint32_t maxBindlessTextures = 16384;
 
+    // Rough mirrors' noise repeats after this many frames: far longer than temporal anti-aliasing remembers.
+    constexpr std::uint64_t mirrorNoiseFrames = 1024;
+
     // Golden captures write what the screen would get: 8-bit sRGB (as the SDR swapchain) or scRGB half floats.
     VkFormat captureFormat(bool hdr) {
         return hdr ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_SRGB;
@@ -1119,7 +1122,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, settings, probes,
-                                                hitLights, mirrorLight);
+                                                hitLights, mirrorPairs);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1153,7 +1156,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         const std::span<const ProbeEvent> events = illumination.sceneEvents ? std::span<const ProbeEvent>{description.lighting.probeEvents}
                                                                             : std::span<const ProbeEvent>{};
         ddgi->update(frame.commands, frame.descriptors, probeSets, illumination, description.lighting.background, description.frameSeconds,
-                     hitLights.fast > 0, events, frame.frameIndex);
+                     hitLights.fast > 0, !mirrorPairs.empty() && settings.mirroredLights.bounce, events, frame.frameIndex);
         endGpuPass(frame, GpuPass::Probes);
     }
 
@@ -1180,7 +1183,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::MirroredLights);
         const MirroredLightSets mirrorSets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
         mirroredLights->light(frame.commands, frame.descriptors, frame.frameIndex, depth,
-                              packMirroredLightPass(*inverseViewProjection, sceneSize, mirrorPairs), mirrorSets);
+                              packMirroredLightPass(*inverseViewProjection, sceneSize), mirrorSets);
         endGpuPass(frame, GpuPass::MirroredLights);
     }
 
@@ -1358,7 +1361,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const ShadowPlan& shadows, const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws,
                                            const BatchedDraws& motionDraws, std::span<const BatchedDraws> captureDraws, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
-                                           const ProbeHitLights& hitLights, bool mirrorLight) {
+                                           const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs) {
+    const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
     std::vector<std::array<float, 16>> previousModels;
@@ -1402,11 +1406,16 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth, frameUpscaler);
     frameData.textureOptions[1] = settings.normalMapFiltering ? 1.0f : 0.0f;
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
+    // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
+    // (kept small: the shaders turn it into a float offset of the noise).
+    frameData.mirroredLightOptions[1] = static_cast<std::int32_t>(taaFrame % mirrorNoiseFrames);
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
     buffers.atmosphere.write(&packedAtmosphere, sizeof(packedAtmosphere));
     buffers.probeHitLights.write(hitLights.lights);
+    const GpuMirrorPairs packedPairs = packMirrorPairs(mirrorPairs, settings.mirroredLights);
+    buffers.mirrorPairs.write(&packedPairs, sizeof(packedPairs));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
     buffers.directionalLights.write(lights.directional);

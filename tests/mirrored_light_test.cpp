@@ -85,7 +85,8 @@ namespace {
     void testSettings() {
         const MirroredLightSettings defaults;
         assert(!defaults.enabled);
-        assert(defaults.mirrorRoughness == 0.1f);
+        assert(defaults.bounce);
+        assert(defaults.mirrorRoughness == 0.25f);
         validateMirroredLights(defaults);
 
         for (float roughness : {-0.1f, 1.5f, std::numeric_limits<float>::quiet_NaN()}) {
@@ -167,7 +168,7 @@ namespace {
         const Vec3 receiver{0.4f, -1.2f, 2.0f};
         const Vec3 light{-0.3f, 0.5f, 1.5f};
         const std::optional<MirrorPath> path = solveMirrorPath(receiver, light, Vec3{0.0f, 0.0f, 0.0f}, flatMirror(receiver, 2.0f, 2.0f));
-        assert(path);
+        assert(path && path->onMirror);
         assert(path->steps == 0);
         assert(near(path->surface.position.z, 0.0f, 1e-6f));
         assert(obeysReflection(receiver, light, path->surface, 1e-4f));
@@ -187,10 +188,17 @@ namespace {
         assert(nearVec(mirrored, imageLight, 1e-3f * imageLight.x));
     }
 
-    // No light where the point of reflection would be off the mirror's edge, or the receiver or light behind it.
+    /*
+    * No light where the receiver or light is behind the mirror. Where the point of reflection would be off a flat
+    * mirror's edge, the search ends on the mirror's plane, marked off the mirror: a rough mirror's footprint round it
+    * may still reach the mirror, a sharp one's cannot.
+    */
     void testFlatMirrorMisses() {
         const MirrorProjection small = flatMirror(Vec3{3.0f, 0.0f, 1.0f}, 0.5f, 0.5f);
-        assert(!solveMirrorPath(Vec3{3.0f, 0.0f, 1.0f}, Vec3{3.0f, 0.0f, 1.5f}, Vec3{}, small));
+        const std::optional<MirrorPath> offEdge = solveMirrorPath(Vec3{3.0f, 0.0f, 1.0f}, Vec3{3.0f, 0.0f, 1.5f}, Vec3{}, small);
+        assert(offEdge && !offEdge->onMirror && offEdge->steps == 0);
+        assert(nearVec(offEdge->surface.position, Vec3{3.0f, 0.0f, 0.0f}, 1e-5f));
+        assert(nearVec(offEdge->surface.frame.normal, Vec3{0.0f, 0.0f, 1.0f}, 0.0f));
 
         const Vec3 behind{0.0f, 0.0f, -1.0f};
         assert(!solveMirrorPath(behind, Vec3{0.0f, 0.0f, 2.0f}, Vec3{}, flatMirror(behind, 2.0f, 2.0f)));
@@ -198,18 +206,35 @@ namespace {
         const Vec3 receiver{0.5f, 0.0f, 1.0f};
         assert(!solveMirrorPath(receiver, Vec3{0.0f, 0.0f, -2.0f}, Vec3{}, flatMirror(receiver, 2.0f, 2.0f)));
 
+        // A mirror with a rim (a thin box's side faces): where the flat step lands on the rim, which is not in the
+        // mirror's plane, the point of reflection is off the mirror, as past a bare edge.
+        const Vec3 nearRim{0.95f, 0.0f, 1.0f};
+        const MirrorProjection framed = [mirror = flatMirror(nearRim, 0.5f, 0.5f)](const Vec3& towards) {
+            std::optional<MirrorSurface> surface = mirror(towards);
+
+            if (surface && std::abs(surface->position.x) > 0.45f) {
+                surface->frame = tangentFrame(Vec3{surface->position.x > 0.0f ? 1.0f : -1.0f, 0.0f, 0.0f});
+            }
+
+            return surface;
+        };
+        const std::optional<MirrorPath> onRim = solveMirrorPath(nearRim, Vec3{0.0f, 0.0f, 1.0f}, Vec3{}, framed);
+        assert(onRim && !onRim->onMirror);
+        assert(nearVec(onRim->surface.frame.normal, Vec3{0.0f, 0.0f, 1.0f}, 0.0f));
+
         const MirrorProjection nothing = [](const Vec3&) { return std::optional<MirrorSurface>{}; };
         assert(!solveMirrorPath(receiver, Vec3{0.0f, 0.0f, 2.0f}, Vec3{}, nothing));
 
         // On a flat mirror the first step is exact, so a point of reflection off its edge (or an end behind it) is
-        // known to be no light after two rays: the seed's and the step's, with no Newton steps creeping to the edge.
+        // known after two rays: the seed's and the step's, with no Newton steps creeping to the edge.
         const Vec3 aside{3.0f, 0.0f, 1.0f};
         int rays = 0;
         const MirrorProjection counted = [&, mirror = flatMirror(aside, 0.5f, 0.5f)](const Vec3& towards) {
             ++rays;
             return mirror(towards);
         };
-        assert(!solveMirrorPath(aside, Vec3{3.0f, 0.0f, 1.5f}, Vec3{}, counted));
+        const std::optional<MirrorPath> counter = solveMirrorPath(aside, Vec3{3.0f, 0.0f, 1.5f}, Vec3{}, counted);
+        assert(counter && !counter->onMirror);
         assert(rays == 2);
 
         rays = 0;
@@ -347,6 +372,268 @@ namespace {
         assert(nearVec(mirroredIrradiance(intensity, reflectance, 4.0f, 200.0f, 100.0f, 0.1f), Vec3{}, 0.0f));
     }
 
+    // Surfaces up to the setting's roughness reflect lights fully, rougher ones fading out over MIRROR_ROUGHNESS_FADE;
+    // up to MIRROR_FOOTPRINT_ROUGHNESS the reflection is sharp (one point of reflection), past it a footprint.
+    void testRoughnessFade() {
+        const float fade = static_cast<float>(MIRROR_ROUGHNESS_FADE);
+        assert(mirrorRoughnessFade(0.0f, 0.25f) == 1.0f);
+        assert(mirrorRoughnessFade(0.25f, 0.25f) == 1.0f);
+        assert(near(mirrorRoughnessFade(0.25f + 0.5f * fade, 0.25f), 0.5f, 1e-5f));
+        assert(mirrorRoughnessFade(0.25f + fade, 0.25f) == 0.0f);
+        assert(mirrorRoughnessFade(0.9f, 0.25f) == 0.0f);
+
+        const float footprint = static_cast<float>(MIRROR_FOOTPRINT_ROUGHNESS);
+        assert(!usesMirrorFootprint(0.0f));
+        assert(!usesMirrorFootprint(footprint));
+        assert(usesMirrorFootprint(footprint + 0.01f));
+    }
+
+    /*
+    * Each sample point, over every turn and stratum a frame may draw, is a standard normal pair: mean 0, variance 1 along
+    * each axis, uncorrelated. Within one frame the points spread out: no two close together.
+    */
+    void testGaussianSamples() {
+        const int grid = 64;
+        double sumX = 0.0;
+        double sumY = 0.0;
+        double sumXX = 0.0;
+        double sumYY = 0.0;
+        double sumXY = 0.0;
+        int count = 0;
+
+        for (int sample = 0; sample < MIRROR_FOOTPRINT_SAMPLES; ++sample) {
+            for (int i = 0; i < grid; ++i) {
+                for (int j = 0; j < grid; ++j) {
+                    const Vec2 point = gaussianSamplePoint(sample, MIRROR_FOOTPRINT_SAMPLES, (static_cast<float>(i) + 0.5f) / grid,
+                                                           (static_cast<float>(j) + 0.5f) / grid);
+                    sumX += point.x;
+                    sumY += point.y;
+                    sumXX += point.x * point.x;
+                    sumYY += point.y * point.y;
+                    sumXY += point.x * point.y;
+                    ++count;
+                }
+            }
+        }
+
+        assert(near(static_cast<float>(sumX / count), 0.0f, 0.01f));
+        assert(near(static_cast<float>(sumY / count), 0.0f, 0.01f));
+        assert(near(static_cast<float>(sumXX / count), 1.0f, 0.03f));
+        assert(near(static_cast<float>(sumYY / count), 1.0f, 0.03f));
+        assert(near(static_cast<float>(sumXY / count), 0.0f, 0.01f));
+
+        for (int a = 0; a < MIRROR_FOOTPRINT_SAMPLES; ++a) {
+            for (int b = a + 1; b < MIRROR_FOOTPRINT_SAMPLES; ++b) {
+                const Vec2 first = gaussianSamplePoint(a, MIRROR_FOOTPRINT_SAMPLES, 0.3f, 0.6f);
+                const Vec2 second = gaussianSamplePoint(b, MIRROR_FOOTPRINT_SAMPLES, 0.3f, 0.6f);
+                assert((first - second).length() > 0.1f);
+            }
+        }
+    }
+
+    // The half vector's length along the normal, (h . n), for a surface point.
+    float halfwayAlongNormal(const Vec3& receiver, const Vec3& light, const MirrorSurface& surface) {
+        return (unit(receiver - surface.position) + unit(light - surface.position)).dot(surface.frame.normal);
+    }
+
+    /*
+    * The footprint's spread on the mirror: the offsets of the standard normal's two axes are the columns of a square root
+    * of its covariance, (J^T J / s^2 + I / R^2)^-1, with s^2 = (h.n)^2 alpha^2 / 2 + (r / dL)^2 / 4 (the facets' slopes and
+    * the bulb's size) and R the mirror's size. On a mirror much bigger than the footprint every offset's weight is
+    * 1 / |det J|; on a small one the weight at the centre is 1 / (s^2 sqrt(det(J^T J / s^2 + I / R^2))).
+    */
+    void testFootprintShape() {
+        const Vec3 centre{0.0f, 1.0f, 0.0f};
+        const float radius = 0.5f;
+        const Vec3 receiver{2.0f, 0.2f, 1.5f};
+        const Vec3 light{-1.0f, 2.0f, 2.5f};
+        const std::optional<MirrorPath> path = solveMirrorPath(receiver, light, centre, convexBall(receiver, centre, radius));
+        assert(path);
+        const MirrorSurface& surface = path->surface;
+        const TangentMatrix j = mirrorJacobian(receiver, light, surface);
+        const float alpha = 0.09f;
+        const float emitterRadius = 0.05f;
+        const float along = halfwayAlongNormal(receiver, light, surface);
+        const float lightDistance = (light - surface.position).length();
+        const float spread = along * along * alpha * alpha * 0.5f + 0.25f * (emitterRadius / lightDistance) * (emitterRadius / lightDistance);
+
+        for (float size : {1000.0f, 0.05f}) {
+            const MirrorFootprint footprint = mirrorFootprint(receiver, light, surface, alpha, emitterRadius, size);
+            const Vec2 first = footprintOffset(footprint, Vec2{1.0f, 0.0f});
+            const Vec2 second = footprintOffset(footprint, Vec2{0.0f, 1.0f});
+            const float covXX = first.x * first.x + second.x * second.x;
+            const float covXY = first.x * first.y + second.x * second.y;
+            const float covYY = first.y * first.y + second.y * second.y;
+
+            const float precisionXX = (j.xx * j.xx + j.yx * j.yx) / spread + 1.0f / (size * size);
+            const float precisionXY = (j.xx * j.xy + j.yx * j.yy) / spread;
+            const float precisionYY = (j.xy * j.xy + j.yy * j.yy) / spread + 1.0f / (size * size);
+
+            // Covariance times precision is the identity.
+            assert(near(covXX * precisionXX + covXY * precisionXY, 1.0f, 1e-3f));
+            assert(near(covXX * precisionXY + covXY * precisionYY, 0.0f, 1e-3f));
+            assert(near(covXY * precisionXY + covYY * precisionYY, 1.0f, 1e-3f));
+
+            const float centreWeight = 1.0f / (spread * std::sqrt(precisionXX * precisionYY - precisionXY * precisionXY));
+            assert(near(footprintWeight(footprint, Vec2{}), centreWeight, 1e-3f * centreWeight));
+        }
+
+        const MirrorFootprint wide = mirrorFootprint(receiver, light, surface, alpha, emitterRadius, 1000.0f);
+        const float sharpWeight = 1.0f / std::abs(tangentDeterminant(j));
+        assert(near(footprintWeight(wide, Vec2{}), sharpWeight, 1e-3f * sharpWeight));
+        assert(near(footprintWeight(wide, footprintOffset(wide, Vec2{1.5f, -0.7f})), sharpWeight, 1e-3f * sharpWeight));
+    }
+
+    // A light reaching every point of the mirror: no shadows and no spotlight's cone.
+    float reachesEverywhere(const MirrorSurface&) {
+        return 1.0f;
+    }
+
+    /*
+    * The light a rough mirror in the plane z = 0 (halfWidth by halfHeight round the origin) sends a receiver, summed over
+    * the mirror in squares of side cell: each reflects as much as the facets turned to send the light there allow,
+    * D(h) I / (4 dL^2 dx^2) per area, for a light of intensity 1 (Beckmann's facets of width alpha; the reflectance and
+    * the facets' shadowing 1). The exact answer the footprint approximates.
+    */
+    float roughMirrorIntegral(const Vec3& receiver, const Vec3& light, float halfWidth, float halfHeight, float alpha, float cell) {
+        const int across = static_cast<int>(std::lround(2.0f * halfWidth / cell));
+        const int up = static_cast<int>(std::lround(2.0f * halfHeight / cell));
+        const double alphaSquared = static_cast<double>(alpha) * alpha;
+        double sum = 0.0;
+
+        for (int i = 0; i < across; ++i) {
+            for (int j = 0; j < up; ++j) {
+                const Vec3 point{-halfWidth + (static_cast<float>(i) + 0.5f) * cell, -halfHeight + (static_cast<float>(j) + 0.5f) * cell, 0.0f};
+                const double receiverDistance = (receiver - point).length();
+                const double lightDistance = (light - point).length();
+                const double cosine = unit(unit(receiver - point) + unit(light - point)).z;
+                const double cosineSquared = cosine * cosine;
+                const double tangentSquared = (1.0 - cosineSquared) / cosineSquared;
+                const double facets = std::exp(-tangentSquared / alphaSquared) / (std::numbers::pi * alphaSquared * cosineSquared * cosineSquared);
+                sum += facets / (4.0 * lightDistance * lightDistance * receiverDistance * receiverDistance);
+            }
+        }
+
+        return static_cast<float>(sum * cell * cell);
+    }
+
+    /*
+    * The footprint's estimate for a light of intensity 1 off a mirror that reflects all of it, averaged over a grid of
+    * the noise each frame draws (its turn and stratum), as temporal anti-aliasing averages frames.
+    */
+    float averagedFootprintLight(const Vec3& receiver, const Vec3& light, const MirrorPath& path, float alpha, float mirrorSize,
+                                 const MirrorProjection& project) {
+        const MirrorFootprint footprint = mirrorFootprint(receiver, light, path.surface, alpha, 0.0f, mirrorSize);
+        const int grid = 32;
+        double sum = 0.0;
+
+        for (int i = 0; i < grid; ++i) {
+            for (int j = 0; j < grid; ++j) {
+                sum += footprintLight(path.surface, footprint, MIRROR_FOOTPRINT_SAMPLES, (static_cast<float>(i) + 0.5f) / grid,
+                                      (static_cast<float>(j) + 0.5f) / grid, project, reachesEverywhere);
+            }
+        }
+
+        const float meanWeight = static_cast<float>(sum / (grid * grid));
+        return roughMirroredIrradiance(Vec3{1.0f, 1.0f, 1.0f}, Vec3{1.0f, 1.0f, 1.0f}, receiver, light, path.surface, meanWeight, 1000.0f).x;
+    }
+
+    // The sharp answer for a light of intensity 1 off a mirror that reflects all of it, from a point source.
+    float sharpLight(const Vec3& receiver, const Vec3& light, const MirrorSurface& surface) {
+        const float pathLength = (receiver - surface.position).length() + (light - surface.position).length();
+        return mirroredIrradiance(Vec3{1.0f, 1.0f, 1.0f}, Vec3{1.0f, 1.0f, 1.0f}, mirrorSpreadArea(receiver, light, surface), pathLength, 1000.0f, 0.0f).x;
+    }
+
+    /*
+    * Far from its edges, a rough flat mirror sends what a sharp one does: every footprint lies on the mirror, and its
+    * weights add up to the sharp answer. So does a rough chrome ball away from its outline. As the roughness goes to 0
+    * the footprint shrinks onto the point of reflection, and a single frame's estimate is the sharp answer.
+    */
+    void testRoughMatchesSharpAwayFromEdges() {
+        const Vec3 receiver{0.3f, -0.2f, 1.2f};
+        const Vec3 light{-0.4f, 0.1f, 0.9f};
+        const MirrorProjection mirror = flatMirror(receiver, 2.0f, 2.0f);
+        const std::optional<MirrorPath> flat = solveMirrorPath(receiver, light, Vec3{}, mirror);
+        assert(flat && flat->onMirror);
+        const float flatSharp = sharpLight(receiver, light, flat->surface);
+        const float mirrorSize = 2.0f * std::numbers::sqrt2_v<float>;
+        assert(near(averagedFootprintLight(receiver, light, *flat, 0.09f, mirrorSize, mirror), flatSharp, 0.01f * flatSharp));
+
+        const MirrorFootprint tiny = mirrorFootprint(receiver, light, flat->surface, 1e-3f, 0.0f, mirrorSize);
+        const float oneFrame = footprintLight(flat->surface, tiny, MIRROR_FOOTPRINT_SAMPLES, 0.37f, 0.61f, mirror, reachesEverywhere);
+        const float tinyLight =
+            roughMirroredIrradiance(Vec3{1.0f, 1.0f, 1.0f}, Vec3{1.0f, 1.0f, 1.0f}, receiver, light, flat->surface, oneFrame, 1000.0f).x;
+        assert(near(tinyLight, flatSharp, 1e-3f * flatSharp));
+
+        const Vec3 centre{0.0f, 1.0f, 0.0f};
+        const float radius = 0.5f;
+        const Vec3 ballReceiver{1.2f, 0.6f, 1.1f};
+        const Vec3 ballLight{-0.6f, 1.6f, 1.4f};
+        const MirrorProjection ball = convexBall(ballReceiver, centre, radius);
+        const std::optional<MirrorPath> curved = solveMirrorPath(ballReceiver, ballLight, centre, ball);
+        assert(curved && curved->onMirror);
+        const float ballSharp = sharpLight(ballReceiver, ballLight, curved->surface);
+        assert(near(averagedFootprintLight(ballReceiver, ballLight, *curved, 0.09f, radius, ball), ballSharp, 0.02f * ballSharp));
+    }
+
+    /*
+    * Across the edge of a light's reflection in a finite rough mirror, the footprint follows the exact sum over the
+    * mirror's facets: full inside, about half where the sharp reflection's edge is, fading over the footprint's width
+    * outside it, where a sharp mirror's light stops dead (its point of reflection off the mirror).
+    */
+    void testRoughEdgeSoftens() {
+        const Vec3 light{0.0f, 0.0f, 1.5f};
+        const float half = 0.5f;
+        const float alpha = 0.09f;
+        const float mirrorSize = half * std::numbers::sqrt2_v<float>;
+        // Receivers 1 m up see the light's point of reflection at 0.6 of their own x: the sharp edge is at x = 0.833.
+        const float across[] = {0.0f, 0.6f, 0.8333f, 0.95f, 1.25f};
+        float exact[5]{};
+        float sharp[5]{};
+
+        for (int i = 0; i < 5; ++i) {
+            const Vec3 receiver{across[i], 0.0f, 1.0f};
+            const MirrorProjection mirror = flatMirror(receiver, half, half);
+            const std::optional<MirrorPath> path = solveMirrorPath(receiver, light, Vec3{}, mirror);
+            assert(path);
+            assert(path->onMirror == (across[i] < 0.9f));
+            exact[i] = roughMirrorIntegral(receiver, light, half, half, alpha, 0.002f);
+            sharp[i] = sharpLight(receiver, light, path->surface); // the image light, as if the mirror went on
+            const float estimate = averagedFootprintLight(receiver, light, *path, alpha, mirrorSize, mirror);
+            assert(near(estimate, exact[i], 0.03f * exact[0]));
+
+            if (i == 3) {
+                assert(estimate > 0.05f * exact[0]);
+            }
+        }
+
+        assert(near(exact[0], sharp[0], 0.01f * sharp[0]));
+        assert(exact[1] > 0.95f * sharp[1]);
+        assert(exact[2] > 0.35f * sharp[2] && exact[2] < 0.65f * sharp[2]);
+        assert(exact[4] < 0.02f * sharp[4]);
+    }
+
+    /*
+    * At a focus (the receiver and the light at the centre of a concave mirror: every point sends the light back, so
+    * det J = 0) the footprint stays finite: its spread is held to the mirror's size, and the light it gives is finite.
+    */
+    void testRoughFocusStaysFinite() {
+        const Vec3 receiver{0.0f, 0.0f, 1.0f};
+        const MirrorSurface bowl{Vec3{}, tangentFrame(Vec3{0.0f, 0.0f, 1.0f}), TangentMatrix{-1.0f, 0.0f, 0.0f, -1.0f}};
+        assert(std::abs(tangentDeterminant(mirrorJacobian(receiver, receiver, bowl))) < 1e-5f);
+
+        const float mirrorSize = 0.5f;
+        const MirrorFootprint footprint = mirrorFootprint(receiver, receiver, bowl, 0.09f, 0.05f, mirrorSize);
+        const Vec2 offset = footprintOffset(footprint, Vec2{1.0f, 1.0f});
+        assert(std::isfinite(offset.x) && std::isfinite(offset.y));
+        assert(offset.length() <= 2.0f * mirrorSize);
+
+        const float weight = footprintWeight(footprint, offset);
+        assert(std::isfinite(weight) && weight > 0.0f);
+        const Vec3 lit = roughMirroredIrradiance(Vec3{4.0f, 4.0f, 4.0f}, Vec3{1.0f, 1.0f, 1.0f}, receiver, receiver, bowl, weight, 100.0f);
+        assert(std::isfinite(lit.x) && lit.x > 0.0f);
+    }
+
     void testPairMayReach() {
         const Vec3 centre{0.0f, 0.0f, 0.0f};
         assert(mirrorPairMayReach(Vec3{3.0f, 0.0f, 0.0f}, centre, 1.0f, Vec3{0.0f, 4.0f, 0.0f}, 6.0f));
@@ -404,20 +691,23 @@ namespace {
             shinyDraw(Vec3{100.0f, 0.0f, -40.0f}, 1.0f, 0.0f),  // 4: beyond the range
             shinyDraw(Vec3{100.0f, 0.0f, -8.0f}, 1.0f, 0.0f),   // 5: no shadow
             shinyDraw(Vec3{100.0f, 6.0f, 0.0f}, 0.5f, 0.0f),    // 6: beside the point light
+            shinyDraw(Vec3{100.0f, 0.0f, -12.0f}, 1.0f, 0.28f), // 7: rougher than the setting, still fading out
+            shinyDraw(Vec3{100.0f, 0.0f, -5.0f}, 1.0f, 0.31f),  // 8: faded out
         };
         draws[5].castsShadows = false;
 
         const std::vector<MirrorPair> pairs = chooseMirrorPairs(lights, draws, cameraOrigin, MirroredLightSettings{});
-        assert(pairs.size() == 3);
+        assert(pairs.size() == 4);
         assert(pairs[0].lightKind == MIRROR_POINT_LIGHT && pairs[0].slot == 0 && pairs[0].draw == 6);
         assert(pairs[1].lightKind == MIRROR_SPOT_LIGHT && pairs[1].slot == 0 && pairs[1].draw == 1);
         assert(pairs[2].lightKind == MIRROR_SPOT_LIGHT && pairs[2].slot == 0 && pairs[2].draw == 0);
         assert(nearVec(pairs[2].centre, Vec3{0.0f, 0.0f, -10.0f}, 1e-5f));
         assert(pairs[2].radius == 1.0f);
+        assert(pairs[3].draw == 7);
 
         MirroredLightSettings rougher;
         rougher.mirrorRoughness = 0.8f;
-        assert(chooseMirrorPairs(lights, draws, cameraOrigin, rougher).size() == 4);
+        assert(chooseMirrorPairs(lights, draws, cameraOrigin, rougher).size() == 6);
 
         // More than the pass holds: the nearest are kept.
         std::vector<DrawItem> many;
@@ -433,20 +723,29 @@ namespace {
     }
 
     void testPackPass() {
-        const std::vector<MirrorPair> pairs{MirrorPair{MIRROR_SPOT_LIGHT, 3, 7, Vec3{1.0f, 2.0f, 3.0f}, 0.5f}};
         const Mat4 inverse = Mat4::translation(1.0f, 2.0f, 3.0f);
-        const GpuMirroredLightPass pass = packMirroredLightPass(inverse, RenderSize{200, 100}, pairs);
-        assert(pass.counts[0] == 1);
+        const GpuMirroredLightPass pass = packMirroredLightPass(inverse, RenderSize{200, 100});
         assert(pass.size[0] == 200.0f && pass.size[1] == 100.0f && pass.size[2] == 1.0f / 200.0f && pass.size[3] == 1.0f / 100.0f);
         assert(pass.inverseViewProjection[12] == 1.0f && pass.inverseViewProjection[13] == 2.0f); // column-major: translation last
-        assert(pass.pairs[0].light[0] == MIRROR_SPOT_LIGHT && pass.pairs[0].light[1] == 3 && pass.pairs[0].light[2] == 7);
-        assert(pass.pairs[0].bounds[0] == 1.0f && pass.pairs[0].bounds[3] == 0.5f);
+    }
+
+    // The pairs every user of the search reads (scene set 1): their count, the roughness limit, then each one; none when off.
+    void testPackPairs() {
+        const std::vector<MirrorPair> pairs{MirrorPair{MIRROR_SPOT_LIGHT, 3, 7, Vec3{1.0f, 2.0f, 3.0f}, 0.5f}};
+        MirroredLightSettings settings;
+        settings.mirrorRoughness = 0.2f;
+        const GpuMirrorPairs packed = packMirrorPairs(pairs, settings);
+        assert(packed.counts[0] == 1);
+        assert(packed.options[0] == 0.2f);
+        assert(packed.pairs[0].light[0] == MIRROR_SPOT_LIGHT && packed.pairs[0].light[1] == 3 && packed.pairs[0].light[2] == 7);
+        assert(packed.pairs[0].bounds[0] == 1.0f && packed.pairs[0].bounds[3] == 0.5f);
+        assert(packMirrorPairs({}, settings).counts[0] == 0);
 
         const std::vector<MirrorPair> tooMany(MIRROR_MAX_PAIRS + 1);
         bool threw = false;
 
         try {
-            packMirroredLightPass(inverse, RenderSize{200, 100}, tooMany);
+            packMirrorPairs(tooMany, settings);
         } catch (const std::length_error&) {
             threw = true;
         }
@@ -466,7 +765,14 @@ void testMirroredLight() {
     testBallSpreadHeadOn();
     testBallSpreadAgainstRays();
     testFocusStaysFinite();
+    testRoughnessFade();
+    testGaussianSamples();
+    testFootprintShape();
+    testRoughMatchesSharpAwayFromEdges();
+    testRoughEdgeSoftens();
+    testRoughFocusStaysFinite();
     testPairMayReach();
     testChoosePairs();
     testPackPass();
+    testPackPairs();
 }

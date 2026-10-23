@@ -51,7 +51,8 @@ enum SceneBinding : std::uint32_t {
     PreviousModelsBinding = 21,
     MirroredLightBinding = 22,
     MirroredDirectionBinding = 23,
-    SceneBindingCount = 24
+    MirrorPairsBinding = 24,
+    SceneBindingCount = 25
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -123,6 +124,9 @@ struct SceneBuffers {
     // atmosphere's numbers (GpuAtmosphere; present or not, render/gpu/atmosphere.h).
     UploadArray skyLight;
     UploadArray atmosphere;
+
+    // The pairs of a fast light and a shiny surface the mirrored light search runs over (GpuMirrorPairs; none when off).
+    UploadArray mirrorPairs;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light

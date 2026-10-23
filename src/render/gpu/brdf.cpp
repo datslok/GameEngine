@@ -113,6 +113,10 @@ Vec3 schlickFresnel(const Vec3& f0, float cosine) {
     return f0 + (Vec3{1.0f, 1.0f, 1.0f} - f0) * grazing;
 }
 
+Vec3 matteColour(const Vec3& baseColour, float metallic) {
+    return baseColour * (1.0f - metallic);
+}
+
 Vec3 reflectanceAtNormal(const SurfaceProperties& surface) {
     const Vec3 dielectric{dielectricReflectance, dielectricReflectance, dielectricReflectance};
     return dielectric + (surface.baseColour - dielectric) * surface.metallic;
@@ -190,7 +194,7 @@ ShadingPoint prepareShading(const SurfaceProperties& surface, const Vec3& normal
 
     point.energyCompensation = white + point.f0 * (1.0f / facetAlbedo - 1.0f);
     point.specularAlbedo = (point.f0 * entry.x + Vec3{entry.y, entry.y, entry.y}) * point.energyCompensation;
-    point.diffuse = surface.baseColour * (1.0f - surface.metallic) * (white - point.specularAlbedo);
+    point.diffuse = matteColour(surface.baseColour, surface.metallic) * (white - point.specularAlbedo);
 
     return point;
 }

@@ -40,5 +40,25 @@ void main() {
 
         vec4 triangle = triangleCurvature(edge1.xyz, testInput(6).xyz, testInput(7).xyz, testInput(8).xyz, edge1.w, frame);
         testOutput(7, vec4(triangle.x, triangle.y, triangle.w, 0.0));
+    } else if (function == GPU_TEST_MIRROR_FOOTPRINT) {
+        // Inputs: (receiver, alpha), (light, emitter radius), (point, mirror size), (normal, roughness), (curvature),
+        // (standard normal pair, turn, stratum), (intensity, range).
+        vec4 receiver = testInput(0);
+        vec4 light = testInput(1);
+        vec4 point = testInput(2);
+        vec4 normal = testInput(3);
+        vec4 noise = testInput(5);
+        vec4 intensity = testInput(6);
+        MirrorSurface surface = MirrorSurface(point.xyz, tangentFrame(normal.xyz), testInput(4));
+        MirrorFootprint footprint = mirrorFootprint(receiver.xyz, light.xyz, surface, receiver.w, light.w, point.w);
+        vec2 offset = footprintOffset(footprint, noise.xy);
+        float weight = footprintWeight(footprint, offset);
+
+        testOutput(0, vec4(footprint.offsetMatrix, footprint.weightScale));
+        testOutput(1, vec4(offset, weight, mirrorRoughnessFade(normal.w, 0.25)));
+        testOutput(2, vec4(gaussianSamplePoint(0, 4, noise.z, noise.w), gaussianSamplePoint(1, 4, noise.z, noise.w)));
+        testOutput(3, vec4(gaussianSamplePoint(2, 4, noise.z, noise.w), gaussianSamplePoint(3, 4, noise.z, noise.w)));
+        testOutput(4, vec4(roughMirroredIrradiance(intensity.rgb, vec3(0.9, 0.8, 0.7), receiver.xyz, light.xyz, surface, weight, intensity.w),
+                           usesMirrorFootprint(normal.w) ? 1.0 : 0.0));
     }
 }

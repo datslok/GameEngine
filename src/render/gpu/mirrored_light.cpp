@@ -2,6 +2,8 @@
 #include "render/gpu/clusters.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/light_falloff.h"
+#include "math/angles.h"
+#include "math/smooth_step.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,6 +12,7 @@
 
 void visit(MirroredLightSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Mirrored lights", settings.enabled);
+    visitor.field("Mirrored light bounce", settings.bounce);
     visitor.field("Mirror roughness", settings.mirrorRoughness, {.min = 0.0f, .max = 1.0f});
 }
 
@@ -180,14 +183,23 @@ std::optional<MirrorPath> solveMirrorPath(const Vec3& receiver, const Vec3& ligh
     }
 
     // Exact for a flat mirror, and a good start on a curved one: kept only if it lands on the surface. Where a flat
-    // mirror's step does not land (or both ends are not in front of it), there is no point of reflection.
+    // mirror's step does not land, the point of reflection is off the mirror, on its plane; where both ends are not in
+    // front of it, there is none, nor for a receiver on the plane itself (the mirror's own surface, which its reflection
+    // cannot light).
     const std::optional<Vec3> image = planeMirrorPoint(receiver, light, surface->position, surface->frame.normal);
     std::optional<MirrorSurface> moved = image ? project(*image) : std::nullopt;
+    const bool flat = isFlatMirror(surface->curvature);
+
+    if (moved && flat && moved->frame.normal.dot(surface->frame.normal) < static_cast<float>(MIRROR_SAME_PLANE_COSINE)) {
+        moved.reset();
+    }
 
     if (moved) {
         surface = moved;
-    } else if (isFlatMirror(surface->curvature)) {
-        return std::nullopt;
+    } else if (flat) {
+        const bool offPlane = (receiver - surface->position).dot(surface->frame.normal) > static_cast<float>(MIRROR_RAY_OFFSET);
+        return image && offPlane ? std::optional<MirrorPath>{MirrorPath{MirrorSurface{*image, surface->frame, surface->curvature}, 0, false}}
+                                 : std::nullopt;
     }
 
     for (int steps = 0;; ++steps) {
@@ -221,6 +233,90 @@ std::optional<MirrorPath> solveMirrorPath(const Vec3& receiver, const Vec3& ligh
     }
 }
 
+float mirrorRoughnessFade(float roughness, float limit) {
+    return 1.0f - smoothStep(limit, limit + static_cast<float>(MIRROR_ROUGHNESS_FADE), roughness);
+}
+
+bool usesMirrorFootprint(float roughness) {
+    return roughness > static_cast<float>(MIRROR_FOOTPRINT_ROUGHNESS);
+}
+
+// A share u of the way through the radii (stratified: sample index of count, the stratum placing it in its share) is
+// the radius sqrt(-2 ln(1 - u)), which inverts the chi distribution with two degrees of freedom; the angle spreads the
+// samples evenly round, turned by the frame's turn. Uniform u and angle make each sample exactly normal.
+Vec2 gaussianSamplePoint(int index, int count, float turn, float stratum) {
+    const float share = (static_cast<float>(index) + stratum) / static_cast<float>(count);
+    const float radius = std::sqrt(-2.0f * std::log(1.0f - share));
+    const float angle = fullTurnRadians * (turn + static_cast<float>(index) / static_cast<float>(count));
+    return Vec2{radius * std::cos(angle), radius * std::sin(angle)};
+}
+
+/*
+* The precision P = J^T J / s^2 + I / R^2 and its Cholesky factor L (P = L L^T): steps d = L^-T z for standard normal z
+* have covariance P^-1. The determinant comes from det(A + cI) = det A + c tr A + c^2 (for 2 x 2), with
+* det(J^T J) = det(J)^2, rather than from L's last entry, where a near-singular J would cancel away its digits.
+*/
+MirrorFootprint mirrorFootprint(const Vec3& receiver, const Vec3& light, const MirrorSurface& surface, float alpha, float emitterRadius, float mirrorSize) {
+    const MirrorLegs legs = mirrorLegs(receiver, light, surface.position);
+    const float along = (legs.toReceiver + legs.toLight).dot(surface.frame.normal);
+    const float sourceSpread = emitterRadius / legs.lightDistance;
+    const float spread = along * along * alpha * alpha * 0.5f + 0.25f * sourceSpread * sourceSpread;
+    const float inverseSizeSquared = 1.0f / (mirrorSize * mirrorSize);
+
+    const TangentMatrix j = mirrorJacobian(receiver, light, surface);
+    const float squaredXX = (j.xx * j.xx + j.yx * j.yx) / spread;
+    const float squaredXY = (j.xx * j.xy + j.yx * j.yy) / spread;
+    const float squaredYY = (j.xy * j.xy + j.yy * j.yy) / spread;
+    const float det = tangentDeterminant(j);
+    const float precisionXX = squaredXX + inverseSizeSquared;
+    const float precisionDet = det * det / (spread * spread) + inverseSizeSquared * (squaredXX + squaredYY) + inverseSizeSquared * inverseSizeSquared;
+
+    const float l11 = std::sqrt(precisionXX);
+    const float l21 = squaredXY / l11;
+    const float l22 = std::sqrt(precisionDet / precisionXX);
+    return MirrorFootprint{1.0f / l11, -l21 / (l11 * l22), 1.0f / l22, 1.0f / (spread * std::sqrt(precisionDet)), inverseSizeSquared};
+}
+
+Vec2 footprintOffset(const MirrorFootprint& footprint, const Vec2& standardNormal) {
+    return Vec2{footprint.offsetXX * standardNormal.x + footprint.offsetXY * standardNormal.y, footprint.offsetYY * standardNormal.y};
+}
+
+float footprintWeight(const MirrorFootprint& footprint, const Vec2& offset) {
+    return footprint.weightScale * std::exp(0.5f * offset.dot(offset) * footprint.inverseSizeSquared);
+}
+
+float footprintLight(const MirrorSurface& centre, const MirrorFootprint& footprint, int samples, float turn, float stratum, const MirrorProjection& project,
+                     const MirrorLightReach& reach) {
+    float sum = 0.0f;
+
+    for (int sample = 0; sample < samples; ++sample) {
+        const Vec2 offset = footprintOffset(footprint, gaussianSamplePoint(sample, samples, turn, stratum));
+        const std::optional<MirrorSurface> landed = project(centre.position + centre.frame.tangent * offset.x + centre.frame.bitangent * offset.y);
+
+        if (!landed) {
+            continue;
+        }
+
+        const float lit = reach(*landed);
+
+        if (lit > 0.0f) {
+            sum += footprintWeight(footprint, offset) * lit;
+        }
+    }
+
+    return sum / static_cast<float>(samples);
+}
+
+// In mirroredIrradiance's order: the window squared, then the rest.
+Vec3 roughMirroredIrradiance(const Vec3& intensity, const Vec3& reflectance, const Vec3& receiver, const Vec3& light, const MirrorSurface& surface,
+                             float meanWeight, float range) {
+    const MirrorLegs legs = mirrorLegs(receiver, light, surface.position);
+    const float along = (legs.toReceiver + legs.toLight).dot(surface.frame.normal);
+    const float window = rangeWindow(legs.receiverDistance + legs.lightDistance, range);
+    const float distances = legs.receiverDistance * legs.lightDistance;
+    return intensity * reflectance * (window * window * along * along * meanWeight / (4.0f * distances * distances));
+}
+
 std::vector<MirrorPair> chooseMirrorPairs(const GpuLights& lights, std::span<const DrawItem> draws, const Vec3& cameraOrigin,
                                           const MirroredLightSettings& settings) {
     struct Candidate {
@@ -235,7 +331,7 @@ std::vector<MirrorPair> chooseMirrorPairs(const GpuLights& lights, std::span<con
     for (std::size_t index = 0; index < draws.size(); ++index) {
         const DrawItem& draw = draws[index];
 
-        if (!draw.castsShadows || draw.bounds.radius <= 0.0f || draw.material.roughness > settings.mirrorRoughness) {
+        if (!draw.castsShadows || draw.bounds.radius <= 0.0f || mirrorRoughnessFade(draw.material.roughness, settings.mirrorRoughness) <= 0.0f) {
             continue;
         }
 
@@ -280,11 +376,30 @@ std::vector<MirrorPair> chooseMirrorPairs(const GpuLights& lights, std::span<con
     return pairs;
 }
 
-GpuMirroredLightPass packMirroredLightPass(const Mat4& inverseViewProjection, RenderSize size, std::span<const MirrorPair> pairs) {
+GpuMirrorPairs packMirrorPairs(std::span<const MirrorPair> pairs, const MirroredLightSettings& settings) {
     if (pairs.size() > MIRROR_MAX_PAIRS) {
-        throw std::length_error("A mirrored light pass holds at most MIRROR_MAX_PAIRS pairs");
+        throw std::length_error("A frame holds at most MIRROR_MAX_PAIRS mirror pairs");
     }
 
+    GpuMirrorPairs packed{};
+    packed.counts[0] = static_cast<std::int32_t>(pairs.size());
+    packed.options[0] = settings.mirrorRoughness;
+
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+        const MirrorPair& pair = pairs[i];
+        packed.pairs[i].light[0] = pair.lightKind;
+        packed.pairs[i].light[1] = pair.slot;
+        packed.pairs[i].light[2] = static_cast<std::int32_t>(pair.draw);
+        packed.pairs[i].bounds[0] = pair.centre.x;
+        packed.pairs[i].bounds[1] = pair.centre.y;
+        packed.pairs[i].bounds[2] = pair.centre.z;
+        packed.pairs[i].bounds[3] = pair.radius;
+    }
+
+    return packed;
+}
+
+GpuMirroredLightPass packMirroredLightPass(const Mat4& inverseViewProjection, RenderSize size) {
     GpuMirroredLightPass pass{};
     writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
     const float width = static_cast<float>(size.width);
@@ -293,18 +408,5 @@ GpuMirroredLightPass packMirroredLightPass(const Mat4& inverseViewProjection, Re
     pass.size[1] = height;
     pass.size[2] = 1.0f / width;
     pass.size[3] = 1.0f / height;
-    pass.counts[0] = static_cast<std::int32_t>(pairs.size());
-
-    for (std::size_t i = 0; i < pairs.size(); ++i) {
-        const MirrorPair& pair = pairs[i];
-        pass.pairs[i].light[0] = pair.lightKind;
-        pass.pairs[i].light[1] = pair.slot;
-        pass.pairs[i].light[2] = static_cast<std::int32_t>(pair.draw);
-        pass.pairs[i].bounds[0] = pair.centre.x;
-        pass.pairs[i].bounds[1] = pair.centre.y;
-        pass.pairs[i].bounds[2] = pair.centre.z;
-        pass.pairs[i].bounds[3] = pair.radius;
-    }
-
     return pass;
 }

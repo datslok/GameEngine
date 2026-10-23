@@ -367,11 +367,12 @@ private:
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
-    // mirrorLight: whether the mirrored light pass runs this frame, so the main pass reads its images.
+    // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
+    // reads the mirrored light pass's images when there are any.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights, bool mirrorLight);
+                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;

@@ -31,6 +31,7 @@ void main() {
         testOutput(1, vec4(point.energyCompensation, point.alpha));
         testOutput(2, vec4(point.specularAlbedo, 0.0));
         testOutput(3, vec4(point.diffuse, 0.0));
+        testOutput(4, vec4(matteColour(a.rgb, a.a), 0.0));
     } else if (function == GPU_TEST_ADD_LIGHT) {
         ShadingPoint point = shadingPoint();
         vec3 radiance = testInput(4).xyz;

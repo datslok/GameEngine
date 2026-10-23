@@ -1,0 +1,94 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+/*
+* The light mirrors reflect, bounced by the light probes (render/gpu/mirrored_light.h), right after ddgi_trace.comp
+* while the frame has mirror pairs: the trace's rays again, one invocation each, the same layout and sets. Only the rays
+* of probes within reach of a fast light (every mirror pair's light is one) that met a front face are traced again, to
+* find the surface they met; the light mirrors reflect onto it (mirrored_light_search.glsl), on its matte colour, joins
+* the fast lights' light the trace brought back. Its own pass, since the search's registers slowed every probe ray by
+* half when it sat in the trace, run or not.
+*/
+#include "ray_scene.glsl"
+#include "materials.glsl"
+#include "instances.glsl"
+#include "frame_data.glsl"
+#include "scene_lights.glsl"
+#include "ddgi.glsl"
+#include "ddgi_volume.glsl"
+#include "scene_probes.glsl"
+
+#define RAY_HIT_MIRRORED_LIGHTS
+#include "ray_hit_lighting.glsl"
+
+layout(local_size_x = DDGI_TRACE_GROUP_SIZE) in;
+
+// The trace's buffers (ddgi_trace.comp): the rays' light and distance (negative for a back face), the fast lights'
+// light packed as half floats, which probes a fast light reaches, the probes' turns and the traced probes.
+layout(std430, set = 3, binding = 0) readonly buffer ProbeRays {
+    vec4 probeRays[];
+};
+
+layout(std430, set = 3, binding = 1) buffer FastProbeRays {
+    uvec2 fastProbeRays[];
+};
+
+layout(std430, set = 3, binding = 2) readonly buffer ProbeNearFastLights {
+    int probeNearFastLight[];
+};
+
+layout(std430, set = 3, binding = 3) readonly buffer ProbeTurns {
+    ProbeTurn probeTurns[];
+};
+
+layout(std430, set = 3, binding = 4) readonly buffer TracedProbes {
+    int tracedProbes[];
+};
+
+void main() {
+    int stride = volume.counts.w;
+    int index = int(gl_GlobalInvocationID.x);
+    int slot = index / stride;
+    int ray = index % stride;
+
+    if (slot >= tracedProbes[0]) {
+        return;
+    }
+
+    int probe = tracedProbes[1 + slot];
+
+    if (probe >= volumeProbeCount() || probeNearFastLight[probe] == 0 || ray >= volumeRayCount(true)) {
+        return;
+    }
+
+    // Misses came back at the ray's whole reach, back faces negative: neither has a surface to light.
+    float distance = probeRays[index].w;
+
+    if (!(distance > 0.0 && distance < DDGI_RAY_REACH)) {
+        return;
+    }
+
+    ProbeCascade cascade = probeCascades[probeCascadeHolding(probe, volume.cascades.x)];
+    vec3 origin = cascadeProbePosition(cascade, probe) + probeStates[probe].offset + cameraOrigin.xyz;
+    vec3 direction = volumeRayDirection(ray, volumeRayCount(true), probeTurns[probe]);
+
+    rayQueryEXT query;
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_SOLID, origin, 0.0, direction, DDGI_RAY_REACH);
+
+    while (rayQueryProceedEXT(query)) {
+    }
+
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT || !rayQueryGetIntersectionFrontFaceEXT(query, true)) {
+        return;
+    }
+
+    RayHitSurface surface = rayHitSurface(rayQueryGetIntersectionInstanceCustomIndexEXT(query, true),
+                                          rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
+                                          rayQueryGetIntersectionBarycentricsEXT(query, true), direction);
+    vec3 mirrored = mirroredLightAtRayHit(origin + direction * rayQueryGetIntersectionTEXT(query, true), surface.normal, vec2(index, ray));
+
+    if (any(greaterThan(mirrored, vec3(0.0)))) {
+        fastProbeRays[index] = packFastRayLight(unpackFastRayLight(fastProbeRays[index]) + surface.albedo * mirrored);
+    }
+}

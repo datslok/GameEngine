@@ -100,9 +100,81 @@ namespace {
             report.check("triangleCurvature", dividedTolerance, Vec3{triangle.xx, triangle.xy, triangle.yy}, vec3From(out[7]));
         }
     }
+
+    /*
+    * Rough mirrors' footprints: surfaces as checkMirror's, the facets from glassy to past the cut-off, bulbs from points
+    * to fist-sized, mirrors from coins to walls; a tenth with the receiver and light at a concave surface's centre (a
+    * focus, det J = 0). Inputs per case: (receiver, alpha), (light, emitter radius), (point, mirror size),
+    * (normal, roughness), (curvature), (standard normal pair, turn, stratum), (intensity, range).
+    */
+    void checkFootprint(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{139};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 256; ++i) {
+            const Vec3 point = random.direction() * random.between(0.0f, 30.0f);
+            const Vec3 normal = random.direction();
+            const float roughness = random.between(0.0f, 0.4f);
+            const float scale = i % 4 == 0 ? 0.0f : 2.0f;
+            const float twist = random.between(-1.0f, 1.0f);
+            Vec3 receiver = point + inFront(random, normal) * random.between(0.2f, 20.0f);
+            Vec3 light = point + inFront(random, normal) * random.between(0.2f, 20.0f);
+            GpuVec4 curvature{random.between(-scale, scale), twist * scale * 0.5f, twist * scale * 0.5f, random.between(-scale, scale)};
+
+            if (i % 10 == 0) {
+                const float distance = random.between(0.5f, 5.0f);
+                receiver = point + normal * distance;
+                light = receiver;
+                curvature = GpuVec4{-1.0f / distance, 0.0f, 0.0f, -1.0f / distance};
+            }
+
+            inputs.push_back(gpuVec4(receiver, roughness * roughness));
+            inputs.push_back(gpuVec4(light, random.between(0.0f, 0.1f)));
+            inputs.push_back(gpuVec4(point, random.between(0.02f, 5.0f)));
+            inputs.push_back(gpuVec4(normal, roughness));
+            inputs.push_back(curvature);
+            inputs.push_back(GpuVec4{random.between(-3.0f, 3.0f), random.between(-3.0f, 3.0f), random.between(0.0f, 1.0f), random.between(0.0f, 0.999f)});
+            inputs.push_back(gpuVec4(Vec3{random.between(0.0f, 20.0f), random.between(0.0f, 20.0f), random.between(0.0f, 20.0f)},
+                                     random.between(5.0f, 60.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MIRROR_FOOTPRINT, inputs, 7, 5);
+        // The footprint inverts J^T J through its Cholesky factor, which can lose digits to cancellation.
+        const FloatTolerance dividedTolerance{.absolute = 1e-4f, .relative = 1e-3f};
+
+        for (std::size_t i = 0; i < outputs.size() / 5; ++i) {
+            const GpuVec4* in = &inputs[i * 7];
+            const GpuVec4* out = &outputs[i * 5];
+            const Vec3 receiver = vec3From(in[0]);
+            const Vec3 light = vec3From(in[1]);
+            const MirrorSurface surface{vec3From(in[2]), tangentFrame(vec3From(in[3])), TangentMatrix{in[4][0], in[4][1], in[4][2], in[4][3]}};
+            const MirrorFootprint footprint = mirrorFootprint(receiver, light, surface, in[0][3], in[1][3], in[2][3]);
+            const Vec2 offset = footprintOffset(footprint, Vec2{in[5][0], in[5][1]});
+            const float weight = footprintWeight(footprint, offset);
+
+            report.check("mirrorFootprint", dividedTolerance, Vec3{footprint.offsetXX, footprint.offsetXY, footprint.offsetYY}, vec3From(out[0]));
+            report.check("mirrorFootprint", dividedTolerance, footprint.weightScale, out[0][3]);
+            report.check("footprintOffset", dividedTolerance, Vec3{offset.x, offset.y, 0.0f}, Vec3{out[1][0], out[1][1], 0.0f});
+            report.check("footprintWeight", dividedTolerance, weight, out[1][2]);
+            report.check("mirrorRoughnessFade", arithmeticTolerance, mirrorRoughnessFade(in[3][3], 0.25f), out[1][3]);
+
+            for (int sample = 0; sample < 4; ++sample) {
+                const Vec2 expected = gaussianSamplePoint(sample, 4, in[5][2], in[5][3]);
+                const GpuVec4& pair = out[2 + sample / 2];
+                const int first = (sample % 2) * 2;
+                report.check("gaussianSamplePoint", transcendentalTolerance, Vec3{expected.x, expected.y, 0.0f},
+                             Vec3{pair[first], pair[first + 1], 0.0f});
+            }
+
+            report.check("roughMirroredIrradiance", transcendentalTolerance,
+                         roughMirroredIrradiance(vec3From(in[6]), Vec3{0.9f, 0.8f, 0.7f}, receiver, light, surface, weight, in[6][3]), vec3From(out[4]));
+            report.check("usesMirrorFootprint", exactTolerance, usesMirrorFootprint(in[3][3]) ? 1.0f : 0.0f, out[4][3]);
+        }
+    }
 }
 
 void gpuTestMirroredLight(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("mirrored_light.glsl");
     checkMirror(runner, report);
+    checkFootprint(runner, report);
 }

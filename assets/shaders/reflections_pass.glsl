@@ -27,6 +27,7 @@
 #include "frame_data.glsl"
 #include "scene_lights.glsl"
 #include "scene_probes.glsl"
+#define RAY_HIT_MIRRORED_LIGHTS
 #include "ray_hit_lighting.glsl"
 #define REFLECTION_SET 3
 #else
@@ -237,7 +238,7 @@ Reflection reflectFromProbe(Glossy glossy) {
 * The mirror ray traced through the scene (glowing stand-ins for lights included: a mirror shows the bulb), as far as
 * the probe reaches. Escaping, it brings back the sky; on a back face, nothing; on a front face, the probe's picture of
 * that point as far as the probe saw it there (its distance agreeing), else the hit lit as the light probes' rays light
-* theirs (matte, the whole of last frame's probe light as well as the direct light).
+* theirs (matte, the whole of last frame's probe light as well as the direct light), with the light mirrors reflect onto it.
 */
 Reflection reflectFromRays(Glossy glossy) {
     float rough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
@@ -276,7 +277,8 @@ Reflection reflectFromRays(Glossy glossy) {
                                           rayQueryGetIntersectionPrimitiveIndexEXT(query, true),
                                           rayQueryGetIntersectionBarycentricsEXT(query, true), direction);
     RayHitLight light = lightAtRayHit(hit + cameraOrigin.xyz, surface.normal, direction, 1.0);
-    vec3 shaded = surface.emissive + surface.albedo * (light.still + light.fast);
+    vec3 mirrored = mirroredLightAtRayHit(hit + cameraOrigin.xyz, surface.normal, glossy.pixel);
+    vec3 shaded = surface.emissive + surface.albedo * (light.still + light.fast + mirrored);
     return Reflection(rough, mix(shaded, pictured, seen));
 }
 #endif

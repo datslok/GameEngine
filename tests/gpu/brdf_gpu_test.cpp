@@ -144,19 +144,20 @@ namespace {
         return inputs;
     }
 
-    // Outputs per case: (f0, nDotV), (energy compensation, alpha), (specular albedo, 0), (diffuse colour, 0).
+    // Outputs per case: (f0, nDotV), (energy compensation, alpha), (specular albedo, 0), (diffuse colour, 0), (matte colour, 0).
     void checkPrepareShading(GpuFunctionRunner& runner, GpuCheckReport& report, const std::vector<ShadingCase>& cases, const BrdfTable& table) {
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PREPARE_SHADING, shadingInputs(cases, table), 6, 4);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PREPARE_SHADING, shadingInputs(cases, table), 6, 5);
 
         for (std::size_t i = 0; i < cases.size(); ++i) {
             const ShadingPoint expected = prepareShading(cases[i].surface, cases[i].normal, cases[i].toCamera, table);
-            const GpuVec4* actual = &outputs[i * 4];
+            const GpuVec4* actual = &outputs[i * 5];
             report.check("prepareShading f0", arithmeticTolerance, expected.f0, vec3From(actual[0]));
             report.check("prepareShading nDotV", arithmeticTolerance, expected.nDotV, actual[0][3]);
             report.check("prepareShading energyCompensation", arithmeticTolerance, expected.energyCompensation, vec3From(actual[1]));
             report.check("prepareShading alpha", arithmeticTolerance, expected.alpha, actual[1][3]);
             report.check("prepareShading specularAlbedo", arithmeticTolerance, expected.specularAlbedo, vec3From(actual[2]));
             report.check("prepareShading diffuse", arithmeticTolerance, expected.diffuse, vec3From(actual[3]));
+            report.check("matteColour", arithmeticTolerance, matteColour(cases[i].surface.baseColour, cases[i].surface.metallic), vec3From(actual[4]));
         }
     }
 
