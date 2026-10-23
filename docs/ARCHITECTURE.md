@@ -566,6 +566,7 @@ Libraries (vendored unmodified, versions in each folder's `VERSION.txt`, matched
 - **ImGui's Vulkan backend** (`external/imgui/imgui_impl_vulkan.cpp`, built with `IMGUI_IMPL_VULKAN_USE_VOLK`).
 - **Validation layers** come from MSYS2 (`mingw-w64-ucrt-x86_64-vulkan-validation-layers`, in `C:\msys64\ucrt64\bin`, which the loader does not search, so the makefile exports `VK_ADD_LAYER_PATH`).
 - **FSR 3.1** (`external/fidelityfx`: AMD's FidelityFX API headers and signed `amd_fidelityfx_vk.dll` from SDK v1.1.4) is loaded at run time, not linked (see Temporal anti-aliasing, FSR).
+- **Streamline 2.14.16** (`external/streamline`: NVIDIA's MIT headers committed, its signed DLLs with DLSS 310.9.16 fetched into `bin/` by `tools/fetch_streamline.py`) is loaded at run time too (see Temporal anti-aliasing, DLSS).
 
 ### Files
 
@@ -580,6 +581,7 @@ Files:
   - required features `dynamicRendering`, `synchronization2`, `samplerAnisotropy`, `depthClamp`, and for bindless textures `runtimeDescriptorArray`, `shaderSampledImageArrayNonUniformIndexing`, `descriptorBindingPartiallyBound`, `descriptorBindingSampledImageUpdateAfterBind`, `descriptorBindingUpdateUnusedWhilePending`, and `bufferDeviceAddress` (required by Vulkan 1.3 itself);
   - optional ray queries (see Ray tracing) (`getBindlessTextureLimit`: the smallest update-after-bind sampler and sampled image limit);
   - `subgroupSizeControl` and `computeFullSubgroups` (required by Vulkan 1.3 itself), and for FSR (`supportsFsrFeatures`) `shaderFloat16`, `shaderInt16`, `shaderStorageImageReadWithoutFormat` and `WriteWithoutFormat`, asked for first and dropped only when no GPU has them, plus the extensions `VK_KHR_get_memory_requirements2` and `VK_KHR_dedicated_allocation` (core since 1.1, but FSR fetches `vkGetBufferMemoryRequirements2KHR` by its suffixed name, which a device returns only with them on; without them FSR crashed in its context creation);
+  - `privateData` (required by Vulkan 1.3; Streamline keeps data on Vulkan objects), and `timelineSemaphore` and `descriptorIndexing` beside FSR's features; the optional extensions it is given (`OptionalExtensions`, DLSS's: `VK_KHR_push_descriptor`, `VK_NVX_binary_import`, `VK_NVX_image_view_handle`, `VK_KHR_buffer_device_address`, all or none, `hasOptionalExtensions`; the instance's each when present);
   - one validation warning skipped: `rw_luma_history`, a bug in AMD's DLL (its shader declares the image `rgba8`, FSR creates it RGBA16F), so the engine's own messages still stand out;
   - discrete GPU preferred; one queue for drawing, copies and presenting; VMA;
   - helpers for semaphores, fences, samplers, command pools and SPIR-V modules.
@@ -2007,7 +2009,30 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 3. `VulkanFsr::dispatch` with `makeFsrFrameInputs`: the jitter in render pixels (FSR's convention is `jitteredClip`'s), `motionVectorScale` = (-w/2, +h/2) of the render size (turning NDC now minus then into render pixels from now to then, y down), the frame time in milliseconds, the sharpening, near and far swapped (FSR names them by depth for reversed-Z), the vertical field of view, and `reset` when FSR did not draw the last frame (`fsrHistory`) or the camera is unknown. The colour, depth and velocity are moved to `ComputeRead` (`SHADER_READ_ONLY_OPTIMAL`, depth too) and the output to `ComputeStorage` (`GENERAL`), the states it is told and returns them to; then the output to `SurfaceRead`, and it is `finishedScene`.
 4. The engine's history is forgotten while FSR draws (and FSR's dropped while TAA does), so each starts afresh when switched back. If the context cannot be made, FSR becomes unavailable and the frame falls back to the resolve.
 
-The textures' mip bias with FSR is `log2(scale) - 1` (`textureLodBias(..., Upscaler::Fsr)`), AMD's recommendation. No reactive or transparency mask is given yet (the sky and stars have depth and camera motion; transparency comes later in 6e). Golden captures use whatever the settings say (TAA by default).
+The textures' mip bias with FSR (and DLSS) is `log2(scale) - 1` (`textureLodBias(..., Upscaler::Fsr)`), AMD's and NVIDIA's recommendation. No reactive or transparency mask is given yet (the sky and stars have depth and camera motion; transparency comes later in 6e). Golden captures use whatever the settings say (TAA by default).
+
+### DLSS
+
+`Upscaler::Dlss` ("DLSS"), NVIDIA's DLSS super resolution through Streamline (`render/vulkan/vulkan_dlss`), on RTX GPUs; `activeUpscaler` falls back to TAA where `VulkanDlss::isAvailable()` is false.
+
+**Why Streamline:** DLSS's own SDK (NGX) is reached through static libraries built with Microsoft's compiler, which GCC cannot link (they call into Microsoft's C++ runtime). Streamline is a DLL with `extern "C"` functions and plain structs (single inheritance from a 32-byte base with no tail padding, fixed-size enums), so it is loaded like FSR. A trial before the integration (`slInit`, the requirements, a device, `slSetVulkanInfo`, `slDLSSGetOptimalSettings` passing structs both ways, and `slInit` again after `slShutdown`) worked from GCC.
+
+**The files:** Streamline's headers are MIT and committed (`sl_nvperf.h`, under other terms, left out). Its DLLs (`sl.interposer`, `sl.common`, `sl.dlss`, `NvLowLatencyVk`, and `nvngx_dlss`, DLSS itself, under the NVIDIA RTX SDK licence, which lets an application ship it but not hand it out alone) are fetched by `tools/fetch_streamline.py` (the pinned release, SHA-256 checked) into git-ignored `external/streamline/bin`; the makefile copies them beside each build's exe (`$(STREAMLINE_DLLS)`), and `tools/package_demo.py` packages them with their licences and a DLSS credit in the zip's README, as the licence asks.
+
+**`StreamlineLibrary`** (a member of `VulkanRenderer` before its `VulkanDevice`, since Streamline must start before the device exists):
+
+- `sl.interposer.dll` beside the exe, its signature checked with Streamline's own `sl::security::verifyEmbeddedSignature` (WinTrust: `-lwintrust -lcrypt32`), loaded once a run and never unloaded (the golden images make one renderer per game);
+- `slInit` with `eUseManualHooking` (the engine makes and calls Vulkan itself), `eUseFrameBasedResourceTagging`, `eDisableCLStateTracking`, Vulkan, DLSS, plugins from the exe's folder, no over-the-air updates, its information messages dropped and two kinds of warning it repeats or expects (the validation layers' own, and the state-tracking hooks manual hooking leaves out);
+- `slGetFeatureRequirements(DLSS)` gives the extensions (`getExtensions`), passed to `VulkanDevice` (all but `VK_EXT_buffer_device_address`, which Vulkan forbids beside the KHR one);
+- `shutdown()` from the renderer's destructor, after the GPU is idle and before the device goes.
+
+**`VulkanDlss`** (after the device):
+
+- `slSetVulkanInfo` (the device, instance, GPU, and its queues after the engine's one; DLSS asks for none) and `slIsFeatureSupported`; the swapchain presents through Streamline's `vkQueuePresentKHR` (`VulkanSwapchain::setPresentFunction`, from the interposer's `vkGetDeviceProcAddr`), which manual hooking still needs for its per-frame bookkeeping.
+- `renderSize(output, scale)`: DLSS works in its modes (`nearestUpscalingMode`: DLAA, Quality, Balanced, Performance, Ultra performance), each taking render sizes in a range (`slDLSSGetOptimalSettings`, cached; Quality at 2560 x 1440 takes 1280 x 720 to 2560 x 1440, Ultra performance only 853 x 480), so the scale's size is kept inside it (`clampRenderSize`) by `ensureFrameTextures`.
+- `dispatch`, each DLSS frame after the camera motion pass (as FSR's): `slGetNewFrameToken` (the jitter frame's number), `slSetConstants` from `makeDlssFrameInputs` (matrices as Streamline stores them, DirectX's row vectors, `streamlineMatrix`, ours transposed: the GPU lens and its inverse, `taaReprojection` and its inverse as clip to previous clip; the jitter in render pixels; `mvecScale` (-0.5, +0.5), making our NDC differences shares of the screen from now to then; the camera's world position and axes, near, far, field of view and aspect; depth inverted, camera motion included, `reset` when DLSS did not draw the last frame), `slDLSSSetOptions` (the mode, the output's size, HDR colour, DLSS's own exposure, NVIDIA's default model per mode), then `slSetTagForFrame` (colour, depth and velocity in `SHADER_READ_ONLY_OPTIMAL`, the output in `GENERAL`, with their sizes, formats and uses; `eValidUntilPresent`, so Streamline reads them where they are rather than copying them) and `slEvaluateFeature`. DLSS records its own barriers and returns the images to those layouts; the output (also `TRANSFER_DST`, which DLSS clears) then goes to `SurfaceRead` and is `finishedScene`. Refused, DLSS becomes unavailable and the frame falls back to the resolve.
+
+**Checked** with the validation layers (no messages) at DLAA, Quality and Ultra performance in the light lab, the demo at Performance, and without the interposer (one log line, TAA). DLSS's jitter convention is NVIDIA's "the same as the motion vectors'": pixels at the render size, x right, y down, as `jitteredClip`'s; DLSS's development DLL has hotkeys that flip it, if a still scene ever shimmers.
 
 ### Settings
 
@@ -2021,7 +2046,7 @@ The textures' mip bias with FSR is `log2(scale) - 1` (`textureLodBias(..., Upsca
 | `jitter` | on | off holds the projection still |
 | `showMotion` | off | the motion debug view |
 | `upscaling.renderScale` | 1 | the render size's share of the output's (Upscaling) |
-| `upscaling.upscaler` | TAA | TAA or FSR 3.1 (FSR) |
+| `upscaling.upscaler` | TAA | TAA, FSR 3.1 (FSR) or DLSS (DLSS) |
 | `upscaling.sharpness` | 0.5 | FSR's RCAS sharpening, 0 off (FSR) |
 
 ### Golden images

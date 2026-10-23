@@ -83,7 +83,7 @@ namespace {
 
 VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_t requestedFramesInFlight):
     window(window),
-    device(window, validation),
+    device(window, validation, streamline.getExtensions()),
     layouts(device.getDevice()),
     uploads(device),
     swapchain(device, window),
@@ -106,6 +106,11 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     fsr = std::make_unique<VulkanFsr>(device);
+    dlss = std::make_unique<VulkanDlss>(device, streamline);
+
+    if (dlss->isAvailable()) {
+        swapchain.setPresentFunction(streamline.presentFunction(device.getDevice()));
+    }
     createRayTracing();
 
     if (swapchain.rebuild(false, presentMode, framesInFlight)) {
@@ -122,6 +127,15 @@ VulkanRenderer::~VulkanRenderer() {
         ImGui_ImplVulkan_Shutdown();
         debugUiStarted = false;
     }
+
+    // Streamline frees DLSS's images and lets go of the device while the device is still there; nothing presents after.
+    swapchain.setPresentFunction(nullptr);
+    dlss.reset();
+    streamline.shutdown();
+}
+
+UpscalerSupport VulkanRenderer::upscalerSupport() const {
+    return UpscalerSupport{.fsr = fsr->isAvailable(), .dlss = dlss->isAvailable()};
 }
 
 // The formats every GPU worth supporting has, checked once so a missing one fails clearly at start-up.
@@ -476,7 +490,9 @@ void VulkanRenderer::createFixedTextures() {
 */
 void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t height, const RenderSettings& settings) {
     validateUpscaling(settings.upscaling);
-    const RenderSize scene = renderSize(width, height, appliedRenderScale(settings.upscaling, settings.taa.enabled));
+    const float scale = appliedRenderScale(settings.upscaling, settings.taa.enabled);
+    const bool dlssUpscales = settings.taa.enabled && activeUpscaler(settings.upscaling, upscalerSupport()) == Upscaler::Dlss;
+    const RenderSize scene = dlssUpscales ? dlss->renderSize(width, height, scale) : renderSize(width, height, scale);
 
     if (depth && frameWidth == width && frameHeight == height && sceneSize == scene) {
         return;
@@ -509,7 +525,9 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     clusterMasks = std::move(masksReplacement);
     taa->ensureSize(width, height, scene);
     fsr->ensureSize(width, height);
+    dlss->ensureSize(width, height);
     fsrHistory = false;
+    dlssHistory = false;
     frameWidth = width;
     frameHeight = height;
     sceneSize = scene;
@@ -868,10 +886,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Temporal anti-aliasing: the main pass, and everything drawn with it, moves by this frame's jitter; the motion
     // vectors and the reprojection use the camera without it, and last frame's camera made to take this frame's
-    // camera-relative points (or this frame's, when there is none). FSR, when it upscales, wants a longer cycle.
+    // camera-relative points (or this frame's, when there is none). FSR and DLSS, when they upscale, want a longer cycle.
     const TaaSettings& antiAliasing = settings.taa;
-    frameUpscaler = antiAliasing.enabled ? activeUpscaler(settings.upscaling, fsr->isAvailable()) : Upscaler::Taa;
-    const std::uint32_t jitterPhases = frameUpscaler == Upscaler::Fsr ? jitterPhaseCount(sceneSize, frameWidth) : taaJitterFrames;
+    frameUpscaler = antiAliasing.enabled ? activeUpscaler(settings.upscaling, upscalerSupport()) : Upscaler::Taa;
+    const std::uint32_t jitterPhases = frameUpscaler == Upscaler::Taa ? taaJitterFrames : jitterPhaseCount(sceneSize, frameWidth);
     motionViewProjection = relativeViewProjection;
     const Vec2 jitter = antiAliasing.enabled && antiAliasing.jitter ? taaJitter(taaFrame, jitterPhases) : Vec2{};
     relativeViewProjection = jitteredClip(relativeViewProjection, jitter, static_cast<float>(sceneSize.width), static_cast<float>(sceneSize.height));
@@ -1056,25 +1074,39 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthRange);
     }
 
-    // The picture smoothed over frames (and upscaled), before anything reads it: by FSR when it is the upscaler, after
-    // the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history while
-    // the other draws, and both start afresh when temporal anti-aliasing is switched on again. Both are timed as TAA.
+    // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
+    // after the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history
+    // while another draws, and all start afresh when temporal anti-aliasing is switched on again. All are timed as TAA.
     if (antiAliasing.enabled) {
         beginGpuPass(frame, GpuPass::Taa);
         const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
         bool upscaledByFsr = false;
+        bool upscaledByDlss = false;
+
+        if (frameUpscaler != Upscaler::Taa) {
+            taa->fillCameraMotion(frame.commands, frame.descriptors, depth, packMotionFillPass(reprojection, sceneSize));
+        }
 
         if (frameUpscaler == Upscaler::Fsr) {
-            taa->fillCameraMotion(frame.commands, frame.descriptors, depth, packMotionFillPass(reprojection, sceneSize));
             const FsrFrameInputs inputs = makeFsrFrameInputs(sceneSize, frameWidth, frameHeight, jitter, description.frameSeconds,
                                                              camera.getNearPlane(), camera.getFarPlane(), camera.getVerticalFov(),
                                                              !fsrHistory || !previousCamera.known, settings.upscaling);
             upscaledByFsr = fsr->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), inputs);
+        } else if (frameUpscaler == Upscaler::Dlss) {
+            const DlssCamera lens{cameraOrigin, camera.getUp(), camera.getRight(), camera.getForward(), camera.getNearPlane(),
+                                  camera.getFarPlane(), camera.getVerticalFov(), camera.getAspectRatio()};
+            const DlssFrameInputs inputs = makeDlssFrameInputs(sceneSize, frameWidth, frameHeight, jitter, toGpuDepthRange(camera.getProjectionMatrix()),
+                                                               reprojection, lens, !dlssHistory || !previousCamera.known);
+            upscaledByDlss = dlss->dispatch(frame.commands, sceneColour, depth, taa->getVelocity(), inputs,
+                                            nearestUpscalingMode(settings.upscaling.renderScale), static_cast<std::uint32_t>(taaFrame));
         }
 
         if (upscaledByFsr) {
             taa->forgetHistory();
             finishedScene = &fsr->getOutput();
+        } else if (upscaledByDlss) {
+            taa->forgetHistory();
+            finishedScene = &dlss->getOutput();
         } else {
             frameUpscaler = Upscaler::Taa;
             taa->resolve(frame.commands, frame.descriptors, sceneColour, depth,
@@ -1084,11 +1116,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
         endGpuPass(frame, GpuPass::Taa);
         fsrHistory = upscaledByFsr;
+        dlssHistory = upscaledByDlss;
         previousCamera = PreviousCamera{motionViewProjection, cameraOrigin, true};
         ++taaFrame;
     } else {
         taa->forgetHistory();
         fsrHistory = false;
+        dlssHistory = false;
         previousCamera.known = false;
         finishedScene = &sceneColour;
     }
@@ -1583,6 +1617,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
                                       settings.taa.enabled ? taaSettleFrames : 0);
     taa->forgetHistory();
     fsrHistory = false;
+    dlssHistory = false;
     previousCamera.known = false;
     taaFrame = 0;
 

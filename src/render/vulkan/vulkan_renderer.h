@@ -25,6 +25,7 @@
 #include "render/vulkan/vulkan_atmosphere.h"
 #include "render/vulkan/vulkan_eye_adaptation.h"
 #include "render/vulkan/vulkan_stars.h"
+#include "render/vulkan/vulkan_dlss.h"
 #include "render/vulkan/vulkan_fsr.h"
 #include "render/vulkan/vulkan_taa.h"
 #include "render/vulkan/vulkan_bloom.h"
@@ -123,7 +124,11 @@ public:
 private:
     SDL_Window* window = nullptr;
 
-    // Declared first, so it is destroyed last: everything below is made from it.
+    // NVIDIA's Streamline, for DLSS (render/vulkan/vulkan_dlss.h): it must start before the device, which turns on the
+    // extensions it asks for, and stop before the device goes (the destructor stops it first).
+    StreamlineLibrary streamline;
+
+    // Declared before everything else that is made from it, so it is destroyed after them.
     VulkanDevice device;
     DescriptorLayouts layouts;
     ImmediateCommands uploads;
@@ -240,11 +245,16 @@ private:
 
     PreviousCamera previousCamera;
 
-    // AMD's FSR 3.1 (render/vulkan/vulkan_fsr.h), which upscales in place of the resolve when chosen and available; the
-    // upscaler this frame uses, and whether FSR also drew the last frame (else its history is dropped).
+    // AMD's FSR 3.1 (render/vulkan/vulkan_fsr.h) and NVIDIA's DLSS (render/vulkan/vulkan_dlss.h), which upscale in place
+    // of the resolve when chosen and available; the upscaler this frame uses, and whether each also drew the last frame
+    // (else its history is dropped).
     std::unique_ptr<VulkanFsr> fsr;
+    std::unique_ptr<VulkanDlss> dlss;
     Upscaler frameUpscaler = Upscaler::Taa;
     bool fsrHistory = false;
+    bool dlssHistory = false;
+
+    UpscalerSupport upscalerSupport() const;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
 

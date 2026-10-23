@@ -20,11 +20,20 @@
 * buffers and images out of the GPU's memory heaps. Everything else in the renderer is made from this, so it is
 * created first and destroyed last; the window must outlive it.
 */
+/*
+* Extensions a library on top of the renderer asks for (DLSS through Streamline), named before the device is made: the
+* instance's each turned on when the system has it, the device's all together when the GPU has every one.
+*/
+struct OptionalExtensions {
+    std::vector<std::string> instance;
+    std::vector<std::string> device;
+};
+
 class VulkanDevice {
 public:
     // validation turns on the Khronos validation layers when installed: every call checked against the spec, slow.
     // window may be null for work that never presents (the GPU tests): no surface, and getSurface returns null.
-    VulkanDevice(SDL_Window* window, bool validation);
+    VulkanDevice(SDL_Window* window, bool validation, const OptionalExtensions& optional = {});
     ~VulkanDevice();
 
     VulkanDevice(const VulkanDevice&) = delete;
@@ -54,6 +63,9 @@ public:
     // Whether the features FSR 3.1's shaders use are on (16-bit floats and integers, storage images read and written
     // without a declared format; render/vulkan/vulkan_fsr.h). On when the GPU has them; without them FSR stays off.
     bool supportsFsrFeatures() const;
+
+    // Whether the optional device extensions it was given are on (all of them; none when one is missing).
+    bool hasOptionalExtensions() const;
 
     // Each memory heap's numbers from VMA (see render/gpu/video_memory.h). The driver's figures are fetched again when
     // startMemoryFrame is called, once a frame.
@@ -107,13 +119,14 @@ private:
     bool memoryBudget = false;
     bool rayQueries = false;
     bool fsrFeatures = false;
+    bool optionalExtensions = false;
     std::uint32_t scratchAlignment = 1;
     bool debugUtils = false;
     std::uint32_t timestampValidBits = 0;
     std::atomic<std::uint32_t> validationErrors{0};
 
-    void createInstance(bool validation);
-    void selectPhysicalDevice();
+    void createInstance(bool validation, const std::vector<std::string>& optional);
+    void selectPhysicalDevice(const std::vector<std::string>& optional);
     void createDevice();
     void createAllocator();
     void cleanup() noexcept;

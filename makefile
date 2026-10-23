@@ -28,7 +28,8 @@ CPPFLAGS := -Isrc -Iexternal -DVK_NO_PROTOTYPES
 # GCC writes a .d file next to each object listing the headers it read, so a header change rebuilds exactly the
 # files that include it. -MP adds an empty rule per header, so deleting a header does not break the build.
 DEPFLAGS := -MMD -MP
-LDLIBS := -lSDL3_image -lSDL3
+# wintrust and crypt32: Streamline's check that its DLL is signed by NVIDIA (render/vulkan/vulkan_dlss.cpp).
+LDLIBS := -lSDL3_image -lSDL3 -lwintrust -lcrypt32
 
 GLSLC := glslc
 # The renderer is Vulkan 1.3, so its shaders may use what that guarantees (SPIR-V 1.6; subgroup operations need 1.3).
@@ -83,14 +84,23 @@ GPU_TEST_SHADER_BINARIES := $(addsuffix .spv,$(GPU_TEST_SHADER_SOURCES))
 FSR_DLL_SOURCE := external/fidelityfx/bin/amd_fidelityfx_vk.dll
 FSR_DLL := $(BUILD_DIR)/amd_fidelityfx_vk.dll
 
+# NVIDIA's Streamline and DLSS (external/streamline/bin, fetched by tools/fetch_streamline.py, not committed): copied
+# beside the exe when they are there; without them DLSS is unavailable.
+STREAMLINE_DLLS := $(patsubst external/streamline/bin/%,$(BUILD_DIR)/%,$(wildcard external/streamline/bin/*.dll))
+RUNTIME_DLLS := $(FSR_DLL) $(STREAMLINE_DLLS)
+
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
 .PHONY: all run test shaders clean release run-release test-release golden golden-save gputest gputest-release
 
-all: $(TARGET) $(FSR_DLL) shaders
+all: $(TARGET) $(RUNTIME_DLLS) shaders
 
 $(FSR_DLL): $(FSR_DLL_SOURCE)
+	@mkdir -p $(BUILD_DIR)
+	cp $< $@
+
+$(STREAMLINE_DLLS): $(BUILD_DIR)/%.dll: external/streamline/bin/%.dll
 	@mkdir -p $(BUILD_DIR)
 	cp $< $@
 
@@ -105,6 +115,11 @@ $(call objects_for,$(EXTERNAL_SOURCES)): CXXFLAGS += -Wno-array-bounds
 # The Vulkan Memory Allocator leaves parameters unused in some configurations and initialises Vulkan structs partly
 # (the rest zero, as intended). Silenced for it only.
 $(OBJECT_DIR)/external/vma/vk_mem_alloc.o: CXXFLAGS += -Wno-unused-parameter -Wno-unused-variable -Wno-missing-field-initializers
+
+# Streamline's headers mark a field deprecated that their own constructor sets, initialise Vulkan structs partly
+# (the rest zero, as intended), pass NULL for a handle that is a number, and read a GUID through a cast pointer.
+# Silenced for the one file that includes them.
+$(OBJECT_DIR)/src/render/vulkan/vulkan_dlss.o: CXXFLAGS += -Wno-deprecated-declarations -Wno-missing-field-initializers -Wno-conversion-null -Wno-strict-aliasing
 
 # ImGui's Vulkan backend calls Vulkan through volk, which it includes as <volk.h>.
 $(OBJECT_DIR)/external/imgui/imgui_impl_vulkan.o: CPPFLAGS += -DIMGUI_IMPL_VULKAN_USE_VOLK -Iexternal/volk
@@ -159,7 +174,7 @@ tests/gpu/shaders/%.spv: tests/gpu/shaders/% $(MAKEFILE_PATH)
 GAME ?=
 GAME_OPTION := $(if $(GAME),--game $(GAME))
 
-run: $(TARGET) $(FSR_DLL) shaders
+run: $(TARGET) $(RUNTIME_DLLS) shaders
 	./$(TARGET) $(GAME_OPTION)
 
 test: $(TEST_TARGET) shaders
@@ -168,15 +183,15 @@ test: $(TEST_TARGET) shaders
 # Golden images (src/engine/golden.h): golden-save renders every game's fixed views as the references in
 # tests/golden/<GPU>/<game>/, golden compares fresh captures with them (captures and difference heatmaps go to
 # build/golden/<GPU>/<game>/). They need a GPU.
-golden: $(TARGET) $(FSR_DLL) shaders
+golden: $(TARGET) $(RUNTIME_DLLS) shaders
 	./$(TARGET) --golden-check $(GAME_OPTION)
 
-golden-save: $(TARGET) $(FSR_DLL) shaders
+golden-save: $(TARGET) $(RUNTIME_DLLS) shaders
 	./$(TARGET) --golden-save $(GAME_OPTION)
 
 # The GPU test tier (tests/gpu): every shader library's functions run in compute shaders on fixed inputs and compared
 # with their C++ mirrors, then the golden images. Needs a GPU, so it is not part of make test.
-gputest: $(GPU_TEST_TARGET) $(GPU_TEST_SHADER_BINARIES) $(TARGET) $(FSR_DLL) shaders
+gputest: $(GPU_TEST_TARGET) $(GPU_TEST_SHADER_BINARIES) $(TARGET) $(RUNTIME_DLLS) shaders
 	./$(GPU_TEST_TARGET)
 	./$(TARGET) --golden-check
 
@@ -195,4 +210,4 @@ gputest-release:
 	$(MAKE) BUILD=release gputest
 
 clean:
-	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/amd_fidelityfx_vk.dll build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)
+	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/*.dll build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)
