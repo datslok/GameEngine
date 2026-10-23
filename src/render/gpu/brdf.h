@@ -65,6 +65,10 @@ Vec3 schlickFresnel(const Vec3& f0, float cosine);
 // The reflectance head-on: dielectricReflectance for non-metals, the base colour for metals, blended by metallic.
 Vec3 reflectanceAtNormal(const SurfaceProperties& surface);
 
+// The colour of the light a surface scatters from under it (its diffuse colour): metals have none. What rays' hits are
+// lit with (matte only), and the diffuse part's colour before the specular part takes its share.
+Vec3 matteColour(const Vec3& baseColour, float metallic);
+
 /*
 * The van der Corput radical inverse: the bits of a number mirrored behind the binary point (1 to 0.5, 2 to 0.25, 3 to
 * 0.75). With (k + 0.5) / count it makes the Hammersley point set, which spreads points over the unit square far more

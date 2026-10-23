@@ -59,6 +59,10 @@ const bool captureView = false;
 // what the camera looks at): from the point lifted off its surface, through the ray tracing scene (in world space).
 #include "ray_scene.glsl"
 
+// The capture finds the light mirrors reflect itself (the mirrored light pass's images are the camera's view).
+#include "instances.glsl"
+#include "mirrored_light_search.glsl"
+
 float sunBeyondCascades(vec3 normal, vec3 toLight) {
     vec3 lift = normal * (float(PROBE_SHADOW_RAY_OFFSET) + float(PROBE_SHADOW_RAY_OFFSET_PER_METRE) * length(relativePosition));
     return reachesLight(relativePosition + cameraOrigin.xyz + lift, toLight, float(PROBE_SHADOW_RAY_REACH)) ? 1.0 : 0.0;
@@ -544,6 +548,19 @@ void main() {
                 addLight(arriving, octahedralDecode(texelFetch(mirroredDirection, texel, 0).xy), point, diffuse, specular);
             }
         }
+
+#ifdef PROBE_CAPTURE_RAYS
+        // The reflection probe's traced capture runs the search itself, one footprint sample a texel (its prefiltering
+        // and the frames average them), from the point lifted off its surface.
+        if (mirrorPairCounts.x > 0) {
+            vec3 lift = geometricNormal * (float(PROBE_SHADOW_RAY_OFFSET) + float(PROBE_SHADOW_RAY_OFFSET_PER_METRE) * length(relativePosition));
+            MirroredLight mirrored = mirroredLightAt(relativePosition, relativePosition + lift, gl_FragCoord.xy, MIRROR_HIT_FOOTPRINT_SAMPLES);
+
+            if (any(greaterThan(mirrored.total, vec3(0.0)))) {
+                addLight(mirrored.total, mirroredLightDirection(mirrored), point, diffuse, specular);
+            }
+        }
+#endif
     }
 
     // The light from all around: the probes' bounced light where they reach (their visibility tested along the

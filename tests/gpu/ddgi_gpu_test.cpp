@@ -692,7 +692,7 @@ namespace {
         scene.commands.run([&](VkCommandBuffer recording) {
             scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
             const ProbeSceneSets sets{scene.textures.getSet(), frame, scene.rayTracing.getSceneSet(0)};
-            ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, scene.fastLightsListed,
+            ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, scene.fastLightsListed, false,
                         lighting.probeEvents, 0);
         });
 
@@ -996,7 +996,7 @@ namespace {
             scene.commands.run([&](VkCommandBuffer recording) {
                 scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
                 const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
-                ddgi.update(recording, scene.descriptors, sets, settings, Vec3{}, testFrameSeconds, false, {}, 0);
+                ddgi.update(recording, scene.descriptors, sets, settings, Vec3{}, testFrameSeconds, false, false, {}, 0);
             });
         }
 
@@ -1081,7 +1081,7 @@ namespace {
             scene.commands.run([&](VkCommandBuffer recording) {
                 scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
                 const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
-                ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, false, {}, 0);
+                ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, false, false, {}, 0);
             });
         }
 
@@ -1152,7 +1152,7 @@ namespace {
             scene.commands.run([&](VkCommandBuffer recording) {
                 scene.rayTracing.buildScene(recording, 0, scene.rayTracing.packInstances(draws));
                 const ProbeSceneSets sets{scene.textures.getSet(), frameSet, scene.rayTracing.getSceneSet(0)};
-                ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, false, {}, 0);
+                ddgi.update(recording, scene.descriptors, sets, settings, lighting.background, testFrameSeconds, false, false, {}, 0);
             });
         }
 

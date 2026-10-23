@@ -186,7 +186,7 @@ VulkanDdgi::VulkanDdgi(const VulkanDevice& device, DescriptorLayouts& layouts, V
 /*
 * The trace reads the scene the way the ray debug view does (every texture, the frame's instances, materials and lights,
 * and the ray tracing set), plus a fourth set of its own: the buffers it writes the rays into, the probes' turns and the
-* frame's traced probes.
+* frame's traced probes. The mirrors' bounce shares its layout and sets.
 */
 void VulkanDdgi::createTracePipeline(VkDescriptorSetLayout texturesLayout, VkDescriptorSetLayout frameLayout, VkDescriptorSetLayout rayLayout) {
     raysLayout = createUniformLayout(device.getDevice(), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5, VK_SHADER_STAGE_COMPUTE_BIT,
@@ -199,6 +199,11 @@ void VulkanDdgi::createTracePipeline(VkDescriptorSetLayout texturesLayout, VkDes
     trace.shader = "assets/shaders/ddgi_trace.comp.spv";
     trace.sharedLayout = traceLayout.get();
     tracePipeline = std::make_unique<ComputePipeline>(device, trace);
+
+    ComputePipelineDescription mirror;
+    mirror.shader = "assets/shaders/ddgi_mirror.comp.spv";
+    mirror.sharedLayout = traceLayout.get();
+    mirrorPipeline = std::make_unique<ComputePipeline>(device, mirror);
 }
 
 /*
@@ -472,7 +477,7 @@ void VulkanDdgi::writeProbeTurns(bool independent) {
 }
 
 void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const GlobalIlluminationSettings& settings,
-                        const Vec3& sky, float frameSeconds, bool fastLights, std::span<const ProbeEvent> events, std::uint32_t frameIndex) {
+                        const Vec3& sky, float frameSeconds, bool fastLights, bool mirrors, std::span<const ProbeEvent> events, std::uint32_t frameIndex) {
     if (cascades.empty()) {
         throw std::logic_error("Prepare the light probes for their cascades before updating them");
     }
@@ -510,7 +515,7 @@ void VulkanDdgi::update(VkCommandBuffer commands, FrameDescriptors& descriptors,
     }
 
     const UploadArray& frameTraced = tracedUploads.at(frameIndex);
-    trace(commands, descriptors, sets, probeRayStride(frame), frameTraced);
+    trace(commands, descriptors, sets, probeRayStride(frame), frameTraced, mirrors && fastLights);
 
     // The change statistics are only ever read and written by this update, so they stay in storage use between frames
     // (each frame's transition still orders its update after the last one's writes).
@@ -566,9 +571,12 @@ void VulkanDdgi::shareProbes(VkCommandBuffer commands, FrameDescriptors& descrip
 * Every ray of every traced probe, one invocation each, with room for the most rays any probe traces (the stride): a
 * probe that traces fewer leaves the rest of its room unwritten, and its invocations there stop at once. The ray buffers are shared
 * by the frames in flight: last frame's update may still be reading them, so the writes wait for those reads (nothing
-* to flush after a read), and the update's reads wait for these writes.
+* to flush after a read), and the update's reads wait for these writes. With mirrors, the bounce of their light runs
+* over the same rays in between: it reads what the trace wrote and adds to the fast lights' light, so it waits for the
+* trace's writes, and the update for its own.
 */
-void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int rayStride, const UploadArray& frameTraced) {
+void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int rayStride, const UploadArray& frameTraced,
+                       bool mirrors) {
     for (const VulkanBuffer* buffer : rayBuffers()) {
         bufferBarrier(commands, buffer->get(), {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_NONE},
                       {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
@@ -587,6 +595,17 @@ void VulkanDdgi::trace(VkCommandBuffer commands, FrameDescriptors& descriptors, 
 
     const std::uint32_t rayCount = static_cast<std::uint32_t>(tracedProbes.size()) * static_cast<std::uint32_t>(rayStride);
     vkCmdDispatch(commands, workgroupCount(rayCount, DDGI_TRACE_GROUP_SIZE), 1, 1);
+
+    if (mirrors) {
+        for (const VulkanBuffer* buffer : rayBuffers()) {
+            bufferBarrier(commands, buffer->get(), {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
+                          {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
+        }
+
+        // The same sets and push constant: the layout is the trace's.
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, mirrorPipeline->get());
+        vkCmdDispatch(commands, workgroupCount(rayCount, DDGI_TRACE_GROUP_SIZE), 1, 1);
+    }
 
     for (const VulkanBuffer* buffer : rayBuffers()) {
         bufferBarrier(commands, buffer->get(), {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},

@@ -257,7 +257,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Reflections: screen-space reflections, a reflection probe round the camera for what the screen does not show, and ray-traced reflections on RT GPUs (`ssr`, `reflection-probe`, `mirror-and-fps`)
   - A lattice of probes round the camera (for what the camera's own point cannot see) if gaps show.
 - [x] Light reflected by mirrors: manifold next event estimation on ray-tracing GPUs (`mirrored-lights`)
-- [ ] Mirrored lights, the rest: the search shared by every pass that lights a point; its bounce into the light probes (their rays' hits, into the fast atlas), with metals' matte colour fixed for probe rays and ray-traced reflections (base x (1 - metallic): today the mirror looks like a white matte wall to them); the lit spot seen in reflections (the reflection probe's ray-traced capture and ray-traced reflections' hits); rough surfaces (the slab), a Gaussian footprint round the exact point (A) or specular manifold sampling, Zeltner 2020 (B), the user to choose, with the roughness limit raised to 0.3
+- [x] Mirrored lights, the rest: one shared search, its bounce into the probes, the lit spot in reflections, metals' matte colour, rough mirrors by a Gaussian footprint (`mirrored-light-bounce`)
 - [ ] Mirrored lights without ray tracing: the image light for flat mirrors
 - [ ] Ambient occlusion (GTAO) from the prepass's depth, for the small creases DDGI's coarse grid cannot resolve
 - [ ] glTF occlusion and emissive textures (the loader reads only the factors today)

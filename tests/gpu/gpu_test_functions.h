@@ -129,5 +129,6 @@
 
 // mirrored_light_test.comp
 #define GPU_TEST_MIRROR 0
+#define GPU_TEST_MIRROR_FOOTPRINT 1
 
 #endif

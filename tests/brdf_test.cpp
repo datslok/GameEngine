@@ -331,6 +331,14 @@ namespace {
         assert(response.specular.x > 5.0f * response.specular.y);
     }
 
+    // The matte colour rays' hits are lit with: a metal has none, a half-metal half its base colour, a non-metal all of it.
+    void testMatteColour() {
+        const Vec3 base{0.8f, 0.6f, 0.4f};
+        assert(nearVec(matteColour(base, 1.0f), Vec3{}, 0.0f));
+        assert(nearVec(matteColour(base, 0.5f), base * 0.5f, 1e-7f));
+        assert(nearVec(matteColour(base, 0.0f), base, 0.0f));
+    }
+
     /*
     * The unit convention: diffuse light is the weighted diffuse colour times the light times the cosine, with no 1 / pi,
     * as before physically based shading, so the demo's lights keep their brightness.
@@ -466,6 +474,7 @@ void testBrdf() {
     testWhiteFurnace();
     testCompensationRestoresLostLight();
     testMetalsReflectTheirColour();
+    testMatteColour();
     testDiffuseKeepsTheLightUnits();
     testLightBehindGivesNothing();
     testFacesLightOnlyFromInFront();

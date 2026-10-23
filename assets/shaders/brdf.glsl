@@ -27,6 +27,11 @@ float smithVisibility(float nDotV, float nDotL, float alpha) {
     return 0.5 / (towardsView + towardsLight);
 }
 
+// The colour a surface scatters from under it (matteColour in brdf.cpp): metals have none.
+vec3 matteColour(vec3 baseColour, float metallic) {
+    return baseColour * (1.0 - metallic);
+}
+
 // Schlick's Fresnel: f0 head-on, all light at grazing.
 vec3 schlickFresnel(vec3 f0, float cosine) {
     float grazing = pow(1.0 - clamp(cosine, 0.0, 1.0), 5.0);
@@ -88,7 +93,7 @@ ShadingPoint prepareShading(vec3 baseColour, float metallic, float roughness, ve
 
     point.energyCompensation = 1.0 + point.f0 * (1.0 / (tableEntry.x + tableEntry.y) - 1.0);
     point.specularAlbedo = (point.f0 * tableEntry.x + tableEntry.y) * point.energyCompensation;
-    point.diffuse = baseColour * (1.0 - metallic) * (1.0 - point.specularAlbedo);
+    point.diffuse = matteColour(baseColour, metallic) * (1.0 - point.specularAlbedo);
     return point;
 }
 

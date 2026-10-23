@@ -72,12 +72,14 @@ public:
     /*
     * Record this frame's probe update for the cascades prepare() readied: relocate, seed, trace, then blend and share,
     * leaving the atlases readable for the frame's later passes. fastLights: the frame lists a fast light for the probe
-    * rays' hits (ProbeHitLights::fast), so probes within its reach trace more rays. events: the scene events to start
-    * this frame (none while the settings ignore them; a geometry change also relocates the probes); frameIndex: the frame
-    * in flight, whose upload memory holds the restarts and the states prepare() wrote. Outside any rendering block.
+    * rays' hits (ProbeHitLights::fast), so probes within its reach trace more rays. mirrors: the frame has mirror pairs
+    * (render/gpu/mirrored_light.h), whose light those probes' rays then bounce (ddgi_mirror.comp). events: the scene
+    * events to start this frame (none while the settings ignore them; a geometry change also relocates the probes);
+    * frameIndex: the frame in flight, whose upload memory holds the restarts and the states prepare() wrote. Outside any
+    * rendering block.
     */
     void update(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, const GlobalIlluminationSettings& settings,
-                const Vec3& sky, float frameSeconds, bool fastLights, std::span<const ProbeEvent> events, std::uint32_t frameIndex);
+                const Vec3& sky, float frameSeconds, bool fastLights, bool mirrors, std::span<const ProbeEvent> events, std::uint32_t frameIndex);
 
     // Read every relocation still out, once the GPU is idle (the frames in flight changed, so some frame in flight may
     // never come round again to read its own).
@@ -117,6 +119,8 @@ private:
     OwnedHandle<VkDescriptorSetLayout> raysLayout;
     OwnedHandle<VkPipelineLayout> traceLayout;
     std::unique_ptr<ComputePipeline> tracePipeline;
+    // The light mirrors reflect onto the rays' hits near fast lights, with the trace's layout (ddgi_mirror.comp).
+    std::unique_ptr<ComputePipeline> mirrorPipeline;
     std::unique_ptr<ComputePipeline> irradiancePipeline;
     std::unique_ptr<ComputePipeline> distancePipeline;
     std::unique_ptr<ComputePipeline> sharePipeline;
@@ -235,7 +239,8 @@ private:
     void relocate(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int iterations, std::uint32_t frameIndex);
 
     void seed(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, std::uint32_t frameIndex);
-    void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int rayStride, const UploadArray& frameTraced);
+    void trace(VkCommandBuffer commands, FrameDescriptors& descriptors, const ProbeSceneSets& sets, int rayStride, const UploadArray& frameTraced,
+               bool mirrors);
     void blend(VkCommandBuffer commands, FrameDescriptors& descriptors, const ComputePipeline& pipeline, std::span<VulkanImage* const> atlases,
                const UploadArray& frameTraced, const UploadArray& frameRestarts, const UploadArray& frameStates, const UploadArray& frameCascades);
     void shareProbes(VkCommandBuffer commands, FrameDescriptors& descriptors, const GlobalIlluminationSettings& settings, float longKeep,

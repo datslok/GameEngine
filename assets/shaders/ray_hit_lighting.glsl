@@ -1,10 +1,13 @@
 // What a ray traced through the scene finds where it hits a front face, shared by the light probes' rays
 // (ddgi_trace.comp) and the reflections' rays (reflections_rays.comp): the surface (its normal, matte colour and glow)
 // and the light reaching it. Included after ray_scene.glsl, materials.glsl, instances.glsl, frame_data.glsl,
-// scene_lights.glsl and scene_probes.glsl.
+// scene_lights.glsl and scene_probes.glsl, in compute shaders only.
 
 #ifndef RAY_HIT_LIGHTING_GLSL
 #define RAY_HIT_LIGHTING_GLSL
+
+// matteColour, for the hit's matte colour.
+#include "brdf.glsl"
 
 // The point lights, then the spotlights, whose light may reach the probes' rays' hits: x numbers into the light buffers,
 // y 1 for a fast light (render/gpu/ddgi_sampling.h, GpuProbeHitLight).
@@ -55,9 +58,11 @@ RayHitSurface rayHitSurface(int instanceIndex, int primitive, vec2 barycentrics,
         normal = -normal;
     }
 
+    // Matte only: a metal scatters nothing from under its surface, so it is dark here (its reflections are not traced).
     MaterialData material = materials[instance.material.x];
-    vec3 albedo = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
-    return RayHitSurface(normal, albedo, material.emissive.rgb);
+    vec3 baseColour = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
+    float metallic = clamp(material.surfaceParameters.x * textureLod(textures[nonuniformEXT(material.textureSlots.y)], surface.uv, 0.0).b, 0.0, 1.0);
+    return RayHitSurface(normal, matteColour(baseColour, metallic), material.emissive.rgb);
 }
 
 // The irradiance reaching a hit, kept apart by whether fast lights (flashlights) gave it.
@@ -123,5 +128,23 @@ RayHitLight lightAtRayHit(vec3 hit, vec3 normal, vec3 direction, float bounce) {
 
     return RayHitLight(irradiance, fastIrradiance);
 }
+
+#ifdef RAY_HIT_MIRRORED_LIGHTS
+// Light reflected onto the hit by mirrors (mirrored_light_search.glsl), one footprint sample a hit (the probes' many rays
+// and the reflections' frames average them). Kept out of lightAtRayHit and compiled only where it is asked for: the
+// search's registers slowed every probe ray by half when it sat in the trace, run or not (ddgi_mirror.comp has it instead).
+#include "mirrored_light_search.glsl"
+
+// The irradiance mirrors reflect onto a hit (in the world) facing normal; noisePixel turns its footprint's samples.
+vec3 mirroredLightAtRayHit(vec3 hit, vec3 normal, vec2 noisePixel) {
+    if (mirrorPairCounts.x == 0) {
+        return vec3(0.0);
+    }
+
+    vec3 relativeHit = hit - cameraOrigin.xyz;
+    MirroredLight mirrored = mirroredLightAt(relativeHit, relativeHit + normal * DDGI_SHADOW_RAY_OFFSET, noisePixel, MIRROR_HIT_FOOTPRINT_SAMPLES);
+    return mirrored.total * max(dot(normal, mirroredLightDirection(mirrored)), 0.0);
+}
+#endif
 
 #endif

@@ -4,10 +4,9 @@
 
 /*
 * Mirrored lights (render/gpu/mirrored_light.h), on GPUs with ray queries, one invocation per render pixel, between the
-* depth prepass and the main pass. For each pair of a fast light and a smooth shiny surface the CPU chose, the search
-* (solveMirrorPath mirrors its loop) finds the point on the surface where the law of reflection sends the light to
-* this pixel's surface: rays from the pixel put each guess on the mirror and prove the way there clear, a shadow ray
-* proves the way from the mirror to the light clear, and the spread area sets the brightness. The pixel keeps the sum of
+* depth prepass and the main pass. The shared search (mirrored_light_search.glsl) finds, for each pair of a fast light
+* and a shiny surface the CPU chose, the light reflected onto this pixel's surface: the point of reflection (or a rough
+* mirror's footprint round it), rays proving the way there clear and the light reaching it. The pixel keeps the sum of
 * the light arriving and its brightness-weighted direction, which the main pass shades as one more light (exact for one
 * pair, a blend of directions for more).
 */
@@ -18,144 +17,20 @@
 #include "instances.glsl"
 #include "frame_data.glsl"
 #include "scene_lights.glsl"
-#include "brdf.glsl"
-#include "mirrored_light.glsl"
 #include "screen_reflections.glsl"
-#include "ddgi.glsl"
+#include "mirrored_light_search.glsl"
 
 layout(local_size_x = MIRROR_GROUP_SIDE, local_size_y = MIRROR_GROUP_SIDE) in;
 
-// Must match GpuMirrorPair and GpuMirroredLightPass.
-struct MirrorPair {
-    ivec4 light;  // x: the light's kind, y: its slot, z: the draw
-    vec4 bounds;  // xyz: the draw's bounding sphere's centre, measured from the camera, w: its radius
-};
-
+// Must match GpuMirroredLightPass.
 layout(std430, set = 3, binding = 0) readonly buffer Pass {
     mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
     vec4 size;                  // xy: the render size in pixels, zw: their inverses
-    ivec4 counts;               // x: the pairs
-    MirrorPair pairs[MIRROR_MAX_PAIRS];
 } pass;
 
 layout(set = 3, binding = 1) uniform sampler2D depth;                            // exact texels
 layout(set = 3, binding = 2, rgba16f) uniform writeonly image2D mirroredLight;   // rgb: the light arriving
 layout(set = 3, binding = 3, rg16f) uniform writeonly image2D mirroredDirection; // the way it arrives, folded onto a square
-
-// How far a ray from the pixel looks for the mirror (metres): past anything a light's range reaches.
-const float mirrorRayReach = 10000.0;
-
-// Where a ray met the mirror, for its material once the search is done.
-struct MirrorHit {
-    MirrorSurface surface;
-    int primitive;
-    vec2 barycentrics;
-};
-
-/*
-* The surface where a ray from start towards target first meets something solid: false unless that is the pair's draw,
-* met from the front with its smoothed normal facing the ray. The surface's curvature comes from the triangle's corners.
-*/
-bool projectOntoMirror(vec3 start, vec3 target, int draw, out MirrorHit hit) {
-    vec3 direction = normalize(target - start);
-    rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_SOLID, start + cameraOrigin.xyz, 0.0, direction, mirrorRayReach);
-
-    while (rayQueryProceedEXT(query)) {
-    }
-
-    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT ||
-        rayQueryGetIntersectionInstanceCustomIndexEXT(query, true) != draw || !rayQueryGetIntersectionFrontFaceEXT(query, true)) {
-        return false;
-    }
-
-    hit.primitive = rayQueryGetIntersectionPrimitiveIndexEXT(query, true);
-    hit.barycentrics = rayQueryGetIntersectionBarycentricsEXT(query, true);
-    InstanceData instance = instances[draw];
-    MeshTriangle corners = meshTriangleAt(instance.material.y, uint(hit.primitive));
-    vec3 weights = hitCornerWeights(hit.barycentrics.x, hit.barycentrics.y);
-    mat3 model = mat3(instance.model);
-    mat3 normalMatrix = mat3(instance.normalMatrix);
-    vec3 normalSum = normalMatrix * (corners.normals[0] * weights.x + corners.normals[1] * weights.y + corners.normals[2] * weights.z);
-    float normalLength = length(normalSum);
-
-    if (!(normalLength > 0.0) || dot(normalSum, direction) >= 0.0) {
-        return false;
-    }
-
-    hit.surface.position = start + direction * rayQueryGetIntersectionTEXT(query, true);
-    hit.surface.frame = tangentFrame(normalSum / normalLength);
-    hit.surface.curvature = triangleCurvature(model * (corners.positions[1] - corners.positions[0]), model * (corners.positions[2] - corners.positions[0]),
-                                              normalMatrix * (corners.normals[1] - corners.normals[0]),
-                                              normalMatrix * (corners.normals[2] - corners.normals[0]), normalLength, hit.surface.frame);
-    return true;
-}
-
-// The search, as solveMirrorPath: the seed's ray, the flat mirror step (on a flat surface, no light if it falls off),
-// then Newton steps halved while they fall off.
-bool solveMirrorPath(vec3 receiver, vec3 start, vec3 light, vec3 seed, int draw, out MirrorHit hit) {
-    if (!projectOntoMirror(start, seed, draw, hit)) {
-        return false;
-    }
-
-    vec3 image;
-    MirrorHit moved;
-
-    if (planeMirrorPoint(receiver, light, hit.surface.position, hit.surface.frame.normal, image) && projectOntoMirror(start, image, draw, moved)) {
-        hit = moved;
-    } else if (isFlatMirror(hit.surface.curvature)) {
-        return false;
-    }
-
-    for (int steps = 0;; ++steps) {
-        if (length(mirrorConstraint(receiver, light, hit.surface)) <= float(MIRROR_SOLVE_TOLERANCE)) {
-            return mirrorIncidence(receiver, hit.surface) > 0.0 && dot(light - hit.surface.position, hit.surface.frame.normal) > 0.0;
-        }
-
-        vec3 target;
-
-        if (steps == MIRROR_MAX_STEPS || !mirrorNewtonTarget(receiver, light, hit.surface, target)) {
-            return false;
-        }
-
-        MirrorHit next;
-        bool landed = projectOntoMirror(start, target, draw, next);
-
-        for (int halving = 0; halving < MIRROR_BACKTRACKS && !landed; ++halving) {
-            target = (hit.surface.position + target) * 0.5;
-            landed = projectOntoMirror(start, target, draw, next);
-        }
-
-        if (!landed) {
-            return false;
-        }
-
-        hit = next;
-    }
-}
-
-// What a pair's light sends: its position, range, intensity towards a point and the size of its source.
-struct PairLight {
-    vec3 position;
-    float range;
-    vec3 colour;
-    float sourceRadius;
-    bool spot;
-    vec3 beam;
-    float cosOuter;
-    float cosInner;
-};
-
-PairLight pairLight(ivec4 light) {
-    if (light.x == MIRROR_SPOT_LIGHT) {
-        SpotLightData spot = spots[light.y];
-        return PairLight(spot.positionRange.xyz, spot.positionRange.w, spot.radianceCosInner.rgb, spot.sourceRadius, true,
-                         spot.directionCosOuter.xyz, spot.directionCosOuter.w, spot.radianceCosInner.w);
-    }
-
-    PointLightData point = points[light.y];
-    return PairLight(point.positionRange.xyz, point.positionRange.w, point.radiance.rgb, point.radiance.w, false, vec3(0.0), -1.0, -1.0);
-}
 
 void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -165,8 +40,7 @@ void main() {
     }
 
     float pixelDepth = texelFetch(depth, texel, 0).r;
-    vec3 total = vec3(0.0);
-    vec3 weightedDirection = vec3(0.0);
+    MirroredLight light = MirroredLight(vec3(0.0), vec3(0.0));
 
     if (pixelDepth != GPU_FAR_DEPTH) {
         vec3 receiver = positionAtPixel(pass.inverseViewProjection, vec2(texel) + 0.5, pixelDepth, pass.size.xy);
@@ -174,58 +48,9 @@ void main() {
         float lift = float(MIRROR_RAY_OFFSET) + float(MIRROR_RAY_OFFSET_PER_METRE) * cameraDistance;
         // Towards the camera, which sees this point, so off its surface on the side the light can come from.
         vec3 start = receiver - receiver * (lift / max(cameraDistance, 1e-6));
-
-        for (int i = 0; i < pass.counts.x; ++i) {
-            MirrorPair pair = pass.pairs[i];
-            PairLight light = pairLight(pair.light);
-
-            if (!mirrorPairMayReach(receiver, pair.bounds.xyz, pair.bounds.w, light.position, light.range)) {
-                continue;
-            }
-
-            MirrorHit hit;
-
-            if (!solveMirrorPath(receiver, start, light.position, pair.bounds.xyz, pair.light.z, hit)) {
-                continue;
-            }
-
-            vec3 point = hit.surface.position;
-            vec3 normal = hit.surface.frame.normal;
-            vec3 toLight = light.position - point;
-            float lightDistance = length(toLight);
-            float cone = light.spot ? spotCone(dot(-toLight / lightDistance, light.beam), light.cosOuter, light.cosInner) : 1.0;
-
-            if (cone <= 0.0) {
-                continue;
-            }
-
-            vec3 shadowFrom = point + normal * (float(MIRROR_RAY_OFFSET) + float(MIRROR_RAY_OFFSET_PER_METRE) * length(point));
-            vec3 toLightFromShadow = light.position - shadowFrom;
-            float shadowDistance = length(toLightFromShadow);
-
-            if (!reachesLight(shadowFrom + cameraOrigin.xyz, toLightFromShadow / shadowDistance, shadowDistance)) {
-                continue;
-            }
-
-            // The mirror's reflectance at this angle, from its material as the main pass would shade it.
-            InstanceData instance = instances[pair.light.z];
-            MaterialData material = materials[instance.material.x];
-            MeshSurface surface = meshSurfaceAt(instance.material.y, uint(hit.primitive), hit.barycentrics);
-            vec3 baseColour = textureLod(textures[nonuniformEXT(material.textureSlots.x)], surface.uv, 0.0).rgb * material.baseColour.rgb;
-            float metallic = clamp(material.surfaceParameters.x * textureLod(textures[nonuniformEXT(material.textureSlots.y)], surface.uv, 0.0).b, 0.0, 1.0);
-            float incidence = mirrorIncidence(receiver, hit.surface);
-            vec3 reflectance = schlickFresnel(mix(vec3(BRDF_DIELECTRIC_REFLECTANCE), baseColour, metallic), incidence);
-
-            float receiverDistance = length(receiver - point);
-            vec3 arriving = mirroredIrradiance(light.colour * cone, reflectance, mirrorSpreadArea(receiver, light.position, hit.surface),
-                                               receiverDistance + lightDistance, light.range, light.sourceRadius);
-            total += arriving;
-            weightedDirection += (point - receiver) * (probeLuminance(arriving) / receiverDistance);
-        }
+        light = mirroredLightAt(receiver, start, vec2(texel), MIRROR_FOOTPRINT_SAMPLES);
     }
 
-    float weight = length(weightedDirection);
-    vec3 direction = weight > 0.0 ? weightedDirection / weight : vec3(0.0, 1.0, 0.0);
-    imageStore(mirroredLight, texel, vec4(total, 0.0));
-    imageStore(mirroredDirection, texel, vec4(octahedralEncode(direction), 0.0, 0.0));
+    imageStore(mirroredLight, texel, vec4(light.total, 0.0));
+    imageStore(mirroredDirection, texel, vec4(octahedralEncode(mirroredLightDirection(light)), 0.0, 0.0));
 }

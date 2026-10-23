@@ -168,4 +168,73 @@ bool mirrorPairMayReach(vec3 receiver, vec3 centre, float radius, vec3 light, fl
     return shortest < range;
 }
 
+// The share of a surface's mirrored light kept at its roughness: all up to limit, fading out over MIRROR_ROUGHNESS_FADE.
+float mirrorRoughnessFade(float roughness, float limit) {
+    return 1.0 - smoothstep(limit, limit + float(MIRROR_ROUGHNESS_FADE), roughness);
+}
+
+// Whether a surface this rough reflects a light from a footprint rather than its one point of reflection.
+bool usesMirrorFootprint(float roughness) {
+    return roughness > float(MIRROR_FOOTPRINT_ROUGHNESS);
+}
+
+// Point index of count of a standard 2D normal for a frame's turn and stratum (gaussianSamplePoint): stratified radii,
+// angles spread evenly round.
+vec2 gaussianSamplePoint(int index, int count, float turn, float stratum) {
+    float share = (float(index) + stratum) / float(count);
+    float radius = sqrt(-2.0 * log(1.0 - share));
+    float angle = 6.2831853 * (turn + float(index) / float(count));
+    return vec2(radius * cos(angle), radius * sin(angle));
+}
+
+// A rough mirror's footprint round a point of reflection (MirrorFootprint): offsetMatrix is (xx, xy, yy), the upper
+// triangular square root of its covariance; a step's weight is weightScale exp(|d|^2 inverseSizeSquared / 2).
+struct MirrorFootprint {
+    vec3 offsetMatrix;
+    float weightScale;
+    float inverseSizeSquared;
+};
+
+// The precision J^T J / s^2 + I / R^2 and its Cholesky factor; the determinant from det(A + cI) = det A + c tr A + c^2,
+// so a near-singular J does not cancel its digits away (mirrorFootprint).
+MirrorFootprint mirrorFootprint(vec3 receiver, vec3 light, MirrorSurface surface, float alpha, float emitterRadius, float mirrorSize) {
+    MirrorLegs legs = mirrorLegs(receiver, light, surface.position);
+    float along = dot(legs.toReceiver + legs.toLight, surface.frame.normal);
+    float sourceSpread = emitterRadius / legs.lightDistance;
+    float spread = along * along * alpha * alpha * 0.5 + 0.25 * sourceSpread * sourceSpread;
+    float inverseSizeSquared = 1.0 / (mirrorSize * mirrorSize);
+
+    vec4 j = mirrorJacobian(receiver, light, surface);
+    float squaredXX = (j.x * j.x + j.z * j.z) / spread;
+    float squaredXY = (j.x * j.y + j.z * j.w) / spread;
+    float squaredYY = (j.y * j.y + j.w * j.w) / spread;
+    float det = tangentDeterminant(j);
+    float precisionXX = squaredXX + inverseSizeSquared;
+    float precisionDet = det * det / (spread * spread) + inverseSizeSquared * (squaredXX + squaredYY) + inverseSizeSquared * inverseSizeSquared;
+
+    float l11 = sqrt(precisionXX);
+    float l21 = squaredXY / l11;
+    float l22 = sqrt(precisionDet / precisionXX);
+    return MirrorFootprint(vec3(1.0 / l11, -l21 / (l11 * l22), 1.0 / l22), 1.0 / (spread * sqrt(precisionDet)), inverseSizeSquared);
+}
+
+// A standard normal pair's step from the point of reflection along the surface's tangent and bitangent.
+vec2 footprintOffset(MirrorFootprint footprint, vec2 standardNormal) {
+    return vec2(footprint.offsetMatrix.x * standardNormal.x + footprint.offsetMatrix.y * standardNormal.y, footprint.offsetMatrix.z * standardNormal.y);
+}
+
+float footprintWeight(MirrorFootprint footprint, vec2 offset) {
+    return footprint.weightScale * exp(0.5 * dot(offset, offset) * footprint.inverseSizeSquared);
+}
+
+// A rough mirror's light: intensity times reflectance and the range's window, times (h.n)^2 / (4 dx^2 dL^2) times the
+// footprint's mean weight (roughMirroredIrradiance).
+vec3 roughMirroredIrradiance(vec3 intensity, vec3 reflectance, vec3 receiver, vec3 light, MirrorSurface surface, float meanWeight, float range) {
+    MirrorLegs legs = mirrorLegs(receiver, light, surface.position);
+    float along = dot(legs.toReceiver + legs.toLight, surface.frame.normal);
+    float window = rangeWindow(legs.receiverDistance + legs.lightDistance, range);
+    float distances = legs.receiverDistance * legs.lightDistance;
+    return intensity * reflectance * (window * window * along * along * meanWeight / (4.0 * distances * distances));
+}
+
 #endif
