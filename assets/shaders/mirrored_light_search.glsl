@@ -156,9 +156,9 @@ PairLight pairLight(ivec4 light) {
                      -1.0);
 }
 
-// How much of the light reaches a point on the mirror: a spotlight's cone there, then a shadow ray (none with the light
-// behind the surface).
-float lightReachesMirror(PairLight light, MirrorSurface surface) {
+// How much of the light reaches a point on the mirror (per channel): a spotlight's cone there, then a shadow ray tinted
+// by the glass on the way (none with the light behind the surface).
+vec3 lightReachesMirror(PairLight light, MirrorSurface surface) {
     vec3 point = surface.position;
     vec3 normal = surface.frame.normal;
     vec3 toLight = light.position - point;
@@ -166,13 +166,13 @@ float lightReachesMirror(PairLight light, MirrorSurface surface) {
     float cone = light.spot ? spotCone(dot(-toLight / lightDistance, light.beam), light.cosOuter, light.cosInner) : 1.0;
 
     if (cone <= 0.0 || dot(toLight, normal) <= 0.0) {
-        return 0.0;
+        return vec3(0.0);
     }
 
     vec3 shadowFrom = point + normal * (float(MIRROR_RAY_OFFSET) + float(MIRROR_RAY_OFFSET_PER_METRE) * length(point));
     vec3 toLightFromShadow = light.position - shadowFrom;
     float shadowDistance = length(toLightFromShadow);
-    return reachesLight(shadowFrom + cameraOrigin.xyz, toLightFromShadow / shadowDistance, shadowDistance) ? cone : 0.0;
+    return lightThrough(shadowFrom + cameraOrigin.xyz, toLightFromShadow / shadowDistance, shadowDistance) * cone;
 }
 
 // The light arriving by way of the mirrors: its sum, and the ways it arrives weighted by its brightness.
@@ -232,7 +232,7 @@ MirroredLight mirroredLightAt(vec3 receiver, vec3 start, vec2 noisePixel, int sa
         if (usesMirrorFootprint(roughness)) {
             // The footprint's samples, as footprintLight: each a ray proving it on the mirror and in the light.
             MirrorFootprint footprint = mirrorFootprint(receiver, source.position, hit.surface, roughness * roughness, source.emitterRadius, pair.bounds.w);
-            float sum = 0.0;
+            vec3 sum = vec3(0.0);
 
             for (int index = 0; index < samples; ++index) {
                 vec2 offset = footprintOffset(footprint, gaussianSamplePoint(index, samples, turn, stratum));
@@ -242,23 +242,34 @@ MirroredLight mirroredLightAt(vec3 receiver, vec3 start, vec2 noisePixel, int sa
                     continue;
                 }
 
-                float lit = lightReachesMirror(source, landed.surface);
+                vec3 lit = lightReachesMirror(source, landed.surface);
 
-                if (lit > 0.0) {
+                if (any(greaterThan(lit, vec3(0.0)))) {
                     sum += footprintWeight(footprint, offset) * lit;
                 }
             }
 
-            arriving = roughMirroredIrradiance(source.colour, reflectance, receiver, source.position, hit.surface, sum / float(samples), source.range);
+            // The light is linear in the samples' tinted mean, so it goes in with the intensity (the mean weight then 1).
+            arriving = roughMirroredIrradiance(source.colour * sum / float(samples), reflectance, receiver, source.position, hit.surface, 1.0,
+                                               source.range);
         } else {
-            float lit = onMirror ? lightReachesMirror(source, hit.surface) : 0.0;
+            vec3 lit = onMirror ? lightReachesMirror(source, hit.surface) : vec3(0.0);
 
-            if (lit <= 0.0) {
+            if (all(lessThanEqual(lit, vec3(0.0)))) {
                 continue;
             }
 
             arriving = mirroredIrradiance(source.colour * lit, reflectance, mirrorSpreadArea(receiver, source.position, hit.surface),
                                           receiverDistance + length(source.position - point), source.range, source.sourceRadius);
+        }
+
+        // The second leg, from the mirror to the receiver, through the glass between them (the footprint's samples all
+        // taken as crossing it where the path's centre does).
+        vec3 toMirror = point - start;
+        float mirrorDistance = length(toMirror);
+
+        if (mirrorDistance > 0.0) {
+            arriving *= glassTransmittance(start + cameraOrigin.xyz, toMirror / mirrorDistance, mirrorDistance);
         }
 
         light.total += arriving;

@@ -264,7 +264,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Glass and blended surfaces: glTF's alpha blend and thin glass (KHR_materials_transmission) by dual-source blending, sorted per object, the light lab's window pane (`glass`)
 - [x] Glass under anti-aliasing: a reactive mask from the picture before and after the glass, read by TAA, FSR and DLSS (`transparency-motion`)
 - [x] Tinted shadows through glass: every shadowed light in the main pass and the probes' and reflections' rays passed through the glass on the way, on GPUs with ray queries (`glass-shadows`)
-- [ ] Glass shadows, the rest: the mirrored lights' rays through glass, and coloured shadow maps (a half-size transmittance atlas) as the fallback without ray queries
+- [x] Mirrored lights through glass: both legs of the path tinted (`mirrored-light-glass`)
 - [ ] Refraction: frosted glass (rough transmission) and thick glass (`KHR_materials_volume`, `KHR_materials_ior`: Snell's law through the thickness, Beer's law tint) read from a mip chain of this frame's opaque picture
 - [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
 
@@ -492,6 +492,9 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/LUMEN.md`
   - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
   - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
+- [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
+  - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
+  - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.
 - [ ] Mirrored lights without ray tracing: the image light for flat mirrors
   - **Moved here from 6e** (Oct 24 2026, the user's choice): only GPUs without ray tracing would use it, as with the software tracer; the rest of image quality comes first.
 - [ ] Physical light units and a camera exposure for all lights
