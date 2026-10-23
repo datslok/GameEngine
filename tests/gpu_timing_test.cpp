@@ -54,14 +54,15 @@ void testGpuTiming() {
         assert(static_cast<int>(GpuPass::RayDebug) < static_cast<int>(GpuPass::Bloom));
     }
 
-    // Temporal anti-aliasing: the velocity pass draws over the finished picture's depth, and the resolve reads the
-    // picture before anything that uses it (eye adaptation, bloom), after the depth measurement, which reads the same depth.
+    // Anti-aliasing (TAA, FSR or DLSS, so its timing is named AA, not TAA): the velocity pass draws over the finished
+    // picture's depth, and the resolve reads the picture before anything that uses it (eye adaptation, bloom), after the
+    // depth measurement, which reads the same depth.
     {
         assert(static_cast<int>(GpuPass::RayDebug) + 1 == static_cast<int>(GpuPass::Motion));
         assert(static_cast<int>(GpuPass::Motion) + 1 == static_cast<int>(GpuPass::DepthRange));
-        assert(static_cast<int>(GpuPass::DepthRange) + 1 == static_cast<int>(GpuPass::Taa));
-        assert(static_cast<int>(GpuPass::Taa) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
-        assert(std::string(gpuPassName(GpuPass::Motion)) == "MOTION" && std::string(gpuPassName(GpuPass::Taa)) == "TAA");
+        assert(static_cast<int>(GpuPass::DepthRange) + 1 == static_cast<int>(GpuPass::AntiAliasing));
+        assert(static_cast<int>(GpuPass::AntiAliasing) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
+        assert(std::string(gpuPassName(GpuPass::Motion)) == "MOTION" && std::string(gpuPassName(GpuPass::AntiAliasing)) == "AA");
     }
 
     // The depth prepass is recorded after the shadows and right before the main pass, whose depth it fills.

@@ -1078,9 +1078,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
     // after the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history
-    // while another draws, and all start afresh when temporal anti-aliasing is switched on again. All are timed as TAA.
+    // while another draws, and all start afresh when temporal anti-aliasing is switched on again. All are timed as AA.
     if (temporal) {
-        beginGpuPass(frame, GpuPass::Taa);
+        beginGpuPass(frame, GpuPass::AntiAliasing);
         const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
         bool upscaledByFsr = false;
         bool upscaledByDlss = false;
@@ -1116,7 +1116,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             finishedScene = &taa->getResult();
         }
 
-        endGpuPass(frame, GpuPass::Taa);
+        endGpuPass(frame, GpuPass::AntiAliasing);
         fsrHistory = upscaledByFsr;
         dlssHistory = upscaledByDlss;
         previousCamera = PreviousCamera{motionViewProjection, cameraOrigin, true};
