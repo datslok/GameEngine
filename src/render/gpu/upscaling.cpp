@@ -1,12 +1,13 @@
 #include "render/gpu/upscaling.h"
+#include "render/gpu/column_major.h"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 namespace {
-    // AMD's recommended mip bias for FSR is a level sharper than the scale's own.
-    constexpr float fsrExtraLodBias = -1.0f;
+    // AMD's and NVIDIA's recommended mip bias for FSR and DLSS is a level sharper than the scale's own.
+    constexpr float vendorExtraLodBias = -1.0f;
 
     // FSR's jitter cycle at full size, growing with the square of the upscaling.
     constexpr double fsrBasePhaseCount = 8.0;
@@ -66,13 +67,41 @@ std::optional<UpscalingMode> matchingUpscalingMode(float renderScale) {
     return std::nullopt;
 }
 
-Upscaler activeUpscaler(const UpscalingSettings& settings, bool fsrAvailable) {
-    return settings.upscaler == Upscaler::Fsr && fsrAvailable ? Upscaler::Fsr : Upscaler::Taa;
+// The scales are compared as they are, not as their upscalings: nearer in what fraction of the output is drawn.
+UpscalingMode nearestUpscalingMode(float renderScale) {
+    UpscalingMode nearest = UpscalingMode::Native;
+
+    for (std::size_t index = 0; index < modeUpscaling.size(); ++index) {
+        const UpscalingMode mode = static_cast<UpscalingMode>(index);
+
+        if (std::abs(renderScale - upscalingModeScale(mode)) < std::abs(renderScale - upscalingModeScale(nearest))) {
+            nearest = mode;
+        }
+    }
+
+    return nearest;
+}
+
+Upscaler activeUpscaler(const UpscalingSettings& settings, UpscalerSupport support) {
+    if (settings.upscaler == Upscaler::Fsr && support.fsr) {
+        return Upscaler::Fsr;
+    }
+
+    if (settings.upscaler == Upscaler::Dlss && support.dlss) {
+        return Upscaler::Dlss;
+    }
+
+    return Upscaler::Taa;
+}
+
+RenderSize clampRenderSize(RenderSize size, RenderSize smallest, RenderSize largest) {
+    return RenderSize{std::clamp(size.width, smallest.width, std::max(smallest.width, largest.width)),
+                      std::clamp(size.height, smallest.height, std::max(smallest.height, largest.height))};
 }
 
 // From the sizes as rounded, so the bias matches the pixels actually drawn.
 float textureLodBias(RenderSize render, std::uint32_t outputWidth, Upscaler upscaler) {
-    const float extra = upscaler == Upscaler::Fsr ? fsrExtraLodBias : 0.0f;
+    const float extra = upscaler == Upscaler::Taa ? 0.0f : vendorExtraLodBias;
 
     if (render.width == outputWidth || outputWidth == 0) {
         return extra;
@@ -107,6 +136,34 @@ FsrFrameInputs makeFsrFrameInputs(RenderSize render, std::uint32_t outputWidth, 
     inputs.cameraNear = cameraFar;
     inputs.cameraFar = cameraNear;
     inputs.verticalFov = verticalFov;
+    inputs.reset = reset;
+    return inputs;
+}
+
+std::array<float, 16> streamlineMatrix(const Mat4& matrix) {
+    std::array<float, 16> values{};
+    writeColumnMajor(matrix, values.data());
+    return values;
+}
+
+/*
+* Streamline normalises a motion to the screen (its scale makes it a share of the width and height), from where the
+* pixel is now to where it was: UV = (NDC x + 1) / 2 across and (1 - NDC y) / 2 down, so our NDC now minus then becomes
+* -m.x / 2 and +m.y / 2. A matrix that cannot be inverted (never a real lens or camera step) gives the identity.
+*/
+DlssFrameInputs makeDlssFrameInputs(RenderSize render, std::uint32_t outputWidth, std::uint32_t outputHeight, Vec2 jitter, const Mat4& viewToClip,
+                                    const Mat4& reprojection, const DlssCamera& camera, bool reset) {
+    DlssFrameInputs inputs;
+    inputs.renderSize = render;
+    inputs.outputWidth = outputWidth;
+    inputs.outputHeight = outputHeight;
+    inputs.jitter = jitter;
+    inputs.motionVectorScale = Vec2{-0.5f, 0.5f};
+    inputs.viewToClip = streamlineMatrix(viewToClip);
+    inputs.clipToView = streamlineMatrix(inverse(viewToClip).value_or(Mat4::identity()));
+    inputs.clipToPrevClip = streamlineMatrix(reprojection);
+    inputs.prevClipToClip = streamlineMatrix(inverse(reprojection).value_or(Mat4::identity()));
+    inputs.camera = camera;
     inputs.reset = reset;
     return inputs;
 }

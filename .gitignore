@@ -20,6 +20,10 @@
 *.dll
 # AMD's signed FSR 3.1 DLL is vendored (external/fidelityfx/VERSION.txt).
 !external/fidelityfx/bin/amd_fidelityfx_vk.dll
+# NVIDIA Streamline's DLLs (DLSS) are fetched by tools/fetch_streamline.py, not committed (the NVIDIA RTX SDK
+# licence); its MIT headers are committed.
+/external/streamline/bin/
+/external/streamline/docs/
 
 # Fortran module files
 *.mod

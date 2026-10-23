@@ -189,7 +189,7 @@ void VulkanSwapchain::present(VkQueue queue, std::uint32_t index) {
     info.pSwapchains = &swapchain;
     info.pImageIndices = &index;
 
-    const VkResult result = vkQueuePresentKHR(queue, &info);
+    const VkResult result = (presentFunction != nullptr ? presentFunction : vkQueuePresentKHR)(queue, &info);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         outOfDate = true;
@@ -197,6 +197,10 @@ void VulkanSwapchain::present(VkQueue queue, std::uint32_t index) {
     }
 
     vulkanCheck(result, "Presentation failed");
+}
+
+void VulkanSwapchain::setPresentFunction(PFN_vkQueuePresentKHR function) {
+    presentFunction = function;
 }
 
 VkFormat VulkanSwapchain::getFormat() const {

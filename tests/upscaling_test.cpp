@@ -1,4 +1,5 @@
 #include "engine/debug_views.h"
+#include "math/mat4.h"
 #include "render/gpu/taa.h"
 #include "render/gpu/upscaling.h"
 
@@ -65,13 +66,96 @@ namespace {
         assert(jitterPhaseCount(RenderSize{1, 1}, 1) == 8);
     }
 
-    // FSR is used only where its DLL loaded; asked for elsewhere, temporal anti-aliasing upscales instead.
+    // FSR and DLSS are used only where they are available; asked for elsewhere, temporal anti-aliasing upscales instead.
     void testActiveUpscaler() {
+        const UpscalerSupport both{.fsr = true, .dlss = true};
         UpscalingSettings settings;
-        assert(activeUpscaler(settings, true) == Upscaler::Taa);
+        assert(activeUpscaler(settings, both) == Upscaler::Taa);
         settings.upscaler = Upscaler::Fsr;
-        assert(activeUpscaler(settings, true) == Upscaler::Fsr);
-        assert(activeUpscaler(settings, false) == Upscaler::Taa);
+        assert(activeUpscaler(settings, both) == Upscaler::Fsr);
+        assert(activeUpscaler(settings, UpscalerSupport{.dlss = true}) == Upscaler::Taa);
+        settings.upscaler = Upscaler::Dlss;
+        assert(activeUpscaler(settings, both) == Upscaler::Dlss);
+        assert(activeUpscaler(settings, UpscalerSupport{.fsr = true}) == Upscaler::Taa);
+    }
+
+    // DLSS's mips are a level sharper than the scale alone, as FSR's (NVIDIA's log2(scale) - 1).
+    void testDlssLodBias() {
+        assert(textureLodBias(RenderSize{2560, 1440}, 2560, Upscaler::Dlss) == -1.0f);
+        assert(near(textureLodBias(RenderSize{1280, 720}, 2560, Upscaler::Dlss), -2.0f, 1e-6f));
+    }
+
+    /*
+    * DLSS works in its named modes, each taking render sizes in a range round its own: a scale picks the mode nearest it
+    * (0.75 is Quality, 0.4 Ultra performance), and the render size is kept inside the mode's range.
+    */
+    void testDlssModes() {
+        assert(nearestUpscalingMode(1.0f) == UpscalingMode::Native);
+        assert(nearestUpscalingMode(0.67f) == UpscalingMode::Quality);
+        assert(nearestUpscalingMode(0.75f) == UpscalingMode::Quality);
+        assert(nearestUpscalingMode(0.58f) == UpscalingMode::Balanced);
+        assert(nearestUpscalingMode(0.5f) == UpscalingMode::Performance);
+        assert(nearestUpscalingMode(0.4f) == UpscalingMode::UltraPerformance);
+        assert(nearestUpscalingMode(0.33f) == UpscalingMode::UltraPerformance);
+        assert(nearestUpscalingMode(0.95f) == UpscalingMode::Native);
+
+        const RenderSize low{1280, 720};
+        const RenderSize high{2560, 1440};
+        assert((clampRenderSize(RenderSize{1707, 960}, low, high) == RenderSize{1707, 960}));
+        assert((clampRenderSize(RenderSize{1000, 500}, low, high) == low));
+        assert((clampRenderSize(RenderSize{845, 475}, RenderSize{853, 480}, RenderSize{853, 480}) == RenderSize{853, 480}));
+        assert((clampRenderSize(RenderSize{3000, 600}, low, high) == RenderSize{2560, 720}));
+    }
+
+    /*
+    * What DLSS is told each frame through Streamline, without its types. Its matrices are DirectX's way round (row
+    * vectors, the translation in the last row): ours transposed, as GLSL's column-major arrays are. Its motion vectors
+    * are normalised to the screen, from this frame's place to last frame's (UV, y down), so our NDC motions are scaled
+    * by (-0.5, +0.5). The clip matrices invert each other, and a still camera's reprojection is the identity.
+    */
+    void testDlssFrameInputs() {
+        const std::array<float, 16> moved = streamlineMatrix(Mat4::translation(1.0f, 2.0f, 3.0f));
+        assert(moved[12] == 1.0f && moved[13] == 2.0f && moved[14] == 3.0f && moved[15] == 1.0f && moved[3] == 0.0f);
+
+        const Mat4 lens = Mat4::perspective(1.0f, 16.0f / 9.0f, 0.1f, 500.0f);
+        const Mat4 reprojection = Mat4::translation(0.01f, -0.02f, 0.0f);
+        const DlssFrameInputs inputs = makeDlssFrameInputs(RenderSize{1280, 720}, 2560, 1440, Vec2{0.25f, -0.125f}, lens, reprojection,
+                                                           DlssCamera{Vec3{1.0f, 2.0f, 3.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f},
+                                                                      Vec3{0.0f, 0.0f, -1.0f}, 0.1f, 500.0f, 1.0f, 16.0f / 9.0f},
+                                                           true);
+
+        const Vec2 previousNdc{-0.2f, 0.4f};
+        const Vec2 currentNdc{0.1f, 0.3f};
+        const auto uv = [](Vec2 ndc) { return Vec2{ndc.x * 0.5f + 0.5f, 0.5f - ndc.y * 0.5f}; };
+        const Vec2 step = uv(previousNdc) - uv(currentNdc);
+        const Vec2 motion = currentNdc - previousNdc;
+        assert(near(motion.x * inputs.motionVectorScale.x, step.x, 1e-6f) && near(motion.y * inputs.motionVectorScale.y, step.y, 1e-6f));
+
+        const auto product = [](const std::array<float, 16>& a, const std::array<float, 16>& b) {
+            std::array<float, 16> result{};
+            for (int row = 0; row < 4; ++row) {
+                for (int column = 0; column < 4; ++column) {
+                    for (int k = 0; k < 4; ++k) {
+                        result[row * 4 + column] += a[row * 4 + k] * b[k * 4 + column];
+                    }
+                }
+            }
+            return result;
+        };
+
+        const std::array<float, 16> lensRoundTrip = product(inputs.viewToClip, inputs.clipToView);
+        const std::array<float, 16> clipRoundTrip = product(inputs.clipToPrevClip, inputs.prevClipToClip);
+
+        for (int index = 0; index < 16; ++index) {
+            const float identity = index % 5 == 0 ? 1.0f : 0.0f;
+            assert(near(lensRoundTrip[index], identity, 1e-4f) && near(clipRoundTrip[index], identity, 1e-5f));
+        }
+
+        assert(inputs.clipToPrevClip == streamlineMatrix(reprojection) && inputs.viewToClip == streamlineMatrix(lens));
+        assert(inputs.jitter.x == 0.25f && inputs.jitter.y == -0.125f && inputs.reset);
+        assert((inputs.renderSize == RenderSize{1280, 720}) && inputs.outputWidth == 2560 && inputs.outputHeight == 1440);
+        assert(inputs.camera.position.z == 3.0f && inputs.camera.forward.z == -1.0f && inputs.camera.cameraNear == 0.1f);
+        assert(inputs.camera.cameraFar == 500.0f && inputs.camera.verticalFov == 1.0f && near(inputs.camera.aspectRatio, 16.0f / 9.0f, 1e-6f));
     }
 
     /*
@@ -172,6 +256,7 @@ namespace {
     void testReadout() {
         assert(upscalerText(Upscaler::Fsr, 0.67f) == "FSR 3.1 AT 0.67");
         assert(upscalerText(Upscaler::Taa, 1.0f) == "TAA AT 1.00");
+        assert(upscalerText(Upscaler::Dlss, 0.5f) == "DLSS AT 0.50");
     }
 }
 
@@ -184,6 +269,9 @@ void testUpscaling() {
     testFsrLodBias();
     testJitterPhases();
     testActiveUpscaler();
+    testDlssLodBias();
+    testDlssModes();
+    testDlssFrameInputs();
     testFsrFrameInputs();
     testSettings();
 }

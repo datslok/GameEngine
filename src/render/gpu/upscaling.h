@@ -1,7 +1,9 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "math/mat4.h"
 #include "math/vec2.h"
+#include "math/vec3.h"
 
 #include <array>
 #include <cstdint>
@@ -16,24 +18,32 @@
 * so they cost the same at any scale.
 *
 * The upscaler may instead be AMD's FSR 3.1 (render/vulkan/vulkan_fsr.h), which takes the same jittered frames, depth
-* and motion vectors and builds the output from them its own way, with its sharpening after.
+* and motion vectors and builds the output from them its own way, with its sharpening after, or NVIDIA's DLSS through
+* Streamline (render/vulkan/vulkan_dlss.h), a trained network doing the same on RTX GPUs.
 */
 
 // The smallest render scale the settings allow: below a third the history has too few samples per output pixel.
 inline constexpr float minRenderScale = 0.33f;
 
-// Which builds the output from the jittered frames: the engine's own temporal anti-aliasing, or AMD's FSR 3.1.
+// Which builds the output from the jittered frames: the engine's own temporal anti-aliasing, AMD's FSR 3.1 or NVIDIA's DLSS.
 enum class Upscaler {
     Taa,
-    Fsr
+    Fsr,
+    Dlss
 };
 
 // In the order of Upscaler's values.
-inline constexpr std::array<const char*, 2> upscalerNames{"TAA", "FSR 3.1"};
+inline constexpr std::array<const char*, 3> upscalerNames{"TAA", "FSR 3.1", "DLSS"};
+
+// Which of the vendors' upscalers this PC can run (their libraries loaded, the GPU able).
+struct UpscalerSupport {
+    bool fsr = false;
+    bool dlss = false;
+};
 
 struct UpscalingSettings {
-    // FSR only where its DLL loaded (activeUpscaler); either needs temporal anti-aliasing on, since its jitter and
-    // velocity pass feed both.
+    // FSR and DLSS only where they are available (activeUpscaler); each needs temporal anti-aliasing on, since its
+    // jitter and velocity pass feed them all.
     Upscaler upscaler = Upscaler::Taa;
 
     // The render size's share of the output's, across and down (0.5 draws a quarter of the pixels). Only while
@@ -68,6 +78,9 @@ float upscalingModeScale(UpscalingMode mode);
 // The mode a render scale is, within half a slider step (0.005, so 0.67 is Quality), or nothing for a custom scale.
 std::optional<UpscalingMode> matchingUpscalingMode(float renderScale);
 
+// The mode whose scale is nearest this one: DLSS works in its modes, so a custom scale draws in the nearest.
+UpscalingMode nearestUpscalingMode(float renderScale);
+
 // Throws std::invalid_argument for a render scale outside minRenderScale..1 or a sharpness outside 0..1.
 void validateUpscaling(const UpscalingSettings& settings);
 
@@ -84,13 +97,17 @@ RenderSize renderSize(std::uint32_t outputWidth, std::uint32_t outputHeight, flo
 // The scale the frame is drawn at: the setting's while temporal anti-aliasing upscales, else 1.
 float appliedRenderScale(const UpscalingSettings& settings, bool temporalAntiAliasing);
 
-// The upscaler in use: FSR when chosen and its DLL loaded, else temporal anti-aliasing.
-Upscaler activeUpscaler(const UpscalingSettings& settings, bool fsrAvailable);
+// The upscaler in use: FSR or DLSS when chosen and available, else temporal anti-aliasing.
+Upscaler activeUpscaler(const UpscalingSettings& settings, UpscalerSupport support);
+
+// A render size kept within a range, each side on its own (DLSS takes sizes from its mode's smallest to its largest).
+RenderSize clampRenderSize(RenderSize size, RenderSize smallest, RenderSize largest);
 
 /*
 * The textures' mip bias, log2 of the render width over the output's: the GPU picks mips for the size of a render pixel,
 * which at half size is two output pixels across, a level blurrier than the output deserves; the history averages the
-* sharper level's extra detail over its samples instead. FSR wants one level more (AMD's log2(scale) - 1).
+* sharper level's extra detail over its samples instead. FSR and DLSS want one level more (AMD's and NVIDIA's
+* log2(scale) - 1).
 */
 float textureLodBias(RenderSize render, std::uint32_t outputWidth, Upscaler upscaler = Upscaler::Taa);
 
@@ -124,3 +141,44 @@ struct FsrFrameInputs {
 
 FsrFrameInputs makeFsrFrameInputs(RenderSize render, std::uint32_t outputWidth, std::uint32_t outputHeight, Vec2 jitter, float frameSeconds,
                                   float cameraNear, float cameraFar, float verticalFov, bool reset, const UpscalingSettings& settings);
+
+// A matrix the way Streamline stores one, DirectX's: row vectors, so the translation in the last row (ours transposed,
+// the same 16 floats GLSL's column-major arrays get).
+std::array<float, 16> streamlineMatrix(const Mat4& matrix);
+
+// The camera as Streamline's constants name it: where it is and its axes in the world, its planes, lens and shape.
+struct DlssCamera {
+    Vec3 position;
+    Vec3 up;
+    Vec3 right;
+    Vec3 forward;
+    float cameraNear = 0.0f;
+    float cameraFar = 0.0f;
+    float verticalFov = 0.0f;
+    float aspectRatio = 0.0f;
+};
+
+/*
+* What DLSS is told each frame through Streamline besides its images, without its SDK's types
+* (render/vulkan/vulkan_dlss.cpp copies them into its constants): the sizes, the jitter in render pixels, the scale
+* turning the velocity image's motions (this frame's NDC minus last frame's) into Streamline's (the step from this
+* frame's place to last frame's, in shares of the screen, y down), the lens and its inverse, the reprojection between
+* the two frames' clip spaces (both camera-relative and unjittered) and its inverse, the camera, and whether the history
+* must be dropped.
+*/
+struct DlssFrameInputs {
+    RenderSize renderSize;
+    std::uint32_t outputWidth = 0;
+    std::uint32_t outputHeight = 0;
+    Vec2 jitter;
+    Vec2 motionVectorScale;
+    std::array<float, 16> viewToClip{};
+    std::array<float, 16> clipToView{};
+    std::array<float, 16> clipToPrevClip{};
+    std::array<float, 16> prevClipToClip{};
+    DlssCamera camera;
+    bool reset = false;
+};
+
+DlssFrameInputs makeDlssFrameInputs(RenderSize render, std::uint32_t outputWidth, std::uint32_t outputHeight, Vec2 jitter, const Mat4& viewToClip,
+                                    const Mat4& reprojection, const DlssCamera& camera, bool reset);

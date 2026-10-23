@@ -32,6 +32,19 @@ SKIPPED_ASSET_SUFFIXES = {".vert", ".frag", ".glsl"}
 # it the game runs and FSR is simply unavailable.
 FSR_DLL = REPO_ROOT / "external" / "fidelityfx" / "bin" / "amd_fidelityfx_vk.dll"
 
+# NVIDIA's Streamline and DLSS (external/streamline/bin, fetched by tools/fetch_streamline.py): loaded at run time too,
+# packaged when they were fetched, with NVIDIA's licences. Without them the zip simply has no DLSS.
+STREAMLINE_BIN = REPO_ROOT / "external" / "streamline" / "bin"
+
+# The NVIDIA RTX SDK licence asks applications that ship DLSS to credit it.
+DLSS_CREDIT = """
+
+Credits
+-------
+NVIDIA DLSS: DLSS upscaling uses NVIDIA DLSS (NVIDIA DLSS SDK) through NVIDIA
+Streamline. NVIDIA, the NVIDIA logo and DLSS are trademarks of NVIDIA
+Corporation. Its licence is in nvngx_dlss.license.txt."""
+
 # SDL3_image does not link its image decoders. It loads them with LoadLibrary the first time an image
 # of that type is opened, so they never appear in an import table. Each image format maps to the
 # start of the decoder DLL names SDL3_image looks for.
@@ -407,6 +420,13 @@ def main() -> int:
     shutil.copy2(FSR_DLL, stage / FSR_DLL.name)
     print(f"  {FSR_DLL.name}  (loaded at runtime for FSR 3.1)")
 
+    streamline = sorted(STREAMLINE_BIN.glob("*")) if STREAMLINE_BIN.exists() else []
+    for path in streamline:
+        shutil.copy2(path, stage / path.name)
+        print(f"  {path.name}  ({'loaded at runtime for DLSS' if path.suffix.lower() == '.dll' else 'DLSS licence'})")
+    if not streamline:
+        print("  no DLSS: run python tools/fetch_streamline.py first to package it")
+
     # The second game is the same exe with a command-line option; a batch file gives it a double-click of its own.
     demo = stage / DEMO_LAUNCHER
     demo.write_text(f'@echo off\r\n"%~dp0{exe.name}" --game demo\r\n', encoding="ascii", newline="")
@@ -415,6 +435,8 @@ def main() -> int:
     title = ANONYMOUS_NAME if arguments.anonymous else "GameEngine demo"
     readme = README_TEXT.format(title=title, underline="=" * len(title), exe_name=exe.name, demo=demo.name,
                                 controls=controls)
+    if streamline:
+        readme += DLSS_CREDIT
     (stage / "README.txt").write_text(readme.replace("\n", "\r\n"), encoding="utf-8", newline="")
 
     print("Checking every DLL resolves inside the package or Windows...")

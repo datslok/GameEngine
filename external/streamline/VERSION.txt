@@ -1,0 +1,9 @@
+NVIDIA Streamline v2.14.16 (Oct 16 2026, DLSS 310.9.16), https://github.com/NVIDIA-RTX/Streamline
+Committed: Streamline's headers (include/, MIT, unmodified; sl_nvperf.h left out, under NVIDIA's Nsight Perf terms and
+unused) and its licence (license.txt, MIT).
+Fetched, not committed (python tools/fetch_streamline.py, which checks the release's SHA-256): the signed DLLs in bin/
+(sl.interposer, sl.common, sl.dlss, NvLowLatencyVk, and nvngx_dlss, DLSS itself, under the NVIDIA RTX SDK licence in
+bin/nvngx_dlss.license.txt, which lets an application ship it but not hand it out on its own) and the programming
+guides in docs/. The makefile copies the DLLs beside each build's exe when they are there; without them DLSS is
+unavailable. Apps shipping DLSS must credit it with NVIDIA's marks, and notify NVIDIA before a commercial release.
+To update: change VERSION and SHA256 in tools/fetch_streamline.py, run it, and commit the headers it rewrites.

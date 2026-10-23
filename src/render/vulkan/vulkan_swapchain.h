@@ -48,6 +48,10 @@ public:
     // Hand the image back to be shown once its renderFinished semaphore is signalled.
     void present(VkQueue queue, std::uint32_t index);
 
+    // Present through another function than Vulkan's own (Streamline's proxy, which keeps its books each frame), or
+    // Vulkan's again with null.
+    void setPresentFunction(PFN_vkQueuePresentKHR function);
+
     VkFormat getFormat() const;
     VkExtent2D getExtent() const;
     bool isHdr() const;
@@ -61,6 +65,8 @@ public:
     VkSemaphore getRenderFinished(std::uint32_t index) const;
 
 private:
+    PFN_vkQueuePresentKHR presentFunction = nullptr;
+
     const VulkanDevice& device;
     SDL_Window* window = nullptr;
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;

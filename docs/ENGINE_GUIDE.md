@@ -20,6 +20,7 @@ This guide describes the engine as it is now. It is updated at the end of each r
 - eye adaptation (exposure in stops, a histogram of log brightness and why the middle of it, atomics in shared memory, adapting as an RC circuit, partial compensation)
 - night vision (rods and cones, the Purkinje shift, why a pixel goes grey only when it and the scene are both dim)
 - temporal anti-aliasing (aliasing and the sampling theorem, jitter on a Halton sequence, the history as an exponential average, reprojection and motion vectors, clipping stale history to the neighbours' range, Karis weights and Catmull-Rom)
+- upscaling (drawing small and rebuilding big from jittered frames, reconstruction weights, the mip bias, the vendors' upscalers FSR and DLSS, calling a library built by another compiler through a C interface, and keeping licensed binaries out of a public repository)
 - the night sky (the moon's orbit and phase, Lommel-Seeliger's law and the opposition surge, a second sky by linearity, the celestial sphere and sidereal time, magnitudes and blackbody colours, splats that keep a star's light whole)
 - so all of 6c
 - all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps)
@@ -1396,6 +1397,22 @@ That is the same exponential memory the light probes use: roughly the last ten f
 - Reading the history between pixels with plain bilinear filtering would blur it a little more each frame. A Catmull-Rom cubic, which passes exactly through the pixel values, keeps it sharp.
 
 The pass runs after the main pass, so eye adaptation, bloom and tone mapping all see the smoothed picture.
+
+### Upscaling: drawing small, showing big
+
+**The idea.** The costliest passes (the main pass with its lighting, shadows and probe reads) do about the same work for every pixel. Draw the scene at a render scale s of the screen's size in each direction and they do s² of it: 0.67 draws 44% of the pixels, 0.5 a quarter. TAA's history then stays at the screen's full size, the **output size**, and the small frames are blended into it.
+
+**Why that can work.** The jitter moves the small grid by a different fraction of its pixel every frame, so over a cycle its samples land all over each big pixel. It is like a camera with coarse pixels taking several exposures, each shifted by a fraction of a pixel, and combining them: a still scene fills in to nearly full resolution. Where things move or appear, the picture is softer until the history catches up.
+
+**What changes in the blend.** Each output pixel now rebuilds this frame's colour from the nearest small pixels, each weighed by how close its jittered sample landed (a Gaussian, exp(-2.29 d²) with d in output pixels). Where no sample landed close this frame, the new frame counts for less and the history carries the pixel. The cycle of jitter grows with the upscaling, as ceil(8 n²) frames for an upscaling of n, so each big pixel still gets samples spread across it.
+
+**The mip bias.** The GPU picks texture mips for the size of a render pixel, which at half scale is two output pixels across: a level blurrier than the output deserves. A bias of log₂ s (minus one more, as AMD and NVIDIA advise for theirs) picks sharper mips, and the history averages away their extra detail.
+
+**Three upscalers.** The engine's own TAA is one. AMD's **FSR 3.1** (any GPU) and NVIDIA's **DLSS** (RTX GPUs, a trained network) are the others, each given the same jittered frames, depth and motion vectors. They need a motion in *every* pixel, not just on moving objects, so a small pass first fills in the camera's own motion from each pixel's depth. Each vendor has its own conventions (which way a motion vector points, in what units, how matrices are laid out), and each one in the engine is a single tested function, checked against the vendor's documents before it was written.
+
+**Calling another compiler's library.** Both vendors build their libraries with Microsoft's compiler, and the engine is built with GCC. C++ compilers disagree on how they name functions inside a library and on how they lay out classes and exceptions, so C++ libraries rarely mix. C has none of that: a function is a name and a calling convention, and 64-bit Windows has only one. Both libraries offer a C interface, so the engine loads them while it runs (`SDL_LoadObject`), looks each function up by name, and calls it through a pointer. If the library is missing, the game carries on and TAA upscales.
+
+**Licences shape the repository.** AMD's FSR is MIT-licensed, so its DLL is committed. NVIDIA's DLSS may be shipped inside an application but not handed out on its own, and it is a 59 MB file, so it is fetched by a script (`tools/fetch_streamline.py`, checking the download's fingerprint) and left out of git, while NVIDIA's MIT-licensed headers are committed so the engine always builds.
 
 ### Global illumination: light that bounces
 

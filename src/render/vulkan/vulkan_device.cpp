@@ -14,12 +14,12 @@ namespace {
     }
 }
 
-VulkanDevice::VulkanDevice(SDL_Window* window, bool validation):
+VulkanDevice::VulkanDevice(SDL_Window* window, bool validation, const OptionalExtensions& optional):
     window(window)
 {
     try {
-        createInstance(validation);
-        selectPhysicalDevice();
+        createInstance(validation, optional.instance);
+        selectPhysicalDevice(optional.device);
         createDevice();
         createAllocator();
     }
@@ -44,7 +44,7 @@ VulkanDevice::~VulkanDevice() {
 * Without a window (the GPU tests) SDL is left out entirely: no surface, no surface extensions (vk-bootstrap's
 * headless mode), so the GPU is chosen without asking whether it can present.
 */
-void VulkanDevice::createInstance(bool validation) {
+void VulkanDevice::createInstance(bool validation, const std::vector<std::string>& optional) {
     static const VkResult volkLoaded = volkInitialize();
     vulkanCheck(volkLoaded, "Vulkan library loading failed");
 
@@ -80,6 +80,12 @@ void VulkanDevice::createInstance(bool validation) {
 
     if (swapchainColourSpaces) {
         builder.enable_extension(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+    }
+
+    for (const std::string& extension : optional) {
+        if (systemInfo->is_extension_available(extension.c_str())) {
+            builder.enable_extension(extension.c_str());
+        }
     }
 
     if (validation) {
@@ -133,11 +139,12 @@ void VulkanDevice::createInstance(bool validation) {
 * preferred over an integrated one.
 *
 * FSR 3.1's shaders take their paths from what the GPU supports, not from what was turned on, so the features they use
-* (16-bit floats and integers, storage images read and written without a declared format) are asked for first, and
-* the GPU is chosen without them only when none has them (FSR then stays off). Subgroup size control, which its 64-wide
-* shaders need on AMD GPUs, is part of every Vulkan 1.3 driver.
+* (16-bit floats and integers, storage images read and written without a declared format) are asked for first, with
+* those DLSS needs (timeline semaphores, descriptor indexing), and the GPU is chosen without them only when none has
+* them (FSR and DLSS then stay off). Subgroup size control, which FSR's 64-wide shaders need on AMD GPUs, is part of
+* every Vulkan 1.3 driver. The optional device extensions (DLSS's) go on together when the GPU has them all.
 */
-void VulkanDevice::selectPhysicalDevice() {
+void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional) {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
     features.depthClamp = VK_TRUE;
@@ -150,6 +157,7 @@ void VulkanDevice::selectPhysicalDevice() {
     features13.shaderDemoteToHelperInvocation = VK_TRUE; // what discard compiles to for Vulkan 1.3 (required there)
     features13.subgroupSizeControl = VK_TRUE;            // required by Vulkan 1.3 itself
     features13.computeFullSubgroups = VK_TRUE;           // required by Vulkan 1.3 itself
+    features13.privateData = VK_TRUE;                    // required by Vulkan 1.3 itself; Streamline keeps its data on objects with it
 
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -176,6 +184,8 @@ void VulkanDevice::selectPhysicalDevice() {
     withFsr.shaderStorageImageWriteWithoutFormat = VK_TRUE;
     VkPhysicalDeviceVulkan12Features withFsr12 = features12;
     withFsr12.shaderFloat16 = VK_TRUE;
+    withFsr12.timelineSemaphore = VK_TRUE;
+    withFsr12.descriptorIndexing = VK_TRUE;
 
     auto selected = select(withFsr, withFsr12);
     fsrFeatures = static_cast<bool>(selected);
@@ -198,6 +208,7 @@ void VulkanDevice::selectPhysicalDevice() {
     // that name (core since Vulkan 1.1 without the suffix) only with its extensions on. Without them FSR stays off.
     const std::vector<const char*> fsrExtensions{VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME};
     fsrFeatures = fsrFeatures && physicalDevice.enable_extensions_if_present(fsrExtensions);
+    optionalExtensions = !optional.empty() && physicalDevice.enable_extensions_if_present(optional);
 
     // Optional: hardware ray tracing through ray queries (any shader asks what a ray hits), with the acceleration
     // structures it searches. Without them everything ray-traced stays off.
@@ -387,6 +398,10 @@ bool VulkanDevice::supportsRayQueries() const {
 
 bool VulkanDevice::supportsFsrFeatures() const {
     return fsrFeatures;
+}
+
+bool VulkanDevice::hasOptionalExtensions() const {
+    return optionalExtensions;
 }
 
 std::uint32_t VulkanDevice::getScratchAlignment() const {

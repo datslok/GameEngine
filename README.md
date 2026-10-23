@@ -33,6 +33,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Switchable, with a motion debug view, in the settings (Anti-aliasing).
   - It also upscales: a render scale (Upscaling, 1 by default, down to 0.33, or an upscaling mode at the top of the settings: Native, Quality, Balanced, Performance, Ultra performance) draws the scene smaller, and TAA builds the full-size picture from the jittered frames, for speed on weaker GPUs.
   - Or AMD's **FSR 3.1** upscales instead (Upscaling, Upscaler), on any GPU, with its sharpening. It ships as AMD's signed DLL beside the game; without it, TAA upscales.
+  - Or NVIDIA's **DLSS** (DLAA at Native), on RTX GPUs, through NVIDIA Streamline. Its DLLs are not in the repository (NVIDIA's licence): `python tools/fetch_streamline.py` downloads them. Without them, TAA upscales.
 - **Reversed-Z depth:** near at 1 and far at 0, so depth precision is nearly even out to the far plane.
 - **Camera-relative rendering:** positions are measured from the camera before they become floats in matrices, so distant scenes do not jitter.
 - Indexed meshes, and textures with mipmaps and trilinear plus anisotropic filtering.
@@ -196,7 +197,7 @@ The project is developed on **Windows** with **MSYS2** (UCRT64 environment). You
 | Vulkan headers and validation layers | Building the renderer, and checking it in debug builds |
 | A GPU and driver with Vulkan support | Running the game (not needed for the tests) |
 
-Everything else is included in `external/`, so it needs no install: cgltf, Dear ImGui, MikkTSpace, volk, vk-bootstrap, the Vulkan Memory Allocator and AMD's FSR 3.1 (headers and its signed DLL, which the build copies beside the game).
+Everything else is included in `external/`, so it needs no install: cgltf, Dear ImGui, MikkTSpace, volk, vk-bootstrap, the Vulkan Memory Allocator, AMD's FSR 3.1 (headers and its signed DLL, which the build copies beside the game) and NVIDIA Streamline's headers. DLSS's DLLs are the one thing to fetch, and only for DLSS (step 4 below).
 
 ## Install
 
@@ -219,6 +220,12 @@ Everything else is included in `external/`, so it needs no install: cgltf, Dear 
    ```sh
    git clone https://github.com/datslok/GameEngine.git
    cd GameEngine
+   ```
+
+4. Optional, for DLSS on NVIDIA RTX GPUs: fetch NVIDIA Streamline's DLLs (about 276 MB to download, needs a real Python). `make` then copies them beside the game.
+
+   ```sh
+   python tools/fetch_streamline.py
    ```
 
 `glslc` from the Vulkan SDK also works if it is on your `PATH`.
@@ -421,7 +428,7 @@ docs/             ENGINE_GUIDE.md: how the engine works and why, for people lear
                   ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
                   LUMEN.md: research notes on Lumen and its alternatives, and a plan for this engine
                   RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
-tools/            package_demo.py (the shareable zip), make_glb_demo.py
+tools/            package_demo.py (the shareable zip), fetch_streamline.py (DLSS's DLLs), make_glb_demo.py
 assets/
   models/         OBJ and glTF test models (the normal map gallery: Khronos's CompareNormal,
                   NormalTangentTest and NormalTangentMirrorTest)
@@ -433,6 +440,7 @@ assets/
 external/
   cgltf           Vendored glTF loader
   fidelityfx      Vendored AMD FidelityFX API headers and signed FSR 3.1 DLL (v1.1.4)
+  streamline      NVIDIA Streamline's headers (v2.14.16); its DLLs fetched into bin/ (git-ignored)
   imgui           Vendored Dear ImGui (the debug UI), with its SDL3 and Vulkan backends
   mikktspace      Vendored MikkTSpace (tangents for normal maps, C)
   volk            Vendored volk (loads Vulkan's functions from the driver, C)
@@ -454,6 +462,7 @@ build/            Build output (git-ignored)
 - [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut, for the debug UI
 - [MikkTSpace](https://github.com/mmikk/MikkTSpace) by Morten S. Mikkelsen, for tangents (zlib licence)
 - [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) v1.1.4, for FSR 3.1 upscaling (MIT licence)
+- **NVIDIA DLSS**, through [NVIDIA Streamline](https://github.com/NVIDIA-RTX/Streamline) v2.14.16 (Streamline MIT; DLSS under the NVIDIA RTX SDK licence). NVIDIA, the NVIDIA logo and DLSS are trademarks of NVIDIA Corporation.
 - The Yale Bright Star Catalogue, 5th revised edition (Hoffleit and Warren 1991, from the [CDS](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)), for the stars (`assets/stars/`)
 - [SDL3](https://www.libsdl.org/) and SDL3_image
 - The duck model and the normal map gallery are from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): CompareNormal by Eric Chadwick and DGG (CC0), NormalTangentTest and NormalTangentMirrorTest by Ed Mackey, © 2018 Analytical Graphics, Inc. ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
