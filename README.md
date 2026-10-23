@@ -116,6 +116,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Model loading:** OBJ, and glTF/GLB with embedded or external textures.
   - Metallic and roughness, as factors and textures.
   - Normal maps, with the file's tangents or tangents generated with MikkTSpace as baking tools do, so the bumps look as their authors made them, mirrored pictures included.
+  - Normal map filtering (Toksvig): bumps too small to see far away become extra roughness, so distant bumpy surfaces do not sparkle.
   - Emissive colour, with KHR_materials_emissive_strength.
   - Optional smooth normals with a crease angle, for models that have none.
 - **An asset manager** that loads each file once and hands out typed handles.

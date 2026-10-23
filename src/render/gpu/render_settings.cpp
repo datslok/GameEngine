@@ -29,6 +29,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visitor.field("Depth prepass", settings.depthPrepass);
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
+        visitor.field("Normal map filtering", settings.normalMapFiltering);
         visitor.choice("Ray debug view", settings.rayDebugView, rayDebugViewNames);
     });
 }

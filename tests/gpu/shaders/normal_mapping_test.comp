@@ -15,5 +15,8 @@ void main() {
         testOutput(0, vec4(decodeNormalTexel(a.xyz, a.w), 0.0));
     } else if (function == GPU_TEST_PERTURB_NORMAL) {
         testOutput(0, vec4(perturbNormal(testInput(0).xyz, testInput(1), testInput(2).xyz), 0.0));
+    } else if (function == GPU_TEST_TOKSVIG_ROUGHNESS) {
+        vec4 a = testInput(0);
+        testOutput(0, vec4(toksvigRoughness(a.w, a.xyz, testInput(1).x), 0.0, 0.0, 0.0));
     }
 }

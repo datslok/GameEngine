@@ -58,10 +58,38 @@ namespace {
             report.check("perturbNormal", arithmeticTolerance, perturbNormal(vec3From(in[0]), tangent, vec3From(in[2])), vec3From(outputs[i]));
         }
     }
+
+    /*
+    * Mip texels from sharp to fully averaged (any length from 0 to past 1), roughnesses from the smallest to 1 and scales
+    * including 0 (no normal map), plus a flat texel. Inputs per case: (texel, roughness), (scale, 0, 0, 0).
+    */
+    void checkToksvig(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{13};
+        std::vector<GpuVec4> inputs;
+
+        for (float scale : {0.0f, 0.5f, 1.0f, 2.0f}) {
+            for (int i = 0; i < 60; ++i) {
+                const Vec3 direction = random.direction() * random.between(0.0f, 1.01f);
+                inputs.push_back(gpuVec4(direction * 0.5f + Vec3{0.5f, 0.5f, 0.5f}, random.between(0.045f, 1.0f)));
+                inputs.push_back(gpuVec4(Vec3{scale, 0.0f, 0.0f}));
+            }
+        }
+
+        inputs.push_back(gpuVec4(Vec3{0.5f, 0.5f, 1.0f}, 0.3f));
+        inputs.push_back(gpuVec4(Vec3{1.0f, 0.0f, 0.0f}));
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_TOKSVIG_ROUGHNESS, inputs, 2, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4* in = &inputs[i * 2];
+            report.check("toksvigRoughness", arithmeticTolerance, toksvigRoughness(in[0][3], vec3From(in[0]), in[1][0]), outputs[i][0]);
+        }
+    }
 }
 
 void gpuTestNormalMapping(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("normal_mapping.glsl");
     checkDecode(runner, report);
     checkPerturb(runner, report);
+    checkToksvig(runner, report);
 }

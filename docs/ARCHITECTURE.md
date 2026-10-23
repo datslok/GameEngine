@@ -2882,11 +2882,12 @@ Ambient returns `ambient * (diffuse + specularAlbedo)`, so metals are not black 
 
 Fragment samplers: 0 colour, 1 shadow atlas (compared), 2 shadow atlas (raw), 3 metallic-roughness, 4 BRDF table, 5 normal map.
 
-**Normal mapping** (mirrored in `render/gpu/normal_mapping`: `decodeNormalTexel`, `perturbNormal`, `transformTangent`):
+**Normal mapping** (mirrored in `render/gpu/normal_mapping`: `decodeNormalTexel`, `perturbNormal`, `transformTangent`, `toksvigRoughness`):
 
 - `triangle.vert` carries the tangent with the model matrix, normalises it like the normal and multiplies its sign by `handedness(model)` (`math/mat4`, pushed per draw after the three matrices, 52 floats).
 - `triangle.frag` decodes the texel as (2c − 1) · (scale, scale, 1), rebuilds the bitangent as w · (N × T) from the interpolated, unnormalised normal and tangent (MikkTSpace's rule) and normalises only the sum.
 - Shadow offsets use the geometric normal.
+- Normal map filtering (Toksvig 2005, `RenderSettings::normalMapFiltering`, on by default, sent as `textureOptions.y`): the mips are averaged and never renormalised, so a mip texel's length L (decoded without the scale) tells how much the bumps under it disagree. L is first lengthened by `NORMAL_TOKSVIG_QUANTIZATION_SLACK` (sqrt(3)/255, `normal_mapping_shared.h`: what 8-bit rounding alone can take off) and capped at 1; the spread (1 − L) / L, times the scale squared, adds twice over to alpha² (alpha = roughness²), at most roughness 1. A full-size texel gives the material's roughness back exactly. The normal map is read once, before the roughness, outside any branch.
 
 **Odds and ends:**
 

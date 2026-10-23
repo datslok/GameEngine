@@ -404,6 +404,13 @@ void main() {
     vec3 packedSurface = texture(textures[nonuniformEXT(material.textureSlots.y)], textureUv, mipBias).rgb;
     float metallic = clamp(material.surfaceParameters.x * packedSurface.b, 0.0, 1.0);
     float roughness = clamp(material.surfaceParameters.y * packedSurface.g, BRDF_SMALLEST_ROUGHNESS, 1.0);
+    // The normal map is read here, outside any branch, so its mip comes from the neighbouring pixels' coordinates; bumps
+    // its smaller mips averaged away widen the roughness (Toksvig).
+    vec3 normalTexel = texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv, mipBias).rgb;
+
+    if (textureOptions.y > 0.0) {
+        roughness = toksvigRoughness(roughness, normalTexel, material.surfaceParameters.z);
+    }
 
     // Light adds up: each light adds its share to these sums.
     vec3 diffuse = vec3(0.0);
@@ -421,7 +428,7 @@ void main() {
     vec3 normal = geometricNormal;
 
     if (normalLength > 0.0) {
-        vec3 tilt = decodeNormalTexel(texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv, mipBias).rgb, material.surfaceParameters.z);
+        vec3 tilt = decodeNormalTexel(normalTexel, material.surfaceParameters.z);
         vec3 bumped = perturbNormal(worldNormal, worldTangent, tilt);
 
         if (dot(bumped, bumped) > 0.0) {

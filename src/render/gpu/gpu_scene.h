@@ -70,7 +70,7 @@ struct GpuFrameData {
     float probeShading[4];          // x: the self-shadow bias setting, y: the share of probe light a probe ray's hit passes on
     std::int32_t probeAtlas[4];     // xy: the probe atlases' columns and rows (ddgi.h, probeAtlasGrid), w: how many cascades
     std::int32_t probeLights[4];    // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
-    float textureOptions[4];        // x: the surface textures' mip bias (render/gpu/upscaling.h, textureLodBias)
+    float textureOptions[4];        // x: the surface textures' mip bias (render/gpu/upscaling.h, textureLodBias), y: 1 filters normal maps (Toksvig)
 };
 
 static_assert(sizeof(GpuFrameData) == 320, "GpuFrameData must match the shader's FrameData block");
