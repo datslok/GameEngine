@@ -9,8 +9,9 @@ namespace {
     // The copy keeps the scene's own format, so the comparison sees exactly what the glass changed.
     constexpr VkFormat opaqueFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-    // A share, 0 to 1: 256 levels are plenty for how far to trust a history.
-    constexpr VkFormat maskFormat = VK_FORMAT_R8_UNORM;
+    // A share, 0 to 1, as a half float: Streamline's Vulkan format table (DLSS's bias hint) has no 8-bit unsigned
+    // normalised single channel, and refuses an image in a format it cannot name.
+    constexpr VkFormat maskFormat = VK_FORMAT_R16_SFLOAT;
 }
 
 VulkanReactiveMask::VulkanReactiveMask(const VulkanDevice& device, VkSampler nearest):

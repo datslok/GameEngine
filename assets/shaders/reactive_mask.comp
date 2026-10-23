@@ -13,7 +13,7 @@ layout(local_size_x = TRANSPARENCY_REACTIVE_GROUP_SIDE, local_size_y = TRANSPARE
 
 layout(set = 0, binding = 0) uniform sampler2D opaqueScene;  // the picture before the transparent surfaces, exact texels
 layout(set = 0, binding = 1) uniform sampler2D blendedScene; // the picture after them, exact texels
-layout(set = 0, binding = 2, r8) uniform writeonly image2D reactive;
+layout(set = 0, binding = 2, r16f) uniform writeonly image2D reactive;
 
 // Must match GpuReactivePass.
 layout(push_constant) uniform Pass {
