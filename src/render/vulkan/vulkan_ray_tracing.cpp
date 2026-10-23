@@ -11,6 +11,7 @@
 
 static_assert(sizeof(VkAccelerationStructureInstanceKHR) == sizeof(GpuRayInstance),
               "GpuRayInstance must have VkAccelerationStructureInstanceKHR's layout");
+static_assert(rayInstanceNotOpaque == VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR, "rayInstanceNotOpaque must be Vulkan's flag");
 
 namespace {
     // One mesh's buffers by address, as ray_scene.glsl's MeshAddresses.

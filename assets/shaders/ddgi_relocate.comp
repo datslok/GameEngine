@@ -40,18 +40,17 @@ shared bool recorded;
 // solids sees past it.
 float traceStatic(vec3 origin, vec3 direction) {
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_STATIC, origin, DDGI_RELOCATION_MIN_DISTANCE, direction,
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, RAY_MASK_STATIC, origin, DDGI_RELOCATION_MIN_DISTANCE, direction,
                           DDGI_RAY_REACH);
 
-    while (rayQueryProceedEXT(query)) {
-    }
+    traceRayQuery(query);
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
         return DDGI_RAY_REACH;
     }
 
     float distance = rayQueryGetIntersectionTEXT(query, true);
-    return rayQueryGetIntersectionFrontFaceEXT(query, true) ? distance : -distance;
+    return committedHitFacesRay(query) ? distance : -distance;
 }
 
 void main() {

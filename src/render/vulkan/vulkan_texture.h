@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/coverage_mips.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "scene/asset_handles.h"
 
@@ -24,12 +25,13 @@ VulkanTextureDescription surfaceTexture(TextureEncoding encoding);
 
 /*
 * A texture in GPU memory, ready for fragment shaders to sample. A surface's smaller mip levels are made on the GPU, each
-* by a filtered copy (a blit) of the level above, as SDL_GPU made them, so distant surfaces read pre-averaged colours.
+* by a filtered copy (a blit) of the level above, as SDL_GPU made them, so distant surfaces read pre-averaged colours,
+* unless they come built (mips: every level below the full size, as a cut-out's are, core/coverage_mips.h).
 */
 class VulkanTexture {
 public:
     VulkanTexture(const VulkanDevice& device, ImmediateCommands& uploads, std::uint32_t width, std::uint32_t height,
-                  std::span<const std::uint8_t> texels, const VulkanTextureDescription& description);
+                  std::span<const std::uint8_t> texels, const VulkanTextureDescription& description, std::span<const ImageLevel> mips = {});
 
     VkImageView getView() const;
     bool isSurface() const;

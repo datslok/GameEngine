@@ -1,10 +1,13 @@
 #pragma once
 
+#include "core/coverage_mips.h"
 #include "math/aabb.h"
 #include "math/vec3.h"
+#include "scene/mesh.h"
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 /*
@@ -29,7 +32,8 @@ enum class LabSurface {
     Polished, // the reflection corner's slab: dark polished stone
     Chrome,   // the mirror ball
     Mirror,   // the sunlit room's mirror: silvered glass
-    BrushedSteel // the panel beside it: a rough mirror
+    BrushedSteel, // the panel beside it: a rough mirror
+    ChainLink // the fence's wire mesh: galvanised steel
 };
 
 struct LabBlock {
@@ -66,6 +70,28 @@ inline constexpr float labPostHalfWidth = 0.05f;
 inline constexpr float labPostHeight = 2.0f;
 inline constexpr float labRailHeight = 1.0f;     // its centre
 inline constexpr float labRailHalfWidth = 0.03f;
+
+/*
+* The chain-link along the fence: one panel through the posts from the ground to their tops, a diamond wire mesh drawn as
+* a cut-out (render/gpu/alpha_mask.h), double-sided, so sun shadows, light probes and far mip levels all meet holes. Its
+* texture is made here and repeats every tile; its smaller mips are built to keep the wire's coverage, so the fence stays
+* a grey haze to the horizon instead of vanishing.
+*/
+inline constexpr float labChainLinkTileMetres = 0.5f;     // the texture repeats this often along and up the panel
+inline constexpr int labChainLinkDiamonds = 8;             // diamonds across a tile, each way
+inline constexpr float labChainLinkWireHalfWidth = 0.006f; // in tiles: 3 mm
+inline constexpr std::uint32_t labChainLinkTexels = 256;   // the texture's side
+inline constexpr float labChainLinkCutoff = 0.5f;
+
+// The wire's alpha at (u, v), in tiles: 1 on a wire, 0 between, falling over one texel at its edges, so the texture has
+// soft edges for averaging and the cutoff to see. The wires run along both diagonals, so it repeats every tile.
+float chainLinkAlpha(float u, float v);
+
+// The texture: galvanised grey (sRGB) with the wire's alpha, texel centres sampled.
+ImageLevel chainLinkImage();
+
+// The panel: a quad facing east, its texture coordinates in tiles (u north along the fence, v up).
+Mesh chainLinkPanel();
 
 /*
 * A forest of box trees (a trunk and a crown) scattered round the start at between these distances, placed by hashing

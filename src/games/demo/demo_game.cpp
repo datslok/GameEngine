@@ -66,6 +66,7 @@ namespace {
     // CompareNormal shows the same shape without and with a normal map; NormalTangentTest's tangents are generated
     // (MikkTSpace); NormalTangentMirrorTest's come from the file, and half of its pictures are mirrored. WaterBottle
     // (Microsoft, CC0) glows through an emissive texture and has baked occlusion packed with its metallic-roughness.
+    // AlphaBlendModeTest shows cut-outs at three cutoffs beside an opaque row (its blended row draws opaque for now).
     struct Exhibit {
         const char* path;
         Vec3 position;
@@ -75,7 +76,8 @@ namespace {
         {"assets/models/CompareNormal.glb", Vec3{-3.2f, 1.3f, -3.2f}},
         {"assets/models/NormalTangentTest.glb", Vec3{-3.2f, 1.3f, -1.2f}},
         {"assets/models/NormalTangentMirrorTest.glb", Vec3{-3.2f, 1.3f, -5.2f}},
-        {"assets/models/WaterBottle.glb", Vec3{-3.2f, 1.3f, -7.2f}}
+        {"assets/models/WaterBottle.glb", Vec3{-3.2f, 1.3f, -7.2f}},
+        {"assets/models/AlphaBlendModeTest.glb", Vec3{-3.2f, 1.3f, -9.2f}}
     };
     constexpr float galleryExhibitSize = 1.5f; // the longest side
     constexpr float galleryFacingDistance = 3.0f;

@@ -32,10 +32,9 @@ void main() {
     vec3 direction = normalize(cameraRayDirection(view.right.xyz, view.up.xyz, view.forward.xyz, onScreen.x * 2.0 - 1.0, 1.0 - onScreen.y * 2.0));
 
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_EVERYTHING, view.originAndView.xyz, 0.0, direction, debugRayReach);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, RAY_MASK_EVERYTHING, view.originAndView.xyz, 0.0, direction, debugRayReach);
 
-    while (rayQueryProceedEXT(query)) {
-    }
+    traceRayQuery(query);
 
     if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
         colour = vec4(0.02, 0.02, 0.025, 1.0);

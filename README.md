@@ -85,6 +85,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Physically based materials** (glTF metallic-roughness): GGX microfacet highlights with Smith shadowing and Schlick Fresnel, Lambert diffuse, and energy compensation for light that bounces between microfacets, so nothing is lost or created at any roughness.
 - **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
 - **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
+- **Cut-outs and double-sided materials** (glTF's alpha mask and `doubleSided`): leaves, fences and grates with holes, in shadows and ray tracing too, their mips built to keep their coverage so fences do not vanish with distance.
 - **Frustum culling:** each view, camera or shadow, skips what it cannot see.
 
 **Shadows from every light**
@@ -158,7 +159,7 @@ Several games run on one engine, picked at start-up with `--game`.
 
 **The light lab:** a sunlit test ground 800 m across.
 
-- Towers at doubling distances, a thin fence running to the horizon, a forest, and a two-room building lit through one window.
+- Towers at doubling distances, a thin chain-link fence running to the horizon, a forest, and a two-room building lit through one window.
 - A 300 m street of houses, whose 60 lamps and lit windows come on at dusk.
 - A sun placed by real astronomy, from latitude, day of the year and time of day, that can run through a day. Its glowing disc in the sky is as bright as the light it gives, drawn five times its real size for looks (as is the moon's).
 - At night, the moon in its real place and phase, lighting the sky and casting shadows, and the 9,096 brightest real stars, in their colours, turning with the sky.
@@ -439,7 +440,7 @@ docs/             ENGINE_GUIDE.md: how the engine works and why, for people lear
 tools/            package_demo.py (the shareable zip), fetch_streamline.py (DLSS's DLLs), make_glb_demo.py
 assets/
   models/         OBJ and glTF test models (the gallery: Khronos's CompareNormal,
-                  NormalTangentTest, NormalTangentMirrorTest and WaterBottle)
+                  NormalTangentTest, NormalTangentMirrorTest, WaterBottle and AlphaBlendModeTest)
   shaders/        GLSL shaders (compiled to .spv by make) and the shader libraries they include
                   (.glsl: BRDF, normal mapping, lighting, soft shadows, cascades, depth range, ray tracing,
                   light probes, atmosphere, stars, eye adaptation, tone mapping, bloom, dither, overlay, clusters)
@@ -473,4 +474,4 @@ build/            Build output (git-ignored)
 - **NVIDIA DLSS**, through [NVIDIA Streamline](https://github.com/NVIDIA-RTX/Streamline) v2.14.16 (Streamline MIT; DLSS under the NVIDIA RTX SDK licence). NVIDIA, the NVIDIA logo and DLSS are trademarks of NVIDIA Corporation.
 - The Yale Bright Star Catalogue, 5th revised edition (Hoffleit and Warren 1991, from the [CDS](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)), for the stars (`assets/stars/`)
 - [SDL3](https://www.libsdl.org/) and SDL3_image
-- The duck model and the gallery are from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): WaterBottle by Microsoft (CC0), CompareNormal by Eric Chadwick and DGG (CC0), NormalTangentTest and NormalTangentMirrorTest by Ed Mackey, © 2018 Analytical Graphics, Inc. ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+- The duck model and the gallery are from the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): WaterBottle by Microsoft (CC0), CompareNormal by Eric Chadwick and DGG (CC0), NormalTangentTest, NormalTangentMirrorTest and AlphaBlendModeTest by Ed Mackey, © 2018 Analytical Graphics, Inc. ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))

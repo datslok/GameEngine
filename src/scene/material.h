@@ -5,6 +5,15 @@
 #include "scene/asset_handles.h"
 
 /*
+* How a surface's alpha is used (glTF's alphaMode): ignored (Opaque), or a cut-out (Mask) whose texels under the cutoff
+* are holes, for leaves, fences and grates (render/gpu/alpha_mask.h). Blending (glass) is not drawn yet.
+*/
+enum class AlphaMode {
+    Opaque,
+    Mask
+};
+
+/*
 * How the renderer colours a part: a base colour multiplied by a texture, how metallic and rough it is, and any light it emits.
 * No texture handle means plain colour (the renderer uses a white texture).
 * Files describe materials with MaterialSource (scene/model.h); the AssetManager turns those into this.
@@ -43,4 +52,18 @@ struct Material {
     // Optional pattern for the glow (glTF's emissiveTexture): an sRGB colour texture multiplying emissive, for screens,
     // dials and painted lights. No handle means the colour above everywhere.
     TextureHandle emissiveTexture;
+
+    // A cut-out's alpha is its colour texture's alpha times opacity (glTF's base colour factor alpha, 0..1); texels
+    // under alphaCutoff are holes. Ignored for opaque materials.
+    AlphaMode alphaMode = AlphaMode::Opaque;
+    float alphaCutoff = 0.5f;
+    float opacity = 1.0f;
+
+    // Both sides drawn (glTF's doubleSided), the back shaded as the front's mirror image: a leaf or a fence seen from
+    // behind. One-sided surfaces skip their backs, as a closed mesh's are never seen.
+    bool doubleSided = false;
 };
+
+inline bool isCutOut(const Material& material) {
+    return material.alphaMode == AlphaMode::Mask;
+}

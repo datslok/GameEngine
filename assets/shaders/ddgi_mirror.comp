@@ -74,12 +74,11 @@ void main() {
     vec3 direction = volumeRayDirection(ray, volumeRayCount(true), probeTurns[probe]);
 
     rayQueryEXT query;
-    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsOpaqueEXT, RAY_MASK_SOLID, origin, 0.0, direction, DDGI_RAY_REACH);
+    rayQueryInitializeEXT(query, rayScene, gl_RayFlagsNoneEXT, RAY_MASK_SOLID, origin, 0.0, direction, DDGI_RAY_REACH);
 
-    while (rayQueryProceedEXT(query)) {
-    }
+    traceRayQuery(query);
 
-    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT || !rayQueryGetIntersectionFrontFaceEXT(query, true)) {
+    if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionTriangleEXT || !committedHitFacesRay(query)) {
         return;
     }
 

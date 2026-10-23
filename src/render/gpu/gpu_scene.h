@@ -101,11 +101,14 @@ private:
     std::unordered_multimap<std::uint64_t, std::uint32_t> byHash;
 };
 
-// One instanced draw: mesh, drawn instanceCount times, as instances firstInstance onwards.
+// One instanced draw: mesh, drawn instanceCount times, as instances firstInstance onwards, and how its draws are drawn:
+// cut-outs by pipelines that throw away their holes, double-sided ones without culling back faces.
 struct DrawBatch {
     MeshHandle mesh;
     std::uint32_t firstInstance = 0;
     std::uint32_t instanceCount = 0;
+    bool cutOut = false;
+    bool doubleSided = false;
 };
 
 // The chosen draws grouped by mesh: order lists the draw indices in instance order, and each batch covers a run of them.
@@ -115,8 +118,8 @@ struct BatchedDraws {
 };
 
 /*
-* Group the chosen draws (indices into draws) by mesh, meshes in handle order and each mesh's draws in the order they were
-* chosen, so the same frame always gives the same instances. Instances are numbered from firstInstance, for views that
+* Group the chosen draws (indices into draws) by how they are drawn (plain, double-sided, cut-out, double-sided cut-out)
+* and then by mesh, meshes in handle order and each mesh's draws in the order they were chosen, so the same frame always gives the same instances. Instances are numbered from firstInstance, for views that
 * write theirs after another view's in the same buffer (shadow tiles).
 */
 BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance = 0);

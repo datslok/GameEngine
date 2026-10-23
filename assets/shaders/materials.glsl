@@ -17,7 +17,7 @@ struct MaterialData {
     vec4 surfaceParameters; // x: metallic, y: roughness, z: normal map scale (0 without a normal map), w: occlusion strength (0 without an occlusion texture)
     vec4 emissive;          // rgb: light the surface gives off itself, multiplied by the emissive texture
     uvec4 textureSlots;     // in the texture array: x colour, y metallic-roughness (linear), z normal map (linear), w emissive (sRGB)
-    uvec4 moreTextureSlots; // x: baked occlusion (linear, red channel); the rest unused
+    uvec4 extra;            // x: baked occlusion (linear, red channel); y: flags (MATERIAL_DOUBLE_SIDED, MATERIAL_CUT_OUT); the rest unused
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

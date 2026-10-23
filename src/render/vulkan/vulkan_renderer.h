@@ -58,6 +58,14 @@
 
 struct ImDrawData;
 
+// How a pass draws its batches: its pipeline for the plain ones and for cut-outs (the same one where the holes need no
+// throwing away), and the cull mode for one-sided batches (double-sided ones cull nothing).
+struct BatchPipelines {
+    VkPipeline plain = VK_NULL_HANDLE;
+    VkPipeline cutOut = VK_NULL_HANDLE;
+    VkCullModeFlags cull = VK_CULL_MODE_BACK_BIT;
+};
+
 /*
 * The engine's renderer, on Vulkan 1.3 (phase 6b; it replaced SDL_GPU, drawing every golden image bit for bit the same):
 * the shadow atlas, the main pass into a float scene image, bloom, tone mapping into the swapchain image, debug lines
@@ -95,9 +103,10 @@ public:
     std::string getDeviceName() const;
 
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
-    // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear). Between frames only.
+    // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear), with their smaller levels when those were
+    // built on the CPU (a cut-out's, keeping its coverage). Between frames only.
     void uploadMesh(const IndexedMesh& mesh);
-    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding);
+    void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips = {});
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
 
@@ -186,11 +195,14 @@ private:
     std::unique_ptr<SceneLayout> sceneLayout;
 
     // The main pass alone (finding the nearest surface itself) or after the depth prepass (shading only it), sampling
-    // the light probes or not, writing the reflection surfaces or not: every combination, indexed by mainPipelineIndex.
-    // And the prepass.
-    std::array<std::unique_ptr<VulkanPipeline>, 8> mainPipelines;
+    // the light probes or not, writing the reflection surfaces or not, and without the prepass drawing cut-outs (throwing
+    // away their holes) or not: every combination, indexed by mainPipelineIndex. And the prepass and the shadow pass,
+    // each with its cut-out pipeline (cut_out.frag), which the others need none of.
+    std::array<std::unique_ptr<VulkanPipeline>, 16> mainPipelines;
     std::unique_ptr<VulkanPipeline> depthPrepassPipeline;
+    std::unique_ptr<VulkanPipeline> depthPrepassCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowPipeline;
+    std::unique_ptr<VulkanPipeline> shadowCutOutPipeline;
     std::unique_ptr<VulkanPipeline> shadowClearPipeline;
     std::unique_ptr<VulkanPipeline> toneMapPipeline;
     VkFormat screenFormat = VK_FORMAT_UNDEFINED;
@@ -226,10 +238,10 @@ private:
     std::unique_ptr<VulkanAmbientOcclusion> ambientOcclusion;
 
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
-    // without and with the light probes (probe_capture.frag). On GPUs with ray queries they trace the sun's shadow past
+    // without and with the light probes (probe_capture.frag), each for cut-outs too, indexed by capturePipelineIndex. On GPUs with ray queries they trace the sun's shadow past
     // its cascades (probe_capture_rays.frag), in a layout with the ray tracing set as set 2.
     std::unique_ptr<VulkanReflectionProbe> reflectionProbe;
-    std::array<std::unique_ptr<VulkanPipeline>, 2> capturePipelines;
+    std::array<std::unique_ptr<VulkanPipeline>, 4> capturePipelines;
     OwnedHandle<VkPipelineLayout> captureRaysLayout;
 
     // Shadows: every shadow view in one depth atlas, kept between frames (tiles are redrawn only when they change).
@@ -257,6 +269,7 @@ private:
     // (for reprojection; unknown on the first frame, after it was off and when a capture starts).
     std::unique_ptr<VulkanTaa> taa;
     std::unique_ptr<VulkanPipeline> motionPipeline;
+    std::unique_ptr<VulkanPipeline> motionCutOutPipeline;
     std::uint64_t taaFrame = 0;
     Mat4 motionViewProjection = Mat4::identity();
 
@@ -406,7 +419,7 @@ private:
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).
     void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);
-    std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches) const;
+    std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 
     void bindMesh(VkCommandBuffer commands, MeshHandle mesh, std::uint32_t& indexCount) const;

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 /*
 * World space, so the shadow pass (whose cache keys on world matrices) and the camera share the record; the camera's
@@ -96,21 +97,30 @@ const std::vector<GpuMaterial>& MaterialTable::getEntries() const {
 }
 
 /*
-* A stable sort by mesh keeps each mesh's draws in the order they came, then each run of one mesh becomes a batch.
+* A stable sort by style, then mesh, keeps each mesh's draws in the order they came, then each run of one mesh drawn one
+* way becomes a batch. Cut-outs come last, so a pass switches pipeline at most once for them.
 */
 BatchedDraws batchByMesh(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, std::uint32_t firstInstance) {
     BatchedDraws batched;
     batched.order = chosen;
 
-    std::stable_sort(batched.order.begin(), batched.order.end(), [&draws](std::size_t a, std::size_t b) {
-        return draws[a].mesh.index < draws[b].mesh.index;
+    const auto style = [&draws](std::size_t index) {
+        const Material& material = draws[index].material;
+        return (isCutOut(material) ? 2 : 0) + (material.doubleSided ? 1 : 0);
+    };
+
+    std::stable_sort(batched.order.begin(), batched.order.end(), [&](std::size_t a, std::size_t b) {
+        return std::make_pair(style(a), draws[a].mesh.index) < std::make_pair(style(b), draws[b].mesh.index);
     });
 
     for (std::size_t position = 0; position < batched.order.size(); ++position) {
-        const MeshHandle mesh = draws[batched.order[position]].mesh;
+        const DrawItem& draw = draws[batched.order[position]];
+        const bool cutOut = isCutOut(draw.material);
+        const bool doubleSided = draw.material.doubleSided;
+        const DrawBatch* last = batched.batches.empty() ? nullptr : &batched.batches.back();
 
-        if (batched.batches.empty() || batched.batches.back().mesh != mesh) {
-            batched.batches.push_back(DrawBatch{mesh, firstInstance + static_cast<std::uint32_t>(position), 0});
+        if (last == nullptr || last->mesh != draw.mesh || last->cutOut != cutOut || last->doubleSided != doubleSided) {
+            batched.batches.push_back(DrawBatch{draw.mesh, firstInstance + static_cast<std::uint32_t>(position), 0, cutOut, doubleSided});
         }
 
         ++batched.batches.back().instanceCount;

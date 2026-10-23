@@ -1,0 +1,18 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs alpha_mask.glsl's functions on the cases alpha_mask_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "alpha_mask.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_ALPHA_MASK) {
+        // Inputs: (alpha, cutoff, front facing, double-sided).
+        vec4 a = testInput(0);
+        testOutput(0, vec4(isCutAway(a.x, a.y) ? 1.0 : 0.0, facingSign(a.z != 0.0, a.w != 0.0), 0.0, 0.0));
+    }
+}

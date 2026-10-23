@@ -1,3 +1,4 @@
+#include "core/coverage_mips.h"
 #include "engine/golden.h"
 #include "games/lightlab/light_lab_game.h"
 #include "games/lightlab/light_lab_level.h"
@@ -23,6 +24,7 @@
 #include "probe_helpers.h"
 #include "test_levels.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -55,10 +57,10 @@ namespace {
 
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
 
-        // The ground, the towers, fence, trees, building, the street, its windows and its bulbs' glow (static, and
+        // The ground, the towers, fence, its chain-link, trees, building, the street, its windows and its bulbs' glow (static, and
         // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror) and the
         // mirror ball.
-        assert(staticModels == 10);
+        assert(staticModels == 11);
         assert(others > 0);
     }
 
@@ -285,6 +287,64 @@ namespace {
         const Aabb rail = layout.fence.back().bounds();
         assert(near(rail.maximum.z, labFirstPostZ, 0.1f));
         assert(near(rail.minimum.z, labLastPostZ, 0.1f));
+    }
+
+    /*
+    * The chain-link: one panel along the posts, from the ground to their tops, a tiled diamond wire with soft edges
+    * (partial alpha), so its far mips need their coverage kept. The pattern repeats each tile, so it tiles seamlessly.
+    */
+    void testChainLinkPattern() {
+        for (float u : {0.1f, 0.37f, 0.5f, 0.83f}) {
+            for (float v : {0.0f, 0.21f, 0.64f}) {
+                assert(near(chainLinkAlpha(u, v), chainLinkAlpha(u + 1.0f, v), 1e-4f));
+                assert(near(chainLinkAlpha(u, v), chainLinkAlpha(u, v + 1.0f), 1e-4f));
+            }
+        }
+
+        const ImageLevel wire = chainLinkImage();
+        assert(wire.width == labChainLinkTexels && wire.height == labChainLinkTexels);
+        const float coverage = alphaCoverage(wire, labChainLinkCutoff);
+        assert(coverage > 0.1f && coverage < 0.35f);
+
+        bool partial = false;
+        for (std::size_t texel = 3; texel < wire.pixels.size(); texel += 4) {
+            partial = partial || (wire.pixels[texel] > 0 && wire.pixels[texel] < 255);
+        }
+        assert(partial);
+
+        const Mesh panel = chainLinkPanel();
+        assert(panel.vertices.size() == 4 && panel.triangles.size() == 2);
+        float longest = 0.0f;
+        for (const Vec4& corner : panel.vertices) {
+            assert(corner.x == labFenceX);
+            assert(corner.y >= 0.0f && corner.y <= labPostHeight);
+            assert(corner.z <= labFirstPostZ + 1e-4f && corner.z >= labLastPostZ - 1e-4f);
+        }
+        for (const Triangle& triangle : panel.triangles) {
+            for (const auto& uv : triangle.uvs) {
+                longest = std::max(longest, uv->x);
+            }
+        }
+        assert(near(longest, (labFirstPostZ - labLastPostZ) / labChainLinkTileMetres, 1e-3f));
+    }
+
+    // In the lab it is a static, shadow-casting, double-sided cut-out whose texture's mips were built to keep its coverage.
+    void testTheChainLinkFence() {
+        Lab lab;
+        int cutOuts = 0;
+
+        lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
+            for (const RenderPart& part : renderer.parts) {
+                if (isCutOut(part.material)) {
+                    ++cutOuts;
+                    assert(part.material.doubleSided && renderer.isStatic && renderer.castsShadows);
+                    assert(near(part.material.alphaCutoff, labChainLinkCutoff, 1e-6f));
+                    assert(!lab.assets.getTexture(part.material.texture).mips.empty());
+                }
+            }
+        });
+
+        assert(cutOuts == 1);
     }
 
     // The forest is the same every time, all of it on the ground, outside the keep-clear areas.
@@ -943,6 +1003,8 @@ void testLightLab() {
     testSunDisc();
     testTowersDoubleAndFanOut();
     testFence();
+    testChainLinkPattern();
+    testTheChainLinkFence();
     testForest();
     testBuildingOpenings();
     testTheStreet();

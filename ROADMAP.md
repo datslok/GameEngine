@@ -261,7 +261,8 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [ ] Mirrored lights without ray tracing: the image light for flat mirrors
 - [x] Ambient occlusion (GTAO) from the prepass's depth, for the small creases DDGI's coarse grid cannot resolve (`gtao`)
 - [x] glTF occlusion and emissive textures (`gltf-occlusion-emissive`)
-- [ ] Alpha test and transparency: glTF's `alphaMode` (mask for foliage and fences, blend for glass) and a sorted transparent pass after the opaque scene
+- [x] Cut-outs (glTF's alpha mask, with coverage-preserving mips) and double-sided materials, the light lab's chain-link fence (`alpha-mask`)
+- [ ] Transparency: glTF's alpha blend (glass), a transparent pass after the opaque scene sorted per object, back faces before front
 - [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
 
 **Milestone** (in the light lab's building)**:**

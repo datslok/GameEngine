@@ -44,6 +44,12 @@ layout(location = 4) flat in uint materialIndex;
 // code (with it merely skipped by a branch, the driver compiled the rest a little differently, and a few pixels moved).
 layout(constant_id = DDGI_SAMPLE_PROBES_CONSTANT) const bool probesOn = false;
 
+// Whether this pipeline draws cut-outs (render/gpu/alpha_mask.h), throwing away their holes: a specialization constant, so
+// the other pipelines hold no discard, which would keep the GPU from testing depth before shading.
+#include "alpha_mask.glsl"
+#include "render/gpu/material_shared.h"
+layout(constant_id = MATERIAL_CUT_OUT_CONSTANT) const bool cutOut = false;
+
 
 // Whether this shader draws the reflection probe's capture (render/gpu/reflection_probe.h): every light rather than
 // the clusters' lists (those are the camera's view's) and no heatmap.
@@ -460,7 +466,19 @@ void main() {
     // The glow's pattern (white without one, so the emissive colour alone) and the baked occlusion in red (white, open,
     // without one), read here for the same reason.
     vec3 emissive = texture(textures[nonuniformEXT(material.textureSlots.w)], textureUv, mipBias).rgb * material.emissive.rgb;
-    float occlusionTexel = texture(textures[nonuniformEXT(material.moreTextureSlots.x)], textureUv, mipBias).r;
+    float occlusionTexel = texture(textures[nonuniformEXT(material.extra.x)], textureUv, mipBias).r;
+
+    // A cut-out's holes are thrown away in its own pipelines (without the depth prepass; after it, the holes have no
+    // depth for this pass to match). After every texture read, whose mips need the neighbouring pixels.
+    if (cutOut && isCutAway(albedo.a, material.emissive.w)) {
+        discard;
+    }
+
+    // The back of a double-sided surface is shaded as the front's mirror image: its normal and tangent frame turned round.
+    // The capture's cube faces are mirror images, which swaps which side the GPU calls the front.
+    float side = facingSign(gl_FrontFacing != captureView, (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u);
+    vec3 surfaceNormal = worldNormal * side;
+    vec4 surfaceTangent = worldTangent * side;
 
     if (textureOptions.y > 0.0) {
         roughness = toksvigRoughness(roughness, normalTexel, material.surfaceParameters.z);
@@ -470,7 +488,7 @@ void main() {
     vec3 diffuse = vec3(0.0);
     vec3 specular = vec3(0.0);
 
-    float normalLength = length(worldNormal);
+    float normalLength = length(surfaceNormal);
     // The camera is at the origin, so the way to it is minus the fragment's position.
     vec3 cameraOffset = -relativePosition;
     float cameraDistance = length(cameraOffset);
@@ -478,12 +496,12 @@ void main() {
     // Without a usable normal there is no way to tell which side faces a light, so only ambient applies, seen head-on.
     // The geometric normal (the triangle's own, smoothed) moves points off the surface for shadow lookups; the normal
     // map's tilts are far smaller than a shadow texel and would only add noise there.
-    vec3 geometricNormal = normalLength > 0.0 ? worldNormal / normalLength : vec3(0.0, 1.0, 0.0);
+    vec3 geometricNormal = normalLength > 0.0 ? surfaceNormal / normalLength : vec3(0.0, 1.0, 0.0);
     vec3 normal = geometricNormal;
 
     if (normalLength > 0.0) {
         vec3 tilt = decodeNormalTexel(normalTexel, material.surfaceParameters.z);
-        vec3 bumped = perturbNormal(worldNormal, worldTangent, tilt);
+        vec3 bumped = perturbNormal(surfaceNormal, surfaceTangent, tilt);
 
         if (dot(bumped, bumped) > 0.0) {
             normal = bumped;

@@ -43,6 +43,8 @@ void testEngineSettings();
 void testBrdf();
 void testDepthPrepass();
 void testTextureEncoding();
+void testCoverageMips();
+void testAlphaMask();
 void testGltfMaterials();
 void testGltfNormalMaps();
 void testSmoothNormals();
@@ -172,6 +174,8 @@ int main(){
     testBrdf();
     testDepthPrepass();
     testTextureEncoding();
+    testCoverageMips();
+    testAlphaMask();
     testGltfMaterials();
     testGltfNormalMaps();
     testSmoothNormals();

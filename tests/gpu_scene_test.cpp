@@ -70,6 +70,32 @@ namespace {
         assert(sameBatch(batched.batches[1], 1, 11, 2));
     }
 
+    /*
+    * Cut-outs and double-sided draws are drawn differently (a pipeline that throws away the holes, no back faces
+    * culled), so draws of one mesh split by how they are drawn: plain draws first, then double-sided, cut-outs, and
+    * double-sided cut-outs, each by mesh, and each batch says how it is drawn.
+    */
+    void testDrawsAreBatchedByStyle() {
+        DrawItem leaf = drawOf(0);
+        leaf.material.alphaMode = AlphaMode::Mask;
+        leaf.material.doubleSided = true;
+        DrawItem sheet = drawOf(0);
+        sheet.material.doubleSided = true;
+        DrawItem grate = drawOf(1);
+        grate.material.alphaMode = AlphaMode::Mask;
+
+        const std::vector<DrawItem> draws{leaf, drawOf(1), grate, sheet, drawOf(0), leaf};
+        const BatchedDraws batched = batchByMesh(draws, {0, 1, 2, 3, 4, 5});
+
+        assert((batched.order == std::vector<std::size_t>{4, 1, 3, 2, 0, 5}));
+        assert(batched.batches.size() == 5);
+        assert(sameBatch(batched.batches[0], 0, 0, 1) && !batched.batches[0].cutOut && !batched.batches[0].doubleSided);
+        assert(sameBatch(batched.batches[1], 1, 1, 1) && !batched.batches[1].cutOut);
+        assert(sameBatch(batched.batches[2], 0, 2, 1) && !batched.batches[2].cutOut && batched.batches[2].doubleSided);
+        assert(sameBatch(batched.batches[3], 1, 3, 1) && batched.batches[3].cutOut && !batched.batches[3].doubleSided);
+        assert(sameBatch(batched.batches[4], 0, 4, 2) && batched.batches[4].cutOut && batched.batches[4].doubleSided);
+    }
+
     void testNothingChosenGivesNoBatches() {
         const BatchedDraws batched = batchByMesh({drawOf(0)}, {});
 
@@ -260,6 +286,7 @@ void testGpuScene() {
     testOnlyChosenDrawsAreBatchedInTheirOrder();
     testBatchesStartAtTheFirstInstance();
     testNothingChosenGivesNoBatches();
+    testDrawsAreBatchedByStyle();
     testInstanceHoldsTheWorldMatrices();
     testMirroredInstanceIsLeftHanded();
     testShaderSubtractionMatchesRelativeTo();

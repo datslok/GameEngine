@@ -1,4 +1,5 @@
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/material_shared.h"
 #include "scene/material.h"
 
 #include <cassert>
@@ -127,7 +128,7 @@ namespace {
 
         const GpuMaterial plain = packMaterial(Material{});
         assert(plain.textures[0] == whiteTextureSlot && plain.textures[1] == whiteTextureSlot && plain.textures[2] == whiteTextureSlot);
-        assert(plain.textures[3] == whiteTextureSlot && plain.moreTextures[0] == whiteTextureSlot);
+        assert(plain.textures[3] == whiteTextureSlot && plain.extra[0] == whiteTextureSlot);
 
         Material textured;
         textured.texture = TextureHandle{2};
@@ -137,10 +138,42 @@ namespace {
         textured.occlusionTexture = TextureHandle{7};
         const GpuMaterial packed = packMaterial(textured);
         assert(packed.textures[0] == 3 && packed.textures[1] == 8 && packed.textures[2] == 10);
-        assert(packed.textures[3] == 5 && packed.moreTextures[0] == 8);
+        assert(packed.textures[3] == 5 && packed.extra[0] == 8);
 
-        // The rest of the extra slots are kept for later textures and stay zero, so materials hash alike.
-        assert(packed.moreTextures[1] == 0 && packed.moreTextures[2] == 0 && packed.moreTextures[3] == 0);
+        // The rest of extra is kept for later and stays zero, so materials hash alike.
+        assert(packed.extra[1] == 0 && packed.extra[2] == 0 && packed.extra[3] == 0);
+    }
+}
+
+namespace {
+    /*
+    * A cut-out's alpha is its texture's times its opacity (glTF's base colour factor alpha), in baseColour.a; its
+    * cutoff goes in emissive.w and its flags in extra.y. An opaque material packs a cutoff of 0, which keeps every texel,
+    * and its opacity as 1 whatever the number says, since nothing reads it.
+    */
+    void testCutOutsArePacked() {
+        Material leaf;
+        leaf.alphaMode = AlphaMode::Mask;
+        leaf.alphaCutoff = 0.3f;
+        leaf.opacity = 0.8f;
+        leaf.doubleSided = true;
+
+        const GpuMaterial packed = packMaterial(leaf);
+        assert(nearlyEqual(packed.baseColour[3], 0.8f));
+        assert(nearlyEqual(packed.emissive[3], 0.3f));
+        assert(packed.extra[1] == (MATERIAL_DOUBLE_SIDED | MATERIAL_CUT_OUT));
+        assert(isCutOut(leaf) && leaf.doubleSided);
+
+        Material opaque = leaf;
+        opaque.alphaMode = AlphaMode::Opaque;
+        const GpuMaterial solid = packMaterial(opaque);
+        assert(solid.baseColour[3] == 1.0f && solid.emissive[3] == 0.0f);
+        assert(solid.extra[1] == MATERIAL_DOUBLE_SIDED);
+        assert(!isCutOut(opaque));
+
+        const Material defaults;
+        assert(defaults.alphaMode == AlphaMode::Opaque && defaults.alphaCutoff == 0.5f && defaults.opacity == 1.0f && !defaults.doubleSided);
+        assert(packMaterial(defaults).extra[1] == 0);
     }
 }
 
@@ -155,4 +188,5 @@ void testMaterialUniforms() {
     testSurfaceIsClamped();
     testNormalScaleNeedsATexture();
     testOcclusionStrengthIsPacked();
+    testCutOutsArePacked();
 }

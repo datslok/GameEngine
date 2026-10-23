@@ -4,7 +4,10 @@
 #include "math/angles.h"
 #include "physics/overlap.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 
@@ -263,4 +266,70 @@ LightLabLayout buildLightLabLayout() {
     layout.reflectors.push_back(spanning(labMirror.minimum, labMirror.maximum, LabSurface::Mirror));
     layout.reflectors.push_back(spanning(labSteelPanel.minimum, labSteelPanel.maximum, LabSurface::BrushedSteel));
     return layout;
+}
+
+/*
+* Each wire family is the lines u + v = k / n (and u - v = k / n) for whole k, n diamonds a tile; a point's distance from
+* the nearest is |n (u + v) - k| / (n sqrt 2). Whole tiles move n (u + v) by whole numbers, so the pattern repeats.
+*/
+float chainLinkAlpha(float u, float v) {
+    const float diamonds = static_cast<float>(labChainLinkDiamonds);
+    const auto distance = [diamonds](float across) {
+        const float lines = across * diamonds;
+        return std::abs(lines - std::round(lines)) / (diamonds * std::sqrt(2.0f));
+    };
+
+    const float nearest = std::min(distance(u + v), distance(u - v));
+    const float texel = 1.0f / static_cast<float>(labChainLinkTexels);
+    return std::clamp((labChainLinkWireHalfWidth - nearest) / texel + 0.5f, 0.0f, 1.0f);
+}
+
+ImageLevel chainLinkImage() {
+    ImageLevel image{labChainLinkTexels, labChainLinkTexels, {}};
+    image.pixels.reserve(std::size_t{labChainLinkTexels} * labChainLinkTexels * 4);
+
+    for (std::uint32_t y = 0; y < labChainLinkTexels; ++y) {
+        for (std::uint32_t x = 0; x < labChainLinkTexels; ++x) {
+            const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(labChainLinkTexels);
+            const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(labChainLinkTexels);
+            const auto alpha = static_cast<std::uint8_t>(std::lround(chainLinkAlpha(u, v) * 255.0f));
+            image.pixels.insert(image.pixels.end(), {180, 182, 185, alpha});
+        }
+    }
+
+    return image;
+}
+
+/*
+* Seen from the east (looking west, up is +y), north (-z) is to the right, so the corners run anticlockwise from the
+* bottom south corner: the front faces east. It is double-sided, so the west sees it too.
+*/
+Mesh chainLinkPanel() {
+    Mesh panel;
+    panel.vertices = {
+        Vec4{labFenceX, 0.0f, labFirstPostZ, 1.0f},
+        Vec4{labFenceX, 0.0f, labLastPostZ, 1.0f},
+        Vec4{labFenceX, labPostHeight, labLastPostZ, 1.0f},
+        Vec4{labFenceX, labPostHeight, labFirstPostZ, 1.0f}
+    };
+
+    const auto uvOf = [](const Vec4& corner) {
+        return Vec2{(labFirstPostZ - corner.z) / labChainLinkTileMetres, corner.y / labChainLinkTileMetres};
+    };
+
+    for (const std::array<std::size_t, 3>& corners : {std::array<std::size_t, 3>{0, 1, 2}, std::array<std::size_t, 3>{0, 2, 3}}) {
+        Triangle triangle{};
+        triangle.first = corners[0];
+        triangle.second = corners[1];
+        triangle.third = corners[2];
+
+        for (std::size_t corner = 0; corner < 3; ++corner) {
+            triangle.normals[corner] = Vec3{1.0f, 0.0f, 0.0f};
+            triangle.uvs[corner] = uvOf(panel.vertices[corners[corner]]);
+        }
+
+        panel.triangles.push_back(triangle);
+    }
+
+    return panel;
 }
