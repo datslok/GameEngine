@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace {
     // The render size: the output's times the scale, rounded, never below one pixel nor above the output.
@@ -26,13 +27,38 @@ namespace {
         assert(tiny.width == 1 && tiny.height == 1);
     }
 
-    // The scale only applies while temporal anti-aliasing upscales; without it the frame is drawn at the output's size.
+    // The scale applies with any of TAA, FSR or DLSS, which all upscale; with anti-aliasing off the frame is drawn at the
+    // output's size.
     void testAppliedScale() {
         UpscalingSettings settings;
         settings.renderScale = 0.5f;
-        assert(appliedRenderScale(settings, true) == 0.5f);
-        assert(appliedRenderScale(settings, false) == 1.0f);
-        assert(appliedRenderScale(UpscalingSettings{}, true) == 1.0f);
+
+        for (Upscaler upscaler : {Upscaler::Taa, Upscaler::Fsr, Upscaler::Dlss}) {
+            settings.upscaler = upscaler;
+            assert(appliedRenderScale(settings) == 0.5f);
+        }
+
+        settings.upscaler = Upscaler::Off;
+        assert(appliedRenderScale(settings) == 1.0f);
+        assert(appliedRenderScale(UpscalingSettings{}) == 1.0f);
+    }
+
+    /*
+    * One choice says what smooths the picture over frames: off, the engine's own TAA, FSR or DLSS. Each of the last
+    * three needs the jittered frames and motion vectors, so all of them are temporal; FSR and DLSS replace TAA's resolve.
+    */
+    void testOneAntiAliasingChoice() {
+        UpscalingSettings settings;
+        assert(temporalAntiAliasing(settings));
+
+        for (Upscaler upscaler : {Upscaler::Taa, Upscaler::Fsr, Upscaler::Dlss}) {
+            settings.upscaler = upscaler;
+            assert(temporalAntiAliasing(settings));
+        }
+
+        settings.upscaler = Upscaler::Off;
+        assert(!temporalAntiAliasing(settings));
+        assert(upscalerNames.size() == 4 && std::string(upscalerNames[static_cast<std::size_t>(Upscaler::Off)]) == "Off");
     }
 
     /*
@@ -51,6 +77,7 @@ namespace {
         assert(textureLodBias(RenderSize{2560, 1440}, 2560, Upscaler::Fsr) == -1.0f);
         assert(near(textureLodBias(RenderSize{1280, 720}, 2560, Upscaler::Fsr), -2.0f, 1e-6f));
         assert(textureLodBias(RenderSize{2560, 1440}, 2560, Upscaler::Taa) == 0.0f);
+        assert(textureLodBias(RenderSize{2560, 1440}, 2560, Upscaler::Off) == 0.0f);
     }
 
     /*
@@ -67,9 +94,13 @@ namespace {
     }
 
     // FSR and DLSS are used only where they are available; asked for elsewhere, temporal anti-aliasing upscales instead.
+    // Off stays off.
     void testActiveUpscaler() {
         const UpscalerSupport both{.fsr = true, .dlss = true};
         UpscalingSettings settings;
+        settings.upscaler = Upscaler::Off;
+        assert(activeUpscaler(settings, both) == Upscaler::Off);
+        assert(activeUpscaler(settings, UpscalerSupport{}) == Upscaler::Off);
         settings.upscaler = Upscaler::Taa;
         assert(activeUpscaler(settings, both) == Upscaler::Taa);
         settings.upscaler = Upscaler::Fsr;
@@ -259,6 +290,7 @@ namespace {
         assert(upscalerText(Upscaler::Fsr, 0.67f) == "FSR 3.1 AT 0.67");
         assert(upscalerText(Upscaler::Taa, 1.0f) == "TAA AT 1.00");
         assert(upscalerText(Upscaler::Dlss, 0.5f) == "DLSS AT 0.50");
+        assert(upscalerText(Upscaler::Off, 1.0f) == "NO ANTI-ALIASING");
     }
 }
 
@@ -267,6 +299,7 @@ void testUpscaling() {
     testReadout();
     testRenderSize();
     testAppliedScale();
+    testOneAntiAliasingChoice();
     testTextureLodBias();
     testFsrLodBias();
     testJitterPhases();

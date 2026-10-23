@@ -30,7 +30,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Temporal anti-aliasing (TAA):** each frame the picture moves by a different fraction of a pixel, and each pixel averages about the last ten frames, so edges are smooth and thin things stop shimmering.
   - Each pixel finds where its surface was last frame: from its depth and the two cameras, or from a motion vector a small pass draws for anything that moved.
   - History that no longer fits is clipped into the range of colours its neighbours show now, so moving things leave little ghosting.
-  - Switchable, with a motion debug view, in the settings (Anti-aliasing).
+  - One anti-aliasing choice in the settings (Upscaling): Off, TAA, FSR 3.1 or DLSS (the default); FSR and DLSS replace TAA rather than running with it. TAA has its own tuning and a motion debug view (TAA).
   - It also upscales: a render scale (Upscaling, 1 by default, down to 0.33, or an upscaling mode at the top of the settings: Native, Quality, Balanced, Performance, Ultra performance) draws the scene smaller, and TAA builds the full-size picture from the jittered frames, for speed on weaker GPUs.
   - Or AMD's **FSR 3.1** upscales instead (Upscaling, Upscaler), on any GPU, with its sharpening. It ships as AMD's signed DLL beside the game; without it, TAA upscales.
   - Or NVIDIA's **DLSS** (DLAA at Native), on RTX GPUs, through NVIDIA Streamline. Its DLLs are not in the repository (NVIDIA's licence): `python tools/fetch_streamline.py` downloads them. Without them, TAA upscales.

@@ -1987,7 +1987,7 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 
 `UpscalingSettings` (`render/gpu/upscaling`, `RenderSettings::upscaling`, the Upscaling group; tested in `upscaling_test`):
 
-- `renderScale` (1 by default, `minRenderScale` 0.33 to 1): the render size's share of the output's, each way. It applies only while TAA is on (`appliedRenderScale`), since the resolve is what upscales; with TAA off the frame is drawn at the output's size.
+- `renderScale` (1 by default, `minRenderScale` 0.33 to 1): the render size's share of the output's, each way. It applies while anti-aliasing is on (`appliedRenderScale`: TAA, FSR or DLSS), since they are what upscale; with it off the frame is drawn at the output's size.
 - **Modes** (`UpscalingMode`, `upscalingModeNames`): Native, Quality, Balanced, Performance and Ultra performance, FSR's and DLSS's names for render scales 1, 1/1.5, 1/1.7, 1/2 and 1/3 (`upscalingModeScale`). Not stored: the debug UI's combo sets the scale, and `matchingUpscalingMode` reads a scale back as its mode within 0.005 (half a slider step), else Custom. The quality presets leave the scale alone.
 - `renderSize(width, height, scale)`: each side rounded, at least one pixel and at most the output's. `ensureFrameTextures(width, height, settings)` keeps the scene image, its depth, the velocity image and the clusters' lists at it (`sceneSize`) and remakes them when it changes, like a resize.
 - At the render size: the depth prepass, main pass, sky, stars, probe balls, ray debug view, velocity pass, clusters and the depth measurement. At the output's: the histories, eye adaptation, bloom, tone mapping, the debug lines and UI. The shadow atlas, the probes and the sky's tables do not depend on the screen.
@@ -1996,7 +1996,7 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 
 ### FSR
 
-`UpscalingSettings::upscaler` (`Upscaler::Dlss` by default (TAA where DLSS is missing), or `Taa`, `Fsr`, "FSR 3.1" in the settings file) and `sharpness` (0.8, its RCAS sharpening after it upscales; 0 turns it off). FSR runs only while TAA is on (it uses the same jitter and velocity pass) and only where `VulkanFsr::isAvailable()`: `activeUpscaler` falls back to TAA otherwise, and the F4 readout's exposure line ends with the upscaler in use and the render scale (`upscalerText`, e.g. `FSR 3.1 AT 0.67`).
+`UpscalingSettings::upscaler`, the one anti-aliasing choice ("Anti-aliasing" in the Upscaling group: `Upscaler::Dlss` by default (TAA where DLSS is missing), or `Off`, `Taa`, `Fsr`, "FSR 3.1" in the settings file; `temporalAntiAliasing` is any but Off, which draws with no jitter, motion or history; it replaced `TaaSettings::enabled` in `taa-choice`) and `sharpness` (0.8, its RCAS sharpening after it upscales; 0 turns it off). FSR and DLSS replace the resolve but use its jitter and velocity pass; FSR runs only where `VulkanFsr::isAvailable()`: `activeUpscaler` falls back to TAA otherwise, and the F4 readout's exposure line ends with the upscaler in use and the render scale (`upscalerText`, e.g. `FSR 3.1 AT 0.67`).
 
 **The DLL** (`render/vulkan/vulkan_fsr`, `VulkanFsr`): `SDL_LoadObject("amd_fidelityfx_vk.dll")` and the FidelityFX API's C functions by name (`ffxCreateContext`, `ffxDestroyContext`, `ffxDispatch`). A C interface is what lets MSVC's DLL be called from GCC. The makefile copies the DLL beside each build's exe (`$(FSR_DLL)`), and `tools/package_demo.py` packages it. It imports Microsoft's C++ runtime (`MSVCP140`, `VCRUNTIME140`): without it, or without the device features, FSR is unavailable and the game carries on. SDK v1.1.4 is the last line with a Vulkan backend (2.x, with FSR 4, is DirectX 12 only).
 
@@ -2036,22 +2036,21 @@ The textures' mip bias with FSR (and DLSS) is `log2(scale) - 1` (`textureLodBias
 
 ### Settings
 
-`TaaSettings` (`RenderSettings::taa`, the Anti-aliasing group):
+`TaaSettings` (`RenderSettings::taa`, the TAA group; whether anything temporal runs is `upscaling.upscaler`):
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `enabled` | on | the jitter, the velocity pass and the resolve |
 | `currentWeight` | 0.1 | each new frame's share of the average (about ten frames) |
 | `clipSigma` | 1 | the clip box's half-width in the neighbours' standard deviations |
 | `jitter` | on | off holds the projection still |
 | `showMotion` | off | the motion debug view |
 | `upscaling.renderScale` | 1 | the render size's share of the output's (Upscaling) |
-| `upscaling.upscaler` | DLSS | TAA, FSR 3.1 (FSR) or DLSS (DLSS) |
+| `upscaling.upscaler` | DLSS | the anti-aliasing choice: Off, TAA, FSR 3.1 (FSR) or DLSS (DLSS) |
 | `upscaling.sharpness` | 0.8 | FSR's RCAS sharpening, 0 off (FSR) |
 
 ### Golden images
 
-A capture draws `taaSettleFrames` (32, two jitter cycles) before it when TAA is on, more if probes or the cascades' depth fit need more, starting the history and the jitter afresh, so captures repeat exactly. With TAA off nothing is jittered or resolved and the picture is as before.
+A capture draws `taaSettleFrames` (32, two jitter cycles) before it when anti-aliasing is on, more if probes or the cascades' depth fit need more, starting the history and the jitter afresh, so captures repeat exactly. With anti-aliasing off nothing is jittered or resolved and the picture is as before.
 
 ## Depth and camera-relative rendering
 

@@ -19,11 +19,11 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Global illumination", [&] {
         visit(settings.globalIllumination, visitor);
     });
-    visitor.group("Anti-aliasing", [&] {
-        visit(settings.taa, visitor);
-    });
     visitor.group("Upscaling", [&] {
         visit(settings.upscaling, visitor);
+    });
+    visitor.group("TAA", [&] {
+        visit(settings.taa, visitor);
     });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);

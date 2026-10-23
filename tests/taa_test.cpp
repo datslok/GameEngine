@@ -265,10 +265,11 @@ namespace {
         assert(near(middle.x, middle.w, 1e-6f) && near(middle.y, middle.z, 1e-6f) && middle.x < 0.0f);
     }
 
-    // The settings: on by default, each default within its limits; weights outside 0..1 or a negative clip refused.
+    // The settings: jittered by default, each default within its limits; weights outside 0..1 or a negative clip refused.
+    // Whether TAA runs at all is the anti-aliasing choice (upscaling_test).
     void testSettings() {
         const TaaSettings defaults;
-        assert(defaults.enabled && defaults.jitter && !defaults.showMotion);
+        assert(defaults.jitter && !defaults.showMotion);
         assert(defaults.currentWeight > 0.0f && defaults.currentWeight < 1.0f && defaults.clipSigma > 0.0f);
         validateTaa(defaults);
 

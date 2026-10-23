@@ -61,6 +61,10 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
 
 // Hundredths of the scale: the slider's own steps.
 std::string upscalerText(Upscaler upscaler, float renderScale) {
+    if (upscaler == Upscaler::Off) {
+        return "NO ANTI-ALIASING";
+    }
+
     char text[48];
     std::snprintf(text, sizeof(text), "%s AT %.2f", upscalerNames[static_cast<std::size_t>(upscaler)], renderScale);
     return text;

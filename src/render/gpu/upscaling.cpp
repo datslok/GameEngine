@@ -20,7 +20,7 @@ namespace {
 }
 
 void visit(UpscalingSettings& settings, SettingsVisitor& visitor) {
-    visitor.choice("Upscaler", settings.upscaler, upscalerNames);
+    visitor.choice("Anti-aliasing", settings.upscaler, upscalerNames);
     visitor.field("Render scale", settings.renderScale, {.min = minRenderScale, .max = 1.0f});
     visitor.field("FSR sharpness", settings.sharpness, {.min = 0.0f, .max = 1.0f});
 }
@@ -47,8 +47,12 @@ RenderSize renderSize(std::uint32_t outputWidth, std::uint32_t outputHeight, flo
     return RenderSize{scaledSide(outputWidth, scale), scaledSide(outputHeight, scale)};
 }
 
-float appliedRenderScale(const UpscalingSettings& settings, bool temporalAntiAliasing) {
-    return temporalAntiAliasing ? settings.renderScale : 1.0f;
+bool temporalAntiAliasing(const UpscalingSettings& settings) {
+    return settings.upscaler != Upscaler::Off;
+}
+
+float appliedRenderScale(const UpscalingSettings& settings) {
+    return temporalAntiAliasing(settings) ? settings.renderScale : 1.0f;
 }
 
 float upscalingModeScale(UpscalingMode mode) {
@@ -83,6 +87,10 @@ UpscalingMode nearestUpscalingMode(float renderScale) {
 }
 
 Upscaler activeUpscaler(const UpscalingSettings& settings, UpscalerSupport support) {
+    if (settings.upscaler == Upscaler::Off) {
+        return Upscaler::Off;
+    }
+
     if (settings.upscaler == Upscaler::Fsr && support.fsr) {
         return Upscaler::Fsr;
     }
@@ -101,7 +109,7 @@ RenderSize clampRenderSize(RenderSize size, RenderSize smallest, RenderSize larg
 
 // From the sizes as rounded, so the bias matches the pixels actually drawn.
 float textureLodBias(RenderSize render, std::uint32_t outputWidth, Upscaler upscaler) {
-    const float extra = upscaler == Upscaler::Taa ? 0.0f : vendorExtraLodBias;
+    const float extra = upscaler == Upscaler::Fsr || upscaler == Upscaler::Dlss ? vendorExtraLodBias : 0.0f;
 
     if (render.width == outputWidth || outputWidth == 0) {
         return extra;

@@ -28,8 +28,8 @@ const char* gpuPassName(GpuPass pass) {
         return "MOTION";
     case GpuPass::DepthRange:
         return "DEPTHS";
-    case GpuPass::Taa:
-        return "TAA";
+    case GpuPass::AntiAliasing:
+        return "AA";
     case GpuPass::EyeAdaptation:
         return "EYE";
     case GpuPass::Bloom:

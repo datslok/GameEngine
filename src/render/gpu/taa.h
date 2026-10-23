@@ -34,9 +34,8 @@ inline constexpr std::uint64_t taaJitterFrames = TAA_JITTER_FRAMES;
 // A capture draws this many frames first (two jitter cycles), so a still view's history has settled.
 inline constexpr int taaSettleFrames = 2 * TAA_JITTER_FRAMES;
 
+// The engine's own resolve's tuning; whether it runs is the anti-aliasing choice (render/gpu/upscaling.h, Upscaler).
 struct TaaSettings {
-    bool enabled = true;
-
     // The share of each new frame in the running average: 0.1 averages about the last ten frames. More follows changes
     // faster but smooths less.
     float currentWeight = 0.1f;

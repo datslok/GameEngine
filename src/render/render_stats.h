@@ -52,7 +52,8 @@ struct RenderStats {
     // adapts (render/gpu/eye_adaptation.h).
     std::optional<GpuEyeAdaptation> eyeAdaptation;
 
-    // The upscaler that drew the frame (TAA when FSR was asked for but is unavailable) and the render scale it drew at.
-    Upscaler upscaler = Upscaler::Taa;
+    // The upscaler that drew the frame (TAA when FSR was asked for but is unavailable, Off for none) and the render
+    // scale it drew at.
+    Upscaler upscaler = Upscaler::Off;
     float renderScale = 1.0f;
 };
