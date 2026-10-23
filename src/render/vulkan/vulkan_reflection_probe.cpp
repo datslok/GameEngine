@@ -227,3 +227,8 @@ VkImageView VulkanReflectionProbe::readableDistances(VkCommandBuffer commands) {
     distances.transition(commands, ImageState::ComputeRead, captured ? ImageContents::Keep : ImageContents::Discard);
     return distances.getView();
 }
+
+SampledImage VulkanReflectionProbe::fragmentReadableLight(VkCommandBuffer commands) {
+    light.transition(commands, ImageState::SurfaceRead, captured ? ImageContents::Keep : ImageContents::Discard);
+    return SampledImage{light.getView(), trilinear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+}

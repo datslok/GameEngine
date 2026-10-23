@@ -2,6 +2,7 @@
 #include "render/frames_in_flight.h"
 #include "render/gpu/compute_dispatch.h"
 #include "render/vulkan/buffer_barrier.h"
+#include "render/vulkan/descriptor_helpers.h"
 #include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
 
@@ -51,44 +52,6 @@ namespace {
         }
 
         return true;
-    }
-
-    OwnedHandle<VkPipelineLayout> createPipelineLayout(VkDevice device, std::span<const VkDescriptorSetLayout> sets, VkShaderStageFlags pushStages,
-                                                       const char* failure, std::uint32_t pushBytes = sizeof(GpuProbeVolume)) {
-        const VkPushConstantRange push{pushStages, 0, pushBytes};
-
-        VkPipelineLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layoutInfo.setLayoutCount = static_cast<std::uint32_t>(sets.size());
-        layoutInfo.pSetLayouts = sets.data();
-        layoutInfo.pushConstantRangeCount = 1;
-        layoutInfo.pPushConstantRanges = &push;
-
-        VkPipelineLayout created = VK_NULL_HANDLE;
-        vulkanCheck(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &created), failure);
-        return OwnedHandle<VkPipelineLayout>{device, created, vkDestroyPipelineLayout};
-    }
-
-    // A set of count bindings (0..count - 1) all of one type.
-    OwnedHandle<VkDescriptorSetLayout> createUniformLayout(VkDevice device, VkDescriptorType type, std::uint32_t count, VkShaderStageFlags stages,
-                                                           const char* failure) {
-        std::vector<VkDescriptorSetLayoutBinding> bindings(count);
-
-        for (std::uint32_t index = 0; index < count; ++index) {
-            bindings[index].binding = index;
-            bindings[index].descriptorType = type;
-            bindings[index].descriptorCount = 1;
-            bindings[index].stageFlags = stages;
-        }
-
-        VkDescriptorSetLayoutCreateInfo info{};
-        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        info.bindingCount = count;
-        info.pBindings = bindings.data();
-
-        VkDescriptorSetLayout created = VK_NULL_HANDLE;
-        vulkanCheck(vkCreateDescriptorSetLayout(device, &info, nullptr, &created), failure);
-        return OwnedHandle<VkDescriptorSetLayout>{device, created, vkDestroyDescriptorSetLayout};
     }
 
     // A write of whole buffers into bindings first.. of a set, one each.
@@ -193,7 +156,7 @@ void VulkanDdgi::createTracePipeline(VkDescriptorSetLayout texturesLayout, VkDes
                                      "Probe ray set layout creation failed");
 
     const std::array<VkDescriptorSetLayout, 4> sets{texturesLayout, frameLayout, rayLayout, raysLayout.get()};
-    traceLayout = createPipelineLayout(device.getDevice(), sets, VK_SHADER_STAGE_COMPUTE_BIT, "Probe trace layout creation failed");
+    traceLayout = createPipelineLayout(device.getDevice(), sets, VK_SHADER_STAGE_COMPUTE_BIT, "Probe trace layout creation failed", sizeof(GpuProbeVolume));
 
     ComputePipelineDescription trace;
     trace.shader = "assets/shaders/ddgi_trace.comp.spv";
@@ -215,7 +178,7 @@ void VulkanDdgi::createSeedPipeline(VkDescriptorSetLayout texturesLayout, VkDesc
                                         "Probe seed set layout creation failed");
 
     const std::array<VkDescriptorSetLayout, 4> sets{texturesLayout, frameLayout, rayLayout, seedSetLayout.get()};
-    seedLayout = createPipelineLayout(device.getDevice(), sets, VK_SHADER_STAGE_COMPUTE_BIT, "Probe seed layout creation failed");
+    seedLayout = createPipelineLayout(device.getDevice(), sets, VK_SHADER_STAGE_COMPUTE_BIT, "Probe seed layout creation failed", sizeof(GpuProbeVolume));
 
     ComputePipelineDescription seed;
     seed.shader = "assets/shaders/ddgi_seed.comp.spv";
@@ -254,7 +217,7 @@ void VulkanDdgi::createBallsPipeline(DescriptorLayouts& layouts, VkDescriptorSet
 
     const std::array<VkDescriptorSetLayout, 3> sets{texturesLayout, frameLayout, ballsSetLayout.get()};
     ballsLayout = createPipelineLayout(device.getDevice(), sets, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                                       "Probe ball layout creation failed");
+                                       "Probe ball layout creation failed", sizeof(GpuProbeVolume));
 
     PipelineDescription description;
     description.vertexShader = "assets/shaders/ddgi_probes.vert.spv";
@@ -735,22 +698,8 @@ void VulkanDdgi::drawProbes(VkCommandBuffer commands, FrameDescriptors& descript
     }
 
     const VkDescriptorSet atlasSet = descriptors.allocate(ballsSetLayout.get());
-    const SampledImage still = sampledIrradiance();
-    const SampledImage fast = sampledFastIrradiance();
-    const std::array<VkDescriptorImageInfo, 2> imageInfos{VkDescriptorImageInfo{still.sampler, still.view, still.layout},
-                                                          VkDescriptorImageInfo{fast.sampler, fast.view, fast.layout}};
-    std::array<VkWriteDescriptorSet, 2> writes{};
-
-    for (std::size_t index = 0; index < writes.size(); ++index) {
-        writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[index].dstSet = atlasSet;
-        writes[index].dstBinding = static_cast<std::uint32_t>(index);
-        writes[index].descriptorCount = 1;
-        writes[index].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[index].pImageInfo = &imageInfos[index];
-    }
-
-    vkUpdateDescriptorSets(device.getDevice(), static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    const std::array<SampledImage, 2> atlases{sampledIrradiance(), sampledFastIrradiance()};
+    writeSampledImages(device.getDevice(), atlasSet, 0, atlases);
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, ballsPipeline->get());
     const std::array<VkDescriptorSet, 3> sets{textures, frame, atlasSet};

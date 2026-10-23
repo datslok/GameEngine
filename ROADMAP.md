@@ -262,7 +262,8 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Ambient occlusion (GTAO) from the prepass's depth, for the small creases DDGI's coarse grid cannot resolve (`gtao`)
 - [x] glTF occlusion and emissive textures (`gltf-occlusion-emissive`)
 - [x] Cut-outs (glTF's alpha mask, with coverage-preserving mips) and double-sided materials, the light lab's chain-link fence (`alpha-mask`)
-- [ ] Transparency: glTF's alpha blend (glass), a transparent pass after the opaque scene sorted per object, back faces before front
+- [x] Glass and blended surfaces: glTF's alpha blend and thin glass (KHR_materials_transmission) by dual-source blending, sorted per object, the light lab's window pane (`glass`)
+- [ ] Transparency, the rest: FSR's reactive mask and DLSS's hint for moving glass, tinted shadows through glass, refraction
 - [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
 
 **Milestone** (in the light lab's building)**:**

@@ -56,12 +56,16 @@ struct MaterialSource {
     float opacity = Material{}.opacity;
     bool doubleSided = Material{}.doubleSided;
 
+    // Thin glass: how much light passes through, and its texture (linear, red channel).
+    float transmission = Material{}.transmission;
+    TextureSource transmissionTexture;
+
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
         return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet() || occlusionTexture.isSet() ||
-               emissiveTexture.isSet();
+               emissiveTexture.isSet() || transmissionTexture.isSet();
     }
 };
 

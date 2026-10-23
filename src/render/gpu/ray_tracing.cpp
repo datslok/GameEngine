@@ -4,6 +4,10 @@
 #include <stdexcept>
 
 std::uint32_t rayMaskFor(const DrawItem& draw) {
+    if (isTransparent(draw.material)) {
+        return 0;
+    }
+
     if (!draw.castsShadows) {
         return visualOnlyRayMask;
     }

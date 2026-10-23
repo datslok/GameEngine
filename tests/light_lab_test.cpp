@@ -57,10 +57,10 @@ namespace {
 
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
 
-        // The ground, the towers, fence, its chain-link, trees, building, the street, its windows and its bulbs' glow (static, and
+        // The ground, the towers, fence, its chain-link, the window's glass, trees, building, the street, its windows and its bulbs' glow (static, and
         // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror) and the
         // mirror ball.
-        assert(staticModels == 11);
+        assert(staticModels == 12);
         assert(others > 0);
     }
 
@@ -345,6 +345,32 @@ namespace {
         });
 
         assert(cutOuts == 1);
+    }
+
+    /*
+    * The window has a pane of clear glass in the middle of the wall's thickness (thin glass, KHR_materials_transmission
+    * in the engine's terms): drawn after the opaque scene, casting no shadow and not in the level's collision, so the
+    * sun still comes through.
+    */
+    void testTheWindowGlass() {
+        assert(labWindowPane.minimum.x > labWindow.minimum.x && labWindowPane.maximum.x < labWindow.maximum.x);
+        assert(labWindowPane.maximum.x - labWindowPane.minimum.x < 0.02f);
+        assert(labWindowPane.minimum.z == labWindow.minimum.z && labWindowPane.maximum.y == labWindow.maximum.y);
+
+        Lab lab;
+        int panes = 0;
+
+        lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
+            for (const RenderPart& part : renderer.parts) {
+                if (isTransparent(part.material)) {
+                    ++panes;
+                    assert(part.material.transmission == 1.0f && part.material.roughness < 0.1f);
+                    assert(!renderer.castsShadows && renderer.isStatic);
+                }
+            }
+        });
+
+        assert(panes == 1);
     }
 
     // The forest is the same every time, all of it on the ground, outside the keep-clear areas.
@@ -1005,6 +1031,7 @@ void testLightLab() {
     testFence();
     testChainLinkPattern();
     testTheChainLinkFence();
+    testTheWindowGlass();
     testForest();
     testBuildingOpenings();
     testTheStreet();

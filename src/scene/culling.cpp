@@ -63,7 +63,8 @@ std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, cons
     for (std::size_t i = 0; i < draws.size(); ++i) {
         const DrawItem& draw = draws[i];
 
-        if (!draw.castsShadows) {
+        // Glass and blended surfaces cast no shadow yet (a tinted one would need coloured shadow maps).
+        if (!draw.castsShadows || isTransparent(draw.material)) {
             continue;
         }
 

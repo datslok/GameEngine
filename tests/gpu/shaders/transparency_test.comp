@@ -1,0 +1,21 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs transparency.glsl's functions on the cases transparency_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "transparency.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_TRANSPARENT_BLEND) {
+        // Inputs: (alpha, transmission, metallic), diffuse light, specular light, emissive, base colour, specular albedo.
+        vec4 shares = testInput(0);
+        TransparentLight light = transparentBlend(shares.x, shares.y, shares.z, testInput(1).rgb, testInput(2).rgb, testInput(3).rgb,
+                                                  testInput(4).rgb, testInput(5).rgb);
+        testOutput(0, vec4(light.added, 0.0));
+        testOutput(1, vec4(light.transmittance, 0.0));
+    }
+}

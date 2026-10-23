@@ -11,6 +11,7 @@
 #include "render/gpu/shadow_atlas.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/shadow_map.h"
+#include "render/gpu/transparency.h"
 #include "render/captured_frame.h"
 #include "render/gpu/render_settings.h"
 #include "render/frames_in_flight.h"
@@ -270,6 +271,13 @@ private:
     std::unique_ptr<VulkanTaa> taa;
     std::unique_ptr<VulkanPipeline> motionPipeline;
     std::unique_ptr<VulkanPipeline> motionCutOutPipeline;
+
+    // Glass and blended surfaces (render/gpu/transparency.h): drawn after the opaque scene and its reflections, before
+    // anti-aliasing, without and with the light probes. Their layout keeps the scene's sets and adds the reflection
+    // probe's light as set 2; their shader tints per channel by dual-source blending where the GPU has it.
+    OwnedHandle<VkDescriptorSetLayout> transparentSetLayout;
+    OwnedHandle<VkPipelineLayout> transparentLayout;
+    std::array<std::unique_ptr<VulkanPipeline>, 2> transparentPipelines;
     std::uint64_t taaFrame = 0;
     Mat4 motionViewProjection = Mat4::identity();
 
@@ -389,7 +397,8 @@ private:
     // blurred image when occlusionBlurred.
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
-                               std::span<const BatchedDraws> captureDraws, const RenderSettings& settings, std::span<const ProbeCascade> probes,
+                               std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
+                               std::span<const ProbeCascade> probes,
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred);
 
     // Whether this frame traces (and samples) light probes: ray tracing, global illumination on, and ProbeCascades.
@@ -411,6 +420,9 @@ private:
     void drawProbeBalls(FrameContext& frame, VkDescriptorSet sceneSet, int cascade);
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     void drawMotion(FrameContext& frame, const BatchedDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
+    // The transparent draws, far to near, blended over the scene image (its depth tested, not written), sampling the
+    // light probes or not, reading the reflection probe when this frame captured it.
+    void drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes, bool readsProbe);
 
     // The reflection probe's six faces from the camera, each with its draws, then its sky (none: the background alone)
     // over them, and the probe's distances and prefiltered light made from them.

@@ -27,7 +27,7 @@ inline constexpr std::uint32_t maxRayInstances = 1u << 24;
 
 // Which rays see a drawn object: shadow casters are solid (they block light, so light-gathering rays see them); the
 // rest only rays that want everything drawn (reflections, the debug view). Static shadow casters carry the static bit
-// as well, for light probe relocation.
+// as well, for light probe relocation. Transparent ones (glass) are in no ray's world for now: every ray passes through.
 std::uint32_t rayMaskFor(const DrawItem& draw);
 
 /*

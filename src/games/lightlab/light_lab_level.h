@@ -33,7 +33,8 @@ enum class LabSurface {
     Chrome,   // the mirror ball
     Mirror,   // the sunlit room's mirror: silvered glass
     BrushedSteel, // the panel beside it: a rough mirror
-    ChainLink // the fence's wire mesh: galvanised steel
+    ChainLink, // the fence's wire mesh: galvanised steel
+    WindowGlass // the sunlit room's window pane: clear glass
 };
 
 struct LabBlock {
@@ -123,6 +124,10 @@ inline constexpr float labRedPanelThickness = 0.05f;
 inline const Aabb labSunlitRoom{Vec3{-22.7f, labFloorTop, 10.15f}, Vec3{-17.3f - labRedPanelThickness, labRoomHeight, 14.7f}};
 inline const Aabb labBackRoom{Vec3{-22.7f, labFloorTop, 5.3f}, Vec3{-17.3f, labRoomHeight, 9.85f}};
 inline const Aabb labWindow{Vec3{-23.0f, 1.0f, 11.75f}, Vec3{-22.7f, 2.2f, 13.25f}};
+// A pane of clear glass across the window, 1 cm thick, in the middle of the wall's thickness.
+inline constexpr float labPaneHalfThickness = 0.005f;
+inline const Aabb labWindowPane{Vec3{(labWindow.minimum.x + labWindow.maximum.x) * 0.5f - labPaneHalfThickness, labWindow.minimum.y, labWindow.minimum.z},
+                                Vec3{(labWindow.minimum.x + labWindow.maximum.x) * 0.5f + labPaneHalfThickness, labWindow.maximum.y, labWindow.maximum.z}};
 inline const Aabb labInnerDoorway{Vec3{-20.5f, labFloorTop, 9.85f}, Vec3{-19.5f, 2.1f, 10.15f}};
 inline const Aabb labFrontDoor{Vec3{-17.3f, labFloorTop, 7.0f}, Vec3{-17.0f, 2.1f, 8.2f}};
 

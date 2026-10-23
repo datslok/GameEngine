@@ -63,6 +63,14 @@ namespace {
         fence.material.alphaMode = AlphaMode::Mask;
         assert(packRayInstance(fence, 3, 1, 0x2).recordAndFlags == ((0x2u | rayInstanceNotOpaque) << 24));
         assert(packRayInstance(drawAt(model), 3, 1).recordAndFlags == 0);
+
+        // Glass and blended surfaces are not in any ray's world for now: probe rays, shadow rays and reflections pass
+        // through them.
+        DrawItem window = drawAt(model);
+        window.material.transmission = 1.0f;
+        window.isStatic = true;
+        assert(rayMaskFor(window) == 0);
+        assert((packRayInstance(window, 3, 1).indexAndMask >> 24) == 0);
     }
 
     /*

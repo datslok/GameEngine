@@ -806,7 +806,7 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 
 - `GpuInstance` (160 bytes: world model matrix, normal matrix, handedness, material number, mesh number (for ray hits); `packInstance(draw, material)`).
   - One per `DrawItem` of the frame, instance i being draw i, the same for every view (ray tracing instances and GPU culling can read the same records later).
-- `GpuMaterial` (80 bytes, see Assets and materials), deduplicated per frame by `MaterialTable::add` (an FNV-1a hash of the packed bytes, then a full comparison; packing has no padding).
+- `GpuMaterial` (96 bytes, see Assets and materials), deduplicated per frame by `MaterialTable::add` (an FNV-1a hash of the packed bytes, then a full comparison; packing has no padding).
 - Lights, in `GpuLights` from `packLighting` with `ambient` and `counts`, shadows filled in by `attachShadows`:
   - `GpuDirectionalLight` (48: direction towards the light, radiance, `shadowTile` (its first cascade), `cascadeCount`, `tanAngularRadius`);
   - `GpuPointLight` (48: position and range, radiance and source radius, `firstShadowTile`, `shadowStrength`, `emitterRadius`);
@@ -2115,7 +2115,7 @@ Reflections in reflections build up a bounce a frame, since last frame's picture
 | `probeFar` | 300 m | how far the probe's capture sees |
 | `showConfidence` | off | the debug view: white where screen-space reflections are trusted, blue where the probe is |
 
-Timed as SSR (`GpuPass::Reflections`), between the probe's capture and anti-aliasing. The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) and the sunlit room's mirror facing the doorway (`labMirror`), with a brushed steel panel beside it (`labSteelPanel`, roughness 0.2: a rough mirror for mirrored lights' footprints), are the places to judge them.
+Timed as SSR (`GpuPass::Reflections`), between the probe's capture and the glass (GLASS, then anti-aliasing). The light lab's reflection corner (`labPolishedSlab`, `labMirrorBallCentre`) and the sunlit room's mirror facing the doorway (`labMirror`), with a brushed steel panel beside it (`labSteelPanel`, roughness 0.2: a rough mirror for mirrored lights' footprints), are the places to judge them.
 
 ## Reflection probe
 
@@ -2327,7 +2327,7 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 **From the loaders.** Loaders produce `Model`s whose parts hold a shared `Mesh` and a `MaterialSource`:
 
 - colour, `metallic`, `roughness`, linear `emissive`;
-- `alphaMode`, `alphaCutoff`, `opacity` and `doubleSided` (see Cut-outs and double-sided surfaces);
+- `alphaMode`, `alphaCutoff`, `opacity` and `doubleSided` (see Cut-outs and double-sided surfaces), and `transmission` with `transmissionTexture` (see Glass and blended surfaces);
 - and five `TextureSource`s, `colourTexture`, `metallicRoughnessTexture`, `normalTexture` (with `normalScale`, glTF's `normalTexture.scale`, default 1), `occlusionTexture` (with `occlusionStrength`, glTF's `occlusionTexture.strength`, default 1) and `emissiveTexture`, each a path or embedded bytes, sharing one flip.
 
 **To a `Material`.** `AssetManager::makeMaterial` turns that into a `Material`:
@@ -2338,18 +2338,20 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - an optional linear `normalTexture` with `normalScale`;
 - an optional linear `occlusionTexture` (baked occlusion in red: how open each texel is to the light from all around, 0 buried to 1 open) with `occlusionStrength` (0..1);
 - `emissive`, with an optional sRGB `emissiveTexture` multiplying it (screens, dials, painted lights);
-- and `alphaMode` (`Opaque` by default, or `Mask`), `alphaCutoff` (0.5), `opacity` (1) and `doubleSided` (false), with `isCutOut(material)`.
+- `alphaMode` (`Opaque` by default, `Mask` or `Blend`), `alphaCutoff` (0.5), `opacity` (1) and `doubleSided` (false), with `isCutOut(material)`;
+- and `transmission` (0) with an optional linear `transmissionTexture` (red), with `isTransparent(material)`: blended or transmitting.
 - It loads the colour and emissive textures as `TextureEncoding::Srgb` and the metallic-roughness, normal and occlusion ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`. Occlusion packed into the metallic-roughness image (ORM: occlusion, roughness, metallic in red, green, blue) is the same file or bytes read the same way, so it is one texture.
 
-**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor`, `KHR_materials_emissive_strength`, the base colour factor's alpha (as `opacity`), `alphaMode` with `alphaCutoff` (at least 0) and `doubleSided` (`readTexture` handles every texture, files and embedded alike). `BLEND` loads as opaque until blended materials are drawn. Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
+**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor`, `KHR_materials_emissive_strength`, the base colour factor's alpha (as `opacity`), `alphaMode` with `alphaCutoff` (at least 0) and `doubleSided` (`readTexture` handles every texture, files and embedded alike). `BLEND` loads as `AlphaMode::Blend`; `KHR_materials_transmission` as `transmission` (0..1) and `transmissionTexture`. Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
 
-**On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (80 bytes, std430):
+**On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (96 bytes, std430):
 
-- base colour, its alpha a cut-out's opacity (1 for opaque materials);
+- base colour, its alpha a cut-out's or blended material's opacity (1 for opaque materials);
 - `surface` = metallic and roughness clamped to 0..1 and the normal scale (0 when there is no normal texture, so the white stand-in tilts nothing), and the occlusion strength (clamped to 0..1, and 0 when there is no occlusion texture, which tells the main pass to leave the light from all around alone);
 - emissive (multiplied by the emissive texture in the shaders), w a cut-out's cutoff (0 for opaque materials, keeping every texel);
 - `textures`: the slots of the colour, metallic-roughness, normal and emissive textures in the bindless array, `bindlessTextureSlot` = handle + 1, `whiteTextureSlot` 0 for none.
-- and `extra`: x the occlusion texture's slot, y the flags (`MATERIAL_DOUBLE_SIDED` 1, `MATERIAL_CUT_OUT` 2, `render/gpu/material_shared.h`), the rest 0.
+- `extra`: x the occlusion texture's slot, y the flags (`MATERIAL_DOUBLE_SIDED` 1, `MATERIAL_CUT_OUT` 2, `MATERIAL_BLEND` 4, `render/gpu/material_shared.h`)), z the transmission texture's slot, w 0;
+- and `transmission`: x thin glass's transmission (0..1), the rest 0.
 - One entry per different material in the frame's material buffer (see GPU scene).
 
 ### Cut-outs and double-sided surfaces
@@ -2373,6 +2375,35 @@ Double-sided batches cull nothing (`vkCmdSetCullMode`); the rest keep the pass's
 **Rays.** A cut-out's ray instance is not opaque (`rayInstanceNotOpaque`, Vulkan's `FORCE_NO_OPAQUE`), and every ray query runs through `traceRayQuery` (`ray_scene.glsl`), which confirms a candidate hit only where its texel is solid (`candidateIsSolid`: the full-size texel, as rays have no screen footprint). Opaque instances still commit at once. `committedHitFacesRay` counts either side of a double-sided surface as its front, so probe rays, relocation, mirrored lights and traced reflections never take a leaf for the inside of a wall. These need the material buffer and textures, which every renderer pass with rays binds as sets 0 and 1 (`RAY_SCENE_MATERIALS`); a shader that binds the ray scene elsewhere (the GPU tests') gets neither.
 
 **Tests**: `coverage_mips_test` (halving data and sRGB, odd sizes, coverage, leaves keeping their share where plain averaging loses it, colour untouched, solid and clear unchanged), `alpha_mask_test`, the loader's and asset manager's, `material_uniforms_test`, `gpu_scene_test` (batching by style), `ray_tracing_test` (the flag), `light_lab_test` (the chain-link); GPU tests in `alpha_mask_gpu_test` (written and built, not run).
+
+### Glass and blended surfaces
+
+**Two kinds of seen-through** (`render/gpu/transparency`, mirrored in `transparency.glsl`):
+
+- **Coverage** (glTF's `alphaMode: BLEND`): alpha is the share of the pixel that is the surface, all of it (its reflection too), the rest what lies behind. Right for decals and fading things.
+- **Thin glass** (`KHR_materials_transmission`): the whole pixel is glass. Its reflection stays whole (Fresnel: about 4% head-on, nearly all at grazing angles), and of the rest the share `transmission` passes through, tinted by the base colour, in place of the light it would scatter (its diffuse part). Metals pass none. No bending (refraction) yet.
+
+`transparentBlend(alpha, transmission, metallic, diffuse, specular, emissive, baseColour, specularAlbedo)` gives the light added and the transmittance, per channel:
+
+| | Formula |
+|---|---|
+| passing share | t = transmission x (1 - metallic) |
+| surface light | (1 - t) x diffuse + specular + emissive |
+| through | baseColour x (1 - specularAlbedo) x t |
+| added | alpha x surface light |
+| transmittance | alpha x through + (1 - alpha) |
+
+Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque glTF material's alpha is ignored, as glTF says.
+
+**Blending** (`drawTransparent`, GpuPass `Transparent`, GLASS): picture = added + transmittance x picture, per channel, by dual-source blending (`BlendMode::DualSourceTransmittance`: the shader's second colour, location 0 index 1, is the destination factor; `dualSrcBlend`, `VulkanDevice::supportsDualSourceBlending`, on every desktop GPU). Without it a grey share: alpha = 1 - the transmittance's mean, premultiplied (`triangle_transparent_grey.frag`).
+
+**Where and in what order.** After the opaque scene, its reflections and the reflection probe's capture, before anti-aliasing (so glass is smoothed too), into the scene image with its depth tested (`GREATER`) and not written (the main pass keeps its depth for this). Transparent draws are left out of every opaque view (`opaqueDraws`, `transparentDraws`) and sorted far to near by their bounds' centre (`sortTransparentDraws`, equal distances in the order chosen), one draw list entry each, after the capture's. A double-sided one is drawn twice from its entry, back faces (front culled) then front faces, so its far side shows through its near side. Whole objects are sorted, so interpenetrating glass can draw in the wrong order.
+
+**Shading.** The main pass's shading (`scene_surface.glsl` with `TRANSPARENT`: `triangle_transparent.frag`), its diffuse and specular parts kept apart for the blend. Its reflection is the reflection probe's prefiltered light in the mirror direction at the roughness's level (`probeRoughnessLevel`; set 2 of `transparentLayout`, `VulkanReflectionProbe::fragmentReadableLight`), while this frame captured one (`GpuTransparentView` push constants, after the vertex shader's 64 bytes); else the light probes' or the flat ambient's mirror light. A one-texel probe stands in when reflections never made one. The screen's ambient occlusion and the mirrored lights' images are the opaque surface's behind, so glass reads neither.
+
+**What glass does not do yet:** cast shadows (`castersInReach` skips it, so the sun passes untinted), stop or tint rays (its ray mask is 0: probe rays, shadow rays, mirrored lights and traced reflections pass through, and `chooseMirrorPairs` skips it), appear in the reflection probe's capture, or write motion (moving glass may smear under anti-aliasing; FSR's reactive mask and DLSS's hint are the planned fix).
+
+**Tests**: `transparency_test` (opaque, coverage, transmission with Fresnel, metals, the split, far-to-near sorting with backs first, unbounded draws, the push constants), the loader's, asset manager's and packing tests, `culling_test` (no glass shadow casters), `ray_tracing_test` (mask 0), `mirrored_light_test`, `gpu_timing_test`, `light_lab_test` (the window's pane); GPU tests in `transparency_gpu_test` (written and built, not run).
 
 ## Input
 
@@ -2614,7 +2645,8 @@ What is in it:
   - 0.3 m walls cut round the openings;
   - a 2 cm floorboard slab (`labFloorTop`, so it never fights the grass for depth);
   - a red panel lining the sunlit room's east wall;
-  - and a roof.
+  - a roof;
+  - and a 1 cm pane of clear glass across the window (`labWindowPane`, `LabSurface::WindowGlass`: transmission 1, roughness 0.02, a faint green), in the middle of the wall's thickness, casting no shadow and kept out of the level's collision, so the sun still comes through.
 
 #### The street
 
@@ -2995,7 +3027,7 @@ Colour is gamma-correct: shading happens in linear light.
 - Light colours, intensities and `emissive` are linear.
 - `VulkanTexture` uploads RGBA pixels with a full mip chain (`mipLevelCount`, `render/gpu/mip_levels`; each smaller level blitted from the one above, or copied in when built on the CPU: a cut-out's) and samples them with trilinear and 16x anisotropic filtering. The sampler's `maxLod` is `VK_LOD_CLAMP_NONE`: 0 would lock sampling to the full-size level.
 - `Material::emissive` (a `Vec3`, black by default) is light the surface gives off itself, added after lighting. With a black `colour` the surface shows only its glow and never changes with lighting (the demo's moon and MOBA marker).
-- `GpuMaterial` is 80 bytes.
+- `GpuMaterial` is 96 bytes.
 - `Mesh::sphere(segments, rings)` builds a unit UV sphere with smooth normals.
 
 ## Loaders

@@ -33,7 +33,7 @@ namespace {
     const char* const document = R"json(
 {
     "asset": { "version": "2.0" },
-    "extensionsUsed": ["KHR_materials_emissive_strength"],
+    "extensionsUsed": ["KHR_materials_emissive_strength", "KHR_materials_transmission"],
     "scene": 0,
     "scenes": [{ "nodes": [0] }],
     "nodes": [{ "mesh": 0 }],
@@ -59,7 +59,10 @@ namespace {
             "alphaCutoff": 0.3,
             "doubleSided": true,
             "emissiveFactor": [0.5, 0.25, 0.0],
-            "extensions": { "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 } }
+            "extensions": {
+                "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 },
+                "KHR_materials_transmission": { "transmissionFactor": 0.6, "transmissionTexture": { "index": 0 } }
+            }
         },
         { "emissiveFactor": [0.0, 0.0, 0.0] }
     ],
@@ -99,12 +102,15 @@ namespace {
         assert(model.parts.size() == 9);
 
         int masked = 0;
+        int blended = 0;
         int doubleSided = 0;
         bool cutoffs[3] = {false, false, false};
 
         for (const ModelPart& part : model.parts) {
             const MaterialSource& material = part.material;
             doubleSided += material.doubleSided ? 1 : 0;
+
+            blended += material.alphaMode == AlphaMode::Blend ? 1 : 0;
 
             if (material.alphaMode == AlphaMode::Mask) {
                 ++masked;
@@ -115,6 +121,7 @@ namespace {
         }
 
         assert(masked == 3 && cutoffs[0] && cutoffs[1] && cutoffs[2]);
+        assert(blended == 2);
         assert(doubleSided == 8);
     }
 
@@ -176,6 +183,8 @@ void testGltfMaterials() {
         assert(nearlyEqual(full.alphaCutoff, 0.3f));
         assert(full.doubleSided);
         assert(nearlyEqual(full.opacity, 0.8f));
+        assert(nearlyEqual(full.transmission, 0.6f));
+        assert(full.transmissionTexture.path == full.metallicRoughnessTexture.path);
 
         const MaterialSource& withoutFactors = model.parts[1].material;
         assert(nearlyEqual(withoutFactors.metallic, 1.0f));
@@ -190,6 +199,8 @@ void testGltfMaterials() {
         assert(nearlyEqual(withoutFactors.alphaCutoff, 0.5f));
         assert(!withoutFactors.doubleSided);
         assert(nearlyEqual(withoutFactors.opacity, 1.0f));
+        assert(nearlyEqual(withoutFactors.transmission, 0.0f));
+        assert(!withoutFactors.transmissionTexture.isSet());
 
         const MaterialSource& withoutMaterial = model.parts[2].material;
         assert(nearlyEqual(withoutMaterial.metallic, 1.0f));
@@ -200,9 +211,10 @@ void testGltfMaterials() {
         assert(throwsWhenLoaded(directory, "too_strong.gltf", "\"strength\": 0.75", "\"strength\": 1.5"));
         assert(throwsWhenLoaded(directory, "negative_cutoff.gltf", "\"alphaCutoff\": 0.3", "\"alphaCutoff\": -0.1"));
 
-        // Blending is not drawn yet (it needs a sorted pass after the opaque scene): such materials draw opaque until then.
+        // Blended materials (glass, decals) are drawn after the opaque scene.
         const Model blended = loadVariant(directory, "blended.gltf", "\"alphaMode\": \"MASK\"", "\"alphaMode\": \"BLEND\"");
-        assert(blended.parts[0].material.alphaMode == AlphaMode::Opaque);
+        assert(blended.parts[0].material.alphaMode == AlphaMode::Blend);
+        assert(throwsWhenLoaded(directory, "too_transmissive.gltf", "\"transmissionFactor\": 0.6", "\"transmissionFactor\": 1.5"));
     }
     catch (...) {
         std::filesystem::remove_all(directory);

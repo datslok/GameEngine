@@ -27,6 +27,7 @@ enum class GpuPass {
     DepthRange,
     ReflectionProbe, // the reflection probe's capture: its six faces, their mips, distances and prefiltered levels
     Reflections,  // reflections: the depth and colour pyramids and the reflection pass
+    Transparent,  // glass and blended surfaces, sorted, over the picture with its reflections (render/gpu/transparency.h)
     AntiAliasing, // TAA, FSR or DLSS, whichever smooths the frame (with the camera motion pass before FSR and DLSS)
     EyeAdaptation,
     Bloom,

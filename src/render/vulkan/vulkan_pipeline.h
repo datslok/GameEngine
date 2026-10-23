@@ -59,7 +59,8 @@ private:
 enum class BlendMode {
     None,               // the new colour replaces what was there
     Additive,           // the new colour is added to it (bloom growing back up)
-    PremultipliedAlpha  // the new colour over it, which shows through by one minus the new alpha (the debug UI)
+    PremultipliedAlpha, // the new colour over it, which shows through by one minus the new alpha (the debug UI)
+    DualSourceTransmittance // the new colour added to it, which shows through by the shader's second colour, per channel (glass)
 };
 
 // Vertices read from one buffer, each stride bytes; no attributes means the vertex shader makes its own (a full-screen triangle).

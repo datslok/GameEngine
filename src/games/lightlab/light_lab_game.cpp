@@ -144,6 +144,12 @@ namespace {
             material.alphaCutoff = labChainLinkCutoff;
             material.doubleSided = true;
             break;
+        case LabSurface::WindowGlass:
+            // Clear glass with the faint green of ordinary window glass, smooth, passing all the light it does not reflect.
+            material.colour = Pixel{240, 250, 245};
+            material.roughness = 0.02f;
+            material.transmission = 1.0f;
+            break;
         }
         return material;
     }
@@ -350,6 +356,15 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(makeMeshRenderer(assets.addMesh(chainLinkPanel()), chainLink));
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
+
+    // The window's glass: drawn after the opaque scene, casting no shadow and not part of the level's collision, so the
+    // sun still comes through (glass tints nothing in shadows yet).
+    ModelRenderer pane = blocksRenderer(cube, {LabBlock{labWindowPane.centre(), (labWindowPane.maximum - labWindowPane.minimum) * 0.5f, LabSurface::WindowGlass}});
+    pane.castsShadows = false;
+    pane.isStatic = true;
+    const Entity glass = world.create();
+    world.add(glass, Transform{});
+    world.add(glass, std::move(pane));
     addStatic(blocksRenderer(cube, layout.street));
     addStatic(blocksRenderer(cube, layout.reflectors));
 

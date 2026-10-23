@@ -54,6 +54,10 @@ public:
     VkImageView readableLight(VkCommandBuffer commands);
     VkImageView readableDistances(VkCommandBuffer commands);
 
+    // The prefiltered light as the glass pass reads it, in fragment shaders, with the trilinear sampler: made readable
+    // there (as readableLight, defined even if never captured).
+    SampledImage fragmentReadableLight(VkCommandBuffer commands);
+
 private:
     const VulkanDevice& device;
     VkSampler nearest;

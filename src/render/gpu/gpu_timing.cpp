@@ -36,6 +36,8 @@ const char* gpuPassName(GpuPass pass) {
         return "CUBE";
     case GpuPass::Reflections:
         return "SSR";
+    case GpuPass::Transparent:
+        return "GLASS";
     case GpuPass::AntiAliasing:
         return "AA";
     case GpuPass::EyeAdaptation:
