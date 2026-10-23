@@ -26,6 +26,7 @@ void visit(ReflectionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Edge fade", settings.edgeFade, {.min = 0.01f, .max = 1.0f});
     visitor.field("Probe size", settings.probeSize, {.min = 16, .max = 1024, .sliderMin = 64, .sliderMax = 512, .unit = "texels"});
     visitor.field("Probe far", settings.probeFar, {.min = 1.0f, .max = 5000.0f, .sliderMax = 1000.0f, .unit = "m"});
+    visitor.field("Ray-traced", settings.rayTraced);
     visitor.field("Show confidence", settings.showConfidence);
 }
 
@@ -355,6 +356,9 @@ GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inv
     pass.probeOrigin[2] = frame.probeOrigin.z;
     pass.probeCube[0] = static_cast<float>(frame.probeSize);
     pass.probeCube[1] = static_cast<float>(frame.probeDistanceLevels);
+    pass.background[0] = frame.background.x;
+    pass.background[1] = frame.background.y;
+    pass.background[2] = frame.background.z;
     return pass;
 }
 

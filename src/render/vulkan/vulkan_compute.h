@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <span>
+#include <vector>
 
 class VulkanDevice;
 class FrameDescriptors;
@@ -25,6 +26,10 @@ struct ComputePipelineDescription {
     // one from storageBuffers and pushConstantBytes, so the shader reads the frame's scene set as the passes do. Not
     // owned: it must outlive the pipeline.
     VkPipelineLayout sharedLayout = VK_NULL_HANDLE;
+
+    // Sets made elsewhere that the shader reads before its own (the scene's and the ray tracing set, for a pass that
+    // traces and lights rays): its own set then comes after them, at set number sharedSets.size(). Not owned.
+    std::vector<VkDescriptorSetLayout> sharedSets;
 };
 
 /*
@@ -41,13 +46,16 @@ public:
     VkPipeline get() const;
     VkPipelineLayout getLayout() const;
 
-    // Set 0's layout, for allocating the descriptor set that points at the storage buffers (none with a shared layout).
+    // Its own set's layout, for allocating the descriptor set that points at the storage buffers (none with a shared
+    // layout), and that set's number (after any shared sets).
     VkDescriptorSetLayout getResourceLayout() const;
+    std::uint32_t getResourceSet() const;
 
     std::uint32_t getPushConstantBytes() const;
 
 private:
     std::uint32_t pushConstantBytes = 0;
+    std::uint32_t resourceSet = 0;
     VkPipelineLayout sharedLayout = VK_NULL_HANDLE;
     OwnedHandle<VkDescriptorSetLayout> resourceLayout;
     OwnedHandle<VkPipelineLayout> layout;
@@ -67,6 +75,7 @@ ComputeBinding storageBufferBinding(VkBuffer buffer);
 ComputeBinding sampledBinding(VkSampler sampler, VkImageView view, VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 ComputeBinding storageImageBinding(VkImageView view);
 
-// A fresh set 0 for one dispatch, its bindings numbered in order, and the pipeline bound with it.
+// A fresh set of the pipeline's own for one dispatch, its bindings numbered in order, and the pipeline bound with it
+// (any shared sets before it are the caller's to bind).
 void bindComputeSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors& descriptors, const ComputePipeline& pipeline,
                     std::span<const ComputeBinding> bindings);

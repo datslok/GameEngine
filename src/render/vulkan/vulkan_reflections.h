@@ -16,6 +16,13 @@
 
 class VulkanDevice;
 
+// The sets a ray-traced reflection pass reads before its own: every texture, the frame's scene and the ray tracing set.
+struct ReflectionRaySets {
+    VkDescriptorSet textures = VK_NULL_HANDLE;
+    VkDescriptorSet scene = VK_NULL_HANDLE;
+    VkDescriptorSet rayScene = VK_NULL_HANDLE;
+};
+
 /*
 * Screen-space reflections on the GPU (render/gpu/screen_reflections.h): the reflection surfaces the main pass writes
 * beside the scene image (normal, specular albedo and roughness, the stand-in), the depth pyramid built from this
@@ -32,6 +39,10 @@ public:
     // One pass record per frame in flight, since the CPU writes the next frame's while the GPU may read the last.
     void setFramesInFlight(std::uint32_t count);
 
+    // On GPUs with ray queries: the pass that traces each mirror ray (reflections_rays.comp), reading the scene's sets
+    // (these layouts: textures, the frame's scene, the ray tracing set) before its own.
+    void enableRayTracing(VkDescriptorSetLayout textures, VkDescriptorSetLayout scene, VkDescriptorSetLayout rayScene);
+
     // The surfaces and pyramids at the render size, remade when it changes; the GPU must be idle (the renderer waits).
     void ensureSize(RenderSize render);
 
@@ -46,10 +57,14 @@ public:
     * Record the pyramids and the reflection pass: the depth (drawn this frame), the velocity image (drawn this frame),
     * last frame's finished picture (any size; readable; null when screen-space reflections do not run), the reflection
     * probe (read only if the pass says so) and the scene image (drawn this frame), changed in place and left readable
-    * by fragment and compute shaders, as the main pass leaves it.
+    * by fragment and compute shaders, as the main pass leaves it. With rays (enableRayTracing first), each mirror ray is
+    * traced through the scene in place of the probe's search.
     */
     void reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene, VulkanImage& depth,
-                 VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe, const GpuReflectionPass& pass);
+                 VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe, const GpuReflectionPass& pass,
+                 const ReflectionRaySets* rays = nullptr);
+
+    bool tracesRays() const;
 
     // The depth pyramid's levels at the current size (packReflectionPass needs them).
     std::uint32_t getPyramidLevels() const;
@@ -65,6 +80,7 @@ private:
     std::unique_ptr<ComputePipeline> depthPyramidPipeline;
     std::unique_ptr<ComputePipeline> colourPyramidPipeline;
     std::unique_ptr<ComputePipeline> reflectionPipeline;
+    std::unique_ptr<ComputePipeline> rayReflectionPipeline; // null without ray queries
     std::vector<VulkanBuffer> passRecords;
 
     RenderSize size;

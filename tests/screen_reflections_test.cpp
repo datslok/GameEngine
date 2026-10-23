@@ -409,7 +409,7 @@ namespace {
         const Mat4 inverseViewProjection = *inverse(viewProjection);
         const ReflectionSettings settings;
         const ReflectionPassFrame frame{.pyramidLevels = 8, .screenSpace = true, .probeLevels = 7, .probeOrigin = Vec3{1.0f, -2.0f, 3.0f},
-                                        .probeSize = 256, .probeDistanceLevels = 9};
+                                        .probeSize = 256, .probeDistanceLevels = 9, .background = Vec3{0.1f, 0.2f, 0.3f}};
         const GpuReflectionPass pass = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize,
                                                           Vec2{0.25f, -0.125f}, settings, frame);
 
@@ -426,10 +426,14 @@ namespace {
         assert(pass.probe[0] == 1.0f && pass.probe[1] == 7.0f && pass.probe[2] == 1.0f && pass.probe[3] == settings.probeFar);
         assert(pass.probeOrigin[0] == 1.0f && pass.probeOrigin[1] == -2.0f && pass.probeOrigin[2] == 3.0f);
         assert(pass.probeCube[0] == 256.0f && pass.probeCube[1] == 9.0f);
+        assert(pass.background[0] == 0.1f && pass.background[1] == 0.2f && pass.background[2] == 0.3f);
+
+        // Ray-traced reflections are a ray tracing setting: off by default, as every ray-traced feature is.
+        assert(!ReflectionSettings{}.rayTraced);
 
         // Without a probe this frame (none captured yet, or switched off) and without last frame's picture.
         const GpuReflectionPass bare = packReflectionPass(viewProjection, inverseViewProjection, Mat4::identity(), screenSize, Vec2{}, settings,
-                                                          ReflectionPassFrame{.pyramidLevels = 8, .probeOrigin = Vec3{}, .probeSize = 0, .probeDistanceLevels = 0});
+                                                          ReflectionPassFrame{.pyramidLevels = 8, .probeOrigin = Vec3{}, .probeSize = 0, .probeDistanceLevels = 0, .background = Vec3{}});
         assert(bare.probe[0] == 0.0f && bare.probe[2] == 0.0f);
 
         const GpuPyramidPass pyramid = packPyramidPass(RenderSize{80, 45}, 1, RenderSize{160, 90});

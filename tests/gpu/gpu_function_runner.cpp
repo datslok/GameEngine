@@ -51,7 +51,10 @@ ComputePipeline& GpuFunctionRunner::pipelineFor(const std::string& shader) {
     auto found = pipelines.find(shader);
 
     if (found == pipelines.end()) {
-        const ComputePipelineDescription description{shader.c_str(), buffersPerShader, sizeof(TestPushConstants)};
+        ComputePipelineDescription description;
+        description.shader = shader.c_str();
+        description.storageBuffers = buffersPerShader;
+        description.pushConstantBytes = sizeof(TestPushConstants);
         found = pipelines.emplace(shader, std::make_unique<ComputePipeline>(device, description)).first;
     }
 

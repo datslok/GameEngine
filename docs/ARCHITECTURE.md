@@ -2138,10 +2138,22 @@ Six faces in Vulkan's cube order and addressing (+X, -X, +Y, -Y, +Z, -Z; `cubeFa
 
 A picture from one point is wrong seen from another. For a pixel at P (measured from the probe) and its mirror direction R, the ray P + R t meets a surface where it first goes behind what the probe saw in the direction of its own point (distance impostors, Szirmay-Kalos et al. 2005), `parallaxMismatch` = |P + R t| - D(direction) going from negative to positive.
 
-- **March:** from `PROBE_MARCH_START` (2 cm) to past the far plane in `PROBE_MARCH_STEPS` (32) steps, each about a third longer than the last (`probeMarchRatio`), so the steps are as fine near the surface as far out. A crossing counts only after the ray has been in front (near its start it may sit a hair behind its own surface).
+- **Leaving:** from `PROBE_MARCH_START` (2 cm), doubling up to `PROBE_LEAVE_STEPS` (8) times until the ray is in front of what the probe saw (near its start it may sit a hair behind its own surface).
+- **March:** at most `PROBE_MARCH_ITERATIONS` (128) steps to past the far plane, doubling after each step taken and halving after each refused. A step sweeping more than one of the probe's texels (`probeTexelAngle`) is taken only if the distance pyramid holds nothing nearer than the ray over its cone of directions: two reads, at the cone's ends, on the level whose texels are `PROBE_CONE_MARGIN` (4) times the cone's width (`probeConeLevel`). Shorter steps check the ray's point itself. So anything the probe saw a texel wide or more is met, a wall seen edge-on included.
+- **Distance pyramid:** the distances cube has a full mip chain, each level the nearest of the 2x2 below (`probe_distance_min.comp`, `buildProbeDistanceCube` on the CPU), read through an exact-texel sampler reaching every level.
 - **Halving:** `PROBE_REFINE_STEPS` (8) halvings of the crossing's step, 256 times narrower (under a centimetre at 3 m).
 - **Confidence:** `parallaxConfidence` compares the distances the probe saw on either side of the crossing: a real surface is continuous there (trusted fully within 3%), an edge the probe saw past is a jump (not at all past 15%), where the ray passes behind something the probe cannot see past, and the stand-in stays.
-- **Why not solve the equation directly:** |P + R t| = D has other roots further along the ray, through doorways and behind walls. The first version iterated towards a root and could settle on one of those: the light lab's mirror showed the back room through the wall beside the doorway, the doorway pinched towards the floor, and curved cuts followed the sphere |P + R t| = D round the probe. Tested now with a doorway the ray passes beside, through and across the edge of (`reflection_probe_test`).
+- **Why not solve the equation directly:** |P + R t| = D has other roots further along the ray, through doorways and behind walls. The first version iterated towards a root and could settle on one of those: the light lab's mirror showed the back room through the wall beside the doorway, the doorway pinched towards the floor, and curved cuts followed the sphere |P + R t| = D round the probe. Tested now with a doorway the ray passes beside, through and across the edge of (`reflection_probe_test`). A march of fixed geometric steps then still stepped over a wall the probe saw edge-on from a doorway (a sliver on the cube), finding the room beyond: hence the pyramid, tested on a 256-texel cube of a doorway scene.
+
+### Ray-traced reflections
+
+On GPUs with ray queries, `ReflectionSettings::rayTraced` (off by default, as every ray-traced feature) runs `reflections_rays.comp` (`reflections_pass.glsl` with `REFLECTION_RAYS`) in place of the probe's search: each glossy pixel's mirror ray is traced through the scene, glowing stand-ins for lights included (mask 0xFF), as far as `probeFar`.
+
+- A miss brings back the sky: the frame's background plus the atmosphere's light in that direction.
+- A back face brings back nothing.
+- A front face brings back the probe's picture of that point (its direction from the probe, at the level for the roughness) as far as the probe saw it there (`parallaxConfidence` of the probe's distance to the hit and the stored one), and elsewhere the hit lit as the light probes' rays light theirs (`ray_hit_lighting.glsl`, shared with `ddgi_trace.comp`: matte, direct light by shadow rays, last frame's probe light in full, or the flat ambient without probes), blended by that confidence.
+
+The pass's own set comes after the scene's two sets and the ray tracing set (`ComputePipelineDescription::sharedSets`), which the renderer binds (`ReflectionRaySets`); the ray tracing scene is built for it. Screen-space reflections still go on top.
 
 The light is read in the found direction at the level for the pixel's roughness (`probeRoughnessLevel`), faded by the same roughness fade as screen-space reflections.
 

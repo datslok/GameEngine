@@ -427,6 +427,9 @@ void VulkanRenderer::createRayTracing() {
     description.colourFormat = sceneColourFormat;
     rayDebugPipeline = std::make_unique<VulkanPipeline>(device, layouts, description);
 
+    // Reflections tracing each mirror ray, reading the scene's sets and the ray tracing set before their own.
+    reflections->enableRayTracing(bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), rayTracing->getSetLayout());
+
     // The reflection probe's capture tracing the sun's shadow past its cascades: the scene's sets and the ray tracing
     // set, and the scene's push constants (each face's view-projection).
     const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
@@ -1094,12 +1097,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
-    // probes, the debug view or the reflection probe's capture.
+    // probes, the debug view, the reflection probe's capture or ray-traced reflections.
     const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
 
     const bool captureTracesRays = captureProbe && rayTracing;
+    const bool reflectionsTraceRays = screenReflections && settings.reflections.rayTraced && reflections->tracesRays();
 
-    if (rayDebug || traceProbes || captureTracesRays) {
+    if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays) {
         beginGpuPass(frame, GpuPass::RayScene);
         rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
         endGpuPass(frame, GpuPass::RayScene);
@@ -1193,15 +1197,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool screenSpace = settings.reflections.screenSpace && previousPictureUsable && previousCamera.known;
     const bool probeReady = captureProbe && reflectionProbe->hasCapture();
 
-    if (screenReflections && (screenSpace || probeReady) && inverseViewProjection) {
+    if (screenReflections && (screenSpace || probeReady || reflectionsTraceRays) && inverseViewProjection) {
         beginGpuPass(frame, GpuPass::Reflections);
         const ReflectionPassFrame passFrame{reflections->getPyramidLevels(), screenSpace, probeReady ? reflectionProbe->getLevels() : 0u,
                                             probeReady ? reflectionProbe->getOrigin() - cameraOrigin : Vec3{}, reflectionProbe->getSize(),
-                                            reflectionProbe->getDistanceLevels()};
+                                            reflectionProbe->getDistanceLevels(), description.lighting.background};
         const GpuReflectionPass pass = packReflectionPass(relativeViewProjection, *inverseViewProjection, reprojection, sceneSize, jitter,
                                                           settings.reflections, passFrame);
+        const ReflectionRaySets raySets = reflectionsTraceRays
+                                              ? ReflectionRaySets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)}
+                                              : ReflectionRaySets{};
         reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(),
-                             screenSpace ? finishedScene : nullptr, *reflectionProbe, pass);
+                             screenSpace ? finishedScene : nullptr, *reflectionProbe, pass, reflectionsTraceRays ? &raySets : nullptr);
         endGpuPass(frame, GpuPass::Reflections);
     }
 

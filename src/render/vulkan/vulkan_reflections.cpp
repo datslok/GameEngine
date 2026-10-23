@@ -20,6 +20,16 @@ namespace {
     // The depth pyramid keeps the depth image's 32-bit floats; the colour pyramid the scene's 16-bit floats.
     constexpr VkFormat depthPyramidFormat = VK_FORMAT_R32_SFLOAT;
     constexpr VkFormat colourPyramidFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+    // The reflection pass's own set: its record, eight images it samples and the scene image it changes.
+    ComputePipelineDescription reflectionPass(const char* shader) {
+        ComputePipelineDescription reflections;
+        reflections.shader = shader;
+        reflections.storageBuffers = 1;
+        reflections.sampledImages = 8;
+        reflections.storageImages = 1;
+        return reflections;
+    }
 }
 
 VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler nearest, VkSampler linear, VkSampler pyramid, VkSampler nearestLevels,
@@ -48,14 +58,19 @@ VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler neare
     colourLevels.pushConstantBytes = sizeof(GpuPyramidPass);
     colourPyramidPipeline = std::make_unique<ComputePipeline>(device, colourLevels);
 
-    ComputePipelineDescription reflections;
-    reflections.shader = "assets/shaders/reflections.comp.spv";
-    reflections.storageBuffers = 1;
-    reflections.sampledImages = 8;
-    reflections.storageImages = 1;
-    reflectionPipeline = std::make_unique<ComputePipeline>(device, reflections);
+    reflectionPipeline = std::make_unique<ComputePipeline>(device, reflectionPass("assets/shaders/reflections.comp.spv"));
 
     setFramesInFlight(framesInFlight);
+}
+
+void VulkanReflections::enableRayTracing(VkDescriptorSetLayout textures, VkDescriptorSetLayout scene, VkDescriptorSetLayout rayScene) {
+    ComputePipelineDescription rays = reflectionPass("assets/shaders/reflections_rays.comp.spv");
+    rays.sharedSets = {textures, scene, rayScene};
+    rayReflectionPipeline = std::make_unique<ComputePipeline>(device, rays);
+}
+
+bool VulkanReflections::tracesRays() const {
+    return rayReflectionPipeline != nullptr;
 }
 
 void VulkanReflections::setFramesInFlight(std::uint32_t count) {
@@ -212,7 +227,7 @@ void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescri
 */
 void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene,
                                 VulkanImage& depth, VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe,
-                                const GpuReflectionPass& pass) {
+                                const GpuReflectionPass& pass, const ReflectionRaySets* rays) {
     VulkanBuffer& record = passRecords.at(frameIndex);
     std::memcpy(record.getMapped(), &pass, sizeof(pass));
     record.flush();
@@ -246,7 +261,16 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
         storageImageBinding(scene.getView()),
     };
 
-    bindComputeSet(commands, device.getDevice(), descriptors, *reflectionPipeline, bindings);
+    const bool traced = rays != nullptr && rayReflectionPipeline;
+    const ComputePipeline& pipeline = traced ? *rayReflectionPipeline : *reflectionPipeline;
+    bindComputeSet(commands, device.getDevice(), descriptors, pipeline, bindings);
+
+    if (traced) {
+        const std::array<VkDescriptorSet, 3> sets{rays->textures, rays->scene, rays->rayScene};
+        vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0,
+                                nullptr);
+    }
+
     vkCmdDispatch(commands, workgroupCount(size.width, SSR_GROUP_SIDE), workgroupCount(size.height, SSR_GROUP_SIDE), 1);
 
     scene.transition(commands, ImageState::SurfaceRead);

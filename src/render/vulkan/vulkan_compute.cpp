@@ -13,7 +13,8 @@
 * With a shared layout the first two are made elsewhere (the scene's) and only the pipeline is built here.
 */
 ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipelineDescription& description):
-    pushConstantBytes(description.pushConstantBytes)
+    pushConstantBytes(description.pushConstantBytes),
+    resourceSet(static_cast<std::uint32_t>(description.sharedSets.size()))
 {
     if (description.shader == nullptr) {
         throw std::invalid_argument("A compute pipeline needs a shader");
@@ -42,8 +43,8 @@ ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipeli
     sharedLayout = description.sharedLayout;
 }
 
-// The set layout of the storage buffers, sampled images and storage images, and the pipeline layout of that set and the
-// push constants, kept by this pipeline.
+// The set layout of the storage buffers, sampled images and storage images, and the pipeline layout of any shared sets,
+// that set and the push constants, kept by this pipeline.
 VkPipelineLayout ComputePipeline::createLayout(VkDevice handle, const ComputePipelineDescription& description) {
     const std::uint32_t firstStorageImage = description.storageBuffers + description.sampledImages;
     const std::uint32_t bindingCount = firstStorageImage + description.storageImages;
@@ -72,10 +73,13 @@ VkPipelineLayout ComputePipeline::createLayout(VkDevice handle, const ComputePip
     pushRange.offset = 0;
     pushRange.size = pushConstantBytes;
 
+    std::vector<VkDescriptorSetLayout> setLayouts = description.sharedSets;
+    setLayouts.push_back(createdSetLayout);
+
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &createdSetLayout;
+    layoutInfo.setLayoutCount = static_cast<std::uint32_t>(setLayouts.size());
+    layoutInfo.pSetLayouts = setLayouts.data();
     layoutInfo.pushConstantRangeCount = pushConstantBytes > 0 ? 1 : 0;
     layoutInfo.pPushConstantRanges = &pushRange;
 
@@ -95,6 +99,10 @@ VkPipelineLayout ComputePipeline::getLayout() const {
 
 VkDescriptorSetLayout ComputePipeline::getResourceLayout() const {
     return resourceLayout.get();
+}
+
+std::uint32_t ComputePipeline::getResourceSet() const {
+    return resourceSet;
 }
 
 std::uint32_t ComputePipeline::getPushConstantBytes() const {
@@ -136,5 +144,5 @@ void bindComputeSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors&
 
     vkUpdateDescriptorSets(device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.get());
-    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 1, &set, 0, nullptr);
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), pipeline.getResourceSet(), 1, &set, 0, nullptr);
 }

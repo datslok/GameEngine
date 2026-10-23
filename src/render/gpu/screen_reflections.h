@@ -63,6 +63,11 @@ struct ReflectionSettings {
     // How far the probe's capture sees (metres); beyond it the sky.
     float probeFar = 300.0f;
 
+    // On GPUs with ray queries: each glossy pixel's mirror ray traced through the scene, so what it hits is exact,
+    // lit with the probe's picture where the probe saw it and as the light probes' rays light their hits elsewhere
+    // (matte), in place of the probe's search. Off by default, as every ray-traced feature; ignored without ray queries.
+    bool rayTraced = false;
+
     // A debug view: each pixel's confidence in its reflection (white: screen-space reflections, blue: the probe,
     // black: the stand-in).
     bool showConfidence = false;
@@ -197,6 +202,7 @@ struct ReflectionPassFrame {
     Vec3 probeOrigin;
     std::uint32_t probeSize = 0;
     std::uint32_t probeDistanceLevels = 0;
+    Vec3 background; // the light behind everything, for ray-traced reflections that escape to the sky
 };
 
 /*
@@ -215,9 +221,10 @@ struct GpuReflectionPass {
     float probe[4];       // x: 1 when the probe is read, y: its prefiltered levels, z: 1 when screen-space reflections run, w: its far plane
     float probeOrigin[4]; // xyz: where the probe was taken, measured from the camera
     float probeCube[4];   // x: the probe's faces in texels, y: its distance pyramid's levels
+    float background[4];  // rgb: the light behind everything (ray-traced reflections that escape)
 };
 
-static_assert(sizeof(GpuReflectionPass) == 304, "GpuReflectionPass must match reflections.comp's buffer");
+static_assert(sizeof(GpuReflectionPass) == 320, "GpuReflectionPass must match reflections.comp's buffer");
 
 GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inverseViewProjection, const Mat4& reprojection,
                                      RenderSize render, Vec2 jitter, const ReflectionSettings& settings, const ReflectionPassFrame& frame);
