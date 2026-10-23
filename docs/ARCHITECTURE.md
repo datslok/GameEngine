@@ -87,7 +87,7 @@ One description of every tunable value, walked by several visitors.
 - No `imgui.ini`, keyboard navigation off (the game keeps its keys), sizes and font scaled by `SDL_GetWindowDisplayScale`.
 - `build(walk, render, requests)` returns `nullptr` while closed (nothing runs). Open, it:
   - runs the backends' `NewFrame`s (the renderer's through `beginDebugUiFrame`);
-  - shows one window "Settings (F5)" with the quality preset combo (`Custom` when `matchingQualityPreset` finds none);
+  - shows one window "Settings (F5)" with the quality preset combo (`Custom` when `matchingQualityPreset` finds none) and the upscaling mode combo (which sets `renderScale`; `Custom` when `matchingUpscalingMode` finds none);
   - has Save and Reset buttons (reported in `DebugUiRequests`, carried out by `Application`, which sets the status line);
   - then runs the walk through `ImGuiSettingsVisitor`. Top-level groups are collapsing headers (open), deeper ones tree nodes, each with its own ID scope. Floats and ints are sliders (`%.4g` plus unit), clamped to the hard limits after Ctrl+click typing. Start-up fields are disabled with a tooltip.
 
@@ -1986,6 +1986,7 @@ Temporal anti-aliasing (`taa`; `render/gpu/taa`, numbers in `taa_shared.h`, mirr
 `UpscalingSettings` (`render/gpu/upscaling`, `RenderSettings::upscaling`, the Upscaling group; tested in `upscaling_test`):
 
 - `renderScale` (1 by default, `minRenderScale` 0.33 to 1): the render size's share of the output's, each way. It applies only while TAA is on (`appliedRenderScale`), since the resolve is what upscales; with TAA off the frame is drawn at the output's size.
+- **Modes** (`UpscalingMode`, `upscalingModeNames`): Native, Quality, Balanced, Performance and Ultra performance, FSR's and DLSS's names for render scales 1, 1/1.5, 1/1.7, 1/2 and 1/3 (`upscalingModeScale`). Not stored: the debug UI's combo sets the scale, and `matchingUpscalingMode` reads a scale back as its mode within 0.005 (half a slider step), else Custom. The quality presets leave the scale alone.
 - `renderSize(width, height, scale)`: each side rounded, at least one pixel and at most the output's. `ensureFrameTextures(width, height, settings)` keeps the scene image, its depth, the velocity image and the clusters' lists at it (`sceneSize`) and remakes them when it changes, like a resize.
 - At the render size: the depth prepass, main pass, sky, stars, probe balls, ray debug view, velocity pass, clusters and the depth measurement. At the output's: the histories, eye adaptation, bloom, tone mapping, the debug lines and UI. The shadow atlas, the probes and the sky's tables do not depend on the screen.
 - `textureLodBias(render, outputWidth)`, log2 of the render width over the output's (-1 at half), goes to `GpuFrameData::textureOptions.x`: the mips are chosen for the output's pixels, and the history averages the sharper level's detail.

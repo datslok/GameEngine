@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 /*
 * Upscaling: the passes that cost per pixel (the depth prepass, the main pass, the velocity pass, the clusters) draw a
@@ -45,6 +46,27 @@ struct UpscalingSettings {
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(UpscalingSettings& settings, SettingsVisitor& visitor);
+
+/*
+* The named modes FSR and DLSS offer, each only a render scale: the output's size over the render's is 1, 1.5, 1.7, 2
+* and 3 (so Quality draws 44% of the pixels, Performance a quarter). The debug UI's list sets the scale; the scale is
+* still the one setting stored, and a scale between them is custom.
+*/
+enum class UpscalingMode {
+    Native,
+    Quality,
+    Balanced,
+    Performance,
+    UltraPerformance
+};
+
+// In the order of UpscalingMode's values.
+inline constexpr std::array<const char*, 5> upscalingModeNames{"Native", "Quality", "Balanced", "Performance", "Ultra performance"};
+
+float upscalingModeScale(UpscalingMode mode);
+
+// The mode a render scale is, within half a slider step (0.005, so 0.67 is Quality), or nothing for a custom scale.
+std::optional<UpscalingMode> matchingUpscalingMode(float renderScale);
 
 // Throws std::invalid_argument for a render scale outside minRenderScale..1 or a sharpness outside 0..1.
 void validateUpscaling(const UpscalingSettings& settings);

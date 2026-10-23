@@ -142,6 +142,32 @@ namespace {
 }
 
 namespace {
+    /*
+    * The named modes, as FSR and DLSS name them: each a fixed render scale (1, 1/1.5, 1/1.7, 1/2, 1/3), every one
+    * within the slider's limits, and a scale reads back as its mode within half a slider step (0.67 is Quality), else
+    * as none (custom).
+    */
+    void testModes() {
+        assert(upscalingModeScale(UpscalingMode::Native) == 1.0f);
+        assert(near(upscalingModeScale(UpscalingMode::Quality), 1.0f / 1.5f, 1e-6f));
+        assert(near(upscalingModeScale(UpscalingMode::Balanced), 1.0f / 1.7f, 1e-6f));
+        assert(upscalingModeScale(UpscalingMode::Performance) == 0.5f);
+        assert(near(upscalingModeScale(UpscalingMode::UltraPerformance), 1.0f / 3.0f, 1e-6f));
+
+        for (std::size_t index = 0; index < upscalingModeNames.size(); ++index) {
+            const UpscalingMode mode = static_cast<UpscalingMode>(index);
+            UpscalingSettings settings;
+            settings.renderScale = upscalingModeScale(mode);
+            validateUpscaling(settings);
+            assert(matchingUpscalingMode(settings.renderScale) == mode);
+        }
+
+        assert(matchingUpscalingMode(0.67f) == UpscalingMode::Quality);
+        assert(matchingUpscalingMode(0.59f) == UpscalingMode::Balanced);
+        assert(!matchingUpscalingMode(0.75f).has_value());
+        assert(!matchingUpscalingMode(0.62f).has_value());
+    }
+
     // The F4 readout names the upscaler in use (FSR asked for but unavailable shows TAA) and the render scale.
     void testReadout() {
         assert(upscalerText(Upscaler::Fsr, 0.67f) == "FSR 3.1 AT 0.67");
@@ -150,6 +176,7 @@ namespace {
 }
 
 void testUpscaling() {
+    testModes();
     testReadout();
     testRenderSize();
     testAppliedScale();
