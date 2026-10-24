@@ -25,9 +25,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // directional lights (compute for probe rays)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // point lights
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // spotlights
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment},                    // shadow tiles
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // shadow atlas, compared
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // shadow atlas, raw depths
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // shadow tiles (compute for the fog's grid)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // shadow atlas, compared
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // shadow atlas, raw depths
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // BRDF table
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vertex},                      // draw list
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // cluster masks
@@ -46,6 +46,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the mirror pairs (fragment for the probe's traced capture)
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // ambient occlusion
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the glass a ray towards a light may cross
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the frame's fog
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the fog integrated through its grid
     }};
 }
 
@@ -135,7 +137,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     skyLight(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    glassBounds(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    glassBounds(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    fog(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -171,6 +174,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         buffers.mirrorPairs.describe(),
         VkDescriptorBufferInfo{},
         buffers.glassBounds.describe(),
+        buffers.fog.describe(),
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -185,6 +190,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[MirroredLightBinding] = imageInfo(images.mirroredLight);
     imageInfos[MirroredDirectionBinding] = imageInfo(images.mirroredDirection);
     imageInfos[AmbientOcclusionBinding] = imageInfo(images.ambientOcclusion);
+    imageInfos[FogVolumeBinding] = imageInfo(images.fogVolume);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

@@ -118,6 +118,7 @@ void testScreenReflections();
 void testReflectionProbe();
 void testMirroredLight();
 void testAmbientOcclusion();
+void testVolumetricFog();
 void testUpscaling();
 void testDisplayOutput();
 void testSettingsFile();
@@ -250,6 +251,7 @@ int main(){
     testReflectionProbe();
     testMirroredLight();
     testAmbientOcclusion();
+    testVolumetricFog();
     testUpscaling();
     testDisplayOutput();
     testSettingsFile();

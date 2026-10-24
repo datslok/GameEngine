@@ -14,6 +14,7 @@
 #include "render/gpu/tone_mapping.h"
 #include "render/gpu/transparency.h"
 #include "render/gpu/upscaling.h"
+#include "render/gpu/volumetric_fog.h"
 
 /*
 * Everything about drawing that a game, the debug UI or a player may tune, in one place. The renderer reads it every
@@ -43,6 +44,9 @@ struct RenderSettings {
 
     // Glass and blended surfaces (render/gpu/transparency.h): the reactive mask that keeps anti-aliasing from smearing them.
     TransparencySettings transparency;
+
+    // Volumetric fog (render/gpu/volumetric_fog.h): the air lit by the lights, when the frame has a Fog.
+    FogSettings fog;
 
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.

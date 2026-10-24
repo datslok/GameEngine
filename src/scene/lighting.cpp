@@ -49,6 +49,12 @@ FrameLighting collectLighting(World& world, float alpha) {
         }
     });
 
+    world.each<Fog>([&](Entity, Fog& fog) {
+        if (!lighting.fog) {
+            lighting.fog = fog;
+        }
+    });
+
     world.each<ProbeEvent>([&](Entity, ProbeEvent& event) {
         lighting.probeEvents.push_back(event);
     });

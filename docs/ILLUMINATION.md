@@ -388,7 +388,7 @@ Notes on the states:
 
 - "Newly" states take hysteresis 0 for their first update (optionally with many extra rays to converge in one frame), then become their plain state.
 - Saving: 30-50% of probe tracing and updating time in their scenes, which can be spent on more rays per probe instead.
-- For fog or other participating media later, probes inside the medium would have to stay awake, since empty space then gets shaded too.
+- For fog or other participating media later, probes inside the medium would have to stay awake, since empty space then gets shaded too. (Volumetric fog, `volumetric-fog`, Oct 24 2026, did not wake them: all the cascades' sleeping probes would pass the 8,192 traced a frame. The fog reads the traced probes and falls back to the coarser cascades, whose cells nearly always reach the ground; see `docs/ARCHITECTURE.md`, Volumetric fog.)
 - The [2021] text and code differ in detail here (see the table at the end); follow the code.
 
 ### Built here

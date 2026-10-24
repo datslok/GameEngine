@@ -281,6 +281,11 @@ void visit(LightLabNightSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Star contrast", settings.starContrast, {.min = 0.0f, .max = 2.0f});
 }
 
+void visit(LightLabMistSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Mist", settings.enabled);
+    visit(settings.fog, visitor);
+}
+
 float starVisibility(const Vec3& towardsSun) {
     return 1.0f - smoothStep(radiansFromDegrees(labStarsFullBelowDegrees), radiansFromDegrees(labStarsAppearBelowDegrees), sunElevation(towardsSun));
 }
@@ -656,6 +661,17 @@ void LightLabGame::updateDaylight(World& world) {
         world.remove<Atmosphere>(air);
     }
 
+    // The mist, while it is on.
+    if (mistSettings.enabled) {
+        if (world.has<Fog>(air)) {
+            world.get<Fog>(air) = mistSettings.fog;
+        } else {
+            world.add(air, mistSettings.fog);
+        }
+    } else if (world.has<Fog>(air)) {
+        world.remove<Fog>(air);
+    }
+
     // The disc where the sunlight comes from, just inside the far plane, glowing with that light over its patch of sky.
     // Hidden once the sun has set (its light has faded to nothing).
     const Camera& camera = controls.getCamera();
@@ -722,6 +738,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Atmosphere", [&] {
         visit(atmosphereSettings, visitor);
     });
+    visitor.group("Mist", [&] {
+        visit(mistSettings, visitor);
+    });
     controls.visitSettings(visitor);
 }
 
@@ -778,6 +797,10 @@ LightLabSunSettings& LightLabGame::getSunSettings() {
 
 LightLabNightSettings& LightLabGame::getNightSettings() {
     return nightSettings;
+}
+
+LightLabMistSettings& LightLabGame::getMistSettings() {
+    return mistSettings;
 }
 
 Entity LightLabGame::getMoon() const {

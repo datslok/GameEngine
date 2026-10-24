@@ -134,6 +134,11 @@
 // ambient_occlusion_test.comp
 #define GPU_TEST_AMBIENT_OCCLUSION 0
 
+// volumetric_fog_test.comp
+#define GPU_TEST_FOG_MEDIUM 0
+#define GPU_TEST_FOG_GRID 1
+#define GPU_TEST_FOG_LIGHT 2
+
 // alpha_mask_test.comp
 #define GPU_TEST_ALPHA_MASK 0
 

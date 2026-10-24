@@ -103,27 +103,8 @@ layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
     uint clusterMasks[];
 };
 
-// Must match ShadowTileData in render/gpu/shadow_map.h.
-struct ShadowTileData {
-    mat4 matrix; // the shadow pass's view-projection, for points measured from the camera
-    vec4 offset; // against acne: x per unit of distance from the light, y fixed (a sun cascade's: its base bias towards the sun)
-    vec4 rect;   // where the tile is in the atlas, 0..1: xy corner, zw size
-    // Perspective tiles: x near, y far plane, z world size of a texel per unit of distance. A sun's cascade boxes: x 0
-    // (no near plane), y the box's depth, z one texel's world size, w the cascade's radius.
-    vec4 lens;
-};
-
-layout(std430, set = 1, binding = 6) readonly buffer ShadowTiles {
-    ShadowTileData shadowTiles[];
-};
-
-// The shadow atlas: every light's depth images in square tiles of 256 to 2048 texels, packed into one texture. A shadow sampler compares a depth we give it
-// with the stored one and returns 1 (lit) or 0 (blocked), blended across neighbouring texels for slightly soft edges.
-layout(set = 1, binding = 7) uniform sampler2DShadow shadowAtlas;
-
-// The same atlas read as plain numbers, the stored depths themselves, which soft shadows need to find how far away the
-// things blocking a light are (a comparison only says whether something is in the way).
-layout(set = 1, binding = 8) uniform sampler2D shadowDepths;
+// The shadow tiles and the atlas they are drawn into (shared with the fog's grid, fog_light.comp).
+#include "scene_shadow_tiles.glsl"
 
 // The specular albedo table (render/gpu/brdf.h): scale and bias for the reflectance head-on, over n.v and roughness.
 layout(set = 1, binding = 9) uniform sampler2D brdfTable;
@@ -149,6 +130,9 @@ layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 #include "reflection_probe.glsl"
 #include "transparency.glsl"
 const bool transparentView = true;
+
+// The fog in front of the glass (render/gpu/volumetric_fog.h): the picture behind it is already fogged.
+#include "scene_fog.glsl"
 
 layout(set = 2, binding = 0) uniform samplerCube transparentProbeLight;
 
@@ -742,6 +726,12 @@ void main() {
                        beerAttenuation(material.attenuation.rgb, material.transmission.z, thickness);
         seen.added += coverage * through * refractedPicture(shadingNormal, toCamera, roughness, material.transmission.w, thickness);
         seen.transmittance = vec3(1.0 - coverage);
+    }
+
+    // Seen through the fog in front of it: its light dimmed, and the fog's light for the share it does not let through
+    // (the picture it lets through already holds the rest).
+    if (fogOn()) {
+        seen.added = fogOverGlass(seen.added, seen.transmittance, fogAlongView(relativePosition, false));
     }
     outputColour = vec4(seen.added, 1.0 - (seen.transmittance.r + seen.transmittance.g + seen.transmittance.b) / 3.0);
 #ifdef DUAL_SOURCE_BLENDING

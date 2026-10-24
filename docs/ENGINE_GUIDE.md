@@ -22,6 +22,7 @@ This guide describes the engine as it is now. It is updated at the end of each r
 - temporal anti-aliasing (aliasing and the sampling theorem, jitter on a Halton sequence, the history as an exponential average, reprojection and motion vectors, clipping stale history to the neighbours' range, Karis weights and Catmull-Rom)
 - upscaling (drawing small and rebuilding big from jittered frames, reconstruction weights, the mip bias, the vendors' upscalers FSR and DLSS, calling a library built by another compiler through a C interface, and keeping licensed binaries out of a public repository)
 - reflections (the split sum, screen-space reflections marched through a depth pyramid, last frame's picture and a colour pyramid as wide as the reflected cone, a reflection probe captured at the camera, parallax corrected from its own distances, prefiltering by importance sampling, the chain of fallbacks and their confidences; mirrored lights by Newton's method on the mirror and the wavefront's curvature, rough mirrors' footprints; ambient occlusion from horizons in the depth image)
+- volumetric fog (participating media, extinction and albedo, Beer–Lambert, the phase function, single scattering, froxels, the slab's exact solution, the height fog's closed form and its series, glass over fog)
 - the night sky (the moon's orbit and phase, Lommel-Seeliger's law and the opposition surge, a second sky by linearity, the celestial sphere and sidereal time, magnitudes and blackbody colours, splats that keep a star's light whole)
 - so all of 6c
 - all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps)
@@ -1622,6 +1623,47 @@ A probe averages the pixel values its rays bring back, with cosine weights, and 
 - **Light bounces back.** A crease between white walls is not as dark as visibility alone says, since light bounces between its walls. Jimenez fitted that from path-traced references as a cubic in the visibility and the albedo: bright creases darken less than dark ones.
 - **The surface's slope from depth alone.** The normal comes from the neighbouring pixels' points, choosing each way the neighbour whose next one carries on in a straight line, since a straight line of pixels across a flat surface is a straight line in space. The obvious choice, the nearer neighbour, fails at a wall's foot: the floor there is so foreshortened that the wall's pixel above is nearer than the floor's pixel below.
 - **Only the light from all around.** The direct light already has its shadows, so ambient occlusion dims only the probes' light (and, by Lagarde's fit, the reflections in creases).
+
+### Volumetric fog: light in the air
+
+**What it adds.** Without fog the air between the camera and a surface does nothing: the surface's light arrives untouched. Real air with mist or haze in it is a **participating medium**: tiny droplets take light out of every ray and put light into it. That is why a flashlight shows as a cone, sunbeams through a window as bright shafts, a street lamp has a halo, and far things fade into a pale veil.
+
+**Three numbers per point**, each a rate per metre, like the attenuation coefficient of a beam in a material:
+
+- **Scattering**: light knocked out of the ray into other directions.
+- **Absorption**: light swallowed as heat (water mist absorbs almost nothing, smoke a lot).
+- **Extinction**, their sum: everything the ray loses. Its integral along the ray is the **optical depth** τ, and the light that survives is exp(−τ) (Beer–Lambert, the same law as radioactive decay along a path). The **albedo** is scattering over extinction: the share of the lost light that is scattered rather than absorbed.
+
+**The equation.** What reaches the eye along a ray to a surface at distance d is
+
+  L_eye = T(d) L_surface + ∫₀ᵈ T(s) · extinction(s) · albedo · S(s) ds
+
+the surface's light dimmed by the transmittance T, plus the light scattered into the ray at every point s on the way, itself dimmed by the fog between s and the eye. S is the light arriving at s from every light, each weighted by two things:
+
+- **its shadow there**: air in shadow gets no light from that lamp, air in the beam does. The difference between the two is the visible shaft.
+- **the phase function** p(θ), how the droplets share out the light they scatter by the angle θ it turns through. It plays the role of a differential cross-section in scattering theory, normalised so it integrates to 1 over the sphere (scattering moves light around without making any). The engine uses **Henyey–Greenstein**, with one number g, the mean cosine of the scattering angle: 0 sends light equally everywhere, 0.6 (the default) mostly forward, as water droplets do. Forward scattering is why the halo round a lamp you look at is bright and why the sky round the sun glows in mist.
+
+This is the radiative transfer equation keeping **single scattering**: each photon is scattered once on its way to the eye. Light scattered several times would fill shadows in a little; the light probes' light from all around stands in for it.
+
+**Units.** A light's value in the engine is the irradiance E it gives a surface facing it, and a pixel is π times radiance (see the units in the global illumination section). So a light adds π · p(θ) · E per unit of optical depth. Checked by the white furnace test: a uniform sky of radiance L, summed over every direction, gives back π L, whatever g.
+
+**Froxels: a grid of the air.** Tracing every pixel's ray through the fog would cost too much. Instead the GPU fills a 3D grid shaped like the view: the screen cut into tiles (160 across by 90 down), and each tile cut in depth into 64 slices out to 100 m. Each cell is a small truncated pyramid of air, a **froxel** (frustum voxel). The slices are spaced evenly in log(depth + 1 m): a few centimetres deep near the camera, about 7 m deep at 100 m, so each froxel is roughly as deep as it is wide, as a tile's width grows with distance.
+
+Each frame three compute passes run:
+
+1. **Light each froxel**: its extinction from the fog's height, and the light it scatters towards the eye. The sun with one lookup in its shadow cascades; the point and spot lights its cluster lists (the same lists clustered shading built for the pixels; see Clustered shading), each with its shadow; and the light from all around from the light probes, read straight up and straight down.
+2. **Integrate each column** front to back, slice by slice, keeping the light gathered and the share let through so far.
+3. **Fog the picture**: each pixel, at its depth, reads the grid and becomes colour × transmittance + light.
+
+**The slab's exact solution.** A slice is a slab of constant fog. Instead of adding "scattered light × length" (a Riemann sum, which overshoots for a thick slab), the engine uses the slab's exact answer: it adds scattered × (1 − exp(−τ)) and lets exp(−τ) through. One thick slab then gives exactly what many thin ones do, so energy is conserved however coarse the slices are (Hillaire, Frostbite, 2015).
+
+**Many samples over time.** Each froxel samples one point a frame. The point moves round the froxel's middle on a Halton sequence and keeps 90% of last frame's result, read where that point was last frame, as temporal anti-aliasing does for pixels. The grid averages dozens of samples, and the edges of shafts come out smooth.
+
+**Past the grid.** Beyond 100 m the fog uses a formula instead of the grid. The density falls exponentially with height (by e every scale height, like the atmosphere), and along a straight ray an exponential's integral has a closed form: the density where the stretch starts × its length × (1 − e^(−x))/x, for x how much the exponent changes along it. For a level ray x is 0 and the factor's limit is 1 (density × length), so the formula switches to its series near 0, where computing (1 − e^(−x))/x directly would lose every digit. That far fog is lit by the sun and sky without shadows, out to the fog's farthest distance, so the sky beyond it still shows.
+
+**Glass in fog.** Glass is drawn after the picture is fogged, over a picture that already holds the fog up to the surface behind it. So glass adds its own light dimmed by the fog in front of it, and the fog's light only for the share of light the glass does not let through. Working it out, that is exactly what the glass and the surface behind it fogged one after the other give.
+
+**What it leaves out**: lights without shadow maps light the fog through walls; the fog does not dim light on its way to a froxel; the probes in empty air stay asleep, so air high above the ground takes the coarser probes' light.
 
 ---
 

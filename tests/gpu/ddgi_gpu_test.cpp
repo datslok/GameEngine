@@ -510,7 +510,7 @@ namespace {
 
             const SampledImage dummy{white->getView(), sampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             return writeSceneSet(descriptors, sceneLayout, buffers,
-                                 SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance(), dummy, dummy, dummy, dummy},
+                                 SceneImages{dummy, dummy, dummy, ddgi.sampledIrradiance(), ddgi.sampledDistance(), ddgi.sampledFastIrradiance(), dummy, dummy, dummy, dummy, dummy},
                                  clusterMasks, SceneBufferViews{ddgi.describeProbeStates(0), buffers.skyLight.describe(), ddgi.describeProbeCascades(0)});
         }
 

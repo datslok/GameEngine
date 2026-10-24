@@ -589,7 +589,7 @@ Files:
   - helpers for semaphores, fences, samplers, command pools and SPIR-V modules.
 - `owned_handle` (`OwnedHandle<T>`: one device object and its destroy function).
 - `vulkan_check` (`vulkanCheck`: a `VkResult` other than success becomes an exception naming it).
-- `vulkan_memory`: `VulkanBuffer` in `BufferMemory::Gpu`, `Upload` (mapped, sequential writes) or `Readback` (mapped, cached); `VulkanImage`, a 2D image with a view of all levels and its current `ImageState`.
+- `vulkan_memory`: `VulkanBuffer` in `BufferMemory::Gpu`, `Upload` (mapped, sequential writes) or `Readback` (mapped, cached); `VulkanImage`, a 2D image (or a cube, or a volume: `ImageDescription::volume`, a 3D image `depth` texels deep) with a view of all levels and its current `ImageState`.
 - `image_state` (below).
 - `immediate_commands` (`ImmediateCommands::run`: record, submit, wait; uploads, the atlas clear and the GPU tests' dispatches).
 - `vulkan_compute` (`ComputePipeline`, see GPU tests and shader libraries).
@@ -682,6 +682,7 @@ A frame (`render`) runs these steps:
 - the ray tracing scene and the light probes' update (when the GPU has ray queries, `GlobalIlluminationSettings::enabled` and the frame has `ProbeCascades`; see Light probes);
 - the clusters' light lists (when `RenderSettings::clusteredShading`, on by default, or `clusterHeatmap`; see Clustered shading);
 - shadows;
+- the fog's grid, lit and integrated (when the frame has a `Fog` and `RenderSettings::fog` is on; see Volumetric fog);
 - the depth prepass (when `RenderSettings::depthPrepass`, on by default);
 - main pass;
 - the probes' debug balls (when `showProbes`);
@@ -755,19 +756,21 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 | `Probes` | the light probes' trace and update |
 | `Clusters` | the clusters' light lists, a compute pass |
 | `Shadows` | |
+| `Fog` | FOG: the fog's grid lit and integrated, only with fog |
 | `DepthPrepass` | |
 | `MirroredLights` | MIRROR: light reflected off mirrors onto what the prepass drew, only while the pass runs |
 | `Main` | |
 | `ProbeBalls` | the probes' debug balls |
 | `RayDebug` | the ray tracing debug view |
 | `DepthRange` | the screen's depths measured for the sun's cascades, a compute pass |
+| `FogApply` | FOGMIX: the picture before the glass seen through the fog, only with fog (after the reflections) |
 | `EyeAdaptation` | EYE: the scene's brightness and the adapted exposure, two compute passes, while it adapts |
 | `Bloom`, `ToneMap`, `DebugLines` | |
 | `Overlay` | the composite |
 
 The same file has:
 
-- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, PREPASS, MIRROR, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
+- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, FOG, PREPASS, MIRROR, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
 - `gpuTimestampCount` (one stamp before the first pass and one after each);
 - `timestampTicksBetween` (the difference masked to the queue's `timestampValidBits`, so a counter that rolls over still gives the right count);
 - and `gpuTimingsFromTicks` (seconds per pass from the device's `timestampPeriod`; the passes add up to `totalSeconds`; not `valid` with zero valid bits).
@@ -880,8 +883,10 @@ Descriptors (`scene_layout`):
 | 11 | the cluster masks |
 | 12 and 13 | the light probes' irradiance and distance atlases (fragment and compute) |
 | 14 | the lights probe rays' hits may need (compute) |
+| 27 | the fog's record (`GpuFog`, fragment and compute; see Volumetric fog) |
+| 28 | the fog integrated through its grid (fragment and compute) |
 
-- The frame data and the point and spot lights are visible to the compute stage too, and the masks to fragment and compute.
+- The frame data and the point and spot lights are visible to the compute stage too, and the masks, the shadow tiles and the atlas (for the fog's grid) to fragment and compute.
 
 **Sharing the layout.** `SceneLayout` owns set 1's layout and the pipeline layout of both sets plus the push constant, shared by the main, shadow and tile reset pipelines (`PipelineDescription::sharedLayout`) and the cluster pass (`ComputePipelineDescription::sharedLayout`).
 
@@ -2266,6 +2271,76 @@ With it off and no baked occlusion every factor is exactly 1 and the picture is 
 
 **Not measured yet**: its cost and its look in the game. **Not yet**: half resolution, if the cost calls for it.
 
+## Volumetric fog
+
+Light scattered by the air towards the eye, so beams and lamps light the fog round them and distant things fade into it (`volumetric-fog`). `scene/fog` (the component), `render/gpu/volumetric_fog` (mirrored by `assets/shaders/volumetric_fog.glsl`, numbers in `volumetric_fog_shared.h`), `render/vulkan/vulkan_fog`, `scene_fog.glsl`, `fog_light.comp`, `fog_integrate.comp` and `fog_apply.comp`.
+
+**The physics** (single scattering). Along a view ray to a surface at distance d:
+
+  L_eye = T(d) L_surface + integral from 0 to d of T(s) extinction(s) albedo S(s) ds,  T(s) = exp(-integral of extinction)
+
+S is the light arriving at s from every light, each times the phase function at the angle between the view and the way to the light, and its shadow there. In the engine's units (a light's value its irradiance E, a pixel pi times radiance; see Light) a light adds `fogInScattering` = pi p(g, cos) E per unit of optical depth, and the light from all around `fogAmbient` = the mean of the irradiance from above and from below (a uniform sky of radiance L gives pi L each way).
+
+**The `Fog` component** (`scene/fog.h`, collected into `FrameLighting::fog`, the first; `visit` names its fields):
+
+| Field | Default | |
+|---|---|---|
+| `density` | 0.02 per metre | the extinction at the base height (3 / density is about how far one sees) |
+| `baseHeight` | 0 m | |
+| `scaleHeight` | 10 m | the density falls by e every scale height up, and grows below (`fogDensity`, its exponent capped at `FOG_MAX_EXPONENT` 60) |
+| `albedo` | 1, 1, 1 | the share of the extinction that scatters, per colour |
+| `anisotropy` | 0.6 | Henyey-Greenstein's g (`henyeyGreensteinPhase`, shared with the sky) |
+| `maxDistance` | 1000 m | no fog beyond, along a ray, so the sky past it shows |
+
+**Settings** (`FogSettings`, `RenderSettings::fog`, F5 Fog; `validateFog`):
+
+| Setting | Default | |
+|---|---|---|
+| `enabled` | on | off on the Low preset |
+| `range` | 100 m | how far the grid reaches (`FOG_MIN_RANGE` 5 to `FOG_MAX_RANGE` 2000), never past the camera's far plane |
+| `gridWidth`, `gridHeight`, `slices` | 160, 90, 64 | froxels across, down and deep (Medium 128, 72, 48; Low 96, 54, 32); changing them remakes the grid after waiting for the GPU |
+| `historyWeight` | 0.9 | how much of last frame's grid a froxel keeps (at most `FOG_MAX_HISTORY_WEIGHT` 0.98) |
+| `probeLight` | on | the light from all around from the probes (where the frame has them), else the flat ambient |
+
+**The grid.** Froxels (frustum voxels) shaped like the view, through the camera without the jitter (`motionViewProjection`), camera-relative:
+
+- A place in it is (across 0..1, down 0..1 with rows from the top, slice coordinate 0..1): `fogVolumeCoordinate` through the view-projection, the clip w being the view depth; `fogVolumePoint` back along the ray through the screen place (its direction from the inverse at half depth) scaled to the slice's view depth.
+- Slices are even in log(depth + `FOG_SLICE_START` 1 m) (`fogSliceDepth`, `fogDepthSlice`): about 7 cm deep at the camera and 7 m at 100 m for 64 slices.
+- Froxel (x, y, k)'s middle is ((x, y, k) + 0.5) / size.
+
+**The record** (`GpuFog`, 272 bytes, std430, `SceneBuffers::fog` at set 1 binding 27, fragment and compute; `packFog`): the grid's camera, its inverse and last frame's (taking this frame's camera-relative points, `previousRelativeViewProjection`), the grid (froxels across, down, slices, range), the medium (density, base height, scale height, g), the albedo with the farthest distance in w, the options (x 1 when on, y the history weight or 0 without a usable history, z 1 reading the probes) and the jitter. All zeros without fog. Binding 28 is the integrated grid (`VulkanFog::sampledVolume`; a 1 x 1 x 1 clear stand-in, no light and everything let through, on frames without fog).
+
+**The passes** (`VulkanFog`, its three pipelines on the scene's sets 0 and 1 plus a set 2 of their own; its images RGBA16F volumes, `ImageDescription::volume`):
+
+1. **Lighting** (`fog_light.comp`, 4 x 4 x 4 froxels a group, `GpuPass::Fog`, FOG, right after the shadows and before the depth prepass; the shadow atlas moved to `DepthComputeRead` for it and back). Each froxel's point is its middle moved by the frame's `fogJitter` (Halton 2, 3, 5 over `FOG_JITTER_FRAMES` 16), clamped into the grid. Its light:
+   - every directional light, shadowed by its finest cascade holding the point (moved towards the light by the cascade's bias) with one hardware-filtered comparison (`shadowTap`, `scene_shadow_tiles.glsl`); lit past the last cascade;
+   - the point and spot lights its cluster lists (`clusterOfPixel` at its screen place and view depth; every light when clustered shading is off), with `distanceFalloff`, `spotCone` and one comparison against the light's tile;
+   - the light from all around: `probeAmbientInAir` (`scene_probes.glsl`): the cascades densest first as for a surface, each from `sampleProbesInAir`, the 8 corner probes weighted by `probeAirWeight` (visibility crushed, times trilinear: no surface faces them), read straight up and down, still and fast atlases apart; the flat ambient takes what is left;
+   - times the albedo, with the extinction (`fogDensity` at the point's height) in alpha. Last frame's grid, read where the point was then (filtered), keeps `fogHistoryWeight`'s share: the weight inside last frame's grid, else 0.
+2. **Integration** (`fog_integrate.comp`, 8 x 8 columns a group): front to back, each slice as long as its depth step times the column's stretch (1 / the ray's cosine to the view axis), `fogIntegrateSlice`: light += scattered x transmittance x (1 - exp(-depth)) (`oneMinusExp`, shared with the sky), transmittance x= exp(-depth). Texel k holds the fog to the far side of slice k. `integrateFogColumn` mirrors it.
+3. **The picture** (`fog_apply.comp`, 8 x 8 pixels a group, `GpuPass::FogApply`, FOGMIX, after the reflections and before the glass, so the picture before the glass, which refracting glass and the reactive mask read, is fogged). Each pixel's point from the depth (the sky's anywhere on its ray), `fogAlongView` (`scene_fog.glsl`), and `fogComposite`: colour x transmittance + light, in place. Push constants `GpuFogPicturePass` (the jittered camera's inverse, the render size).
+
+**Reading the fog along a view** (`fogAlongView`): the integrated grid at the point's place (`fogSliceRead`: half a texel earlier in depth, clamped to the texels' middles, fading towards no fog inside the first half slice; the sky reads the whole grid), then, where the ray goes on past the grid's range (range / the ray's cosine to the view axis) up to the fog's farthest distance, `fogBeyondGrid`: the height fog's closed form (`fogOpticalDepth`: the start's density x the length x (1 - exp(-x)) / x for x the exponent's change along the ray, its series near 0, capped looking down), lit by the directional lights and the flat ambient without shadows (`fogBeyondSource`), joined by `fogFollow`.
+
+**Glass** (`triangle_transparent.frag`, `scene_surface.glsl`) is drawn over a picture already fogged to the surface behind it, so it adds `fogOverGlass`: its own light dimmed by the fog in front, plus the fog's light for the share it does not let through (per colour). Glass over the picture is then the glass and the surface behind fogged in turn (tested).
+
+**History.** `VulkanFog::prepare` keeps last frame's grid camera and the camera's place; the history counts when last frame drew fog with the same grid and range. Two lighting grids take turns (this frame's written, last frame's read).
+
+**Barriers.** This frame's lighting grid from last frame's reads to storage writes, discarded; last frame's readable by compute (made readable, unwritten, the first time: its weight is 0 then); the lighting grid to compute reads for the integration; the integrated grid from last frame's reads (the picture pass, glass) to storage writes, discarded, then `SurfaceRead`. The clusters' lists' barriers include the compute stage on both sides. The picture pass moves the depth to `DepthComputeRead` and the scene image to `ComputeStorage` (kept).
+
+**Tests:** `volumetric_fog_test` (the settings, the medium, the closed form against a fine sum level, rising, falling and nearly level, the slices both ways, the grid's coordinates both ways through a real camera, the jitter's bounds and cycle, the phase function's furnace over 8,192 directions, the slab exact and energy-conserving, a stretch followed by another, glass over the fog, the slice read, the history weight, the column, past the grid, `probeAirWeight`, packing and collection), `quality_preset_test`, `gpu_timing_test`, `light_lab_test` (the mist); GPU tests in `volumetric_fog_gpu_test` and `ddgi_sampling_gpu_test` (written and built, not run).
+
+**Not done:**
+
+- Probes in empty air stay asleep (waking them all would pass the traced probes' budget, see `docs/BUILDLOG.md`): air far above the ground reads the coarser cascades' light.
+- Lights without shadow maps light the fog through walls.
+- The sky's fog past the sun's last cascade has no sun shadows.
+- Refracting glass reads the fogged picture and adds the front fog's light for its covered share, counting that part twice.
+- The fog does not dim light on its way to a froxel.
+- The reflection probe's capture and the probes' rays see no fog.
+
+**Not measured yet:** its cost and its look in the game.
+
 ## Depth and camera-relative rendering
 
 ### Reversed-Z
@@ -2799,6 +2874,8 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 - Sunlight fades in between -1 and 4 degrees of elevation and warms below 30 (from (1, 0.96, 0.9) to (1, 0.55, 0.3)).
 - The sky's ambient and background (tint (0.6, 0.75, 1)) are full above 20 degrees and dim to a 3% night share at -6.
 - Brightness values are by eye until lights have physical units.
+
+**The mist** (`LightLabMistSettings`, group "Mist"; see Volumetric fog): on at the start (`enabled`), a `Fog` of density 0.01 per metre at the ground (about 300 m of sight), thinning by e every 10 m up, picked by eye, so the sunbeams through the window and the street lamps' halos show. `updateDaylight` puts it on the air entity beside the `Atmosphere` while it is on and takes it away when it is off.
 
 ## Characters
 

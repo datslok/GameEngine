@@ -1,0 +1,40 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The picture before the glass seen through the fog (render/gpu/volumetric_fog.h), one invocation per render pixel: its
+* point from the depth (the sky's along its ray), the fog from the camera to it (the grid's, then the closed form's), and
+* the pixel dimmed and lit by it, in place.
+*/
+#include "render/gpu/depth_shared.h"
+#include "screen_reflections.glsl"
+#include "frame_data.glsl"
+#include "scene_lights.glsl"
+#include "scene_sky.glsl"
+#include "scene_fog.glsl"
+
+layout(local_size_x = FOG_APPLY_GROUP_SIDE, local_size_y = FOG_APPLY_GROUP_SIDE) in;
+
+layout(set = 2, binding = 0) uniform sampler2D depth;                 // exact texels
+layout(set = 2, binding = 1, rgba16f) uniform image2D picture;        // the scene image, changed in place
+
+// Must match GpuFogPicturePass in render/gpu/volumetric_fog.h.
+layout(push_constant) uniform Pass {
+    mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
+    vec4 size;                  // xy: the render size in pixels
+} pass;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (texel.x >= int(pass.size.x) || texel.y >= int(pass.size.y)) {
+        return;
+    }
+
+    float pixelDepth = texelFetch(depth, texel, 0).r;
+    bool sky = pixelDepth == float(GPU_FAR_DEPTH);
+    // The sky's point is any on its ray: halfway in the depth range.
+    vec3 point = positionAtPixel(pass.inverseViewProjection, vec2(texel) + 0.5, sky ? 0.5 : pixelDepth, pass.size.xy);
+    vec4 colour = imageLoad(picture, texel);
+    imageStore(picture, texel, vec4(fogComposite(colour.rgb, fogAlongView(point, sky)), colour.a));
+}
