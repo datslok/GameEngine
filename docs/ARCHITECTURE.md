@@ -2532,7 +2532,7 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 
 ## Cloth
 
-The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`), the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`) and a hand that drags it (`cloth-grab`, tested in `cloth_grab_test`). Bending and moving pins come next.
+The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`), the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`), a hand that drags it (`cloth-grab`, tested in `cloth_grab_test`), and bending and moving pins (`cloth-bending`, tested in `cloth_bending_test`).
 
 **The points** (`cloth_particles`, `ClothParticles`): one per vertex of the sheet's mesh, point i the mesh's vertex i, as plain arrays (structure of arrays): `positions`, `previousPositions` (where each was when the step began), `velocities` and `inverseMasses` (1 / kg; 0 for a pinned point, which nothing then moves, with no special case).
 
@@ -2553,6 +2553,22 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 - `stretchConstraints(mesh)`: every edge of the triangles once (first < second), sorted, at its length in the mesh. On a grid, its rows' and columns' threads and one diagonal a square, which also resists shear: columns (rows + 1) + (columns + 1) rows + columns rows edges.
 - `solveStretch(particles, constraints, compliance, seconds)`: one pass in order (Gauss-Seidel), the multiplier starting at 0 since each substep makes one pass: delta lambda = -C / (w_first + w_second + compliance / seconds^2), each end moved along the edge by its inverse mass times delta lambda. A pinned end never moves and the centre of mass stays put; edges with both ends pinned, or squashed below `shortestEdge`, are skipped.
 - Compliance (m/N) is 1 / stiffness: 0 holds lengths exactly; a positive value is a spring of that stiffness whatever the step (tested: a weight m hangs stretched by m g alpha for 5, 15 and 30 substeps).
+
+**Bending** (`cloth_constraints`):
+
+- `BendConstraint {wing0, wing1, edgeStart, edgeEnd, restAngle, stiffnessShare}`: a hinge, two triangles sharing an edge, C = angle - restAngle (wrapped to -pi..pi).
+- `bendConstraints(mesh)`: every edge shared by exactly two triangles, sorted by its ends, at its angle in the mesh (so curved garments can rest curved), with `stiffnessShare` = 3 l^2 / A (l the edge, A the two triangles' area; discrete shells, Grinspun et al. 2003). A grid has its edges less the 2 (columns + rows) round its border.
+- `hingeAngle`: atan2 of the sine and cosine between the triangles' normals (unnormalised: atan2 does not change when both are scaled alike), not acos of the cosine, whose slope is infinite at flat; measured from normal1 towards normal0 about the edge. 0 for a squashed hinge.
+- `hingeAngleGradient`: Bridson, Marino & Fedkiw 2003's closed form, n0 and n1 the normals scaled by twice their triangles' areas, e the edge: the wings |e| n / |n|^2, the edge's ends the same scaled normals weighted by how far along the edge the wings lie. Sums to zero; tested against finite differences (it is the gradient of the angle with the sign above: the first try, normal0 towards normal1, came out exactly opposite).
+- `solveBend(particles, hinges, bendingStiffness, seconds)`: one pass, XPBD's step with alpha = 1 / (B stiffnessShare), angle and gradient from one frame (`hingeState`). No bending for B = 0.
+- **Units:** B is the bending rigidity the cantilever test measures (N m): silk about 1-5 micro N m, cotton shirting about 10, denim 50-200. Bending length (B / (areaDensity g))^(1/3) is 1.7 cm for the default cotton, near real shirting's 2-3 cm.
+- **Convergence:** one Gauss-Seidel pass a substep carries stiffness about a hinge a pass, so a finer mesh needs more passes. A very stiff strip (B 5 mN m, card) droops 75% more on a mesh twice as fine at 15 substeps, 20% more at 60 (tested: the gap shrinks with the substeps). At real fabrics' stiffness the two meshes agree within 4% at 15 substeps.
+
+**Moving pins** (`cloth`):
+
+- `ClothPin {particle, position}` in `Cloth::pins`, made by `addClothPin(cloth, particle)` (inverse mass 0, at its point). The game sets each position from its commands before a tick.
+- Each substep after the prediction, a pin slides a share of the way from where the tick found it to its position (exactly there on the last), so it moves without a jolt and its velocity is its motion (tested: a pin moving 5 mm a tick has 0.6 m/s, and a strip between two pins follows them).
+- Drag slows only free points: a pin's velocity stays its motion.
 
 **Float precision:** each substep gravity moves a point by g h^2 (3 micrometres at 15 substeps), which a float resolves only to about 0.1 micrometre at 1 m from the origin and 0.5 at 4 m, so the balance between gravity and the edges settles where the rounded moves cancel: the Hooke test's stretch is 0.4-0.5% off. Invisible for cotton's 0.15% stretch; far from the origin (large worlds) the cloth would want its points kept relative to an origin of its own.
 
@@ -2576,13 +2592,14 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 | `substeps` | 15 a tick (1.8 kHz) | Small Steps (Macklin et al. 2019): for the same work, more substeps leave far less stretch than more passes |
 | `drag` | 0.5 per second | every velocity times e^(-drag h) each substep, standing in for the air; picked by eye |
 | `grabCompliance` | 0.001 m/N | the hand's give (see The hand) |
+| `bendingStiffness` | 1e-5 N m | a light cotton's bending rigidity (see Bending) |
 
-- `Cloth {settings, particles, stretch, triangles, grab}`, simulated in world space (its entity's `Transform` is not used).
-- `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses and rest lengths come from the placed sheet.
-- `stepClothParticles(particles, stretch, settings, seconds)`: `substeps` substeps, each `predictCloth`, `solveStretch`, `finishClothStep`, then drag; throws for fewer than one substep. `stepCloth(cloth, seconds)`.
+- `Cloth {settings, particles, stretch, bend, pins, triangles, grab}`, simulated in world space (its entity's `Transform` is not used).
+- `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses, rest lengths and rest angles come from the placed sheet.
+- `stepCloth(cloth, seconds)`: `substeps` substeps, each `predictCloth`, the moving pins slid, `solveStretch`, `solveBend`, the hand (`solveGrab`), `finishClothStep`, then drag on the free points; throws for fewer than one substep. `stepClothParticles(particles, stretch, settings, seconds, grab)` is the same with stretch and a hand alone (for tests).
 - `stepCloths(world, seconds)`: each cloth's tick, then its points copied into the entity's `DeformingMesh` (drawn from a mesh at the identity), so the simulation never depends on drawing (120 KB a tick for a 100 x 100 sheet).
 
-**Measured** (release, one thread, best tick of 120, 15 substeps): the cloth lab's 28 x 30 sheet (2,578 edges) 0.37 ms a tick, about 4% of a core at 120 ticks a second; a 100 x 100 sheet (30,200 edges) 4.2 ms, too slow for one thread, waiting for the multi-threaded or GPU solver. The debug build is several times slower.
+**Measured** (release, one thread, best tick of 120, 15 substeps): the cloth lab's 28 x 30 sheet (2,578 edges, about 2,500 hinges) 2.0 ms a tick with bending (0.37 ms with stretch alone), about a quarter of a core at 120 ticks a second; a 100 x 100 sheet 24 ms, too slow for one thread, waiting for the multi-threaded or GPU solver. A hinge solve costs about 45 ns (atan2 only 4.5 ns of it), five times a stretch solve. The debug build is several times slower.
 - `hashSimulationState` includes every cloth's positions, velocities and inverse masses.
 
 ## Deforming meshes
@@ -3010,6 +3027,7 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 
 - It starts flat level with the fabric bar's underside under its left half, stretching forward from the bar (`ClothLabLayout::sheetCentre`; the grid turned to face up, its top edge at the back), pinned at the two corners of its back edge.
 - It falls, swings down and hangs from the pins, its points driving a deforming mesh of its own (see Deforming meshes) drawn in world space.
+- **Hooks:** its two pins are moving pins (`addClothPin`), hooks on the bar. `ClothLabHookSettings::hookGap` (F5's Hooks group, `getHookSettings`; the sheet's width at the start, at least `clothLabSmallestHookGap` 0.05 m, at most the sheet's width) is where they should be; each tick moves the gap towards it at `clothLabHookSpeed` (0.5 m/s), about the sheet's middle (`hookMiddle`), so bunching the sheet up shows its folds.
 - Its fabric is the lab's `ClothSettings` (`getClothSettings`, F5's Cloth group), given to the sheet every tick before `stepCloths`; `getSheet()`.
 - **Dragging** (`updateGrab`, in `onInput`, from last frame's camera): a left press casts `PlayerControls::pointerRay` (the crosshair while the mouse looks, the cursor in MOBA mode) at the sheet within `clothLabGrabReach` (10 m) and grabs the nearest corner; while held, the hand (`getSheetGrab`) stays the grab's distance along the pointer, so turning or walking carries the cloth; a release or a pointer leaving the window lets go. While the mouse should look but is free (after Escape), the click that captures it grabs nothing. The ticks give it to the sheet (`Cloth::grab`); `onDebugDraw` draws a yellow line from the held point to the hand.
 

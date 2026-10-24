@@ -2,6 +2,7 @@
 
 #include "cloth/cloth.h"
 #include "core/settings_visitor.h"
+#include "games/clothlab/cloth_lab_layout.h"
 #include "ecs/world.h"
 #include "engine/game.h"
 #include "gameplay/control_mode.h"
@@ -21,6 +22,20 @@ inline constexpr float clothLabSunIntensity = 4.0f;
 
 // The left button grabs the sheet within this reach of the eye, so it cannot be pulled from across the field.
 inline constexpr float clothLabGrabReach = 10.0f;
+
+/*
+* The sheet hangs from two hooks on the fabric bar, like a curtain on a rail. Hook gap (Hooks in F5) is how far apart
+* they should be, at most the sheet's width; they slide there at this speed, about the sheet's middle, so bunching the
+* sheet up shows how its bending makes folds.
+*/
+struct ClothLabHookSettings {
+    float hookGap = clothLabSheetWidth; // m
+};
+
+void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
+
+inline constexpr float clothLabHookSpeed = 0.5f; // m/s
+inline constexpr float clothLabSmallestHookGap = 0.05f;
 
 /*
 * The cloth lab: a test ground for phase 7's cloth, a station for each milestone on a plain floor under an afternoon
@@ -52,6 +67,7 @@ public:
     // The hanging sheet: a Cloth, the DeformingMesh it drives and a ModelRenderer drawing it.
     Entity getSheet() const;
     ClothSettings& getClothSettings();
+    ClothLabHookSettings& getHookSettings();
     PlayerControls& getControls();
 
     // The hand holding the sheet while the left button is held: the command the next ticks carry out.
@@ -66,6 +82,11 @@ private:
     // The hanging sheet, and its fabric (the Cloth group in F5), given to it every tick.
     Entity sheet;
     ClothSettings clothSettings;
+
+    // Where the hooks should be, and how far apart they are now on their way there.
+    ClothLabHookSettings hookSettings;
+    float hookGapNow = clothLabSheetWidth;
+    Vec3 hookMiddle;
 
     // The hand, and how far from the eye the sheet was grabbed: the hand stays that far along the pointer.
     std::optional<ClothGrab> sheetGrab;

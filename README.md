@@ -130,7 +130,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Emissive colour, with KHR_materials_emissive_strength.
   - Optional smooth normals with a crease angle, for models that have none.
 - **An asset manager** that loads each file once and hands out typed handles.
-- **Cloth** (being built): a sheet's points held by stretch constraints, solved with XPBD in 15 substeps a tick, with stiffness from real fabric (1 / compliance, about 2000 N/m for cotton), mass from its weight per area, pins and air drag. A hand can grab any point and pull it, a stiff spring that lets the cloth be flung.
+- **Cloth** (being built): a sheet's points held by stretch constraints, solved with XPBD in 15 substeps a tick, with stiffness from real fabric (1 / compliance, about 2000 N/m for cotton), mass from its weight per area, bending stiffness from the fabric's measured rigidity (folds sized as real cotton's), pins the game can move (hooks on a rail), and air drag. A hand can grab any point and pull it, a stiff spring that lets the cloth be flung.
 - **Deforming meshes** (for cloth): meshes whose vertices move every tick, drawn blended between ticks with their normals and tangents worked out again each frame. They cast shadows, show up in ray-traced light and reflections, and give temporal anti-aliasing their motion.
 
 ### The engine core
@@ -170,7 +170,7 @@ Several games run on one engine, picked at start-up with `--game`.
 - At night, the moon in its real place and phase, lighting the sky and casting shadows, and the 9,096 brightest real stars, in their colours, turning with the sky.
 - A thin ground mist, so sunbeams through the window, the flashlight's cone and the street lamps' halos show (Mist in F5).
 
-**The cloth lab** (`--game clothlab`): a plain floor under an afternoon sun, with a test station for each of the cloth milestones: a ball on a pedestal under a bar to pin a sheet to, a mat to drop sheets onto, and a wide bar to hang two fabrics side by side. A red cotton sheet starts flat level with the wide bar, pinned at its two back corners, then falls, swings down and hangs (its fabric in F5, Cloth); hold the left mouse button on it to drag it. It does not collide with anything yet (roadmap phase 7).
+**The cloth lab** (`--game clothlab`): a plain floor under an afternoon sun, with a test station for each of the cloth milestones: a ball on a pedestal under a bar to pin a sheet to, a mat to drop sheets onto, and a wide bar to hang two fabrics side by side. A red cotton sheet starts flat level with the wide bar, pinned at its two back corners, then falls, swings down and hangs (its fabric in F5, Cloth); hold the left mouse button on it to drag it, and slide its hooks together along the bar with Hook gap (F5, Hooks) to bunch it into folds. It does not collide with anything yet (roadmap phase 7).
 
 ### Tools for building and testing
 

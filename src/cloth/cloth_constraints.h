@@ -3,6 +3,7 @@
 #include "cloth/cloth_particles.h"
 #include "scene/mesh.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -33,3 +34,42 @@ std::vector<StretchConstraint> stretchConstraints(const Mesh& mesh);
 * the edge a spring of that stiffness whatever the step. Edges with both ends pinned, or squashed to a point, are skipped.
 */
 void solveStretch(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, float compliance, float seconds);
+
+/*
+* A bending constraint on a hinge: two triangles sharing the edge edgeStart-edgeEnd, their far corners wing0 and wing1,
+* C = angle - restAngle, the angle between the triangles (0 flat). stiffnessShare is 3 l^2 / A from the rest shape (l the
+* edge's length, A the two triangles' area; discrete shells, Grinspun et al. 2003), so a hinge's compliance is
+* 1 / (B stiffnessShare) for a fabric of bending rigidity B (N m), and the same B drapes alike at any mesh resolution.
+*/
+struct BendConstraint {
+    std::uint32_t wing0 = 0;
+    std::uint32_t wing1 = 0;
+    std::uint32_t edgeStart = 0;
+    std::uint32_t edgeEnd = 0;
+    float restAngle = 0.0f;
+    float stiffnessShare = 0.0f;
+};
+
+// Every edge of the mesh shared by exactly two triangles, sorted by its ends, at its angle in the mesh.
+std::vector<BendConstraint> bendConstraints(const Mesh& mesh);
+
+/*
+* The hinge's angle, -pi..pi: 0 flat, its sign telling which way it is folded. From atan2 of the sine and cosine
+* between the triangles' normals, not acos of the cosine, whose slope is infinite exactly at flat. 0 for a hinge
+* squashed so a triangle or the edge has no size.
+*/
+float hingeAngle(const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd);
+
+/*
+* How the angle changes as each point moves (wing0, wing1, edgeStart, edgeEnd), in closed form (Bridson, Marino &
+* Fedkiw 2003): the wings along their triangles' normals, inversely to their distance from the edge, the edge's ends by
+* how far along it the wings lie. They sum to zero. All zero for a squashed hinge.
+*/
+std::array<Vec3, 4> hingeAngleGradient(const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd);
+
+/*
+* One pass over the hinges in order, XPBD's multiplier step (starting at 0): delta lambda = -C / (sum of w |grad|^2 +
+* alpha / seconds^2), alpha = 1 / (bendingStiffness stiffnessShare), each point moved by its w times its gradient times
+* delta lambda; C is wrapped to -pi..pi. No bending at all for a stiffness of 0.
+*/
+void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds);

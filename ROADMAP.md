@@ -292,7 +292,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] Particle store for cloth: the sheet's points as plain arrays, lumped masses, pins, the step (`cloth-particles`)
 - [x] XPBD solver: substeps, compliance, stretch constraints and pins, a sheet hanging in the cloth lab (`xpbd-cloth`)
 - [x] Dragging cloth with the mouse: a hand constraint on the grabbed point (`cloth-grab`)
-- [ ] Cloth constraints: bending (angle between neighbouring triangles), and moving pins (hangers); stretch and fixed pins came with the solver
+- [x] Cloth constraints: bending (the hinge angle, Bridson's gradient) and moving pins (hooks on a rail) (`cloth-bending`)
 - [ ] Collision with bodies: spheres and capsules first (phase 5's shapes), then a signed distance field around a mannequin
   - The field is built in compute (it can serve later as DDGI's software tracer and for distance-field AO).
   - Friction between cloth and body (phase 5's `bounceVelocity` fits the velocity response; its `fly` does not fit the step, see `cloth-particles` in the build log)
@@ -301,6 +301,8 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
   - Cloth is so thin that a fast-moving layer can jump right through another between two substeps, so it also needs continuous collision detection (vertex-triangle and edge-edge pairs checked along their motion during the step) and a cloth thickness that keeps layers apart
 - [ ] Untangling pass (Baraff, Witkin & Kass 2003, "Untangling Cloth") as a safety net: finds intersections that slipped through anyway and pushes the tangled regions apart over the next steps, instead of letting them lock together for good
 - [ ] Solver on the GPU (phase 6's compute pipelines) or on several threads (the job system above), once a sheet is too slow on one core, checked against the CPU solver
+  - With bending, the lab's 28 x 30 sheet takes 2.0 ms a tick on one core (about a quarter of a core at 120 ticks a second) and a 100 x 100 sheet 24 ms: already too slow for big sheets.
+  - One Gauss-Seidel pass a substep carries stiffness about a hinge a pass, so stiff fabric on a fine mesh looks softer than it is (measured in `cloth-bending`); a parallel solver should keep or improve the passes per substep.
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
   - Bending stiffness (silk vs denim), mass per area, friction

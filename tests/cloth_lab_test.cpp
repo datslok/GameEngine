@@ -191,6 +191,46 @@ namespace {
     }
 
     /*
+    * The sheet hangs from two hooks on the bar, a sheet's width apart at the start. The Hook gap setting slides them
+    * along the bar at a steady speed, about the sheet's middle, never further apart than the sheet is wide, and the
+    * sheet bunches up between them.
+    */
+    void testHooksSlide() {
+        ClothLab lab;
+        const ClothLabLayout layout = buildClothLabLayout();
+        const Cloth& cloth = lab.world.get<Cloth>(lab.game.getSheet());
+        assert(cloth.pins.size() == 2);
+        assert(near(lab.game.getHookSettings().hookGap, clothLabSheetWidth));
+        const auto gap = [&] {
+            return cloth.particles.positions[cloth.pins[1].particle].x - cloth.particles.positions[cloth.pins[0].particle].x;
+        };
+        assert(near(gap(), clothLabSheetWidth));
+
+        lab.game.getHookSettings().hookGap = 0.4f;
+        runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, 0.0);
+        assert(near(gap(), clothLabSheetWidth - clothLabHookSpeed / 120.0f));
+
+        for (int tick = 1; tick < 360; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        assert(near(gap(), 0.4f));
+        for (const ClothPin& pin : cloth.pins) {
+            const Vec3& hook = cloth.particles.positions[pin.particle];
+            assert(near(hook.y, clothLabBarUnderside(layout.fabricFrame)));
+            assert(near(hook.z, layout.fabricFrame.barCentre.z));
+        }
+        const float middle = 0.5f * (cloth.particles.positions[cloth.pins[0].particle].x + cloth.particles.positions[cloth.pins[1].particle].x);
+        assert(near(middle, layout.sheetCentre.x));
+
+        // Asked for more than the sheet is wide, the hooks stop at its width.
+        lab.game.getHookSettings().hookGap = 5.0f;
+        for (int tick = 0; tick < 360; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        assert(near(gap(), clothLabSheetWidth));
+    }
+
+    /*
     * Dragging: pressing the left button with the crosshair on the sheet grabs the point there; while it is held, the
     * hand stays at the grab's distance along the crosshair, so lifting the camera lifts the cloth; letting go drops it.
     * Out of reach, a press grabs nothing.
@@ -261,6 +301,7 @@ void testClothLab() {
     testTheLevelIsTheLayout();
     testItIsLit();
     testTheSheetHangs();
+    testHooksSlide();
     testTheSheetCanBeDragged();
     testItHasGoldenViews();
 }

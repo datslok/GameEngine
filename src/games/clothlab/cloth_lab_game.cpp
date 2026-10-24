@@ -12,6 +12,7 @@
 #include "scene/probe_volume.h"
 #include "scene/sun.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -141,8 +142,9 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
     const Mat4 flat = Mat4::translation(layout.sheetCentre.x, layout.sheetCentre.y, layout.sheetCentre.z) * Mat4::rotationX(-0.25f * fullTurnRadians);
     Cloth cloth = makeCloth(sheetMesh, flat, clothSettings);
     const std::size_t backEdge = static_cast<std::size_t>(clothLabSheetRows) * static_cast<std::size_t>(clothLabSheetColumns + 1);
-    pinParticle(cloth.particles, backEdge);
-    pinParticle(cloth.particles, backEdge + static_cast<std::size_t>(clothLabSheetColumns));
+    addClothPin(cloth, static_cast<std::uint32_t>(backEdge));
+    addClothPin(cloth, static_cast<std::uint32_t>(backEdge + static_cast<std::size_t>(clothLabSheetColumns)));
+    hookMiddle = (cloth.particles.positions[cloth.pins[0].particle] + cloth.particles.positions[cloth.pins[1].particle]) * 0.5f;
 
     DeformingMesh sheetShape;
     sheetShape.mesh = assets.addDeformingMesh(sheetMesh);
@@ -214,13 +216,19 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
 
 /*
 * The fabric's settings reach the sheet every tick, so the debug UI's changes apply at once (its mass per area only when
-* it is made).
+* it is made). The hooks step towards their gap at their speed, in ticks, so where they are depends only on the ticks.
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     (void)simulationSeconds;
     Cloth& cloth = world.get<Cloth>(sheet);
     cloth.settings = clothSettings;
     cloth.grab = sheetGrab;
+
+    const float wanted = std::clamp(hookSettings.hookGap, clothLabSmallestHookGap, clothLabSheetWidth);
+    const float step = clothLabHookSpeed * tickSeconds;
+    hookGapNow += std::clamp(wanted - hookGapNow, -step, step);
+    cloth.pins[0].position = hookMiddle - Vec3{0.5f * hookGapNow, 0.0f, 0.0f};
+    cloth.pins[1].position = hookMiddle + Vec3{0.5f * hookGapNow, 0.0f, 0.0f};
     stepCloths(world, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
@@ -255,9 +263,16 @@ void ClothLabGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha
     }
 }
 
+void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Hook gap", settings.hookGap, {.min = clothLabSmallestHookGap, .max = clothLabSheetWidth, .unit = "m"});
+}
+
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Cloth", [&] {
         visit(clothSettings, visitor);
+    });
+    visitor.group("Hooks", [&] {
+        visit(hookSettings, visitor);
     });
     controls.visitSettings(visitor);
 }
@@ -290,6 +305,10 @@ Entity ClothLabGame::getSheet() const {
 
 ClothSettings& ClothLabGame::getClothSettings() {
     return clothSettings;
+}
+
+ClothLabHookSettings& ClothLabGame::getHookSettings() {
+    return hookSettings;
 }
 
 PlayerControls& ClothLabGame::getControls() {
