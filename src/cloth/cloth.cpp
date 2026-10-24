@@ -1,5 +1,6 @@
 #include "cloth/cloth.h"
 
+#include "physics/overlap.h"
 #include "scene/deforming_mesh.h"
 
 #include <cmath>
@@ -14,6 +15,9 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Drag", settings.drag, {.min = 0.0f, .max = 100.0f, .sliderMax = 5.0f, .unit = "per second"});
     visitor.field("Grab compliance", settings.grabCompliance, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.01f, .unit = "m/N"});
     visitor.field("Bending stiffness", settings.bendingStiffness, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.0005f, .unit = "N m"});
+    visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 0.1f, .sliderMax = 0.02f, .unit = "m"});
+    visitor.field("Static friction", settings.staticFriction, {.min = 0.0f, .max = 2.0f});
+    visitor.field("Kinetic friction", settings.kineticFriction, {.min = 0.0f, .max = 2.0f});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
@@ -48,11 +52,35 @@ namespace {
         const std::vector<BendConstraint>& bend;
         const std::vector<ClothPin>& pins;
         const std::optional<ClothGrab>& grab;
+        const std::vector<Shape>& colliders;
     };
+
+    // The shapes whose boxes meet the box round the cloth, grown by its thickness: most bodies are nowhere near it.
+    std::vector<Shape> nearbyShapes(const ClothParticles& particles, const std::vector<Shape>& shapes, float thickness) {
+        if (shapes.empty() || particles.size() == 0) {
+            return {};
+        }
+
+        Aabb around{particles.positions.front(), particles.positions.front()};
+        for (const Vec3& position : particles.positions) {
+            around = enclosing(around, Aabb{position, position});
+        }
+        const Vec3 margin{thickness, thickness, thickness};
+        around = Aabb{around.minimum - margin, around.maximum + margin};
+
+        std::vector<Shape> nearby;
+        for (const Shape& shape : shapes) {
+            if (overlaps(around, boundsOf(shape))) {
+                nearby.push_back(shape);
+            }
+        }
+        return nearby;
+    }
 
     /*
     * Each substep: predict; slide the moving pins a share of the way to where they are going (the last substep exactly
-    * there); stretch, then bending, then the hand; velocities from the motion; drag on the free points.
+    * there); stretch, then bending, then the hand, then the bodies, last so nothing is left inside them; velocities from
+    * the motion; drag on the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds) {
         if (settings.substeps < 1) {
@@ -85,6 +113,9 @@ namespace {
             if (constraints.grab) {
                 solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
             }
+            if (!constraints.colliders.empty()) {
+                solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings);
+            }
             finishClothStep(particles, substep);
 
             // The air slows free points; a pin's velocity stays its motion, which the game drives.
@@ -98,14 +129,14 @@ namespace {
 }
 
 void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
-                        const std::optional<ClothGrab>& grab) {
+                        const std::optional<ClothGrab>& grab, const std::vector<Shape>& colliders) {
     const std::vector<BendConstraint> noBend;
     const std::vector<ClothPin> noPins;
-    stepTick(particles, TickConstraints{stretch, noBend, noPins, grab}, settings, seconds);
+    stepTick(particles, TickConstraints{stretch, noBend, noPins, grab, colliders}, settings, seconds);
 }
 
-void stepCloth(Cloth& cloth, float seconds) {
-    stepTick(cloth.particles, TickConstraints{cloth.stretch, cloth.bend, cloth.pins, cloth.grab}, cloth.settings, seconds);
+void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders) {
+    stepTick(cloth.particles, TickConstraints{cloth.stretch, cloth.bend, cloth.pins, cloth.grab, colliders}, cloth.settings, seconds);
 }
 
 /*
@@ -113,8 +144,9 @@ void stepCloth(Cloth& cloth, float seconds) {
 * sheet that is 120 KB a tick.
 */
 void stepCloths(World& world, float seconds) {
+    const std::vector<Shape> colliders = worldColliderShapes(world);
     world.each<Cloth>([&](Entity entity, Cloth& cloth) {
-        stepCloth(cloth, seconds);
+        stepCloth(cloth, seconds, colliders);
 
         if (DeformingMesh* mesh = world.tryGet<DeformingMesh>(entity)) {
             mesh->positions = cloth.particles.positions;

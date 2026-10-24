@@ -64,14 +64,17 @@ public:
     // For tests.
     const StaticLevel& getLevel() const;
 
-    // The hanging sheet: a Cloth, the DeformingMesh it drives and a ModelRenderer drawing it.
+    // The hanging sheet on its hooks, and the drape sheet over the ball: each a Cloth, the DeformingMesh it drives and a
+    // ModelRenderer drawing it.
     Entity getSheet() const;
+    Entity getDrapeSheet() const;
     ClothSettings& getClothSettings();
     ClothLabHookSettings& getHookSettings();
     PlayerControls& getControls();
 
-    // The hand holding the sheet while the left button is held: the command the next ticks carry out.
+    // The hand holding a sheet while the left button is held (the command the next ticks carry out), and which sheet.
     const std::optional<ClothGrab>& getSheetGrab() const;
+    Entity getGrabbedSheet() const;
 
 private:
     // Turn the left button into the hand's command: grab the sheet under the pointer, move the hand along it, let go.
@@ -88,8 +91,11 @@ private:
     float hookGapNow = clothLabSheetWidth;
     Vec3 hookMiddle;
 
-    // The hand, and how far from the eye the sheet was grabbed: the hand stays that far along the pointer.
+    Entity drapeSheet;
+
+    // The hand, the sheet it holds, and how far from the eye it was grabbed: the hand stays that far along the pointer.
     std::optional<ClothGrab> sheetGrab;
+    Entity grabbedSheet;
     float grabDistance = 0.0f;
 
     // The floor, the stations' blocks and the ball: built once in onInit, never rebuilt.

@@ -4,6 +4,7 @@
 #include "physics/overlap.h"
 #include "physics/static_level.h"
 #include "cloth/cloth.h"
+#include "cloth/cloth_collision.h"
 #include "cloth/cloth_grab.h"
 #include "demo_helpers.h"
 #include "scene/deforming_mesh.h"
@@ -104,12 +105,12 @@ namespace {
         assert(near(levelHeightBelow(level, layout.fabricFrame.barCentre.x, layout.fabricFrame.barCentre.z),
                     clothLabBarUnderside(layout.fabricFrame) + 2.0f * clothLabBarHalfThickness));
 
-        // Everything but the sheet, which moves.
+        // Everything but the two sheets, which move.
         int staticModels = 0;
         int others = 0;
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
         assert(staticModels >= 1);
-        assert(others == 1);
+        assert(others == 2);
         assert(!lab.world.get<ModelRenderer>(lab.game.getSheet()).isStatic);
     }
 
@@ -286,6 +287,59 @@ namespace {
         assert(!lab.game.getSheetGrab().has_value());
     }
 
+    /*
+    * The bodies cloth collides with are the layout's: the ball, the pedestal, the mat, every post and bar, and the floor,
+    * whose top is the ground.
+    */
+    void testCollidersMatchTheLayout() {
+        ClothLab lab;
+        const ClothLabLayout layout = buildClothLabLayout();
+        const std::vector<Shape> shapes = worldColliderShapes(lab.world);
+        assert(shapes.size() == 1 + layout.blocks().size() + 1);
+
+        int balls = 0;
+        bool floor = false;
+        for (const Shape& shape : shapes) {
+            if (const Sphere* ball = std::get_if<Sphere>(&shape)) {
+                assert(near(ball->radius, layout.ball.radius));
+                assert(near((ball->centre - layout.ball.centre).length(), 0.0f));
+                ++balls;
+            } else if (const Aabb* box = std::get_if<Aabb>(&shape)) {
+                floor = floor || (near(box->maximum.y, 0.0f) && box->maximum.x >= clothLabFloorHalfSize);
+            }
+        }
+        assert(balls == 1);
+        assert(floor);
+    }
+
+    /*
+    * The drape milestone: a sheet laid flat level with the drape bar, pinned at its back corners under it, falls onto
+    * the ball and settles draped over it: nothing inside the ball or below the floor, part of it resting on the ball.
+    */
+    void testTheDrapeSheetSettlesOverTheBall() {
+        ClothLab lab;
+        const ClothLabLayout layout = buildClothLabLayout();
+        const Entity drape = lab.game.getDrapeSheet();
+        assert(lab.assets.isDeforming(lab.world.get<DeformingMesh>(drape).mesh));
+        for (const Vec3& point : lab.world.get<Cloth>(drape).particles.positions) {
+            assert(near(point.y, clothLabBarUnderside(layout.drapeFrame)));
+        }
+
+        for (int tick = 0; tick < 600; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+
+        const Cloth& cloth = lab.world.get<Cloth>(drape);
+        float closest = 1e9f;
+        for (const Vec3& point : cloth.particles.positions) {
+            const float fromBall = (point - layout.ball.centre).length() - layout.ball.radius;
+            assert(fromBall > 0.5f * cloth.settings.thickness);
+            assert(point.y >= 0.5f * cloth.settings.thickness);
+            closest = std::min(closest, fromBall);
+        }
+        assert(closest < 2.0f * cloth.settings.thickness);
+    }
+
     // It has golden views, looking at its stations.
     void testItHasGoldenViews() {
         ClothLab lab;
@@ -303,5 +357,7 @@ void testClothLab() {
     testTheSheetHangs();
     testHooksSlide();
     testTheSheetCanBeDragged();
+    testCollidersMatchTheLayout();
+    testTheDrapeSheetSettlesOverTheBall();
     testItHasGoldenViews();
 }
