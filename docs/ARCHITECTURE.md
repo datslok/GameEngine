@@ -19,6 +19,7 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
   - `targetFPS` 120, 0 = unlimited;
   - `presentMode`, applied when it changes;
   - `framesInFlight` (2), applied when it changes;
+  - `workerThreads` (`automaticWorkerThreads`, -1: one per core but one; 0 runs everything on the main thread), read at start-up through `workerThreadCount` (see Job system);
   - `gpuValidation`, read at start-up and passed to the renderer's constructor (Vulkan's validation layers when installed; MSYS2's, which the makefile points the loader at; see VulkanRenderer). It defaults to `isDebugBuild` from `core/build_info.h`, which the makefile sets by defining `ENGINE_DEBUG_BUILD` in debug builds only;
   - and `render`.
 - `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
@@ -310,6 +311,23 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
   - the depth measurement (its own layout with a sampled image; see Cascaded sun shadows);
   - and the light probes (the trace with a shared layout, the updates with a storage buffer and a storage image; see Light probes).
 
+## Job system
+
+`JobSystem` (`core/job_system`, plain C++ threads, tested in `job_system_test`) runs CPU work on every core (phase 7, `job-system`).
+
+- **Threads:** `defaultWorkerCount()` workers (one per core but one), made once and kept for the whole run; the thread that calls `parallelFor` works too, so `getThreadCount()` is the workers plus one. With 0 workers everything runs on the caller.
+- **`parallelFor(count, grain, work)`:** runs `work(index)` for every index in 0..count-1 and returns when all have finished.
+  - The range is halved until a piece holds at most `grain` indices; each upper half goes on the running thread's pile, and the thread goes on with the lower.
+  - With no workers, or a range of one piece, it runs at once on the caller.
+  - The work reaches the threads as a plain function pointer and context (`RangeFunction`), so a call does not allocate; the call's `RangeTask` lives on the caller's stack and counts the indices not yet finished.
+  - The first exception a piece throws is rethrown by `parallelFor` once every piece has finished; a grain of 0 throws `std::invalid_argument`.
+- **Work stealing:** each thread has a `Pile` (a deque behind a mutex, on its own cache lines). A thread takes its newest job (`take`: the back of its own pile), else the oldest of another pile (the front, usually the biggest half left).
+  - The thread waiting for a `parallelFor` runs jobs (anyone's) until its count reaches zero, so a `parallelFor` inside a job finishes.
+  - Workers with nothing to take sleep on a condition variable. A push counts its job (`queuedJobs`) before checking for sleepers (`sleepingWorkers`), and a worker counts itself before checking for jobs, so a wake-up is never lost; pushes skip the wake-up while no worker sleeps.
+  - Workers use their own piles; every other thread (the main thread, any thread outside the system) shares pile 0, so several may call `parallelFor` at once.
+- **Determinism:** results do not depend on the threads when each index writes only its own output. A sum adds fixed chunks, each in index order, then the chunks' totals in order (tested: the same bits on 1 and 8 threads, 20 runs).
+- **Owner:** `Application`, before the window and renderer (`jobs(workerThreadCount(settings))`). The renderer borrows it (`VulkanRenderer(window, jobs, validation, framesInFlight)`) for the BRDF table at start-up.
+
 ## Application (the engine)
 
 `Application` (`engine/`) runs the main loop (fixed timestep, frame cap) for a borrowed `Game` (declare the game first so it outlives the engine). It owns the `Window`, the renderer (`VulkanRenderer`), `Input`, the `World` and the `AssetManager`.
@@ -318,6 +336,7 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
 
 - the borrowed `game`;
 - `settings` and `defaultSettings` (initialised by `captureDefaultsAndLoad`, so the saved file is applied before the renderer reads `gpuValidation` and the timestep its rate);
+- `jobs`, the job system, which the renderer borrows;
 - `window`, then `renderer`: members are destroyed in reverse order, so the renderer goes before the window it draws into, and the GPU device outlives every uploaded mesh;
 - `input`, `world`, `assets`, ...;
 - `debugUi` (after the window and renderer, so it is destroyed first).
@@ -3252,7 +3271,7 @@ plus Lambert diffuse weighted by `1 - specular albedo`, so a white surface under
 - `f0 = mix(0.04, baseColour, metallic)`, alpha = roughness squared;
 - and from the specular albedo table, the compensation, the specular albedo and the weighted diffuse colour.
 - The table: `BrdfTable`, scale and bias for f0 over n.v and roughness, texel i at i / (size - 1).
-  - Integrated at start-up by `buildBrdfTable` with GGX importance sampling along a Hammersley sequence, 4096 samples per texel, about 85 ms in release.
+  - Integrated at start-up by `buildBrdfTable(jobs)` with GGX importance sampling along a Hammersley sequence, 4096 samples per texel, one texel a job (see Job system): 104 ms on one thread in release, 10.5 ms on 16, the same to the last bit.
   - Uploaded by `VulkanRenderer::createFixedTextures` as `R16G16_UNORM` via `brdfTableTexels`.
 
 Ambient returns `ambient * (diffuse + specularAlbedo)`, so metals are not black under ambient light.

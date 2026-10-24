@@ -109,6 +109,7 @@ void testSphereCast();
 void testParticle();
 void testGrenade();
 void testProfiler();
+void testJobSystem();
 void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
@@ -242,6 +243,7 @@ int main(){
     testParticle();
     testGrenade();
     testProfiler();
+    testJobSystem();
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();

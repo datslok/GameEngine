@@ -136,6 +136,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Entities and components:** generational entity handles and sparse-set component storage. Systems are plain functions that may destroy entities and remove components mid-walk (queued until the walk ends).
 - **A fixed 120 Hz simulation** with interpolated rendering, so movement is smooth at any frame rate. Orientations are quaternions, blended along the shortest turn.
 - **Deterministic:** the same commands give a bit-identical result, checked by a test that plays the demo twice. Ready for replays and networking.
+- **A job system:** a team of worker threads, one per core, that split loops across every core by work stealing, with results that do not depend on which thread ran what. The first user, a lighting table built at start-up, went from 104 ms to 10.5 ms on 16 threads.
 - **Event-based input** with engine-owned key codes, so no SDL types appear in game code.
 - **Three camera modes,** shared by every game that wants them:
   - first person: a body that walks, jumps, crouches and sprints through the level with Overwatch-like movement
@@ -426,7 +427,7 @@ src/              Engine and game source, in layers (lower ones never include hi
   assets/         The asset manager, and OBJ, glTF, image and star catalogue loaders
   input/          Engine keys and the input snapshot (no SDL)
   ecs/            Entities, component storage and the World
-  core/           Fixed timestep, profiler, sRGB conversions, the settings visitor, float tolerances
+  core/           Fixed timestep, job system, profiler, sRGB conversions, the settings visitor, float tolerances
                   and small shared types
   physics/        Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid,
                   static level collision, sphere sweeps, particles and the character controller

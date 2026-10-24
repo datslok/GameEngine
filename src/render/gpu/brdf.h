@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <vector>
 
+class JobSystem;
+
 /*
 * Physically based shading: how much of the light arriving at a surface from one direction leaves towards the eye.
 * That ratio is the BRDF (bidirectional reflectance distribution function), f(l, v). These functions mirror triangle.frag
@@ -103,9 +105,10 @@ struct BrdfTable {
 
 /*
 * Integrates the table numerically: for each texel, samples (brdfTableSamples by default, which keeps it within 0.003 of the exact integral even at grazing views) facet normals in proportion to D (n.h) along a Hammersley
-* sequence and averages each reflected direction's weight. Throws std::invalid_argument for a size below 2 or no samples.
+* sequence and averages each reflected direction's weight. The texels are independent, so they are integrated on every
+* thread of jobs and come out the same to the last bit however many there are. Throws std::invalid_argument for a size below 2 or no samples.
 */
-BrdfTable buildBrdfTable(std::uint32_t size = brdfTableSize, std::uint32_t samples = brdfTableSamples);
+BrdfTable buildBrdfTable(JobSystem& jobs, std::uint32_t size = brdfTableSize, std::uint32_t samples = brdfTableSamples);
 
 // The table read as the shader reads it: bilinear between the grid points, clamped at 0 and 1.
 Vec2 sampleBrdfTable(const BrdfTable& table, float nDotV, float roughness);

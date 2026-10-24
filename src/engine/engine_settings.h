@@ -8,6 +8,9 @@
 
 #include <cstdint>
 
+// EngineSettings::workerThreads for one worker per core but one.
+inline constexpr int automaticWorkerThreads = -1;
+
 /*
 * The engine's tunable values in one place: the main loop's timing and presentation, and the renderer's settings.
 * Application owns one copy; pass your own to its constructor, or change it later through getSettings().
@@ -35,8 +38,15 @@ struct EngineSettings {
     // at start-up: the GPU device is created with it.
     bool gpuValidation = isDebugBuild;
 
+    // The job system's worker threads (core/job_system.h), besides the main thread: automaticWorkerThreads for one per
+    // core but one, 0 to run everything on the main thread. Read once, at start-up: the threads are made with the engine.
+    int workerThreads = automaticWorkerThreads;
+
     RenderSettings render;
 };
+
+// The worker threads the settings ask for.
+unsigned workerThreadCount(const EngineSettings& settings);
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(EngineSettings& settings, SettingsVisitor& visitor);

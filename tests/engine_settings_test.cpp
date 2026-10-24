@@ -1,4 +1,5 @@
 #include "core/build_info.h"
+#include "core/job_system.h"
 #include "engine/engine_settings.h"
 #include "engine/settings_file.h"
 #include "render/frames_in_flight.h"
@@ -63,6 +64,27 @@ namespace {
         assert(validFramesInFlight(2) == 2);
         assert(validFramesInFlight(7) == maxFramesInFlight);
     }
+
+    // By default the job system has a worker per core but one (the main thread is the last); a number sets it, 0 runs
+    // everything on the main thread. It is read once, when the engine starts, from the settings file too.
+    void testWorkerThreads() {
+        EngineSettings settings;
+        assert(settings.workerThreads == automaticWorkerThreads);
+        assert(workerThreadCount(settings) == defaultWorkerCount());
+
+        settings.workerThreads = 0;
+        assert(workerThreadCount(settings) == 0);
+        settings.workerThreads = 3;
+        assert(workerThreadCount(settings) == 3);
+
+        const std::vector<std::string> kept = applySettings({{"workerThreads", "5"}}, walkOf(settings), StartupFields::Keep);
+        assert(kept.empty());
+        assert(settings.workerThreads == 3);
+
+        const std::vector<std::string> loaded = applySettings({{"workerThreads", "5"}}, walkOf(settings), StartupFields::Apply);
+        assert(loaded.empty());
+        assert(settings.workerThreads == 5);
+    }
 }
 
 void testEngineSettings() {
@@ -71,4 +93,5 @@ void testEngineSettings() {
     testTwoFramesInFlightByDefault();
     testFramesInFlightAppliesLiveWithinLimits();
     testRendererFramesInFlightAreClamped();
+    testWorkerThreads();
 }

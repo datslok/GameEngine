@@ -163,7 +163,7 @@ What both genres need from physics: knowing what you hit, and moving a character
   - The `-O2` build also showed a false array-bounds warning inside `std::sort` in `closestPointsSegmentBox`, now an insertion sort of its at most 8 cuts.
 - `collision-guide`: the "Collision and movement" chapter of `docs/ENGINE_GUIDE.md`.
 
-## Phase 6: Rendering foundations, lighting and global illumination (Oct 18 2026 onwards)
+## Phase 6: Rendering foundations, lighting and global illumination (Oct 18-24 2026)
 
 ### The re-plan (Oct 18 2026)
 
@@ -1031,3 +1031,14 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Known limits:** lights without shadow maps light the fog through walls; past the sun's last cascade (the farthest surface on screen) the sky's fog has no sun shadows; refracting glass reads the fogged picture and adds the front fog's light for its covered share, counting that part twice (small); the fog dims no light on its way to a froxel; the reflection probe's capture and the probes' rays see no fog.
   - **On the way:** `VulkanImage` gained 3D images (`ImageDescription::volume`); the shadow tiles' declarations moved from the main pass into `scene_shadow_tiles.glsl`, shared with the fog's grid; the clusters' lists' barriers now cover the fog's compute reads; `probeAirWeight` joined the probes' sampling.
   - **Checked:** the tests (debug and release, tests first: the medium and its closed form against a fine sum, the slices, the grid's coordinates both ways through a real camera, the jitter, the phase function's furnace, the slab and its energy conservation, glass over the fog, the column, the record, the presets, the light lab's mist). Everything builds without warnings, the shaders compile. Not checked here: the picture, its cost and the validation layers, left to the user; the GPU test cases are written and built, not run; golden images not run (the light lab's mist is on by default, so every lab view changes).
+
+## Phase 7: Cloth simulation (Oct 24 2026 onwards)
+
+- `job-system` (Oct 24 2026): the engine's first threads, so the cloth solver (and later frame building, culling and asset decoding) can use every core.
+  - **Our own, not a library:** enkiTS and Taskflow were the alternatives. The user chose our own: about 300 lines that fit the engine's determinism rules, no new dependency.
+  - **The design:** work stealing, a pile per thread, `parallelFor` halving its range down to a grain. The waiting thread runs jobs, so a `parallelFor` inside a job finishes.
+  - **Locked piles, not lock-free:** a deque behind a mutex per thread. The lock-free Chase-Lev deque is much harder to get right, and with pieces of microseconds the lock costs little. Worth revisiting only if a measurement shows the locks.
+  - **Determinism:** each index writes only its own output; sums go by fixed chunks in a fixed order. Tested: the same bits on 1 and 8 threads.
+  - **First user, the BRDF table** (32 x 32 texels, 4096 samples each): one texel a job. Measured in release, best of five: 103.6 ms on one thread, 10.5 ms on 16 (this PC's threads), the table the same to the last bit.
+  - **The setting:** `EngineSettings::workerThreads` (-1, one per core but one; start-up only), so a slow or misbehaving run can be tried on one thread.
+  - **Checked:** the tests (debug and release, tests first: every index once for empty, tiny, uneven and large ranges, 1 thread against 8, the chunked sum, nesting, exceptions with and without workers, a grain of 0, work reaching several threads, two outside threads at once). The game and GPU test program build without warnings; nothing run on the GPU.

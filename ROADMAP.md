@@ -286,9 +286,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 
 **Items**
 
-- [ ] Job system (moved to the start of the phase): a work-stealing thread pool with `parallelFor` first
-  - For simulation, frame building, culling and asset decoding.
-  - The cloth solver is the first work that needs more than one core
+- [x] Job system: a work-stealing thread pool with `parallelFor` (`job-system`)
 - [ ] Dynamic meshes: a GPU upload path for meshes whose vertices change every frame, with normals recomputed each time (today a mesh is uploaded once and never changes)
 - [ ] Particle store for cloth: the sheet's vertices as plain arrays
   - Positions, previous positions, velocities, inverse masses, with 0 for pinned points.
