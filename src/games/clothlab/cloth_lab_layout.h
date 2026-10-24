@@ -32,6 +32,14 @@ inline constexpr int clothLabSheetRows = 30;
 inline constexpr float clothLabSheetWidth = 1.4f;
 inline constexpr float clothLabSheetDepth = 1.5f;
 
+// The drape sheet at the drape station: a square of squares x squares, laid flat level with the drape bar's underside
+// and stretching forward from it over the ball, pinned at the two corners of its back edge.
+inline constexpr int clothLabDrapeSheetSquares = 24;
+inline constexpr float clothLabDrapeSheetSize = 1.2f;
+
+// The floor's collision box reaches this far below the ground, so nothing can pass through it in a substep.
+inline constexpr float clothLabFloorDepth = 1.0f;
+
 // A box: its centre and half its size along each axis.
 struct ClothLabBlock {
     Vec3 centre;
@@ -63,6 +71,9 @@ struct ClothLabLayout {
 
     // Fabrics.
     ClothLabFrame fabricFrame;
+
+    // Where the flat drape sheet's middle starts: level with the drape bar's underside, half its size in front of it.
+    Vec3 drapeSheetCentre;
 
     // Where the flat sheet's middle starts: level with the bar's underside, under the middle of its left half, half
     // the sheet's depth in front of it.

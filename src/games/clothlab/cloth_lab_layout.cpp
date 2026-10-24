@@ -49,18 +49,22 @@ std::vector<Aabb> ClothLabLayout::stations() const {
 }
 
 /*
-* Sized for sheets about 1.5 m square: the drape bar 2 m up, the ball's top a metre below it and half a sheet out in
-* front, so a sheet pinned at the bar's ends swings down onto the ball; the fabric bar long enough for two such
-* sheets with a gap between them.
+* Sized for sheets about 1.5 m square: the drape bar 2 m up, the ball's top 0.6 m below it and its centre just in front
+* of the bar, so a sheet pinned under the bar cannot hang straight down but comes to rest draped over the ball; the
+* fabric bar long enough for two such sheets with a gap between them.
 */
 ClothLabLayout buildClothLabLayout() {
     ClothLabLayout layout;
 
     constexpr float ballRadius = 0.4f;
     constexpr float pedestalHalfHeight = 0.3f;
-    layout.pedestal = ClothLabBlock{Vec3{-4.0f, pedestalHalfHeight, -0.6f}, Vec3{0.15f, pedestalHalfHeight, 0.15f}};
-    layout.ball = Sphere{Vec3{-4.0f, 2.0f * pedestalHalfHeight + ballRadius, -0.6f}, ballRadius};
-    layout.drapeFrame = ClothLabFrame{Vec3{-4.0f, 2.0f + clothLabBarHalfThickness, -1.35f}, 1.0f};
+    constexpr float barDepth = -1.35f;
+    constexpr float ballInFrontOfBar = 0.2f;
+    layout.pedestal = ClothLabBlock{Vec3{-4.0f, pedestalHalfHeight, barDepth + ballInFrontOfBar}, Vec3{0.15f, pedestalHalfHeight, 0.15f}};
+    layout.ball = Sphere{Vec3{-4.0f, 2.0f * pedestalHalfHeight + ballRadius, barDepth + ballInFrontOfBar}, ballRadius};
+    layout.drapeFrame = ClothLabFrame{Vec3{-4.0f, 2.0f + clothLabBarHalfThickness, barDepth}, 1.0f};
+    layout.drapeSheetCentre = Vec3{layout.drapeFrame.barCentre.x, clothLabBarUnderside(layout.drapeFrame),
+                                   layout.drapeFrame.barCentre.z + 0.5f * clothLabDrapeSheetSize};
 
     layout.mat = ClothLabBlock{Vec3{0.0f, 0.005f, -1.0f}, Vec3{1.5f, 0.005f, 1.5f}};
 

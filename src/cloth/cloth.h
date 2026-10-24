@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cloth/cloth_collision.h"
 #include "cloth/cloth_constraints.h"
 #include "cloth/cloth_grab.h"
 #include "cloth/cloth_particles.h"
@@ -32,6 +33,9 @@
 * Bending stiffness is the fabric's bending rigidity B, as the cantilever test measures it: silk about 1-5 micro N m,
 * cotton shirting about 10, denim 50-200. Its bending length (B / (areaDensity g))^(1/3), how far a strip sticks out
 * before it droops, is 1.7 cm for the default cotton, near real shirting's 2-3 cm. 0 bends freely.
+*
+* Against bodies the cloth keeps a thickness: real fabric is about a millimetre thick, but a small gap lets it rest on
+* a body instead of flickering half inside it. Friction is cotton's on a smooth surface.
 */
 struct ClothSettings {
     float areaDensity = 0.2f;          // kg per square metre; read when the cloth is made
@@ -41,6 +45,9 @@ struct ClothSettings {
     float drag = 0.5f;                 // per second
     float grabCompliance = 0.001f;     // m/N
     float bendingStiffness = 1e-5f;    // N m
+    float thickness = 0.005f;          // m
+    float staticFriction = 0.6f;
+    float kineticFriction = 0.4f;
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -87,10 +94,11 @@ void addClothPin(Cloth& cloth, std::uint32_t particle);
 * and applies the drag. Throws std::invalid_argument for fewer than one substep. stepCloth adds the bending and the pins.
 */
 void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
-                        const std::optional<ClothGrab>& grab = std::nullopt);
+                        const std::optional<ClothGrab>& grab = std::nullopt, const std::vector<Shape>& colliders = {});
 
-// One tick of a cloth.
-void stepCloth(Cloth& cloth, float seconds);
+// One tick of a cloth, colliding with the given still bodies' shapes (in the world).
+void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {});
 
-// One tick for every cloth, then each cloth's points handed to its DeformingMesh, if it has one.
+// One tick for every cloth against every Collider in the world (worldColliderShapes), then each cloth's points handed
+// to its DeformingMesh, if it has one.
 void stepCloths(World& world, float seconds);

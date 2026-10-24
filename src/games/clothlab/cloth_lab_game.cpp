@@ -5,6 +5,7 @@
 #include "gameplay/first_person_body.h"
 #include "math/transform.h"
 #include "math/angles.h"
+#include "physics/collider.h"
 #include "scene/atmosphere.h"
 #include "scene/deforming_mesh.h"
 #include "scene/light.h"
@@ -13,6 +14,7 @@
 #include "scene/sun.h"
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace {
@@ -64,13 +66,52 @@ namespace {
     // The line from the held point to the hand, while dragging.
     const Vec3 grabLineColour{1.0f, 0.8f, 0.2f};
 
-    // A deep red cotton, seen from both sides.
-    Material sheetMaterial() {
+    // Cotton seen from both sides: the hanging sheet deep red, the drape sheet cream.
+    Material cottonMaterial(const Pixel& colour) {
         Material material;
-        material.colour = Pixel{150, 30, 35};
+        material.colour = colour;
         material.roughness = 0.9f;
         material.doubleSided = true;
         return material;
+    }
+
+    const Pixel hangingSheetColour{150, 30, 35};
+    const Pixel drapeSheetColour{225, 215, 190};
+
+    // A grid laid flat (the grid faces +z; turned to face up, its top edge at the back) with its middle at centre.
+    Mat4 laidFlat(const Vec3& centre) {
+        return Mat4::translation(centre.x, centre.y, centre.z) * Mat4::rotationX(-0.25f * fullTurnRadians);
+    }
+
+    // The two corners of a grid's top edge, which lies at the back once laid flat.
+    std::array<std::uint32_t, 2> backCorners(int columns, int rows) {
+        const std::uint32_t backEdge = static_cast<std::uint32_t>(rows) * static_cast<std::uint32_t>(columns + 1);
+        return {backEdge, backEdge + static_cast<std::uint32_t>(columns)};
+    }
+
+    /*
+    * A cloth as an entity: drawn through a deforming mesh of its own, in world space (its points are where the cloth
+    * is), the cloth on the same entity.
+    */
+    Entity addSheet(World& world, AssetManager& assets, const Mesh& mesh, Cloth cloth, const Material& material) {
+        DeformingMesh shape;
+        shape.mesh = assets.addDeformingMesh(mesh);
+        shape.positions = cloth.particles.positions;
+        ModelRenderer renderer;
+        renderer.parts.push_back(RenderPart{shape.mesh, material, Mat4::identity()});
+        const Entity entity = world.create();
+        world.add(entity, Transform{});
+        world.add(entity, std::move(renderer));
+        world.add(entity, std::move(shape));
+        world.add(entity, std::move(cloth));
+        return entity;
+    }
+
+    // A body cloth collides with: a Collider at the origin, its shape already in the world.
+    void addBody(World& world, const Shape& shape) {
+        const Entity entity = world.create();
+        world.add(entity, Transform{});
+        world.add(entity, Collider{shape, nullptr});
     }
 
     // One box as a part: the unit cube (-1..1) stretched to its half-size and moved.
@@ -134,28 +175,29 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
                                             Mat4::scaling(radius, radius, radius)});
     addStatic(std::move(stations));
 
-    /*
-    * The hanging sheet: a cloth laid flat level with the bar (the grid, facing +z, turned to face up, its top edge at the
-    * back), pinned at its back corners, drawn through a deforming mesh of its own in world space.
-    */
-    const Mesh sheetMesh = Mesh::grid(clothLabSheetColumns, clothLabSheetRows, clothLabSheetWidth, clothLabSheetDepth);
-    const Mat4 flat = Mat4::translation(layout.sheetCentre.x, layout.sheetCentre.y, layout.sheetCentre.z) * Mat4::rotationX(-0.25f * fullTurnRadians);
-    Cloth cloth = makeCloth(sheetMesh, flat, clothSettings);
-    const std::size_t backEdge = static_cast<std::size_t>(clothLabSheetRows) * static_cast<std::size_t>(clothLabSheetColumns + 1);
-    addClothPin(cloth, static_cast<std::uint32_t>(backEdge));
-    addClothPin(cloth, static_cast<std::uint32_t>(backEdge + static_cast<std::size_t>(clothLabSheetColumns)));
-    hookMiddle = (cloth.particles.positions[cloth.pins[0].particle] + cloth.particles.positions[cloth.pins[1].particle]) * 0.5f;
+    // The bodies cloth collides with: the ball, every block, and the floor as a thick box under the ground.
+    addBody(world, Shape{layout.ball});
+    for (const ClothLabBlock& block : layout.blocks()) {
+        addBody(world, Shape{block.bounds()});
+    }
+    addBody(world, Shape{Aabb{Vec3{-clothLabFloorHalfSize, -clothLabFloorDepth, -clothLabFloorHalfSize}, Vec3{clothLabFloorHalfSize, 0.0f, clothLabFloorHalfSize}}});
 
-    DeformingMesh sheetShape;
-    sheetShape.mesh = assets.addDeformingMesh(sheetMesh);
-    sheetShape.positions = cloth.particles.positions;
-    ModelRenderer sheetRenderer;
-    sheetRenderer.parts.push_back(RenderPart{sheetShape.mesh, sheetMaterial(), Mat4::identity()});
-    sheet = world.create();
-    world.add(sheet, Transform{});
-    world.add(sheet, std::move(sheetRenderer));
-    world.add(sheet, std::move(sheetShape));
-    world.add(sheet, std::move(cloth));
+    // The hanging sheet: laid flat level with the fabric bar, hung from two hooks at its back corners.
+    const Mesh sheetMesh = Mesh::grid(clothLabSheetColumns, clothLabSheetRows, clothLabSheetWidth, clothLabSheetDepth);
+    Cloth hanging = makeCloth(sheetMesh, laidFlat(layout.sheetCentre), clothSettings);
+    for (std::uint32_t corner : backCorners(clothLabSheetColumns, clothLabSheetRows)) {
+        addClothPin(hanging, corner);
+    }
+    hookMiddle = (hanging.particles.positions[hanging.pins[0].particle] + hanging.particles.positions[hanging.pins[1].particle]) * 0.5f;
+    sheet = addSheet(world, assets, sheetMesh, std::move(hanging), cottonMaterial(hangingSheetColour));
+
+    // The drape sheet: laid flat level with the drape bar over the ball, pinned at its back corners.
+    const Mesh drapeMesh = Mesh::grid(clothLabDrapeSheetSquares, clothLabDrapeSheetSquares, clothLabDrapeSheetSize, clothLabDrapeSheetSize);
+    Cloth draping = makeCloth(drapeMesh, laidFlat(layout.drapeSheetCentre), clothSettings);
+    for (std::uint32_t corner : backCorners(clothLabDrapeSheetSquares, clothLabDrapeSheetSquares)) {
+        pinParticle(draping.particles, corner);
+    }
+    drapeSheet = addSheet(world, assets, drapeMesh, std::move(draping), cottonMaterial(drapeSheetColour));
 
     controls.spawnBody(world);
 
@@ -198,9 +240,14 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
 
     if (input.wasMouseButtonPressed(MouseButton::Left) && pointer) {
         const Ray ray{pointer->origin, pointer->direction.normalized()};
-        if (const std::optional<ClothHit> hit = raycastCloth(world.get<Cloth>(sheet), ray, clothLabGrabReach)) {
-            sheetGrab = ClothGrab{hit->particle, hit->point};
-            grabDistance = hit->distance;
+        float nearest = clothLabGrabReach;
+        for (const Entity candidate : {sheet, drapeSheet}) {
+            if (const std::optional<ClothHit> hit = raycastCloth(world.get<Cloth>(candidate), ray, nearest)) {
+                sheetGrab = ClothGrab{hit->particle, hit->point};
+                grabbedSheet = candidate;
+                grabDistance = hit->distance;
+                nearest = hit->distance;
+            }
         }
     }
 
@@ -220,9 +267,13 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     (void)simulationSeconds;
+    for (const Entity each : {sheet, drapeSheet}) {
+        Cloth& cloth = world.get<Cloth>(each);
+        cloth.settings = clothSettings;
+        cloth.grab = each == grabbedSheet ? sheetGrab : std::nullopt;
+    }
+
     Cloth& cloth = world.get<Cloth>(sheet);
-    cloth.settings = clothSettings;
-    cloth.grab = sheetGrab;
 
     const float wanted = std::clamp(hookSettings.hookGap, clothLabSmallestHookGap, clothLabSheetWidth);
     const float step = clothLabHookSpeed * tickSeconds;
@@ -259,7 +310,7 @@ bool ClothLabGame::wantsDebugView() const {
 void ClothLabGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
     (void)alpha;
     if (sheetGrab) {
-        debug.line(world.get<Cloth>(sheet).particles.positions[sheetGrab->particle], sheetGrab->target, grabLineColour);
+        debug.line(world.get<Cloth>(grabbedSheet).particles.positions[sheetGrab->particle], sheetGrab->target, grabLineColour);
     }
 }
 
@@ -301,6 +352,14 @@ const StaticLevel& ClothLabGame::getLevel() const {
 
 Entity ClothLabGame::getSheet() const {
     return sheet;
+}
+
+Entity ClothLabGame::getDrapeSheet() const {
+    return drapeSheet;
+}
+
+Entity ClothLabGame::getGrabbedSheet() const {
+    return grabbedSheet;
 }
 
 ClothSettings& ClothLabGame::getClothSettings() {
