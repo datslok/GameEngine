@@ -137,12 +137,13 @@ A game lists its views with `Game::goldenViews()` (`GoldenView` in `engine/golde
   - `simulationSeconds`;
   - `hdr`.
 - **The demo** sets a free camera at a fixed pose via `PlayerControls::poseFreeCamera`, and switches lamps and flashlight to the view's choice. Six views: `start`, `start-hdr`, `gallery`, `lamp-field`, `floodlights`, `moon`.
-- **The light lab** sets the sun's solar time and day, a free camera pose, the flashlight and the lamp. Eight views:
+- **The light lab** sets the sun's solar time and day, a free camera pose, the flashlight and the lamp. Nine views:
   - `towers`, `overview`, `sunlit-room`, `sunset-hdr`;
   - `sun-disc` (the camera facing the sun wherever it stands at that hour);
   - `flashlight` (the dark back room lit by the flashlight, a fast light, so the probes' fast atlas is in a golden image);
   - `back-room-lamp` (the back room lit by its ceiling lamp);
-  - `moonlit` (day 88 at 21:00, a waxing gibbous moon: the camera facing the moon's bearing with the moon near the top of the view, the stars, the moonlit sky and the moon's shadows).
+  - `moonlit` (day 88 at 21:00, a waxing gibbous moon: the camera facing the moon's bearing with the moon near the top of the view, the stars, the moonlit sky and the moon's shadows);
+  - `street-night` (down the street at 22:00, its lamps and lit windows on; see The street).
 - `advanceToGoldenView(game, world, view, ticksPerSecond)` prepares the view, runs `round(seconds × rate)` ticks through `runFixedUpdate` and one `onUpdate` with an empty `Input`. `golden_views_test` uses it to check each view is deterministic.
 
 ### Capturing
@@ -317,7 +318,8 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
 
 - the borrowed `game`;
 - `settings` and `defaultSettings` (initialised by `captureDefaultsAndLoad`, so the saved file is applied before the renderer reads `gpuValidation` and the timestep its rate);
-- `window`, `renderer`, ...;
+- `window`, then `renderer`: members are destroyed in reverse order, so the renderer goes before the window it draws into, and the GPU device outlives every uploaded mesh;
+- `input`, `world`, `assets`, ...;
 - `debugUi` (after the window and renderer, so it is destroyed first).
 
 **Each frame:**
@@ -386,7 +388,6 @@ Debug drawing: `DebugDraw` (`scene/debug_draw`) collects `DebugLine`s (`line`, `
 - Always run ticks through `runFixedUpdate`, which saves previous transforms first; tests use it too.
 - `DemoGame` (`games/demo/`) holds the player controls (camera, control modes, body), the player and marker entities, and all demo input rules.
 - `LightLabGame` (`games/lightlab/`) is the second game (see Games and the light lab).
-- `window` is declared first and `renderer` second: members are destroyed in reverse order, so the renderer goes before the window it draws into, and the GPU device outlives every uploaded mesh.
 
 ## Window
 
@@ -528,7 +529,7 @@ The shader skips a light, and so its shadow lookups, for pixels beyond its range
 
 Point and spot lights get soft shadows (PCSS, `softShadowFromTile`; the arithmetic is mirrored and tested in `render/gpu/soft_shadow`):
 
-1. a 16-sample Poisson-disc blocker search in the atlas read as raw depths (`shadowDepths`, fragment sampler slot 2, a nearest non-comparison `shadowDepthSampler`);
+1. a 16-sample Poisson-disc blocker search in the atlas read as raw depths (`shadowDepths`, scene set 1 binding 8, a nearest non-comparison `shadowDepthSampler`);
 2. the penumbra in texels (1 to 12):
 
    `emitterRadius * (receiver - blocker) / blocker`
@@ -548,7 +549,7 @@ Point and spot lights get soft shadows (PCSS, `softShadowFromTile`; the arithmet
 
 ## VulkanRenderer
 
-`VulkanRenderer` (`render/vulkan/`) is the engine's own Vulkan 1.3 renderer (phase 6b). It replaced SDL_GPU's `GpuRenderer` one pass at a time, with the same compiled shaders: all twelve golden images matched SDL_GPU's bit for bit (debug and release) before SDL_GPU was removed, so several of SDL_GPU's choices are kept on purpose (see Kept from SDL_GPU).
+`VulkanRenderer` (`render/vulkan/`) is the engine's own Vulkan 1.3 renderer (phase 6b). It replaced SDL_GPU's `GpuRenderer` one pass at a time, with the same compiled shaders: all twelve golden images of the time matched SDL_GPU's bit for bit (debug and release) before SDL_GPU was removed, so several of SDL_GPU's choices are kept on purpose (see Kept from SDL_GPU).
 
 Public calls:
 
@@ -954,7 +955,7 @@ The pass: `cluster_lights.comp` (`GpuPass::Clusters`, CLUSTERS in F4; `clusterLi
 
 Shading: `triangle.frag`, when `shadingOptions.x`, finds its cluster's first word (`firstClusterWord`), and for each word up to the frame's counts walks the set bits lowest first (`findLSB`, then clearing it), calling `addPointLight` or `addSpotLight` (the per-light shading, unchanged, shared with the plain loops used when clustering is off).
 
-- Lowest bit first is slot order, and every light that reaches the pixel is listed, so the pixel adds exactly the lights it added before, in the same order: all twelve golden images were identical bit for bit with clustering on and off.
+- Lowest bit first is slot order, and every light that reaches the pixel is listed, so the pixel adds exactly the lights it added before, in the same order: all twelve golden images of the time were identical bit for bit with clustering on and off.
 - Each word is first OR-ed across the wave (`lightsOfTheWave`, `subgroupOr`, `GL_KHR_shader_subgroup_arithmetic`), so the pixels shaded together walk one list and read the same light records at once. A light from a neighbour's list cannot reach this pixel (it would be in its own list), so it adds nothing.
 - `checkFormats` throws if the GPU lacks subgroup arithmetic in fragment shaders.
 
@@ -2685,7 +2686,7 @@ MOBA mode uses a confined visible cursor, edge panning (`gameplay/edge_pan`, fro
 
 - `pick(world, ray)`, shared with selection, raycasts the collision scene, then the static level up to that distance, and the nearer wins, so walls hide what is behind them;
 - `getHovered` is the entity, outlined in dimmed cyan; `getHoveredTriangle` the level triangle, outlined with its normal only in the F4 view;
-- with F4, readout lines 7 and 8 show colliders and level triangles, tested and cells walked, and line 9 the duck's controller (grounded or airborne, slope, substeps) with its ground normal drawn at its feet;
+- with F4, readout lines 11 and 12 (`firstGameReadoutLine` + 1 and + 2, after the demo's system timings) show colliders and level triangles, tested and cells walked, and line 13 the duck's controller (grounded or airborne, slope, substeps) with its ground normal drawn at its feet;
 - the duck's controller has radius 0.5 and `mobaUnitAcceleration` (1000) so it starts and stops within a tick.
 
 **The obstacle course** (`buildObstacleCourse`): cube parts of one entity at `obstacleCourseOrigin` (17, 0, -4) with the slab top at `obstacleCourseFloorTop`.
@@ -3168,15 +3169,15 @@ lights are components (`scene/light.h`):
 **Each frame:**
 
 - `buildFrame` calls `collectLighting(world, alpha)` (`scene/lighting`, point light positions interpolated like meshes).
-- `VulkanRenderer::drawScene` (after `prioritizeLights`) uses `packLighting` (`render/gpu/light_uniforms`) to fill `LightUniformData` and pushes it once to fragment uniform slot 1.
-- That struct mirrors the `LightData` block in `triangle.frag` byte for byte (all `vec4`, `static_assert` 2720 bytes).
+- `VulkanRenderer::drawScene` (after `prioritizeLights`) uses `packLighting` (`render/gpu/light_uniforms`) to fill `GpuLights`: one record per light in three storage buffers (set 1 bindings 3 to 5), with the ambient light and the counts in the frame's uniform block. The records and their sizes are in GPU scene, Records.
+- The shaders declare them once, in `scene_lights.glsl`.
 - Light positions are measured from the camera (`packLighting(lighting, cameraPosition)` subtracts it), so the viewer sits at the shader's origin and has no field.
 
 ### HDR and tone mapping
 
-HDR and tone mapping: `triangle.frag` writes unbounded linear colour into `sceneColour`, an `R16G16B16A16_SFLOAT` texture the size of the frame (made with the depth texture in `ensureFrameTextures`).
+HDR and tone mapping: the main pass (`triangle.frag`, its shading in `scene_surface.glsl`) writes unbounded linear colour into `sceneColour`, an `R16G16B16A16_SFLOAT` texture the size of the frame (made with the depth texture in `ensureFrameTextures`).
 
-A final pass (`beginToneMapPass`, `fullscreen_triangle.vert` + `tone_map.frag`, `ToneMapUniformData` at fragment slot 0, the scene read with `texelFetch`):
+A final pass (`drawToneMap`, `fullscreen_triangle.vert` + `tone_map.frag`, `ToneMapUniformData` at fragment slot 0, the scene read with `texelFetch`):
 
 1. multiplies by `ToneMappingSettings::exposure` (1.5, so scenes tuned for the old clipped look keep their shadows and mid-tones);
 2. applies the curve (`ToneMapCurve`), stretched to the screen's peak, `sdrPeakBrightness` 1 on an SDR screen:
@@ -3256,12 +3257,12 @@ plus Lambert diffuse weighted by `1 - specular albedo`, so a white surface under
 
 Ambient returns `ambient * (diffuse + specularAlbedo)`, so metals are not black under ambient light.
 
-Fragment samplers: 0 colour, 1 shadow atlas (compared), 2 shadow atlas (raw), 3 metallic-roughness, 4 BRDF table, 5 normal map.
+**Textures:** a material's colour, metallic-roughness, normal, occlusion and emissive textures (and glass's transmission and thickness) are read from the bindless array (set 0) by the slots in its record. The shadow atlas (compared and raw) and the BRDF table are scene set 1 bindings 7 to 9 (see GPU scene, Descriptors).
 
 **Normal mapping** (mirrored in `render/gpu/normal_mapping`: `decodeNormalTexel`, `perturbNormal`, `transformTangent`, `toksvigRoughness`):
 
-- `triangle.vert` carries the tangent with the model matrix, normalises it like the normal and multiplies its sign by `handedness(model)` (`math/mat4`, pushed per draw after the three matrices, 52 floats).
-- `triangle.frag` decodes the texel as (2c − 1) · (scale, scale, 1), rebuilds the bitangent as w · (N × T) from the interpolated, unnormalised normal and tangent (MikkTSpace's rule) and normalises only the sum.
+- `triangle.vert` carries the tangent with the model matrix, normalises it like the normal and multiplies its sign by `handedness(model)` (`math/mat4`, kept in the object's `GpuInstance`).
+- The main pass (`scene_surface.glsl`) decodes the texel as (2c − 1) · (scale, scale, 1), rebuilds the bitangent as w · (N × T) from the interpolated, unnormalised normal and tangent (MikkTSpace's rule) and normalises only the sum.
 - Shadow offsets use the geometric normal.
 - Normal map filtering (Toksvig 2005, `RenderSettings::normalMapFiltering`, on by default, sent as `textureOptions.y`): the mips are averaged and never renormalised, so a mip texel's length L (decoded without the scale) tells how much the bumps under it disagree. L is first lengthened by `NORMAL_TOKSVIG_QUANTIZATION_SLACK` (sqrt(3)/255, `normal_mapping_shared.h`: what 8-bit rounding alone can take off) and capped at 1; the spread (1 − L) / L, times the scale squared, adds twice over to alpha² (alpha = roughness²), at most roughness 1. A full-size texel gives the material's roughness back exactly. The normal map is read once, before the roughness, outside any branch.
 
@@ -3269,7 +3270,7 @@ Fragment samplers: 0 colour, 1 shadow atlas (compared), 2 shadow atlas (raw), 3 
 
 - The demo's glowing materials (moon, bulbs, floodlight heads, marker) share `glowMaterial` (black, roughness 1); the teapot is real gold (metallic 1, roughness 0.35).
 - `Vec3 * Vec3` multiplies component by component, as GLSL does.
-- Limits are 4 directional, 64 point and 8 spotlights (2736 bytes); with more, `prioritizeLights` picks the most important (see Shadows above).
+- Limits are 4 directional, 1024 point and 256 spotlights (`maxDirectionalLights`, `maxPointLights`, `maxSpotLights`), all seated by default. Shadows are scarcer (1 sun, 64 point and 8 spot lights), so `prioritizeLights` picks which lights get them (see Light priority).
 - The software renderer still hardcodes a light at `(-1, 2, 1)`.
 
 ### The demo's lighting
