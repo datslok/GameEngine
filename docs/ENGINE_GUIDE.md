@@ -4,35 +4,15 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** the topics below.
+**Covers:** phases 0 to 6, every item done so far.
 
-- phases 0 to 5
-- several games on one engine (the game registry, shared controls by composition, a settings section per game)
-- the sun's place in the sky (declination, hour angle, latitude) and phase 6's physically based materials
-- 6c's GPU scene (storage buffers and std430, bindless textures and nonuniform indexing, instancing and the draw list, culling shadow casters by a light's reach, why changing the order of a product changes pixels)
-- depth prepass (overdraw, early depth testing, equal-depth shading and invariant positions)
-- clustered shading (exponential depth slices, conservative sphere and cone tests, one bit per light in slot order and why that keeps every pixel the same, shared memory and workgroup barriers, buffer barriers, waves and subgroupOr, the heatmap)
-- the sun's disc in the sky (no parallax, radiance from illuminance and solid angle, the half-float cap)
-- cascaded sun shadows (practical splits, bounding spheres and texel snapping, choosing by box and blending, bias along the light, the sun's angular size and its penumbra, the 4096 cascades and the grown atlas, fitting them to the screen's depths with a reduction and a ladder of steps)
-- hardware ray tracing (ray queries, two-level acceleration structures and compaction, front and back faces, instance masks, device addresses, grazing hits and their tolerance)
-- global illumination with light probes (irradiance, octahedral images, Fibonacci rays and hysteresis as a time constant, fast lights as a second memory by superposition, infinite bounces as a series, trilinear, back-face and Chebyshev visibility weights, the self-shadow bias, the specular stand-in, cascades that follow the camera (nested grids like mipmaps, circular buffers, a blend centred on the camera and its margin, seeds from the coarser grid), specialization constants, the units, probes moving out of walls and sleeping where nothing reads them)
-- the sky and the air (Beer-Lambert, Rayleigh and Mie scattering, phase functions, single and multiple scattering as a geometric series, the three tables, float precision at a planet's scale)
-- eye adaptation (exposure in stops, a histogram of log brightness and why the middle of it, atomics in shared memory, adapting as an RC circuit, partial compensation)
-- night vision (rods and cones, the Purkinje shift, why a pixel goes grey only when it and the scene are both dim)
-- temporal anti-aliasing (aliasing and the sampling theorem, jitter on a Halton sequence, the history as an exponential average, reprojection and motion vectors, clipping stale history to the neighbours' range, Karis weights and Catmull-Rom)
-- upscaling (drawing small and rebuilding big from jittered frames, reconstruction weights, the mip bias, the vendors' upscalers FSR and DLSS, calling a library built by another compiler through a C interface, and keeping licensed binaries out of a public repository)
-- reflections (the split sum, screen-space reflections marched through a depth pyramid, last frame's picture and a colour pyramid as wide as the reflected cone, a reflection probe captured at the camera, parallax corrected from its own distances, prefiltering by importance sampling, the chain of fallbacks and their confidences; mirrored lights by Newton's method on the mirror and the wavefront's curvature, rough mirrors' footprints; ambient occlusion from horizons in the depth image)
-- volumetric fog (participating media, extinction and albedo, Beer–Lambert, the phase function, single scattering, froxels, the slab's exact solution, the height fog's closed form and its series, glass over fog)
-- the night sky (the moon's orbit and phase, Lommel-Seeliger's law and the opposition surge, a second sky by linearity, the celestial sphere and sidereal time, magnitudes and blackbody colours, splats that keep a star's light whole)
-- so all of 6c
-- all of 6a (engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps)
-- and all of 6b (the Vulkan renderer: volk, vk-bootstrap and VMA, command buffers, fences and semaphores, uniforms as dynamic offsets, validation layers, barriers and image states, GPU timestamps and debug labels, frames in flight, compute shaders), plus:
-  - golden images and the GPU test tier: shader libraries of pure functions, float tolerances and condition numbers
-  - normal maps: tangent frames, handedness and MikkTSpace
-  - quaternions and slerp
-  - collision shapes, raycasts, colliders and picking, the broad phase grid, static level collision, the character controller, particles, the profiler and the release build
-  - lights including spotlights, emissive materials and the moon, physically based materials (microfacets, Fresnel, metals, multiple-scattering energy compensation, the white furnace test), smooth normals, normal matrix, reversed-Z depth and camera-relative rendering, mipmaps
-  - the debug UI and settings file (visitors, presets, the overlay), gamma-correct colour and dithering, the frame description, shadow mapping, debug drawing, frustum culling, light priority, shadow face skipping, shadow caching and soft shadows
+- Phases 0 to 5: foundations, GPU rendering and assets, the core loop and input, engine architecture, rendering upgrades, collision and movement
+- 6a: engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps
+- 6b: the Vulkan renderer (volk, vk-bootstrap and VMA, command buffers, fences and semaphores, validation layers, barriers, GPU timestamps, frames in flight, compute shaders), golden images and the GPU test tier
+- 6c: the GPU scene, depth prepass, clustered shading, cascaded sun shadows
+- 6d: hardware ray tracing, light probes (DDGI) and their cascades, the sky and the air, the night sky
+- 6e: eye adaptation and night vision, TAA and upscaling, reflections, mirrored lights, ambient occlusion, glass, volumetric fog
+- Also: several games on one engine, the sun's place in the sky
 
 ---
 
