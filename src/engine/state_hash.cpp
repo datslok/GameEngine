@@ -6,6 +6,7 @@
 #include "math/transform.h"
 #include "physics/character_controller.h"
 #include "physics/particle.h"
+#include "scene/deforming_mesh.h"
 #include "scene/interpolation.h"
 
 namespace {
@@ -106,6 +107,15 @@ std::uint64_t hashSimulationState(const World& world) {
     world.each<Grenade>([&](Entity entity, const Grenade& grenade) {
         add(hash, entity);
         hash.add(grenade.secondsLeft);
+    });
+
+    hash.add(8u);
+    world.each<DeformingMesh>([&](Entity entity, const DeformingMesh& mesh) {
+        add(hash, entity);
+        hash.add(static_cast<std::uint64_t>(mesh.positions.size()));
+        for (const Vec3& position : mesh.positions) {
+            add(hash, position);
+        }
     });
 
     return hash.value;

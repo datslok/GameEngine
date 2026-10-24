@@ -410,6 +410,7 @@ void VulkanRenderer::createPipelines() {
     motion.fragmentShader = "assets/shaders/motion.frag.spv";
     motion.sharedLayout = sceneLayout->getPipelineLayout();
     motion.vertices = shadowCutOut.vertices;
+    motion.vertices.attributes.push_back({4, 1, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, position))});
     motion.cullMode = VK_CULL_MODE_BACK_BIT;
     motion.dynamicCullMode = true;
     motion.colourFormat = VK_FORMAT_R16G16_SFLOAT;
@@ -1073,6 +1074,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                          ImDrawData* ui) {
     stats = RenderStats{};
     stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
+    showShapes(description);
 
     // Video memory as this frame begins: the driver's figures are fetched again once per frame number.
     device.startMemoryFrame(++memoryFrameNumber);
@@ -1159,7 +1161,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         for (std::size_t index : visible) {
             const DrawItem& draw = description.draws[index];
 
-            if (draw.previousModel && *draw.previousModel != draw.model) {
+            const bool moved = draw.previousModel && *draw.previousModel != draw.model;
+            if (moved || meshes.at(draw.mesh.index)->changedShape()) {
                 moving.push_back(index);
             }
         }
@@ -1293,6 +1296,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays || mirrorLight || glassShadows) {
         beginGpuPass(frame, GpuPass::RayScene);
+        rayTracing->rebuildDeformedMeshes(frame.commands);
         rayTracing->buildScene(frame.commands, frame.frameIndex, rayTracing->packInstances(description.draws));
         endGpuPass(frame, GpuPass::RayScene);
     }
@@ -1993,7 +1997,7 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionD
     if (!motionDraws.batches.empty()) {
         bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
-        stats.drawCalls += drawBatches(commands, motionDraws.batches, {motionPipeline->get(), motionCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
+        stats.drawCalls += drawBatches(commands, motionDraws.batches, {motionPipeline->get(), motionCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT, true});
     }
 
     vkCmdEndRendering(commands);
@@ -2118,7 +2122,7 @@ std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vec
         }
 
         std::uint32_t indexCount = 0;
-        bindMesh(commands, batch.mesh, indexCount);
+        bindMesh(commands, batch.mesh, indexCount, pipelines.previousShapes);
         vkCmdDrawIndexed(commands, indexCount, batch.instanceCount, 0, 0, batch.firstInstance);
     }
 
@@ -2315,9 +2319,37 @@ std::string VulkanRenderer::getDeviceName() const {
 }
 
 /*
-* Handles are indices into the same numbering the AssetManager uses, so finding the GPU copy is one array access.
+* A frame has few deforming meshes, so each looks through the frame's list. Every deforming mesh shows or holds once
+* per frame, which keeps its ring of slots safe from the frames still in flight.
 */
-void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, std::uint32_t& indexCount) const {
+void VulkanRenderer::showShapes(const FrameDescription& description) {
+    for (const DeformedMesh& deformed : description.deformedMeshes) {
+        if (!deformed.mesh.isValid() || deformed.mesh.index >= meshes.size() || !meshes[deformed.mesh.index]->isDeforming()) {
+            throw std::invalid_argument("A deformed mesh was not uploaded as a deforming mesh");
+        }
+    }
+
+    for (std::size_t index = 0; index < meshes.size(); ++index) {
+        VulkanMesh& mesh = *meshes[index];
+        if (!mesh.isDeforming()) {
+            continue;
+        }
+
+        const auto shown = std::find_if(description.deformedMeshes.begin(), description.deformedMeshes.end(),
+                                        [index](const DeformedMesh& deformed) { return deformed.mesh.index == index; });
+        if (shown != description.deformedMeshes.end()) {
+            mesh.showShape(shown->vertices, shown->shape);
+        } else {
+            mesh.holdShape();
+        }
+    }
+}
+
+/*
+* Handles are indices into the same numbering the AssetManager uses, so finding the GPU copy is one array access. A
+* deforming mesh binds its current shape; with previousShape, its last frame's too (the same buffer for every other mesh).
+*/
+void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, std::uint32_t& indexCount, bool previousShape) const {
     if (!meshHandle.isValid() || meshHandle.index >= meshes.size()) {
         throw std::out_of_range("Mesh handle has not been uploaded");
     }
@@ -2326,6 +2358,11 @@ void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, s
     const VkBuffer vertexBuffer = mesh.getVertexBuffer();
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, &vertexBuffer, &offset);
+
+    if (previousShape) {
+        const VkBuffer previousBuffer = mesh.getPreviousVertexBuffer();
+        vkCmdBindVertexBuffers(commands, 1, 1, &previousBuffer, &offset);
+    }
     vkCmdBindIndexBuffer(commands, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
     indexCount = mesh.getIndexCount();
 }
@@ -2348,12 +2385,12 @@ SampledImage VulkanRenderer::sampled(const VulkanTexture& texture) const {
 // Uploads wait for the GPU with their own command buffer, so they must happen between frames. A texture takes its slot
 // in the bindless array at once (slots in-flight frames do not read may change while they run).
 // With ray tracing, each mesh also gets its acceleration structure, numbered like the mesh.
-void VulkanRenderer::uploadMesh(const IndexedMesh& mesh) {
+void VulkanRenderer::uploadMesh(const IndexedMesh& mesh, bool deforming) {
     if (recording) {
         throw std::logic_error("Upload meshes before beginning a frame");
     }
 
-    meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh));
+    meshes.push_back(std::make_unique<VulkanMesh>(device, uploads, mesh, deforming));
 
     if (rayTracing) {
         rayTracing->addMesh(uploads, *meshes.back());

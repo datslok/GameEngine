@@ -214,8 +214,13 @@ void Application::applyMouseMode() {
 void Application::prepareNewResources() {
     while (renderer.getMeshCount() < assets.getMeshCount()) {
         const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
-        // Convert to the render format once, when the mesh first reaches the GPU.
-        renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next)));
+        // Convert to the render format once, when the mesh first reaches the GPU; a deforming mesh's rest shape is its
+        // topology's, built when it was added.
+        if (assets.isDeforming(next)) {
+            renderer.uploadMesh(assets.getDeformingTopology(next).rest, true);
+        } else {
+            renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next)));
+        }
         boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
     }
 
@@ -278,6 +283,18 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     // Probe events last one frame: this one carries them.
     clearProbeEvents(world);
     frame.frameSeconds = frameSeconds;
+
+    // Each deforming mesh's shape at alpha, one mesh a job: its vertices, and its bounds in place of its rest shape's.
+    std::vector<const DeformingMesh*> deforming;
+    world.each<DeformingMesh>([&](Entity, DeformingMesh& mesh) { deforming.push_back(&mesh); });
+    frame.deformedMeshes.resize(deforming.size());
+    jobs.parallelFor(deforming.size(), 1, [&](std::size_t index) {
+        frame.deformedMeshes[index] = deformMesh(assets.getDeformingTopology(deforming[index]->mesh), *deforming[index], alpha);
+    });
+    for (const DeformedMesh& deformed : frame.deformedMeshes) {
+        boundsByMesh.at(deformed.mesh.index) = deformed.bounds;
+    }
+    attachShapes(frame.draws, frame.deformedMeshes);
 
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);

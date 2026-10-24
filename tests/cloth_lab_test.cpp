@@ -3,6 +3,8 @@
 #include "games/clothlab/cloth_lab_layout.h"
 #include "physics/overlap.h"
 #include "physics/static_level.h"
+#include "scene/deforming_mesh.h"
+#include "engine/game.h"
 #include "scene/atmosphere.h"
 #include "scene/light.h"
 #include "scene/model_renderer.h"
@@ -99,11 +101,13 @@ namespace {
         assert(near(levelHeightBelow(level, layout.fabricFrame.barCentre.x, layout.fabricFrame.barCentre.z),
                     clothLabBarUnderside(layout.fabricFrame) + 2.0f * clothLabBarHalfThickness));
 
+        // Everything but the banner, which moves.
         int staticModels = 0;
         int others = 0;
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
         assert(staticModels >= 1);
-        assert(others == 0);
+        assert(others == 1);
+        assert(!lab.world.get<ModelRenderer>(lab.game.getBanner()).isStatic);
     }
 
     // A sunlit afternoon under the real sky, with light probes round the camera.
@@ -126,6 +130,51 @@ namespace {
         assert(probes == 1);
     }
 
+    // The banner: a deforming mesh hanging from the fabric bar, its top edge pinned along the bar's underside, rippling
+    // from tick to tick by the same waves on every run.
+    void testTheBannerRipples() {
+        ClothLab lab;
+        const Entity banner = lab.game.getBanner();
+        const DeformingMesh& mesh = lab.world.get<DeformingMesh>(banner);
+        assert(lab.assets.isDeforming(mesh.mesh));
+        assert(mesh.positions.size() == lab.assets.getMesh(mesh.mesh).vertices.size());
+        assert(lab.world.get<ModelRenderer>(banner).parts.at(0).mesh.index == mesh.mesh.index);
+        assert(lab.world.get<ModelRenderer>(banner).parts.at(0).material.doubleSided);
+
+        const ClothLabLayout layout = buildClothLabLayout();
+        const Aabb fabricStation = layout.stations()[2];
+        const Mat4& placement = lab.world.get<ModelRenderer>(banner).parts[0].localTransform;
+        const std::vector<Vec3> before = mesh.positions;
+
+        for (int tick = 0; tick < 30; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        const std::vector<Vec3>& after = lab.world.get<DeformingMesh>(banner).positions;
+
+        bool moved = false;
+        const std::size_t columns = static_cast<std::size_t>(clothLabBannerColumns) + 1;
+        for (std::size_t vertex = 0; vertex < after.size(); ++vertex) {
+            const Vec3 placed = transformPoint(placement, after[vertex]);
+            assert(placed.x >= fabricStation.minimum.x && placed.x <= fabricStation.maximum.x);
+            assert(placed.y >= 0.0f && placed.y <= clothLabBarUnderside(layout.fabricFrame) + 1e-4f);
+            if (vertex >= after.size() - columns) {
+                assert(near(placed.y, clothLabBarUnderside(layout.fabricFrame)));
+                assert(near(after[vertex].z, 0.0f));
+            }
+            moved = moved || std::abs(after[vertex].z - before[vertex].z) > 1e-3f;
+        }
+        assert(moved);
+
+        ClothLab again;
+        for (int tick = 0; tick < 30; ++tick) {
+            runFixedUpdate(again.game, again.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        const std::vector<Vec3>& repeated = again.world.get<DeformingMesh>(again.game.getBanner()).positions;
+        for (std::size_t vertex = 0; vertex < after.size(); ++vertex) {
+            assert(repeated[vertex].x == after[vertex].x && repeated[vertex].y == after[vertex].y && repeated[vertex].z == after[vertex].z);
+        }
+    }
+
     // It has golden views, looking at its stations.
     void testItHasGoldenViews() {
         ClothLab lab;
@@ -140,5 +189,6 @@ void testClothLab() {
     testStationsStandApart();
     testTheLevelIsTheLayout();
     testItIsLit();
+    testTheBannerRipples();
     testItHasGoldenViews();
 }

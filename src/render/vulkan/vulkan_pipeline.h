@@ -63,7 +63,9 @@ enum class BlendMode {
     DualSourceTransmittance // the new colour added to it, which shows through by the shader's second colour, per channel (glass)
 };
 
-// Vertices read from one buffer, each stride bytes; no attributes means the vertex shader makes its own (a full-screen triangle).
+// Vertices read from one buffer, each stride bytes; no attributes means the vertex shader makes its own (a full-screen
+// triangle). Attributes naming binding 1 read a second buffer of the same layout (the velocity pass: last frame's shape
+// of a deforming mesh).
 struct VertexLayout {
     std::uint32_t stride = 0;
     std::vector<VkVertexInputAttributeDescription> attributes;

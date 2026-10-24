@@ -2530,6 +2530,40 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 
 **Tests**: `transparency_test` (opaque, coverage, transmission with Fresnel, metals, the split, far-to-near sorting with backs first, unbounded draws, the push constants, the reactive share, its settings and pass, the shared transmittance, the light crossing glass, which faces count, segments against spheres, the glass bounds, Beer's law, the spread, the picture's level, the solid sphere's exit, which glass refracts, the picture pass), `material_uniforms_test`, `gltf_material_test` and `texture_encoding_test` (thick glass's numbers), `gpu_scene_test` (the instance's scale), `light_lab_test` (the glass ball and frosted panel), `taa_test` (`taaReactiveShare`), the loader's, asset manager's and packing tests, `culling_test` (no glass shadow casters), `ray_tracing_test` (the glass mask alone, not opaque), `mirrored_light_test`, `gpu_timing_test`, `light_lab_test` (the window's pane); GPU tests in `transparency_gpu_test` (the blend, the reactive share, the light crossing glass, the sphere test and refraction's functions) and `taa_gpu_test` (`taaReactiveShare`), written and built, not run.
 
+## Deforming meshes
+
+Meshes whose vertices move every tick while their triangles and UVs stay the same (phase 7, `dynamic-meshes`): cloth. `scene/deforming_mesh` (tested in `deforming_mesh_test`), `render/gpu/deforming_slots` (`deforming_slots_test`), `render/vulkan/vulkan_mesh`, `vulkan_ray_tracing`.
+
+**The game's side:**
+
+- `AssetManager::addDeformingMesh(mesh)`: a mesh of its own (never shared), its `DeformingTopology` built once (`isDeforming`, `getDeformingTopology`). The `Mesh` is the rest shape; `Mesh::grid(columns, rows, width, height)` makes a sheet (facing +z, rows from the bottom, UV (0, 0) bottom-left).
+- Drawn by a `ModelRenderer` part like any mesh, its entity holding a `DeformingMesh {mesh, positions, previousPositions}`: one position per `Mesh` vertex, in the mesh's own space, written in ticks.
+- `runFixedUpdate` calls `savePreviousShapes` before each tick (as `savePreviousTransforms`), and `hashSimulationState` includes the positions.
+
+**The topology** (`buildDeformingTopology`): the render vertices, each triangle corner shared by its `Mesh` vertex, UV and tangent side (`resolveCorners`' MikkTSpace sign), and `sourceVertex`, which `Mesh` vertex each is. Corners split at a UV seam share one normal. `rest` holds the rest shape's vertices, worked out by `deformVertices` itself, and is what is uploaded.
+
+**Each frame** (`Application::describeFrame`, one mesh a job on the job system):
+
+- `deformMesh(topology, mesh, alpha)`: `blendedPositions` between the ticks (the latest without a previous shape of the same size), then `deformVertices`:
+  - each normal the sum of its triangles' cross products (area-weighted), normalised;
+  - each tangent the sum of its triangles' direction of increasing u (Lengyel: (e1 dv2 - e2 dv1) times the sign of the UV area), made square to the normal (Gram-Schmidt), its side w kept;
+  - fallbacks for a squashed shape: normal +y, tangent any perpendicular.
+- The `DeformedMesh {mesh, vertices, bounds, shape}` goes into `FrameDescription::deformedMeshes`; `shape` is an FNV-1a hash of the blended positions (never 0). The bounds replace the mesh's in `boundsByMesh` before culling.
+- `attachShapes` gives every draw of that mesh `DrawItem::shape`, which `shadowCasterSignature` hashes, so a caster that changes shape where it stands redraws its tiles and one that holds still keeps them.
+
+**Measured** (release, `deformMesh`, best of 50): the banner's 841 vertices 0.045 ms, a 100 x 100 sheet's 10,201 vertices 0.50 ms. One mesh is one job, so a single big sheet is not split across threads yet.
+
+**The ring** (`DeformingSlots`, `deformingSlotCount` = `maxFramesInFlight` + 1 = 3):
+
+- A deforming `VulkanMesh` (`uploadMesh(rest, true)`) keeps its vertices in three mapped upload buffers (`shapeSlots`), all starting with the rest shape; its indices live in GPU memory.
+- Each frame reads the current slot and the previous one (motion). A new shape goes into the slot after the current one (`advance`), and the current slot moves at most one step a frame, so with F frames in flight the slot written is never one frames N - F + 1 .. N - 1 read (tested over many orders of new and held frames).
+- `VulkanRenderer::showShapes`, first thing in `drawScene` (after the frame's fence): each deforming mesh `showShape`s the frame's vertices, or holds when the fingerprint matches the shape it shows (no upload, no motion) or the frame has none (`holdShape`). Each mesh shows or holds exactly once a frame. A deformed mesh not uploaded as deforming throws.
+- `version(slot)` counts every write, so what was built from a slot knows when it is stale.
+
+**Motion vectors:** a draw is in the velocity pass when its matrix moved or its mesh `changedShape()`. The motion pipelines read a second vertex stream (`VertexLayout`: attributes naming binding 1; `BatchPipelines::previousShapes`, `bindMesh(..., previousShape)`), last frame's slot, at location 4, and `motion.vert` places it with last frame's matrix. Other meshes bind their one buffer twice.
+
+**Ray tracing:** a deforming mesh has a bottom-level structure per slot (`MeshStructure::slotStructures`, built with `PREFER_FAST_BUILD`, not compacted, one scratch buffer each), slot 0 built at upload. `rebuildDeformedMeshes`, recorded before each top-level build, rebuilds the current slot's structure when its version is newer than the one it was built from, after a barrier for the reused scratch; a barrier then makes it readable by the top-level build and ray queries. `packInstances` and the mesh table use the current slot's structure and vertices (`currentStructure`, `currentVertices`).
+
 ## Input
 
 `Input` is a once-per-frame snapshot with no SDL dependency.
@@ -2916,6 +2950,11 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 **The scene:** the floor and one renderer of every station's parts (pale concrete, a dark blue mat, grey stone, brushed steel, the ball a 64 x 32 sphere), all static level (`isStatic`, walked on, probes moved off them). A fixed sun (`clothLabLatitudeDegrees` 45, `clothLabDayOfYear` 172, `clothLabSolarHours` 15, intensity 4 above the air), the real sky (an `Atmosphere`, its ground the floor's colour) and `ProbeCascades`.
 
 **Controls:** `PlayerControls` (F1 first person, F2 MOBA, F3 free camera) and F4's debug view; no settings of its own yet.
+
+**The banner:** a stand-in for cloth until the solver, and the first deforming mesh (see Deforming meshes): a `Mesh::grid` of `clothLabBannerColumns` x `clothLabBannerRows` (28 x 30) squares, `clothLabBannerWidth` 1.4 by `clothLabBannerHeight` 1.5 m, hanging from the fabric bar's left half (`ClothLabLayout::bannerCentre`), deep red and double-sided.
+
+- Each tick `bannerShape` pushes each point into the picture by a wave running down the sheet (`clothLabBannerWaveHeight` 0.08 m, `clothLabBannerWavelength` 0.9 m, `clothLabBannerWaveSeconds` 1.6 s, its crests slanting across) and a sway of the whole sheet (`clothLabBannerSwayHeight` 0.05 m every `clothLabBannerSwaySeconds` 2.3 s), both scaled by how far down the point hangs, so the top edge stays on the bar.
+- From the time at the end of the tick, so it is deterministic; `getBanner()`.
 
 **Golden view:** `stations`, from the free camera's start (0, 2.4, 6.5) towards (0, 1, -1).
 

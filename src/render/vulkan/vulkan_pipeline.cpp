@@ -2,6 +2,7 @@
 #include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 
@@ -163,17 +164,25 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
         stages[1].pSpecializationInfo = &fragmentSpecialization;
     }
 
-    VkVertexInputBindingDescription vertexBinding{};
-    vertexBinding.binding = 0;
-    vertexBinding.stride = description.vertices.stride;
-    vertexBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    std::uint32_t bindingCount = 0;
+    for (const VkVertexInputAttributeDescription& attribute : description.vertices.attributes) {
+        bindingCount = std::max(bindingCount, attribute.binding + 1);
+    }
 
-    const bool hasVertices = !description.vertices.attributes.empty();
+    std::array<VkVertexInputBindingDescription, 2> vertexBindings{};
+    if (bindingCount > vertexBindings.size()) {
+        throw std::invalid_argument("A pipeline reads vertices from at most two buffers");
+    }
+    for (std::uint32_t binding = 0; binding < vertexBindings.size(); ++binding) {
+        vertexBindings[binding].binding = binding;
+        vertexBindings[binding].stride = description.vertices.stride;
+        vertexBindings[binding].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    }
 
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInput.vertexBindingDescriptionCount = hasVertices ? 1 : 0;
-    vertexInput.pVertexBindingDescriptions = &vertexBinding;
+    vertexInput.vertexBindingDescriptionCount = bindingCount;
+    vertexInput.pVertexBindingDescriptions = vertexBindings.data();
     vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(description.vertices.attributes.size());
     vertexInput.pVertexAttributeDescriptions = description.vertices.attributes.data();
 

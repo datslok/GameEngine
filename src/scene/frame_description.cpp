@@ -29,7 +29,7 @@ std::size_t MotionHistory::KeyHash::operator()(const Key& key) const {
 * placed by the entity's interpolated transform times the part's local transform.
 */
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history) {
-    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}};
+    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}};
 
     world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
         if (!modelRenderer.visible) {
@@ -55,4 +55,15 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
     }
 
     return frame;
+}
+
+// A frame has few deforming meshes, so each draw looks through them.
+void attachShapes(std::vector<DrawItem>& draws, const std::vector<DeformedMesh>& deformedMeshes) {
+    for (DrawItem& draw : draws) {
+        for (const DeformedMesh& deformed : deformedMeshes) {
+            if (draw.mesh.index == deformed.mesh.index && draw.mesh.isValid()) {
+                draw.shape = deformed.shape;
+            }
+        }
+    }
 }
