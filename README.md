@@ -396,6 +396,7 @@ src/              Engine and game source, in layers (lower ones never include hi
   games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground)
                   and games/clothlab (the cloth test ground)
   engine/         The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
+  cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area) and their step
   gameplay/       Character movement, spinners, fireflies, grenades, camera controllers
                   and the player controls games share (F1-F3)
   platform/       The window and SDL input translation

@@ -1,4 +1,5 @@
 #include "engine/state_hash.h"
+#include "cloth/cloth.h"
 #include "core/hash.h"
 #include "gameplay/character.h"
 #include "gameplay/first_person_body.h"
@@ -115,6 +116,18 @@ std::uint64_t hashSimulationState(const World& world) {
         hash.add(static_cast<std::uint64_t>(mesh.positions.size()));
         for (const Vec3& position : mesh.positions) {
             add(hash, position);
+        }
+    });
+
+    hash.add(9u);
+    world.each<Cloth>([&](Entity entity, const Cloth& cloth) {
+        const ClothParticles& particles = cloth.particles;
+        add(hash, entity);
+        hash.add(static_cast<std::uint64_t>(particles.size()));
+        for (std::size_t index = 0; index < particles.size(); ++index) {
+            add(hash, particles.positions[index]);
+            add(hash, particles.velocities[index]);
+            hash.add(particles.inverseMasses[index]);
         }
     });
 

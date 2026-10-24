@@ -289,17 +289,14 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] Job system: a work-stealing thread pool with `parallelFor` (`job-system`)
 - [x] Cloth lab: a test ground with a station for each milestone, `--game clothlab` (`cloth-lab`)
 - [x] Dynamic meshes: deforming meshes uploaded every frame, normals and tangents recomputed (`dynamic-meshes`)
-- [ ] Particle store for cloth: the sheet's vertices as plain arrays
-  - Positions, previous positions, velocities, inverse masses, with 0 for pinned points.
-  - Contiguous for the cache and for upload to the GPU, inside the cloth component.
-  - Reusing phase 5's per-particle functions (`fly`, `bounceVelocity`)
+- [x] Particle store for cloth: the sheet's points as plain arrays, lumped masses, pins, the step (`cloth-particles`)
 - [ ] XPBD solver (extended position-based dynamics): particles integrated with gravity, then constraints project their positions back towards valid states
   - Each constraint has a compliance (inverse stiffness), so nearly unstretchable fabric stays stable at the 120 Hz tick, where stiff springs would need a tiny timestep.
   - Use many substeps (10-20 per tick, one constraint iteration each) rather than many iterations of one big step: small steps converge faster for the same work, so fabric stretches less (Macklin et al. 2019, "Small Steps in Physics Simulation")
 - [ ] Cloth constraints: stretch (edge lengths), bending (angle between neighbouring triangles), pinning (fixed points, for testing and for hangers)
 - [ ] Collision with bodies: spheres and capsules first (phase 5's shapes), then a signed distance field around a mannequin
   - The field is built in compute (it can serve later as DDGI's software tracer and for distance-field AO).
-  - Friction between cloth and body
+  - Friction between cloth and body (phase 5's `bounceVelocity` fits the velocity response; its `fly` does not fit the step, see `cloth-particles` in the build log)
 - [ ] Self-collision, so folds and layers never pass through each other
   - A broad phase (a BVH or spatial hash) only finds nearby pairs.
   - Cloth is so thin that a fast-moving layer can jump right through another between two substeps, so it also needs continuous collision detection (vertex-triangle and edge-edge pairs checked along their motion during the step) and a cloth thickness that keeps layers apart
