@@ -493,6 +493,10 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
   - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
 - [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
+- [ ] Steadier volumetric fog: sunbeams through the light lab's window shimmer
+  - Read each froxel's history at its centre, not at its jittered sample point (with the camera still the read now lands up to half a froxel off, so the filter mixes in neighbours with weights that change every frame).
+  - Give each froxel its own phase of the Halton jitter (a hash of its place added and wrapped, a Cranley-Patterson rotation), so the leftover error is fine noise the history and DLSS remove rather than one pattern moving together.
+  - Possibly set the history as a time constant in seconds, as the probes do, so it lags the same at any frame rate.
   - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
   - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.
 - [ ] Mirrored lights without ray tracing: the image light for flat mirrors
