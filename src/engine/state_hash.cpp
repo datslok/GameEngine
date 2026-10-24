@@ -129,6 +129,11 @@ std::uint64_t hashSimulationState(const World& world) {
             add(hash, particles.velocities[index]);
             hash.add(particles.inverseMasses[index]);
         }
+        hash.add(static_cast<std::uint64_t>(cloth.pins.size()));
+        for (const ClothPin& pin : cloth.pins) {
+            hash.add(pin.particle);
+            add(hash, pin.position);
+        }
         hash.add(cloth.grab.has_value());
         if (cloth.grab) {
             hash.add(cloth.grab->particle);

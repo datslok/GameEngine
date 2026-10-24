@@ -166,6 +166,8 @@ namespace {
         assert(near(settings.stretchCompliance, 1.0f / 2000.0f));
         assert(settings.substeps == 15);
         assert(near(settings.drag, 0.5f));
+        assert(near(settings.grabCompliance, 0.001f));
+        assert(near(settings.bendingStiffness, 1e-5f));
     }
 }
 
