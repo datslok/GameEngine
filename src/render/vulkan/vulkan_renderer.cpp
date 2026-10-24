@@ -115,6 +115,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
+    fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     reactiveMask = std::make_unique<VulkanReactiveMask>(device, nearestSampler.get());
@@ -1265,10 +1266,16 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool glassShadows = rayTracing && settings.transparency.glassShadows &&
                               std::any_of(description.draws.begin(), description.draws.end(), [](const DrawItem& draw) { return isTransparent(draw.material); });
 
+    // Volumetric fog (render/gpu/volumetric_fog.h), its grid readied before the scene set points at it: the grid's camera
+    // is the camera without the jitter (the froxels' own samples move instead), its samples turned every frame.
+    const std::optional<Fog>& fogInAir = description.lighting.fog;
+    const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, memoryFrameNumber,
+                                         camera.getFarPlane());
+
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
-                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, glassShadows);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, glassShadows, frameFog);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1317,6 +1324,16 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::Shadows);
         drawShadows(frame, shadowDraws, sceneSet);
         endGpuPass(frame, GpuPass::Shadows);
+    }
+
+    // The fog's grid, lit from this frame's shadows and the clusters' lists, then integrated. The atlas is read by compute
+    // for it, then handed back to the fragment shaders.
+    if (fog->drawsFog()) {
+        beginGpuPass(frame, GpuPass::Fog);
+        shadowAtlas.transition(frame.commands, ImageState::DepthComputeRead);
+        fog->light(frame.commands, frame.descriptors, bindlessTextures->getSet(), sceneSet);
+        shadowAtlas.transition(frame.commands, ImageState::DepthFragmentRead);
+        endGpuPass(frame, GpuPass::Fog);
     }
 
     if (settings.depthPrepass) {
@@ -1407,6 +1424,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(),
                              screenSpace ? finishedScene : nullptr, *reflectionProbe, pass, reflectionsTraceRays ? &raySets : nullptr);
         endGpuPass(frame, GpuPass::Reflections);
+    }
+
+    // The picture with its reflections seen through the fog, before the glass, which applies the fog to itself (and
+    // refracts the fogged picture).
+    if (fog->drawsFog() && inverseViewProjection) {
+        beginGpuPass(frame, GpuPass::FogApply);
+        fog->apply(frame.commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, sceneColour, depth,
+                   packFogPicturePass(*inverseViewProjection, sceneSize));
+        endGpuPass(frame, GpuPass::FogApply);
     }
 
     // Glass and blended surfaces over the picture with its reflections, before it is smoothed. The picture before them
@@ -1545,7 +1571,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
-                                           bool occlusionBlurred, bool glassShadows) {
+                                           bool occlusionBlurred, bool glassShadows, const GpuFog& frameFog) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1609,6 +1635,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.mirrorPairs.write(&packedPairs, sizeof(packedPairs));
     const GpuGlassBounds glassBounds = packGlassBounds(description.draws, glassShadows);
     buffers.glassBounds.write(&glassBounds, sizeof(glassBounds));
+    buffers.fog.write(&frameFog, sizeof(frameFog));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
     buffers.directionalLights.write(lights.directional);
@@ -1629,6 +1656,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         mirrorLight ? mirroredLights->sampledLight() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledDirection() : sampled(*noProbesTexture),
         occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred) : sampled(*noProbesTexture),
+        fog->sampledVolume(),
     };
 
     SceneBufferViews views;
@@ -1683,14 +1711,15 @@ GpuAtmosphere VulkanRenderer::packFrameAtmosphere(const FrameDescription& descri
 * Clustered shading's light lists, written by cluster_lights.comp from this frame's lights and grid (in the frame's
 * scene set, bound at the compute bind point, which keeps its own sets apart from the graphics passes'), one invocation
 * per cluster. Two barriers order the lists between the passes, since only the GPU touches them:
-* - before: last frame's main pass may still be reading them (frames in flight), so those reads must finish before
-*   this pass overwrites them. A write after a read needs only that order, no caches made visible: no source access.
-* - after: this frame's main pass reads what this pass wrote, so the compute writes are made visible to fragment shader
-*   reads (written back from the compute units' caches, and the reading caches invalidated).
+* - before: last frame's main pass and fog grid may still be reading them (frames in flight), so those reads must
+*   finish before this pass overwrites them. A write after a read needs only that order, no caches made visible: no
+*   source access.
+* - after: this frame's main pass and fog grid read what this pass wrote, so the compute writes are made visible to
+*   fragment and compute shader reads (written back from the compute units' caches, and the reading caches invalidated).
 */
 void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet) {
     const VkCommandBuffer commands = frame.commands;
-    bufferBarrier(commands, clusterMasks.get(), {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_NONE},
+    bufferBarrier(commands, clusterMasks.get(), {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_NONE},
                   {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT});
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, clusterLightsPipeline->get());
@@ -1698,7 +1727,7 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
     vkCmdDispatch(commands, workgroupCount(static_cast<std::uint32_t>(clusterCount(clusterGrid)), clusterGroupSize), 1, 1);
 
     bufferBarrier(commands, clusterMasks.get(), {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT},
-                  {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT});
+                  {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT});
 }
 
 /*

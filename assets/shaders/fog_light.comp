@@ -1,0 +1,167 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The fog's grid lit (render/gpu/volumetric_fog.h), one invocation per froxel, after the shadows and the clusters' light
+* lists: the froxel's extinction from the height fog and the light it scatters towards the eye per unit of optical depth,
+* at a point moved round the froxel's middle by this frame's jitter. The light is the directional lights' (each with
+* its cascades' shadow), the point and spot lights its cluster lists (each with its shadow), and the light from all
+* around (the probes', or the flat ambient), through the albedo. Last frame's grid, read where the point was then, keeps
+* the history weight's share, so the frames' samples average into a smooth grid.
+*/
+#include "render/gpu/shader_shared.h"
+#include "lighting.glsl"
+#include "cascades.glsl"
+#include "clusters.glsl"
+#include "frame_data.glsl"
+#include "frame_clusters.glsl"
+#include "scene_lights.glsl"
+#include "scene_probes.glsl"
+#include "scene_shadow_tiles.glsl"
+#include "scene_fog.glsl"
+
+layout(local_size_x = FOG_LIGHT_GROUP_SIDE, local_size_y = FOG_LIGHT_GROUP_SIDE, local_size_z = FOG_LIGHT_GROUP_SIDE) in;
+
+// Which lights may reach each cluster, one bit per light (cluster_lights.comp writes them before this pass).
+layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
+    uint clusterMasks[];
+};
+
+layout(set = 2, binding = 0) uniform sampler3D history;                // last frame's grid, filtered
+layout(set = 2, binding = 1, rgba16f) uniform writeonly image3D lighting; // rgb the scattered light, a the extinction
+
+// The sun's shadow at a point in the air: the finest cascade whose box holds it, moved towards the sun by the cascade's
+// own bias (cascades.h), one comparison; lit past the last.
+float sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight) {
+    for (int cascade = 0; cascade < cascades; ++cascade) {
+        int tile = firstTile + cascade;
+        vec3 biased = position + toLight * shadowTiles[tile].offset.y;
+        vec4 clip = shadowTiles[tile].matrix * vec4(biased, 1.0);
+
+        if (cascadeEdgeDistance(clip.xyz / clip.w, shadowTiles[tile].lens.y / shadowTiles[tile].lens.w) > 0.0) {
+            return shadowTap(tile, biased);
+        }
+    }
+
+    return 1.0;
+}
+
+// One point light's light scattered towards the eye at a point in the air; nothing beyond its range.
+vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection) {
+    vec3 offset = points[i].positionRange.xyz - position;
+    float range = points[i].positionRange.w;
+    float distance = length(offset);
+
+    if (distance <= 0.0 || distance >= range) {
+        return vec3(0.0);
+    }
+
+    vec3 irradiance = points[i].radiance.rgb * distanceFalloff(distance, range, points[i].radiance.w);
+    int firstTile = points[i].firstShadowTile;
+
+    if (firstTile >= 0) {
+        float lit = shadowTap(firstTile + pointShadowFace(position - points[i].positionRange.xyz), position);
+        irradiance *= mix(1.0, lit, points[i].shadowStrength);
+    }
+
+    return fogInScattering(irradiance, offset / distance, viewDirection, frameFog.medium.w);
+}
+
+// One spotlight's: as a point light's, and nothing outside its cone.
+vec3 spotLightInAir(int i, vec3 position, vec3 viewDirection) {
+    vec3 offset = spots[i].positionRange.xyz - position;
+    float range = spots[i].positionRange.w;
+    float distance = length(offset);
+
+    if (distance <= 0.0 || distance >= range) {
+        return vec3(0.0);
+    }
+
+    vec3 toLight = offset / distance;
+    float cone = spotCone(dot(-toLight, spots[i].directionCosOuter.xyz), spots[i].directionCosOuter.w, spots[i].radianceCosInner.w);
+
+    if (cone <= 0.0) {
+        return vec3(0.0);
+    }
+
+    vec3 irradiance = spots[i].radianceCosInner.rgb * (distanceFalloff(distance, range, spots[i].sourceRadius) * cone);
+    int tile = spots[i].shadowTile;
+
+    if (tile >= 0) {
+        irradiance *= mix(1.0, shadowTap(tile, position), spots[i].shadowStrength);
+    }
+
+    return fogInScattering(irradiance, toLight, viewDirection, frameFog.medium.w);
+}
+
+void main() {
+    ivec3 froxel = ivec3(gl_GlobalInvocationID);
+    ivec3 size = ivec3(frameFog.grid.xyz);
+
+    if (any(greaterThanEqual(froxel, size))) {
+        return;
+    }
+
+    float range = frameFog.grid.w;
+    vec3 coordinate = clamp((vec3(froxel) + 0.5 + frameFog.jitter.xyz) / vec3(size), 0.0, 1.0);
+    vec3 position = fogVolumePoint(coordinate, frameFog.inverseViewProjection, viewForward.xyz, range);
+    vec3 viewDirection = normalize(fogVolumePoint(vec3(coordinate.xy, 1.0), frameFog.inverseViewProjection, viewForward.xyz, range));
+    vec3 light = vec3(0.0);
+
+    for (int i = 0; i < counts.x; ++i) {
+        vec3 irradiance = directional[i].radiance.rgb;
+        int tile = directional[i].shadowTile;
+
+        if (tile >= 0) {
+            irradiance *= sunShadowInAir(tile, directional[i].cascadeCount, position, directional[i].toLight.xyz);
+        }
+
+        light += fogInScattering(irradiance, directional[i].toLight.xyz, viewDirection, frameFog.medium.w);
+    }
+
+    if (shadingOptions.x != 0) {
+        // Only the lights listed for the point's cluster, as the main pass walks them (every light that reaches the
+        // point is listed there).
+        int firstWord = clusterOfPixel(frameClusterGrid(), coordinate.xy * clusterScreen.xy, dot(position, viewForward.xyz)) * CLUSTER_WORDS;
+
+        for (int word = 0; word * 32 < counts.y; ++word) {
+            uint bits = clusterMasks[firstWord + word];
+
+            while (bits != 0u) {
+                int bit = findLSB(bits);
+                bits &= bits - 1u;
+                light += pointLightInAir(word * 32 + bit, position, viewDirection);
+            }
+        }
+
+        for (int word = 0; word * 32 < counts.z; ++word) {
+            uint bits = clusterMasks[firstWord + CLUSTER_POINT_WORDS + word];
+
+            while (bits != 0u) {
+                int bit = findLSB(bits);
+                bits &= bits - 1u;
+                light += spotLightInAir(word * 32 + bit, position, viewDirection);
+            }
+        }
+    } else {
+        for (int i = 0; i < counts.y; ++i) {
+            light += pointLightInAir(i, position, viewDirection);
+        }
+
+        for (int i = 0; i < counts.z; ++i) {
+            light += spotLightInAir(i, position, viewDirection);
+        }
+    }
+
+    light += frameFog.options.z > 0.5 ? probeAmbientInAir(position) : flatAmbient();
+
+    vec4 froxelLight = vec4(light * frameFog.albedo.rgb, fogDensity(frameFog.medium, position.y + cameraOrigin.y));
+    vec3 previous = fogVolumeCoordinate(position, frameFog.previousViewProjection, range);
+    float kept = fogHistoryWeight(previous, frameFog.options.y);
+
+    if (kept > 0.0) {
+        froxelLight = mix(froxelLight, textureLod(history, previous, 0.0), kept);
+    }
+
+    imageStore(lighting, froxel, froxelLight);
+}

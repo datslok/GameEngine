@@ -69,6 +69,10 @@ float probeCornerWeight(vec3 normal, vec3 toProbe, float distance, vec2 moments,
     return crushProbeWeight(probeBackFaceWeight(normal, toProbe) * probeVisibility(distance, moments)) * trilinear;
 }
 
+float probeAirWeight(float distance, vec2 moments, float trilinear) {
+    return crushProbeWeight(probeVisibility(distance, moments)) * trilinear;
+}
+
 float probeCascadeWeight(vec3 centre, vec3 reach, vec3 fade, vec3 point) {
     vec3 weights = clamp((reach - abs(point - centre)) / fade, 0.0, 1.0);
     return weights.x * weights.y * weights.z;

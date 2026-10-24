@@ -90,6 +90,27 @@ namespace {
         assert(defaults.enabled && defaults.slices == 3 && defaults.steps == 6);
     }
 
+    // Volumetric fog per preset: off on Low, a coarser grid on Medium, the defaults on High and Ultra.
+    void testPresetsSetFog() {
+        const std::array<bool, 4> enabled{false, true, true, true};
+        const std::array<int, 4> widths{96, 128, 160, 160};
+        const std::array<int, 4> heights{54, 72, 90, 90};
+        const std::array<int, 4> slices{32, 48, 64, 64};
+
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            const std::size_t index = static_cast<std::size_t>(preset);
+            RenderSettings settings;
+            settings.fog.enabled = !enabled[index];
+            applyQualityPreset(settings, preset);
+            assert(settings.fog.enabled == enabled[index]);
+            assert(settings.fog.gridWidth == widths[index] && settings.fog.gridHeight == heights[index] && settings.fog.slices == slices[index]);
+            assert(matchingQualityPreset(settings) == preset);
+        }
+
+        const FogSettings defaults = RenderSettings{}.fog;
+        assert(defaults.enabled && defaults.gridWidth == 160 && defaults.gridHeight == 90 && defaults.slices == 64);
+    }
+
     // Sharing between probes per preset: more where there are fewer rays, none on Ultra, the default.
     void testPresetsSetProbeSharing() {
         const std::array<float, 4> sharing{0.5f, 0.3f, 0.1f, 0.0f};
@@ -259,6 +280,7 @@ void testQualityPreset() {
     testPresetsSetProbeSharing();
     testPresetsSetReflections();
     testPresetsSetAmbientOcclusion();
+    testPresetsSetFog();
     testPresetsSetRayTracedFeatures();
     testPresetsSetTheProbeCascades();
     testLowerPresetsCostLess();

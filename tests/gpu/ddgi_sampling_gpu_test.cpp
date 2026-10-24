@@ -110,19 +110,20 @@ namespace {
             inputs.push_back(gpuVec4(random.between(0.0f, 0.6f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_CORNER_WEIGHTS, inputs, 4, 1);
+        const std::vector<GpuVec4> outputs = runner.run(libraryShader, GPU_TEST_PROBE_CORNER_WEIGHTS, inputs, 4, 2);
 
-        for (std::size_t i = 0; i < outputs.size(); ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
             const Vec3 normal = vec3From(inputs[i * 4]);
             const Vec3 toProbe = vec3From(inputs[i * 4 + 1]);
             const GpuVec4& in = inputs[i * 4 + 2];
             const Vec2 moments{in[1], in[2]};
-            const GpuVec4& out = outputs[i];
+            const GpuVec4& out = outputs[i * 2];
 
             report.check("probeBackFaceWeight", arithmeticTolerance, probeBackFaceWeight(normal, toProbe), out[0]);
             report.check("probeVisibility", visibilityTolerance(moments), probeVisibility(in[0], moments), out[1]);
             report.check("crushProbeWeight", arithmeticTolerance, crushProbeWeight(inputs[i * 4 + 3][0]), out[2]);
             report.check("probeCornerWeight", visibilityTolerance(moments), probeCornerWeight(normal, toProbe, in[0], moments, in[3]), out[3]);
+            report.check("probeAirWeight", visibilityTolerance(moments), probeAirWeight(in[0], moments, in[3]), outputs[i * 2 + 1][0]);
         }
     }
 

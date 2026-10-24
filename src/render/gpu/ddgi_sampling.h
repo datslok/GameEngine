@@ -88,6 +88,12 @@ float crushProbeWeight(float weight);
 float probeCornerWeight(const Vec3& normal, const Vec3& toProbe, float distance, const Vec2& moments, float trilinear);
 
 /*
+* A corner probe's weight for a point in the air (volumetric fog), which faces no way: its visibility crushed, times the
+* trilinear weight, with no back-face weight.
+*/
+float probeAirWeight(float distance, const Vec2& moments, float trilinear);
+
+/*
 * How much a cascade lights a point along each axis, multiplied (render/gpu/probe_cascades.h): 1 out to reach - fade
 * from its centre, falling linearly to nothing at reach.
 */

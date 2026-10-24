@@ -9,6 +9,7 @@
 #include "gameplay/player_controls.h"
 #include "physics/static_level.h"
 #include "scene/atmosphere.h"
+#include "scene/fog.h"
 #include "scene/light.h"
 
 #include <vector>
@@ -90,6 +91,17 @@ inline constexpr float labStarsFullBelowDegrees = -14.0f;
 float starVisibility(const Vec3& towardsSun);
 
 void visit(LightLabNightSettings& settings, SettingsVisitor& visitor);
+
+/*
+* A thin ground mist (a Fog, render/gpu/volumetric_fog.h), on at the start so the sunbeams through the window and the
+* street lamps' halos show: about 300 m of sight at the ground, thinning by e every 10 m up, picked by eye.
+*/
+struct LightLabMistSettings {
+    bool enabled = true;
+    Fog fog{.density = 0.01f, .baseHeight = 0.0f, .scaleHeight = 10.0f};
+};
+
+void visit(LightLabMistSettings& settings, SettingsVisitor& visitor);
 
 // The moonlight's colour: sunlight reflected by the moon's grey-brown ground, a little warmer than the sun's.
 inline const Vec3 labMoonColour{1.0f, 0.94f, 0.86f};
@@ -189,6 +201,7 @@ public:
     const StaticLevel& getLevel() const;
     LightLabSunSettings& getSunSettings();
     LightLabNightSettings& getNightSettings();
+    LightLabMistSettings& getMistSettings();
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -227,8 +240,10 @@ private:
     PlayerControls controls;
     LightLabSunSettings sunSettings;
     LightLabNightSettings nightSettings;
+    LightLabMistSettings mistSettings;
 
-    // The real sky's air (Earth's by default), on the air entity while sunSettings.atmosphere is on.
+    // The real sky's air (Earth's by default), on the air entity while sunSettings.atmosphere is on; the mist's Fog on
+    // it too while mistSettings is on.
     Atmosphere atmosphereSettings;
 
     // The entity holding the lab's ProbeCascades: light probes round the camera wherever it goes.

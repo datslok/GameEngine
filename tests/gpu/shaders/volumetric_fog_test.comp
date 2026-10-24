@@ -1,0 +1,53 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs volumetric_fog.glsl's functions on the cases volumetric_fog_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "volumetric_fog.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_FOG_MEDIUM) {
+        // Inputs: (density, base height, scale height, anisotropy), (origin height, direction y, start, end), (source, height).
+        vec4 medium = testInput(0);
+        vec4 ray = testInput(1);
+        vec4 source = testInput(2);
+        FogIntegration beyond = fogBeyondGrid(medium, source.rgb, ray.x, ray.y, ray.z, ray.w);
+        testOutput(0, vec4(fogDensity(medium, source.w), fogOpticalDepth(medium, ray.x, ray.y, ray.z, ray.w), beyond.transmittance, 0.0));
+        testOutput(1, vec4(beyond.light, 0.0));
+    } else if (function == GPU_TEST_FOG_GRID) {
+        // Inputs: the view-projection's columns, its inverse's columns, (point, range), (coordinate, slices), (forward,
+        // history weight).
+        mat4 viewProjection = mat4(testInput(0), testInput(1), testInput(2), testInput(3));
+        mat4 inverseViewProjection = mat4(testInput(4), testInput(5), testInput(6), testInput(7));
+        vec4 point = testInput(8);
+        vec4 coordinate = testInput(9);
+        vec4 forward = testInput(10);
+        vec2 read = fogSliceRead(coordinate.z, int(coordinate.w));
+        testOutput(0, vec4(fogVolumeCoordinate(point.xyz, viewProjection, point.w), fogSliceDepth(coordinate.z, point.w)));
+        testOutput(1, vec4(fogVolumePoint(coordinate.xyz, inverseViewProjection, forward.xyz, point.w), fogDepthSlice(length(point.xyz), point.w)));
+        testOutput(2, vec4(read, fogHistoryWeight(coordinate.xyz * 1.2 - 0.1, forward.w), 0.0));
+    } else if (function == GPU_TEST_FOG_LIGHT) {
+        // Inputs: (irradiance, anisotropy), (to the light, extinction), (view direction, length), (scattered, so far's
+        // transmittance), (so far's light, 0), (colour or glass's transmittance, 0), (glass's added light, 0).
+        vec4 irradiance = testInput(0);
+        vec4 toLight = testInput(1);
+        vec4 view = testInput(2);
+        vec4 scattered = testInput(3);
+        FogIntegration soFar = FogIntegration(testInput(4).rgb, scattered.w);
+        vec3 colour = testInput(5).rgb;
+        vec3 added = testInput(6).rgb;
+        FogIntegration slab = soFar;
+        fogIntegrateSlice(slab, scattered.rgb, toLight.w, view.w);
+        FogIntegration followed = fogFollow(soFar, slab);
+        testOutput(0, vec4(fogInScattering(irradiance.rgb, toLight.xyz, view.xyz, irradiance.w), 0.0));
+        testOutput(1, vec4(fogAmbient(irradiance.rgb, scattered.rgb), 0.0));
+        testOutput(2, vec4(slab.light, slab.transmittance));
+        testOutput(3, vec4(followed.light, followed.transmittance));
+        testOutput(4, vec4(fogComposite(colour, soFar), 0.0));
+        testOutput(5, vec4(fogOverGlass(added, colour, soFar), 0.0));
+    }
+}

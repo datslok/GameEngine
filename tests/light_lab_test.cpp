@@ -642,6 +642,33 @@ namespace {
         assert(collectLighting(lab.world, 1.0f).atmosphere.has_value());
     }
 
+    /*
+    * A thin ground mist (a Fog), on at the start so sunbeams through the window and lamps' halos show, thinning upwards;
+    * its settings reach the component every frame, and switching it off takes the component away.
+    */
+    void testTheLabsMist() {
+        Lab lab;
+        const LightLabMistSettings& settings = lab.game.getMistSettings();
+        assert(settings.enabled);
+        assert(settings.fog.density > 0.0f && settings.fog.density <= 0.02f && settings.fog.baseHeight == 0.0f);
+
+        const std::optional<Fog> fog = collectLighting(lab.world, 1.0f).fog;
+        assert(fog.has_value() && fog->density == settings.fog.density && fog->scaleHeight == settings.fog.scaleHeight);
+
+        const Input noInput;
+        lab.game.getMistSettings().fog.density = 0.005f;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        assert(collectLighting(lab.world, 1.0f).fog->density == 0.005f);
+
+        lab.game.getMistSettings().enabled = false;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        assert(!collectLighting(lab.world, 1.0f).fog.has_value());
+
+        lab.game.getMistSettings().enabled = true;
+        lab.game.onUpdate(lab.world, noInput, 1.0f / 60.0f, 1.0f);
+        assert(collectLighting(lab.world, 1.0f).fog.has_value());
+    }
+
     // The clock runs at its speed, wraps round midnight, and stands still at speed 0.
     void testClock() {
         assert(near(advanceSolarHours(10.0f, 0.5f, 4.0f), 12.0f, 1e-5f));
@@ -1087,6 +1114,7 @@ void testLightLab() {
     testWalkingIn();
     testDaylight();
     testAtmosphere();
+    testTheLabsMist();
     testClock();
     testCalendar();
     testMoonlight();

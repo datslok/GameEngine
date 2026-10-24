@@ -17,6 +17,7 @@ enum class GpuPass {
     Probes,
     Clusters,
     Shadows,
+    Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)
     DepthPrepass,
     AmbientOcclusion, // ambient occlusion from the prepass's depth, and its blur (render/gpu/ambient_occlusion.h)
     MirroredLights, // light reflected off mirrors onto what the prepass drew (render/gpu/mirrored_light.h)
@@ -27,6 +28,7 @@ enum class GpuPass {
     DepthRange,
     ReflectionProbe, // the reflection probe's capture: its six faces, their mips, distances and prefiltered levels
     Reflections,  // reflections: the depth and colour pyramids and the reflection pass
+    FogApply,     // the picture before the glass seen through the fog
     Transparent,  // glass and blended surfaces, sorted, over the picture with its reflections (render/gpu/transparency.h)
     AntiAliasing, // TAA, FSR or DLSS, whichever smooths the frame (with the camera motion pass before FSR and DLSS)
     EyeAdaptation,

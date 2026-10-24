@@ -35,6 +35,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Transparency", [&] {
         visit(settings.transparency, visitor);
     });
+    visitor.group("Fog", [&] {
+        visit(settings.fog, visitor);
+    });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);
         visitor.field("Clustered shading", settings.clusteredShading);

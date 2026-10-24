@@ -26,6 +26,10 @@ namespace {
         bool ambientOcclusion = false; // ambient occlusion, its slices and its steps
         int occlusionSlices = 0;
         int occlusionSteps = 0;
+        bool fog = false; // volumetric fog and its grid
+        int fogWidth = 0;
+        int fogHeight = 0;
+        int fogSlices = 0;
         bool rayTracedReflections = false; // the ray-traced features (Ultra's only)
         bool mirroredLights = false;
 
@@ -57,6 +61,10 @@ namespace {
             .ambientOcclusion = settings.ambientOcclusion.enabled,
             .occlusionSlices = settings.ambientOcclusion.slices,
             .occlusionSteps = settings.ambientOcclusion.steps,
+            .fog = settings.fog.enabled,
+            .fogWidth = settings.fog.gridWidth,
+            .fogHeight = settings.fog.gridHeight,
+            .fogSlices = settings.fog.slices,
             .rayTracedReflections = settings.reflections.rayTraced,
             .mirroredLights = settings.mirroredLights.enabled
         };
@@ -83,14 +91,16 @@ namespace {
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32, .probeSharing = 0.5f,
                         .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
                         .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64,
-                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3, .rayTracedReflections = false, .mirroredLights = false};
+                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3, .fog = false, .fogWidth = 96, .fogHeight = 54,
+                        .fogSlices = 32, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
                         .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64,
-                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3, .rayTracedReflections = false, .mirroredLights = false};
+                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3, .fog = true, .fogWidth = 128, .fogHeight = 72,
+                        .fogSlices = 48, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Ultra:
                 break;
         }
@@ -124,6 +134,10 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.ambientOcclusion.enabled = values.ambientOcclusion;
     settings.ambientOcclusion.slices = values.occlusionSlices;
     settings.ambientOcclusion.steps = values.occlusionSteps;
+    settings.fog.enabled = values.fog;
+    settings.fog.gridWidth = values.fogWidth;
+    settings.fog.gridHeight = values.fogHeight;
+    settings.fog.slices = values.fogSlices;
     settings.reflections.rayTraced = values.rayTracedReflections;
     settings.mirroredLights.enabled = values.mirroredLights;
 }

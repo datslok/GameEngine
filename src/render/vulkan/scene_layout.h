@@ -54,7 +54,9 @@ enum SceneBinding : std::uint32_t {
     MirrorPairsBinding = 24,
     AmbientOcclusionBinding = 25,
     GlassBoundsBinding = 26,
-    SceneBindingCount = 27
+    FogBinding = 27,
+    FogVolumeBinding = 28,
+    SceneBindingCount = 29
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -132,6 +134,9 @@ struct SceneBuffers {
 
     // The glass a ray towards a light may cross, tested before tracing it (GpuGlassBounds; none without glass shadows).
     UploadArray glassBounds;
+
+    // The frame's fog (GpuFog; off without one).
+    UploadArray fog;
 };
 
 // The images set 1 points at: the shadow atlas read by comparison and as raw depths, the BRDF table, and the light
@@ -147,6 +152,7 @@ struct SceneImages {
     SampledImage mirroredLight;     // the light mirrors reflect onto each pixel, and the way it arrives (stand-ins without)
     SampledImage mirroredDirection;
     SampledImage ambientOcclusion;  // the visibility in creases and corners (a stand-in without)
+    SampledImage fogVolume;         // the fog integrated through its grid (a clear stand-in without)
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

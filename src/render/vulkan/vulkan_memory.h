@@ -71,13 +71,17 @@ struct ImageDescription {
     // Array layers; a cube has six (+X, -X, +Y, -Y, +Z, -Z) and its view samples them as one cube.
     std::uint32_t layers = 1;
     bool cube = false;
+
+    // A 3D image (a volume, width x height x depth texels, filtered between slices as well), with one layer.
+    bool volume = false;
+    std::uint32_t depth = 1;
     VkImageUsageFlags usage = 0;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     const char* name = nullptr; // for RenderDoc, Nsight and validation messages (a string literal: it is kept)
 };
 
 /*
-* A 2D image in GPU memory with a view of all its levels (what descriptors and render passes name), and the state it
+* A 2D image (or a cube, or a volume) in GPU memory with a view of all its levels (what descriptors and render passes name), and the state it
 * was last left in, so the next use knows which barrier to record. Every level is kept in the same state, except
 * during mipmap generation, which tracks its levels itself and sets the state when done.
 */

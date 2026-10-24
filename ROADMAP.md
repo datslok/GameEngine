@@ -266,7 +266,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Tinted shadows through glass: every shadowed light in the main pass and the probes' and reflections' rays passed through the glass on the way, on GPUs with ray queries (`glass-shadows`)
 - [x] Mirrored lights through glass: both legs of the path tinted (`mirrored-light-glass`)
 - [x] Refraction: frosted and thick glass (`KHR_materials_volume`, `KHR_materials_ior`) from the blurred picture before the glass, the light lab's glass ball and frosted panel (`refraction`)
-- [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
+- [x] Volumetric fog: the air lit by every light through a froxel grid on the clusters' lists, the light lab's ground mist (`volumetric-fog`)
 
 **Milestone** (in the light lab's building)**:**
 

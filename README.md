@@ -33,6 +33,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Mirrored lights, on GPUs with ray tracing (Mirrored lights in F5 Reflections, on by default: the Ultra preset's): a flashlight shone into a mirror lights the spot its reflection points at, the mirror's shape cut out of the beam, and a chrome ball spreads it faintly all round. Each pixel finds the point on the shiny surface where the law of reflection sends the light to it (manifold next event estimation: Newton's method on the surface, with rays), and the surface's curvature sets how bright it is. Brushed metal softens the spot's edges (its light gathered from a patch round that point), the lit spot bounces round the room through the light probes, and reflections show it.
   - Where neither finds anything, and on rough surfaces, the light probes stand in. Settings in F5 (Reflections), with a confidence debug view; off on the Low preset. The light lab has a polished slab and a mirror ball north-east of the start, and a mirror in the sunlit room facing the doorway with a brushed steel panel beside it (a rough mirror), to try them on.
 - **Ambient occlusion (GTAO):** creases, corners and the gaps under things darken in the light from all around, where the light probes are too far apart to see them. Each pixel finds, along a few lines through it on screen, how high the surfaces round it rise within half a metre (from the depth image), and the share of the sky between them comes from a closed-form integral. A crease between bright walls darkens less (light bounces back in), and reflections dim in creases too. Settings in F5 (Ambient occlusion); off on the Low preset.
+- **Volumetric fog:** light scattered by the air, so the sun's beams through a window, a flashlight's cone and the street lamps' halos show in the mist, and distant things fade into it. A game places a `Fog` (how thick it is at the ground and how fast it thins upwards, its colour and how much it scatters forward); the light lab has a thin ground mist (its settings under Mist in F5). The air in view is cut into a grid of small cells (froxels) that follows the camera, each lit by the sun with its shadows, the lamps its part of the screen lists with theirs, and the light probes' light from all around; then each pixel is dimmed and lit by the fog in front of it, glass too, and past the grid's 100 m the fog's closed form takes over. Settings in F5 (Fog); off on the Low preset.
 - **Temporal anti-aliasing (TAA):** each frame the picture moves by a different fraction of a pixel, and each pixel averages about the last ten frames, so edges are smooth and thin things stop shimmering.
   - Each pixel finds where its surface was last frame: from its depth and the two cameras, or from a motion vector a small pass draws for anything that moved.
   - History that no longer fits is clipped into the range of colours its neighbours show now, so moving things leave little ghosting.
@@ -164,6 +165,7 @@ Several games run on one engine, picked at start-up with `--game`.
 - A 300 m street of houses, whose 60 lamps and lit windows come on at dusk.
 - A sun placed by real astronomy, from latitude, day of the year and time of day, that can run through a day. Its glowing disc in the sky is as bright as the light it gives, drawn five times its real size for looks (as is the moon's).
 - At night, the moon in its real place and phase, lighting the sky and casting shadows, and the 9,096 brightest real stars, in their colours, turning with the sky.
+- A thin ground mist, so sunbeams through the window, the flashlight's cone and the street lamps' halos show (Mist in F5).
 
 ### Tools for building and testing
 
@@ -175,7 +177,7 @@ Several games run on one engine, picked at start-up with `--game`.
 - Numbers the shaders share with C++ are written once.
 - **Profiling** in the F4 view:
   - frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second
-  - the GPU's own time for each render pass, measured with GPU timestamps: the ray tracing scene's build, the light probes, cluster light lists, shadows, depth prepass, ambient occlusion, mirrored lights, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the reflection probe's capture, the reflections, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
+  - the GPU's own time for each render pass, measured with GPU timestamps: the ray tracing scene's build, the light probes, cluster light lists, shadows, the fog's grid, depth prepass, ambient occlusion, mirrored lights, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the reflection probe's capture, the reflections, the fog over the picture, glass, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
   - render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
 - **Debug drawing:** lines, boxes, spheres and capsules drawn over the scene, with an F4 debug view.
 - **Unit tests** that run without a GPU or window.
@@ -407,16 +409,18 @@ src/              Engine and game source, in layers (lower ones never include hi
                     (the cell, the visibility and back-face weights, the cascades' blend, the lights kept
                     at rays' hits)
                   - the sky and atmosphere, the stars, tone mapping, eye adaptation and night vision, bloom
+                  - volumetric fog: the height fog, the froxel grid, the light scattered in the air, the
+                    fog along a ray slab by slab
   render/vulkan/  The engine's own Vulkan 1.3 renderer:
                   - the device (with or without a window), swapchain, barriers, graphics and compute pipelines
                   - per-frame uniforms and descriptors, the bindless texture array, the scene's buffers and layout
                   - ray tracing's acceleration structures
-                  - every pass: the light probes' rays (with their bounce and lamps) and update, and the clusters'
-                    light lists (compute passes); shadows, depth prepass, main, the probes' debug balls,
+                  - every pass: the light probes' rays (with their bounce and lamps) and update, the clusters'
+                    light lists and the fog's grid (compute passes); shadows, depth prepass, main, the probes' debug balls,
                     the ray tracing debug view, the depth measurement, bloom, tone mapping, debug lines,
                     the debug UI
   render/software/  Software rasterizer, kept as a tested reference
-  scene/          Meshes (with tangents for normal maps), models, materials, lights, light probe placement
+  scene/          Meshes (with tangents for normal maps), models, materials, lights, fog, light probe placement
                   (cascades that follow the camera) and events, the sun's, moon's and stars' places in the sky,
                   the camera, render components, interpolation and the frame description
   assets/         The asset manager, and OBJ, glTF, image and star catalogue loaders

@@ -126,12 +126,16 @@ VulkanImage::VulkanImage(const VulkanDevice& device, const ImageDescription& des
         throw std::invalid_argument("A cube image needs six square layers");
     }
 
+    if (description.depth == 0 || (description.depth > 1 && !description.volume) || (description.volume && (description.layers != 1 || description.cube))) {
+        throw std::invalid_argument("Only a volume has depth, and a volume has one layer");
+    }
+
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.flags = description.cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.imageType = description.volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     imageInfo.format = description.format;
-    imageInfo.extent = {description.width, description.height, 1};
+    imageInfo.extent = {description.width, description.height, description.depth};
     imageInfo.mipLevels = description.levels;
     imageInfo.arrayLayers = description.layers;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -149,7 +153,10 @@ VulkanImage::VulkanImage(const VulkanDevice& device, const ImageDescription& des
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
-        viewInfo.viewType = description.cube ? VK_IMAGE_VIEW_TYPE_CUBE : description.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.viewType = description.volume ? VK_IMAGE_VIEW_TYPE_3D
+                            : description.cube ? VK_IMAGE_VIEW_TYPE_CUBE
+                            : description.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                     : VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = description.format;
         viewInfo.subresourceRange.aspectMask = description.aspect;
         viewInfo.subresourceRange.levelCount = description.levels;

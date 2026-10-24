@@ -1,0 +1,41 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The fog's grid integrated (render/gpu/volumetric_fog.h, integrateFogColumn mirrors it), one invocation per column of
+* froxels, front to back: each slice as long as its depth step along the column's ray, the light it adds and lets
+* through exact for constant fog in it, and the fog from the camera to the far side of each slice stored.
+*/
+#include "frame_data.glsl"
+#include "scene_lights.glsl"
+#include "scene_sky.glsl"
+#include "scene_fog.glsl"
+
+layout(local_size_x = FOG_COLUMN_GROUP_SIDE, local_size_y = FOG_COLUMN_GROUP_SIDE) in;
+
+layout(set = 2, binding = 0) uniform sampler3D lighting;                    // exact texels: rgb scattered light, a extinction
+layout(set = 2, binding = 1, rgba16f) uniform writeonly image3D integrated; // rgb the light gathered, a the share let through
+
+void main() {
+    ivec2 column = ivec2(gl_GlobalInvocationID.xy);
+    ivec3 size = ivec3(frameFog.grid.xyz);
+
+    if (column.x >= size.x || column.y >= size.y) {
+        return;
+    }
+
+    float range = frameFog.grid.w;
+    vec2 place = (vec2(column) + 0.5) / vec2(size.xy);
+    vec3 direction = normalize(fogVolumePoint(vec3(place, 1.0), frameFog.inverseViewProjection, viewForward.xyz, range));
+    float stretch = 1.0 / dot(direction, viewForward.xyz);
+    FogIntegration sum = FogIntegration(vec3(0.0), 1.0);
+    float near = 0.0;
+
+    for (int slice = 0; slice < size.z; ++slice) {
+        float far = fogSliceDepth(float(slice + 1) / float(size.z), range);
+        vec4 froxel = texelFetch(lighting, ivec3(column, slice), 0);
+        fogIntegrateSlice(sum, froxel.rgb, froxel.a, (far - near) * stretch);
+        imageStore(integrated, ivec3(column, slice), vec4(sum.light, sum.transmittance));
+        near = far;
+    }
+}

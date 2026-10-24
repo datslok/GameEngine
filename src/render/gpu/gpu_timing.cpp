@@ -16,6 +16,8 @@ const char* gpuPassName(GpuPass pass) {
         return "CLUSTERS";
     case GpuPass::Shadows:
         return "SHADOW";
+    case GpuPass::Fog:
+        return "FOG";
     case GpuPass::DepthPrepass:
         return "PREPASS";
     case GpuPass::AmbientOcclusion:
@@ -36,6 +38,8 @@ const char* gpuPassName(GpuPass pass) {
         return "CUBE";
     case GpuPass::Reflections:
         return "SSR";
+    case GpuPass::FogApply:
+        return "FOGMIX";
     case GpuPass::Transparent:
         return "GLASS";
     case GpuPass::AntiAliasing:
