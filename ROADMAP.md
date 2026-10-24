@@ -204,11 +204,7 @@ Re-planned on Oct 18, 2026 (the decisions and reasons are in the build log):
 
 **Documentation pass**
 - [x] Make the docs easy for people to read (`docs-readability`)
-- [ ] Bring the stale parts of `docs/ARCHITECTURE.md` up to date
-  - The light, HDR and shading section still describes the renderer before the GPU scene: lights pushed as a uniform block (64 point lights), per-draw matrices and fixed texture slots, where today lights live in storage buffers, textures in the bindless array and nothing is bound per object.
-  - Golden image counts ("eight views", "all twelve") may predate the street view.
-  - The MOBA hover text puts the demo's readouts on lines 7 to 9, which the engine now uses (games start at `firstGameReadoutLine` 10).
-  - The sentence about the order of `Application`'s members sits in the Game interface section.
+- [x] Bring the stale parts of `docs/ARCHITECTURE.md` up to date (`architecture-stale`)
 
 **6d. Global illumination: DDGI** ("Dynamic Diffuse Global Illumination", Majercik et al. 2019, built in the form of its 2021 production follow-up, "Scaling Probe-Based Real-Time Dynamic Global Illumination for Production").
 
