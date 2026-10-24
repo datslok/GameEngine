@@ -87,8 +87,9 @@ namespace {
     }
 }
 
-VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_t requestedFramesInFlight):
+VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validation, std::uint32_t requestedFramesInFlight):
     window(window),
+    jobs(jobs),
     device(window, validation, streamline.getExtensions()),
     layouts(device.getDevice()),
     uploads(device),
@@ -644,7 +645,7 @@ void VulkanRenderer::createFixedTextures() {
     whiteTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, white, surfaceTexture(TextureEncoding::Srgb));
     bindlessTextures->write(whiteTextureSlot, whiteTexture->getView(), surfaceSampler.get());
 
-    const BrdfTable table = buildBrdfTable();
+    const BrdfTable table = buildBrdfTable(jobs);
     const std::vector<std::uint16_t> texels = brdfTableTexels(table);
 
     VulkanTextureDescription description;

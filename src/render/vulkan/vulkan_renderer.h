@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/job_system.h"
 #include "math/mat4.h"
 #include "render/gpu/bloom.h"
 #include "render/gpu/clusters.h"
@@ -85,8 +86,9 @@ struct BatchPipelines {
 class VulkanRenderer {
 public:
     // validation checks every graphics call (EngineSettings::gpuValidation): slow, for development. framesInFlight
-    // as setFramesInFlight takes it.
-    VulkanRenderer(SDL_Window* window, bool validation, std::uint32_t framesInFlight);
+    // as setFramesInFlight takes it. jobs runs CPU work on every core (the BRDF table at start-up); it is borrowed, so it
+    // must outlive the renderer.
+    VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validation, std::uint32_t framesInFlight);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -140,6 +142,7 @@ public:
 
 private:
     SDL_Window* window = nullptr;
+    JobSystem& jobs;
 
     // NVIDIA's Streamline, for DLSS (render/vulkan/vulkan_dlss.h): it must start before the device, which turns on the
     // extensions it asks for, and stop before the device goes (the destructor stops it first).

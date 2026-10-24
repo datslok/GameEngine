@@ -1,11 +1,20 @@
 #include "engine/engine_settings.h"
 
+#include "core/job_system.h"
+
 namespace {
     // In the order of PresentMode's values.
     constexpr std::array<const char*, 3> presentModeNames{"Vsync", "Mailbox", "Immediate"};
 
     static_assert(static_cast<int>(PresentMode::Vsync) == 0 && static_cast<int>(PresentMode::Immediate) == 2,
                   "presentModeNames lists the modes by their values");
+}
+
+unsigned workerThreadCount(const EngineSettings& settings) {
+    if (settings.workerThreads < 0) {
+        return defaultWorkerCount();
+    }
+    return static_cast<unsigned>(settings.workerThreads);
 }
 
 /*
@@ -21,6 +30,8 @@ void visit(EngineSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Max frame seconds", settings.maxFrameSeconds,
                   {.min = 0.001f, .max = 10.0f, .sliderMax = 1.0f, .unit = "s", .applies = FieldApplies::AtStartup});
     visitor.field("GPU validation", settings.gpuValidation, FieldApplies::AtStartup);
+    visitor.field("Worker threads", settings.workerThreads,
+                  {.min = automaticWorkerThreads, .max = 256, .sliderMax = 64, .unit = "(-1: a core each but one)", .applies = FieldApplies::AtStartup});
     visitor.group("Render", [&] {
         visit(settings.render, visitor);
     });

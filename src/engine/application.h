@@ -2,6 +2,7 @@
 
 #include "assets/asset_manager.h"
 #include "core/fixed_timestep.h"
+#include "core/job_system.h"
 #include "core/profiler.h"
 #include "engine/debug_views.h"
 #include "engine/debug_ui.h"
@@ -84,6 +85,9 @@ private:
     // timestep are read once). defaultSettings is what they were before loading.
     EngineSettings settings;
     const std::vector<SettingEntry> defaultSettings;
+
+    // Threads for CPU work on every core, before the renderer, which borrows them, and everything else that may.
+    JobSystem jobs;
 
     // Members are destroyed in reverse order: the window outlives the renderer that draws into it,
     // and the renderer owns every GPU copy of the assets.

@@ -1,4 +1,5 @@
 #include "render/gpu/brdf.h"
+#include "core/job_system.h"
 
 #include <algorithm>
 #include <cmath>
@@ -134,7 +135,7 @@ Vec3 specularBrdf(const Vec3& f0, float alpha, const Vec3& normal, const Vec3& t
     return specularFromCosines(f0, alpha, nDotV, nDotL, std::max(normal.dot(halfway), 0.0f), std::max(toCamera.dot(halfway), 0.0f));
 }
 
-BrdfTable buildBrdfTable(std::uint32_t size, std::uint32_t samples) {
+BrdfTable buildBrdfTable(JobSystem& jobs, std::uint32_t size, std::uint32_t samples) {
     if (size < 2 || samples == 0) {
         throw std::invalid_argument("A BRDF table needs at least two texels per side and one sample");
     }
@@ -144,14 +145,14 @@ BrdfTable buildBrdfTable(std::uint32_t size, std::uint32_t samples) {
     table.entries.resize(static_cast<std::size_t>(size) * size);
     const float last = static_cast<float>(size - 1);
 
-    for (std::uint32_t row = 0; row < size; ++row) {
+    // One texel a piece: each integrates thousands of samples, far more work than handing it out costs.
+    jobs.parallelFor(table.entries.size(), 1, [&](std::size_t texel) {
+        const std::size_t row = texel / size;
+        const std::size_t column = texel % size;
         const float alpha = ggxAlpha(static_cast<float>(row) / last);
-
-        for (std::uint32_t column = 0; column < size; ++column) {
-            const float nDotV = std::max(static_cast<float>(column) / last, smallestViewCosine);
-            table.entries[static_cast<std::size_t>(row) * size + column] = integrateTexel(nDotV, alpha, samples);
-        }
-    }
+        const float nDotV = std::max(static_cast<float>(column) / last, smallestViewCosine);
+        table.entries[texel] = integrateTexel(nDotV, alpha, samples);
+    });
 
     return table;
 }

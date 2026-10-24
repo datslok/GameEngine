@@ -1,6 +1,7 @@
 #include "gpu_check.h"
 #include "gpu_test_functions.h"
 
+#include "core/job_system.h"
 #include "render/gpu/brdf.h"
 
 #include <algorithm>
@@ -273,7 +274,8 @@ void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkSmith(runner, report);
     checkFresnel(runner, report);
 
-    const BrdfTable table = buildBrdfTable();
+    JobSystem jobs;
+    const BrdfTable table = buildBrdfTable(jobs);
     const std::vector<ShadingCase> cases = shadingCases();
     checkPrepareShading(runner, report, cases, table);
     checkAddLight(runner, report, cases, table);

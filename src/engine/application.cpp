@@ -16,8 +16,9 @@ Application::Application(const char* title, int width, int height, Game& game, c
     game(game),
     settings(initialSettings),
     defaultSettings(captureDefaultsAndLoad(settings, game, saved)),
+    jobs(workerThreadCount(settings)),
     window(title, width, height),
-    renderer(window.getSdlWindow(), settings.gpuValidation, settings.framesInFlight),
+    renderer(window.getSdlWindow(), jobs, settings.gpuValidation, settings.framesInFlight),
     debugUi(window, renderer),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)
 {

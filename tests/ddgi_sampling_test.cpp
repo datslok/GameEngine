@@ -1,4 +1,5 @@
 #include "render/gpu/brdf.h"
+#include "core/job_system.h"
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/light_falloff.h"
 
@@ -470,7 +471,8 @@ namespace {
 
     // Probe light that equals the ambient in both parts shades exactly like the ambient, up to rounding.
     void testProbeAmbientMatchesTheFlatAmbient() {
-        const BrdfTable table = buildBrdfTable();
+        JobSystem jobs;
+        const BrdfTable table = buildBrdfTable(jobs);
         const SurfaceProperties surface{Vec3{0.6f, 0.4f, 0.3f}, 0.2f, 0.5f};
         const Vec3 normal{0.0f, 1.0f, 0.0f};
         const ShadingPoint point = prepareShading(surface, normal, Vec3{0.6f, 0.8f, 0.0f}, table);

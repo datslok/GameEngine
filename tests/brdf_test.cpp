@@ -1,7 +1,9 @@
 #include "render/gpu/brdf.h"
+#include "core/job_system.h"
 
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <numbers>
 #include <stdexcept>
 
@@ -18,7 +20,10 @@ namespace {
 
     // The table is shared by the tests that need one: building it integrates a thousand directions per texel.
     const BrdfTable& table() {
-        static const BrdfTable built = buildBrdfTable();
+        static const BrdfTable built = [] {
+            JobSystem jobs;
+            return buildBrdfTable(jobs);
+        }();
         return built;
     }
 
@@ -249,11 +254,23 @@ namespace {
         assert(near(texels[6] / 65535.0f, 0.123f, 1e-5f) && near(texels[7] / 65535.0f, 0.987f, 1e-5f));
     }
 
+    // Built on many threads, the table is the same to the last bit as on one: each texel is integrated on its own.
+    void testBrdfTableOnManyThreads() {
+        JobSystem serial{0};
+        JobSystem parallel{7};
+        const BrdfTable one = buildBrdfTable(serial, 16, 256);
+        const BrdfTable many = buildBrdfTable(parallel, 16, 256);
+        assert(one.size == many.size);
+        assert(one.entries.size() == many.entries.size());
+        assert(std::memcmp(one.entries.data(), many.entries.data(), one.entries.size() * sizeof(Vec2)) == 0);
+    }
+
     void testBrdfTableRejectsEmpty() {
+        JobSystem jobs{0};
         bool threw = false;
 
         try {
-            buildBrdfTable(1, 16);
+            buildBrdfTable(jobs, 1, 16);
         }
         catch (const std::invalid_argument&) {
             threw = true;
@@ -263,7 +280,7 @@ namespace {
         threw = false;
 
         try {
-            buildBrdfTable(4, 0);
+            buildBrdfTable(jobs, 4, 0);
         }
         catch (const std::invalid_argument&) {
             threw = true;
@@ -468,6 +485,7 @@ void testBrdf() {
     testSmithVisibility();
     testSpecularIsReciprocal();
     testBrdfTableSampling();
+    testBrdfTableOnManyThreads();
     testBrdfTableRejectsEmpty();
     testBrdfTableTexels();
     testBrdfTable();
