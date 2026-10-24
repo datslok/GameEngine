@@ -1,11 +1,17 @@
 #pragma once
 
 #include "cloth/cloth_constraints.h"
+#include "cloth/cloth_grab.h"
 #include "cloth/cloth_particles.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "math/mat4.h"
 #include "scene/mesh.h"
+
+#include <array>
+#include <cstdint>
+#include <optional>
+#include <vector>
 
 /*
 * A fabric and the world it hangs in, in real units. Mass per area tells fabrics apart: silk about 0.05-0.08 kg/m2, a
@@ -20,6 +26,8 @@
 *
 * Drag stands in for the air, which slows cloth a lot for its weight: every velocity loses this share per second, a
 * little each substep. Picked by eye; air that pushes each triangle by how it faces could come later.
+*
+* A hand holding the cloth (ClothGrab) is a stiff spring: a tug of a few newtons stretches it a few millimetres.
 */
 struct ClothSettings {
     float areaDensity = 0.2f;          // kg per square metre; read when the cloth is made
@@ -27,6 +35,7 @@ struct ClothSettings {
     float stretchCompliance = 0.0005f; // m/N
     int substeps = 15;                 // per tick: 1.8 kHz at 120 ticks a second
     float drag = 0.5f;                 // per second
+    float grabCompliance = 0.001f;     // m/N
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -39,6 +48,12 @@ struct Cloth {
     ClothSettings settings;
     ClothParticles particles;
     std::vector<StretchConstraint> stretch;
+
+    // The mesh's triangles, for finding the cloth with a ray.
+    std::vector<std::array<std::uint32_t, 3>> triangles;
+
+    // A hand holding one point, set by the game from its commands (never from input inside a tick).
+    std::optional<ClothGrab> grab;
 };
 
 // A cloth from a mesh's vertices, placed in the world by placement, at rest, with the settings' fabric and an edge
@@ -46,11 +61,12 @@ struct Cloth {
 Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& settings);
 
 /*
-* One tick of points held by stretch constraints, in settings.substeps substeps: each predicts under gravity, makes one
-* pass over the constraints, works out the velocities from the motion and applies the drag. Throws
-* std::invalid_argument for fewer than one substep.
+* One tick of points held by stretch constraints (and a hand, if one holds a point), in settings.substeps substeps: each
+* predicts under gravity, makes one pass over the constraints, the hand last, works out the velocities from the motion
+* and applies the drag. Throws std::invalid_argument for fewer than one substep.
 */
-void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds);
+void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
+                        const std::optional<ClothGrab>& grab = std::nullopt);
 
 // One tick of a cloth.
 void stepCloth(Cloth& cloth, float seconds);

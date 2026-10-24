@@ -113,9 +113,6 @@ private:
     // Whether MOBA mouse commands count right now: MOBA mode, keyboard focus and a confined cursor.
     bool mobaPointerActive(const Input& input) const;
 
-    // The camera ray through a window pixel, or nothing outside the window.
-    std::optional<Ray> rayThroughPixel(const Input& input, const Vec2& pixel) const;
-
     // The camera and its three views, switched with F1-F3 (a real game would use just one), and the first-person body.
     PlayerControls controls;
 

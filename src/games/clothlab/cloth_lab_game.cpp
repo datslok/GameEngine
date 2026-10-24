@@ -60,6 +60,9 @@ namespace {
         return material;
     }
 
+    // The line from the held point to the hand, while dragging.
+    const Vec3 grabLineColour{1.0f, 0.8f, 0.2f};
+
     // A deep red cotton, seen from both sides.
     Material sheetMaterial() {
         Material material;
@@ -177,6 +180,36 @@ void ClothLabGame::onInput(World& world, const Input& input) {
     if (input.wasKeyPressed(Key::F4)) {
         debugViewEnabled = !debugViewEnabled;
     }
+
+    updateGrab(world, input);
+}
+
+/*
+* Once a frame, from last frame's camera: a press grabs the corner nearest where the pointer meets the sheet, within
+* reach; while held, the hand follows the pointer at the grab's distance (turning or walking carries the cloth, as at
+* arm's length); a release, or a pointer that leaves the window, lets go. The ticks only read the result. While the mouse
+* should look but is free (after Escape), the click that captures it again grabs nothing.
+*/
+void ClothLabGame::updateGrab(const World& world, const Input& input) {
+    const bool pointing = !controls.wantsMouseLook() || input.isMouseCaptured();
+    const std::optional<Ray> pointer = pointing ? controls.pointerRay(input) : std::nullopt;
+
+    if (input.wasMouseButtonPressed(MouseButton::Left) && pointer) {
+        const Ray ray{pointer->origin, pointer->direction.normalized()};
+        if (const std::optional<ClothHit> hit = raycastCloth(world.get<Cloth>(sheet), ray, clothLabGrabReach)) {
+            sheetGrab = ClothGrab{hit->particle, hit->point};
+            grabDistance = hit->distance;
+        }
+    }
+
+    if (!input.isMouseButtonHeld(MouseButton::Left) || !pointer) {
+        sheetGrab.reset();
+        return;
+    }
+
+    if (sheetGrab) {
+        sheetGrab->target = pointer->origin + pointer->direction.normalized() * grabDistance;
+    }
 }
 
 /*
@@ -185,7 +218,9 @@ void ClothLabGame::onInput(World& world, const Input& input) {
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     (void)simulationSeconds;
-    world.get<Cloth>(sheet).settings = clothSettings;
+    Cloth& cloth = world.get<Cloth>(sheet);
+    cloth.settings = clothSettings;
+    cloth.grab = sheetGrab;
     stepCloths(world, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
@@ -211,6 +246,13 @@ Vec3 ClothLabGame::getLightFocus() {
 
 bool ClothLabGame::wantsDebugView() const {
     return debugViewEnabled;
+}
+
+void ClothLabGame::onDebugDraw(const World& world, DebugDraw& debug, float alpha) {
+    (void)alpha;
+    if (sheetGrab) {
+        debug.line(world.get<Cloth>(sheet).particles.positions[sheetGrab->particle], sheetGrab->target, grabLineColour);
+    }
 }
 
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {
@@ -248,4 +290,12 @@ Entity ClothLabGame::getSheet() const {
 
 ClothSettings& ClothLabGame::getClothSettings() {
     return clothSettings;
+}
+
+PlayerControls& ClothLabGame::getControls() {
+    return controls;
+}
+
+const std::optional<ClothGrab>& ClothLabGame::getSheetGrab() const {
+    return sheetGrab;
 }

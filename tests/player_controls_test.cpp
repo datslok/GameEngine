@@ -9,6 +9,7 @@
 #include "test_levels.h"
 
 #include <cassert>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -60,6 +61,34 @@ namespace {
         controls.setControlMode(world, ControlMode::FirstPerson);
         assert(controls.wantsMouseLook());
         assert(samePoint(controls.getCamera().getPosition(), firstPersonEyePosition(world, controls.getFirstPersonBody(), 1.0f)));
+    }
+
+    /*
+    * The ray the pointer points along: while the mouse looks (first person, free camera) straight out through the
+    * crosshair at the screen's middle; with a visible cursor (MOBA) through the cursor, and none while it is outside the
+    * window.
+    */
+    void testPointerRay() {
+        World world;
+        const PlayerControlsSetup setup = testSetup();
+        PlayerControls controls{setup, ControlMode::FreeCamera, true};
+        controls.spawnBody(world);
+        controls.setControlMode(world, ControlMode::FreeCamera);
+
+        const std::optional<Ray> ahead = controls.pointerRay(firstPersonInput({}));
+        assert(ahead.has_value());
+        assert(samePoint(ahead->direction.normalized(), (setup.freeCameraTarget - setup.freeCameraPosition).normalized()));
+
+        controls.setControlMode(world, ControlMode::Moba);
+        Input cursor = mobaInput();
+        const std::optional<Ray> throughCursor = controls.pointerRay(cursor);
+        assert(throughCursor.has_value());
+        const std::optional<Ray> samePixel = controls.rayThroughPixel(cursor, cursor.getCursorPosition());
+        assert(samePixel.has_value() && samePoint(throughCursor->direction, samePixel->direction));
+
+        cursor.setCursor(Vec2{800.0f, 450.0f}, false);
+        assert(!controls.pointerRay(cursor).has_value());
+        assert(!controls.rayThroughPixel(cursor, Vec2{-1.0f, 10.0f}).has_value());
     }
 
     // F1-F3 switch modes only while debug switching is on and the window has the keyboard; a switch is reported.
@@ -135,6 +164,7 @@ namespace {
 
 void testPlayerControls() {
     testModesStartFromTheSetup();
+    testPointerRay();
     testModeSwitchingKeys();
     testDropFromFreeCamera();
     testFirstPersonCommands();

@@ -2532,7 +2532,7 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 
 ## Cloth
 
-The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`) and the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`). Bending and moving pins come next.
+The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`), the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`) and a hand that drags it (`cloth-grab`, tested in `cloth_grab_test`). Bending and moving pins come next.
 
 **The points** (`cloth_particles`, `ClothParticles`): one per vertex of the sheet's mesh, point i the mesh's vertex i, as plain arrays (structure of arrays): `positions`, `previousPositions` (where each was when the step began), `velocities` and `inverseMasses` (1 / kg; 0 for a pinned point, which nothing then moves, with no special case).
 
@@ -2556,6 +2556,14 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 
 **Float precision:** each substep gravity moves a point by g h^2 (3 micrometres at 15 substeps), which a float resolves only to about 0.1 micrometre at 1 m from the origin and 0.5 at 4 m, so the balance between gravity and the edges settles where the rounded moves cancel: the Hooke test's stretch is 0.4-0.5% off. Invisible for cotton's 0.15% stretch; far from the origin (large worlds) the cloth would want its points kept relative to an origin of its own.
 
+**The hand** (`cloth_grab`):
+
+- `ClothGrab {particle, target}`: one more XPBD constraint, C = |x - target|, solved after the stretch constraints in every substep (`solveGrab`: delta lambda = -C / (w + `grabCompliance` / h^2), the point moved towards the target). A pinned point (w = 0) cannot be dragged.
+- With `grabCompliance` 0.001 m/N the hand is a stiff spring (a tug of a few newtons stretches it a few millimetres), so a yank cannot over-stretch the edges round the grabbed point; tested: a weight held by it alone hangs m g alpha below the target.
+- Let go, the point keeps the speed its motion gives it; tested: a free sheet towed through empty space keeps its centre of mass's velocity once released (the edges cannot change its momentum; 0.1% float drift in half a second). While towed, the sheet sloshes on the hand's spring with no drag to calm it.
+- `Cloth::grab` is set by the game from its commands before the tick, never from input inside it; `hashSimulationState` includes it.
+- `raycastCloth(cloth, ray, maxDistance)`: `raycastTriangle` against every triangle as the cloth is now (`Cloth::triangles`, from the mesh), the nearest hit's triangle corner nearest the hit, the hit and its distance (`ClothHit`).
+
 **The component** (`cloth`):
 
 - `ClothSettings`, with `visit`:
@@ -2567,8 +2575,9 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 | `stretchCompliance` | 0.0005 m/N | 1 / (E t), cotton's tensile stiffness about 2000 N/m; the same for any edge length on a square mesh, so a hanging sheet stretches about 0.15% at any resolution |
 | `substeps` | 15 a tick (1.8 kHz) | Small Steps (Macklin et al. 2019): for the same work, more substeps leave far less stretch than more passes |
 | `drag` | 0.5 per second | every velocity times e^(-drag h) each substep, standing in for the air; picked by eye |
+| `grabCompliance` | 0.001 m/N | the hand's give (see The hand) |
 
-- `Cloth {settings, particles, stretch}`, simulated in world space (its entity's `Transform` is not used).
+- `Cloth {settings, particles, stretch, triangles, grab}`, simulated in world space (its entity's `Transform` is not used).
 - `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses and rest lengths come from the placed sheet.
 - `stepClothParticles(particles, stretch, settings, seconds)`: `substeps` substeps, each `predictCloth`, `solveStretch`, `finishClothStep`, then drag; throws for fewer than one substep. `stepCloth(cloth, seconds)`.
 - `stepCloths(world, seconds)`: each cloth's tick, then its points copied into the entity's `DeformingMesh` (drawn from a mesh at the identity), so the simulation never depends on drawing (120 KB a tick for a 100 x 100 sheet).
@@ -3002,6 +3011,7 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 - It starts flat level with the fabric bar's underside under its left half, stretching forward from the bar (`ClothLabLayout::sheetCentre`; the grid turned to face up, its top edge at the back), pinned at the two corners of its back edge.
 - It falls, swings down and hangs from the pins, its points driving a deforming mesh of its own (see Deforming meshes) drawn in world space.
 - Its fabric is the lab's `ClothSettings` (`getClothSettings`, F5's Cloth group), given to the sheet every tick before `stepCloths`; `getSheet()`.
+- **Dragging** (`updateGrab`, in `onInput`, from last frame's camera): a left press casts `PlayerControls::pointerRay` (the crosshair while the mouse looks, the cursor in MOBA mode) at the sheet within `clothLabGrabReach` (10 m) and grabs the nearest corner; while held, the hand (`getSheetGrab`) stays the grab's distance along the pointer, so turning or walking carries the cloth; a release or a pointer leaving the window lets go. While the mouse should look but is free (after Escape), the click that captures it grabs nothing. The ticks give it to the sheet (`Cloth::grab`); `onDebugDraw` draws a yellow line from the held point to the hand.
 
 **Golden view:** `stations`, from the free camera's start (0, 2.4, 6.5) towards (0, 1, -1).
 
