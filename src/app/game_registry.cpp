@@ -1,5 +1,6 @@
 #include "app/game_registry.h"
 
+#include "games/clothlab/cloth_lab_game.h"
 #include "games/demo/demo_game.h"
 #include "games/lightlab/light_lab_game.h"
 
@@ -7,7 +8,7 @@
 #include <stdexcept>
 
 namespace {
-    // Both start in first person, the way a player meets them; F2 and F3 switch views.
+    // Each starts in first person, the way a player meets it; F2 and F3 switch views.
     std::unique_ptr<Game> makeDemo() {
         return std::make_unique<DemoGame>(ControlMode::FirstPerson, true);
     }
@@ -16,11 +17,16 @@ namespace {
         return std::make_unique<LightLabGame>(ControlMode::FirstPerson, true);
     }
 
+    std::unique_ptr<Game> makeClothLab() {
+        return std::make_unique<ClothLabGame>(ControlMode::FirstPerson, true);
+    }
+
     // Adding a game is one line here. Plain function pointers: the entries capture nothing, so the table is built at
     // compile time.
-    constexpr std::array<GameEntry, 2> games{{
+    constexpr std::array<GameEntry, 3> games{{
         {"lightlab", makeLightLab},
-        {"demo", makeDemo}
+        {"demo", makeDemo},
+        {"clothlab", makeClothLab}
     }};
 }
 

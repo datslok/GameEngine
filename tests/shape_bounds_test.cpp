@@ -27,4 +27,17 @@ void testShapeBounds() {
     const Aabb same = boundsOf(Shape{crate});
     assert(nearlyEqual(same.minimum, crate.minimum));
     assert(nearlyEqual(same.maximum, crate.maximum));
+
+    // The box enclosing two boxes takes the lower of their minimums and the higher of their maximums on each axis,
+    // whether they overlap or not, in either order.
+    const Aabb apart{Vec3{3.0f, -2.0f, 0.0f}, Vec3{4.0f, 1.0f, 2.5f}};
+    const Aabb both = enclosing(crate, apart);
+    assert(nearlyEqual(both.minimum, Vec3{-1.0f, -2.0f, 0.0f}));
+    assert(nearlyEqual(both.maximum, Vec3{4.0f, 3.0f, 4.0f}));
+    const Aabb swapped = enclosing(apart, crate);
+    assert(nearlyEqual(swapped.minimum, both.minimum));
+    assert(nearlyEqual(swapped.maximum, both.maximum));
+    const Aabb inside = enclosing(crate, Aabb{Vec3{0.0f, 1.0f, 3.0f}, Vec3{0.5f, 2.0f, 3.5f}});
+    assert(nearlyEqual(inside.minimum, crate.minimum));
+    assert(nearlyEqual(inside.maximum, crate.maximum));
 }

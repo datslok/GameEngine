@@ -168,6 +168,8 @@ Several games run on one engine, picked at start-up with `--game`.
 - At night, the moon in its real place and phase, lighting the sky and casting shadows, and the 9,096 brightest real stars, in their colours, turning with the sky.
 - A thin ground mist, so sunbeams through the window, the flashlight's cone and the street lamps' halos show (Mist in F5).
 
+**The cloth lab** (`--game clothlab`): a plain floor under an afternoon sun, with a test station for each of the cloth milestones: a ball on a pedestal under a bar to pin a sheet to, a mat to drop sheets onto, and a wide bar to hang two fabrics side by side. The cloth itself is being built (roadmap phase 7).
+
 ### Tools for building and testing
 
 - **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity, grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
@@ -313,7 +315,7 @@ It needs a real Python 3 (standard library only; `winget install Python.Python.3
 
 The game starts in first-person mode. F1-F3 switch modes at any time.
 
-The light lab is the default game (`--game lightlab`; the exe alone in the zip). It has the same controls for moving and looking (F1-F5). The field of lamps and the grenades (G) are the demo's only.
+The light lab is the default game (`--game lightlab`; the exe alone in the zip). It has the same controls for moving and looking (F1-F5). The cloth lab (`--game clothlab`) has them too. The field of lamps and the grenades (G) are the demo's only.
 
 | Input | Action |
 |---|---|
@@ -390,7 +392,8 @@ The settings are grouped by system (light priority, shadows, bloom, tone mapping
 ```
 src/              Engine and game source, in layers (lower ones never include higher ones):
   app/            main and the game registry: picks a game by name and starts the engine
-  games/          Games built on the engine: games/demo (the demo) and games/lightlab (the sunlit test ground)
+  games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground)
+                  and games/clothlab (the cloth test ground)
   engine/         The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
   gameplay/       Character movement, spinners, fireflies, grenades, camera controllers
                   and the player controls games share (F1-F3)
