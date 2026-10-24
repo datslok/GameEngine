@@ -3,6 +3,7 @@
 #include "games/clothlab/cloth_lab_layout.h"
 #include "physics/overlap.h"
 #include "physics/static_level.h"
+#include "cloth/cloth.h"
 #include "scene/deforming_mesh.h"
 #include "engine/game.h"
 #include "scene/atmosphere.h"
@@ -101,13 +102,13 @@ namespace {
         assert(near(levelHeightBelow(level, layout.fabricFrame.barCentre.x, layout.fabricFrame.barCentre.z),
                     clothLabBarUnderside(layout.fabricFrame) + 2.0f * clothLabBarHalfThickness));
 
-        // Everything but the banner, which moves.
+        // Everything but the sheet, which moves.
         int staticModels = 0;
         int others = 0;
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
         assert(staticModels >= 1);
         assert(others == 1);
-        assert(!lab.world.get<ModelRenderer>(lab.game.getBanner()).isStatic);
+        assert(!lab.world.get<ModelRenderer>(lab.game.getSheet()).isStatic);
     }
 
     // A sunlit afternoon under the real sky, with light probes round the camera.
@@ -130,48 +131,60 @@ namespace {
         assert(probes == 1);
     }
 
-    // The banner: a deforming mesh hanging from the fabric bar, its top edge pinned along the bar's underside, rippling
-    // from tick to tick by the same waves on every run.
-    void testTheBannerRipples() {
+    /*
+    * The hanging sheet: a cloth laid flat level with the fabric bar, its back corners pinned under the bar, falls, swings
+    * down and hangs from them in front of the bar, its points handed to its deforming mesh, the same on every run.
+    */
+    void testTheSheetHangs() {
         ClothLab lab;
-        const Entity banner = lab.game.getBanner();
-        const DeformingMesh& mesh = lab.world.get<DeformingMesh>(banner);
-        assert(lab.assets.isDeforming(mesh.mesh));
-        assert(mesh.positions.size() == lab.assets.getMesh(mesh.mesh).vertices.size());
-        assert(lab.world.get<ModelRenderer>(banner).parts.at(0).mesh.index == mesh.mesh.index);
-        assert(lab.world.get<ModelRenderer>(banner).parts.at(0).material.doubleSided);
-
+        const Entity sheet = lab.game.getSheet();
         const ClothLabLayout layout = buildClothLabLayout();
-        const Aabb fabricStation = layout.stations()[2];
-        const Mat4& placement = lab.world.get<ModelRenderer>(banner).parts[0].localTransform;
-        const std::vector<Vec3> before = mesh.positions;
+        const float barUnderside = clothLabBarUnderside(layout.fabricFrame);
+        const DeformingMesh& mesh = lab.world.get<DeformingMesh>(sheet);
+        assert(lab.assets.isDeforming(mesh.mesh));
+        assert(lab.world.get<ModelRenderer>(sheet).parts.at(0).mesh.index == mesh.mesh.index);
+        assert(lab.world.get<ModelRenderer>(sheet).parts.at(0).material.doubleSided);
+        assert(!lab.world.get<ModelRenderer>(sheet).isStatic);
 
-        for (int tick = 0; tick < 30; ++tick) {
-            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        // It starts flat, level with the bar's underside.
+        for (const Vec3& point : lab.world.get<Cloth>(sheet).particles.positions) {
+            assert(near(point.y, barUnderside));
         }
-        const std::vector<Vec3>& after = lab.world.get<DeformingMesh>(banner).positions;
 
-        bool moved = false;
-        const std::size_t columns = static_cast<std::size_t>(clothLabBannerColumns) + 1;
-        for (std::size_t vertex = 0; vertex < after.size(); ++vertex) {
-            const Vec3 placed = transformPoint(placement, after[vertex]);
-            assert(placed.x >= fabricStation.minimum.x && placed.x <= fabricStation.maximum.x);
-            assert(placed.y >= 0.0f && placed.y <= clothLabBarUnderside(layout.fabricFrame) + 1e-4f);
-            if (vertex >= after.size() - columns) {
-                assert(near(placed.y, clothLabBarUnderside(layout.fabricFrame)));
-                assert(near(after[vertex].z, 0.0f));
+        const auto hang = [](ClothLab& lab) {
+            for (int tick = 0; tick < 600; ++tick) {
+                runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
             }
-            moved = moved || std::abs(after[vertex].z - before[vertex].z) > 1e-3f;
+        };
+        hang(lab);
+
+        const ClothParticles& particles = lab.world.get<Cloth>(sheet).particles;
+        const std::size_t backEdge = static_cast<std::size_t>(clothLabSheetRows) * (clothLabSheetColumns + 1);
+        for (std::size_t pin : {backEdge, backEdge + clothLabSheetColumns}) {
+            assert(near(particles.positions[pin].y, barUnderside));
+            assert(near(particles.positions[pin].z, layout.fabricFrame.barCentre.z));
         }
-        assert(moved);
+
+        const Aabb fabricStation = layout.stations()[2];
+        for (const Vec3& point : particles.positions) {
+            assert(point.x >= fabricStation.minimum.x && point.x <= fabricStation.maximum.x);
+            assert(point.y <= barUnderside + 1e-3f && point.y > 0.0f);
+        }
+        // The front edge has swung down to hang below the bar.
+        assert(particles.positions[clothLabSheetColumns / 2].y < barUnderside - 1.0f);
+
+        const std::vector<Vec3>& shown = lab.world.get<DeformingMesh>(sheet).positions;
+        assert(shown.size() == particles.size());
+        for (std::size_t index = 0; index < shown.size(); ++index) {
+            assert(shown[index].x == particles.positions[index].x && shown[index].y == particles.positions[index].y);
+        }
 
         ClothLab again;
-        for (int tick = 0; tick < 30; ++tick) {
-            runFixedUpdate(again.game, again.world, 1.0f / 120.0f, tick / 120.0);
-        }
-        const std::vector<Vec3>& repeated = again.world.get<DeformingMesh>(again.game.getBanner()).positions;
-        for (std::size_t vertex = 0; vertex < after.size(); ++vertex) {
-            assert(repeated[vertex].x == after[vertex].x && repeated[vertex].y == after[vertex].y && repeated[vertex].z == after[vertex].z);
+        hang(again);
+        const std::vector<Vec3>& repeated = again.world.get<Cloth>(again.game.getSheet()).particles.positions;
+        for (std::size_t index = 0; index < repeated.size(); ++index) {
+            assert(repeated[index].x == particles.positions[index].x && repeated[index].y == particles.positions[index].y &&
+                   repeated[index].z == particles.positions[index].z);
         }
     }
 
@@ -189,6 +202,6 @@ void testClothLab() {
     testStationsStandApart();
     testTheLevelIsTheLayout();
     testItIsLit();
-    testTheBannerRipples();
+    testTheSheetHangs();
     testItHasGoldenViews();
 }

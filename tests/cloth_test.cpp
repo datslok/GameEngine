@@ -158,11 +158,14 @@ namespace {
         assert(hashSimulationState(world) != before);
     }
 
-    // The defaults: a light cotton (200 g/m2) under real gravity.
+    // The defaults: a light cotton (200 g/m2, about 2000 N/m stiff) under real gravity, 15 substeps a tick.
     void testDefaults() {
         const ClothSettings settings;
         assert(near(settings.areaDensity, 0.2f));
         assert(near(settings.gravity, 9.81f));
+        assert(near(settings.stretchCompliance, 1.0f / 2000.0f));
+        assert(settings.substeps == 15);
+        assert(near(settings.drag, 0.5f));
     }
 }
 

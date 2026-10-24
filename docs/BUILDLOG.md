@@ -1070,3 +1070,13 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Symplectic Euler, not phase 5's `fly`,** though the roadmap suggested reusing it: the step works out each velocity from the motion afterwards, which gives back v + a t / 2 from `fly`'s v t + a t^2 / 2, so a sheet would fall at half of g. The roadmap's note now says `bounceVelocity` fits the collision item instead.
   - **Checked:** the tests (debug and release, tests first: the masses add up to the fabric's and split as the triangles do, bad meshes and densities rejected, free fall at g, velocity from the motion, pins hold, a cloth entity steps and feeds its mesh, its state in the hash, the defaults). The game builds without warnings.
 
+- `xpbd-cloth` (Oct 24 2026): the cloth solver, XPBD (Macklin, Muller & Chentanez 2016) in substeps (Macklin et al. 2019), with stretch constraints along every edge and fixed pins; the first real cloth, a sheet in the cloth lab in place of the banner.
+  - **Explained first, then chosen by the user:** linear drag for the air (a sheet settles; true air resistance by each triangle's facing could come later), 15 substeps a tick, and the banner replaced by the real sheet.
+  - **One pass a substep,** so the multiplier starts at 0 each time and needs no storage: delta lambda = -C / (w1 + w2 + alpha / h^2).
+  - **Compliance from real cotton:** 1 / (E t), about 2000 N/m, resolution-independent on a square mesh; a hanging sheet stretches about 0.15%.
+  - **Changed on the way:** the sheet starts flat, not hanging. Pinned at its two top corners a sheet-width apart, a hanging sheet's top edge is already straight at rest length, so it could not move at all.
+  - **Float precision found by the Hooke test:** a weight on a compliant edge settles 0.4-0.5% off m g alpha, because each substep's gravity move (micrometres) is rounded to the float grid at a metre from the origin. Tested to 1%; invisible for cloth; points relative to the cloth's own origin would cure it for large worlds.
+  - **Measured** (release, one thread): the lab's 28 x 30 sheet 0.37 ms a tick (about 4% of a core), a 100 x 100 sheet 4.2 ms (as estimated, too slow on one thread).
+  - **Roadmap:** stretch and fixed pins are done with the solver; the constraints item keeps bending and moving pins.
+  - **Checked:** the tests (debug and release, tests first: the edges of a grid, a stiff edge corrected with its centre of mass kept, pinned ends, Hooke's law at 5, 15 and 30 substeps, a pendulum keeping its length and slowed by drag, a pinned sheet hanging barely stretched and the same twice, the lab's sheet pinned, hanging in its station and fed to its mesh). The game builds without warnings. Not checked here: how it looks, left to the user.
+

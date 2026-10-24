@@ -2532,7 +2532,7 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 
 ## Cloth
 
-The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games. So far its points and their step (`cloth-particles`, tested in `cloth_test`); the XPBD solver and its constraints come next.
+The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`) and the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`). Bending and moving pins come next.
 
 **The points** (`cloth_particles`, `ClothParticles`): one per vertex of the sheet's mesh, point i the mesh's vertex i, as plain arrays (structure of arrays): `positions`, `previousPositions` (where each was when the step began), `velocities` and `inverseMasses` (1 / kg; 0 for a pinned point, which nothing then moves, with no special case).
 
@@ -2547,12 +2547,33 @@ The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and belo
 
 With nothing between, step 3 gives back exactly the predicted velocity, so a sheet falls at g (tested over a second: speed g, distance g dt^2 n (n + 1) / 2). Phase 5's `fly` (v t + a t^2 / 2, the exact parabola) cannot be used here: step 3 would give back v + a t / 2, and a sheet would fall at half of g.
 
+**Stretch constraints** (`cloth_constraints`, XPBD, Macklin, Muller & Chentanez 2016):
+
+- `StretchConstraint {first, second, restLength}`: C = |x_first - x_second| - restLength.
+- `stretchConstraints(mesh)`: every edge of the triangles once (first < second), sorted, at its length in the mesh. On a grid, its rows' and columns' threads and one diagonal a square, which also resists shear: columns (rows + 1) + (columns + 1) rows + columns rows edges.
+- `solveStretch(particles, constraints, compliance, seconds)`: one pass in order (Gauss-Seidel), the multiplier starting at 0 since each substep makes one pass: delta lambda = -C / (w_first + w_second + compliance / seconds^2), each end moved along the edge by its inverse mass times delta lambda. A pinned end never moves and the centre of mass stays put; edges with both ends pinned, or squashed below `shortestEdge`, are skipped.
+- Compliance (m/N) is 1 / stiffness: 0 holds lengths exactly; a positive value is a spring of that stiffness whatever the step (tested: a weight m hangs stretched by m g alpha for 5, 15 and 30 substeps).
+
+**Float precision:** each substep gravity moves a point by g h^2 (3 micrometres at 15 substeps), which a float resolves only to about 0.1 micrometre at 1 m from the origin and 0.5 at 4 m, so the balance between gravity and the edges settles where the rounded moves cancel: the Hooke test's stretch is 0.4-0.5% off. Invisible for cotton's 0.15% stretch; far from the origin (large worlds) the cloth would want its points kept relative to an origin of its own.
+
 **The component** (`cloth`):
 
-- `ClothSettings`: `areaDensity` (0.2 kg/m2, a light cotton; silk about 0.05-0.08, denim 0.3-0.4; read when the cloth is made) and `gravity` (9.81 m/s2, real units as in the papers), with `visit`.
-- `Cloth {settings, particles}`, simulated in world space (its entity's `Transform` is not used).
-- `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses come from the placed areas.
-- `stepCloths(world, seconds)`: each cloth's step, then its points copied into the entity's `DeformingMesh` (drawn from a mesh at the identity), so the simulation never depends on drawing (120 KB a tick for a 100 x 100 sheet).
+- `ClothSettings`, with `visit`:
+
+| Setting | Default | What |
+|---|---|---|
+| `areaDensity` | 0.2 kg/m2 | a light cotton (silk about 0.05-0.08, denim 0.3-0.4); read when the cloth is made |
+| `gravity` | 9.81 m/s2 | real units, as in the papers |
+| `stretchCompliance` | 0.0005 m/N | 1 / (E t), cotton's tensile stiffness about 2000 N/m; the same for any edge length on a square mesh, so a hanging sheet stretches about 0.15% at any resolution |
+| `substeps` | 15 a tick (1.8 kHz) | Small Steps (Macklin et al. 2019): for the same work, more substeps leave far less stretch than more passes |
+| `drag` | 0.5 per second | every velocity times e^(-drag h) each substep, standing in for the air; picked by eye |
+
+- `Cloth {settings, particles, stretch}`, simulated in world space (its entity's `Transform` is not used).
+- `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses and rest lengths come from the placed sheet.
+- `stepClothParticles(particles, stretch, settings, seconds)`: `substeps` substeps, each `predictCloth`, `solveStretch`, `finishClothStep`, then drag; throws for fewer than one substep. `stepCloth(cloth, seconds)`.
+- `stepCloths(world, seconds)`: each cloth's tick, then its points copied into the entity's `DeformingMesh` (drawn from a mesh at the identity), so the simulation never depends on drawing (120 KB a tick for a 100 x 100 sheet).
+
+**Measured** (release, one thread, best tick of 120, 15 substeps): the cloth lab's 28 x 30 sheet (2,578 edges) 0.37 ms a tick, about 4% of a core at 120 ticks a second; a 100 x 100 sheet (30,200 edges) 4.2 ms, too slow for one thread, waiting for the multi-threaded or GPU solver. The debug build is several times slower.
 - `hashSimulationState` includes every cloth's positions, velocities and inverse masses.
 
 ## Deforming meshes
@@ -2576,7 +2597,7 @@ Meshes whose vertices move every tick while their triangles and UVs stay the sam
 - The `DeformedMesh {mesh, vertices, bounds, shape}` goes into `FrameDescription::deformedMeshes`; `shape` is an FNV-1a hash of the blended positions (never 0). The bounds replace the mesh's in `boundsByMesh` before culling.
 - `attachShapes` gives every draw of that mesh `DrawItem::shape`, which `shadowCasterSignature` hashes, so a caster that changes shape where it stands redraws its tiles and one that holds still keeps them.
 
-**Measured** (release, `deformMesh`, best of 50): the banner's 841 vertices 0.045 ms, a 100 x 100 sheet's 10,201 vertices 0.50 ms. One mesh is one job, so a single big sheet is not split across threads yet.
+**Measured** (release, `deformMesh`, best of 50): a 28 x 28 sheet's 841 vertices 0.045 ms, a 100 x 100 sheet's 10,201 vertices 0.50 ms. One mesh is one job, so a single big sheet is not split across threads yet.
 
 **The ring** (`DeformingSlots`, `deformingSlotCount` = `maxFramesInFlight` + 1 = 3):
 
@@ -2976,10 +2997,11 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 
 **Controls:** `PlayerControls` (F1 first person, F2 MOBA, F3 free camera) and F4's debug view; no settings of its own yet.
 
-**The banner:** a stand-in for cloth until the solver, and the first deforming mesh (see Deforming meshes): a `Mesh::grid` of `clothLabBannerColumns` x `clothLabBannerRows` (28 x 30) squares, `clothLabBannerWidth` 1.4 by `clothLabBannerHeight` 1.5 m, hanging from the fabric bar's left half (`ClothLabLayout::bannerCentre`), deep red and double-sided.
+**The hanging sheet:** a `Cloth` of a `Mesh::grid` of `clothLabSheetColumns` x `clothLabSheetRows` (28 x 30) squares, `clothLabSheetWidth` 1.4 by `clothLabSheetDepth` 1.5 m, deep red cotton, double-sided.
 
-- Each tick `bannerShape` pushes each point into the picture by a wave running down the sheet (`clothLabBannerWaveHeight` 0.08 m, `clothLabBannerWavelength` 0.9 m, `clothLabBannerWaveSeconds` 1.6 s, its crests slanting across) and a sway of the whole sheet (`clothLabBannerSwayHeight` 0.05 m every `clothLabBannerSwaySeconds` 2.3 s), both scaled by how far down the point hangs, so the top edge stays on the bar.
-- From the time at the end of the tick, so it is deterministic; `getBanner()`.
+- It starts flat level with the fabric bar's underside under its left half, stretching forward from the bar (`ClothLabLayout::sheetCentre`; the grid turned to face up, its top edge at the back), pinned at the two corners of its back edge.
+- It falls, swings down and hangs from the pins, its points driving a deforming mesh of its own (see Deforming meshes) drawn in world space.
+- Its fabric is the lab's `ClothSettings` (`getClothSettings`, F5's Cloth group), given to the sheet every tick before `stepCloths`; `getSheet()`.
 
 **Golden view:** `stations`, from the free camera's start (0, 2.4, 6.5) towards (0, 1, -1).
 

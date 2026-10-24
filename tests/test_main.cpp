@@ -114,6 +114,7 @@ void testClothLab();
 void testDeformingMesh();
 void testDeformingSlots();
 void testCloth();
+void testClothSolver();
 void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
@@ -252,6 +253,7 @@ int main(){
     testDeformingMesh();
     testDeformingSlots();
     testCloth();
+    testClothSolver();
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();
