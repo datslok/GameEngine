@@ -155,7 +155,7 @@ The original ten-step plan's steps 1-6, built on the CPU before any GPU code.
 
 **Milestone:** walk around a small level in first person with walls, stairs and jumping, and throw a grenade that bounces. ✔
 
-## Phase 6: Rendering foundations, lighting and global illumination ← current
+## Phase 6: Rendering foundations, lighting and global illumination (done, Oct 18-24 2026)
 
 Light that bounces: the biggest visual step up from today's direct-only lighting. It is done early because it is one of the two things we most want to see.
 
@@ -277,7 +277,9 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - the lamp field runs with hundreds of lights;
 - edges are smooth (TAA) and metals reflect the room.
 
-## Phase 7: Cloth simulation
+✔ (checked by the user, Oct 24 2026)
+
+## Phase 7: Cloth simulation ← current
 
 The physics half of the dressmaking game: fabric that drapes, folds and piles up without passing through itself. It comes early because it is the other thing we most want to see.
 
