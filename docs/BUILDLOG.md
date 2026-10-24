@@ -1062,3 +1062,11 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **On the way:** `Mesh::grid`; `VertexLayout` takes a second vertex binding.
   - **Checked:** the tests (debug and release, tests first: the grid, the topology and its seams, normals and tangents of flat, turned, bumped and squashed shapes, blending, ticks saving shapes, the fingerprint, attaching shapes and the shadow cache, the asset manager, the ring, the banner pinned, moving and deterministic). The game, release game and GPU test program build without warnings and the shaders compile. Not checked here: the picture, the validation layers and the GPU cost, left to the user; golden images not run (the cloth lab has none yet).
 
+- `cloth-particles` (Oct 24 2026): the cloth's points, the first piece of the cloth module (`src/cloth/`, a new folder above `physics/` and `scene/`, as the roadmap asked for cloth to be a module of its own).
+  - **Kept small, the user's choice:** the store, its masses, pins and step alone, without the XPBD solver, so each idea is explained and tested by itself. Nothing new shows yet: without constraints a sheet's points just fall.
+  - **Structure of arrays:** positions, previous positions, velocities and inverse masses as separate arrays, so a loop reads only what it needs and the compiler can work on several floats at once.
+  - **Inverse masses:** XPBD moves points in proportion to them, so a pinned point is simply infinitely heavy.
+  - **Lumped masses from the fabric's mass per area** (0.2 kg/m2 by default), a third of each triangle to each corner, so fabrics differ by a real number.
+  - **Symplectic Euler, not phase 5's `fly`,** though the roadmap suggested reusing it: the step works out each velocity from the motion afterwards, which gives back v + a t / 2 from `fly`'s v t + a t^2 / 2, so a sheet would fall at half of g. The roadmap's note now says `bounceVelocity` fits the collision item instead.
+  - **Checked:** the tests (debug and release, tests first: the masses add up to the fabric's and split as the triangles do, bad meshes and densities rejected, free fall at g, velocity from the motion, pins hold, a cloth entity steps and feeds its mesh, its state in the hash, the defaults). The game builds without warnings.
+

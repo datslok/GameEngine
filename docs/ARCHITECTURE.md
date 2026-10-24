@@ -2530,6 +2530,31 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 
 **Tests**: `transparency_test` (opaque, coverage, transmission with Fresnel, metals, the split, far-to-near sorting with backs first, unbounded draws, the push constants, the reactive share, its settings and pass, the shared transmittance, the light crossing glass, which faces count, segments against spheres, the glass bounds, Beer's law, the spread, the picture's level, the solid sphere's exit, which glass refracts, the picture pass), `material_uniforms_test`, `gltf_material_test` and `texture_encoding_test` (thick glass's numbers), `gpu_scene_test` (the instance's scale), `light_lab_test` (the glass ball and frosted panel), `taa_test` (`taaReactiveShare`), the loader's, asset manager's and packing tests, `culling_test` (no glass shadow casters), `ray_tracing_test` (the glass mask alone, not opaque), `mirrored_light_test`, `gpu_timing_test`, `light_lab_test` (the window's pane); GPU tests in `transparency_gpu_test` (the blend, the reactive share, the light crossing glass, the sphere test and refraction's functions) and `taa_gpu_test` (`taaReactiveShare`), written and built, not run.
 
+## Cloth
+
+The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games. So far its points and their step (`cloth-particles`, tested in `cloth_test`); the XPBD solver and its constraints come next.
+
+**The points** (`cloth_particles`, `ClothParticles`): one per vertex of the sheet's mesh, point i the mesh's vertex i, as plain arrays (structure of arrays): `positions`, `previousPositions` (where each was when the step began), `velocities` and `inverseMasses` (1 / kg; 0 for a pinned point, which nothing then moves, with no special case).
+
+- `makeClothParticles(mesh, areaDensity)`: at rest, with lumped masses: each point gets a third of the mass of every triangle it belongs to (area times the fabric's kg per m2). Throws for a density that is not finite and positive, or a point in no triangle with area.
+- `pinParticle(particles, index)`: inverse mass 0 and still.
+
+**The step:**
+
+1. `predictCloth(particles, acceleration, seconds)`: symplectic Euler. Each free point's velocity gains acceleration x seconds, then it moves by its new velocity; its start is kept. Pinned points neither speed up nor move.
+2. The constraints (next, XPBD) move the points towards valid shapes.
+3. `finishClothStep(particles, seconds)`: each velocity is the point's motion over the step divided by its length.
+
+With nothing between, step 3 gives back exactly the predicted velocity, so a sheet falls at g (tested over a second: speed g, distance g dt^2 n (n + 1) / 2). Phase 5's `fly` (v t + a t^2 / 2, the exact parabola) cannot be used here: step 3 would give back v + a t / 2, and a sheet would fall at half of g.
+
+**The component** (`cloth`):
+
+- `ClothSettings`: `areaDensity` (0.2 kg/m2, a light cotton; silk about 0.05-0.08, denim 0.3-0.4; read when the cloth is made) and `gravity` (9.81 m/s2, real units as in the papers), with `visit`.
+- `Cloth {settings, particles}`, simulated in world space (its entity's `Transform` is not used).
+- `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses come from the placed areas.
+- `stepCloths(world, seconds)`: each cloth's step, then its points copied into the entity's `DeformingMesh` (drawn from a mesh at the identity), so the simulation never depends on drawing (120 KB a tick for a 100 x 100 sheet).
+- `hashSimulationState` includes every cloth's positions, velocities and inverse masses.
+
 ## Deforming meshes
 
 Meshes whose vertices move every tick while their triangles and UVs stay the same (phase 7, `dynamic-meshes`): cloth. `scene/deforming_mesh` (tested in `deforming_mesh_test`), `render/gpu/deforming_slots` (`deforming_slots_test`), `render/vulkan/vulkan_mesh`, `vulkan_ray_tracing`.
