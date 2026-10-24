@@ -66,6 +66,6 @@ ClothLabLayout buildClothLabLayout() {
 
     layout.fabricFrame = ClothLabFrame{Vec3{4.5f, 2.0f + clothLabBarHalfThickness, -1.35f}, 1.8f};
     const ClothLabFrame& bar = layout.fabricFrame;
-    layout.bannerCentre = Vec3{bar.barCentre.x - 0.5f * bar.barHalfLength, clothLabBarUnderside(bar) - 0.5f * clothLabBannerHeight, bar.barCentre.z};
+    layout.sheetCentre = Vec3{bar.barCentre.x - 0.5f * bar.barHalfLength, clothLabBarUnderside(bar), bar.barCentre.z + 0.5f * clothLabSheetDepth};
     return layout;
 }

@@ -12,7 +12,6 @@
 #include "scene/probe_volume.h"
 #include "scene/sun.h"
 
-#include <cmath>
 #include <utility>
 
 namespace {
@@ -61,35 +60,13 @@ namespace {
         return material;
     }
 
-    // A deep red woven fabric, seen from both sides.
-    Material bannerMaterial() {
+    // A deep red cotton, seen from both sides.
+    Material sheetMaterial() {
         Material material;
         material.colour = Pixel{150, 30, 35};
         material.roughness = 0.9f;
         material.doubleSided = true;
         return material;
-    }
-
-    /*
-    * The banner's shape after some seconds: each point pushed into the picture by a wave running down the sheet, its
-    * phase also turning across it so the crests slant, and a sway of the whole sheet, both scaled by how far down the
-    * point hangs, so the top edge stays on the bar.
-    */
-    std::vector<Vec3> bannerShape(const std::vector<Vec3>& rest, double seconds) {
-        const double waveTurns = seconds / clothLabBannerWaveSeconds;
-        const double swayTurns = seconds / clothLabBannerSwaySeconds;
-        const float sway = clothLabBannerSwayHeight * static_cast<float>(std::sin(fullTurnRadians * swayTurns));
-
-        std::vector<Vec3> shape(rest.size());
-        for (std::size_t vertex = 0; vertex < rest.size(); ++vertex) {
-            const Vec3& point = rest[vertex];
-            const float below = 0.5f * clothLabBannerHeight - point.y;
-            const float share = below / clothLabBannerHeight;
-            const double turns = below / clothLabBannerWavelength + 0.25 * point.x / clothLabBannerWidth - waveTurns;
-            const float wave = clothLabBannerWaveHeight * static_cast<float>(std::sin(fullTurnRadians * turns));
-            shape[vertex] = Vec3{point.x, point.y, share * (wave + sway)};
-        }
-        return shape;
     }
 
     // One box as a part: the unit cube (-1..1) stretched to its half-size and moved.
@@ -153,21 +130,27 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
                                             Mat4::scaling(radius, radius, radius)});
     addStatic(std::move(stations));
 
-    // The banner: a deforming mesh of its own, drawn where it hangs, its shape set every tick.
-    const Mesh bannerMesh = Mesh::grid(clothLabBannerColumns, clothLabBannerRows, clothLabBannerWidth, clothLabBannerHeight);
-    for (const Vec4& vertex : bannerMesh.vertices) {
-        bannerRest.push_back(Vec3{vertex.x, vertex.y, vertex.z});
-    }
-    DeformingMesh bannerShapeNow;
-    bannerShapeNow.mesh = assets.addDeformingMesh(bannerMesh);
-    bannerShapeNow.positions = bannerShape(bannerRest, 0.0);
-    ModelRenderer bannerRenderer;
-    bannerRenderer.parts.push_back(RenderPart{bannerShapeNow.mesh, bannerMaterial(),
-                                              Mat4::translation(layout.bannerCentre.x, layout.bannerCentre.y, layout.bannerCentre.z)});
-    banner = world.create();
-    world.add(banner, Transform{});
-    world.add(banner, std::move(bannerRenderer));
-    world.add(banner, std::move(bannerShapeNow));
+    /*
+    * The hanging sheet: a cloth laid flat level with the bar (the grid, facing +z, turned to face up, its top edge at the
+    * back), pinned at its back corners, drawn through a deforming mesh of its own in world space.
+    */
+    const Mesh sheetMesh = Mesh::grid(clothLabSheetColumns, clothLabSheetRows, clothLabSheetWidth, clothLabSheetDepth);
+    const Mat4 flat = Mat4::translation(layout.sheetCentre.x, layout.sheetCentre.y, layout.sheetCentre.z) * Mat4::rotationX(-0.25f * fullTurnRadians);
+    Cloth cloth = makeCloth(sheetMesh, flat, clothSettings);
+    const std::size_t backEdge = static_cast<std::size_t>(clothLabSheetRows) * static_cast<std::size_t>(clothLabSheetColumns + 1);
+    pinParticle(cloth.particles, backEdge);
+    pinParticle(cloth.particles, backEdge + static_cast<std::size_t>(clothLabSheetColumns));
+
+    DeformingMesh sheetShape;
+    sheetShape.mesh = assets.addDeformingMesh(sheetMesh);
+    sheetShape.positions = cloth.particles.positions;
+    ModelRenderer sheetRenderer;
+    sheetRenderer.parts.push_back(RenderPart{sheetShape.mesh, sheetMaterial(), Mat4::identity()});
+    sheet = world.create();
+    world.add(sheet, Transform{});
+    world.add(sheet, std::move(sheetRenderer));
+    world.add(sheet, std::move(sheetShape));
+    world.add(sheet, std::move(cloth));
 
     controls.spawnBody(world);
 
@@ -197,10 +180,13 @@ void ClothLabGame::onInput(World& world, const Input& input) {
 }
 
 /*
-* The banner's shape comes from the time at the end of the tick, so it depends only on how long the game has run.
+* The fabric's settings reach the sheet every tick, so the debug UI's changes apply at once (its mass per area only when
+* it is made).
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
-    world.get<DeformingMesh>(banner).positions = bannerShape(bannerRest, simulationSeconds + tickSeconds);
+    (void)simulationSeconds;
+    world.get<Cloth>(sheet).settings = clothSettings;
+    stepCloths(world, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 
@@ -228,6 +214,9 @@ bool ClothLabGame::wantsDebugView() const {
 }
 
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {
+    visitor.group("Cloth", [&] {
+        visit(clothSettings, visitor);
+    });
     controls.visitSettings(visitor);
 }
 
@@ -253,6 +242,10 @@ const StaticLevel& ClothLabGame::getLevel() const {
     return staticLevel;
 }
 
-Entity ClothLabGame::getBanner() const {
-    return banner;
+Entity ClothLabGame::getSheet() const {
+    return sheet;
+}
+
+ClothSettings& ClothLabGame::getClothSettings() {
+    return clothSettings;
 }
