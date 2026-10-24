@@ -102,10 +102,7 @@ std::optional<LevelHit> raycast(const StaticLevel& level, const Ray& ray, float 
 std::optional<LevelHit> sweepSphere(const StaticLevel& level, const Sphere& sphere, const Vec3& motion) {
     const Aabb start = boundsOf(Shape{sphere});
     const Aabb end = boundsOf(Shape{Sphere{sphere.centre + motion, sphere.radius}});
-    const Aabb swept{
-        Vec3{std::min(start.minimum.x, end.minimum.x), std::min(start.minimum.y, end.minimum.y), std::min(start.minimum.z, end.minimum.z)},
-        Vec3{std::max(start.maximum.x, end.maximum.x), std::max(start.maximum.y, end.maximum.y), std::max(start.maximum.z, end.maximum.z)}
-    };
+    const Aabb swept = enclosing(start, end);
     std::vector<std::uint32_t> candidates;
     level.getGrid().query(swept, candidates);
 

@@ -110,6 +110,7 @@ void testParticle();
 void testGrenade();
 void testProfiler();
 void testJobSystem();
+void testClothLab();
 void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
@@ -244,6 +245,7 @@ int main(){
     testGrenade();
     testProfiler();
     testJobSystem();
+    testClothLab();
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();

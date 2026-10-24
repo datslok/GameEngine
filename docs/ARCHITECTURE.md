@@ -2727,11 +2727,11 @@ MOBA mode uses a confined visible cursor, edge panning (`gameplay/edge_pan`, fro
 The game registry (`app/game_registry`):
 
 - `GameEntry {name, make}`: a plain function pointer making a fresh game, since golden images need one per view; the table is `constexpr`.
-- `registeredGames()`: `lightlab`, then `demo`. Names are golden view names, since they name golden folders.
+- `registeredGames()`: `lightlab`, `demo`, then `clothlab`. Names are golden view names, since they name golden folders.
 - `defaultGame()` (the first, the light lab), `findGame(name)`, `gameNames()`.
 - `parseLaunchOptions(arguments)`: `--game <name>`, `--golden-save`, `--golden-check`, any order, each once; anything else throws `std::invalid_argument` listing the choices.
 
-Both games start in first person. Adding a game is one line in the table.
+Every game starts in first person. Adding a game is one line in the table.
 
 ### The light lab
 
@@ -2896,6 +2896,28 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 - Brightness values are by eye until lights have physical units.
 
 **The mist** (`LightLabMistSettings`, group "Mist"; see Volumetric fog): on at the start (`enabled`), a `Fog` of density 0.01 per metre at the ground (about 300 m of sight), thinning by e every 10 m up, picked by eye, so the sunbeams through the window and the street lamps' halos show. `updateDaylight` puts it on the air entity beside the `Atmosphere` while it is on and takes it away when it is off.
+
+### The cloth lab
+
+`ClothLabGame` (`games/clothlab/`, `--game clothlab`, phase 7, `cloth-lab`) is the test ground for cloth: a station for each of phase 7's milestones on a plain floor, tested in `cloth_lab_test`.
+
+**The layout** (`cloth_lab_layout`, `buildClothLabLayout`, in metres, along x in front of the player):
+
+| Station | What | Where |
+|---|---|---|
+| Draping | `ball` (radius 0.4) on `pedestal` (0.6 high), under `drapeFrame`'s bar 2 m up, 0.75 m behind the ball | x = -4 |
+| Piling | `mat`, 3 x 3 m and 1 cm thick | x = 0 |
+| Fabrics | `fabricFrame`, a 3.6 m bar 2 m up for two sheets side by side | x = 4.5 |
+
+- A `ClothLabFrame` is a bar along x (`barCentre`, `barHalfLength`) resting on two posts standing on the floor (`clothLabFrameBlocks`: the posts, then the bar; `clothLabBarUnderside`, where pinned cloth hangs from). Posts and bar are thin square sections (`clothLabPostHalfWidth` 0.04, `clothLabBarHalfThickness` 0.025).
+- `stations()` gives each station's box; the tests check they stand apart and clear of the player's start (`clothLabFirstPersonFeet`, (0, 0, 4)).
+- The floor is `clothLabFloorHalfSize` (30 m) each way.
+
+**The scene:** the floor and one renderer of every station's parts (pale concrete, a dark blue mat, grey stone, brushed steel, the ball a 64 x 32 sphere), all static level (`isStatic`, walked on, probes moved off them). A fixed sun (`clothLabLatitudeDegrees` 45, `clothLabDayOfYear` 172, `clothLabSolarHours` 15, intensity 4 above the air), the real sky (an `Atmosphere`, its ground the floor's colour) and `ProbeCascades`.
+
+**Controls:** `PlayerControls` (F1 first person, F2 MOBA, F3 free camera) and F4's debug view; no settings of its own yet.
+
+**Golden view:** `stations`, from the free camera's start (0, 2.4, 6.5) towards (0, 1, -1).
 
 ## Characters
 

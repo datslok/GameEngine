@@ -287,6 +287,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 **Items**
 
 - [x] Job system: a work-stealing thread pool with `parallelFor` (`job-system`)
+- [x] Cloth lab: a test ground with a station for each milestone, `--game clothlab` (`cloth-lab`)
 - [ ] Dynamic meshes: a GPU upload path for meshes whose vertices change every frame, with normals recomputed each time (today a mesh is uploaded once and never changes)
 - [ ] Particle store for cloth: the sheet's vertices as plain arrays
   - Positions, previous positions, velocities, inverse masses, with 0 for pinned points.

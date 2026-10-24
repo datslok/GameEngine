@@ -1042,3 +1042,11 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **First user, the BRDF table** (32 x 32 texels, 4096 samples each): one texel a job. Measured in release, best of five: 103.6 ms on one thread, 10.5 ms on 16 (this PC's threads), the table the same to the last bit.
   - **The setting:** `EngineSettings::workerThreads` (-1, one per core but one; start-up only), so a slow or misbehaving run can be tried on one thread.
   - **Checked:** the tests (debug and release, tests first: every index once for empty, tiny, uneven and large ranges, 1 thread against 8, the chunked sum, nesting, exceptions with and without workers, a grain of 0, work reaching several threads, two outside threads at once). The game and GPU test program build without warnings; nothing run on the GPU.
+
+- `cloth-lab` (Oct 24 2026): a third game, `--game clothlab`, asked for by the user as the place to build and judge cloth, as the light lab is for lighting.
+  - **What it holds:** a station for each of phase 7's milestones, kept apart from the game as a layout the tests check: a ball on a pedestal under a pin bar (a sheet pinned at two corners drapes over it), a mat (a sheet dropped onto itself piles there), a wide bar (silk beside denim).
+  - **Kept plain:** a pale floor and matte surfaces so the cloth stands out, a fixed afternoon sun from the side so folds cast shadows, the real sky and light probes; none of the light lab's clock, night or street.
+  - **Not yet:** a capsule (phase 5's other shape for body collision) waits for the collision item, since the engine has no capsule mesh; the mannequin's distance field comes later in the phase.
+  - **On the way:** `enclosing(a, b)` in `math/aabb`, the box holding two boxes, shared with `sweepSphere`, which had its own copy.
+  - **Checked:** the tests (debug and release, tests first: registered, the ball on its pedestal under its bar, the frames standing on the floor, the stations apart and clear of the start, the level matching the layout, the sun, sky and probes, golden views). The game builds without warnings. Not checked here: the picture, left to the user; its golden reference is not saved yet, so `make golden` reports it missing until `make golden-save GAME=clothlab`.
+
