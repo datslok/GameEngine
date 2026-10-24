@@ -5,6 +5,7 @@
 #include "scene/asset_handles.h"
 #include "scene/camera.h"
 #include "scene/debug_draw.h"
+#include "scene/deforming_mesh.h"
 #include "scene/lighting.h"
 #include "scene/material.h"
 
@@ -36,6 +37,10 @@ struct DrawItem {
     // The model matrix the same part was drawn with last frame (MotionHistory), so the renderer can tell how it moved
     // (motion vectors for temporal anti-aliasing). None on its first frame, or without a history: treated as not moving.
     std::optional<Mat4> previousModel;
+
+    // A deforming mesh's shape this frame (DeformedMesh::shape, set by attachShapes), 0 for every other mesh: the shadow
+    // cache's fingerprint of the casters includes it, so a caster that changes shape where it stands is drawn again.
+    std::uint64_t shape = 0;
 };
 
 /*
@@ -91,7 +96,13 @@ struct FrameDescription {
     // Wireframe shapes drawn over the scene (see DebugDraw), and lines on the screen itself in window pixels (overlays, text).
     std::vector<DebugLine> debugLines;
     std::vector<DebugLine> debugScreenLines;
+
+    // This frame's shape of every deforming mesh (scene/deforming_mesh.h), for the renderer to upload before drawing.
+    std::vector<DeformedMesh> deformedMeshes;
 };
+
+// Give each draw of a deformed mesh its shape's fingerprint.
+void attachShapes(std::vector<DrawItem>& draws, const std::vector<DeformedMesh>& deformedMeshes);
 
 // Describe the World as seen by camera, alpha (0..1) of the way between the last two ticks. With a history, each draw
 // gets its matrix from last frame, and this frame's are remembered for the next.

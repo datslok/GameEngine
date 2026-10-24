@@ -130,6 +130,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Emissive colour, with KHR_materials_emissive_strength.
   - Optional smooth normals with a crease angle, for models that have none.
 - **An asset manager** that loads each file once and hands out typed handles.
+- **Deforming meshes** (for cloth): meshes whose vertices move every tick, drawn blended between ticks with their normals and tangents worked out again each frame. They cast shadows, show up in ray-traced light and reflections, and give temporal anti-aliasing their motion.
 
 ### The engine core
 
@@ -168,7 +169,7 @@ Several games run on one engine, picked at start-up with `--game`.
 - At night, the moon in its real place and phase, lighting the sky and casting shadows, and the 9,096 brightest real stars, in their colours, turning with the sky.
 - A thin ground mist, so sunbeams through the window, the flashlight's cone and the street lamps' halos show (Mist in F5).
 
-**The cloth lab** (`--game clothlab`): a plain floor under an afternoon sun, with a test station for each of the cloth milestones: a ball on a pedestal under a bar to pin a sheet to, a mat to drop sheets onto, and a wide bar to hang two fabrics side by side. The cloth itself is being built (roadmap phase 7).
+**The cloth lab** (`--game clothlab`): a plain floor under an afternoon sun, with a test station for each of the cloth milestones: a ball on a pedestal under a bar to pin a sheet to, a mat to drop sheets onto, and a wide bar to hang two fabrics side by side. A red banner ripples on the wide bar, a stand-in until the cloth itself is built (roadmap phase 7).
 
 ### Tools for building and testing
 

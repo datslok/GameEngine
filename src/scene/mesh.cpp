@@ -72,6 +72,46 @@ Mesh Mesh::cube() {
     return mesh;
 }
 
+/*
+* Each square's two triangles share its diagonal from bottom-left to top-right, both anticlockwise seen from +z.
+*/
+Mesh Mesh::grid(int columns, int rows, float width, float height) {
+    if (columns < 1 || rows < 1) {
+        throw std::invalid_argument("A grid needs at least one square each way");
+    }
+    if (!std::isfinite(width) || !std::isfinite(height) || width <= 0.0f || height <= 0.0f) {
+        throw std::invalid_argument("A grid's size must be finite and positive");
+    }
+
+    Mesh mesh;
+    const auto vertexAt = [columns](int row, int column) {
+        return static_cast<std::size_t>(row) * static_cast<std::size_t>(columns + 1) + static_cast<std::size_t>(column);
+    };
+    const auto uvAt = [columns, rows](int row, int column) {
+        return Vec2{static_cast<float>(column) / static_cast<float>(columns), static_cast<float>(row) / static_cast<float>(rows)};
+    };
+
+    for (int row = 0; row <= rows; ++row) {
+        for (int column = 0; column <= columns; ++column) {
+            const Vec2 uv = uvAt(row, column);
+            mesh.vertices.push_back(Vec4{(uv.x - 0.5f) * width, (uv.y - 0.5f) * height, 0.0f, 1.0f});
+        }
+    }
+
+    for (int row = 0; row < rows; ++row) {
+        for (int column = 0; column < columns; ++column) {
+            Triangle lower{vertexAt(row, column), vertexAt(row, column + 1), vertexAt(row + 1, column + 1)};
+            lower.uvs = {uvAt(row, column), uvAt(row, column + 1), uvAt(row + 1, column + 1)};
+            Triangle upper{vertexAt(row, column), vertexAt(row + 1, column + 1), vertexAt(row + 1, column)};
+            upper.uvs = {uvAt(row, column), uvAt(row + 1, column + 1), uvAt(row + 1, column)};
+            mesh.triangles.push_back(lower);
+            mesh.triangles.push_back(upper);
+        }
+    }
+
+    return mesh;
+}
+
 Mesh Mesh::plane(float halfSize) {
     if (!std::isfinite(halfSize) || halfSize <= 0.0f) {
         throw std::invalid_argument(

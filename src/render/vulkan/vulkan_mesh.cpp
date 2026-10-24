@@ -4,6 +4,7 @@
 #include "render/vulkan/vulkan_device.h"
 
 #include <cstring>
+#include <stdexcept>
 
 /*
 * After the copies, one barrier makes the copied data visible to everything that reads it later: vertex attribute
@@ -12,7 +13,9 @@
 * does) orders it in time, but only a barrier makes the GPU's own writes visible to its later reads, including those in
 * later submissions.
 */
-VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh) {
+VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, const IndexedMesh& mesh, bool deforming):
+    deforming(deforming)
+{
     checkMeshUpload(mesh);
 
     const std::uint32_t vertexSize = vertexBytes(mesh);
@@ -29,6 +32,15 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
 
     const VmaAllocator allocator = device.getAllocator();
     vertices = VulkanBuffer{allocator, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | shared, BufferMemory::Gpu};
+
+    // The CPU writes a deforming mesh's slots itself; its writes reach the GPU when the frame is submitted.
+    if (deforming) {
+        for (VulkanBuffer& slot : shapeSlots) {
+            slot = VulkanBuffer{allocator, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | (shared & ~VK_BUFFER_USAGE_TRANSFER_DST_BIT), BufferMemory::Upload};
+            std::memcpy(slot.getMapped(), mesh.vertices.data(), vertexSize);
+            slot.flush();
+        }
+    }
     indices = VulkanBuffer{allocator, indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | shared, BufferMemory::Gpu};
 
     VulkanBuffer staging{allocator, VkDeviceSize{vertexSize} + indexSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
@@ -65,8 +77,54 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
     });
 }
 
+bool VulkanMesh::isDeforming() const {
+    return deforming;
+}
+
+void VulkanMesh::showShape(std::span<const MeshVertex> shape, std::uint64_t fingerprint) {
+    if (!deforming) {
+        throw std::logic_error("Only a deforming mesh changes shape");
+    }
+    if (shape.size() != vertexCount) {
+        throw std::invalid_argument("A deforming mesh's shape needs one vertex per vertex of its rest shape");
+    }
+    if (fingerprint == slotShapes[slots.current()]) {
+        slots.hold();
+        return;
+    }
+
+    const std::uint32_t slot = slots.advance();
+    std::memcpy(shapeSlots[slot].getMapped(), shape.data(), shape.size_bytes());
+    shapeSlots[slot].flush();
+    slotShapes[slot] = fingerprint;
+}
+
+void VulkanMesh::holdShape() {
+    slots.hold();
+}
+
+bool VulkanMesh::changedShape() const {
+    return deforming && slots.changed();
+}
+
+std::uint32_t VulkanMesh::getSlot() const {
+    return deforming ? slots.current() : 0;
+}
+
+std::uint64_t VulkanMesh::getSlotVersion() const {
+    return deforming ? slots.version(slots.current()) : 1;
+}
+
+VkDeviceAddress VulkanMesh::getSlotVertexAddress(std::uint32_t slot) const {
+    return deforming ? shapeSlots.at(slot).getDeviceAddress() : vertices.getDeviceAddress();
+}
+
 VkBuffer VulkanMesh::getVertexBuffer() const {
-    return vertices.get();
+    return deforming ? shapeSlots[slots.current()].get() : vertices.get();
+}
+
+VkBuffer VulkanMesh::getPreviousVertexBuffer() const {
+    return deforming ? shapeSlots[slots.previous()].get() : vertices.get();
 }
 
 VkBuffer VulkanMesh::getIndexBuffer() const {
@@ -82,7 +140,7 @@ std::uint32_t VulkanMesh::getVertexCount() const {
 }
 
 VkDeviceAddress VulkanMesh::getVertexAddress() const {
-    return vertices.getDeviceAddress();
+    return getSlotVertexAddress(getSlot());
 }
 
 VkDeviceAddress VulkanMesh::getIndexAddress() const {

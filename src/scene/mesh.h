@@ -47,6 +47,14 @@ struct Mesh {
 
     // A unit sphere with smooth normals: segments around the equator, rings from pole to pole.
     static Mesh sphere(int segments = 32, int rings = 16);
+
+    /*
+    * A flat sheet of columns x rows squares, width by height, centred on the origin and facing +z, two triangles a
+    * square: a cloth's rest shape. Vertex row * (columns + 1) + column, rows counted up from the bottom, UV (0, 0) at
+    * the bottom-left and (1, 1) at the top-right. Throws std::invalid_argument for no squares or a size that is not
+    * finite and positive.
+    */
+    static Mesh grid(int columns, int rows, float width, float height);
 };
 
 // The unit normal of the triangle first, second, third (counterclockwise seen from the front), or zero for a triangle with no area.

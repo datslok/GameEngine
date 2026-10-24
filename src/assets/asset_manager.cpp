@@ -31,6 +31,26 @@ MeshHandle AssetManager::addMesh(std::shared_ptr<const Mesh> mesh) {
     return handle;
 }
 
+// A new mesh of its own, never shared with another handle, since each deforming mesh has its own shape.
+MeshHandle AssetManager::addDeformingMesh(Mesh mesh) {
+    DeformingTopology topology = buildDeformingTopology(mesh);
+    const MeshHandle handle = addMesh(std::move(mesh));
+    deformingTopologies.emplace(handle.index, std::move(topology));
+    return handle;
+}
+
+bool AssetManager::isDeforming(MeshHandle handle) const {
+    return handle.isValid() && deformingTopologies.contains(handle.index);
+}
+
+const DeformingTopology& AssetManager::getDeformingTopology(MeshHandle handle) const {
+    const auto found = deformingTopologies.find(handle.index);
+    if (!handle.isValid() || found == deformingTopologies.end()) {
+        throw std::invalid_argument("Not a deforming mesh");
+    }
+    return found->second;
+}
+
 /*
 * The options are part of the cache key, so the same file loaded flat and smooth gives two meshes.
 */

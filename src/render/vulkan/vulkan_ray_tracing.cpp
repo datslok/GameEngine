@@ -41,6 +41,28 @@ namespace {
     }
 
     constexpr VkPipelineStageFlags2 rayQueryStages = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+
+    /*
+    * A mesh's triangles, opaque (no shader is asked whether a hit counts), positions read from each MeshVertex's first
+    * three floats. Each triangle a candidate at most once along a ray: glass's tint multiplies in once per pane it crosses.
+    */
+    VkAccelerationStructureGeometryKHR meshGeometry(VkDeviceAddress vertices, std::uint32_t vertexCount, VkDeviceAddress indices) {
+        VkAccelerationStructureGeometryKHR geometry{};
+        geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR | VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
+        geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geometry.geometry.triangles.vertexData.deviceAddress = vertices;
+        geometry.geometry.triangles.vertexStride = sizeof(MeshVertex);
+        geometry.geometry.triangles.maxVertex = vertexCount - 1;
+        geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+        geometry.geometry.triangles.indexData.deviceAddress = indices;
+        return geometry;
+    }
+
+    // A deforming mesh's structure is built every time its shape changes, so a fast build beats a fast trace.
+    constexpr VkBuildAccelerationStructureFlagsKHR deformingBuildFlags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
 }
 
 VulkanRayTracing::VulkanRayTracing(const VulkanDevice& device, std::uint32_t framesInFlight):
@@ -149,24 +171,17 @@ VkDeviceAddress VulkanRayTracing::scratchAddress(const VulkanBuffer& scratch) co
 }
 
 /*
-* The mesh's triangles, opaque (no shader is asked whether a hit counts), positions read from each MeshVertex's first
-* three floats. Built preferring fast tracing and allowing compaction; the build writes its compacted size into a query,
-* read once the GPU has finished, and a second submission copies the tree into a buffer of exactly that size. The last
-* barrier makes the compacted structure readable by top-level builds and ray queries in later submissions.
+* Built preferring fast tracing and allowing compaction; the build writes its compacted size into a query, read once the
+* GPU has finished, and a second submission copies the tree into a buffer of exactly that size. The last barrier makes
+* the compacted structure readable by top-level builds and ray queries in later submissions.
 */
 void VulkanRayTracing::addMesh(ImmediateCommands& uploads, const VulkanMesh& mesh) {
-    VkAccelerationStructureGeometryKHR geometry{};
-    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    // Each triangle a candidate at most once along a ray: glass's tint multiplies in once per pane it crosses.
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR | VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR;
-    geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geometry.geometry.triangles.vertexData.deviceAddress = mesh.getVertexAddress();
-    geometry.geometry.triangles.vertexStride = sizeof(MeshVertex);
-    geometry.geometry.triangles.maxVertex = mesh.getVertexCount() - 1;
-    geometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-    geometry.geometry.triangles.indexData.deviceAddress = mesh.getIndexAddress();
+    if (mesh.isDeforming()) {
+        addDeformingMesh(uploads, mesh);
+        return;
+    }
+
+    VkAccelerationStructureGeometryKHR geometry = meshGeometry(mesh.getVertexAddress(), mesh.getVertexCount(), mesh.getIndexAddress());
 
     VkAccelerationStructureBuildGeometryInfoKHR build{};
     build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -230,6 +245,105 @@ void VulkanRayTracing::addMesh(ImmediateCommands& uploads, const VulkanMesh& mes
     meshes.push_back(std::move(entry));
 }
 
+/*
+* Every slot's structure is the same size, since only positions change. The rest shape in slot 0 is built now, so the
+* mesh can be traced before its first new shape.
+*/
+void VulkanRayTracing::addDeformingMesh(ImmediateCommands& uploads, const VulkanMesh& mesh) {
+    VkAccelerationStructureGeometryKHR geometry = meshGeometry(mesh.getSlotVertexAddress(0), mesh.getVertexCount(), mesh.getIndexAddress());
+    VkAccelerationStructureBuildGeometryInfoKHR build{};
+    build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    build.flags = deformingBuildFlags;
+    build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.geometryCount = 1;
+    build.pGeometries = &geometry;
+
+    const std::uint32_t triangles = mesh.getIndexCount() / 3;
+    VkAccelerationStructureBuildSizesInfoKHR sizes{};
+    sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    vkGetAccelerationStructureBuildSizesKHR(device.getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &triangles, &sizes);
+
+    MeshStructure entry;
+    entry.deforming = &mesh;
+    entry.indices = mesh.getIndexAddress();
+    for (std::uint32_t slot = 0; slot < deformingSlotCount; ++slot) {
+        entry.slotStructures.push_back(createStructure(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, sizes.accelerationStructureSize));
+    }
+    entry.scratch = createScratch(sizes.buildScratchSize);
+    meshes.push_back(std::move(entry));
+
+    MeshStructure& added = meshes.back();
+    uploads.run([&](VkCommandBuffer commands) {
+        recordDeformingBuild(commands, added, 0);
+        structureBarrier(commands, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | rayQueryStages);
+    });
+    added.builtVersions[0] = mesh.getSlotVersion();
+}
+
+void VulkanRayTracing::recordDeformingBuild(VkCommandBuffer commands, MeshStructure& mesh, std::uint32_t slot) const {
+    const VulkanMesh& source = *mesh.deforming;
+    VkAccelerationStructureGeometryKHR geometry = meshGeometry(source.getSlotVertexAddress(slot), source.getVertexCount(), source.getIndexAddress());
+    VkAccelerationStructureBuildGeometryInfoKHR build{};
+    build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    build.flags = deformingBuildFlags;
+    build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    build.geometryCount = 1;
+    build.pGeometries = &geometry;
+    build.dstAccelerationStructure = mesh.slotStructures.at(slot).handle.get();
+    build.scratchData.deviceAddress = scratchAddress(mesh.scratch);
+
+    const VkAccelerationStructureBuildRangeInfoKHR range{source.getIndexCount() / 3, 0, 0, 0};
+    const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;
+    vkCmdBuildAccelerationStructuresKHR(commands, 1, &build, &ranges);
+}
+
+/*
+* Each mesh's scratch memory is reused from one build to the next, so the first barrier waits for any earlier build
+* (an earlier frame's, still running) before it is written again. The CPU's writes of the vertices reached the GPU
+* when the frame was submitted. The last barrier makes the new structures readable by the top-level build and by ray
+* queries.
+*/
+void VulkanRayTracing::rebuildDeformedMeshes(VkCommandBuffer commands) {
+    const auto stale = [](const MeshStructure& mesh) {
+        return mesh.deforming != nullptr && mesh.builtVersions[mesh.deforming->getSlot()] != mesh.deforming->getSlotVersion();
+    };
+    if (std::none_of(meshes.begin(), meshes.end(), stale)) {
+        return;
+    }
+
+    VkMemoryBarrier2 scratchBarrier{};
+    scratchBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    scratchBarrier.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    scratchBarrier.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    scratchBarrier.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    scratchBarrier.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    VkDependencyInfo dependency{};
+    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &scratchBarrier;
+    vkCmdPipelineBarrier2(commands, &dependency);
+
+    for (MeshStructure& mesh : meshes) {
+        if (stale(mesh)) {
+            const std::uint32_t slot = mesh.deforming->getSlot();
+            recordDeformingBuild(commands, mesh, slot);
+            mesh.builtVersions[slot] = mesh.deforming->getSlotVersion();
+        }
+    }
+
+    structureBarrier(commands, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | rayQueryStages);
+}
+
+VkDeviceAddress VulkanRayTracing::MeshStructure::currentStructure() const {
+    return deforming != nullptr ? slotStructures[deforming->getSlot()].address : structure.address;
+}
+
+VkDeviceAddress VulkanRayTracing::MeshStructure::currentVertices() const {
+    return deforming != nullptr ? deforming->getVertexAddress() : vertices;
+}
+
 std::size_t VulkanRayTracing::getMeshCount() const {
     return meshes.size();
 }
@@ -245,7 +359,7 @@ std::vector<GpuRayInstance> VulkanRayTracing::packInstances(const std::vector<Dr
             throw std::logic_error("A drawn mesh has no acceleration structure: add every mesh before drawing it");
         }
 
-        instances.push_back(packRayInstance(draw, static_cast<std::uint32_t>(index), meshes[draw.mesh.index].structure.address));
+        instances.push_back(packRayInstance(draw, static_cast<std::uint32_t>(index), meshes[draw.mesh.index].currentStructure()));
     }
 
     return instances;
@@ -265,7 +379,7 @@ void VulkanRayTracing::buildScene(VkCommandBuffer commands, std::uint32_t frameI
     table.reserve(meshes.size());
 
     for (const MeshStructure& mesh : meshes) {
-        table.push_back(GpuMeshAddresses{mesh.vertices, mesh.indices});
+        table.push_back(GpuMeshAddresses{mesh.currentVertices(), mesh.indices});
     }
 
     frame.meshTable->write(table);

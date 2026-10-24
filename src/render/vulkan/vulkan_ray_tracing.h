@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/deforming_slots.h"
 #include "render/gpu/ray_tracing.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/scene_layout.h"
@@ -26,6 +27,10 @@ class VulkanMesh;
 * then compacted, copied into a buffer of just the size the finished tree needs (often about half), and the original
 * dropped. Each frame in flight has its own top-level structure, rebuilt from scratch from that frame's instances, so
 * moving objects need no bookkeeping; it grows (to twice its size, or what is needed) when a frame has more instances.
+*
+* A deforming mesh (scene/deforming_mesh.h) has a bottom-level structure per slot of its ring of shapes, built preferring a
+* fast build and not compacted, and built again in the frame (rebuildDeformedMeshes) whenever its current slot holds a
+* newer shape than the structure was built from. The ring keeps a slot being rebuilt out of reach of the frames in flight.
 */
 class VulkanRayTracing {
 public:
@@ -37,8 +42,13 @@ public:
     // Between frames only (the GPU idle): every frame's structure and set are made again.
     void setFramesInFlight(std::uint32_t count);
 
-    // Build the next mesh's structure (meshes are numbered in upload order, like their handles). Waits for the GPU.
+    // Build the next mesh's structure (meshes are numbered in upload order, like their handles). Waits for the GPU. A
+    // deforming mesh is kept by reference, so it must outlive this.
     void addMesh(ImmediateCommands& uploads, const VulkanMesh& mesh);
+
+    // Record building the structures of deforming meshes whose current shape is newer than their structure (after their
+    // shapes were shown this frame, before buildScene), and make them readable by the build and ray queries after.
+    void rebuildDeformedMeshes(VkCommandBuffer commands);
     std::size_t getMeshCount() const;
 
     // The frame's draws as instances: instance i is draw i, with its mesh's structure, its matrix and its mask. Throws
@@ -65,6 +75,16 @@ private:
         AccelerationStructure structure;
         VkDeviceAddress vertices = 0;
         VkDeviceAddress indices = 0;
+
+        // A deforming mesh: its structure per slot, the slot's version each was built from, and its scratch memory.
+        const VulkanMesh* deforming = nullptr;
+        std::vector<AccelerationStructure> slotStructures;
+        std::array<std::uint64_t, deformingSlotCount> builtVersions{};
+        VulkanBuffer scratch;
+
+        // The structure and vertices this frame's shape uses.
+        VkDeviceAddress currentStructure() const;
+        VkDeviceAddress currentVertices() const;
     };
 
     struct Frame {
@@ -85,4 +105,9 @@ private:
     AccelerationStructure createStructure(VkAccelerationStructureTypeKHR type, VkDeviceSize size) const;
     VulkanBuffer createScratch(VkDeviceSize size) const;
     VkDeviceAddress scratchAddress(const VulkanBuffer& scratch) const;
+
+    void addDeformingMesh(ImmediateCommands& uploads, const VulkanMesh& mesh);
+
+    // Record building one slot's structure of a deforming mesh from that slot's vertices.
+    void recordDeformingBuild(VkCommandBuffer commands, MeshStructure& mesh, std::uint32_t slot) const;
 };

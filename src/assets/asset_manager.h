@@ -6,6 +6,7 @@
 #include "physics/triangle_mesh.h"
 #include "scene/asset_handles.h"
 #include "scene/material.h"
+#include "scene/deforming_mesh.h"
 #include "scene/mesh.h"
 #include "scene/model.h"
 #include "scene/model_renderer.h"
@@ -40,6 +41,14 @@ public:
 
     // Register a mesh that is already shared, such as one from an imported model. The same pointer always gives the same handle.
     MeshHandle addMesh(std::shared_ptr<const Mesh> mesh);
+
+    // Register a mesh whose vertices will move (a cloth: scene/deforming_mesh.h), its topology built once here. Its
+    // shape comes each frame from a DeformingMesh; the Mesh is its rest shape, its triangles and its UVs.
+    MeshHandle addDeformingMesh(Mesh mesh);
+
+    // Whether a mesh was added as deforming, and its topology (std::invalid_argument for one that was not).
+    bool isDeforming(MeshHandle handle) const;
+    const DeformingTopology& getDeformingTopology(MeshHandle handle) const;
 
     // Load an OBJ file, or return the handle from the first time it was loaded with the same options.
     MeshHandle loadMesh(const std::string& path, MeshLoadOptions options = {});
@@ -95,6 +104,9 @@ private:
     // Keyed by path, whether smoothed, and crease angle (0 when not smoothed, since it is unused then).
     std::map<std::tuple<std::string, bool, float>, MeshHandle> meshesByPath;
     std::map<const Mesh*, MeshHandle> meshesByPointer;
+
+    // The deforming meshes' topologies, by mesh number. std::map never moves its elements, so references stay valid.
+    std::map<std::uint32_t, DeformingTopology> deformingTopologies;
     std::map<std::tuple<std::string, bool, TextureEncoding, std::optional<float>>, TextureHandle> texturesByPath;
 
     // Keyed by the buffer's address. The buffers are kept alive here, so an address cannot be reused by a different image.

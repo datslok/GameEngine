@@ -25,6 +25,13 @@ inline const Vec3 clothLabFirstPersonFeet{0.0f, 0.0f, 4.0f};
 inline constexpr float clothLabPostHalfWidth = 0.04f;
 inline constexpr float clothLabBarHalfThickness = 0.025f;
 
+// The banner on the fabric bar's left half, a stand-in for cloth until the solver comes (its waves are the game's): a
+// sheet of columns x rows squares, width by height, its top edge along the bar's underside.
+inline constexpr int clothLabBannerColumns = 28;
+inline constexpr int clothLabBannerRows = 30;
+inline constexpr float clothLabBannerWidth = 1.4f;
+inline constexpr float clothLabBannerHeight = 1.5f;
+
 // A box: its centre and half its size along each axis.
 struct ClothLabBlock {
     Vec3 centre;
@@ -56,6 +63,9 @@ struct ClothLabLayout {
 
     // Fabrics.
     ClothLabFrame fabricFrame;
+
+    // Where the banner's middle hangs, still: under the middle of the fabric bar's left half.
+    Vec3 bannerCentre;
 
     // Every box in the level: the pedestal, the mat, then each frame's posts and bar.
     std::vector<ClothLabBlock> blocks() const;

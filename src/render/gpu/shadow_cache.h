@@ -12,8 +12,9 @@
 * right and drawing it again would only repeat the same work.
 */
 
-// A fingerprint of the casters a tile would draw: each one's mesh and model matrix, in order. Any caster moving,
-// changing mesh, or entering or leaving the view changes it (barring a one in 2^64 coincidence).
+// A fingerprint of the casters a tile would draw: each one's mesh, model matrix and shape (a deforming mesh's,
+// DrawItem::shape), in order. Any caster moving, changing mesh or shape, or entering or leaving the view changes it
+// (barring a one in 2^64 coincidence).
 std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters);
 
 // What was last drawn into each square of the atlas.

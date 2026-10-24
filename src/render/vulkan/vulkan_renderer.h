@@ -69,6 +69,9 @@ struct BatchPipelines {
     VkPipeline plain = VK_NULL_HANDLE;
     VkPipeline cutOut = VK_NULL_HANDLE;
     VkCullModeFlags cull = VK_CULL_MODE_BACK_BIT;
+
+    // The pipelines also read each mesh's last shape, at vertex binding 1 (the velocity pass).
+    bool previousShapes = false;
 };
 
 /*
@@ -111,7 +114,9 @@ public:
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear), with their smaller levels when those were
     // built on the CPU (a cut-out's, keeping its coverage). Between frames only.
-    void uploadMesh(const IndexedMesh& mesh);
+    // A deforming mesh (scene/deforming_mesh.h) gets a ring of buffers its shape is written into each frame
+    // (FrameDescription::deformedMeshes); mesh is then its rest shape.
+    void uploadMesh(const IndexedMesh& mesh, bool deforming = false);
     void uploadTexture(Uint32 width, Uint32 height, std::span<const Uint8> pixels, TextureEncoding encoding, std::span<const ImageLevel> mips = {});
     std::size_t getMeshCount() const;
     std::size_t getTextureCount() const;
@@ -463,7 +468,11 @@ private:
     std::size_t drawBatches(VkCommandBuffer commands, const std::vector<DrawBatch>& batches, const BatchPipelines& pipelines) const;
     void drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings, const BloomComposite& bloomMix);
 
-    void bindMesh(VkCommandBuffer commands, MeshHandle mesh, std::uint32_t& indexCount) const;
+    // Each deforming mesh shows the frame's shape for it, or holds its last; after the frame's fence, before anything is
+    // recorded. Throws std::invalid_argument for a deformed mesh that was not uploaded as deforming.
+    void showShapes(const FrameDescription& description);
+
+    void bindMesh(VkCommandBuffer commands, MeshHandle mesh, std::uint32_t& indexCount, bool previousShape = false) const;
     void checkTexturesUploaded(const Material& material) const;
     SampledImage sampled(const VulkanTexture& texture) const;
 };

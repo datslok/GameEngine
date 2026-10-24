@@ -111,6 +111,8 @@ void testGrenade();
 void testProfiler();
 void testJobSystem();
 void testClothLab();
+void testDeformingMesh();
+void testDeformingSlots();
 void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
@@ -246,6 +248,8 @@ int main(){
     testProfiler();
     testJobSystem();
     testClothLab();
+    testDeformingMesh();
+    testDeformingSlots();
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();

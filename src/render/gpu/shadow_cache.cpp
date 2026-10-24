@@ -26,6 +26,7 @@ std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const st
         const DrawItem& draw = draws[index];
         hash.add(draw.mesh.index);
         hash.addBytes(draw.model.values, sizeof(draw.model.values));
+        hash.add(draw.shape);
     }
 
     return hash.value;
