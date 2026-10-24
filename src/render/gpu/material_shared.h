@@ -15,6 +15,10 @@
 // Blended (glTF's alphaMode BLEND): its alpha is the share of the pixel it covers (render/gpu/transparency.h).
 #define MATERIAL_BLEND 4u
 
+// Drawn by refraction (thick or frosted glass, render/gpu/transparency.h, isRefractive): it reads the blurred picture
+// from before the glass where its view ray lands, instead of blending over the picture.
+#define MATERIAL_REFRACTS 8u
+
 // The specialization constant that turns a scene fragment shader into its cut-out variant, which throws away the holes.
 // Number 1, after the light probes' (DDGI_SAMPLE_PROBES_CONSTANT), so a pipeline can set both.
 #define MATERIAL_CUT_OUT_CONSTANT 1

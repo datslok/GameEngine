@@ -119,11 +119,16 @@ namespace {
         const std::vector<DrawItem> draws{closer, drawAt(1, Vec3{0.0f, 0.0f, -4.0f})};
         assert((sortTransparentDraws(draws, {0, 1}, Vec3{}, 0).order == std::vector<std::size_t>{1, 0}));
     }
-    // The glass pass reads the reflection probe only when there is one, at the level its roughness picks.
+    /*
+    * The glass pass reads the reflection probe only when there is one, at the level its roughness picks; and refracts
+    * while the picture before the glass is kept, knowing its levels and the pixels per radian.
+    */
     void testTransparentView() {
-        const GpuTransparentView view = packTransparentView(true, 9);
+        const GpuTransparentView view = packTransparentView(true, 9, TransparentRefraction{true, 1200.0f, 11});
         assert(view.probe[0] == 1.0f && view.probe[1] == 9.0f && view.probe[2] == 0.0f && view.probe[3] == 0.0f);
-        assert(packTransparentView(false, 0).probe[0] == 0.0f);
+        assert(view.refraction[0] == 1.0f && view.refraction[1] == 1200.0f && view.refraction[2] == 11.0f);
+        assert(packTransparentView(false, 0, TransparentRefraction{}).probe[0] == 0.0f);
+        assert(packTransparentView(false, 0, TransparentRefraction{}).refraction[0] == 0.0f);
     }
 
     /*
@@ -158,7 +163,7 @@ namespace {
     // On by default; a negative scale or a limit outside 0..1 is refused.
     void testTransparencySettings() {
         const TransparencySettings defaults;
-        assert(defaults.glassShadows);
+        assert(defaults.glassShadows && defaults.refraction);
         assert(defaults.reactiveMask && defaults.reactiveScale == 1.0f && defaults.reactiveLimit > 0.0f && defaults.reactiveLimit <= 1.0f);
         validateTransparency(defaults);
 
@@ -269,6 +274,104 @@ namespace {
         assert(crowded.counts[0] == glassBoundsLimit && crowded.counts[1] == 1);
     }
 
+    /*
+    * Beer's law: light crossing an absorbing medium keeps exp(-sigma d) of itself. glTF names the medium by the colour
+    * light keeps after one attenuation distance, so the share after length d is that colour to the power d over the
+    * distance. No distance (inverse 0) absorbs nothing.
+    */
+    void testBeerAttenuation() {
+        const Vec3 kept{0.5f, 0.8f, 1.0f};
+        assert(nearVec(beerAttenuation(kept, 0.5f, 2.0f), kept));
+        assert(nearVec(beerAttenuation(kept, 0.5f, 4.0f), Vec3{0.25f, 0.64f, 1.0f}));
+        assert(nearVec(beerAttenuation(kept, 0.5f, 0.0f), Vec3{1.0f, 1.0f, 1.0f}));
+        assert(nearVec(beerAttenuation(kept, 0.0f, 3.0f), Vec3{1.0f, 1.0f, 1.0f}));
+        assert(nearVec(beerAttenuation(Vec3{0.0f, 0.5f, 1.0f}, 1.0f, 1.0f), Vec3{0.0f, 0.5f, 1.0f}));
+    }
+
+    /*
+    * How widely rough glass spreads the light through it: a microfacet tilted by an angle a turns light passing it by
+    * about (ior - 1) a (a thin prism's deviation), and GGX's facets spread by about alpha = roughness squared, so the
+    * cone's half angle has tangent (ior - 1) alpha. Smooth glass, or glass that does not bend light (ior 1), spreads none.
+    */
+    void testTransmissionSpread() {
+        assert(transmissionSpread(0.0f, 1.5f) == 0.0f);
+        assert(transmissionSpread(0.5f, 1.0f) == 0.0f);
+        assert(near(transmissionSpread(0.5f, 1.5f), 0.125f));
+        assert(transmissionSpread(0.5f, 0.8f) == 0.0f);
+        assert(transmissionSpread(1.0f, 1.5f) > transmissionSpread(0.5f, 1.5f));
+    }
+
+    /*
+    * Which level of the blurred picture rough glass reads: the cone (spread) widens over the distance behind the glass,
+    * seen from the camera across both distances, so in pixels its width is 2 spread behind / (view + behind) times the
+    * pixels per radian; the level is log2 of that, 0 for a footprint under a pixel, at most the picture's last level.
+    * Something just behind frosted glass stays sharp; far behind it, blurred.
+    */
+    void testRefractionLevel() {
+        assert(refractionLevel(0.0f, 5.0f, 2.0f, 1000.0f, 12) == 0.0f);
+        assert(refractionLevel(0.125f, 0.0f, 2.0f, 1000.0f, 12) == 0.0f);
+        assert(near(refractionLevel(0.125f, 1.0f, 1.0f, 1000.0f, 12), std::log2(125.0f), 1e-5f));
+        assert(refractionLevel(0.125f, 0.1f, 1.0f, 1000.0f, 12) < refractionLevel(0.125f, 10.0f, 1.0f, 1000.0f, 12));
+        assert(refractionLevel(0.001f, 1.0f, 1.0f, 1000.0f, 12) == 0.0f);
+        assert(refractionLevel(1.0f, 1e6f, 1.0f, 1e6f, 12) == 11.0f);
+        assert(near(pixelsPerRadian(1000.0f, 2.0f * std::atan(0.5f)), 1000.0f, 1e-3f));
+    }
+
+    /*
+    * Thick glass bends the view ray where it enters (Snell's law, sin t = sin i / ior) and the ray crosses the glass to
+    * where it leaves, whose picture the glass shows: as Filament's solid sphere, the ray travels the thickness times
+    * the cosine between its new direction and the inward normal. Head-on it goes straight through; at an angle, glass
+    * bends it towards the normal, so it moves sideways less than an unbent ray would.
+    */
+    void testSolidRefraction() {
+        const Vec3 point{1.0f, 2.0f, 3.0f};
+        const Vec3 up{0.0f, 0.0f, 1.0f};
+        assert(nearVec(solidRefractionExit(point, up, up, 1.5f, 2.0f), point + Vec3{0.0f, 0.0f, -2.0f}));
+        assert(nearVec(solidRefractionExit(point, up, up, 1.5f, 0.0f), point));
+
+        const Vec3 slanted = Vec3{0.6f, 0.0f, 0.8f};
+        const Vec3 unbent = solidRefractionExit(point, slanted, up, 1.0f, 1.0f);
+        assert(nearVec(unbent, point - slanted * 0.8f, 1e-5f));
+        const Vec3 bent = solidRefractionExit(point, slanted, up, 1.5f, 1.0f);
+        assert(std::abs(bent.x - point.x) < std::abs(unbent.x - point.x) && bent.z < point.z);
+
+        // The bent ray obeys Snell's law: its sine against the normal is the incoming sine over the index.
+        const Vec3 direction = refractDirection(slanted * -1.0f, up, 1.0f / 1.5f);
+        assert(near(direction.length(), 1.0f, 1e-5f) && near(direction.x, -0.6f / 1.5f, 1e-5f));
+    }
+
+    /*
+    * Which glass is drawn by refraction (reading the blurred picture before the glass) rather than blended over the
+    * picture: thick glass (a thickness, KHR_materials_volume) and frosted glass (rough enough that its blur can reach
+    * a pixel). Smooth thin glass blends, which keeps the glass behind it in view.
+    */
+    void testWhichGlassRefracts() {
+        Material window;
+        window.transmission = 1.0f;
+        window.roughness = 0.02f;
+        assert(!isRefractive(window));
+
+        Material frosted = window;
+        frosted.roughness = frostedRoughness;
+        assert(isRefractive(frosted));
+
+        Material thick = window;
+        thick.thickness = 0.5f;
+        assert(isRefractive(thick));
+
+        Material decal;
+        decal.alphaMode = AlphaMode::Blend;
+        decal.roughness = 0.9f;
+        assert(!isRefractive(decal));
+    }
+
+    // The pass that keeps the picture before the glass: the camera's inverse (to turn depths into distances), the size.
+    void testOpaquePicturePass() {
+        const GpuOpaquePicturePass pass = packOpaquePicturePass(Mat4::translation(1.0f, 2.0f, 3.0f), RenderSize{320, 180});
+        assert(pass.inverseViewProjection[12] == 1.0f && pass.inverseViewProjection[13] == 2.0f && pass.inverseViewProjection[0] == 1.0f);
+        assert(pass.size[0] == 320.0f && pass.size[1] == 180.0f);
+    }
+
     // The mask pass is told the render screen it walks and the settings.
     void testReactivePass() {
         TransparencySettings settings;
@@ -296,4 +399,10 @@ void testTransparency() {
     testGlassFaces();
     testSegmentMeetsSphere();
     testGlassBounds();
+    testBeerAttenuation();
+    testTransmissionSpread();
+    testRefractionLevel();
+    testSolidRefraction();
+    testWhichGlassRefracts();
+    testOpaquePicturePass();
 }

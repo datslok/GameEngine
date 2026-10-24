@@ -4,6 +4,7 @@
 #include "render/vulkan/frame_descriptors.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/render_pass.h"
+#include "render/vulkan/vulkan_colour_pyramid.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_memory.h"
 #include "render/vulkan/vulkan_reflection_probe.h"
@@ -78,7 +79,6 @@ private:
     VkFormat standInFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     std::unique_ptr<ComputePipeline> depthPyramidPipeline;
-    std::unique_ptr<ComputePipeline> colourPyramidPipeline;
     std::unique_ptr<ComputePipeline> reflectionPipeline;
     std::unique_ptr<ComputePipeline> rayReflectionPipeline; // null without ray queries
     std::vector<VulkanBuffer> passRecords;
@@ -88,13 +88,10 @@ private:
     VulkanImage properties;
     VulkanImage standIns;
     VulkanImage depthPyramid;
-    VulkanImage colourPyramid;
+    std::unique_ptr<VulkanColourPyramid> colourPyramid;
 
-    // A view of each pyramid level alone, for writing (and the colour pyramid's for reading) one level at a time.
+    // A view of each depth pyramid level alone, for writing one level at a time.
     std::vector<OwnedHandle<VkImageView>> depthLevels;
-    std::vector<OwnedHandle<VkImageView>> colourLevels;
 
     void buildDepthPyramid(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& depth);
-    void buildColourPyramid(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& previousPicture);
-    std::vector<OwnedHandle<VkImageView>> levelViews(const VulkanImage& image) const;
 };

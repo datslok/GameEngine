@@ -51,6 +51,10 @@ Mat4 normalMatrix(const Mat4& model);
 // mirror reverses which side of the tangent the bitangent is on.
 float handedness(const Mat4& model);
 
+// How much the model matrix scales lengths, as one number: the cube root of how much it scales volume (exact for a
+// uniform scaling, the geometric mean of the three scales otherwise), for lengths a material gives in model units.
+float uniformScale(const Mat4& model);
+
 // The inverse of a model matrix (any translation, rotation and scale; the last row must be 0 0 0 1), or nothing when it
 // squashes space flat. Used to carry a world ray into an object's own coordinates.
 std::optional<Mat4> affineInverse(const Mat4& model);

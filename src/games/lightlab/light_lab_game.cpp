@@ -150,6 +150,23 @@ namespace {
             material.roughness = 0.02f;
             material.transmission = 1.0f;
             break;
+        case LabSurface::SolidGlass:
+            // Solid glass (ior 1.5), smooth, thick right through: its thickness is the unit sphere's diameter (the
+            // model's units, scaled with it), faintly green after a metre of it, as ordinary glass is edge-on.
+            material.colour = Pixel{255, 255, 255};
+            material.roughness = 0.0f;
+            material.transmission = 1.0f;
+            material.thickness = 2.0f;
+            material.attenuationColour = Vec3{0.85f, 0.95f, 0.9f};
+            material.attenuationDistance = 1.0f;
+            material.ior = 1.5f;
+            break;
+        case LabSurface::FrostedGlass:
+            // Acid-etched glass: thin and clear, its surface rough enough to blur what is behind it.
+            material.colour = Pixel{250, 252, 252};
+            material.roughness = 0.4f;
+            material.transmission = 1.0f;
+            break;
         }
         return material;
     }
@@ -357,8 +374,8 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
 
-    // The window's glass: drawn after the opaque scene, casting no shadow and not part of the level's collision, so the
-    // sun still comes through (glass tints nothing in shadows yet).
+    // The window's glass: drawn after the opaque scene, casting no shadow map and not part of the level's collision, so the
+    // sun still comes through (tinted by rays on GPUs with ray queries).
     ModelRenderer pane = blocksRenderer(cube, {LabBlock{labWindowPane.centre(), (labWindowPane.maximum - labWindowPane.minimum) * 0.5f, LabSurface::WindowGlass}});
     pane.castsShadows = false;
     pane.isStatic = true;
@@ -369,11 +386,27 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(blocksRenderer(cube, layout.reflectors));
 
     // The mirror ball, finely divided so its outline and the reflections across it stay smooth.
+    const MeshHandle sphere = assets.addMesh(Mesh::sphere(96, 48));
     ModelRenderer mirrorBall;
-    mirrorBall.parts.push_back(RenderPart{assets.addMesh(Mesh::sphere(96, 48)), surfaceMaterial(LabSurface::Chrome),
+    mirrorBall.parts.push_back(RenderPart{sphere, surfaceMaterial(LabSurface::Chrome),
                                           Mat4::translation(labMirrorBallCentre.x, labMirrorBallCentre.y, labMirrorBallCentre.z) *
                                               Mat4::scaling(labMirrorBallRadius, labMirrorBallRadius, labMirrorBallRadius)});
     addStatic(std::move(mirrorBall));
+
+    // Refraction's test pieces, as the window's glass: no shadow map, not in the collision.
+    ModelRenderer refractors;
+    refractors.parts.push_back(RenderPart{sphere, surfaceMaterial(LabSurface::SolidGlass),
+                                          Mat4::translation(labGlassBallCentre.x, labGlassBallCentre.y, labGlassBallCentre.z) *
+                                              Mat4::scaling(labGlassBallRadius, labGlassBallRadius, labGlassBallRadius)});
+    const Vec3 frostedHalf = (labFrostedPanel.maximum - labFrostedPanel.minimum) * 0.5f;
+    refractors.parts.push_back(RenderPart{cube, surfaceMaterial(LabSurface::FrostedGlass),
+                                          Mat4::translation(labFrostedPanel.centre().x, labFrostedPanel.centre().y, labFrostedPanel.centre().z) *
+                                              Mat4::scaling(frostedHalf.x, frostedHalf.y, frostedHalf.z)});
+    refractors.castsShadows = false;
+    refractors.isStatic = true;
+    const Entity refracting = world.create();
+    world.add(refracting, Transform{});
+    world.add(refracting, std::move(refractors));
 
     // The windows, one part each in the layout's order, so switching finds each lit one's glow by its number.
     std::vector<LabBlock> panes;

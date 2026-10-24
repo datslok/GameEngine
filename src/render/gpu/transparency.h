@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "math/mat4.h"
 #include "math/vec3.h"
 #include "render/gpu/transparency_shared.h"
 #include "render/gpu/upscaling.h"
@@ -86,20 +87,83 @@ SortedTransparentDraws sortTransparentDraws(const std::vector<DrawItem>& draws, 
                                             std::uint32_t firstInstance);
 
 /*
-* The glass pass's fragment push constants, after triangle.vert's 64 bytes (scene_surface.glsl's TransparentView): x 1
-* while it reads the reflection probe round the camera (else the light probes' or flat ambient's mirror light), y the
-* probe's prefiltered levels.
+* Refraction: thick glass (a thickness, KHR_materials_volume) bends the view ray where it enters and shows what lies
+* where the ray leaves; frosted glass (rough thin glass) blurs what is behind it, more the further behind. Both read
+* the picture from before the glass, kept with blurred levels and each pixel's distance (opaque_picture.comp), instead
+* of blending over the picture; so glass behind refracting glass is not seen through it. Smooth thin glass, which bends
+* and blurs nothing, keeps blending.
+*/
+inline constexpr float frostedRoughness = static_cast<float>(TRANSPARENCY_FROSTED_ROUGHNESS);
+
+// Whether a material is drawn by refraction: transmitting, and thick or frosted.
+bool isRefractive(const Material& material);
+
+// Beer's law: the share of light kept after length through a medium that keeps colour after 1 / inverseDistance
+// (colour to the power length times inverseDistance); 0 absorbs nothing.
+Vec3 beerAttenuation(const Vec3& colour, float inverseDistance, float length);
+
+/*
+* The tangent of the half angle rough glass spreads transmitted light over: a facet tilted by a turns light passing it
+* by about (ior - 1) a (a thin prism), and GGX's facets tilt by about alpha = roughness squared.
+*/
+float transmissionSpread(float roughness, float ior);
+
+/*
+* The blurred picture's level rough glass reads: the cone widens over behindDistance (from the glass to what is behind
+* it), seen from the camera viewDistance in front of the glass, so it covers 2 spread behind / (view + behind) radians,
+* pixelsPerRadian pixels each; log2 of that, 0 under a pixel, at most the picture's last level.
+*/
+float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, std::uint32_t levels);
+
+// Pixels per radian at the screen's centre: its height over twice the tangent of half the vertical field of view.
+float pixelsPerRadian(float screenHeight, float verticalFov);
+
+// GLSL's refract: the direction after crossing into a medium (eta = the index before over the index after); zero for
+// total internal reflection.
+Vec3 refractDirection(const Vec3& incident, const Vec3& normal, float eta);
+
+/*
+* Where the view ray leaves thick glass (Filament's solid sphere): bent by Snell's law where it enters (from air, ior),
+* it travels the thickness times the cosine between its new direction and the inward normal.
+*/
+Vec3 solidRefractionExit(const Vec3& position, const Vec3& toCamera, const Vec3& normal, float ior, float thickness);
+
+// What the glass pass knows of the picture before the glass: whether it was kept this frame, the pixels per radian
+// (pixelsPerRadian, at the render size) and its levels.
+struct TransparentRefraction {
+    bool available = false;
+    float pixelsPerRadian = 0.0f;
+    std::uint32_t levels = 0;
+};
+
+/*
+* The glass pass's fragment push constants, after triangle.vert's 64 bytes (scene_surface.glsl's TransparentView).
+* probe: x 1 while it reads the reflection probe round the camera (else the light probes' or flat ambient's mirror
+* light), y the probe's prefiltered levels. refraction: x 1 while the picture before the glass is kept (refracting
+* glass blends otherwise), y the pixels per radian, z its levels.
 */
 struct GpuTransparentView {
     float probe[4];
+    float refraction[4];
 };
 
-static_assert(sizeof(GpuTransparentView) == 16, "GpuTransparentView must match scene_surface.glsl's TransparentView");
+static_assert(sizeof(GpuTransparentView) == 32, "GpuTransparentView must match scene_surface.glsl's TransparentView");
 
 // Where GpuTransparentView starts in the glass pass's push constants: after the vertex shader's capture matrix.
 inline constexpr std::uint32_t transparentViewOffset = 64;
 
-GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevels);
+GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevels, const TransparentRefraction& refraction);
+
+// The pass keeping the picture before the glass (opaque_picture.comp): the camera's inverse view-projection (column-
+// major, camera-relative, to turn depths into distances along the view) and the render screen (width, height).
+struct GpuOpaquePicturePass {
+    float inverseViewProjection[16];
+    float size[4];
+};
+
+static_assert(sizeof(GpuOpaquePicturePass) == 80, "GpuOpaquePicturePass must match opaque_picture.comp's push constants");
+
+GpuOpaquePicturePass packOpaquePicturePass(const Mat4& inverseViewProjection, RenderSize render);
 
 /*
 * The reactive mask. Anti-aliasing (TAA, FSR, DLSS) rebuilds each pixel from past frames, finding where it was by the
@@ -113,6 +177,9 @@ struct TransparencySettings {
     // Glass tints the light passing through it on its way to a surface (the main pass's shadowed lights, the probes' and
     // reflections' rays), by rays that see only glass. On GPUs with ray queries; ignored elsewhere.
     bool glassShadows = true;
+
+    // Thick and frosted glass drawn by refraction (isRefractive); off blends them over the picture as thin glass.
+    bool refraction = true;
 
     // Off leaves the history trusted everywhere, as before the mask, for comparing.
     bool reactiveMask = true;

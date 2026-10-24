@@ -23,12 +23,15 @@ struct GpuMaterial {
     float emissive[4];       // rgb: light the surface gives off itself, multiplied by the emissive texture; w: a cut-out's alpha cutoff (0 when opaque)
     std::uint32_t textures[4]; // slots in the texture array: x colour, y metallic-roughness, z normal map, w emissive
     // x: the occlusion texture's slot; y: flags (MATERIAL_DOUBLE_SIDED, MATERIAL_CUT_OUT, render/gpu/material_shared.h);
-    // z: the transmission texture's slot; w: 0
+    // z: the transmission texture's slot; w: the thickness texture's slot
     std::uint32_t extra[4];
-    float transmission[4];   // x: thin glass's transmission, 0..1 (render/gpu/transparency.h); the rest 0, kept for glass's later numbers
+    // x: glass's transmission, 0..1 (render/gpu/transparency.h); y: thick glass's thickness (model units, 0 for thin
+    // glass); z: 1 over its attenuation distance (0 absorbs nothing); w: its index of refraction
+    float transmission[4];
+    float attenuation[4];    // rgb: the colour light keeps after the attenuation distance; w: 0
 };
 
-static_assert(sizeof(GpuMaterial) == 96, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 112, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

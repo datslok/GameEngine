@@ -168,7 +168,11 @@ vec3 candidateGlassTransmittance(rayQueryEXT query, vec3 direction) {
     vec3 normal = mat3(instance.normalMatrix) * surface.normal;
     float normalLength = length(normal);
     float cosine = normalLength > 0.0 ? dot(normal, direction) / normalLength : 1.0;
-    return glassLightTransmittance(coverage, transmission, metallic, albedo.rgb, cosine);
+
+    // Thick glass also absorbs over its thickness (Beer's law), counted once, at the face the light enters by.
+    float thickness = material.transmission.y * textureLod(textures[nonuniformEXT(material.extra.w)], surface.uv, 0.0).g * instance.handedness.y;
+    vec3 absorbed = beerAttenuation(material.attenuation.rgb, material.transmission.z, thickness);
+    return glassLightTransmittance(coverage, transmission, metallic, albedo.rgb, cosine) * absorbed;
 }
 
 /*

@@ -28,6 +28,8 @@ layout(location = 2) in vec3 relativePosition;
 layout(location = 3) in vec4 worldTangent;
 // Which entry of the material buffer shades this object (from its instance; the same across the triangle).
 layout(location = 4) flat in uint materialIndex;
+// How much the object scales lengths, for lengths its material gives in model units (thick glass's thickness).
+layout(location = 5) flat in float objectScale;
 
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
@@ -150,10 +152,35 @@ const bool transparentView = true;
 
 layout(set = 2, binding = 0) uniform samplerCube transparentProbeLight;
 
+// The picture before the glass (VulkanOpaquePicture): its colour, ever blurrier levels, and at level 0 each pixel's
+// distance along the view in alpha. Refracting glass reads it.
+layout(set = 2, binding = 1) uniform sampler2D opaquePicture;
+
+// pixelToNdc, ndcToPixel and clipToScreen, for where refracted rays land on screen.
+#include "screen_reflections.glsl"
+
 // Must match GpuTransparentView (after triangle.vert's 64 bytes of push constants).
 layout(push_constant) uniform TransparentView {
     layout(offset = 64) vec4 transparentProbe; // x: 1 when the reflection probe is read, y: its prefiltered levels
+    vec4 transparentRefraction;                // x: 1 when the picture before the glass was kept, y: pixels per radian, z: its levels
 };
+
+/*
+* What refracting glass shows of the picture behind it (render/gpu/transparency.h): thick glass bends the view ray and
+* shows where it leaves (solidRefractionExit), frosted glass blurs what lies behind it, more the further behind (the
+* picture's level from transmissionSpread and refractionLevel, the distance behind from the picture's alpha). Both read
+* the picture from before the glass, so glass behind them is not seen.
+*/
+vec3 refractedPicture(vec3 normal, vec3 toCamera, float roughness, float ior, float thickness) {
+    vec2 screen = clusterScreen.xy;
+    vec3 exit = thickness > 0.0 ? solidRefractionExit(relativePosition, toCamera, normal, ior, thickness) : relativePosition;
+    vec3 landed = clipToScreen(relativeViewProjection * vec4(exit, 1.0), screen);
+    vec2 pixel = clamp(landed.xy, vec2(0.5), screen - 0.5);
+    float viewDistance = dot(relativePosition, viewForward.xyz);
+    float behind = max(texelFetch(opaquePicture, ivec2(pixel), 0).a - viewDistance, 0.0);
+    float level = refractionLevel(transmissionSpread(roughness, ior), behind, viewDistance, transparentRefraction.y, uint(transparentRefraction.z));
+    return textureLod(opaquePicture, pixel / screen, level).rgb;
+}
 
 #ifdef DUAL_SOURCE_BLENDING
 layout(location = 0, index = 0) out vec4 outputColour;
@@ -525,6 +552,8 @@ void main() {
 #ifdef TRANSPARENT
     // Glass's transmission, its texture's red channel times the factor.
     float transmission = material.transmission.x * texture(textures[nonuniformEXT(material.extra.z)], textureUv, mipBias).r;
+    // Thick glass's thickness texture's green channel (white without one).
+    float thicknessTexel = texture(textures[nonuniformEXT(material.extra.w)], textureUv, mipBias).g;
 #endif
 
     // A cut-out's holes are thrown away in its own pipelines (without the depth prepass; after it, the holes have no
@@ -703,6 +732,17 @@ void main() {
     float coverage = (material.extra.y & MATERIAL_BLEND) != 0u ? albedo.a : 1.0;
     TransparentLight seen = transparentBlend(coverage, transmission, metallic, ambientReflected - ambientSpecular + diffuse, ambientSpecular + specular,
                                              emissive, albedo.rgb, point.specularAlbedo);
+
+    // Refracting glass (thick or frosted) adds what it lets through of the picture before the glass, where its view
+    // ray lands and as blurred as its roughness, absorbed on the way through its thickness; only its uncovered share
+    // lets the picture through as it is.
+    if ((material.extra.y & MATERIAL_REFRACTS) != 0u && transparentRefraction.x > 0.5) {
+        float thickness = material.transmission.y * thicknessTexel * objectScale;
+        vec3 through = transparentTransmittance(1.0, transmission, metallic, albedo.rgb, point.specularAlbedo) *
+                       beerAttenuation(material.attenuation.rgb, material.transmission.z, thickness);
+        seen.added += coverage * through * refractedPicture(shadingNormal, toCamera, roughness, material.transmission.w, thickness);
+        seen.transmittance = vec3(1.0 - coverage);
+    }
     outputColour = vec4(seen.added, 1.0 - (seen.transmittance.r + seen.transmittance.g + seen.transmittance.b) / 3.0);
 #ifdef DUAL_SOURCE_BLENDING
     transmittanceOutput = vec4(seen.transmittance, 1.0);

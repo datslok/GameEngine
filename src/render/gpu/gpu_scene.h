@@ -33,7 +33,7 @@
 struct GpuInstance {
     float model[16];        // places the vertex in the world
     float normalMatrix[16]; // inverse transpose of the model's 3x3 part (zero if squashed flat)
-    float handedness[4];    // x: -1 if the model matrix mirrors space, else +1
+    float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
     std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits)
 };
 

@@ -30,6 +30,7 @@
 #include "render/vulkan/vulkan_fsr.h"
 #include "render/vulkan/vulkan_taa.h"
 #include "render/vulkan/vulkan_reactive_mask.h"
+#include "render/vulkan/vulkan_opaque_picture.h"
 #include "render/vulkan/vulkan_bloom.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
@@ -277,6 +278,10 @@ private:
     // The reactive mask (render/gpu/transparency.h): where glass changed the picture, for the anti-aliasing to trust its
     // history less there.
     std::unique_ptr<VulkanReactiveMask> reactiveMask;
+
+    // The picture before the glass, with its blurred levels and distances (render/gpu/transparency.h): refracting glass
+    // reads it, and the reactive mask compares the picture after with it.
+    std::unique_ptr<VulkanOpaquePicture> opaquePicture;
     std::unique_ptr<VulkanPipeline> motionPipeline;
     std::unique_ptr<VulkanPipeline> motionCutOutPipeline;
 
@@ -435,8 +440,10 @@ private:
     void drawRayDebugView(FrameContext& frame, VkDescriptorSet sceneSet, const Camera& camera, RayDebugView view);
     void drawMotion(FrameContext& frame, const BatchedDraws& motionDraws, VkDescriptorSet sceneSet, const GpuMotionView& view);
     // The transparent draws, far to near, blended over the scene image (its depth tested, not written), sampling the
-    // light probes or not, reading the reflection probe when this frame captured it.
-    void drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes, bool readsProbe);
+    // light probes or not, reading the reflection probe when this frame captured it, refracting glass reading the picture
+    // before the glass as refraction says (opaquePicture, kept first).
+    void drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes, bool readsProbe,
+                         const TransparentRefraction& refraction);
 
     // The reflection probe's six faces from the camera, each with its draws, then its sky (none: the background alone)
     // over them, and the probe's distances and prefiltered light made from them.

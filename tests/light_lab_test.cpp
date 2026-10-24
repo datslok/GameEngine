@@ -13,6 +13,7 @@
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/probe_cascades.h"
 #include "render/gpu/probe_relocation.h"
+#include "render/gpu/transparency.h"
 #include "scene/celestial.h"
 #include "scene/lighting.h"
 #include "scene/moon.h"
@@ -58,9 +59,9 @@ namespace {
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) { renderer.isStatic ? ++staticModels : ++others; });
 
         // The ground, the towers, fence, its chain-link, the window's glass, trees, building, the street, its windows and its bulbs' glow (static, and
-        // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror) and the
-        // mirror ball.
-        assert(staticModels == 12);
+        // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror), the
+        // mirror ball and refraction's glass pieces.
+        assert(staticModels == 13);
         assert(others > 0);
     }
 
@@ -362,15 +363,56 @@ namespace {
 
         lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
             for (const RenderPart& part : renderer.parts) {
-                if (isTransparent(part.material)) {
+                if (isTransparent(part.material) && part.material.thickness == 0.0f && part.material.roughness < frostedRoughness) {
                     ++panes;
-                    assert(part.material.transmission == 1.0f && part.material.roughness < 0.1f);
+                    assert(part.material.transmission == 1.0f);
                     assert(!renderer.castsShadows && renderer.isStatic);
                 }
             }
         });
 
         assert(panes == 1);
+    }
+
+    /*
+    * Refraction's test pieces on the polished slab: a ball of solid glass (thick, KHR_materials_volume in the engine's
+    * terms, its thickness the sphere's diameter in model units) and a frosted panel standing in front of the chrome ball,
+    * so the ball is seen blurred through it while the grass just behind stays nearly sharp. Both rest on the slab inside
+    * its edges, clear of the chrome ball.
+    */
+    void testTheRefractionPieces() {
+        const Aabb slab = labPolishedSlab;
+        assert(near(labGlassBallCentre.y - labGlassBallRadius, slab.maximum.y, 1e-5f));
+        assert(labGlassBallCentre.x - labGlassBallRadius > slab.minimum.x && labGlassBallCentre.x + labGlassBallRadius < slab.maximum.x);
+        assert(labGlassBallCentre.z - labGlassBallRadius > slab.minimum.z && labGlassBallCentre.z + labGlassBallRadius < slab.maximum.z);
+        assert((labGlassBallCentre - labMirrorBallCentre).length() > labGlassBallRadius + labMirrorBallRadius);
+
+        assert(near(labFrostedPanel.minimum.y, slab.maximum.y, 1e-5f));
+        assert(labFrostedPanel.minimum.x > slab.minimum.x && labFrostedPanel.maximum.x < slab.maximum.x);
+        assert(labFrostedPanel.maximum.z - labFrostedPanel.minimum.z < 0.02f);
+        assert(labFrostedPanel.maximum.z < labMirrorBallCentre.z + labMirrorBallRadius + 2.0f && labFrostedPanel.minimum.z > labMirrorBallCentre.z);
+        assert(labFrostedPanel.minimum.x < labMirrorBallCentre.x && labFrostedPanel.maximum.x > labMirrorBallCentre.x);
+
+        Lab lab;
+        int balls = 0;
+        int frosted = 0;
+
+        lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
+            for (const RenderPart& part : renderer.parts) {
+                if (part.material.thickness > 0.0f) {
+                    ++balls;
+                    assert(part.material.transmission == 1.0f && part.material.ior > 1.0f && part.material.roughness < frostedRoughness);
+                    assert(near(part.material.thickness, 2.0f, 1e-6f) && part.material.attenuationDistance > 0.0f);
+                    assert(!renderer.castsShadows);
+                } else if (isTransparent(part.material) && part.material.roughness >= frostedRoughness) {
+                    ++frosted;
+                    assert(part.material.transmission == 1.0f);
+                    assert(!renderer.castsShadows);
+                }
+            }
+        });
+
+        assert(balls == 1 && frosted == 1);
     }
 
     // The forest is the same every time, all of it on the ground, outside the keep-clear areas.
@@ -1032,6 +1074,7 @@ void testLightLab() {
     testChainLinkPattern();
     testTheChainLinkFence();
     testTheWindowGlass();
+    testTheRefractionPieces();
     testForest();
     testBuildingOpenings();
     testTheStreet();

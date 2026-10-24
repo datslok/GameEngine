@@ -29,5 +29,15 @@ void main() {
         vec4 sphere = testInput(4);
         testOutput(0, vec4(glassLightTransmittance(shares.x, shares.y, shares.z, testInput(1).rgb, shares.w), 0.0));
         testOutput(1, vec4(segmentMeetsSphere(testInput(2).xyz, segment.xyz, segment.w, sphere.xyz, sphere.w) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+    } else if (function == GPU_TEST_REFRACTION) {
+        // Inputs: (roughness, ior, behind, view distance), (pixels per radian, levels, inverse attenuation distance,
+        // length), the kept colour, the entry point, the way to the camera, (the normal, the thickness).
+        vec4 surface = testInput(0);
+        vec4 picture = testInput(1);
+        vec4 normal = testInput(5);
+        float spread = transmissionSpread(surface.x, surface.y);
+        testOutput(0, vec4(spread, refractionLevel(spread, surface.z, surface.w, picture.x, uint(picture.y)), 0.0, 0.0));
+        testOutput(1, vec4(beerAttenuation(testInput(2).rgb, picture.z, picture.w), 0.0));
+        testOutput(2, vec4(solidRefractionExit(testInput(3).xyz, testInput(4).xyz, normal.xyz, surface.y, normal.w), 0.0));
     }
 }

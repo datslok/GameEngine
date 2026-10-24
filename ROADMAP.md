@@ -265,7 +265,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 - [x] Glass under anti-aliasing: a reactive mask from the picture before and after the glass, read by TAA, FSR and DLSS (`transparency-motion`)
 - [x] Tinted shadows through glass: every shadowed light in the main pass and the probes' and reflections' rays passed through the glass on the way, on GPUs with ray queries (`glass-shadows`)
 - [x] Mirrored lights through glass: both legs of the path tinted (`mirrored-light-glass`)
-- [ ] Refraction: frosted glass (rough transmission) and thick glass (`KHR_materials_volume`, `KHR_materials_ior`: Snell's law through the thickness, Beer's law tint) read from a mip chain of this frame's opaque picture
+- [x] Refraction: frosted and thick glass (`KHR_materials_volume`, `KHR_materials_ior`) from the blurred picture before the glass, the light lab's glass ball and frosted panel (`refraction`)
 - [ ] Volumetric fog on the cluster grid: light scattering in the air, so beams and lamps light the fog around them
 
 **Milestone** (in the light lab's building)**:**

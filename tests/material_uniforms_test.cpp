@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace {
     bool nearlyEqual(float actual, float expected) {
@@ -196,11 +197,43 @@ namespace {
         glass.transmissionTexture = TextureHandle{6};
         const GpuMaterial packed = packMaterial(glass);
         assert(nearlyEqual(packed.transmission[0], 1.0f) && packed.extra[2] == 7);
-        assert(packed.transmission[1] == 0.0f && packed.transmission[2] == 0.0f && packed.transmission[3] == 0.0f);
+        assert(packed.transmission[1] == 0.0f && packed.transmission[2] == 0.0f && nearlyEqual(packed.transmission[3], 1.5f));
         assert(isTransparent(glass));
 
         const GpuMaterial plain = packMaterial(Material{});
         assert(plain.transmission[0] == 0.0f && plain.extra[2] == whiteTextureSlot && !isTransparent(Material{}));
+    }
+
+    /*
+    * Thick glass (KHR_materials_volume and KHR_materials_ior): its thickness (model units) in transmission.y, the
+    * inverse of its attenuation distance in z (0 for none, so nothing is absorbed), its index in w, the colour light keeps
+    * after one attenuation distance in attenuation.rgb, its thickness texture's slot in extra.w, and the refraction flag
+    * for glass drawn by refraction (render/gpu/transparency.h, isRefractive).
+    */
+    void testThickGlassIsPacked() {
+        Material glass;
+        glass.transmission = 1.0f;
+        glass.roughness = 0.0f;
+        glass.thickness = 2.0f;
+        glass.thicknessTexture = TextureHandle{3};
+        glass.attenuationDistance = 4.0f;
+        glass.attenuationColour = Vec3{0.5f, 0.8f, 0.9f};
+        glass.ior = 1.33f;
+        const GpuMaterial packed = packMaterial(glass);
+        assert(packed.transmission[1] == 2.0f && nearlyEqual(packed.transmission[2], 0.25f) && nearlyEqual(packed.transmission[3], 1.33f));
+        assert(packed.attenuation[0] == 0.5f && packed.attenuation[1] == 0.8f && packed.attenuation[2] == 0.9f);
+        assert(packed.extra[3] == 4 && (packed.extra[1] & MATERIAL_REFRACTS) != 0);
+
+        // Without an attenuation distance (infinite, glTF's default) nothing is absorbed.
+        Material clear = glass;
+        clear.attenuationDistance = std::numeric_limits<float>::infinity();
+        assert(packMaterial(clear).transmission[2] == 0.0f);
+
+        // Smooth thin glass blends instead; a missing thickness texture reads white.
+        Material window;
+        window.transmission = 1.0f;
+        window.roughness = 0.0f;
+        assert((packMaterial(window).extra[1] & MATERIAL_REFRACTS) == 0 && packMaterial(window).extra[3] == whiteTextureSlot);
     }
 }
 
@@ -217,4 +250,5 @@ void testMaterialUniforms() {
     testOcclusionStrengthIsPacked();
     testCutOutsArePacked();
     testTransparentMaterialsArePacked();
+    testThickGlassIsPacked();
 }

@@ -7,6 +7,7 @@
 #include "volk/volk.h"
 
 #include <cstdint>
+#include <vector>
 
 class VulkanDevice;
 
@@ -131,6 +132,9 @@ void generateMipmaps(VkCommandBuffer commands, VulkanImage& image, ImageState le
 * level, in every layer.
 */
 void computeLevelWritten(VkCommandBuffer commands, const VulkanImage& image, std::uint32_t level);
+
+// A view of each level of a colour image alone, for writing (or reading) a pyramid one level at a time.
+std::vector<OwnedHandle<VkImageView>> imageLevelViews(VkDevice device, const VulkanImage& image);
 
 // For images the renderer does not own (the swapchain's): record the barrier and update the state it keeps for them.
 void transitionImage(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageState& state, ImageState to,

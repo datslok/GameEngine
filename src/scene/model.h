@@ -60,12 +60,20 @@ struct MaterialSource {
     float transmission = Material{}.transmission;
     TextureSource transmissionTexture;
 
+    // Thick glass: its thickness (model units) and texture (linear, green channel), what light keeps after the
+    // attenuation distance, and the index of refraction. The defaults are Material's own.
+    float thickness = Material{}.thickness;
+    TextureSource thicknessTexture;
+    Vec3 attenuationColour = Material{}.attenuationColour;
+    float attenuationDistance = Material{}.attenuationDistance;
+    float ior = Material{}.ior;
+
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
         return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet() || occlusionTexture.isSet() ||
-               emissiveTexture.isSet() || transmissionTexture.isSet();
+               emissiveTexture.isSet() || transmissionTexture.isSet() || thicknessTexture.isSet();
     }
 };
 

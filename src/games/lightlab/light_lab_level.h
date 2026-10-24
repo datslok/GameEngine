@@ -34,7 +34,9 @@ enum class LabSurface {
     Mirror,   // the sunlit room's mirror: silvered glass
     BrushedSteel, // the panel beside it: a rough mirror
     ChainLink, // the fence's wire mesh: galvanised steel
-    WindowGlass // the sunlit room's window pane: clear glass
+    WindowGlass, // the sunlit room's window pane: clear glass
+    SolidGlass, // the reflection corner's glass ball: thick glass, bending light
+    FrostedGlass // the frosted panel in front of the chrome ball: rough thin glass
 };
 
 struct LabBlock {
@@ -201,6 +203,13 @@ struct LabWindow {
 inline const Aabb labPolishedSlab{Vec3{2.0f, 0.0f, -11.0f}, Vec3{8.0f, 0.04f, -5.0f}};
 inline constexpr float labMirrorBallRadius = 0.6f;
 inline const Vec3 labMirrorBallCentre{5.0f, 0.04f + labMirrorBallRadius, -8.5f};
+
+// Refraction's test pieces on the same slab (render/gpu/transparency.h): a ball of solid glass nearer the start, which
+// bends what is seen through it, and a frosted panel standing in front of the chrome ball (1 cm thick, 1.6 by 1.4 m),
+// which blurs the ball 1.5 m behind it while the slab just behind it stays nearly sharp.
+inline constexpr float labGlassBallRadius = 0.4f;
+inline const Vec3 labGlassBallCentre{3.0f, 0.04f + labGlassBallRadius, -6.0f};
+inline const Aabb labFrostedPanel{Vec3{4.2f, 0.04f, -7.005f}, Vec3{5.8f, 1.44f, -6.995f}};
 
 // A tall mirror on the sunlit room's south wall, facing the doorway from the back room across the room, so the
 // doorway and the room are seen in it (2 cm thick, standing out from the wall).

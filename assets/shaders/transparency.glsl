@@ -42,6 +42,29 @@ bool glassFaceCounts(bool rayMeetsFront, bool doubleSided) {
     return !rayMeetsFront || doubleSided;
 }
 
+// Beer's law: what light keeps after length through a medium keeping colour after 1 / inverseDistance.
+vec3 beerAttenuation(vec3 colour, float inverseDistance, float pathLength) {
+    return pow(colour, vec3(pathLength * inverseDistance));
+}
+
+// The tangent of rough glass's spread: (ior - 1) times GGX's alpha (a thin prism's deviation per facet tilt).
+float transmissionSpread(float roughness, float ior) {
+    return max(ior - 1.0, 0.0) * roughness * roughness;
+}
+
+// The blurred picture's level: log2 of the cone's width in pixels, seen across the view and behind distances.
+float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, uint levels) {
+    float covered = 2.0 * spread * behindDistance / max(viewDistance + behindDistance, 1e-6);
+    return clamp(log2(max(covered * pixelsPerRadian, 1.0)), 0.0, float(levels) - 1.0);
+}
+
+// Where the view ray leaves thick glass (Filament's solid sphere): bent entering, then the thickness times the cosine
+// to the inward normal.
+vec3 solidRefractionExit(vec3 position, vec3 toCamera, vec3 normal, float ior, float thickness) {
+    vec3 inside = refract(-toCamera, normal, 1.0 / ior);
+    return position + inside * (thickness * -dot(normal, inside));
+}
+
 bool segmentMeetsSphere(vec3 from, vec3 direction, float segmentLength, vec3 centre, float radius) {
     float along = clamp(dot(centre - from, direction), 0.0, segmentLength);
     vec3 gap = from + direction * along - centre;
