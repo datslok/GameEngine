@@ -4,6 +4,8 @@
 #include "physics/overlap.h"
 #include "physics/static_level.h"
 #include "cloth/cloth.h"
+#include "cloth/cloth_grab.h"
+#include "demo_helpers.h"
 #include "scene/deforming_mesh.h"
 #include "engine/game.h"
 #include "scene/atmosphere.h"
@@ -188,6 +190,62 @@ namespace {
         }
     }
 
+    /*
+    * Dragging: pressing the left button with the crosshair on the sheet grabs the point there; while it is held, the
+    * hand stays at the grab's distance along the crosshair, so lifting the camera lifts the cloth; letting go drops it.
+    * Out of reach, a press grabs nothing.
+    */
+    void testTheSheetCanBeDragged() {
+        ClothLab lab;
+        const Entity sheet = lab.game.getSheet();
+        const Vec3 point = lab.world.get<Cloth>(sheet).particles.positions[5 * (clothLabSheetColumns + 1) + 14];
+        const Vec3 above{0.0f, 2.0f, 1.5f};
+        lab.game.getControls().poseFreeCamera(lab.world, point + above, point);
+
+        Input input = firstPersonInput({});
+        input.pressMouseButton(MouseButtonPress{MouseButton::Left, Vec2{800.0f, 450.0f}, 0});
+        lab.game.onInput(lab.world, input);
+        const std::optional<ClothGrab>& grab = lab.game.getSheetGrab();
+        assert(grab.has_value());
+        const ClothParticles& particles = lab.world.get<Cloth>(sheet).particles;
+        assert((particles.positions[grab->particle] - point).length() < 0.06f);
+        assert((grab->target - point).length() < 0.01f);
+
+        // Held while the camera rises half a metre: the hand rises with it, and the ticks pull the point up after it.
+        input.beginFrame();
+        lab.game.getControls().poseFreeCamera(lab.world, point + above + Vec3{0.0f, 0.5f, 0.0f}, point + Vec3{0.0f, 0.5f, 0.0f});
+        lab.game.onInput(lab.world, input);
+        assert(lab.game.getSheetGrab().has_value());
+        assert(near(lab.game.getSheetGrab()->target.y, point.y + 0.5f));
+        for (int tick = 0; tick < 60; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        assert(particles.positions[lab.game.getSheetGrab()->particle].y > point.y + 0.4f);
+
+        input.beginFrame();
+        input.releaseMouseButton(MouseButton::Left);
+        lab.game.onInput(lab.world, input);
+        assert(!lab.game.getSheetGrab().has_value());
+
+        // With the mouse freed (after Escape), the click that captures it again grabs nothing.
+        Input freed;
+        freed.beginFrame();
+        freed.setWindowSize(Vec2{1600.0f, 900.0f});
+        freed.setWindowState(true, false, false);
+        freed.setCursor(Vec2{800.0f, 450.0f}, true);
+        freed.pressMouseButton(MouseButtonPress{MouseButton::Left, Vec2{800.0f, 450.0f}, 0});
+        lab.game.getControls().poseFreeCamera(lab.world, point + above, point);
+        lab.game.onInput(lab.world, freed);
+        assert(!lab.game.getSheetGrab().has_value());
+
+        // From 20 m away the sheet is out of reach.
+        lab.game.getControls().poseFreeCamera(lab.world, point + Vec3{0.0f, 12.0f, 16.0f}, point);
+        input.beginFrame();
+        input.pressMouseButton(MouseButtonPress{MouseButton::Left, Vec2{800.0f, 450.0f}, 0});
+        lab.game.onInput(lab.world, input);
+        assert(!lab.game.getSheetGrab().has_value());
+    }
+
     // It has golden views, looking at its stations.
     void testItHasGoldenViews() {
         ClothLab lab;
@@ -203,5 +261,6 @@ void testClothLab() {
     testTheLevelIsTheLayout();
     testItIsLit();
     testTheSheetHangs();
+    testTheSheetCanBeDragged();
     testItHasGoldenViews();
 }

@@ -7,6 +7,7 @@
 #include "gameplay/camera/moba_camera_controller.h"
 #include "gameplay/control_mode.h"
 #include "input/input.h"
+#include "math/ray.h"
 #include "math/vec3.h"
 #include "scene/camera.h"
 
@@ -70,6 +71,13 @@ public:
 
     // A hidden, captured mouse in first person and free camera; a visible cursor in MOBA mode.
     bool wantsMouseLook() const;
+
+    // The camera ray through a window pixel (window pixels, origin top-left), or nothing outside the window.
+    std::optional<Ray> rayThroughPixel(const Input& input, const Vec2& pixel) const;
+
+    // The ray the player points along: through the crosshair at the window's middle while the mouse looks (first
+    // person, free camera), through the cursor otherwise (MOBA), or nothing while the cursor is outside the window.
+    std::optional<Ray> pointerRay(const Input& input) const;
 
     // Where lights are ranked: the ground point in the middle of the MOBA view (its camera floats beyond a torch's
     // reach), otherwise the camera itself.

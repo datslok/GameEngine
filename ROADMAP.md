@@ -291,6 +291,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] Dynamic meshes: deforming meshes uploaded every frame, normals and tangents recomputed (`dynamic-meshes`)
 - [x] Particle store for cloth: the sheet's points as plain arrays, lumped masses, pins, the step (`cloth-particles`)
 - [x] XPBD solver: substeps, compliance, stretch constraints and pins, a sheet hanging in the cloth lab (`xpbd-cloth`)
+- [x] Dragging cloth with the mouse: a hand constraint on the grabbed point (`cloth-grab`)
 - [ ] Cloth constraints: bending (angle between neighbouring triangles), and moving pins (hangers); stretch and fixed pins came with the solver
 - [ ] Collision with bodies: spheres and capsules first (phase 5's shapes), then a signed distance field around a mannequin
   - The field is built in compute (it can serve later as DDGI's software tracer and for distance-field AO).

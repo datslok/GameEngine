@@ -12,6 +12,7 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Stretch compliance", settings.stretchCompliance, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.01f, .unit = "m/N"});
     visitor.field("Substeps", settings.substeps, {.min = 1, .max = 100, .sliderMax = 40, .unit = "per tick"});
     visitor.field("Drag", settings.drag, {.min = 0.0f, .max = 100.0f, .sliderMax = 5.0f, .unit = "per second"});
+    visitor.field("Grab compliance", settings.grabCompliance, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.01f, .unit = "m/N"});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
@@ -26,10 +27,15 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
     cloth.settings = settings;
     cloth.particles = makeClothParticles(placed, settings.areaDensity);
     cloth.stretch = stretchConstraints(placed);
+    for (const Triangle& triangle : placed.triangles) {
+        cloth.triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second),
+                                   static_cast<std::uint32_t>(triangle.third)});
+    }
     return cloth;
 }
 
-void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds) {
+void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
+                        const std::optional<ClothGrab>& grab) {
     if (settings.substeps < 1) {
         throw std::invalid_argument("A cloth needs at least one substep a tick");
     }
@@ -41,6 +47,9 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     for (int step = 0; step < settings.substeps; ++step) {
         predictCloth(particles, gravity, substep);
         solveStretch(particles, stretch, settings.stretchCompliance, substep);
+        if (grab) {
+            solveGrab(particles, *grab, settings.grabCompliance, substep);
+        }
         finishClothStep(particles, substep);
         for (Vec3& velocity : particles.velocities) {
             velocity = velocity * kept;
@@ -49,7 +58,7 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
 }
 
 void stepCloth(Cloth& cloth, float seconds) {
-    stepClothParticles(cloth.particles, cloth.stretch, cloth.settings, seconds);
+    stepClothParticles(cloth.particles, cloth.stretch, cloth.settings, seconds, cloth.grab);
 }
 
 /*

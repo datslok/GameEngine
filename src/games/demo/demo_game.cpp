@@ -8,7 +8,6 @@
 #include "engine/debug_views.h"
 #include "physics/collider_raycast.h"
 #include "scene/debug_text.h"
-#include "scene/camera_ray.h"
 #include "scene/interpolation.h"
 #include "scene/light.h"
 #include "scene/lighting.h"
@@ -859,7 +858,7 @@ void DemoGame::updatePlayerCommands(World& world, const Input& input) {
         return;
     }
 
-    const std::optional<Ray> ray = rayThroughPixel(input, *target);
+    const std::optional<Ray> ray = controls.rayThroughPixel(input, *target);
     if (!ray) {
         return;
     }
@@ -890,18 +889,6 @@ bool DemoGame::mobaPointerActive(const Input& input) const {
 /*
 * The ray from the camera through a window pixel, or nothing for a pixel outside the window (or a window with no size).
 */
-std::optional<Ray> DemoGame::rayThroughPixel(const Input& input, const Vec2& pixel) const {
-    const Vec2 size = input.getWindowSize();
-
-    if (size.x <= 0.0f || size.y <= 0.0f ||
-        pixel.x < 0.0f || pixel.y < 0.0f ||
-        pixel.x >= size.x || pixel.y >= size.y) {
-        return std::nullopt;
-    }
-
-    return makeCameraRay(controls.getCamera(), pixel.x / size.x, pixel.y / size.y, size.x / size.y);
-}
-
 /*
 * A left-click selects the nearest collider under the exact click position, tested against triangles where a collider has
 * them, so the gap in the teapot's handle is not the teapot. Missing everything (the ground has no collider) deselects.
@@ -916,7 +903,7 @@ void DemoGame::updateSelection(World& world, const Input& input) {
         return;
     }
 
-    const std::optional<Ray> ray = rayThroughPixel(input, press->position);
+    const std::optional<Ray> ray = controls.rayThroughPixel(input, press->position);
     if (!ray) {
         return;
     }
@@ -938,7 +925,7 @@ void DemoGame::updateHover(const World& world, const Input& input) {
         return;
     }
 
-    const std::optional<Ray> ray = rayThroughPixel(input, input.getCursorPosition());
+    const std::optional<Ray> ray = controls.rayThroughPixel(input, input.getCursorPosition());
     if (!ray) {
         return;
     }

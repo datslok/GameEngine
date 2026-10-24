@@ -4,6 +4,7 @@
 #include "gameplay/first_person_body.h"
 #include "math/angles.h"
 #include "physics/character_controller.h"
+#include "scene/camera_ray.h"
 
 #include <stdexcept>
 
@@ -192,4 +193,26 @@ void PlayerControls::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Free camera", [&] {
         visit(freeFlyCamera.getSettings(), visitor);
     });
+}
+
+std::optional<Ray> PlayerControls::rayThroughPixel(const Input& input, const Vec2& pixel) const {
+    const Vec2 size = input.getWindowSize();
+
+    if (size.x <= 0.0f || size.y <= 0.0f ||
+        pixel.x < 0.0f || pixel.y < 0.0f ||
+        pixel.x >= size.x || pixel.y >= size.y) {
+        return std::nullopt;
+    }
+
+    return makeCameraRay(camera, pixel.x / size.x, pixel.y / size.y, size.x / size.y);
+}
+
+std::optional<Ray> PlayerControls::pointerRay(const Input& input) const {
+    if (wantsMouseLook()) {
+        return rayThroughPixel(input, input.getWindowSize() * 0.5f);
+    }
+    if (!input.isCursorInWindow()) {
+        return std::nullopt;
+    }
+    return rayThroughPixel(input, input.getCursorPosition());
 }
