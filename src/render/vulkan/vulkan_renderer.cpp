@@ -118,6 +118,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, bool validation, std::uint32_
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     reactiveMask = std::make_unique<VulkanReactiveMask>(device, nearestSampler.get());
+    opaquePicture = std::make_unique<VulkanOpaquePicture>(device, nearestSampler.get(), linearSampler.get(), pyramidSampler.get());
     fsr = std::make_unique<VulkanFsr>(device);
     dlss = std::make_unique<VulkanDlss>(device, streamline);
 
@@ -424,10 +425,10 @@ void VulkanRenderer::createPipelines() {
     * Glass and blended surfaces: the main pass's vertex shader and shading (triangle_transparent.frag), its depth tested
     * (GREATER, reversed-Z) but not written, blended over the picture: picture = light added + transmittance x picture,
     * the transmittance the shader's second colour (dual-source blending), or on GPUs without it a grey share in alpha.
-    * Back or front faces culled as each draw says. The layout keeps the scene's sets and adds the reflection probe's
-    * light as set 2, with the vertex shader's push constants and then GpuTransparentView.
+    * Back or front faces culled as each draw says. The layout keeps the scene's sets and adds set 2, the reflection
+    * probe's light and the picture before the glass, with the vertex shader's push constants and then GpuTransparentView.
     */
-    transparentSetLayout = createUniformLayout(device.getDevice(), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT,
+    transparentSetLayout = createUniformLayout(device.getDevice(), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_FRAGMENT_BIT,
                                                "Transparent set layout creation failed");
     const std::array<VkDescriptorSetLayout, 3> transparentSets{bindlessTextures->getLayout(), sceneLayout->getFrameLayout(), transparentSetLayout.get()};
     transparentLayout = createPipelineLayout(device.getDevice(), transparentSets, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -710,6 +711,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     clusterMasks = std::move(masksReplacement);
     taa->ensureSize(width, height, scene);
     reactiveMask->ensureSize(scene);
+    opaquePicture->ensureSize(scene);
     fsr->ensureSize(width, height);
     dlss->ensureSize(width, height);
     reflections->ensureSize(scene);
@@ -1407,22 +1409,23 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::Reflections);
     }
 
-    // Glass and blended surfaces over the picture with its reflections, before it is smoothed. With anti-aliasing, the
-    // picture before them is kept and compared with the one after (the reactive mask, timed with them), so the
-    // anti-aliasing trusts its history less where they changed it; without them, or with the mask off, it says nothing.
+    // Glass and blended surfaces over the picture with its reflections, before it is smoothed. The picture before them
+    // is kept first (with its blurred levels and distances), which refracting glass reads; with anti-aliasing it is
+    // compared with the one after (the reactive mask, all timed with the glass), so the anti-aliasing trusts its history
+    // less where they changed it; without them, or with the mask off, the mask says nothing.
     const bool measureReactive = temporal && settings.transparency.reactiveMask && !transparent.batches.empty();
 
     if (!transparent.batches.empty()) {
         beginGpuPass(frame, GpuPass::Transparent);
+        opaquePicture->keep(frame.commands, frame.descriptors, sceneColour, depth,
+                            packOpaquePicturePass(inverseViewProjection ? *inverseViewProjection : Mat4::identity(), sceneSize));
+        const TransparentRefraction refraction{settings.transparency.refraction && inverseViewProjection.has_value(),
+                                               pixelsPerRadian(static_cast<float>(sceneSize.height), camera.getVerticalFov()), opaquePicture->getLevels()};
+        drawTransparent(frame, transparent, sceneSet, traceProbes, probeReady, refraction);
 
         if (measureReactive) {
-            reactiveMask->keepOpaque(frame.commands, sceneColour);
-        }
-
-        drawTransparent(frame, transparent, sceneSet, traceProbes, probeReady);
-
-        if (measureReactive) {
-            reactiveMask->measure(frame.commands, frame.descriptors, sceneColour, packReactivePass(sceneSize, settings.transparency));
+            reactiveMask->measure(frame.commands, frame.descriptors, opaquePicture->getImage(), sceneColour,
+                                  packReactivePass(sceneSize, settings.transparency));
         }
 
         endGpuPass(frame, GpuPass::Transparent);
@@ -1968,13 +1971,12 @@ void VulkanRenderer::drawMotion(FrameContext& frame, const BatchedDraws& motionD
 }
 
 /*
-* The reflection probe's capture: each face drawn into its own layer of the capture (its old contents discarded and
-* cleared to the background), with the capture's pipeline and that face's view-projection as push constants, then the
-* sky over its background, as the main pass draws it. The faces are separate images to the GPU, so they need no
-* barriers between them; the probe's own passes follow (finishCapture).
+* Glass and blended surfaces, far to near, into the scene image over the opaque picture, its depth tested and not
+* written. Set 2 holds the reflection probe's light and the picture before the glass (VulkanOpaquePicture, kept just
+* before: refracting glass reads it).
 */
 void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparentDraws& transparent, VkDescriptorSet sceneSet, bool sampleProbes,
-                                     bool readsProbe) {
+                                     bool readsProbe, const TransparentRefraction& refraction) {
     const VkCommandBuffer commands = frame.commands;
 
     // The probe's light becomes readable by fragment shaders, and the picture and its depth (tested, not written; stored,
@@ -1989,13 +1991,14 @@ void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparen
     renderingOpen = true;
 
     const VkDescriptorSet probeSet = frame.descriptors.allocate(transparentSetLayout.get());
-    writeSampledImages(device.getDevice(), probeSet, 0, std::span<const SampledImage>{&probeLight, 1});
+    const std::array<SampledImage, 2> glassImages{probeLight, opaquePicture->sampled()};
+    writeSampledImages(device.getDevice(), probeSet, 0, glassImages);
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentPipelines[sampleProbes ? 1 : 0]->get());
     const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, probeSet};
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentLayout.get(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(),
                             0, nullptr);
-    const GpuTransparentView view = packTransparentView(readsProbe, reflectionProbe->getLevels());
+    const GpuTransparentView view = packTransparentView(readsProbe, reflectionProbe->getLevels(), refraction);
     vkCmdPushConstants(commands, transparentLayout.get(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, transparentViewOffset,
                        sizeof(view), &view);
 
@@ -2014,6 +2017,12 @@ void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparen
     sceneColour.transition(commands, ImageState::SurfaceRead);
 }
 
+/*
+* The reflection probe's capture: each face drawn into its own layer of the capture (its old contents discarded and
+* cleared to the background), with the capture's pipeline and that face's view-projection as push constants, then the
+* sky over its background, as the main pass draws it. The faces are separate images to the GPU, so they need no
+* barriers between them; the probe's own passes follow (finishCapture).
+*/
 void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
                                       float farPlane, const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
@@ -2294,7 +2303,7 @@ void VulkanRenderer::bindMesh(VkCommandBuffer commands, MeshHandle meshHandle, s
 // The shader would read an empty slot of the texture array for a texture that was never uploaded; better to stop here.
 void VulkanRenderer::checkTexturesUploaded(const Material& material) const {
     for (TextureHandle handle : {material.texture, material.metallicRoughnessTexture, material.normalTexture, material.occlusionTexture,
-                                 material.emissiveTexture, material.transmissionTexture}) {
+                                 material.emissiveTexture, material.transmissionTexture, material.thicknessTexture}) {
         if (handle.isValid() && handle.index >= textures.size()) {
             throw std::out_of_range("Material texture handle has not been uploaded");
         }

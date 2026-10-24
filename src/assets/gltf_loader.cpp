@@ -6,8 +6,10 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <cfloat>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <cstdint>
 #include <filesystem>
@@ -553,6 +555,37 @@ namespace {
         if (source->has_transmission) {
             material.transmission = readUnitFactor(source->transmission.transmission_factor, "glTF transmission factor must be between 0 and 1");
             material.transmissionTexture = readTexture(source->transmission.transmission_texture, images);
+        }
+
+        // Thick glass (KHR_materials_volume): its thickness in model units and a texture (green) multiplying it, and the
+        // colour light keeps after the attenuation distance (cgltf's default, the largest float, meaning none: infinite).
+        if (source->has_volume) {
+            const cgltf_volume& volume = source->volume;
+
+            if (!std::isfinite(volume.thickness_factor) || volume.thickness_factor < 0.0f) {
+                throw std::runtime_error("glTF thickness factor must be a number at least 0");
+            }
+
+            if (!(volume.attenuation_distance > 0.0f)) {
+                throw std::runtime_error("glTF attenuation distance must be above 0");
+            }
+
+            const char* const attenuationMessage = "glTF attenuation colour must be between 0 and 1";
+            material.thickness = volume.thickness_factor;
+            material.thicknessTexture = readTexture(volume.thickness_texture, images);
+            material.attenuationColour = Vec3{readUnitFactor(volume.attenuation_color[0], attenuationMessage),
+                                              readUnitFactor(volume.attenuation_color[1], attenuationMessage),
+                                              readUnitFactor(volume.attenuation_color[2], attenuationMessage)};
+            material.attenuationDistance = volume.attenuation_distance == FLT_MAX ? std::numeric_limits<float>::infinity() : volume.attenuation_distance;
+        }
+
+        // The index of refraction (KHR_materials_ior); light only bends towards the normal entering something denser than air.
+        if (source->has_ior) {
+            if (!std::isfinite(source->ior.ior) || source->ior.ior < 1.0f) {
+                throw std::runtime_error("glTF index of refraction must be a number at least 1");
+            }
+
+            material.ior = source->ior.ior;
         }
 
         const float strength = source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f;

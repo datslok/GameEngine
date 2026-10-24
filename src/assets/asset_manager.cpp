@@ -133,7 +133,7 @@ const Model& AssetManager::loadModel(const std::string& path) {
 }
 
 /*
-* The colour and emissive textures hold colours (sRGB), the metallic-roughness, occlusion and transmission textures
+* The colour and emissive textures hold colours (sRGB), the metallic-roughness, occlusion, transmission and thickness textures
 * numbers and the normal map directions (all linear). All are read with the same UVs, so they share the flip. Occlusion packed into the
 * metallic-roughness image (ORM) is the same file or bytes read the same way, so the cache gives it the same texture.
 * A cut-out's colour texture holds its alpha, so its mips are built to keep its coverage at the cutoff its texels
@@ -165,6 +165,11 @@ Material AssetManager::makeMaterial(const MaterialSource& source) {
     material.doubleSided = source.doubleSided;
     material.transmission = source.transmission;
     material.transmissionTexture = loadTexture(source.transmissionTexture, source.flipTextureVertically, TextureEncoding::Linear);
+    material.thickness = source.thickness;
+    material.thicknessTexture = loadTexture(source.thicknessTexture, source.flipTextureVertically, TextureEncoding::Linear);
+    material.attenuationColour = source.attenuationColour;
+    material.attenuationDistance = source.attenuationDistance;
+    material.ior = source.ior;
 
     return material;
 }

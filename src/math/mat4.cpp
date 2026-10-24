@@ -271,6 +271,11 @@ float handedness(const Mat4& model) {
     return upperCofactors(model).determinant < 0.0f ? -1.0f : 1.0f;
 }
 
+// The determinant is how much the 3x3 part scales volume; its cube root is the length scale of a uniform scaling.
+float uniformScale(const Mat4& model) {
+    return std::cbrt(std::abs(upperCofactors(model).determinant));
+}
+
 /*
 * A model matrix is [A t; 0 1]: A turns and scales, t moves. Undoing it means undoing the move, then the turn and scale:
 * the inverse is [A^-1, -A^-1 t; 0 1]. A^-1 is the transposed cofactor matrix (the adjugate) over the determinant, which is

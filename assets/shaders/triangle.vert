@@ -25,6 +25,8 @@ layout(location = 2) out vec3 relativePosition;
 layout(location = 3) out vec4 worldTangent;
 // Which entry of the material buffer shades this object: the same for every fragment of a triangle (flat, not interpolated).
 layout(location = 4) flat out uint materialIndex;
+// How much the object scales lengths (uniformScale), for lengths its material gives in model units (thick glass).
+layout(location = 5) flat out float objectScale;
 
 // The depth prepass runs this same shader, and the main pass then shades only fragments whose depth EQUALS the one the
 // prepass stored. Invariant makes the compiler compute the position the same way in both pipelines, bit for bit (it
@@ -36,6 +38,7 @@ void main() {
     mat4 normalMatrix = instance.normalMatrix;
     vec4 handedness = instance.handedness;
     materialIndex = instance.material.x;
+    objectScale = handedness.y;
 
     // Camera-relative rendering (render/gpu/camera_relative.h): the camera is subtracted from the model matrix's
     // translation before any product, as relativeTo does, so positions are measured from the camera along the world's

@@ -1,0 +1,38 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The picture before the glass (render/gpu/transparency.h), level 0 of its pyramid, one invocation per render pixel: the
+* scene image's colour, and in alpha how far along the view the surface there is (the background's distance, the
+* camera's far plane), which frosted glass needs to know how far behind it what it blurs lies and the reactive mask
+* ignores. The levels above are blurred from it by colour_pyramid.comp.
+*/
+#include "screen_reflections.glsl"
+#include "render/gpu/transparency_shared.h"
+
+layout(local_size_x = TRANSPARENCY_PICTURE_GROUP_SIDE, local_size_y = TRANSPARENCY_PICTURE_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform sampler2D scene; // exact texels
+layout(set = 0, binding = 1) uniform sampler2D depth; // exact texels
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D picture;
+
+// Must match GpuOpaquePicturePass.
+layout(push_constant) uniform Pass {
+    mat4 inverseViewProjection; // camera-relative
+    vec4 size;                  // xy: the render screen in pixels
+} pass;
+
+// A half float's largest finite value is 65504: distances past it (only the farthest backgrounds) are held just under.
+const float largestDistance = 60000.0;
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (texel.x >= int(pass.size.x) || texel.y >= int(pass.size.y)) {
+        return;
+    }
+
+    vec3 colour = texelFetch(scene, texel, 0).rgb;
+    float distance = viewDistanceAtPixel(pass.inverseViewProjection, vec2(texel) + 0.5, texelFetch(depth, texel, 0).r, pass.size.xy);
+    imageStore(picture, texel, vec4(colour, clamp(distance, 0.0, largestDistance)));
+}

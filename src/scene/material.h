@@ -4,6 +4,8 @@
 #include "math/vec3.h"
 #include "scene/asset_handles.h"
 
+#include <limits>
+
 /*
 * How a surface's alpha is used (glTF's alphaMode): ignored (Opaque), a cut-out (Mask) whose texels under the cutoff are
 * holes, for leaves, fences and grates (render/gpu/alpha_mask.h), or coverage (Blend): that share of the pixel is the
@@ -70,6 +72,17 @@ struct Material {
     // A transmitting material is drawn after the opaque scene, blended over it (render/gpu/transparency.h).
     float transmission = 0.0f;
     TextureHandle transmissionTexture;
+
+    // Thick glass (KHR_materials_volume): how far light travels through it, in the model's own units (scaled with the
+    // object), its texture's green channel (linear) multiplying it; 0 is thin glass, which bends nothing. Light crossing
+    // it keeps attenuationColour after attenuationDistance (Beer's law; infinite absorbs nothing).
+    float thickness = 0.0f;
+    TextureHandle thicknessTexture;
+    Vec3 attenuationColour{1.0f, 1.0f, 1.0f};
+    float attenuationDistance = std::numeric_limits<float>::infinity();
+
+    // The index of refraction (KHR_materials_ior): how strongly light bends entering it, 1.5 for glass, 1.33 for water.
+    float ior = 1.5f;
 };
 
 inline bool isCutOut(const Material& material) {

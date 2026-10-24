@@ -17,9 +17,8 @@ namespace {
     // 11- and 10-bit floats with no alpha for the stand-in (light, never negative), where the GPU can draw into it.
     constexpr VkFormat compactStandInFormat = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
 
-    // The depth pyramid keeps the depth image's 32-bit floats; the colour pyramid the scene's 16-bit floats.
+    // The depth pyramid keeps the depth image's 32-bit floats.
     constexpr VkFormat depthPyramidFormat = VK_FORMAT_R32_SFLOAT;
-    constexpr VkFormat colourPyramidFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     // The reflection pass's own set: its record, nine images it samples and the scene image it changes.
     ComputePipelineDescription reflectionPass(const char* shader) {
@@ -51,13 +50,7 @@ VulkanReflections::VulkanReflections(const VulkanDevice& device, VkSampler neare
     depthLevels.pushConstantBytes = sizeof(GpuPyramidPass);
     depthPyramidPipeline = std::make_unique<ComputePipeline>(device, depthLevels);
 
-    ComputePipelineDescription colourLevels;
-    colourLevels.shader = "assets/shaders/colour_pyramid.comp.spv";
-    colourLevels.sampledImages = 1;
-    colourLevels.storageImages = 1;
-    colourLevels.pushConstantBytes = sizeof(GpuPyramidPass);
-    colourPyramidPipeline = std::make_unique<ComputePipeline>(device, colourLevels);
-
+    colourPyramid = std::make_unique<VulkanColourPyramid>(device, linear, "Colour pyramid");
     reflectionPipeline = std::make_unique<ComputePipeline>(device, reflectionPass("assets/shaders/reflections.comp.spv"));
 
     setFramesInFlight(framesInFlight);
@@ -79,29 +72,6 @@ void VulkanReflections::setFramesInFlight(std::uint32_t count) {
     for (std::uint32_t frame = 0; frame < count; ++frame) {
         passRecords.emplace_back(device.getAllocator(), sizeof(GpuReflectionPass), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Upload);
     }
-}
-
-std::vector<OwnedHandle<VkImageView>> VulkanReflections::levelViews(const VulkanImage& image) const {
-    std::vector<OwnedHandle<VkImageView>> views;
-    const ImageDescription& description = image.getDescription();
-
-    for (std::uint32_t level = 0; level < description.levels; ++level) {
-        VkImageViewCreateInfo info{};
-        info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        info.image = image.get();
-        info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        info.format = description.format;
-        info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        info.subresourceRange.baseMipLevel = level;
-        info.subresourceRange.levelCount = 1;
-        info.subresourceRange.layerCount = 1;
-
-        VkImageView view = VK_NULL_HANDLE;
-        vulkanCheck(vkCreateImageView(device.getDevice(), &info, nullptr, &view), "Pyramid level view creation failed");
-        views.emplace_back(device.getDevice(), view, vkDestroyImageView);
-    }
-
-    return views;
 }
 
 void VulkanReflections::ensureSize(RenderSize render) {
@@ -135,9 +105,8 @@ void VulkanReflections::ensureSize(RenderSize render) {
     };
 
     depthPyramid = pyramid(depthPyramidFormat, depthPyramidLevels(render), "Depth pyramid");
-    colourPyramid = pyramid(colourPyramidFormat, depthPyramidLevels(render), "Colour pyramid");
-    depthLevels = levelViews(depthPyramid);
-    colourLevels = levelViews(colourPyramid);
+    depthLevels = imageLevelViews(device.getDevice(), depthPyramid);
+    colourPyramid->ensureSize(render);
     size = render;
 }
 
@@ -193,33 +162,6 @@ void VulkanReflections::buildDepthPyramid(VkCommandBuffer commands, FrameDescrip
 }
 
 /*
-* Level 0 from last frame's picture (sampled by compute, any size), each level above from the one below, sampled in the
-* general layout; as the depth pyramid, readable by the reflection pass at the end.
-*/
-void VulkanReflections::buildColourPyramid(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& previousPicture) {
-    previousPicture.transition(commands, ImageState::ComputeRead);
-    colourPyramid.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
-
-    for (std::uint32_t level = 0; level < colourLevels.size(); ++level) {
-        const RenderSize target = pyramidLevelSize(size, level);
-        const ImageDescription& picture = previousPicture.getDescription();
-        const RenderSize source = level == 0 ? RenderSize{picture.width, picture.height} : pyramidLevelSize(size, level - 1);
-        const std::array<ComputeBinding, 2> bindings{
-            level == 0 ? sampledBinding(linear, previousPicture.getView()) : sampledBinding(linear, colourLevels[level - 1].get(), VK_IMAGE_LAYOUT_GENERAL),
-            storageImageBinding(colourLevels[level].get()),
-        };
-
-        bindComputeSet(commands, device.getDevice(), descriptors, *colourPyramidPipeline, bindings);
-        const GpuPyramidPass pass = packPyramidPass(target, level, source);
-        vkCmdPushConstants(commands, colourPyramidPipeline->getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), &pass);
-        vkCmdDispatch(commands, workgroupCount(target.width, SSR_GROUP_SIDE), workgroupCount(target.height, SSR_GROUP_SIDE), 1);
-        computeLevelWritten(commands, colourPyramid, level);
-    }
-
-    colourPyramid.transition(commands, ImageState::ComputeRead);
-}
-
-/*
 * The barriers, besides the pyramids': the surfaces and the velocity image from being drawn into to being read by
 * compute, and the scene image from being read (it was left readable by the main pass) to being read and written in
 * place, and back to being readable by fragment and compute shaders afterwards. Without last frame's picture the colour
@@ -234,10 +176,11 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
 
     buildDepthPyramid(commands, descriptors, depth);
 
+    // Last frame's picture with its blurred levels, readable by the reflection pass at the end.
     if (previousPicture != nullptr) {
-        buildColourPyramid(commands, descriptors, *previousPicture);
+        colourPyramid->build(commands, descriptors, previousPicture, ImageState::ComputeRead);
     } else {
-        colourPyramid.transition(commands, ImageState::ComputeRead, ImageContents::Discard);
+        colourPyramid->getImage().transition(commands, ImageState::ComputeRead, ImageContents::Discard);
     }
 
     const VkImageView probeLight = probe.readableLight(commands);
@@ -251,7 +194,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
     const std::array<ComputeBinding, 11> bindings{
         storageBufferBinding(record.get()),
         sampledBinding(nearest, depthPyramid.getView()),
-        sampledBinding(pyramidSampler, colourPyramid.getView()),
+        sampledBinding(pyramidSampler, colourPyramid->getImage().getView()),
         sampledBinding(nearest, normals.getView()),
         sampledBinding(nearest, properties.getView()),
         sampledBinding(nearest, standIns.getView()),

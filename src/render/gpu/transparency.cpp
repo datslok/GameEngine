@@ -1,5 +1,6 @@
 #include "render/gpu/transparency.h"
 #include "render/gpu/brdf.h"
+#include "render/gpu/column_major.h"
 
 #include <algorithm>
 #include <cmath>
@@ -94,12 +95,63 @@ SortedTransparentDraws sortTransparentDraws(const std::vector<DrawItem>& draws, 
     return sorted;
 }
 
-GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevels) {
-    return GpuTransparentView{{readsProbe ? 1.0f : 0.0f, static_cast<float>(probeLevels), 0.0f, 0.0f}};
+GpuTransparentView packTransparentView(bool readsProbe, std::uint32_t probeLevels, const TransparentRefraction& refraction) {
+    return GpuTransparentView{{readsProbe ? 1.0f : 0.0f, static_cast<float>(probeLevels), 0.0f, 0.0f},
+                              {refraction.available ? 1.0f : 0.0f, refraction.pixelsPerRadian, static_cast<float>(refraction.levels), 0.0f}};
+}
+
+bool isRefractive(const Material& material) {
+    return material.transmission > 0.0f && (material.thickness > 0.0f || material.roughness >= frostedRoughness);
+}
+
+Vec3 beerAttenuation(const Vec3& colour, float inverseDistance, float length) {
+    const float exponent = length * inverseDistance;
+    return Vec3{std::pow(colour.x, exponent), std::pow(colour.y, exponent), std::pow(colour.z, exponent)};
+}
+
+float transmissionSpread(float roughness, float ior) {
+    return std::max(ior - 1.0f, 0.0f) * roughness * roughness;
+}
+
+// The cone's angle across the camera's view of what is behind, in pixels, then halvings of the picture.
+float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, std::uint32_t levels) {
+    const float covered = 2.0f * spread * behindDistance / std::max(viewDistance + behindDistance, 1e-6f);
+    const float pixels = covered * pixelsPerRadian;
+    return std::clamp(std::log2(std::max(pixels, 1.0f)), 0.0f, static_cast<float>(levels) - 1.0f);
+}
+
+float pixelsPerRadian(float screenHeight, float verticalFov) {
+    return screenHeight / (2.0f * std::tan(verticalFov * 0.5f));
+}
+
+Vec3 refractDirection(const Vec3& incident, const Vec3& normal, float eta) {
+    const float cosine = normal.dot(incident);
+    const float k = 1.0f - eta * eta * (1.0f - cosine * cosine);
+
+    if (k < 0.0f) {
+        return Vec3{0.0f, 0.0f, 0.0f};
+    }
+
+    return incident * eta - normal * (eta * cosine + std::sqrt(k));
+}
+
+// Entering from air the ray never reflects totally, so the bent direction always exists.
+Vec3 solidRefractionExit(const Vec3& position, const Vec3& toCamera, const Vec3& normal, float ior, float thickness) {
+    const Vec3 inside = refractDirection(toCamera * -1.0f, normal, 1.0f / ior);
+    return position + inside * (thickness * -normal.dot(inside));
+}
+
+GpuOpaquePicturePass packOpaquePicturePass(const Mat4& inverseViewProjection, RenderSize render) {
+    GpuOpaquePicturePass pass{};
+    writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
+    pass.size[0] = static_cast<float>(render.width);
+    pass.size[1] = static_cast<float>(render.height);
+    return pass;
 }
 
 void visit(TransparencySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Glass shadows", settings.glassShadows);
+    visitor.field("Refraction", settings.refraction);
     visitor.field("Reactive mask", settings.reactiveMask);
     visitor.field("Reactive scale", settings.reactiveScale, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f});
     visitor.field("Reactive limit", settings.reactiveLimit, {.min = 0.0f, .max = 1.0f});

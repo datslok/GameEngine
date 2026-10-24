@@ -15,6 +15,10 @@
 #include <vector>
 
 namespace {
+    bool near(float actual, float expected) {
+        return std::abs(actual - expected) < 1e-5f;
+    }
+
     DrawItem drawOf(std::uint32_t mesh, float x = 0.0f) {
         DrawItem draw;
         draw.mesh = MeshHandle{mesh};
@@ -138,6 +142,21 @@ namespace {
         const GpuInstance instance = packInstance(draw, 0);
 
         assert(instance.handedness[0] == -1.0f);
+        assert(near(instance.handedness[1], 1.0f));
+    }
+
+    /*
+    * The object's size against its model (the cube root of how much it scales volume), for lengths a material gives in
+    * model units: thick glass's thickness (KHR_materials_volume).
+    */
+    void testInstanceCarriesItsScale() {
+        DrawItem draw = drawOf(0);
+        draw.model = Mat4::translation(5.0f, 0.0f, 0.0f) * Mat4::scaling(2.0f, 2.0f, 2.0f);
+        assert(near(packInstance(draw, 0).handedness[1], 2.0f));
+
+        draw.model = Mat4::scaling(1.0f, 8.0f, 1.0f);
+        assert(near(packInstance(draw, 0).handedness[1], 2.0f));
+        assert(near(packInstance(drawOf(0), 0).handedness[1], 1.0f));
     }
 
     // A shadow tile's view is pushed column-major, and stays in world space like the instances it multiplies.
@@ -289,6 +308,7 @@ void testGpuScene() {
     testDrawsAreBatchedByStyle();
     testInstanceHoldsTheWorldMatrices();
     testMirroredInstanceIsLeftHanded();
+    testInstanceCarriesItsScale();
     testShaderSubtractionMatchesRelativeTo();
     testShadowViewIsColumnMajor();
     testIdenticalMaterialsShareAnEntry();

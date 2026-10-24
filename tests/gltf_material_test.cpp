@@ -28,12 +28,13 @@ namespace {
     /*
     * Three primitives sharing one triangle: a full metallic-roughness material (factors, a metallic-roughness texture,
     * a normal map with its scale, an occlusion texture with its strength, an emissive texture, and an emissive colour
-    * made brighter by KHR_materials_emissive_strength), a material with no pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
+    * made brighter by KHR_materials_emissive_strength, and glass: transmission, a volume's thickness and attenuation, an
+    * index of refraction), a material with no pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
     */
     const char* const document = R"json(
 {
     "asset": { "version": "2.0" },
-    "extensionsUsed": ["KHR_materials_emissive_strength", "KHR_materials_transmission"],
+    "extensionsUsed": ["KHR_materials_emissive_strength", "KHR_materials_transmission", "KHR_materials_volume", "KHR_materials_ior"],
     "scene": 0,
     "scenes": [{ "nodes": [0] }],
     "nodes": [{ "mesh": 0 }],
@@ -61,7 +62,9 @@ namespace {
             "emissiveFactor": [0.5, 0.25, 0.0],
             "extensions": {
                 "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 },
-                "KHR_materials_transmission": { "transmissionFactor": 0.6, "transmissionTexture": { "index": 0 } }
+                "KHR_materials_transmission": { "transmissionFactor": 0.6, "transmissionTexture": { "index": 0 } },
+                "KHR_materials_volume": { "thicknessFactor": 0.5, "thicknessTexture": { "index": 0 }, "attenuationDistance": 2.0, "attenuationColor": [0.5, 0.8, 1.0] },
+                "KHR_materials_ior": { "ior": 1.33 }
             }
         },
         { "emissiveFactor": [0.0, 0.0, 0.0] }
@@ -185,6 +188,8 @@ void testGltfMaterials() {
         assert(nearlyEqual(full.opacity, 0.8f));
         assert(nearlyEqual(full.transmission, 0.6f));
         assert(full.transmissionTexture.path == full.metallicRoughnessTexture.path);
+        assert(nearlyEqual(full.thickness, 0.5f) && full.thicknessTexture.path == full.metallicRoughnessTexture.path);
+        assert(nearlyEqual(full.attenuationDistance, 2.0f) && nearlyEqual(full.attenuationColour.y, 0.8f) && nearlyEqual(full.ior, 1.33f));
 
         const MaterialSource& withoutFactors = model.parts[1].material;
         assert(nearlyEqual(withoutFactors.metallic, 1.0f));
@@ -201,6 +206,8 @@ void testGltfMaterials() {
         assert(nearlyEqual(withoutFactors.opacity, 1.0f));
         assert(nearlyEqual(withoutFactors.transmission, 0.0f));
         assert(!withoutFactors.transmissionTexture.isSet());
+        assert(withoutFactors.thickness == 0.0f && !withoutFactors.thicknessTexture.isSet() && nearlyEqual(withoutFactors.ior, 1.5f));
+        assert(std::isinf(withoutFactors.attenuationDistance) && withoutFactors.attenuationColour.x == 1.0f);
 
         const MaterialSource& withoutMaterial = model.parts[2].material;
         assert(nearlyEqual(withoutMaterial.metallic, 1.0f));
@@ -215,6 +222,12 @@ void testGltfMaterials() {
         const Model blended = loadVariant(directory, "blended.gltf", "\"alphaMode\": \"MASK\"", "\"alphaMode\": \"BLEND\"");
         assert(blended.parts[0].material.alphaMode == AlphaMode::Blend);
         assert(throwsWhenLoaded(directory, "too_transmissive.gltf", "\"transmissionFactor\": 0.6", "\"transmissionFactor\": 1.5"));
+
+        // Thick glass: an index below 1, a negative thickness, no attenuation distance or a colour past 0..1 are refused.
+        assert(throwsWhenLoaded(directory, "low_ior.gltf", "\"ior\": 1.33", "\"ior\": 0.5"));
+        assert(throwsWhenLoaded(directory, "negative_thickness.gltf", "\"thicknessFactor\": 0.5", "\"thicknessFactor\": -1.0"));
+        assert(throwsWhenLoaded(directory, "zero_attenuation.gltf", "\"attenuationDistance\": 2.0", "\"attenuationDistance\": 0.0"));
+        assert(throwsWhenLoaded(directory, "bright_attenuation.gltf", "[0.5, 0.8, 1.0]", "[0.5, 0.8, 1.5]"));
     }
     catch (...) {
         std::filesystem::remove_all(directory);

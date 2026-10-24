@@ -1,5 +1,6 @@
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/material_shared.h"
+#include "render/gpu/transparency.h"
 #include "core/srgb.h"
 
 #include <algorithm>
@@ -17,7 +18,8 @@ std::uint32_t bindlessTextureSlot(TextureHandle texture) {
 * the texture multiplies it). Without a normal map the scale goes as 0, which makes the shader ignore the white texture
 * standing in for one (render/gpu/normal_mapping.h). The occlusion strength likewise goes as 0 without an occlusion
 * texture, which tells the shader to leave the light from all around as it was. A missing emissive texture needs no such
-* care: white times the emissive colour is the colour itself.
+* care: white times the emissive colour is the colour itself. An infinite attenuation distance packs as 0 (1 / infinity),
+* absorbing nothing.
 */
 GpuMaterial packMaterial(const Material& material) {
     GpuMaterial data{};
@@ -43,9 +45,16 @@ GpuMaterial packMaterial(const Material& material) {
     data.textures[3] = bindlessTextureSlot(material.emissiveTexture);
     data.extra[0] = bindlessTextureSlot(material.occlusionTexture);
     data.extra[1] = (material.doubleSided ? MATERIAL_DOUBLE_SIDED : 0u) | (isCutOut(material) ? MATERIAL_CUT_OUT : 0u) |
-                    (material.alphaMode == AlphaMode::Blend ? MATERIAL_BLEND : 0u);
+                    (material.alphaMode == AlphaMode::Blend ? MATERIAL_BLEND : 0u) | (isRefractive(material) ? MATERIAL_REFRACTS : 0u);
     data.extra[2] = bindlessTextureSlot(material.transmissionTexture);
+    data.extra[3] = bindlessTextureSlot(material.thicknessTexture);
     data.transmission[0] = std::clamp(material.transmission, 0.0f, 1.0f);
+    data.transmission[1] = std::max(material.thickness, 0.0f);
+    data.transmission[2] = material.attenuationDistance > 0.0f ? 1.0f / material.attenuationDistance : 0.0f;
+    data.transmission[3] = material.ior;
+    data.attenuation[0] = material.attenuationColour.x;
+    data.attenuation[1] = material.attenuationColour.y;
+    data.attenuation[2] = material.attenuationColour.z;
 
     return data;
 }

@@ -290,6 +290,29 @@ void computeLevelWritten(VkCommandBuffer commands, const VulkanImage& image, std
     recordImageBarrier(commands, barrier);
 }
 
+std::vector<OwnedHandle<VkImageView>> imageLevelViews(VkDevice device, const VulkanImage& image) {
+    std::vector<OwnedHandle<VkImageView>> views;
+    const ImageDescription& description = image.getDescription();
+
+    for (std::uint32_t level = 0; level < description.levels; ++level) {
+        VkImageViewCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        info.image = image.get();
+        info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        info.format = description.format;
+        info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        info.subresourceRange.baseMipLevel = level;
+        info.subresourceRange.levelCount = 1;
+        info.subresourceRange.layerCount = 1;
+
+        VkImageView view = VK_NULL_HANDLE;
+        vulkanCheck(vkCreateImageView(device, &info, nullptr, &view), "Pyramid level view creation failed");
+        views.emplace_back(device, view, vkDestroyImageView);
+    }
+
+    return views;
+}
+
 void transitionImage(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageState& state, ImageState to,
                      ImageContents contents) {
     if (!needsBarrier(state, to)) {
