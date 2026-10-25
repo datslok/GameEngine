@@ -1,8 +1,10 @@
 #pragma once
 
+#include "cloth/cloth_block_descent.h"
 #include "cloth/cloth_collision.h"
 #include "cloth/cloth_constraints.h"
 #include "cloth/cloth_grab.h"
+#include "cloth/cloth_hierarchy.h"
 #include "cloth/cloth_particles.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
@@ -38,7 +40,17 @@
 *
 * Against bodies the cloth keeps a thickness: real fabric is about a millimetre thick, but a small gap lets it rest on
 * a body instead of flickering half inside it. Friction is cotton's on a smooth surface.
+*
+* The solver (ClothMethod) is XPBD's constraint passes, or Vertex Block Descent (cloth_block_descent.h), which lowers
+* the substep's energy one point at a time and takes coarse levels (cloth_hierarchy.h) between its sweeps, carrying a
+* pin's pull across a fine sheet so it stretches as little as a coarse one. XPBD by default, with no levels, until the
+* GPU solver has the other too, so that both step a cloth alike.
 */
+enum class ClothMethod {
+    Xpbd,
+    VertexBlockDescent,
+};
+
 struct ClothSettings {
     float areaDensity = 0.2f;          // kg per square metre; read when the cloth is made
     float gravity = 9.81f;             // downward acceleration, m/s2
@@ -51,6 +63,8 @@ struct ClothSettings {
     float thickness = 0.005f;          // m
     float staticFriction = 0.6f;
     float kineticFriction = 0.4f;
+    ClothMethod method = ClothMethod::Xpbd;
+    int hierarchyLevels = 0;           // coarse levels used with vertex block descent, up to maxClothLevels
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -106,6 +120,15 @@ struct Cloth {
     // The mesh's triangles, for finding the cloth with a ray.
     std::vector<std::array<std::uint32_t, 3>> triangles;
 
+    // Where the points were when the cloth was made, and the coarse levels built from that shape and the pins, rebuilt
+    // whenever a point is pinned (pinClothPoint, addClothPin).
+    std::vector<Vec3> restPositions;
+    ClothHierarchy hierarchy;
+
+    // Each point's constraints and the points' colouring, for vertex block descent and the coarse levels' energy.
+    ClothPointConstraints pointConstraints;
+    ClothVertexColours vertexColours;
+
     // A hand holding one point, set by the game from its commands (never from input inside a tick).
     std::optional<ClothGrab> grab;
 
@@ -125,13 +148,20 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
 // Where a moving pin is after substep step (0..substeps - 1) of a tick: slid evenly from start, exactly on target at the end.
 Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps);
 
-// Pin a point where it is, as a pin the game can move. Throws std::out_of_range for a point the cloth does not have.
+/*
+* Pin a point where it is, for good, and rebuild the coarse levels so the point anchors every one of them. Throws
+* std::out_of_range for a point the cloth does not have.
+*/
+void pinClothPoint(Cloth& cloth, std::uint32_t particle);
+
+// Pin a point where it is, as a pin the game can move (pinClothPoint, then a ClothPin).
 void addClothPin(Cloth& cloth, std::uint32_t particle);
 
 /*
 * One tick of points held by stretch constraints (and a hand, if one holds a point), in settings.substeps substeps: each
 * predicts under gravity, makes one pass over the constraints, the hand last, works out the velocities from the motion
-* and applies the drag. Throws std::invalid_argument for fewer than one substep. stepCloth adds the bending and the pins.
+* and applies the drag. Throws std::invalid_argument for fewer than one substep. stepCloth adds the coarse levels, the
+* bending and the pins.
 */
 void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
                         const std::optional<ClothGrab>& grab = std::nullopt, const std::vector<Shape>& colliders = {});

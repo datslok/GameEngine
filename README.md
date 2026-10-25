@@ -131,6 +131,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Optional smooth normals with a crease angle, for models that have none.
 - **An asset manager** that loads each file once and hands out typed handles.
 - **Cloth** (being built): a sheet's points held by stretch constraints, solved with XPBD in 15 substeps a tick, with stiffness from real fabric (1 / compliance, about 2000 N/m for cotton), mass from its weight per area, bending stiffness from the fabric's measured rigidity (folds sized as real cotton's; isometric bending, a fixed weighted sum of each hinge's points, about four times cheaper than the angle between triangles, which stays as an option for pressed creases), pins the game can move (hooks on a rail), and air drag. It collides with every collider shape (spheres, capsules, boxes) with friction, so it drapes over a ball. Cloths are stepped a job each, and a big cloth's constraints are coloured so they are solved on every core, with the same result to the last bit as on one. A hand can grab any point and pull it, a stiff spring that lets the cloth be flung.
+- **A second cloth solver with coarse levels against stretch** (CPU only for now; F5's Cloth group: Solver "Vertex block descent", then Coarse levels; XPBD by default): vertex block descent (Chen et al. 2024) treats each substep as an energy to minimise (the cost of leaving where momentum carries each point, plus the fabric's stretch and bending) and moves each point to its own best spot in turn. On top, ever coarser copies of the cloth (each about half as fine) move whole regions at once, each with the region's real mass, by steps that can only lower that same energy (Galerkin multigrid, Lu et al. 2025). They carry a pin's pull across a fine sheet in a few steps, so a 10,000-point sheet stretches about 0.6% instead of 10%, and a sagging sheet settles as calmly as with XPBD. For now it costs 8-16 times XPBD on the CPU. Turn off Cloth on GPU to see it in the cloth lab.
 - **Cloth on the GPU** (on by default, "Cloth on GPU" in F5): the same solver ported to compute shaders, one thread per point or constraint, checked against the CPU's to within microns a tick; a 40,000-point sheet takes under a millisecond a tick, 17 times faster than on 16 CPU threads. The cloth is drawn straight from the GPU (its normals and tangents worked out there), and its points come back a couple of frames later for grabbing it with the mouse. Switch it off to compare with the CPU solver; headless runs and tests always use the CPU.
 - **Deforming meshes** (for cloth): meshes whose vertices move every tick, drawn blended between ticks with their normals and tangents worked out again each frame. They cast shadows, show up in ray-traced light and reflections, and give temporal anti-aliasing their motion.
 
@@ -271,6 +272,7 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | `make golden` | Renders every game's golden views and compares them with the references in `tests/golden/<GPU>/<game>/`. Needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/<game>/` |
 | `make golden-save` | Renders the golden views and saves them as the new references. Only on purpose, after a change that is meant to alter the picture |
 | `make yardstick` | Measures the cloth solver: a 1 m sheet at four resolutions, its stretch, sag and cost a tick (release build; `docs/CLOTHGPU.md` holds the numbers) |
+| `make yardstick-quick` | The same in about a minute, for development: the CPU rows only, three resolutions, settled less |
 | `make gputest` | Runs every shader library's functions in compute shaders on the GPU and compares them with their C++ mirrors (`build/gputests.exe`), then the golden images. Needs a GPU; `make gputest-release` for the optimised build |
 
 **Good to know**
@@ -400,7 +402,8 @@ src/              Engine and game source, in layers (lower ones never include hi
   games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground)
                   and games/clothlab (the cloth test ground)
   engine/         The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
-  cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area) and their step
+  cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area), their step
+                  and the coarse levels that keep fine sheets from stretching
   gameplay/       Character movement, spinners, fireflies, grenades, camera controllers
                   and the player controls games share (F1-F3)
   platform/       The window and SDL input translation
