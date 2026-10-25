@@ -74,9 +74,12 @@ README_TEXT = """{title}
 How to run
 ----------
 1. Extract the whole zip into a folder (do not run it from inside the zip).
-2. Double-click {exe_name} for the light lab: a sunlit test ground whose sun
-   moves with the time of day (F5, Light lab, Sun).
-3. Or double-click {demo} for the demo.
+2. Double-click a game's launcher:
+   - LightLab.bat: a sunlit test ground whose sun moves with the time of day
+     (F5, Light lab, Sun). The exe on its own starts it too.
+   - Demo.bat: the demo, with first-person, MOBA and free cameras.
+   - ClothLab.bat: the cloth test ground; drag the sheets with the left mouse
+     button.
 
 Keep the exe next to its DLLs and the assets folder. A console window opens
 alongside the game; if something goes wrong, the error is shown there.
@@ -91,8 +94,9 @@ Controls
 --------
 {controls}"""
 
-# Starts the demo (app/game_registry.h) from the packaged exe, which starts the light lab by itself.
-DEMO_LAUNCHER = "Demo.bat"
+# A batch file per game (app/game_registry.h): its name and the --game it passes to the packaged exe, which starts
+# the light lab by itself.
+GAME_LAUNCHERS = {"LightLab.bat": "lightlab", "Demo.bat": "demo", "ClothLab.bat": "clothlab"}
 
 # The zip's README is plain text read in Notepad, so lines are wrapped to this width.
 README_WIDTH = 78
@@ -427,14 +431,13 @@ def main() -> int:
     if not streamline:
         print("  no DLSS: run python tools/fetch_streamline.py first to package it")
 
-    # The second game is the same exe with a command-line option; a batch file gives it a double-click of its own.
-    demo = stage / DEMO_LAUNCHER
-    demo.write_text(f'@echo off\r\n"%~dp0{exe.name}" --game demo\r\n', encoding="ascii", newline="")
+    # Every game is the same exe with a command-line option; a batch file gives each a double-click of its own.
+    for launcher, game_name in GAME_LAUNCHERS.items():
+        (stage / launcher).write_text(f'@echo off\r\n"%~dp0{exe.name}" --game {game_name}\r\n', encoding="ascii", newline="")
 
     controls = readme_controls((REPO_ROOT / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n"), brief=arguments.anonymous)
     title = ANONYMOUS_NAME if arguments.anonymous else "GameEngine demo"
-    readme = README_TEXT.format(title=title, underline="=" * len(title), exe_name=exe.name, demo=demo.name,
-                                controls=controls)
+    readme = README_TEXT.format(title=title, underline="=" * len(title), controls=controls)
     if streamline:
         readme += DLSS_CREDIT
     (stage / "README.txt").write_text(readme.replace("\n", "\r\n"), encoding="utf-8", newline="")
