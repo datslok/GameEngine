@@ -91,6 +91,9 @@ struct Cloth {
 // constraint along every edge and a bending constraint on every inside edge of the placed mesh, coloured.
 Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& settings);
 
+// Where a moving pin is after substep step (0..substeps - 1) of a tick: slid evenly from start, exactly on target at the end.
+Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps);
+
 // Pin a point where it is, as a pin the game can move. Throws std::out_of_range for a point the cloth does not have.
 void addClothPin(Cloth& cloth, std::uint32_t particle);
 

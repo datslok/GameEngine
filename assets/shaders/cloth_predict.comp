@@ -1,0 +1,27 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// A substep's start for every point (predictCloth), then the moving pins slid a share of the way to their targets.
+#include "cloth_pass.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    vec4 position = positions[point];
+    vec3 velocity = velocities[point].xyz;
+    vec3 previous;
+    clothPredict(position, velocity, previous, vec3(0.0, -tick.gravity, 0.0) * tick.substepSeconds, tick.substepSeconds);
+
+    uint slot = pinSlots[point];
+    if (slot != CLOTH_NO_PIN) {
+        position.xyz = clothPinPosition(pins[tick.pinFirst + slot], step, tick.substeps);
+    }
+
+    positions[point] = position;
+    previousPositions[point] = vec4(previous, 0.0);
+    velocities[point] = vec4(velocity, 0.0);
+}

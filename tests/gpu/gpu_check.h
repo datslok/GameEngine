@@ -139,4 +139,5 @@ void gpuTestRayTracing(const VulkanDevice& device, GpuFunctionRunner& runner, Gp
 
 // The light probes' library, then the real probe passes on scenes the CPU works out ray by ray (skipped on a GPU without
 // ray queries).
+void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDdgi(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report);

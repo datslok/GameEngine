@@ -1,5 +1,6 @@
 #include "cloth/cloth_constraints.h"
 
+#include "cloth/cloth_shared.h"
 #include "math/angles.h"
 
 #include <algorithm>
@@ -10,11 +11,9 @@
 #include <utility>
 
 namespace {
-    // Below this length an edge has no direction to push along.
-    constexpr float shortestEdge = 1e-9f;
-
-    // Below this a hinge's edge, or a triangle's doubled area, squared, is taken as squashed.
-    constexpr float squashedHinge = 1e-12f;
+    // Shared with cloth.glsl (cloth/cloth_shared.h).
+    constexpr float shortestEdge = static_cast<float>(CLOTH_SHORTEST_EDGE);
+    constexpr float squashedHinge = static_cast<float>(CLOTH_SQUASHED_HINGE);
 
     Vec3 at(const Mesh& mesh, std::uint32_t index) {
         const Vec4& vertex = mesh.vertices.at(index);

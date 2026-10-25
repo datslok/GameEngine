@@ -1,0 +1,35 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* A substep's end for every point, in the CPU solver's order: the hand on its point, then the bodies (each free point
+* pushed out of every body in turn, with friction), then the velocity from the motion, slowed by the air. Each step
+* touches only its own point, so one invocation per point does them all.
+*/
+#include "cloth_pass.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    vec4 position = positions[point];
+    vec3 previous = previousPositions[point].xyz;
+
+    if (point == tick.grabParticle) {
+        clothGrab(position, tick.grabTarget.xyz, tick.grabCompliance);
+    }
+
+    if (position.w != 0.0) {
+        for (uint body = 0u; body < tick.colliderCount; ++body) {
+            ClothCollider collider = colliders[tick.colliderFirst + body];
+            clothContact(position.xyz, previous, clothSurfacePoint(collider, position.xyz), tick.thickness, tick.staticFriction,
+                         tick.kineticFriction);
+        }
+    }
+
+    positions[point] = position;
+    velocities[point] = vec4(clothFinishVelocity(position, previous, tick.substepSeconds, tick.kept), 0.0);
+}

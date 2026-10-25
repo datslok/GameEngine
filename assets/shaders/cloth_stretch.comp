@@ -1,0 +1,19 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// One colour of stretch constraints, all at once: no two share a point, so none sees another's correction.
+#include "cloth_pass.glsl"
+
+void main() {
+    uint index;
+    if (!clothItem(index)) {
+        return;
+    }
+
+    ClothStretch edge = stretches[index];
+    vec4 firstPoint = positions[edge.first];
+    vec4 secondPoint = positions[edge.second];
+    clothStretch(firstPoint, secondPoint, edge.restLength, ticks[tickIndex].stretchCompliance);
+    positions[edge.first] = firstPoint;
+    positions[edge.second] = secondPoint;
+}

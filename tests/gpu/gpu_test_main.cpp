@@ -44,6 +44,7 @@ int main() {
             gpuTestEyeAdaptation(device, runner, report);
             gpuTestRayTracing(device, runner, report);
             gpuTestDdgi(device, runner, report);
+            gpuTestCloth(device, runner, report);
             report.print();
         }
 

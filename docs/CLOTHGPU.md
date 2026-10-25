@@ -306,6 +306,19 @@ Before any solver is chosen, tests that measure the problem, on the CPU and the 
 - **Not quite settled** at 60 substeps on the finer sheets (a few cm a second on the 200): the stiffer sheet still sways a little after 10 s, under 0.5 /s drag.
 - **The goal for the later steps:** the same path stretch and sag on every rung, near 0.15% and 1.00 m, at no more than 60 substeps' cost.
 
+**The same solver on the GPU** (`gpu-cloth-solver`, `make yardstick`'s GPU rows, Oct 25 2026, RTX 5080, ms a tick counting recording, submitting and waiting, 120 ticks a submission):
+
+| Squares | Points | CPU, 15 substeps | GPU, 15 | CPU, 60 | GPU, 60 |
+|---|---|---|---|---|---|
+| 25 | 676 | 0.41 | 0.75 | 1.61 | 2.94 |
+| 50 | 2,601 | 1.63 | 0.76 | 6.46 | 3.13 |
+| 100 | 10,201 | 5.13 | 0.79 | 20.3 | 3.10 |
+| 200 | 40,401 | 14.8 | 0.89 | 59.3 | 3.64 |
+
+- **The same answers:** stretch, worst edge and sag match the CPU's rows to the shown digits, except the 200 sheet at 60 substeps, still swaying (2.6 to 5.5 cm in its last second), where a sheet in motion is chaotic.
+- **Cost is the dispatches, not the points:** 330 dispatches a tick at 15 substeps (22 a substep: the prediction, about 20 colours, the end), about 2.3 microseconds each whatever their size, so 40,000 points cost barely more than 700. The 200 sheet is 17 times faster than the CPU's 16 threads; the smallest is slower than the CPU.
+- **What it means for the plan:** the GPU has room for many more substeps or a hierarchy's extra passes on large garments; fewer dispatches (fewer colours, fused passes, a whole small cloth in one workgroup) would help small cloths.
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.
