@@ -14,6 +14,14 @@
 unsigned defaultWorkerCount();
 
 /*
+* How long a worker with nothing to do keeps looking for work before it sleeps. Waking a sleeping thread takes tens of
+* microseconds, so work that comes in quick rounds (the cloth's colours, each a few microseconds, many times a tick)
+* would spend more time waking workers than working; a short spin keeps them at hand, then they sleep and use nothing.
+* Measured on the cloth lab's big sheet (16 threads): 9.3 ms a tick with it, 13.8 without.
+*/
+inline constexpr double workerSpinSeconds = 50e-6;
+
+/*
 * A fixed team of worker threads that run pieces of work ("jobs") on every core, kept alive for the whole run, since
 * starting a thread costs far more than handing a waiting one a job.
 *
@@ -28,6 +36,12 @@ unsigned defaultWorkerCount();
 * The thread that built the system, and any other thread outside it, shares pile 0; the piles are locked, so several
 * such threads may call parallelFor at once.
 */
+class JobSystem;
+
+// One shared system with no workers, for code that has no engine at hand (tests, a game run headless): everything runs
+// on the caller.
+JobSystem& serialJobs();
+
 class JobSystem {
 public:
     explicit JobSystem(unsigned workerCount = defaultWorkerCount());

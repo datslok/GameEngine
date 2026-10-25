@@ -3,8 +3,10 @@
 #include "math/angles.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <map>
+#include <stdexcept>
 #include <utility>
 
 namespace {
@@ -92,15 +94,14 @@ std::vector<StretchConstraint> stretchConstraints(const Mesh& mesh) {
     return constraints;
 }
 
-void solveStretch(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, float compliance, float seconds) {
-    const float scaledCompliance = compliance / (seconds * seconds);
-
-    for (const StretchConstraint& constraint : constraints) {
+namespace {
+    // One edge's XPBD step (see solveStretch); scaledCompliance is the compliance over the step's length squared.
+    inline void solveStretchConstraint(ClothParticles& particles, const StretchConstraint& constraint, float scaledCompliance) {
         const float firstWeight = particles.inverseMasses[constraint.first];
         const float secondWeight = particles.inverseMasses[constraint.second];
         const float weights = firstWeight + secondWeight;
         if (weights == 0.0f) {
-            continue;
+            return;
         }
 
         Vec3& first = particles.positions[constraint.first];
@@ -108,13 +109,20 @@ void solveStretch(ClothParticles& particles, const std::vector<StretchConstraint
         const Vec3 between = first - second;
         const float length = between.length();
         if (length < shortestEdge) {
-            continue;
+            return;
         }
 
         const Vec3 along = between * (1.0f / length);
         const float multiplier = -(length - constraint.restLength) / (weights + scaledCompliance);
         first = first + along * (firstWeight * multiplier);
         second = second - along * (secondWeight * multiplier);
+    }
+}
+
+void solveStretch(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, float compliance, float seconds) {
+    const float scaledCompliance = compliance / (seconds * seconds);
+    for (const StretchConstraint& constraint : constraints) {
+        solveStretchConstraint(particles, constraint, scaledCompliance);
     }
 }
 
@@ -165,14 +173,10 @@ std::array<Vec3, 4> hingeAngleGradient(const Vec3& wing0, const Vec3& wing1, con
     return hingeState(wing0, wing1, edgeStart, edgeEnd).gradient;
 }
 
-void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds) {
-    if (bendingStiffness <= 0.0f) {
-        return;
-    }
-
-    std::vector<Vec3>& positions = particles.positions;
-    const float perSecondSquared = 1.0f / (seconds * seconds);
-    for (const BendConstraint& bend : constraints) {
+namespace {
+    // One hinge's XPBD step (see solveBend).
+    inline void solveBendConstraint(ClothParticles& particles, const BendConstraint& bend, float bendingStiffness, float perSecondSquared) {
+        std::vector<Vec3>& positions = particles.positions;
         const std::uint32_t points[4]{bend.wing0, bend.wing1, bend.edgeStart, bend.edgeEnd};
         const HingeState state = hingeState(positions[points[0]], positions[points[1]], positions[points[2]], positions[points[3]]);
         const std::array<Vec3, 4>& gradient = state.gradient;
@@ -182,7 +186,7 @@ void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& con
             moving += particles.inverseMasses[points[point]] * gradient[point].lengthSquared();
         }
         if (moving == 0.0f) {
-            continue;
+            return;
         }
 
         const float scaledCompliance = perSecondSquared / (bendingStiffness * bend.stiffnessShare);
@@ -191,5 +195,102 @@ void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& con
         for (int point = 0; point < 4; ++point) {
             positions[points[point]] = positions[points[point]] + gradient[point] * (particles.inverseMasses[points[point]] * multiplier);
         }
+    }
+
+    /*
+    * Constraints a job takes at a time, picked by measuring the big sheet (100 x 100) over a sweep: stretch about 20
+    * microseconds a job, bending about 12. Smaller jobs cost more to hand out than they save; larger ones leave threads
+    * idle. A sheet the size of the cloth lab's others has colours of a job or two, so they run on the caller.
+    */
+    constexpr std::size_t stretchPerJob = 2048;
+    constexpr std::size_t bendPerJob = 256;
+
+    // The lowest colour none of the points has, marked on them; the colour numbers as given by pointsOf.
+    template <typename Constraint, typename PointsOf>
+    std::vector<std::uint32_t> colourConstraints(std::vector<Constraint>& constraints, std::size_t pointCount, PointsOf pointsOf) {
+        std::vector<std::uint64_t> usedByPoint(pointCount, 0);
+        std::vector<int> colourOf(constraints.size());
+        int colourCount = 0;
+
+        for (std::size_t index = 0; index < constraints.size(); ++index) {
+            const auto points = pointsOf(constraints[index]);
+            std::uint64_t used = 0;
+            for (std::uint32_t point : points) {
+                used |= usedByPoint.at(point);
+            }
+            if (~used == 0) {
+                throw std::length_error("A cloth's constraints need more than 64 colours");
+            }
+            const int colour = std::countr_one(used);
+            for (std::uint32_t point : points) {
+                usedByPoint[point] |= std::uint64_t{1} << colour;
+            }
+            colourOf[index] = colour;
+            colourCount = std::max(colourCount, colour + 1);
+        }
+
+        std::vector<Constraint> sorted;
+        sorted.reserve(constraints.size());
+        std::vector<std::uint32_t> starts;
+        for (int colour = 0; colour < colourCount; ++colour) {
+            starts.push_back(static_cast<std::uint32_t>(sorted.size()));
+            for (std::size_t index = 0; index < constraints.size(); ++index) {
+                if (colourOf[index] == colour) {
+                    sorted.push_back(constraints[index]);
+                }
+            }
+        }
+        starts.push_back(static_cast<std::uint32_t>(sorted.size()));
+        constraints = std::move(sorted);
+        return starts;
+    }
+}
+
+void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds) {
+    if (bendingStiffness <= 0.0f) {
+        return;
+    }
+
+    const float perSecondSquared = 1.0f / (seconds * seconds);
+    for (const BendConstraint& bend : constraints) {
+        solveBendConstraint(particles, bend, bendingStiffness, perSecondSquared);
+    }
+}
+
+std::vector<std::uint32_t> colourStretch(std::vector<StretchConstraint>& constraints, std::size_t pointCount) {
+    return colourConstraints(constraints, pointCount, [](const StretchConstraint& edge) {
+        return std::array<std::uint32_t, 2>{edge.first, edge.second};
+    });
+}
+
+std::vector<std::uint32_t> colourBend(std::vector<BendConstraint>& constraints, std::size_t pointCount) {
+    return colourConstraints(constraints, pointCount, [](const BendConstraint& hinge) {
+        return std::array<std::uint32_t, 4>{hinge.wing0, hinge.wing1, hinge.edgeStart, hinge.edgeEnd};
+    });
+}
+
+void solveStretchColours(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, const std::vector<std::uint32_t>& colours,
+                         float compliance, float seconds, JobSystem& jobs) {
+    const float scaledCompliance = compliance / (seconds * seconds);
+    for (std::size_t colour = 0; colour + 1 < colours.size(); ++colour) {
+        const std::uint32_t first = colours[colour];
+        jobs.parallelFor(colours[colour + 1] - first, stretchPerJob, [&](std::size_t index) {
+            solveStretchConstraint(particles, constraints[first + index], scaledCompliance);
+        });
+    }
+}
+
+void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
+                      float bendingStiffness, float seconds, JobSystem& jobs) {
+    if (bendingStiffness <= 0.0f) {
+        return;
+    }
+
+    const float perSecondSquared = 1.0f / (seconds * seconds);
+    for (std::size_t colour = 0; colour + 1 < colours.size(); ++colour) {
+        const std::uint32_t first = colours[colour];
+        jobs.parallelFor(colours[colour + 1] - first, bendPerJob, [&](std::size_t index) {
+            solveBendConstraint(particles, constraints[first + index], bendingStiffness, perSecondSquared);
+        });
     }
 }

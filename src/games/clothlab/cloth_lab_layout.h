@@ -37,6 +37,13 @@ inline constexpr float clothLabSheetDepth = 1.5f;
 inline constexpr int clothLabDrapeSheetSquares = 24;
 inline constexpr float clothLabDrapeSheetSize = 1.2f;
 
+// The big sheet over the mat, the cloth that gives the solver's threads work: squares x squares, size metres square,
+// laid flat this far above the mat with its corners on hooks drawn in to cornerSpan apart, so it sags like a hammock.
+inline constexpr int clothLabBigSheetSquares = 100;
+inline constexpr float clothLabBigSheetSize = 2.0f;
+inline constexpr float clothLabBigSheetCornerSpan = 1.6f;
+inline constexpr float clothLabBigSheetHeight = 1.2f;
+
 // The floor's collision box reaches this far below the ground, so nothing can pass through it in a substep.
 inline constexpr float clothLabFloorDepth = 1.0f;
 
@@ -74,6 +81,9 @@ struct ClothLabLayout {
 
     // Where the flat drape sheet's middle starts: level with the drape bar's underside, half its size in front of it.
     Vec3 drapeSheetCentre;
+
+    // Where the big sheet's middle starts: above the mat's middle.
+    Vec3 bigSheetCentre;
 
     // Where the flat sheet's middle starts: level with the bar's underside, under the middle of its left half, half
     // the sheet's depth in front of it.

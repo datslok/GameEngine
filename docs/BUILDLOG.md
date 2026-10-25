@@ -1105,3 +1105,18 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Roadmap:** the collision item is done for phase 5's shapes; the mannequin's distance field and moving bodies are an item of their own.
   - **Checked:** the tests (debug and release, tests first: signed distances and normals for every shape, inside and out, points pushed out to the thickness, clear and pinned points untouched, friction sticking, slipping and off, a point resting on a ball below its friction angle and sliding above it, a sheet dropped on a ball resting on it with nothing inside, the same twice, the world's colliders placed by their entities, the defaults, the lab's colliders matching its layout and the drape sheet settling over the ball). The game builds without warnings. Not checked here: how it looks, left to the user.
 
+- `cloth-parallel` (Oct 25 2026): the cloth solver on many threads: a job per cloth, coloured constraints solved on every core, spinning workers, the cloth code optimised in the debug build, and a big sheet in the cloth lab to measure it.
+  - **Explained first; the user chose all three with a big sheet,** against my recommendation to leave colouring until garments needed it.
+  - **Bit for bit:** the colouring is also the solving order on one thread, so one thread and many give the same result (tested). The order changed from one sweep to colour by colour, so one test's number moved: a dragged point jiggles a few millimetres at about 80 Hz on the hand's spring, so the grab test now checks its average speed, not one tick's.
+  - **Debug at real time:** `src/cloth/` compiled at `-O2` in the debug build: the lab's two sheets 31 ms a tick before, 3.3 ms after.
+  - **Measured, and tuned by sweeps** (release, the 100 x 100 sheet): 26 ms a tick on one thread, 9.3 ms on 16 (2.8 times); the lab's two sheets 4.0 to 2.36 ms.
+    - Job sizes: smaller jobs cost more to hand out, larger left threads idle; stretch 2048 and bending 256 measured best.
+    - Spinning: workers that spin 50 microseconds before sleeping, 9.3 ms; sleeping at once, 13.8. A pause instruction instead of yielding made no difference.
+    - Contacts shared among threads measured slower every time and stay on the caller.
+    - 16 threads were often worse than 4 (stretch alone 8 ms against 1.2 in one sweep): this CPU's 16 threads are 8 cores, and a spinning worker slows the thread working beside it on the same core.
+  - **The limit:** the barrier after each colour, about 25 microseconds, 210 a tick, against about 6 of work per colour. A faster barrier (fixed-thread loops meeting at a spinning counter, one thread per physical core) or the GPU is a roadmap item.
+  - **The big sheet is off by default:** at about 9 ms a tick it is more than a tick's 8.3, so with it on the lab runs a little slower than real time. On from F5's Stations (read at start-up) to measure.
+  - **Games get the job system** (`Game::getJobs`), `serialJobs()` until the engine gives its own, so games run headless on one thread unchanged.
+  - **Seen on the way:** the debug tests take about 80 s; the slowest are the golden views, cloth lab and demo tests (about 14 s each), DDGI (11 s) and the light lab (8 s). Not changed here.
+  - **Checked:** the tests (debug and release, tests first: colours sharing no point and covering every constraint, a busy sheet with pins, a hand and a ball bit for bit the same on 1 and 8 threads, three cloths stepped together as one by one, the lab's big sheet sagging on its hooks over the mat and none when off). The game builds without warnings.
+

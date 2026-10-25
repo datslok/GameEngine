@@ -2532,7 +2532,7 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 
 ## Cloth
 
-The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`), the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`), a hand that drags it (`cloth-grab`, tested in `cloth_grab_test`), bending and moving pins (`cloth-bending`, tested in `cloth_bending_test`), and collision with bodies (`cloth-collision`, tested in `cloth_collision_test`).
+The cloth module (`src/cloth/`, phase 7), above `physics/` and `scene/` and below `engine/` and the games: its points (`cloth-particles`, tested in `cloth_test`), the XPBD solver with stretch constraints and pins (`xpbd-cloth`, tested in `cloth_solver_test`), a hand that drags it (`cloth-grab`, tested in `cloth_grab_test`), bending and moving pins (`cloth-bending`, tested in `cloth_bending_test`), collision with bodies (`cloth-collision`, tested in `cloth_collision_test`), and the solver on many threads (`cloth-parallel`, tested in `cloth_parallel_test`).
 
 **The points** (`cloth_particles`, `ClothParticles`): one per vertex of the sheet's mesh, point i the mesh's vertex i, as plain arrays (structure of arrays): `positions`, `previousPositions` (where each was when the step began), `velocities` and `inverseMasses` (1 / kg; 0 for a pinned point, which nothing then moves, with no special case).
 
@@ -2578,6 +2578,17 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 - Bodies are still and infinitely heavy: the cloth cannot push them, and their own motion is not in the friction yet (moving bodies come with the mannequin).
 - Phase 5's `bounceVelocity` is not used: in XPBD friction on the positions holds a resting sheet exactly still, where a velocity rule after the step lets it creep. Cloth barely bounces, so there is no restitution.
 
+**Many threads** (`cloth-parallel`):
+
+- **A job per cloth:** `stepCloths(world, seconds, jobs)` gathers the cloths in the world's order, then steps them with `parallelFor`, a job each; each writes only its own points and reads the bodies, so the result is the one-by-one result.
+- **Coloured constraints:** `makeCloth` sorts the stretch and bending constraints into colours (`colourStretch`, `colourBend`: each constraint the lowest colour none of its points has, at most 64, a grid's 6 and 14), each list sorted by colour with `Cloth::stretchColours` and `bendColours` giving where each starts. The colours are solved in turn (still Gauss-Seidel), each one's constraints with `parallelFor` (`solveStretchColours`, `solveBendColours`). Within a colour no two share a point, so the order cannot matter: one thread and many give the same bits (tested), and the colouring is the solving order on one thread too.
+- **Job sizes,** measured by a sweep on the big sheet: `stretchPerJob` 2048, `bendPerJob` 256 (about 20 and 12 microseconds a job). The lab's other sheets have colours of a job or two, which run on the caller.
+- **Contacts stay on the caller:** shared out they measured slower (a point's test is a few nanoseconds).
+- **The job system's workers spin** `workerSpinSeconds` (50 microseconds) before sleeping, since waking a thread takes tens of microseconds and colours come in quick rounds: 9.3 ms a tick on the big sheet against 13.8 without.
+- **Measured** (release, 100 x 100 sheet, best tick): one thread 26 ms, 16 threads 9.3 ms (2.8 times); stretch alone 2.5 to 1.2 ms; the cloth lab's two sheets 4.0 to 2.36 ms. The limit is the barrier after each colour, 210 a tick at about 25 microseconds each against about 6 of work; with 16 threads on 8 cores, spinning workers also slow the threads sharing their cores (stretch alone took 8 ms on 16 threads in one sweep, 1.2 on 4). A faster barrier is a roadmap item.
+- **Debug:** the makefile compiles `src/cloth/` with `-O2` in the debug build too (still `-g`): the lab's two sheets 31 ms a tick unoptimised, 3.3 ms now, real time again.
+- `Game::getJobs()` is the engine's job system (`Game::useJobs`, called by `Application` before `onInit`), or `serialJobs()` (no workers) for a game run headless.
+
 **Float precision:** each substep gravity moves a point by g h^2 (3 micrometres at 15 substeps), which a float resolves only to about 0.1 micrometre at 1 m from the origin and 0.5 at 4 m, so the balance between gravity and the edges settles where the rounded moves cancel: the Hooke test's stretch is 0.4-0.5% off. Invisible for cotton's 0.15% stretch; far from the origin (large worlds) the cloth would want its points kept relative to an origin of its own.
 
 **The hand** (`cloth_grab`):
@@ -2604,7 +2615,7 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 | `thickness` | 0.005 m | the gap kept from bodies, so cloth rests on them instead of flickering half inside |
 | `staticFriction`, `kineticFriction` | 0.6, 0.4 | cotton on a smooth surface (a friction angle of 31 degrees) |
 
-- `Cloth {settings, particles, stretch, bend, pins, triangles, grab}`, simulated in world space (its entity's `Transform` is not used).
+- `Cloth {settings, particles, stretch, bend, stretchColours, bendColours, pins, triangles, grab}`, simulated in world space (its entity's `Transform` is not used).
 - `makeCloth(mesh, placement, settings)`: the mesh placed first, so the masses, rest lengths and rest angles come from the placed sheet.
 - `stepCloth(cloth, seconds, colliders)`: `substeps` substeps, each `predictCloth`, the moving pins slid, `solveStretch`, `solveBend`, the hand (`solveGrab`), the bodies (`solveContacts`, last, so nothing is left inside them), `finishClothStep`, then drag on the free points; throws for fewer than one substep. `stepClothParticles(particles, stretch, settings, seconds, grab, colliders)` is the same with stretch, a hand and bodies alone (for tests).
 - `stepCloths(world, seconds)`: each cloth's tick against the world's colliders, then its points copied into the entity's `DeformingMesh` (drawn from a mesh at the identity), so the simulation never depends on drawing (120 KB a tick for a 100 x 100 sheet).
@@ -3038,9 +3049,10 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 - It starts flat level with the fabric bar's underside under its left half, stretching forward from the bar (`ClothLabLayout::sheetCentre`; the grid turned to face up, its top edge at the back), pinned at the two corners of its back edge.
 - It falls, swings down and hangs from the pins, its points driving a deforming mesh of its own (see Deforming meshes) drawn in world space.
 - **The drape sheet:** a second `Cloth`, a `Mesh::grid` of `clothLabDrapeSheetSquares` (24) squares each way, `clothLabDrapeSheetSize` 1.2 m square, cream cotton, laid flat level with the drape bar (`ClothLabLayout::drapeSheetCentre`) and pinned at its back corners under it; it falls onto the ball at 0.5 s and rests draped over it by about 2 s (`getDrapeSheet`). Both sheets are made by `addSheet` and share the lab's `ClothSettings`.
+- **The big sheet** (`ClothLabStationSettings::bigSheet`, F5's Stations, read at start-up, off by default): a `Mesh::grid` of `clothLabBigSheetSquares` (100) squares each way, `clothLabBigSheetSize` 2 m square (10,201 points), laid flat `clothLabBigSheetHeight` (1.2 m) over the mat (`bigSheetCentre`), its four corners moving pins drawn in to `clothLabBigSheetCornerSpan` (1.6 m) during the first tick, so it sags like a hammock (`getBigSheet`). About 9 ms a tick on 16 threads, more than a tick's 8.3, so with it the lab runs a little slower than real time.
 - **Bodies:** a `Collider` each for the ball (a sphere), every block of the layout (boxes) and the floor (a box from `clothLabFloorDepth`, 1 m, below the ground up to it), at the origin with their shapes already in the world (`addBody`).
 - **Hooks:** its two pins are moving pins (`addClothPin`), hooks on the bar. `ClothLabHookSettings::hookGap` (F5's Hooks group, `getHookSettings`; the sheet's width at the start, at least `clothLabSmallestHookGap` 0.05 m, at most the sheet's width) is where they should be; each tick moves the gap towards it at `clothLabHookSpeed` (0.5 m/s), about the sheet's middle (`hookMiddle`), so bunching the sheet up shows its folds.
-- Its fabric is the lab's `ClothSettings` (`getClothSettings`, F5's Cloth group), given to the sheet every tick before `stepCloths`; `getSheet()`.
+- Its fabric is the lab's `ClothSettings` (`getClothSettings`, F5's Cloth group), given to every sheet every tick before `stepCloths(world, seconds, getJobs())`; `getSheet()`.
 - **Dragging** (`updateGrab`, in `onInput`, from last frame's camera): a left press casts `PlayerControls::pointerRay` (the crosshair while the mouse looks, the cursor in MOBA mode) at both sheets within `clothLabGrabReach` (10 m) and grabs the nearest corner of the nearest hit (`getGrabbedSheet`); while held, the hand (`getSheetGrab`) stays the grab's distance along the pointer, so turning or walking carries the cloth; a release or a pointer leaving the window lets go. While the mouse should look but is free (after Escape), the click that captures it grabs nothing. The ticks give it to the sheet (`Cloth::grab`); `onDebugDraw` draws a yellow line from the held point to the hand.
 
 **Golden view:** `stations`, from the free camera's start (0, 2.4, 6.5) towards (0, 1, -1).

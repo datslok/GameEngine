@@ -33,6 +33,8 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
     cloth.particles = makeClothParticles(placed, settings.areaDensity);
     cloth.stretch = stretchConstraints(placed);
     cloth.bend = bendConstraints(placed);
+    cloth.stretchColours = colourStretch(cloth.stretch, cloth.particles.size());
+    cloth.bendColours = colourBend(cloth.bend, cloth.particles.size());
     for (const Triangle& triangle : placed.triangles) {
         cloth.triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second),
                                    static_cast<std::uint32_t>(triangle.third)});
@@ -50,6 +52,10 @@ namespace {
     struct TickConstraints {
         const std::vector<StretchConstraint>& stretch;
         const std::vector<BendConstraint>& bend;
+
+        // Where each colour starts, or empty: the constraints solved in their order on the caller.
+        const std::vector<std::uint32_t>& stretchColours;
+        const std::vector<std::uint32_t>& bendColours;
         const std::vector<ClothPin>& pins;
         const std::optional<ClothGrab>& grab;
         const std::vector<Shape>& colliders;
@@ -82,7 +88,7 @@ namespace {
     * there); stretch, then bending, then the hand, then the bodies, last so nothing is left inside them; velocities from
     * the motion; drag on the free points.
     */
-    void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds) {
+    void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {
             throw std::invalid_argument("A cloth needs at least one substep a tick");
         }
@@ -108,8 +114,16 @@ namespace {
                     : pinStarts[index] + (pin.position - pinStarts[index]) * share;
             }
 
-            solveStretch(particles, constraints.stretch, settings.stretchCompliance, substep);
-            solveBend(particles, constraints.bend, settings.bendingStiffness, substep);
+            if (constraints.stretchColours.empty()) {
+                solveStretch(particles, constraints.stretch, settings.stretchCompliance, substep);
+            } else {
+                solveStretchColours(particles, constraints.stretch, constraints.stretchColours, settings.stretchCompliance, substep, jobs);
+            }
+            if (constraints.bendColours.empty()) {
+                solveBend(particles, constraints.bend, settings.bendingStiffness, substep);
+            } else {
+                solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep, jobs);
+            }
             if (constraints.grab) {
                 solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
             }
@@ -131,25 +145,38 @@ namespace {
 void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
                         const std::optional<ClothGrab>& grab, const std::vector<Shape>& colliders) {
     const std::vector<BendConstraint> noBend;
+    const std::vector<std::uint32_t> noColours;
     const std::vector<ClothPin> noPins;
-    stepTick(particles, TickConstraints{stretch, noBend, noPins, grab, colliders}, settings, seconds);
+    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders}, settings, seconds, serialJobs());
 }
 
-void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders) {
-    stepTick(cloth.particles, TickConstraints{cloth.stretch, cloth.bend, cloth.pins, cloth.grab, colliders}, cloth.settings, seconds);
+void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs) {
+    stepTick(cloth.particles,
+             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders},
+             cloth.settings, seconds, jobs);
 }
 
 /*
 * The points are copied into the mesh rather than shared, so the simulation never depends on drawing; for a 100 x 100
 * sheet that is 120 KB a tick.
 */
-void stepCloths(World& world, float seconds) {
+/*
+* The cloths are gathered first, in the world's order, then stepped a job each: each writes only its own points and
+* only reads the bodies, so stepping them at once gives what stepping them in turn does.
+*/
+void stepCloths(World& world, float seconds, JobSystem& jobs) {
     const std::vector<Shape> colliders = worldColliderShapes(world);
+    std::vector<Cloth*> cloths;
+    std::vector<DeformingMesh*> meshes;
     world.each<Cloth>([&](Entity entity, Cloth& cloth) {
-        stepCloth(cloth, seconds, colliders);
+        cloths.push_back(&cloth);
+        meshes.push_back(world.tryGet<DeformingMesh>(entity));
+    });
 
-        if (DeformingMesh* mesh = world.tryGet<DeformingMesh>(entity)) {
-            mesh->positions = cloth.particles.positions;
+    jobs.parallelFor(cloths.size(), 1, [&](std::size_t index) {
+        stepCloth(*cloths[index], seconds, colliders, jobs);
+        if (meshes[index] != nullptr) {
+            meshes[index]->positions = cloths[index]->particles.positions;
         }
     });
 }

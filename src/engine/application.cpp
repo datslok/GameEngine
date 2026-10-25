@@ -25,6 +25,7 @@ Application::Application(const char* title, int width, int height, Game& game, c
     requestedPresentMode = settings.presentMode;
     renderer.setPresentMode(requestedPresentMode);
 
+    game.useJobs(jobs);
     game.onInit(world, assets);
 
     mouseLookEnabled = game.wantsMouseLook();

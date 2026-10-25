@@ -4,6 +4,7 @@
 #include "physics/overlap.h"
 #include "physics/static_level.h"
 #include "cloth/cloth.h"
+#include "core/job_system.h"
 #include "cloth/cloth_collision.h"
 #include "cloth/cloth_grab.h"
 #include "demo_helpers.h"
@@ -20,13 +21,17 @@
 #include <vector>
 
 namespace {
-    // A fresh cloth lab, initialised headless.
+    /*
+    * A fresh cloth lab, initialised headless. Without its big sheet unless asked for: 10,000 points on one thread would
+    * make every test here take many seconds.
+    */
     struct ClothLab {
         World world;
         AssetManager assets;
         ClothLabGame game{ControlMode::FreeCamera, true};
 
-        ClothLab() {
+        explicit ClothLab(bool bigSheet = false) {
+            game.getStationSettings().bigSheet = bigSheet;
             game.onInit(world, assets);
         }
     };
@@ -340,6 +345,43 @@ namespace {
         assert(closest < 2.0f * cloth.settings.thickness);
     }
 
+    /*
+    * The big sheet: 100 x 100 squares, 2 m square, laid flat over the mat with its four corners on hooks drawn in to
+    * 1.6 m apart during the first tick, so it sags like a hammock. Stepped on many threads; it is the cloth that gives
+    * them work.
+    */
+    void testTheBigSheetSags() {
+        JobSystem jobs{7};
+        ClothLab lab{true};
+        lab.game.useJobs(jobs);
+        const ClothLabLayout layout = buildClothLabLayout();
+        const Entity big = lab.game.getBigSheet();
+        const Cloth& cloth = lab.world.get<Cloth>(big);
+        assert(cloth.particles.size() == static_cast<std::size_t>((clothLabBigSheetSquares + 1) * (clothLabBigSheetSquares + 1)));
+        assert(cloth.pins.size() == 4);
+
+        for (int tick = 0; tick < 120; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+
+        for (const ClothPin& pin : cloth.pins) {
+            const Vec3 fromCentre = cloth.particles.positions[pin.particle] - layout.bigSheetCentre;
+            assert(near(std::abs(fromCentre.x), 0.5f * clothLabBigSheetCornerSpan));
+            assert(near(std::abs(fromCentre.z), 0.5f * clothLabBigSheetCornerSpan));
+            assert(near(fromCentre.y, 0.0f));
+        }
+        const std::size_t middle = static_cast<std::size_t>(clothLabBigSheetSquares / 2) * (clothLabBigSheetSquares + 1) + clothLabBigSheetSquares / 2;
+        assert(cloth.particles.positions[middle].y < layout.bigSheetCentre.y - 0.1f);
+        for (const Vec3& point : cloth.particles.positions) {
+            assert(point.y > 0.0f);
+        }
+        assert(lab.world.get<DeformingMesh>(big).positions.size() == cloth.particles.size());
+
+        // Off, there is none.
+        ClothLab without;
+        assert(!without.world.isAlive(without.game.getBigSheet()));
+    }
+
     // It has golden views, looking at its stations.
     void testItHasGoldenViews() {
         ClothLab lab;
@@ -359,5 +401,6 @@ void testClothLab() {
     testTheSheetCanBeDragged();
     testCollidersMatchTheLayout();
     testTheDrapeSheetSettlesOverTheBall();
+    testTheBigSheetSags();
     testItHasGoldenViews();
 }

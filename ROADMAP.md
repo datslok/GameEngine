@@ -299,10 +299,8 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
   - A broad phase (a BVH or spatial hash) only finds nearby pairs.
   - Cloth is so thin that a fast-moving layer can jump right through another between two substeps, so it also needs continuous collision detection (vertex-triangle and edge-edge pairs checked along their motion during the step) and a cloth thickness that keeps layers apart
 - [ ] Untangling pass (Baraff, Witkin & Kass 2003, "Untangling Cloth") as a safety net: finds intersections that slipped through anyway and pushes the tangled regions apart over the next steps, instead of letting them lock together for good
-- [ ] Solver on the GPU (phase 6's compute pipelines) or on several threads (the job system above), once a sheet is too slow on one core, checked against the CPU solver
-  - With bending, the lab's 28 x 30 sheet takes 2.0 ms a tick on one core (about a quarter of a core at 120 ticks a second) and a 100 x 100 sheet 24 ms: already too slow for big sheets.
-  - The cloth lab's two sheets with collisions: 4.2 ms a tick in release (half a core), 31 ms in debug, where the lab runs at about a quarter speed: the next thing to fix.
-  - One Gauss-Seidel pass a substep carries stiffness about a hinge a pass, so stiff fabric on a fine mesh looks softer than it is (measured in `cloth-bending`); a parallel solver should keep or improve the passes per substep.
+- [x] Solver on several threads: a job per cloth, coloured constraints on every core (bit for bit the one-thread result), spinning workers, `src/cloth/` optimised in debug, a big sheet to measure (`cloth-parallel`)
+- [ ] A faster barrier for the coloured solve: a 100 x 100 sheet gains only 2.8 times on 16 threads (26 to 9.3 ms a tick), its 210 colour barriers a tick costing about 25 microseconds each against 6 of work. Fixed-thread loops meeting at a spinning counter, as cloth solvers use, and one thread per physical core (spinning on both of a core's threads slowed the work), or the GPU
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
   - Bending stiffness (silk vs denim), mass per area, friction
