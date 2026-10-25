@@ -34,6 +34,7 @@ void visit(EngineSettings& settings, SettingsVisitor& visitor) {
     visitor.field("GPU validation", settings.gpuValidation, FieldApplies::AtStartup);
     visitor.field("Worker threads", settings.workerThreads,
                   {.min = automaticWorkerThreads, .max = 256, .sliderMax = 64, .unit = "(-1: a core each but one)", .applies = FieldApplies::AtStartup});
+    visitor.field("Cloth on GPU", settings.clothOnGpu);
     visitor.group("Render", [&] {
         visit(settings.render, visitor);
     });

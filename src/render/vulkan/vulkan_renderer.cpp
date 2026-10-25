@@ -830,6 +830,8 @@ FrameContext VulkanRenderer::beginFrame() {
         lastEyeAdaptation = adapted;
     }
 
+    collectClothReadbacks();
+
     frame.descriptors->reset();
     frame.uniforms->reset();
     vulkanCheck(vkResetCommandPool(device.getDevice(), frame.commandPool.get(), 0), "Frame command pool reset failed");
@@ -1075,6 +1077,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats = RenderStats{};
     stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
     showShapes(description);
+    runCloths(frame.commands);
 
     // Video memory as this frame begins: the driver's figures are fetched again once per frame number.
     device.startMemoryFrame(++memoryFrameNumber);
@@ -2329,6 +2332,12 @@ void VulkanRenderer::showShapes(const FrameDescription& description) {
         }
     }
 
+    // A mesh a GPU cloth shapes takes the next slot for its shape pass, if that cloth is in this frame's work.
+    gpuShapeSlots.clear();
+    const auto shapedByCloth = [&](std::size_t index) {
+        return std::any_of(clothWork.begin(), clothWork.end(), [index](const ClothWork& work) { return work.mesh.isValid() && work.mesh.index == index; });
+    };
+
     for (std::size_t index = 0; index < meshes.size(); ++index) {
         VulkanMesh& mesh = *meshes[index];
         if (!mesh.isDeforming()) {
@@ -2337,12 +2346,101 @@ void VulkanRenderer::showShapes(const FrameDescription& description) {
 
         const auto shown = std::find_if(description.deformedMeshes.begin(), description.deformedMeshes.end(),
                                         [index](const DeformedMesh& deformed) { return deformed.mesh.index == index; });
-        if (shown != description.deformedMeshes.end()) {
-            mesh.showShape(shown->vertices, shown->shape);
-        } else {
+        if (shown == description.deformedMeshes.end()) {
             mesh.holdShape();
+        } else if (shown->shapedOnGpu) {
+            if (shapedByCloth(index)) {
+                gpuShapeSlots[static_cast<std::uint32_t>(index)] = mesh.advanceGpuShape(shown->shape);
+            } else {
+                mesh.holdShape();
+            }
+        } else {
+            mesh.showShape(shown->vertices, shown->shape);
         }
     }
+}
+
+void VulkanRenderer::setClothWork(std::vector<ClothWork> work, float alpha) {
+    if (recording) {
+        throw std::logic_error("Hand over cloth work between frames");
+    }
+    for (const ClothWork& each : work) {
+        if (each.cloth == nullptr) {
+            throw std::invalid_argument("Cloth work needs its cloth");
+        }
+        if (each.mesh.isValid() && (each.mesh.index >= meshes.size() || !meshes[each.mesh.index]->isDeforming() || each.topology == nullptr)) {
+            throw std::invalid_argument("A GPU cloth's mesh must be an uploaded deforming mesh with its topology");
+        }
+    }
+    clothWork = std::move(work);
+    clothAlpha = alpha;
+}
+
+std::vector<ClothReadback> VulkanRenderer::takeClothReadbacks() {
+    return std::exchange(clothReadbacks, {});
+}
+
+void VulkanRenderer::collectClothReadbacks() {
+    for (auto& [key, entry] : gpuCloths) {
+        if (entry.readbackPending[frameIndex]) {
+            entry.readbackPending[frameIndex] = false;
+            clothReadbacks.push_back(ClothReadback{key, entry.cloth->readPositions(frameIndex), entry.cloth->readVelocities(frameIndex)});
+        }
+    }
+}
+
+/*
+* A cloth that is gone, or must be uploaded again, may still be read by frames in flight, so the GPU is waited for
+* first: this happens only when a cloth appears, disappears or changes its points or pins, never frame to frame. Each
+* cloth then runs its ticks into this frame in flight's slot, shapes its mesh into the slot showShapes advanced and asks
+* for its points back.
+*/
+void VulkanRenderer::runCloths(VkCommandBuffer commands) {
+    const auto listed = [&](std::uint64_t key) {
+        return std::any_of(clothWork.begin(), clothWork.end(), [key](const ClothWork& work) { return work.key == key; });
+    };
+    const auto stale = [&](const ClothWork& work) {
+        const auto found = gpuCloths.find(work.key);
+        return found != gpuCloths.end() &&
+               (found->second.cloth->getPointCount() != work.cloth->particles.size() || found->second.cloth->getPinCount() != work.cloth->pins.size() ||
+                !(found->second.mesh == work.mesh));
+    };
+
+    const bool dropping = std::any_of(gpuCloths.begin(), gpuCloths.end(), [&](const auto& entry) { return !listed(entry.first); });
+    if (dropping || std::any_of(clothWork.begin(), clothWork.end(), stale)) {
+        device.waitIdle();
+        std::erase_if(gpuCloths, [&](const auto& entry) { return !listed(entry.first); });
+        for (const ClothWork& work : clothWork) {
+            if (stale(work)) {
+                gpuCloths.erase(work.key);
+            }
+        }
+    }
+
+    if (!clothWork.empty() && !clothPipelines) {
+        clothPipelines = std::make_unique<VulkanClothPipelines>(device);
+    }
+
+    for (const ClothWork& work : clothWork) {
+        GpuCloth& entry = gpuCloths[work.key];
+        if (!entry.cloth) {
+            entry.cloth = std::make_unique<VulkanCloth>(device, *clothPipelines, uploads, *work.cloth, maxFramesInFlight);
+            entry.mesh = work.mesh;
+            if (work.mesh.isValid()) {
+                entry.cloth->attachShape(uploads, *work.topology, *meshes[work.mesh.index]);
+            }
+        }
+
+        entry.cloth->recordTicks(commands, work.ticks, frameIndex);
+        if (work.mesh.isValid()) {
+            if (const auto slot = gpuShapeSlots.find(work.mesh.index); slot != gpuShapeSlots.end()) {
+                entry.cloth->recordShape(commands, slot->second, clothAlpha);
+            }
+        }
+        entry.cloth->recordReadback(commands, frameIndex);
+        entry.readbackPending[frameIndex] = true;
+    }
+    clothWork.clear();
 }
 
 /*
@@ -2498,6 +2596,11 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     device.waitIdle();
     framesInFlight = count;
     createFrames();
+
+    // A frame in flight that is no more would never come round to read its cloths' points.
+    for (auto& [key, entry] : gpuCloths) {
+        entry.readbackPending.fill(false);
+    }
     debugLines->setFramesInFlight(count);
     depthRange->setFramesInFlight(count);
     reflections->setFramesInFlight(count);

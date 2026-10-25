@@ -4,6 +4,8 @@
 #include "math/vec4.h"
 #include "physics/shapes.h"
 #include "render/gpu/cloth_gpu_shared.h"
+#include "scene/asset_handles.h"
+#include "scene/deforming_mesh.h"
 
 #include <cstdint>
 #include <optional>
@@ -96,19 +98,26 @@ struct GpuClothTick {
 static_assert(sizeof(GpuClothTick) == 80, "GpuClothTick must match cloth.glsl's ClothTick");
 
 /*
-* What one tick of a cloth is given, as the CPU's stepCloth takes it: the fabric, the tick's length, where each of the
-* cloth's pins goes (one target per Cloth::pins, in order), the hand, and the bodies.
+* A cloth the renderer simulates this frame (VulkanRenderer::setClothWork): which cloth (key, its entity, the same every
+* frame it lives), its state on the CPU (uploaded the first frame the renderer sees it, or after its pins change; read
+* only during that frame's render), the deforming mesh shaped from its points on the GPU with its topology (none to
+* simulate only) and the ticks the game queued since the last frame. A cloth sent with no ticks is still drawn, between
+* its last two.
 */
-struct ClothTickCommands {
-    ClothSettings settings;
-    float seconds = 0.0f;
-    std::vector<Vec3> pinTargets;
-    std::optional<ClothGrab> grab;
-    std::vector<Shape> colliders;
+struct ClothWork {
+    std::uint64_t key = 0;
+    const Cloth* cloth = nullptr;
+    MeshHandle mesh;
+    const DeformingTopology* topology = nullptr;
+    std::vector<ClothTickCommands> ticks;
 };
 
-// The tick a cloth would take now on the CPU: its settings, pins' positions and hand, the given bodies.
-ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {});
+// A cloth's points and velocities as the GPU had them a few frames ago (VulkanRenderer::takeClothReadbacks).
+struct ClothReadback {
+    std::uint64_t key = 0;
+    std::vector<Vec3> positions;
+    std::vector<Vec3> velocities;
+};
 
 // Each point's position with its inverse mass in w.
 std::vector<Vec4> packClothPoints(const ClothParticles& particles);

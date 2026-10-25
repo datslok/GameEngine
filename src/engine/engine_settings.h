@@ -47,6 +47,11 @@ struct EngineSettings {
     // core but one, 0 to run everything on the main thread. Read once, at start-up: the threads are made with the engine.
     int workerThreads = automaticWorkerThreads;
 
+    // Simulate cloth on the GPU (render/vulkan/vulkan_cloth.h), where a game's cloths then cost almost nothing on the
+    // CPU, or on the CPU's threads. Read every frame: switching moves each cloth across from its latest points (from the
+    // GPU, those a few frames old, so it jumps a little).
+    bool clothOnGpu = true;
+
     RenderSettings render;
 };
 

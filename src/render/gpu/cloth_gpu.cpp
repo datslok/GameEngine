@@ -4,18 +4,6 @@
 #include <stdexcept>
 #include <type_traits>
 
-ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders) {
-    ClothTickCommands commands;
-    commands.settings = cloth.settings;
-    commands.seconds = seconds;
-    for (const ClothPin& pin : cloth.pins) {
-        commands.pinTargets.push_back(pin.position);
-    }
-    commands.grab = cloth.grab;
-    commands.colliders = colliders;
-    return commands;
-}
-
 std::vector<Vec4> packClothPoints(const ClothParticles& particles) {
     std::vector<Vec4> points;
     points.reserve(particles.size());

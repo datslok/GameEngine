@@ -63,6 +63,9 @@ private:
     // Upload meshes and textures the AssetManager gained since the last frame, before the frame begins.
     void prepareNewResources();
 
+    // The cloths on the GPU and their queued ticks, handed to the renderer for the frame about to be drawn.
+    void handOverClothWork(float alpha);
+
     // Tell the window when the game switches between mouse look and a visible cursor.
     void applyMouseMode();
 
@@ -132,6 +135,9 @@ private:
 
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
+
+    // Frames drawn, for GPU cloths' shape fingerprints (engine/gpu_cloth.h).
+    std::uint64_t frameNumber = 0;
 
     // The present mode last asked for. Only changes are applied, so a mode the GPU lacks is not asked for every frame.
     PresentMode requestedPresentMode = PresentMode::Vsync;

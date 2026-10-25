@@ -1,6 +1,7 @@
 #include "engine/application.h"
 #include "engine/debug_views.h"
 #include "engine/golden.h"
+#include "engine/gpu_cloth.h"
 #include "scene/culling.h"
 #include "scene/frame_description.h"
 #include "scene/indexed_mesh.h"
@@ -58,6 +59,8 @@ void Application::run() {
         // Before the game reads its settings this frame, so a slider's change shows at once.
         ImDrawData* ui = updateDebugUi();
 
+        // Read every frame, so the debug UI's switch moves the cloths across at the next tick.
+        game.useClothSolver(settings.clothOnGpu ? ClothSolver::Gpu : ClothSolver::Cpu);
         game.onInput(world, input);
 
         const double ticksStart = profilerSeconds();
@@ -268,8 +271,13 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
     const double renderStart = profilerSeconds();
     profiler.record(sceneSection, renderStart - sceneStart);
+    handOverClothWork(alpha);
     const bool rendered = renderer.render(frame, settings.render, ui);
     profiler.record(renderSection, profilerSeconds() - renderStart);
+
+    // What finished frames left of the GPU cloths, for picking and grabbing them.
+    applyClothReadbacks(world, renderer.takeClothReadbacks());
+    ++frameNumber;
     if (!rendered) {
         return;
     }
@@ -281,6 +289,16 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     camera.setAspectRatio(renderer.getFrameAspectRatio());
 }
 
+void Application::handOverClothWork(float alpha) {
+    std::vector<ClothWork> work = takeClothWork(world);
+    for (ClothWork& each : work) {
+        if (each.mesh.isValid()) {
+            each.topology = &assets.getDeformingTopology(each.mesh);
+        }
+    }
+    renderer.setClothWork(std::move(work), alpha);
+}
+
 FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory);
     frame.lightFocus = game.getLightFocus();
@@ -289,12 +307,24 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     clearProbeEvents(world);
     frame.frameSeconds = frameSeconds;
 
-    // Each deforming mesh's shape at alpha, one mesh a job: its vertices, and its bounds in place of its rest shape's.
+    /*
+    * Each deforming mesh's shape at alpha, one mesh a job: its vertices, and its bounds in place of its rest shape's. A
+    * cloth on the GPU is shaped there: its entry has only its bounds, from points as late as the frames in flight and
+    * the one being drawn, grown by how far they can have moved.
+    */
     std::vector<const DeformingMesh*> deforming;
-    world.each<DeformingMesh>([&](Entity, DeformingMesh& mesh) { deforming.push_back(&mesh); });
+    std::vector<const Cloth*> onGpu;
+    world.each<DeformingMesh>([&](Entity entity, DeformingMesh& mesh) {
+        const Cloth* cloth = world.tryGet<Cloth>(entity);
+        deforming.push_back(&mesh);
+        onGpu.push_back(cloth != nullptr && cloth->onGpu ? cloth : nullptr);
+    });
+    const float lateSeconds = static_cast<float>(renderer.getFramesInFlight() + 1) * frameSeconds;
     frame.deformedMeshes.resize(deforming.size());
     jobs.parallelFor(deforming.size(), 1, [&](std::size_t index) {
-        frame.deformedMeshes[index] = deformMesh(assets.getDeformingTopology(deforming[index]->mesh), *deforming[index], alpha);
+        frame.deformedMeshes[index] = onGpu[index] != nullptr
+                                          ? gpuClothDeformedMesh(*onGpu[index], deforming[index]->mesh, lateSeconds, frameNumber)
+                                          : deformMesh(assets.getDeformingTopology(deforming[index]->mesh), *deforming[index], alpha);
     });
     for (const DeformedMesh& deformed : frame.deformedMeshes) {
         boundsByMesh.at(deformed.mesh.index) = deformed.bounds;

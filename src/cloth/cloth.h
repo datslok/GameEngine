@@ -68,6 +68,29 @@ struct ClothPin {
     Vec3 position;
 };
 
+/*
+* What one tick of a cloth is given, as stepCloth takes it: the fabric, the tick's length, where each of the cloth's
+* pins goes (one target per Cloth::pins, in order), the hand, and the bodies. A cloth simulated on the GPU queues these
+* instead of stepping (Cloth::gpuTicks), and the renderer runs them (render/vulkan/vulkan_cloth.h).
+*/
+struct ClothTickCommands {
+    ClothSettings settings;
+    float seconds = 0.0f;
+    std::vector<Vec3> pinTargets;
+    std::optional<ClothGrab> grab;
+    std::vector<Shape> colliders;
+};
+
+/*
+* Where cloth is simulated. On the GPU (the engine's choice, EngineSettings::clothOnGpu, made only where there is a
+* renderer) a tick queues its commands; the points the cloth holds are then the GPU's, read back a few frames late, for
+* picking and grabbing. Headless runs and tests stay on the CPU.
+*/
+enum class ClothSolver {
+    Cpu,
+    Gpu,
+};
+
 struct Cloth {
     ClothSettings settings;
     ClothParticles particles;
@@ -85,7 +108,15 @@ struct Cloth {
 
     // A hand holding one point, set by the game from its commands (never from input inside a tick).
     std::optional<ClothGrab> grab;
+
+    // Simulated on the GPU (set by stepCloths): its ticks wait here for the renderer, which the engine hands them to
+    // once a frame, and its points are the GPU's read back late.
+    bool onGpu = false;
+    std::vector<ClothTickCommands> gpuTicks;
 };
+
+// The tick a cloth would take now: its settings, its pins' positions and hand, the given bodies.
+ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {});
 
 // A cloth from a mesh's vertices, placed in the world by placement, at rest, with the settings' fabric, a stretch
 // constraint along every edge and a bending constraint on every inside edge of the placed mesh, coloured.
@@ -111,6 +142,9 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
 */
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {}, JobSystem& jobs = serialJobs());
 
-// One tick for every cloth against every Collider in the world (worldColliderShapes), a job each, then each cloth's
-// points handed to its DeformingMesh, if it has one.
-void stepCloths(World& world, float seconds, JobSystem& jobs = serialJobs());
+/*
+* One tick for every cloth against every Collider in the world (worldColliderShapes). On the CPU a job each, then each
+* cloth's points handed to its DeformingMesh, if it has one (queued GPU ticks dropped: they were never run). On the GPU,
+* each cloth's tick queued in gpuTicks, its points left alone.
+*/
+void stepCloths(World& world, float seconds, JobSystem& jobs = serialJobs(), ClothSolver solver = ClothSolver::Cpu);

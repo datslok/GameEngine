@@ -33,10 +33,14 @@ VulkanMesh::VulkanMesh(const VulkanDevice& device, ImmediateCommands& uploads, c
     const VmaAllocator allocator = device.getAllocator();
     vertices = VulkanBuffer{allocator, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | shared, BufferMemory::Gpu};
 
-    // The CPU writes a deforming mesh's slots itself; its writes reach the GPU when the frame is submitted.
+    // The CPU writes a deforming mesh's slots itself; its writes reach the GPU when the frame is submitted. A cloth on
+    // the GPU writes them in a compute pass instead (and the GPU tests copy them out to check them).
     if (deforming) {
         for (VulkanBuffer& slot : shapeSlots) {
-            slot = VulkanBuffer{allocator, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | (shared & ~VK_BUFFER_USAGE_TRANSFER_DST_BIT), BufferMemory::Upload};
+            slot = VulkanBuffer{allocator, vertexSize,
+                                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                    (shared & ~VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+                                BufferMemory::Upload};
             std::memcpy(slot.getMapped(), mesh.vertices.data(), vertexSize);
             slot.flush();
         }
@@ -97,6 +101,19 @@ void VulkanMesh::showShape(std::span<const MeshVertex> shape, std::uint64_t fing
     std::memcpy(shapeSlots[slot].getMapped(), shape.data(), shape.size_bytes());
     shapeSlots[slot].flush();
     slotShapes[slot] = fingerprint;
+}
+
+std::uint32_t VulkanMesh::advanceGpuShape(std::uint64_t shape) {
+    if (!deforming) {
+        throw std::logic_error("Only a deforming mesh changes shape");
+    }
+    const std::uint32_t slot = slots.advance();
+    slotShapes[slot] = shape;
+    return slot;
+}
+
+VkBuffer VulkanMesh::getSlotBuffer(std::uint32_t slot) const {
+    return shapeSlots.at(slot).get();
 }
 
 void VulkanMesh::holdShape() {

@@ -34,6 +34,13 @@ public:
     // No shape for this frame: the last one stands still.
     void holdShape();
 
+    /*
+    * A shape the GPU writes this frame (a cloth's, render/vulkan/vulkan_cloth.h): the next slot, as showShape would
+    * take, returned for the shape pass to write into before anything reads it. The slots take storage writes for this.
+    */
+    std::uint32_t advanceGpuShape(std::uint64_t shape);
+    VkBuffer getSlotBuffer(std::uint32_t slot) const;
+
     // Whether this frame's shape is new (a deforming mesh that showed a different shape).
     bool changedShape() const;
 

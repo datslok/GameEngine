@@ -4,6 +4,7 @@
 // Runs cloth.glsl's functions on the cases cloth_gpu_test.cpp sends.
 #include "gpu_test.glsl"
 #include "cloth.glsl"
+#include "deform.glsl"
 
 // A body from three inputs: (kind, radius), a, b.
 ClothCollider testCollider(uint first) {
@@ -85,5 +86,16 @@ void main() {
         testOutput(0, point);
     } else if (function == GPU_TEST_CLOTH_FINISH_VELOCITY) {
         testOutput(0, vec4(clothFinishVelocity(testInput(0), testInput(1).xyz, testInput(2).x, testInput(2).y), 0.0));
+    } else if (function == GPU_TEST_DEFORM_BLEND) {
+        testOutput(0, vec4(deformBlend(testInput(0).xyz, testInput(1).xyz, testInput(2).x), 0.0));
+    } else if (function == GPU_TEST_DEFORM_AREA_NORMAL) {
+        testOutput(0, vec4(deformAreaNormal(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz), 0.0));
+    } else if (function == GPU_TEST_DEFORM_TANGENT) {
+        vec4 uvs = testInput(3);
+        testOutput(0, deformTangent(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, uvs.xy, uvs.zw, testInput(4).xy));
+    } else if (function == GPU_TEST_DEFORM_NORMAL) {
+        testOutput(0, vec4(deformNormal(testInput(0).xyz), 0.0));
+    } else if (function == GPU_TEST_DEFORM_TANGENT_DIRECTION) {
+        testOutput(0, vec4(deformTangentDirection(testInput(0).xyz, testInput(1).xyz), 0.0));
     }
 }
