@@ -162,7 +162,8 @@ namespace {
                 const Vec2 expected = gaussianSamplePoint(sample, 4, in[5][2], in[5][3]);
                 const GpuVec4& pair = out[2 + sample / 2];
                 const int first = (sample % 2) * 2;
-                report.check("gaussianSamplePoint", transcendentalTolerance, Vec3{expected.x, expected.y, 0.0f},
+                // The radius times the cosine and sine of the angle.
+                report.check("gaussianSamplePoint", trigonometricTolerance(Vec3{expected.x, expected.y, 0.0f}.length()), Vec3{expected.x, expected.y, 0.0f},
                              Vec3{pair[first], pair[first + 1], 0.0f});
             }
 

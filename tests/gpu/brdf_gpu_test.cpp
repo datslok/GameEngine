@@ -261,7 +261,8 @@ namespace {
             const GpuVec4* out = &outputs[i * 2];
             const std::uint32_t sample = static_cast<std::uint32_t>(in[0][0]);
             report.check("radicalInverse", exactTolerance, radicalInverse(sample), out[0][3]);
-            report.check("ggxSampleHalfway", transcendentalTolerance, ggxSampleHalfway(sample, 64, in[0][2]), vec3From(out[0]));
+            // Its x and z are the sine times the cosine and sine of the angle round the normal: a unit amplitude.
+            report.check("ggxSampleHalfway", trigonometricTolerance(1.0f), ggxSampleHalfway(sample, 64, in[0][2]), vec3From(out[0]));
             report.check("alongNormal", transcendentalTolerance, alongNormal(vec3From(in[2]), vec3From(in[1])), vec3From(out[1]));
         }
     }
