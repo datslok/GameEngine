@@ -117,6 +117,13 @@ void restrictToLevel(const ClothHierarchy& hierarchy, std::vector<Vec3>& values,
 */
 void prolongFromLevel(const ClothHierarchy& hierarchy, std::vector<Vec3>& values, int level, JobSystem& jobs = serialJobs());
 
+/*
+* A coarse edge's share of its point's block: the fabric's stiffness along the edge's direction now (between, from the
+* point to its neighbour), as the outer product between between^T times stiffness / |between|^2; nothing for an edge
+* too short to have a direction. cloth.glsl mirrors it.
+*/
+void addCoarseEdgeTerm(ClothStiffnessBlock& block, const Vec3& between, float stiffness);
+
 // Work arrays for the hierarchy's steps, one value per point, kept between substeps so they are not made again.
 struct ClothHierarchyScratch {
     std::vector<Vec3> predicted;

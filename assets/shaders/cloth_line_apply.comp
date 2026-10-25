@@ -1,0 +1,15 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Every point moved along the level's direction by the line search's step length.
+#include "cloth_levels.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    vec4 position = positions[point];
+    positions[point] = vec4(position.xyz + direction[point].xyz * lineStep[0], position.w);
+}

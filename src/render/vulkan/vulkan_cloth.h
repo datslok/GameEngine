@@ -21,7 +21,9 @@ class ImmediateCommands;
 
 /*
 * The cloth passes (cloth_predict, cloth_stretch, cloth_bend, cloth_block and cloth_finish.comp, which all bind the same
-* fifteen storage buffers, cloth_pass.glsl, so one descriptor set serves them all) and the shape pass
+* fifteen storage buffers, cloth_pass.glsl, so one descriptor set serves them all), the coarse levels' passes
+* (cloth_held, cloth_gradient, cloth_coarse_step, cloth_spread, cloth_line_terms, cloth_line_total and
+* cloth_line_apply.comp: the same set 0, and the levels' sixteen buffers at set 1, cloth_levels.glsl) and the shape pass
 * (cloth_shape.comp), built once and shared by every cloth.
 */
 class VulkanClothPipelines {
@@ -35,6 +37,14 @@ public:
     const ComputePipeline& getFinish() const;
     const ComputePipeline& getShape() const;
 
+    const ComputePipeline& getHeld() const;
+    const ComputePipeline& getGradient() const;
+    const ComputePipeline& getCoarseStep() const;
+    const ComputePipeline& getSpread() const;
+    const ComputePipeline& getLineTerms() const;
+    const ComputePipeline& getLineTotal() const;
+    const ComputePipeline& getLineApply() const;
+
 private:
     std::unique_ptr<ComputePipeline> predict;
     std::unique_ptr<ComputePipeline> stretch;
@@ -42,16 +52,25 @@ private:
     std::unique_ptr<ComputePipeline> block;
     std::unique_ptr<ComputePipeline> finish;
     std::unique_ptr<ComputePipeline> shape;
+    std::unique_ptr<ComputePipeline> held;
+    std::unique_ptr<ComputePipeline> gradient;
+    std::unique_ptr<ComputePipeline> coarseStep;
+    std::unique_ptr<ComputePipeline> spread;
+    std::unique_ptr<ComputePipeline> lineTerms;
+    std::unique_ptr<ComputePipeline> lineTotal;
+    std::unique_ptr<ComputePipeline> lineApply;
 };
 
 /*
-* One cloth living on the GPU: the CPU solver (cloth/cloth.h) ported as it is, XPBD or vertex block descent, as each
-* tick's settings say (the coarse levels not yet). Its points, coloured constraints, per-point lists and point colours
-* are uploaded once; each tick then needs only its commands (ClothTickCommands: the fabric, the pins' targets, the
+* One cloth living on the GPU: the CPU solver (cloth/cloth.h) ported as it is, XPBD or vertex block descent with its
+* coarse levels, as each tick's settings say. Its points, coloured constraints, per-point lists, point colours and
+* levels are uploaded once; each tick then needs only its commands (ClothTickCommands: the fabric, the pins' targets, the
 * hand, the bodies), written into a small upload buffer, and runs as a string of dispatches with a barrier after each
 * (clothDispatchesPerTick): per substep the prediction, the solver's dispatches (XPBD's a colour of stretch or of
 * bending each, vertex block descent's a colour of points each: within a colour nothing shares a point, so each runs
-* at once, as the CPU's threads do), and the end.
+* at once, as the CPU's threads do; with levels, the held points, each level's passes coarsest first and a second
+* sweep), and the end. A level's line search sums its terms on the GPU and leaves its step length there for the move,
+* so a tick never waits for the CPU.
 *
 * The result is the CPU solver's to within rounding, not to the bit (the GPU may fuse a multiply and an add, and
 * rounds division and square roots its own way), and repeats exactly on the same GPU and driver: nothing in a pass
@@ -109,6 +128,29 @@ private:
         VkDescriptorSet set = VK_NULL_HANDLE;
     };
 
+    // The coarse levels (render/gpu/cloth_gpu.h's GpuClothLevels) and the work arrays their passes hand on: set 1.
+    struct Levels {
+        std::vector<GpuClothLevel> records;
+        VulkanBuffer gradient;
+        VulkanBuffer direction;
+        VulkanBuffer coarseSteps;
+        VulkanBuffer held;
+        VulkanBuffer recordBuffer;
+        VulkanBuffer points;
+        VulkanBuffer masses;
+        VulkanBuffer neighbourStarts;
+        VulkanBuffer neighbours;
+        VulkanBuffer gatherStarts;
+        VulkanBuffer gather;
+        VulkanBuffer spreadStarts;
+        VulkanBuffer spread;
+        VulkanBuffer pointLevels;
+        VulkanBuffer linePartials;
+        VulkanBuffer lineStep;
+        OwnedHandle<VkDescriptorPool> descriptorPool;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+    };
+
     // What the shape pass reads besides the points, and a set per mesh slot it may write.
     struct Shape {
         VulkanBuffer restVertices;
@@ -126,6 +168,8 @@ private:
     const VulkanDevice& device;
     const VulkanClothPipelines& pipelines;
     std::uint32_t pointCount = 0;
+    std::uint32_t edgeCount = 0;
+    std::uint32_t hingeCount = 0;
     std::vector<std::uint32_t> stretchColours;
     std::vector<std::uint32_t> bendColours;
     std::vector<std::uint32_t> vertexColours;
@@ -155,11 +199,22 @@ private:
     std::vector<Slot> slots;
     std::unique_ptr<Shape> shape;
 
+    // None for a cloth without coarse levels.
+    std::unique_ptr<Levels> levels;
+
     Slot& slotAt(std::uint32_t slot);
     const Slot& slotAt(std::uint32_t slot) const;
     void ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins, std::size_t colliders);
     void writeSet(const Slot& slot);
+    void uploadLevels(ImmediateCommands& uploads, const Cloth& cloth);
+
+    /*
+    * One pass over count items from first, followed by a barrier; a level's pass (one whose set is set 1) binds the
+    * levels' set too and is told its level. groups, if given, is the workgroups to run instead of enough for count.
+    */
     void dispatch(VkCommandBuffer commands, const ComputePipeline& pipeline, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step,
-                  std::uint32_t first, std::uint32_t count) const;
+                  std::uint32_t first, std::uint32_t count, std::uint32_t level = 0, std::uint32_t groups = 0) const;
+    void recordSweep(VkCommandBuffer commands, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step) const;
+    void recordLevels(VkCommandBuffer commands, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step, const ClothSettings& settings) const;
     void keepTickStart(VkCommandBuffer commands);
 };

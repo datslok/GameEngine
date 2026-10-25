@@ -39,37 +39,59 @@ namespace {
         }
     }
 
-    // An edge's d . H d along the direction (see clothLineSearch).
-    double edgeCurvature(const StretchConstraint& edge, const std::vector<Vec3>& positions, const std::vector<Vec3>& direction, double stiffness) {
-        const Vec3 between = positions[edge.first] - positions[edge.second];
-        const float length = between.length();
-        if (length < shortestEdge) {
-            return 0.0;
-        }
-        const Vec3 apart = direction[edge.first] - direction[edge.second];
-        const double along = apart.dot(between) / length;
-        const double across = std::max(0.0, double(apart.lengthSquared()) - along * along);
-        const double stretched = std::max(0.0, 1.0 - double(edge.restLength) / length);
-        return stiffness * (along * along + stretched * across);
-    }
-
     // A hinge's d . H d along the direction: exact for the isometric model, Gauss-Newton for the angle.
     double hingeCurvature(const BendConstraint& bend, const std::vector<Vec3>& positions, const std::vector<Vec3>& direction, float bendingStiffness,
                           BendingModel model) {
         const std::array<std::uint32_t, 4> points = hingePoints(bend);
         const double stiffness = double(bendingStiffness) * bend.stiffnessShare;
         if (model == BendingModel::Isometric) {
-            return stiffness * isometricCurvature(bend.isometricWeights, direction[points[0]], direction[points[1]], direction[points[2]],
-                                                  direction[points[3]])
-                                   .lengthSquared();
+            return isometricHingeCurvature(bend.isometricWeights, direction[points[0]], direction[points[1]], direction[points[2]], direction[points[3]],
+                                           stiffness);
         }
         const std::array<Vec3, 4> angleGradient = hingeAngleGradient(positions[points[0]], positions[points[1]], positions[points[2]], positions[points[3]]);
-        double change = 0.0;
-        for (int corner = 0; corner < 4; ++corner) {
-            change += angleGradient[corner].dot(direction[points[corner]]);
-        }
-        return stiffness * change * change;
+        return hingeAngleCurvature(angleGradient, direction[points[0]], direction[points[1]], direction[points[2]], direction[points[3]], stiffness);
     }
+}
+
+double inertiaCurvature(const Vec3& direction, double perSecondSquared, float inverseMass) {
+    return direction.lengthSquared() * perSecondSquared / inverseMass;
+}
+
+double edgeCurvature(const Vec3& between, const Vec3& apart, float restLength, double stiffness) {
+    const float length = between.length();
+    if (length < shortestEdge) {
+        return 0.0;
+    }
+    const double along = apart.dot(between) / length;
+    const double across = std::max(0.0, double(apart.lengthSquared()) - along * along);
+    const double stretched = std::max(0.0, 1.0 - double(restLength) / length);
+    return stiffness * (along * along + stretched * across);
+}
+
+double isometricHingeCurvature(const std::array<float, 4>& weights, const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd,
+                               double stiffness) {
+    return stiffness * isometricCurvature(weights, wing0, wing1, edgeStart, edgeEnd).lengthSquared();
+}
+
+double hingeAngleCurvature(const std::array<Vec3, 4>& slopes, const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd,
+                           double stiffness) {
+    double change = 0.0;
+    change += slopes[0].dot(wing0);
+    change += slopes[1].dot(wing1);
+    change += slopes[2].dot(edgeStart);
+    change += slopes[3].dot(edgeEnd);
+    return stiffness * change * change;
+}
+
+double handCurvature(const Vec3& direction, double stiffness) {
+    return stiffness * direction.lengthSquared();
+}
+
+float lineSearchStep(double slope, double curvature) {
+    if (!(slope < 0.0) || !(curvature > 0.0)) {
+        return 0.0f;
+    }
+    return static_cast<float>(-slope / curvature);
 }
 
 ClothPointConstraints clothPointConstraints(const std::vector<StretchConstraint>& stretch, const std::vector<BendConstraint>& bend,
@@ -287,14 +309,16 @@ float clothLineSearch(ClothParticles& particles, const std::vector<Vec3>& gradie
                 slope += double(gradient[point].dot(direction[point]));
                 const float inverseMass = particles.inverseMasses[point];
                 if (inverseMass > 0.0f) {
-                    curvature += direction[point].lengthSquared() * perSecondSquared / inverseMass;
+                    curvature += inertiaCurvature(direction[point], perSecondSquared, inverseMass);
                 }
             }
         } else if (chunk < pointChunks + edgeChunks) {
             const std::size_t first = (chunk - pointChunks) * constraintsPerChunk;
             const std::size_t end = std::min(terms.stretch.size(), first + constraintsPerChunk);
-            for (std::size_t edge = first; edge < end; ++edge) {
-                curvature += edgeCurvature(terms.stretch[edge], positions, direction, stretchStiffness);
+            for (std::size_t index = first; index < end; ++index) {
+                const StretchConstraint& edge = terms.stretch[index];
+                curvature += edgeCurvature(positions[edge.first] - positions[edge.second], direction[edge.first] - direction[edge.second],
+                                           edge.restLength, stretchStiffness);
             }
         } else {
             const std::size_t first = (chunk - pointChunks - edgeChunks) * constraintsPerChunk;
@@ -307,7 +331,7 @@ float clothLineSearch(ClothParticles& particles, const std::vector<Vec3>& gradie
         curvatures[chunk] = curvature;
     });
     if (terms.grab) {
-        curvatures.push_back(grabStiffness * direction[terms.grab->particle].lengthSquared());
+        curvatures.push_back(handCurvature(direction[terms.grab->particle], grabStiffness));
         slopes.push_back(0.0);
     }
 
@@ -317,10 +341,10 @@ float clothLineSearch(ClothParticles& particles, const std::vector<Vec3>& gradie
         slope += slopes[chunk];
         curvature += curvatures[chunk];
     }
-    if (!(slope < 0.0) || !(curvature > 0.0)) {
+    const float length = lineSearchStep(slope, curvature);
+    if (length == 0.0f) {
         return 0.0f;
     }
-    const float length = static_cast<float>(-slope / curvature);
     jobs.parallelFor(pointCount, pointsPerJob, [&](std::size_t point) {
         particles.positions[point] = particles.positions[point] + direction[point] * length;
     });

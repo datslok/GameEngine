@@ -80,6 +80,10 @@ layout(push_constant) uniform ClothDispatch {
     uint step;  // the substep, 0..substeps - 1
     uint first; // the first point or constraint
     uint count;
+    uint levelNumber;     // a coarse level's pass: which level, 1 the first coarser than the cloth
+    uint clothPointCount; // the cloth's points, stretch constraints and hinges
+    uint clothEdgeCount;
+    uint clothHingeCount;
 };
 
 // This invocation's place in the range, or false past its end (the last workgroup's spare invocations).

@@ -306,7 +306,8 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
     - [x] On the CPU, beside XPBD and off by default (`hierarchical-cloth`)
     - [ ] On the GPU, checked against the CPU's, in two branches; then the default for large garments if it beats XPBD there. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019)
       - [x] Vertex block descent's sweep: a pass per point colour (`gpu-block-descent`)
-      - [ ] The coarse levels: gradient, coarse step and spread passes, the line search as a two-stage reduction on the GPU, its cost cut (fewer passes a level, skipping fine levels) (`gpu-cloth-levels`)
+      - [x] The coarse levels: gradient, coarse step and spread passes, the line search as a two-stage reduction on the GPU (`gpu-cloth-levels`)
+      - [ ] Its cost cut after measuring: the two finest levels skipped, the reduction in one pass, the move folded into the next level's gradient
   - [ ] Self-collision, so folds and layers never pass through each other: Offset Geometric Contact's two-stage contact energy with a per-point motion bound (Divide and Truncate, or OGC's own), a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean
   - [ ] Bodies on the GPU: the engine's collider shapes, then the mannequin below
 - [ ] Collision with a mannequin: a signed distance field around it, built in compute (it can serve later as DDGI's software tracer and for distance-field AO); moving bodies (the surface's velocity in the friction)

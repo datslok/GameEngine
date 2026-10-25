@@ -1,0 +1,21 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// The points the coarse levels leave alone this substep (markHeldPoints): the pinned, and those within the thickness of
+// a body, which the contacts hold.
+#include "cloth_levels.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    vec4 position = positions[point];
+    bool isHeld = position.w == 0.0;
+    for (uint body = 0u; body < tick.colliderCount && !isHeld; ++body) {
+        isHeld = clothSurfacePoint(colliders[tick.colliderFirst + body], position.xyz).w < tick.thickness;
+    }
+    held[point] = isHeld ? 1u : 0u;
+}

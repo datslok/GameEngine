@@ -7,6 +7,7 @@
 #include "math/vec3.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -128,3 +129,21 @@ void clothEnergyGradient(const ClothParticles& particles, const std::vector<Vec3
 */
 float clothLineSearch(ClothParticles& particles, const std::vector<Vec3>& gradient, const std::vector<Vec3>& direction,
                       const ClothEnergyTerms& terms, float seconds, JobSystem& jobs);
+
+/*
+* The pieces of the line search's curvature d . H d, which clothLineSearch adds (and the GPU's cloth.glsl mirrors in
+* float): a free point's inertia m |d|^2 / h^2; an edge's, from its ends' difference now (between) and along the
+* direction (apart), stiff along it and, while stretched, across it (nothing for an edge too short to have a direction);
+* an isometric hinge's stiffness times its curvature of the direction squared; a hinge's stiffness times its angle's
+* change along the direction squared (from its corners' slopes of the angle); the hand's stiffness |d|^2.
+*/
+double inertiaCurvature(const Vec3& direction, double perSecondSquared, float inverseMass);
+double edgeCurvature(const Vec3& between, const Vec3& apart, float restLength, double stiffness);
+double isometricHingeCurvature(const std::array<float, 4>& weights, const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd,
+                               double stiffness);
+double hingeAngleCurvature(const std::array<Vec3, 4>& slopes, const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd,
+                           double stiffness);
+double handCurvature(const Vec3& direction, double stiffness);
+
+// How far along a direction: -slope / curvature, or 0 unless it goes downhill (slope below 0) into phi curving up.
+float lineSearchStep(double slope, double curvature);

@@ -1,0 +1,21 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The line search's total, in one workgroup: each invocation adds every CLOTH_GROUP_SIZE-th partial in order, then the
+* group adds those as a tree, so the sum's order is fixed. The step length goes into lineStep for the move, which the
+* CPU never reads. count is the partials.
+*/
+#include "cloth_levels.glsl"
+
+void main() {
+    uint lane = gl_LocalInvocationID.x;
+    vec2 term = vec2(0.0);
+    for (uint partial = lane; partial < count; partial += CLOTH_GROUP_SIZE) {
+        term = term + linePartials[partial];
+    }
+    vec2 sum = clothGroupSum(term);
+    if (lane == 0u) {
+        lineStep[0] = clothLineSearchStep(sum.x, sum.y);
+    }
+}
