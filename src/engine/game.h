@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/asset_manager.h"
+#include "cloth/cloth.h"
 #include "core/job_system.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
@@ -85,6 +86,16 @@ public:
         jobs = &engineJobs;
     }
 
+    // Where the game's cloth is simulated (stepCloths' solver), set by the engine every frame from
+    // EngineSettings::clothOnGpu. The CPU until then, so a game run headless (tests, golden captures) stays there.
+    ClothSolver getClothSolver() const {
+        return clothSolver;
+    }
+
+    void useClothSolver(ClothSolver solver) {
+        clothSolver = solver;
+    }
+
     // Golden image views (engine/golden.h): fixed scenes the renderer must keep drawing the same, optional.
     virtual std::vector<GoldenView> goldenViews() const {
         return {};
@@ -99,6 +110,7 @@ public:
 
 private:
     JobSystem* jobs = &serialJobs();
+    ClothSolver clothSolver = ClothSolver::Cpu;
 };
 
 /*

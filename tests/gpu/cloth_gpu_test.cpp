@@ -7,9 +7,13 @@
 #include "render/gpu/cloth_gpu.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_cloth.h"
+#include "render/vulkan/vulkan_device.h"
+#include "render/vulkan/vulkan_mesh.h"
+#include "scene/deforming_mesh.h"
 
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <cstddef>
 #include <numbers>
 #include <span>
@@ -449,6 +453,150 @@ namespace {
     }
 }
 
+namespace {
+    // deform.glsl's steps against deforming_mesh.cpp's, on triangles of cloth's size, some squashed or with flat UVs.
+    void checkDeformSteps(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{163};
+        std::vector<GpuVec4> blendInputs;
+        std::vector<GpuVec4> triangleInputs;
+        std::vector<GpuVec4> tangentInputs;
+        std::vector<GpuVec4> normalInputs;
+        std::vector<GpuVec4> directionInputs;
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 first = randomPoint(random, 1.0f);
+            const Vec3 second = first + randomPoint(random, 0.05f);
+            const Vec3 third = i % 10 == 0 ? second : first + randomPoint(random, 0.05f);
+            blendInputs.push_back(gpuVec4(first));
+            blendInputs.push_back(gpuVec4(second));
+            blendInputs.push_back(gpuVec4(random.between(0.0f, 1.0f)));
+            triangleInputs.push_back(gpuVec4(first));
+            triangleInputs.push_back(gpuVec4(second));
+            triangleInputs.push_back(gpuVec4(third));
+            const Vec2 uv0{random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)};
+            const Vec2 uv1{random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)};
+            const Vec2 uv2 = i % 7 == 0 ? uv1 : Vec2{random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)};
+            tangentInputs.push_back(gpuVec4(first));
+            tangentInputs.push_back(gpuVec4(second));
+            tangentInputs.push_back(gpuVec4(third));
+            tangentInputs.push_back(gpuVec4(uv0.x, uv0.y, uv1.x, uv1.y));
+            tangentInputs.push_back(gpuVec4(uv2.x, uv2.y));
+            normalInputs.push_back(gpuVec4(i % 10 == 0 ? Vec3{} : randomPoint(random, 0.01f)));
+            const Vec3 normal = random.direction();
+            directionInputs.push_back(gpuVec4(i % 10 == 0 ? normal * 0.5f : randomPoint(random, 0.01f)));
+            directionInputs.push_back(gpuVec4(normal));
+        }
+
+        const std::vector<GpuVec4> blended = runner.run(shader, GPU_TEST_DEFORM_BLEND, blendInputs, 3, 1);
+        const std::vector<GpuVec4> normals = runner.run(shader, GPU_TEST_DEFORM_AREA_NORMAL, triangleInputs, 3, 1);
+        const std::vector<GpuVec4> tangents = runner.run(shader, GPU_TEST_DEFORM_TANGENT, tangentInputs, 5, 1);
+        const std::vector<GpuVec4> unitNormals = runner.run(shader, GPU_TEST_DEFORM_NORMAL, normalInputs, 1, 1);
+        const std::vector<GpuVec4> directions = runner.run(shader, GPU_TEST_DEFORM_TANGENT_DIRECTION, directionInputs, 2, 1);
+
+        for (std::size_t i = 0; i < blended.size(); ++i) {
+            DeformingMesh mesh;
+            mesh.previousPositions = {vec3From(blendInputs[i * 3])};
+            mesh.positions = {vec3From(blendInputs[i * 3 + 1])};
+            report.check("deformBlend", arithmeticTolerance, blendedPositions(mesh, blendInputs[i * 3 + 2][0])[0], vec3From(blended[i]));
+
+            const Vec3 first = vec3From(triangleInputs[i * 3]);
+            const Vec3 second = vec3From(triangleInputs[i * 3 + 1]);
+            const Vec3 third = vec3From(triangleInputs[i * 3 + 2]);
+            report.check("deformAreaNormal", arithmeticTolerance, triangleAreaNormal(first, second, third), vec3From(normals[i]));
+
+            const GpuVec4& uvs = tangentInputs[i * 5 + 3];
+            const TriangleTangent along = triangleTangent(first, second, third, Vec2{uvs[0], uvs[1]}, Vec2{uvs[2], uvs[3]},
+                                                          Vec2{tangentInputs[i * 5 + 4][0], tangentInputs[i * 5 + 4][1]});
+            report.check("deformTangent", arithmeticTolerance, along.alongU, vec3From(tangents[i]));
+            report.check("deformTangent has UV area", exactTolerance, along.hasUvArea ? 1.0f : 0.0f, tangents[i][3]);
+
+            report.check("deformNormal", arithmeticTolerance, deformedNormal(vec3From(normalInputs[i])), vec3From(unitNormals[i]));
+            report.check("deformTangentDirection", arithmeticTolerance,
+                         deformedTangent(vec3From(directionInputs[i * 2]), vec3From(directionInputs[i * 2 + 1])), vec3From(directions[i]));
+        }
+    }
+
+    // A mesh slot's vertices copied out, after everything recorded before it.
+    std::vector<MeshVertex> readSlot(const VulkanDevice& device, ImmediateCommands& commands, const VulkanMesh& mesh, std::uint32_t slot) {
+        const VkDeviceSize bytes = static_cast<VkDeviceSize>(mesh.getVertexCount()) * sizeof(MeshVertex);
+        VulkanBuffer readback{device.getAllocator(), bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
+        commands.run([&](VkCommandBuffer buffer) {
+            VkMemoryBarrier2 toCopy{};
+            toCopy.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+            toCopy.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            toCopy.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+            toCopy.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+            toCopy.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+            VkDependencyInfo dependency{};
+            dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dependency.memoryBarrierCount = 1;
+            dependency.pMemoryBarriers = &toCopy;
+            vkCmdPipelineBarrier2(buffer, &dependency);
+
+            const VkBufferCopy region{0, 0, bytes};
+            vkCmdCopyBuffer(buffer, mesh.getSlotBuffer(slot), readback.get(), 1, &region);
+
+            VkMemoryBarrier2 toHost = toCopy;
+            toHost.srcStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+            toHost.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            toHost.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+            toHost.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+            dependency.pMemoryBarriers = &toHost;
+            vkCmdPipelineBarrier2(buffer, &dependency);
+        });
+        readback.invalidate();
+        std::vector<MeshVertex> vertices(mesh.getVertexCount());
+        std::memcpy(vertices.data(), readback.getMapped(), static_cast<std::size_t>(bytes));
+        return vertices;
+    }
+
+    /*
+    * The shape pass against deformVertices: a sheet falls two ticks on the GPU, its points read back after each, and its
+    * mesh is shaped a third of the way between them. The CPU shapes the same blend of the GPU's own points, so only the
+    * shape pass's arithmetic differs (positions, normals and tangents within rounding; UVs and tangent sides copied).
+    */
+    void checkShapePass(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, GpuCheckReport& report) {
+        const Mesh grid = Mesh::grid(8, 6, 1.0f, 0.75f);
+        const DeformingTopology topology = buildDeformingTopology(grid);
+        VulkanMesh mesh{device, commands, topology.rest, true};
+        Cloth cloth = makeCloth(grid, Mat4::rotationX(-0.6f), ClothSettings{});
+        addClothPin(cloth, 6 * 9);
+        addClothPin(cloth, 6 * 9 + 8);
+        VulkanCloth gpu{device, pipelines, commands, cloth, 2};
+        gpu.attachShape(commands, topology, mesh);
+        const ClothTickCommands tick = clothTickCommands(cloth, 1.0f / 120.0f);
+
+        commands.run([&](VkCommandBuffer buffer) {
+            gpu.recordTicks(buffer, std::span<const ClothTickCommands>{&tick, 1}, 0);
+            gpu.recordReadback(buffer, 0);
+        });
+        const std::vector<Vec3> before = gpu.readPositions(0);
+
+        const float alpha = 1.0f / 3.0f;
+        const std::uint32_t slot = mesh.advanceGpuShape(1);
+        commands.run([&](VkCommandBuffer buffer) {
+            gpu.recordTicks(buffer, std::span<const ClothTickCommands>{&tick, 1}, 1);
+            gpu.recordShape(buffer, slot, alpha);
+            gpu.recordReadback(buffer, 1);
+        });
+        const std::vector<Vec3> after = gpu.readPositions(1);
+        const std::vector<MeshVertex> shaped = readSlot(device, commands, mesh, slot);
+
+        DeformingMesh between;
+        between.previousPositions = before;
+        between.positions = after;
+        std::vector<MeshVertex> expected;
+        deformVertices(topology, blendedPositions(between, alpha), expected);
+        for (std::size_t vertex = 0; vertex < expected.size(); ++vertex) {
+            report.check("cloth_shape position", arithmeticTolerance, expected[vertex].position, shaped[vertex].position);
+            report.check("cloth_shape normal", arithmeticTolerance, expected[vertex].normal, shaped[vertex].normal);
+            report.check("cloth_shape tangent", arithmeticTolerance, Vec3{expected[vertex].tangent.x, expected[vertex].tangent.y, expected[vertex].tangent.z},
+                         Vec3{shaped[vertex].tangent.x, shaped[vertex].tangent.y, shaped[vertex].tangent.z});
+            report.check("cloth_shape copied", exactTolerance, Vec3{expected[vertex].uv.x, expected[vertex].uv.y, expected[vertex].tangent.w},
+                         Vec3{shaped[vertex].uv.x, shaped[vertex].uv.y, shaped[vertex].tangent.w});
+        }
+    }
+}
+
 void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("cloth.glsl");
     checkPredict(runner, report);
@@ -466,5 +614,7 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     ImmediateCommands commands{device};
     checkSolverTicks(device, pipelines, commands, report);
     checkSettledSheet(device, pipelines, commands, report);
+    checkDeformSteps(runner, report);
+    checkShapePass(device, pipelines, commands, report);
 }
 

@@ -1,7 +1,9 @@
+#include "cloth/cloth.h"
 #include "core/hash.h"
 #include "engine/state_hash.h"
 #include "games/lightlab/light_lab_game.h"
 #include "math/transform.h"
+#include "scene/deforming_mesh.h"
 
 #include "demo_helpers.h"
 
@@ -93,6 +95,48 @@ namespace {
         transform.position = Vec3{1.0f, 2.0f, 3.0f};
         recycled.add(recycled.create(), transform);
         assert(hashSimulationState(first) != hashSimulationState(recycled));
+    }
+
+    /*
+    * A cloth on the GPU holds the GPU's points read back late, repeatable only on one GPU and driver, so the hash leaves
+    * them out (and its mesh's shape) but still sees what the simulation decides: its pins.
+    */
+    void testStateHashLeavesOutGpuCloth() {
+        World first;
+        World second;
+        for (World* world : {&first, &second}) {
+            const Entity sheet = world->create();
+            Cloth cloth = makeCloth(Mesh::grid(2, 2, 1.0f, 1.0f), Mat4::identity(), ClothSettings{});
+            addClothPin(cloth, 6);
+            cloth.onGpu = true;
+            world->add(sheet, DeformingMesh{MeshHandle{0}, cloth.particles.positions, cloth.particles.positions});
+            world->add(sheet, std::move(cloth));
+        }
+        assert(hashSimulationState(first) == hashSimulationState(second));
+
+        second.each<Cloth>([](Entity, Cloth& cloth) {
+            cloth.particles.positions[0].x += 0.01f;
+            cloth.particles.velocities[1].y += 0.01f;
+        });
+        second.each<DeformingMesh>([](Entity, DeformingMesh& mesh) {
+            mesh.positions[0].x += 0.01f;
+        });
+        assert(hashSimulationState(first) == hashSimulationState(second));
+
+        second.each<Cloth>([](Entity, Cloth& cloth) {
+            cloth.pins[0].position.x += 0.01f;
+        });
+        assert(hashSimulationState(first) != hashSimulationState(second));
+
+        // On the CPU its points count again.
+        first.each<Cloth>([](Entity, Cloth& cloth) {
+            cloth.onGpu = false;
+        });
+        const std::uint64_t cpuHash = hashSimulationState(first);
+        first.each<Cloth>([](Entity, Cloth& cloth) {
+            cloth.particles.positions[0].x += 0.01f;
+        });
+        assert(hashSimulationState(first) != cpuHash);
     }
 
     /*
@@ -254,6 +298,7 @@ void testDeterminism() {
     testHashIsBitExact();
     testMixSpreadsConsecutiveNumbers();
     testStateHashSeesTheSmallestChange();
+    testStateHashLeavesOutGpuCloth();
     testDemoIsDeterministic();
     testLightLabIsDeterministic();
 }

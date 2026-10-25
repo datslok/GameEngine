@@ -1,0 +1,112 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* A cloth's mesh shaped from its points on the GPU (render/vulkan/vulkan_cloth.h): one invocation per render vertex,
+* blending each point between the last two ticks, then gathering its own triangles' normals (those of its Mesh vertex,
+* so a seam stays smooth) and tangents (its own corners'), in triangle order as deformVertices adds them
+* (scene/deforming_mesh.h's deformVertexAt mirrors this loop). Written straight into the mesh's vertex slot.
+*/
+#include "deform.glsl"
+#include "render/gpu/cloth_gpu_shared.h"
+#include "render/gpu/ray_tracing_shared.h"
+
+layout(local_size_x = CLOTH_GROUP_SIZE) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer ClothPositions {
+    vec4 positions[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer ClothTickStart {
+    vec4 tickStart[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer RestVertices {
+    float restVertices[]; // MESH_VERTEX_FLOATS each
+};
+
+layout(std430, set = 0, binding = 3) readonly buffer Indices {
+    uint indices[];
+};
+
+layout(std430, set = 0, binding = 4) readonly buffer SourceVertices {
+    uint sourceVertex[];
+};
+
+layout(std430, set = 0, binding = 5) readonly buffer SourceStarts {
+    uint sourceStarts[];
+};
+
+layout(std430, set = 0, binding = 6) readonly buffer SourceTriangles {
+    uint sourceTriangles[];
+};
+
+layout(std430, set = 0, binding = 7) readonly buffer VertexStarts {
+    uint vertexStarts[];
+};
+
+layout(std430, set = 0, binding = 8) readonly buffer VertexTriangles {
+    uint vertexTriangles[];
+};
+
+layout(std430, set = 0, binding = 9) writeonly buffer ShapedVertices {
+    float shaped[]; // MESH_VERTEX_FLOATS each
+};
+
+// Must match ClothShapePushConstants in render/vulkan/vulkan_cloth.cpp.
+layout(push_constant) uniform ClothShape {
+    float alpha;
+    uint vertexCount;
+};
+
+vec3 cornerPosition(uint triangle, uint corner) {
+    uint source = sourceVertex[indices[triangle * 3u + corner]];
+    return deformBlend(tickStart[source].xyz, positions[source].xyz, alpha);
+}
+
+vec2 cornerUv(uint triangle, uint corner) {
+    uint first = indices[triangle * 3u + corner] * MESH_VERTEX_FLOATS + MESH_VERTEX_UV;
+    return vec2(restVertices[first], restVertices[first + 1u]);
+}
+
+void main() {
+    uint vertex = gl_GlobalInvocationID.x;
+    if (vertex >= vertexCount) {
+        return;
+    }
+
+    uint source = sourceVertex[vertex];
+    vec3 summedNormal = vec3(0.0);
+    for (uint index = sourceStarts[source]; index < sourceStarts[source + 1u]; ++index) {
+        uint triangle = sourceTriangles[index];
+        summedNormal = summedNormal + deformAreaNormal(cornerPosition(triangle, 0u), cornerPosition(triangle, 1u), cornerPosition(triangle, 2u));
+    }
+
+    vec3 summedTangent = vec3(0.0);
+    for (uint index = vertexStarts[vertex]; index < vertexStarts[vertex + 1u]; ++index) {
+        uint triangle = vertexTriangles[index];
+        vec4 along = deformTangent(cornerPosition(triangle, 0u), cornerPosition(triangle, 1u), cornerPosition(triangle, 2u), cornerUv(triangle, 0u),
+                                   cornerUv(triangle, 1u), cornerUv(triangle, 2u));
+        if (along.w != 0.0) {
+            summedTangent = summedTangent + along.xyz;
+        }
+    }
+
+    vec3 normal = deformNormal(summedNormal);
+    vec3 tangent = deformTangentDirection(summedTangent, normal);
+    vec3 position = deformBlend(tickStart[source].xyz, positions[source].xyz, alpha);
+    uint first = vertex * MESH_VERTEX_FLOATS;
+
+    shaped[first + MESH_VERTEX_POSITION] = position.x;
+    shaped[first + MESH_VERTEX_POSITION + 1u] = position.y;
+    shaped[first + MESH_VERTEX_POSITION + 2u] = position.z;
+    shaped[first + MESH_VERTEX_NORMAL] = normal.x;
+    shaped[first + MESH_VERTEX_NORMAL + 1u] = normal.y;
+    shaped[first + MESH_VERTEX_NORMAL + 2u] = normal.z;
+    shaped[first + MESH_VERTEX_UV] = restVertices[first + MESH_VERTEX_UV];
+    shaped[first + MESH_VERTEX_UV + 1u] = restVertices[first + MESH_VERTEX_UV + 1u];
+    shaped[first + MESH_VERTEX_TANGENT] = tangent.x;
+    shaped[first + MESH_VERTEX_TANGENT + 1u] = tangent.y;
+    shaped[first + MESH_VERTEX_TANGENT + 2u] = tangent.z;
+    shaped[first + MESH_VERTEX_TANGENT + 3u] = restVertices[first + MESH_VERTEX_TANGENT + 3u];
+}

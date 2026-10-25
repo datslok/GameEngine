@@ -111,7 +111,12 @@ std::uint64_t hashSimulationState(const World& world) {
     });
 
     hash.add(8u);
+    // A GPU cloth's mesh is shaped from its late points (see the cloths below).
     world.each<DeformingMesh>([&](Entity entity, const DeformingMesh& mesh) {
+        const Cloth* cloth = world.tryGet<Cloth>(entity);
+        if (cloth != nullptr && cloth->onGpu) {
+            return;
+        }
         add(hash, entity);
         hash.add(static_cast<std::uint64_t>(mesh.positions.size()));
         for (const Vec3& position : mesh.positions) {
@@ -120,11 +125,14 @@ std::uint64_t hashSimulationState(const World& world) {
     });
 
     hash.add(9u);
+    // A cloth on the GPU holds the GPU's points read back a few frames late, repeatable only on one GPU and driver (as
+    // the golden images are), so they are left out; what the simulation decides for it (its pins, its hand) is not.
     world.each<Cloth>([&](Entity entity, const Cloth& cloth) {
         const ClothParticles& particles = cloth.particles;
         add(hash, entity);
+        hash.add(cloth.onGpu);
         hash.add(static_cast<std::uint64_t>(particles.size()));
-        for (std::size_t index = 0; index < particles.size(); ++index) {
+        for (std::size_t index = 0; index < particles.size() && !cloth.onGpu; ++index) {
             add(hash, particles.positions[index]);
             add(hash, particles.velocities[index]);
             hash.add(particles.inverseMasses[index]);

@@ -298,7 +298,7 @@ void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulat
     hookGapNow += std::clamp(wanted - hookGapNow, -step, step);
     cloth.pins[0].position = hookMiddle - Vec3{0.5f * hookGapNow, 0.0f, 0.0f};
     cloth.pins[1].position = hookMiddle + Vec3{0.5f * hookGapNow, 0.0f, 0.0f};
-    stepCloths(world, tickSeconds, getJobs());
+    stepCloths(world, tickSeconds, getJobs(), getClothSolver());
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 

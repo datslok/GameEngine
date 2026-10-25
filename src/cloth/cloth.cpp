@@ -60,6 +60,18 @@ Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int subste
     return start + (target - start) * share;
 }
 
+ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders) {
+    ClothTickCommands commands;
+    commands.settings = cloth.settings;
+    commands.seconds = seconds;
+    for (const ClothPin& pin : cloth.pins) {
+        commands.pinTargets.push_back(pin.position);
+    }
+    commands.grab = cloth.grab;
+    commands.colliders = colliders;
+    return commands;
+}
+
 void addClothPin(Cloth& cloth, std::uint32_t particle) {
     pinParticle(cloth.particles, particle);
     cloth.pins.push_back(ClothPin{particle, cloth.particles.positions[particle]});
@@ -179,11 +191,21 @@ void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders,
 * The cloths are gathered first, in the world's order, then stepped a job each: each writes only its own points and
 * only reads the bodies, so stepping them at once gives what stepping them in turn does.
 */
-void stepCloths(World& world, float seconds, JobSystem& jobs) {
+void stepCloths(World& world, float seconds, JobSystem& jobs, ClothSolver solver) {
     const std::vector<Shape> colliders = worldColliderShapes(world);
+    if (solver == ClothSolver::Gpu) {
+        world.each<Cloth>([&](Entity, Cloth& cloth) {
+            cloth.onGpu = true;
+            cloth.gpuTicks.push_back(clothTickCommands(cloth, seconds, colliders));
+        });
+        return;
+    }
+
     std::vector<Cloth*> cloths;
     std::vector<DeformingMesh*> meshes;
     world.each<Cloth>([&](Entity entity, Cloth& cloth) {
+        cloth.onGpu = false;
+        cloth.gpuTicks.clear();
         cloths.push_back(&cloth);
         meshes.push_back(world.tryGet<DeformingMesh>(entity));
     });

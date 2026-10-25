@@ -22,6 +22,7 @@
 #define MESH_VERTEX_POSITION 0
 #define MESH_VERTEX_NORMAL 3
 #define MESH_VERTEX_UV 6
+#define MESH_VERTEX_TANGENT 8
 
 // What the ray tracing debug view shows (RayDebugView).
 #define RAY_DEBUG_OFF 0

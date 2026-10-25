@@ -1,9 +1,16 @@
+#include "ecs/world.h"
+#include "math/transform.h"
+#include "physics/collider.h"
 #include "render/gpu/cloth_gpu.h"
+#include "scene/deforming_mesh.h"
 #include "test_levels.h"
 
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
+#include <utility>
+#include <variant>
 
 namespace {
     Cloth smallSheet() {
@@ -130,6 +137,74 @@ namespace {
     }
 }
 
+namespace {
+    // The same points to the bit.
+    bool samePoints(const std::vector<Vec3>& first, const std::vector<Vec3>& second) {
+        return first.size() == second.size() && std::memcmp(first.data(), second.data(), first.size() * sizeof(Vec3)) == 0;
+    }
+
+    // A world with one hanging sheet drawn through a DeformingMesh, and a ball below it.
+    struct QueueWorld {
+        World world;
+        Entity sheet;
+    };
+
+    QueueWorld sheetOverBall() {
+        QueueWorld scene;
+        scene.sheet = scene.world.create();
+        Cloth cloth = makeCloth(Mesh::grid(4, 4, 1.0f, 1.0f), Mat4::translation(0.0f, 1.0f, 0.0f), ClothSettings{});
+        addClothPin(cloth, 20);
+        scene.world.add(scene.sheet, DeformingMesh{MeshHandle{0}, cloth.particles.positions, cloth.particles.positions});
+        scene.world.add(scene.sheet, std::move(cloth));
+
+        const Entity ball = scene.world.create();
+        scene.world.add(ball, Transform{});
+        scene.world.add(ball, Collider{Shape{Sphere{Vec3{0.0f, 0.0f, 0.0f}, 0.5f}}, nullptr});
+        return scene;
+    }
+
+    /*
+    * On the GPU a tick only queues what stepCloth would have been given: the cloth's points stay as they are (the
+    * renderer moves the GPU's copy), its mesh keeps its shape, and the cloth is marked as the GPU's.
+    */
+    void testGpuTicksQueue() {
+        QueueWorld scene = sheetOverBall();
+        Cloth& cloth = scene.world.get<Cloth>(scene.sheet);
+        const std::vector<Vec3> before = cloth.particles.positions;
+        cloth.pins[0].position = Vec3{0.25f, 1.6f, 0.0f};
+        cloth.grab = ClothGrab{3, Vec3{1.0f, 0.0f, 0.0f}};
+
+        stepCloths(scene.world, 1.0f / 120.0f, serialJobs(), ClothSolver::Gpu);
+        stepCloths(scene.world, 1.0f / 120.0f, serialJobs(), ClothSolver::Gpu);
+
+        assert(cloth.onGpu);
+        assert(samePoints(cloth.particles.positions, before));
+        assert(samePoints(scene.world.get<DeformingMesh>(scene.sheet).positions, before));
+        assert(cloth.gpuTicks.size() == 2);
+        for (const ClothTickCommands& tick : cloth.gpuTicks) {
+            assert(tick.seconds == 1.0f / 120.0f);
+            assert(tick.pinTargets.size() == 1 && tick.pinTargets[0].x == 0.25f);
+            assert(tick.grab && tick.grab->particle == 3);
+            assert(tick.colliders.size() == 1 && std::holds_alternative<Sphere>(tick.colliders[0]));
+            assert(tick.settings.substeps == cloth.settings.substeps);
+        }
+    }
+
+    // Back on the CPU the cloth steps again, from where its points are, and any queued ticks are dropped.
+    void testCpuTicksStepAgain() {
+        QueueWorld scene = sheetOverBall();
+        Cloth& cloth = scene.world.get<Cloth>(scene.sheet);
+        const std::vector<Vec3> before = cloth.particles.positions;
+        stepCloths(scene.world, 1.0f / 120.0f, serialJobs(), ClothSolver::Gpu);
+        stepCloths(scene.world, 1.0f / 120.0f, serialJobs(), ClothSolver::Cpu);
+
+        assert(!cloth.onGpu);
+        assert(cloth.gpuTicks.empty());
+        assert(!samePoints(cloth.particles.positions, before));
+        assert(samePoints(scene.world.get<DeformingMesh>(scene.sheet).positions, cloth.particles.positions));
+    }
+}
+
 void testClothGpu() {
     testPoints();
     testConstraints();
@@ -137,4 +212,6 @@ void testClothGpu() {
     testPinSlots();
     testTick();
     testDispatches();
+    testGpuTicksQueue();
+    testCpuTicksStepAgain();
 }

@@ -4,10 +4,13 @@
 #include "scene/deforming_mesh.h"
 #include "scene/frame_description.h"
 
+#include <bit>
 #include <cassert>
+#include <cstdint>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -289,6 +292,102 @@ namespace {
         }
         assert(threw);
     }
+
+    bool sameBits(const Vec3& a, const Vec3& b) {
+        return std::bit_cast<std::uint32_t>(a.x) == std::bit_cast<std::uint32_t>(b.x) && std::bit_cast<std::uint32_t>(a.y) == std::bit_cast<std::uint32_t>(b.y) &&
+               std::bit_cast<std::uint32_t>(a.z) == std::bit_cast<std::uint32_t>(b.z);
+    }
+
+    // The shaping's steps, shared by deformVertices and the GPU's shape pass (deform.glsl): each named and checked.
+    void testShapingSteps() {
+        const Vec3 normal = triangleAreaNormal(Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f});
+        assert(nearVec(normal, Vec3{0.0f, 0.0f, 2.0f}));
+
+        const TriangleTangent along = triangleTangent(Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f},
+                                                      Vec2{0.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{0.0f, 1.0f});
+        assert(along.hasUvArea && nearVec(along.alongU, Vec3{2.0f, 0.0f, 0.0f}));
+        const TriangleTangent mirrored = triangleTangent(Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f},
+                                                         Vec2{0.0f, 0.0f}, Vec2{1.0f, 0.0f}, Vec2{0.0f, -1.0f});
+        assert(mirrored.hasUvArea && nearVec(mirrored.alongU, Vec3{2.0f, 0.0f, 0.0f}));
+        const TriangleTangent flat = triangleTangent(Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f},
+                                                     Vec2{0.0f, 0.0f}, Vec2{1.0f, 1.0f}, Vec2{2.0f, 2.0f});
+        assert(!flat.hasUvArea);
+
+        assert(nearVec(deformedNormal(Vec3{0.0f, 0.0f, 3.0f}), Vec3{0.0f, 0.0f, 1.0f}));
+        assert(nearVec(deformedNormal(Vec3{}), Vec3{0.0f, 1.0f, 0.0f}));
+        assert(nearVec(deformedTangent(Vec3{1.0f, 0.0f, 1.0f}, Vec3{0.0f, 0.0f, 1.0f}), Vec3{1.0f, 0.0f, 0.0f}));
+        const Vec3 any = deformedTangent(Vec3{}, Vec3{0.0f, 0.0f, 1.0f});
+        assert(finiteUnit(any) && near(any.z, 0.0f));
+    }
+
+    /*
+    * Each Mesh vertex's triangles and each render vertex's, in the order deformVertices adds them up: a triangle once per
+    * corner it has there. The cube has seams, so render vertices outnumber Mesh vertices.
+    */
+    void testAdjacency() {
+        for (const Mesh& mesh : {Mesh::grid(3, 2, 1.0f, 1.0f), Mesh::cube()}) {
+            const DeformingTopology topology = buildDeformingTopology(mesh);
+            const DeformingAdjacency adjacency = buildDeformingAdjacency(topology);
+            assert(adjacency.sourceStarts.size() == topology.sourceVertexCount + 1);
+            assert(adjacency.vertexStarts.size() == topology.rest.vertices.size() + 1);
+            assert(adjacency.sourceTriangles.size() == topology.rest.indices.size());
+            assert(adjacency.vertexTriangles.size() == topology.rest.indices.size());
+
+            const std::size_t triangles = topology.rest.indices.size() / 3;
+            for (std::uint32_t source = 0; source < topology.sourceVertexCount; ++source) {
+                std::vector<std::uint32_t> expected;
+                for (std::uint32_t triangle = 0; triangle < triangles; ++triangle) {
+                    for (int corner = 0; corner < 3; ++corner) {
+                        if (topology.sourceVertex[topology.rest.indices[triangle * 3 + corner]] == source) {
+                            expected.push_back(triangle);
+                        }
+                    }
+                }
+                const std::vector<std::uint32_t> listed(adjacency.sourceTriangles.begin() + adjacency.sourceStarts[source],
+                                                        adjacency.sourceTriangles.begin() + adjacency.sourceStarts[source + 1]);
+                assert(listed == expected);
+            }
+            for (std::uint32_t vertex = 0; vertex < topology.rest.vertices.size(); ++vertex) {
+                for (std::uint32_t index = adjacency.vertexStarts[vertex]; index < adjacency.vertexStarts[vertex + 1]; ++index) {
+                    const std::uint32_t triangle = adjacency.vertexTriangles[index];
+                    const std::uint32_t* corners = &topology.rest.indices[triangle * 3];
+                    assert(corners[0] == vertex || corners[1] == vertex || corners[2] == vertex);
+                }
+            }
+        }
+    }
+
+    /*
+    * The shape pass's way, one render vertex at a time gathering its own triangles, gives deformVertices' result to the
+    * bit, since it adds the same numbers in the same order: on a bumped sheet and a squashed cube.
+    */
+    void testGatheredVerticesMatch() {
+        const Mesh grid = Mesh::grid(6, 4, 1.0f, 1.0f);
+        std::vector<Vec3> bumped = restPositions(grid);
+        for (std::size_t index = 0; index < bumped.size(); ++index) {
+            bumped[index].z = 0.1f * std::sin(static_cast<float>(index) * 0.7f);
+        }
+        std::vector<Vec3> squashed = restPositions(Mesh::cube());
+        for (Vec3& position : squashed) {
+            position.y *= 0.0f;
+        }
+
+        const std::pair<Mesh, std::vector<Vec3>> cases[]{{grid, bumped}, {Mesh::cube(), squashed}};
+        for (const auto& [mesh, positions] : cases) {
+            const DeformingTopology topology = buildDeformingTopology(mesh);
+            const DeformingAdjacency adjacency = buildDeformingAdjacency(topology);
+            std::vector<MeshVertex> expected;
+            deformVertices(topology, positions, expected);
+            for (std::uint32_t vertex = 0; vertex < expected.size(); ++vertex) {
+                const MeshVertex gathered = deformVertexAt(topology, adjacency, positions, vertex);
+                assert(sameBits(gathered.position, expected[vertex].position));
+                assert(sameBits(gathered.normal, expected[vertex].normal));
+                assert(sameBits(xyz(gathered.tangent), xyz(expected[vertex].tangent)));
+                assert(gathered.tangent.w == expected[vertex].tangent.w);
+                assert(gathered.uv.x == expected[vertex].uv.x && gathered.uv.y == expected[vertex].uv.y);
+            }
+        }
+    }
 }
 
 void testDeformingMesh() {
@@ -302,4 +401,7 @@ void testDeformingMesh() {
     testDeformedMeshes();
     testShapesReachTheShadowCache();
     testAssetManagerKeepsTopologies();
+    testShapingSteps();
+    testAdjacency();
+    testGatheredVerticesMatch();
 }

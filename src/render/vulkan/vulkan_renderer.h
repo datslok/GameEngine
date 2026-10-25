@@ -33,6 +33,7 @@
 #include "render/vulkan/vulkan_reactive_mask.h"
 #include "render/vulkan/vulkan_opaque_picture.h"
 #include "render/vulkan/vulkan_bloom.h"
+#include "render/vulkan/vulkan_cloth.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
 #include "render/vulkan/vulkan_debug_lines.h"
@@ -55,6 +56,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -144,6 +146,18 @@ public:
 
     // The aspect ratio of the last frame render() drew. Read after it returns true.
     float getFrameAspectRatio() const;
+
+    /*
+    * Cloth simulated on the GPU (render/vulkan/vulkan_cloth.h), for the next render(): each listed cloth's ticks run
+    * first thing in its commands, then its mesh is shaped at alpha between its last two ticks (its frame entry
+    * DeformedMesh::shapedOnGpu) and its points copied for the CPU. A cloth seen for the first time, or whose points,
+    * pins or mesh changed, is uploaded from its CPU state; cloths no longer listed are dropped. Between frames only;
+    * the work is used once.
+    */
+    void setClothWork(std::vector<ClothWork> work, float alpha);
+
+    // Each GPU cloth's points and velocities as a finished frame left them (a few frames late), each returned once.
+    std::vector<ClothReadback> takeClothReadbacks();
 
 private:
     SDL_Window* window = nullptr;
@@ -348,6 +362,22 @@ private:
     std::unique_ptr<VulkanOverlay> overlay;
     bool debugUiStarted = false;
 
+    // Cloth on the GPU: the passes (made with the first cloth), each cloth by its key with the frames in flight whose
+    // readback it is waiting for, the next frame's work, and the readbacks collected and not yet taken.
+    struct GpuCloth {
+        std::unique_ptr<VulkanCloth> cloth;
+        MeshHandle mesh;
+        std::array<bool, maxFramesInFlight> readbackPending{};
+    };
+    std::unique_ptr<VulkanClothPipelines> clothPipelines;
+    std::map<std::uint64_t, GpuCloth> gpuCloths;
+    std::vector<ClothWork> clothWork;
+    float clothAlpha = 1.0f;
+    std::vector<ClothReadback> clothReadbacks;
+
+    // This frame's slot for each mesh a cloth shapes on the GPU, by mesh index (set by showShapes).
+    std::map<std::uint32_t, std::uint32_t> gpuShapeSlots;
+
     // GPU copies, indexed exactly like MeshHandle and TextureHandle.
     std::vector<std::unique_ptr<VulkanMesh>> meshes;
     std::vector<std::unique_ptr<VulkanTexture>> textures;
@@ -471,6 +501,12 @@ private:
     // Each deforming mesh shows the frame's shape for it, or holds its last; after the frame's fence, before anything is
     // recorded. Throws std::invalid_argument for a deformed mesh that was not uploaded as deforming.
     void showShapes(const FrameDescription& description);
+
+    // The frame's cloth work (setClothWork), recorded right after showShapes.
+    void runCloths(VkCommandBuffer commands);
+
+    // After the frame's fence: the readbacks its last use of each cloth asked for.
+    void collectClothReadbacks();
 
     void bindMesh(VkCommandBuffer commands, MeshHandle mesh, std::uint32_t& indexCount, bool previousShape = false) const;
     void checkTexturesUploaded(const Material& material) const;
