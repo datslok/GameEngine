@@ -39,6 +39,24 @@ struct ClothPin {
     vec4 target;
 };
 
+// A point on another level and its weight (render/gpu/cloth_gpu.h's GpuClothLink).
+struct ClothLink {
+    uint point;
+    float weight;
+};
+
+// Where one coarse level's lists start (GpuClothLevel).
+struct ClothLevel {
+    uint pointsFirst;
+    uint pointCount;
+    uint neighbourStartsFirst;
+    uint gatherStartsFirst;
+    uint spreadStartsFirst;
+    uint unused0;
+    uint unused1;
+    uint unused2;
+};
+
 struct ClothTick {
     float substepSeconds;
     float gravity;
@@ -369,6 +387,58 @@ void clothHingeAngleTerm(inout vec3 force, inout ClothBlock block, vec3 slope, f
 void clothHandTerm(inout vec3 force, inout ClothBlock block, vec3 here, vec3 target, float stiffness) {
     force = force - (here - target) * stiffness;
     clothBlockAddDiagonal(block, stiffness);
+}
+
+// addCoarseEdgeTerm: a coarse edge's stiffness along its direction now (between, from the point to its neighbour).
+void clothCoarseEdgeTerm(inout ClothBlock block, vec3 between, float stiffness) {
+    float lengthSquared = dot(between, between);
+    if (lengthSquared >= float(CLOTH_SHORTEST_EDGE) * float(CLOTH_SHORTEST_EDGE)) {
+        clothBlockAddOuter(block, between, stiffness / lengthSquared);
+    }
+}
+
+// The line search's curvature terms d . H d (cloth_energy.h's inertiaCurvature and the rest), in float where the CPU
+// adds them in double, and its step.
+float clothInertiaCurvature(vec3 direction, float perSecondSquared, float inverseMass) {
+    return dot(direction, direction) * perSecondSquared / inverseMass;
+}
+
+float clothEdgeCurvature(vec3 between, vec3 apart, float restLength, float stiffness) {
+    float edgeLength = length(between);
+    if (edgeLength < CLOTH_SHORTEST_EDGE) {
+        return 0.0;
+    }
+    float along = dot(apart, between) / edgeLength;
+    float across = max(0.0, dot(apart, apart) - along * along);
+    float stretched = max(0.0, 1.0 - restLength / edgeLength);
+    return stiffness * (along * along + stretched * across);
+}
+
+float clothIsometricHingeCurvature(vec4 weights, vec3 wing0, vec3 wing1, vec3 edgeStart, vec3 edgeEnd, float stiffness) {
+    vec3 curvature = clothIsometricCurvature(weights, wing0, wing1, edgeStart, edgeEnd);
+    return stiffness * dot(curvature, curvature);
+}
+
+// From the hinge's slopes of its angle (clothHingeState's gradient) and its corners' directions.
+float clothHingeAngleCurvature(ClothHinge hinge, vec3 wing0, vec3 wing1, vec3 edgeStart, vec3 edgeEnd, float stiffness) {
+    float change = 0.0;
+    change += dot(hinge.gradient[0], wing0);
+    change += dot(hinge.gradient[1], wing1);
+    change += dot(hinge.gradient[2], edgeStart);
+    change += dot(hinge.gradient[3], edgeEnd);
+    return stiffness * change * change;
+}
+
+float clothHandCurvature(vec3 direction, float stiffness) {
+    return stiffness * dot(direction, direction);
+}
+
+// lineSearchStep: -slope / curvature, or 0 unless the direction goes downhill into phi curving up.
+float clothLineSearchStep(float slope, float curvature) {
+    if (!(slope < 0.0) || !(curvature > 0.0)) {
+        return 0.0;
+    }
+    return -slope / curvature;
 }
 
 // finishClothStep for one point, then the air's drag on a free point.

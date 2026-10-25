@@ -120,6 +120,48 @@ struct ClothWork {
     std::vector<ClothTickCommands> ticks;
 };
 
+// A point on another level and its weight (ClothLink).
+struct GpuClothLink {
+    std::uint32_t point = 0;
+    float weight = 0.0f;
+};
+
+static_assert(sizeof(GpuClothLink) == 8, "GpuClothLink must match cloth.glsl's ClothLink");
+
+/*
+* Where one coarse level's lists start in GpuClothLevels' buffers: its points (and their masses) from pointsFirst, and
+* its rows of starts (each its points' count plus one, or the cloth's point count plus one for spreading) from the
+* other firsts. The starts themselves count from the front of their lists' buffers.
+*/
+struct GpuClothLevel {
+    std::uint32_t pointsFirst = 0;
+    std::uint32_t pointCount = 0;
+    std::uint32_t neighbourStartsFirst = 0;
+    std::uint32_t gatherStartsFirst = 0;
+    std::uint32_t spreadStartsFirst = 0;
+    std::uint32_t unused[3]{};
+};
+
+static_assert(sizeof(GpuClothLevel) == 32, "GpuClothLevel must match cloth.glsl's ClothLevel");
+
+/*
+* A cloth's coarse levels for the GPU (ClothHierarchy): every level's lists one after another in one buffer each, and a
+* record per level, so a pass is told only its level's number; each point's level (0 for a point on none); no records
+* for a cloth with no levels.
+*/
+struct GpuClothLevels {
+    std::vector<GpuClothLevel> records;
+    std::vector<std::uint32_t> points;
+    std::vector<float> masses;
+    std::vector<std::uint32_t> neighbourStarts;
+    std::vector<std::uint32_t> neighbours;
+    std::vector<std::uint32_t> gatherStarts;
+    std::vector<GpuClothLink> gather;
+    std::vector<std::uint32_t> spreadStarts;
+    std::vector<GpuClothLink> spread;
+    std::vector<std::uint32_t> pointLevels;
+};
+
 // A cloth's points and velocities as the GPU had them a few frames ago (VulkanRenderer::takeClothReadbacks).
 struct ClothReadback {
     std::uint64_t key = 0;
@@ -143,9 +185,19 @@ std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth);
 */
 GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst);
 
+// The levels of a cloth with pointCount points (a hierarchy built for no points, a cloth's before makeCloth, has none).
+GpuClothLevels packClothLevels(const ClothHierarchy& hierarchy, std::size_t pointCount);
+
+// Each coarse level's dispatches a substep: phi's gradient, the coarse step, spreading it, the line search's terms and
+// total, the move.
+inline constexpr std::uint32_t clothDispatchesPerLevel = 6;
+
+// The coarse levels a tick uses: as many as its settings ask for (vertex block descent only), up to those the cloth has.
+std::uint32_t clothLevelsUsed(const Cloth& cloth, const ClothSettings& settings);
+
 /*
 * The dispatches one tick records: per substep, the prediction, the solver's (XPBD: one per stretch colour and one per
-* bending colour, none without bending; vertex block descent: one per point colour) and the end (the hand, the
-* bodies, the velocities).
+* bending colour, none without bending; vertex block descent: one per point colour, and with coarse levels the held
+* points, clothDispatchesPerLevel a level and a second sweep) and the end (the hand, the bodies, the velocities).
 */
 std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& settings);

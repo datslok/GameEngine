@@ -54,17 +54,22 @@ namespace {
         return blockDescent;
     }
 
-    // The CPU solvers every sheet is settled with, each by the name its rows carry: XPBD, vertex block descent, and
-    // vertex block descent with every coarse level the sheet has.
-    std::vector<std::pair<const char*, ClothSettings>> cpuSolvers(const ClothSettings& settings) {
+    // Vertex block descent with every coarse level the sheet has.
+    ClothSettings withLevels(const ClothSettings& settings) {
         ClothSettings layered = withBlockDescent(settings);
         layered.hierarchyLevels = maxClothLevels;
-        return {{"XPBD", settings}, {"VBD", withBlockDescent(settings)}, {"VBD+L", layered}};
+        return layered;
     }
 
-    // The GPU's: XPBD and vertex block descent (its coarse levels not yet).
+    // The CPU solvers every sheet is settled with, each by the name its rows carry: XPBD, vertex block descent, and
+    // vertex block descent with its levels.
+    std::vector<std::pair<const char*, ClothSettings>> cpuSolvers(const ClothSettings& settings) {
+        return {{"XPBD", settings}, {"VBD", withBlockDescent(settings)}, {"VBD+L", withLevels(settings)}};
+    }
+
+    // The GPU's, the same three.
     std::vector<std::pair<const char*, ClothSettings>> gpuSolvers(const ClothSettings& settings) {
-        return {{"GPU", settings}, {"GPU VBD", withBlockDescent(settings)}};
+        return {{"GPU", settings}, {"GPU VBD", withBlockDescent(settings)}, {"GPU VBD+L", withLevels(settings)}};
     }
 
     struct YardstickRow {
@@ -81,7 +86,7 @@ namespace {
 
     void printRow(std::ostream& out, const YardstickRow& row) {
         char text[200];
-        std::snprintf(text, sizeof(text), "%-8s %7d %8zu %9d %6d %10u %12.3f%% %10.3f%% %9.4f %17.2f %12.2f\n", row.solver, row.squares,
+        std::snprintf(text, sizeof(text), "%-10s %7d %8zu %9d %6d %10u %12.3f%% %10.3f%% %9.4f %17.2f %12.2f\n", row.solver, row.squares,
                       row.points, row.substeps, row.levels, row.dispatches, 100.0 * row.measure.pathStretch, 100.0 * row.measure.worstEdgeStrain, row.measure.sag,
                       1000.0 * row.motion, row.millisecondsPerTick);
         out << text << std::flush;
@@ -139,7 +144,8 @@ namespace {
         for (std::size_t index = 0; index < before.size(); ++index) {
             motion = std::max(motion, (cloth.particles.positions[index] - before[index]).length());
         }
-        return YardstickRow{solver, squares, cloth.particles.size(), settings.substeps, 0, clothDispatchesPerTick(cloth, settings),
+        return YardstickRow{solver, squares, cloth.particles.size(), settings.substeps, static_cast<int>(clothLevelsUsed(cloth, settings)),
+                            clothDispatchesPerTick(cloth, settings),
                             measureSheet(cloth, squares), motion, elapsed / ticks};
     }
 }
@@ -164,7 +170,7 @@ void runClothYardstick(std::ostream& out, YardstickRun run) {
         << " m sheet hung from its top corners, settled " << plan.settleSeconds << " s, the CPU on " << jobs.getThreadCount() << " threads"
         << (device ? ", the GPU on " + device->getName() : std::string{}) << (isDebugBuild ? " (debug build: times are not comparable)" : "")
         << '\n';
-    out << "solver   squares   points  substeps levels dispatches  path stretch  worst edge   sag (m)  last second (mm)  ms per tick\n";
+    out << "solver     squares   points  substeps levels dispatches  path stretch  worst edge   sag (m)  last second (mm)  ms per tick\n";
 
     std::unique_ptr<VulkanClothPipelines> pipelines;
     std::unique_ptr<ImmediateCommands> commands;

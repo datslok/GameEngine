@@ -123,6 +123,28 @@ void main() {
         vec4 point = testInput(0);
         clothGrab(point, testInput(1).xyz, testInput(2).x);
         testOutput(0, point);
+    } else if (function == GPU_TEST_CLOTH_LINE_SEARCH_TERMS) {
+        // The coarse levels' pieces, cloth_gpu_test.cpp's checkLineSearchTerms.
+        ClothBlock block = testBlock(0u);
+        vec4 between = testInput(2);
+        clothCoarseEdgeTerm(block, between.xyz, between.w);
+        vec3 d0 = testInput(3).xyz;
+        vec3 d1 = testInput(4).xyz;
+        vec3 d2 = testInput(5).xyz;
+        vec3 d3 = testInput(6).xyz;
+        vec4 edge = testInput(7);
+        vec4 numbers = testInput(8);
+        ClothHinge hinge;
+        hinge.angle = 0.0;
+        for (uint corner = 0u; corner < 4u; ++corner) {
+            hinge.gradient[corner] = testInput(10u + corner).xyz;
+        }
+        vec4 last = testInput(14);
+        testOutput(0, vec4(block.diagonal, 0.0));
+        testOutput(1, vec4(block.offDiagonal, 0.0));
+        testOutput(2, vec4(clothInertiaCurvature(d0, numbers.y, numbers.x), clothEdgeCurvature(edge.xyz, d1 - d2, edge.w, numbers.z),
+                           clothIsometricHingeCurvature(testInput(9), d0, d1, d2, d3, last.x), clothHingeAngleCurvature(hinge, d0, d1, d2, d3, last.x)));
+        testOutput(3, vec4(clothHandCurvature(d3, last.y), clothLineSearchStep(last.z, last.w), 0.0, 0.0));
     } else if (function == GPU_TEST_CLOTH_BLOCK_SOLVE) {
         testOutput(0, vec4(clothBlockSolve(testBlock(0u), testInput(2).xyz), 0.0));
     } else if (function == GPU_TEST_CLOTH_FINISH_VELOCITY) {

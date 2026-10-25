@@ -1,0 +1,51 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The line search's terms (clothLineSearch), one invocation each: the points (the slope gradient . d, the inertia and
+* the hand's curvature), then the edges, then the hinges (without bending, none), each workgroup's added into one
+* partial (slope, curvature). count is all the terms; past it an invocation adds nothing, but still joins the sum.
+*/
+#include "cloth_levels.glsl"
+
+void main() {
+    uint item = gl_GlobalInvocationID.x;
+    ClothTick tick = ticks[tickIndex];
+    vec2 term = vec2(0.0);
+    if (item < count) {
+        if (item < clothPointCount) {
+            vec3 moving = direction[item].xyz;
+            term.x = dot(gradient[item].xyz, moving);
+            float inverseMass = positions[item].w;
+            if (inverseMass > 0.0) {
+                term.y = clothInertiaCurvature(moving, tick.perSecondSquared, inverseMass);
+            }
+            if (item == tick.grabParticle) {
+                term.y += clothHandCurvature(moving, tick.grabStiffness);
+            }
+        } else if (item < clothPointCount + clothEdgeCount) {
+            ClothStretch edge = stretches[item - clothPointCount];
+            term.y = clothEdgeCurvature(positions[edge.first].xyz - positions[edge.second].xyz, direction[edge.first].xyz - direction[edge.second].xyz,
+                                        edge.restLength, tick.stretchStiffness);
+        } else {
+            ClothBend bend = bends[item - clothPointCount - clothEdgeCount];
+            float stiffness = tick.bendingStiffness * bend.stiffnessShare;
+            vec3 wing0 = direction[bend.points.x].xyz;
+            vec3 wing1 = direction[bend.points.y].xyz;
+            vec3 edgeStart = direction[bend.points.z].xyz;
+            vec3 edgeEnd = direction[bend.points.w].xyz;
+            if (tick.bendingModel == CLOTH_BEND_ISOMETRIC) {
+                term.y = clothIsometricHingeCurvature(bend.isometricWeights, wing0, wing1, edgeStart, edgeEnd, stiffness);
+            } else {
+                ClothHinge hinge = clothHingeState(positions[bend.points.x].xyz, positions[bend.points.y].xyz, positions[bend.points.z].xyz,
+                                                   positions[bend.points.w].xyz);
+                term.y = clothHingeAngleCurvature(hinge, wing0, wing1, edgeStart, edgeEnd, stiffness);
+            }
+        }
+    }
+
+    vec2 sum = clothGroupSum(term);
+    if (gl_LocalInvocationID.x == 0u) {
+        linePartials[gl_WorkGroupID.x] = sum;
+    }
+}

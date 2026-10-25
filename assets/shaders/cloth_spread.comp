@@ -1,0 +1,27 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// One level's steps spread down (solveClothHierarchy's spread): each point below the level takes its row of P times
+// them; held points stay where they are; the level's own points keep their steps.
+#include "cloth_levels.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    if (held[point] != 0u) {
+        direction[point] = vec4(0.0);
+        return;
+    }
+    if (pointLevels[point] < levelNumber) {
+        ClothLevel level = clothLevels[levelNumber - 1u];
+        vec3 share = vec3(0.0);
+        for (uint link = spreadStarts[level.spreadStartsFirst + point]; link < spreadStarts[level.spreadStartsFirst + point + 1u]; ++link) {
+            ClothLink entry = spreadLinks[link];
+            share = share + coarseSteps[entry.point].xyz * entry.weight;
+        }
+        direction[point] = vec4(share, 0.0);
+    }
+}

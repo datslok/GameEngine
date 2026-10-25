@@ -160,11 +160,7 @@ namespace {
         block.addDiagonal(level.masses[at] * perSecondSquared);
         const Vec3& point = positions[level.points[at]];
         for (std::uint32_t next = level.neighbourStarts[at]; next < level.neighbourStarts[at + 1]; ++next) {
-            const Vec3 between = positions[level.neighbours[next]] - point;
-            const float lengthSquared = between.lengthSquared();
-            if (lengthSquared >= shortestEdge * shortestEdge) {
-                block.addOuter(between, stiffness / lengthSquared);
-            }
+            addCoarseEdgeTerm(block, positions[level.neighbours[next]] - point, stiffness);
         }
         return block.solve(gathered * -1.0f);
     }
@@ -180,6 +176,13 @@ namespace {
             }
             scratch.held[point] = held ? 1 : 0;
         });
+    }
+}
+
+void addCoarseEdgeTerm(ClothStiffnessBlock& block, const Vec3& between, float stiffness) {
+    const float lengthSquared = between.lengthSquared();
+    if (lengthSquared >= shortestEdge * shortestEdge) {
+        block.addOuter(between, stiffness / lengthSquared);
     }
 }
 

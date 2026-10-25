@@ -1,0 +1,19 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// phi's gradient at every point (clothEnergyGradient): minus its force, zero at held points.
+#include "cloth_levels.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    if (held[point] != 0u) {
+        gradient[point] = vec4(0.0);
+        return;
+    }
+    ClothBlock unused;
+    gradient[point] = vec4(clothPointForceAt(point, ticks[tickIndex], unused) * -1.0, 0.0);
+}

@@ -1,0 +1,36 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* One level's coarse step for each of its points (solveClothHierarchy's gather and step): its column of the gradient
+* gathered, divided by its region's stiffness (its mass / h^2 plus its coarse edges along their directions now). A held
+* point's own direction stays zero; its step still reaches the points it moves.
+*/
+#include "cloth_levels.glsl"
+
+void main() {
+    uint at;
+    if (!clothItem(at)) {
+        return;
+    }
+
+    ClothLevel level = clothLevels[levelNumber - 1u];
+    uint point = levelPoints[level.pointsFirst + at];
+    vec3 gathered = vec3(0.0);
+    for (uint link = gatherStarts[level.gatherStartsFirst + at]; link < gatherStarts[level.gatherStartsFirst + at + 1u]; ++link) {
+        ClothLink entry = gatherLinks[link];
+        gathered = gathered + gradient[entry.point].xyz * entry.weight;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    ClothBlock block = clothEmptyBlock();
+    clothBlockAddDiagonal(block, levelMasses[level.pointsFirst + at] * tick.perSecondSquared);
+    vec3 here = positions[point].xyz;
+    for (uint next = levelNeighbourStarts[level.neighbourStartsFirst + at]; next < levelNeighbourStarts[level.neighbourStartsFirst + at + 1u]; ++next) {
+        clothCoarseEdgeTerm(block, positions[levelNeighbours[next]].xyz - here, tick.stretchStiffness);
+    }
+
+    vec3 coarseStep = clothBlockSolve(block, gathered * -1.0);
+    coarseSteps[point] = vec4(coarseStep, 0.0);
+    direction[point] = held[point] != 0u ? vec4(0.0) : vec4(coarseStep, 0.0);
+}

@@ -578,6 +578,101 @@ namespace {
 }
 
 
+namespace {
+    /*
+    * The line search's curvature d . H d is a sum of terms the GPU adds one per thread (cloth.glsl mirrors each): a
+    * point's inertia m |d|^2 / h^2, an edge's stiffness along it and (while stretched) across it, an isometric hinge's
+    * stiffness |curvature of d|^2, a hinge's stiffness (its angle's change along d)^2, the hand's stiffness |d|^2.
+    */
+    void testCurvatureTerms() {
+        assert(inertiaCurvature(Vec3{1.0f, 2.0f, 2.0f}, 100.0, 0.5f) == 1800.0);
+
+        // An edge along x stretched 10%: moving its ends apart along it costs k along^2; across it, k (1 - r / L) across^2.
+        const double stiffness = 2000.0;
+        assert(near(static_cast<float>(edgeCurvature(Vec3{0.11f, 0.0f, 0.0f}, Vec3{0.01f, 0.0f, 0.0f}, 0.1f, stiffness)), 0.2f, 1e-5f));
+        const double across = edgeCurvature(Vec3{0.11f, 0.0f, 0.0f}, Vec3{0.0f, 0.01f, 0.0f}, 0.1f, stiffness);
+        assert(near(static_cast<float>(across), static_cast<float>(stiffness * (1.0 - 0.1 / 0.11) * 1e-4), 1e-6f));
+        // Squashed, across costs nothing; too short to have a direction, nothing at all.
+        assert(edgeCurvature(Vec3{0.09f, 0.0f, 0.0f}, Vec3{0.0f, 0.01f, 0.0f}, 0.1f, stiffness) == 0.0);
+        assert(edgeCurvature(Vec3{}, Vec3{0.01f, 0.0f, 0.0f}, 0.1f, stiffness) == 0.0);
+
+        const std::array<float, 4> weights{1.0f, 1.0f, -1.0f, -1.0f};
+        const Vec3 up{0.0f, 1.0f, 0.0f};
+        assert(isometricHingeCurvature(weights, up, up, Vec3{}, Vec3{}, 3.0) == 12.0);
+        assert(isometricHingeCurvature(weights, up, up, up, up, 3.0) == 0.0);
+
+        const std::array<Vec3, 4> slopes{Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 2.0f, 0.0f}, Vec3{}, Vec3{}};
+        assert(hingeAngleCurvature(slopes, Vec3{1.0f, 0.0f, 0.0f}, up, Vec3{}, Vec3{}, 2.0) == 18.0);
+
+        assert(handCurvature(Vec3{0.0f, 3.0f, 4.0f}, 10.0) == 250.0);
+    }
+
+    // The step along a direction: -slope / curvature, and nothing when it does not go downhill or phi is not curved up.
+    void testLineSearchStep() {
+        assert(lineSearchStep(-2.0, 4.0) == 0.5f);
+        assert(lineSearchStep(0.0, 4.0) == 0.0f);
+        assert(lineSearchStep(1.0, 4.0) == 0.0f);
+        assert(lineSearchStep(-1.0, 0.0) == 0.0f);
+        assert(lineSearchStep(-1.0, -1.0) == 0.0f);
+    }
+
+    /*
+    * clothLineSearch is its terms summed: on a busy sheet along its gradient's descent, the step from the terms added
+    * in a plain loop matches it (to double's rounding between the two orders of adding).
+    */
+    void testLineSearchIsItsTerms() {
+        Cloth cloth = makeCloth(Mesh::grid(8, 8, 0.4f, 0.4f), Mat4::rotationX(-0.3f), blockDescent(maxClothLevels));
+        addClothPin(cloth, 0);
+        cloth.grab = ClothGrab{40, Vec3{0.1f, 0.3f, 0.2f}};
+        std::vector<Vec3> predicted = cloth.particles.positions;
+        for (std::size_t point = 0; point < predicted.size(); ++point) {
+            predicted[point].y -= 0.0002f * float(point % 7);
+        }
+        const float substep = tick / 15.0f;
+        const ClothEnergyTerms terms = energyTerms(cloth);
+        std::vector<Vec3> gradient;
+        clothEnergyGradient(cloth.particles, predicted, terms, substep, {}, gradient, serialJobs());
+        std::vector<Vec3> direction(gradient.size());
+        for (std::size_t point = 0; point < gradient.size(); ++point) {
+            direction[point] = gradient[point] * -1e-7f;
+        }
+
+        const std::vector<Vec3>& positions = cloth.particles.positions;
+        const double perSecondSquared = 1.0 / (double(substep) * substep);
+        double slope = 0.0;
+        double curvature = 0.0;
+        for (std::size_t point = 0; point < positions.size(); ++point) {
+            slope += double(gradient[point].dot(direction[point]));
+            if (cloth.particles.inverseMasses[point] > 0.0f) {
+                curvature += inertiaCurvature(direction[point], perSecondSquared, cloth.particles.inverseMasses[point]);
+            }
+        }
+        for (const StretchConstraint& edge : cloth.stretch) {
+            curvature += edgeCurvature(positions[edge.first] - positions[edge.second], direction[edge.first] - direction[edge.second], edge.restLength,
+                                       energyStiffness(cloth.settings.stretchCompliance));
+        }
+        for (const BendConstraint& bend : cloth.bend) {
+            curvature += isometricHingeCurvature(bend.isometricWeights, direction[bend.wing0], direction[bend.wing1], direction[bend.edgeStart],
+                                                 direction[bend.edgeEnd], double(cloth.settings.bendingStiffness) * bend.stiffnessShare);
+        }
+        curvature += handCurvature(direction[cloth.grab->particle], energyStiffness(cloth.settings.grabCompliance));
+
+        const float expected = lineSearchStep(slope, curvature);
+        assert(expected > 0.0f);
+        ClothParticles moved = cloth.particles;
+        assert(near(clothLineSearch(moved, gradient, direction, terms, substep, serialJobs()), expected, 1e-6f * expected));
+    }
+
+    // A coarse edge stiffens its point along it by stiffness / length^2 times its outer product: stiffness along its direction.
+    void testCoarseEdgeTerm() {
+        ClothStiffnessBlock block;
+        addCoarseEdgeTerm(block, Vec3{0.0f, 0.5f, 0.0f}, 100.0f);
+        assert(block.yy == 100.0f && block.xx == 0.0f && block.zz == 0.0f && block.xy == 0.0f);
+        addCoarseEdgeTerm(block, Vec3{}, 100.0f);
+        assert(block.yy == 100.0f && block.xx == 0.0f);
+    }
+}
+
 void testClothHierarchy() {
     testCoarsePointsOfAWheel();
     testCoarsePointsOfAGrid();
@@ -598,4 +693,8 @@ void testClothHierarchy() {
     testHandReachesCoarseLevels();
     testManyThreadsMatchOne();
     testOffByDefault();
+    testCurvatureTerms();
+    testLineSearchStep();
+    testLineSearchIsItsTerms();
+    testCoarseEdgeTerm();
 }

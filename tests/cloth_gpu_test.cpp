@@ -151,6 +151,97 @@ namespace {
         assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
         settings.bendingStiffness = 1e-5f;
         assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
+
+        // This sheet is too small for levels, so asking for them changes nothing.
+        assert(cloth.hierarchy.levels.empty());
+        settings.hierarchyLevels = 3;
+        assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
+    }
+
+    /*
+    * With levels: the first sweep, the held points, six passes a level (gradient, coarse step, spread, the line search's
+    * terms and total, the move), the second sweep. A tick uses as many levels as asked for, up to those the cloth has.
+    */
+    void testDispatchesWithLevels() {
+        ClothSettings settings;
+        settings.method = ClothMethod::VertexBlockDescent;
+        settings.substeps = 3;
+        const Cloth cloth = makeCloth(Mesh::grid(20, 20, 1.0f, 1.0f), Mat4::identity(), settings);
+        const std::uint32_t levels = static_cast<std::uint32_t>(cloth.hierarchy.levels.size());
+        assert(levels >= 2);
+        const std::uint32_t pointColours = static_cast<std::uint32_t>(cloth.vertexColours.colours.size() - 1);
+
+        settings.hierarchyLevels = 1;
+        assert(clothDispatchesPerTick(cloth, settings) == 3 * (2 + 2 * pointColours + 1 + 6));
+        settings.hierarchyLevels = maxClothLevels;
+        assert(clothDispatchesPerTick(cloth, settings) == 3 * (2 + 2 * pointColours + 1 + 6 * levels));
+
+        // XPBD takes no levels.
+        settings.method = ClothMethod::Xpbd;
+        assert(clothDispatchesPerTick(cloth, settings) ==
+               3 * (2 + static_cast<std::uint32_t>(cloth.stretchColours.size() - 1) + static_cast<std::uint32_t>(cloth.bendColours.size() - 1)));
+    }
+
+    /*
+    * The levels flattened for the GPU: every level's lists one after another in one buffer each, a record per level
+    * saying where its own start, every start counted from the front of its buffer, so a pass needs only its level's
+    * record. Each level's lists come back exactly.
+    */
+    void testLevels() {
+        Cloth cloth = makeCloth(Mesh::grid(20, 20, 1.0f, 1.0f), Mat4::identity(), ClothSettings{});
+        addClothPin(cloth, 0);
+        const ClothHierarchy& hierarchy = cloth.hierarchy;
+        const std::size_t pointCount = cloth.particles.size();
+        const GpuClothLevels packed = packClothLevels(hierarchy, pointCount);
+        assert(packed.records.size() == hierarchy.levels.size() && !packed.records.empty());
+        assert(packed.pointLevels.size() == pointCount);
+        for (std::size_t point = 0; point < pointCount; ++point) {
+            assert(packed.pointLevels[point] == static_cast<std::uint32_t>(hierarchy.pointLevels[point]));
+        }
+
+        for (std::size_t index = 0; index < hierarchy.levels.size(); ++index) {
+            const ClothLevel& level = hierarchy.levels[index];
+            const GpuClothLevel& record = packed.records[index];
+            assert(record.pointCount == level.points.size());
+            for (std::size_t at = 0; at < level.points.size(); ++at) {
+                assert(packed.points[record.pointsFirst + at] == level.points[at]);
+                assert(packed.masses[record.pointsFirst + at] == level.masses[at]);
+
+                const std::uint32_t neighbourFirst = packed.neighbourStarts[record.neighbourStartsFirst + at];
+                const std::uint32_t neighbourEnd = packed.neighbourStarts[record.neighbourStartsFirst + at + 1];
+                assert(neighbourEnd - neighbourFirst == level.neighbourStarts[at + 1] - level.neighbourStarts[at]);
+                for (std::uint32_t next = 0; next < neighbourEnd - neighbourFirst; ++next) {
+                    assert(packed.neighbours[neighbourFirst + next] == level.neighbours[level.neighbourStarts[at] + next]);
+                }
+
+                const std::uint32_t gatherFirst = packed.gatherStarts[record.gatherStartsFirst + at];
+                const std::uint32_t gatherEnd = packed.gatherStarts[record.gatherStartsFirst + at + 1];
+                assert(gatherEnd - gatherFirst == level.gatherStarts[at + 1] - level.gatherStarts[at]);
+                for (std::uint32_t link = 0; link < gatherEnd - gatherFirst; ++link) {
+                    const ClothLink& expected = level.gather[level.gatherStarts[at] + link];
+                    assert(packed.gather[gatherFirst + link].point == expected.point && packed.gather[gatherFirst + link].weight == expected.weight);
+                }
+            }
+            for (std::size_t point = 0; point < pointCount; ++point) {
+                const std::uint32_t spreadFirst = packed.spreadStarts[record.spreadStartsFirst + point];
+                const std::uint32_t spreadEnd = packed.spreadStarts[record.spreadStartsFirst + point + 1];
+                assert(spreadEnd - spreadFirst == level.spreadStarts[point + 1] - level.spreadStarts[point]);
+                for (std::uint32_t link = 0; link < spreadEnd - spreadFirst; ++link) {
+                    const ClothLink& expected = level.spread[level.spreadStarts[point] + link];
+                    assert(packed.spread[spreadFirst + link].point == expected.point && packed.spread[spreadFirst + link].weight == expected.weight);
+                }
+            }
+        }
+
+        // A cloth with no levels packs none, and every point on the cloth's own level.
+        const Cloth small = smallSheet();
+        const GpuClothLevels none = packClothLevels(small.hierarchy, small.particles.size());
+        assert(none.records.empty() && none.points.empty() && none.spread.empty());
+        assert(none.pointLevels.size() == small.particles.size());
+        for (const std::uint32_t level : none.pointLevels) {
+            assert(level == 0);
+        }
+        assert(packClothLevels(ClothHierarchy{}, 5).pointLevels.size() == 5);
     }
 }
 
@@ -229,6 +320,8 @@ void testClothGpu() {
     testPinSlots();
     testTick();
     testDispatches();
+    testDispatchesWithLevels();
+    testLevels();
     testGpuTicksQueue();
     testCpuTicksStepAgain();
 }

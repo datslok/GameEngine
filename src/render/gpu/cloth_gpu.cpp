@@ -1,5 +1,6 @@
 #include "render/gpu/cloth_gpu.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <type_traits>
@@ -106,13 +107,63 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     return tick;
 }
 
+GpuClothLevels packClothLevels(const ClothHierarchy& hierarchy, std::size_t pointCount) {
+    GpuClothLevels packed;
+    const auto links = [](std::vector<GpuClothLink>& into, const std::vector<ClothLink>& from) {
+        for (const ClothLink& link : from) {
+            into.push_back(GpuClothLink{link.point, link.weight});
+        }
+    };
+    // Starts counted from the front of their list's buffer: the level's own plus where its list begins there.
+    const auto starts = [](std::vector<std::uint32_t>& into, const std::vector<std::uint32_t>& from, std::size_t listFirst) {
+        for (const std::uint32_t start : from) {
+            into.push_back(static_cast<std::uint32_t>(listFirst + start));
+        }
+    };
+
+    for (const ClothLevel& level : hierarchy.levels) {
+        GpuClothLevel record;
+        record.pointsFirst = static_cast<std::uint32_t>(packed.points.size());
+        record.pointCount = static_cast<std::uint32_t>(level.points.size());
+        record.neighbourStartsFirst = static_cast<std::uint32_t>(packed.neighbourStarts.size());
+        record.gatherStartsFirst = static_cast<std::uint32_t>(packed.gatherStarts.size());
+        record.spreadStartsFirst = static_cast<std::uint32_t>(packed.spreadStarts.size());
+        packed.records.push_back(record);
+
+        packed.points.insert(packed.points.end(), level.points.begin(), level.points.end());
+        packed.masses.insert(packed.masses.end(), level.masses.begin(), level.masses.end());
+        starts(packed.neighbourStarts, level.neighbourStarts, packed.neighbours.size());
+        packed.neighbours.insert(packed.neighbours.end(), level.neighbours.begin(), level.neighbours.end());
+        starts(packed.gatherStarts, level.gatherStarts, packed.gather.size());
+        links(packed.gather, level.gather);
+        starts(packed.spreadStarts, level.spreadStarts, packed.spread.size());
+        links(packed.spread, level.spread);
+    }
+
+    packed.pointLevels.assign(pointCount, 0);
+    for (std::size_t point = 0; point < std::min(pointCount, hierarchy.pointLevels.size()); ++point) {
+        packed.pointLevels[point] = static_cast<std::uint32_t>(hierarchy.pointLevels[point]);
+    }
+    return packed;
+}
+
+std::uint32_t clothLevelsUsed(const Cloth& cloth, const ClothSettings& settings) {
+    if (settings.method != ClothMethod::VertexBlockDescent || settings.hierarchyLevels < 1) {
+        return 0;
+    }
+    return static_cast<std::uint32_t>(std::min(static_cast<std::size_t>(settings.hierarchyLevels), cloth.hierarchy.levels.size()));
+}
+
 std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& settings) {
     const auto colours = [](const std::vector<std::uint32_t>& starts) {
         return starts.empty() ? 0u : static_cast<std::uint32_t>(starts.size() - 1);
     };
     const std::uint32_t substeps = static_cast<std::uint32_t>(settings.substeps);
     if (settings.method == ClothMethod::VertexBlockDescent) {
-        return substeps * (2u + colours(cloth.vertexColours.colours));
+        const std::uint32_t sweep = colours(cloth.vertexColours.colours);
+        const std::uint32_t levels = clothLevelsUsed(cloth, settings);
+        const std::uint32_t layered = levels > 0 ? 1u + clothDispatchesPerLevel * levels + sweep : 0u;
+        return substeps * (2u + sweep + layered);
     }
     const std::uint32_t bendColours = settings.bendingStiffness > 0.0f ? colours(cloth.bendColours) : 0u;
     return substeps * (2u + colours(cloth.stretchColours) + bendColours);
