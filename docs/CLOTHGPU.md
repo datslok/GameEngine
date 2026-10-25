@@ -303,13 +303,13 @@ Later, for the dressmaking game: tethers for worn garments, the coarse simulatio
 
 ## Where it goes in the roadmap
 
-Phase 7's items change (to be agreed before editing `ROADMAP.md`):
+Agreed with the user on Oct 25, 2026; phase 7's items in `ROADMAP.md` changed to match:
 
-- "A faster barrier for the coloured solve ... or the GPU" becomes steps 1-2.
-- New items for steps 3 and 4.
-- "Self-collision" and "Untangling pass" become step 5, the untangling pass dropped (the motion bound makes it unnecessary for cloth that starts clean).
+- "A faster barrier for the coloured solve ... or the GPU" became steps 1-2 (the CPU barrier stays an option for the CPU path).
+- Steps 3 and 4 are new items.
+- "Self-collision" and "Untangling pass" became step 5, the untangling pass dropped (the motion bound makes it unnecessary for cloth that starts clean).
 - "Collision with a mannequin" stays as it is (step 6).
-- "Optional, later: IPC" stays as the offline reference.
+- "Optional, later: IPC" stays, as the offline reference.
 
 ## Sources
 
