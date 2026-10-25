@@ -119,6 +119,7 @@ void testClothGrab();
 void testClothBending();
 void testClothCollision();
 void testClothParallel();
+void testClothYardstick();
 void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
@@ -262,6 +263,7 @@ int main(){
     testClothBending();
     testClothCollision();
     testClothParallel();
+    testClothYardstick();
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();

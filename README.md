@@ -269,6 +269,7 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides |
 | `make golden` | Renders every game's golden views and compares them with the references in `tests/golden/<GPU>/<game>/`. Needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/<game>/` |
 | `make golden-save` | Renders the golden views and saves them as the new references. Only on purpose, after a change that is meant to alter the picture |
+| `make yardstick` | Measures the cloth solver: a 1 m sheet at four resolutions, its stretch, sag and cost a tick (release build; `docs/CLOTHGPU.md` holds the numbers) |
 | `make gputest` | Runs every shader library's functions in compute shaders on the GPU and compares them with their C++ mirrors (`build/gputests.exe`), then the golden images. Needs a GPU; `make gputest-release` for the optimised build |
 
 **Good to know**

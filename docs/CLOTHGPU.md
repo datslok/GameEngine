@@ -288,11 +288,29 @@ Before any solver is chosen, tests that measure the problem, on the CPU and the 
 - **Self-collision:** a sheet dropped onto itself into a pile, checked for intersections every frame (phase 7's second milestone), and a twisted sheet.
 - **GPU against CPU:** the shader library's functions against their C++ mirrors (`make gputest`), as for every other shader library.
 
+**Measured** (`make yardstick`, release, 16 threads, Oct 25 2026: today's CPU solver, XPBD with isometric bending, the default cotton, settled 10 s):
+
+| Squares | Points | Substeps | Path stretch | Worst edge | Sag (m) | Moved in the last second (mm) | ms a tick |
+|---|---|---|---|---|---|---|---|
+| 25 | 676 | 15 | 0.97% | 5.8% | 1.007 | 0.11 | 0.42 |
+| 25 | 676 | 60 | 0.31% | 1.5% | 1.002 | 0.13 | 1.64 |
+| 50 | 2,601 | 15 | 3.2% | 43% | 1.023 | 0.31 | 1.65 |
+| 50 | 2,601 | 60 | 0.39% | 3.6% | 1.003 | 4.35 | 6.58 |
+| 100 | 10,201 | 15 | 9.7% | 210% | 1.074 | 13.9 | 4.90 |
+| 100 | 10,201 | 60 | 0.87% | 17% | 1.007 | 2.67 | 19.8 |
+| 200 | 40,401 | 15 | 36% | 872% | 1.311 | 14.4 | 16.2 |
+| 200 | 40,401 | 60 | 4.7% | 130% | 1.027 | 55.0 | 69.4 |
+
+- **The low-frequency error, measured:** the fabric should stretch about 0.15%. At 15 substeps the path stretch roughly triples with each halving of the squares, 1% to 36%, and the 200 sheet hangs 31 cm too low. Four times the substeps (and four times the cost) cuts it about eightfold but does not stop the growth.
+- **The worst edge is not all the solver's:** each pin is a single point, and a point holding a sheet has a stress that grows without bound near it even in the exact solution, so the edges at the pins stretch more on a finer mesh whatever the solver. Path stretch and sag are the yardstick's main numbers; the worst edge shows where the error sits.
+- **Not quite settled** at 60 substeps on the finer sheets (a few cm a second on the 200): the stiffer sheet still sways a little after 10 s, under 0.5 /s drag.
+- **The goal for the later steps:** the same path stretch and sag on every rung, near 0.15% and 1.00 m, at no more than 60 substeps' cost.
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.
 
-1. **The yardstick.** The resolution ladder on today's CPU solver, measured and recorded. Small, and it tells every later step whether it helped.
+1. **The yardstick (done, `cloth-yardstick`).** The resolution ladder on today's CPU solver, measured and recorded (Part 5). Small, and it tells every later step whether it helped.
 2. **The GPU cloth framework.** The GPU-resident design (Part 4) with today's XPBD solver ported as it is (coloured, our units), its GLSL library mirrored by the CPU solver and checked by GPU tests. The big sheet on the GPU, drawn from its buffer, picked and grabbed through the late readback. Measured on the ladder.
 3. **The low-frequency layer.** Hierarchical levels with unilateral geodesic limits (Müller 2008), CPU and GPU, judged on the ladder. Expected to be the biggest visible gain for large garments.
 4. **Vertex Block Descent as a second local solver,** on the same framework: Stable Neo-Hookean membrane in N/m from our fabric's stiffness, our bending energy, point colouring, the adaptive guess, Chebyshev to try. Judged against XPBD on the ladder and cantilever. Keep the better, or both if each wins somewhere.

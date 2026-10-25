@@ -86,10 +86,20 @@ LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments) {
             }
 
             options.golden = argument == "--golden-save" ? GoldenMode::Save : GoldenMode::Check;
+        } else if (argument == "--cloth-yardstick") {
+            if (options.clothYardstick) {
+                throw std::invalid_argument("Give --cloth-yardstick once");
+            }
+
+            options.clothYardstick = true;
         } else {
             throw std::invalid_argument("Unknown option \"" + argument + "\". Options: --game <" + gameNames() +
-                                        ">, --golden-save, --golden-check");
+                                        ">, --golden-save, --golden-check, --cloth-yardstick");
         }
+    }
+
+    if (options.clothYardstick && (gameNamed || options.golden)) {
+        throw std::invalid_argument("--cloth-yardstick plays no game: give it alone");
     }
 
     return options;

@@ -92,7 +92,7 @@ RUNTIME_DLLS := $(FSR_DLL) $(STREAMLINE_DLLS)
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test shaders clean release run-release test-release golden golden-save gputest gputest-release
+.PHONY: all run test shaders clean release run-release test-release golden golden-save gputest gputest-release yardstick
 
 all: $(TARGET) $(RUNTIME_DLLS) shaders
 
@@ -214,6 +214,11 @@ test-release:
 
 gputest-release:
 	$(MAKE) BUILD=release gputest
+
+# The cloth yardstick (app/cloth_yardstick_run.h) on the release build, whose times are the ones to compare.
+yardstick:
+	$(MAKE) BUILD=release all
+	./build/release/game.exe --cloth-yardstick
 
 clean:
 	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/*.dll build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)
