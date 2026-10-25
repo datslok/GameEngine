@@ -83,30 +83,41 @@ namespace {
         assert(sum.length() < 1e-4f);
     }
 
-    // A folded hinge with no give (and free points) opens back towards flat, all the way over repeated solves.
-    void testFoldedHingeOpens() {
-        const std::array<Vec3, 4> folded = hinge(0.6f * pi);
+    // A hinge's points with the given inverse masses.
+    ClothParticles hingeParticles(const std::array<Vec3, 4>& points, const std::array<float, 4>& inverseMasses) {
         ClothParticles particles;
-        particles.positions.assign(folded.begin(), folded.end());
+        particles.positions.assign(points.begin(), points.end());
         particles.previousPositions = particles.positions;
         particles.velocities.assign(4, Vec3{0.0f, 0.0f, 0.0f});
-        particles.inverseMasses.assign(4, 1.0f);
-        const std::vector<BendConstraint> hinges{BendConstraint{0, 1, 2, 3, 0.0f, 3.0f}};
+        particles.inverseMasses.assign(inverseMasses.begin(), inverseMasses.end());
+        return particles;
+    }
 
-        const float before = std::abs(hingeAngle(particles.positions[0], particles.positions[1], particles.positions[2], particles.positions[3]));
-        solveBend(particles, hinges, 1e6f, 0.001f);
-        const float once = std::abs(hingeAngle(particles.positions[0], particles.positions[1], particles.positions[2], particles.positions[3]));
-        assert(once < 0.5f * before);
+    float angleOf(const ClothParticles& particles) {
+        return std::abs(hingeAngle(particles.positions[0], particles.positions[1], particles.positions[2], particles.positions[3]));
+    }
+
+    // A folded hinge with no give (and free points) opens back towards flat, all the way over repeated solves.
+    void foldedHingeOpens(ClothParticles& particles, const std::vector<BendConstraint>& hinges, BendingModel model) {
+        const float before = angleOf(particles);
+        solveBend(particles, hinges, 1e6f, 0.001f, model);
+        assert(angleOf(particles) < 0.5f * before);
         for (int solve = 0; solve < 20; ++solve) {
-            solveBend(particles, hinges, 1e6f, 0.001f);
+            solveBend(particles, hinges, 1e6f, 0.001f, model);
         }
-        assert(std::abs(hingeAngle(particles.positions[0], particles.positions[1], particles.positions[2], particles.positions[3])) < 1e-3f);
+        assert(angleOf(particles) < 1e-3f);
+    }
+
+    void testFoldedHingeOpens() {
+        ClothParticles particles = hingeParticles(hinge(0.6f * pi), {1.0f, 1.0f, 1.0f, 1.0f});
+        foldedHingeOpens(particles, {BendConstraint{0, 1, 2, 3, 0.0f, 3.0f}}, BendingModel::Hinge);
     }
 
     // How far a strip clamped along its first two columns, sticking out level, droops at its free end once it settles.
-    float cantileverDroop(int columns, int rows, float bendingStiffness, int substeps = 15) {
+    float cantileverDroop(int columns, int rows, float bendingStiffness, int substeps = 15, BendingModel model = BendingModel::Hinge) {
         ClothSettings settings;
         settings.bendingStiffness = bendingStiffness;
+        settings.bendingModel = model;
         settings.drag = 3.0f;
         settings.substeps = substeps;
         const Mat4 level = Mat4::rotationX(-0.5f * pi);
@@ -178,6 +189,115 @@ namespace {
         assert(threw);
     }
 
+    /*
+    * Isometric bending's weights (Bergou et al. 2006, scaled by -1 / l): each wing 1 / its distance from the edge, each
+    * end of the edge minus the wings' weights shared by where along the edge they lie. They sum to zero and send the
+    * flat rest hinge to C = 0, so a flat sheet feels no bending.
+    */
+    void testIsometricWeights() {
+        const std::array<Vec3, 4> square = hinge(0.0f);
+        const std::array<float, 4> even = isometricBendWeights(square[0], square[1], square[2], square[3]);
+        assert(near(even[0], 1.0f, 1e-6f) && near(even[1], 1.0f, 1e-6f));
+        assert(near(even[2], -1.0f, 1e-6f) && near(even[3], -1.0f, 1e-6f));
+
+        // Wings at different heights and places along the edge: 1 / 0.5 and 1 / 2, at 0.2 and 0.9 of the way.
+        const std::array<float, 4> skewed =
+            isometricBendWeights(Vec3{0.2f, 0.5f, 0.0f}, Vec3{0.9f, -2.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f});
+        assert(near(skewed[0], 2.0f, 1e-5f) && near(skewed[1], 0.5f, 1e-5f));
+        assert(near(skewed[2], -1.65f, 1e-5f) && near(skewed[3], -0.85f, 1e-5f));
+
+        // Every hinge of a sheet at rest, and the sheet moved and turned as a whole: no curvature.
+        const Mesh sheet = Mesh::grid(3, 2, 3.0f, 2.0f);
+        const Mat4 moved = Mat4::translation(1.0f, 2.0f, -3.0f) * Mat4::rotationX(0.7f) * Mat4::rotationY(-1.1f);
+        for (const BendConstraint& bend : bendConstraints(sheet)) {
+            const std::array<float, 4>& weights = bend.isometricWeights;
+            assert(near(weights[0] + weights[1] + weights[2] + weights[3], 0.0f, 1e-5f));
+            const auto at = [&](std::uint32_t index) {
+                return transformPoint(moved, Vec3{sheet.vertices[index].x, sheet.vertices[index].y, sheet.vertices[index].z});
+            };
+            assert(isometricCurvature(weights, at(bend.wing0), at(bend.wing1), at(bend.edgeStart), at(bend.edgeEnd)).length() < 1e-5f);
+        }
+
+        // The weights come from each triangle's own shape, so a hinge made folded still rests flat.
+        const std::array<Vec3, 4> folded = hinge(0.6f * pi);
+        const std::array<float, 4> fromFolded = isometricBendWeights(folded[0], folded[1], folded[2], folded[3]);
+        for (int point = 0; point < 4; ++point) {
+            assert(near(fromFolded[point], even[point], 1e-5f));
+        }
+    }
+
+    /*
+    * A hinge folded by an angle without stretching has |C| = 2 sin(angle / 2): the angle itself while small, so its
+    * energy matches the angle model's for the same stiffness, and a little softer in deep folds (1.41 against 1.57 at a
+    * quarter turn).
+    */
+    void testIsometricCurvature() {
+        const std::array<Vec3, 4> flat = hinge(0.0f);
+        const std::array<float, 4> weights = isometricBendWeights(flat[0], flat[1], flat[2], flat[3]);
+        for (const float angle : {0.01f, 0.5f * pi, -0.5f * pi, 0.9f * pi}) {
+            const std::array<Vec3, 4> points = hinge(angle);
+            const float size = isometricCurvature(weights, points[0], points[1], points[2], points[3]).length();
+            assert(near(size, 2.0f * std::abs(std::sin(0.5f * angle)), 1e-5f));
+        }
+        const std::array<Vec3, 4> slight = hinge(0.01f);
+        assert(near(isometricCurvature(weights, slight[0], slight[1], slight[2], slight[3]).length(),
+                    std::abs(hingeAngle(slight[0], slight[1], slight[2], slight[3])), 1e-6f));
+    }
+
+    Vec3 centreOfMass(const ClothParticles& particles) {
+        Vec3 sum{0.0f, 0.0f, 0.0f};
+        float mass = 0.0f;
+        for (std::size_t point = 0; point < particles.size(); ++point) {
+            sum = sum + particles.positions[point] * (1.0f / particles.inverseMasses[point]);
+            mass += 1.0f / particles.inverseMasses[point];
+        }
+        return sum * (1.0f / mass);
+    }
+
+    /*
+    * A folded hinge opens back to flat under isometric bending too, and since the weights sum to zero the centre of mass
+    * stays put whatever the masses. Pinned points never move.
+    */
+    void testIsometricFoldOpens() {
+        const std::array<Vec3, 4> folded = hinge(0.6f * pi);
+        const std::array<Vec3, 4> flat = hinge(0.0f);
+        BendConstraint bend{0, 1, 2, 3, 0.0f, 3.0f};
+        bend.isometricWeights = isometricBendWeights(flat[0], flat[1], flat[2], flat[3]);
+        const std::vector<BendConstraint> hinges{bend};
+
+        ClothParticles particles = hingeParticles(folded, {1.0f, 2.0f, 0.5f, 1.0f});
+        const Vec3 centre = centreOfMass(particles);
+        foldedHingeOpens(particles, hinges, BendingModel::Isometric);
+        assert((centreOfMass(particles) - centre).length() < 1e-5f);
+
+        // The edge pinned: only the wings move. Everything pinned: nothing does.
+        ClothParticles edgePinned = hingeParticles(folded, {1.0f, 1.0f, 0.0f, 0.0f});
+        solveBend(edgePinned, hinges, 1e6f, 0.001f, BendingModel::Isometric);
+        assert(std::memcmp(&edgePinned.positions[2], &folded[2], 2 * sizeof(Vec3)) == 0);
+        assert((edgePinned.positions[1] - folded[1]).length() > 0.0f);
+        ClothParticles allPinned = hingeParticles(folded, {0.0f, 0.0f, 0.0f, 0.0f});
+        solveBend(allPinned, hinges, 1e6f, 0.001f, BendingModel::Isometric);
+        assert(std::memcmp(allPinned.positions.data(), folded.data(), sizeof(folded)) == 0);
+    }
+
+    /*
+    * Isometric bending is the default, and a strip under it droops like one under the angle model: stiffer less, and for
+    * the same stiffness near the angle model's droop.
+    */
+    void testIsometricCantilever() {
+        assert(ClothSettings{}.bendingModel == BendingModel::Isometric);
+
+        const float stiff = cantileverDroop(12, 4, 5e-3f, 15, BendingModel::Isometric);
+        const float soft = cantileverDroop(12, 4, 5e-4f, 15, BendingModel::Isometric);
+        assert(stiff > 0.0f && stiff < soft);
+
+        for (const float stiffness : {5e-3f, 5e-4f}) {
+            const float isometric = cantileverDroop(12, 4, stiffness, 15, BendingModel::Isometric);
+            const float angle = cantileverDroop(12, 4, stiffness, 15, BendingModel::Hinge);
+            assert(std::abs(isometric - angle) < 0.15f * angle);
+        }
+    }
+
     // With bending and moving pins, the same run twice gives the same bits.
     void testDeterministic() {
         const auto run = [] {
@@ -203,5 +323,9 @@ void testClothBending() {
     testFoldedHingeOpens();
     testCantilever();
     testMovingPins();
+    testIsometricWeights();
+    testIsometricCurvature();
+    testIsometricFoldOpens();
+    testIsometricCantilever();
     testDeterministic();
 }

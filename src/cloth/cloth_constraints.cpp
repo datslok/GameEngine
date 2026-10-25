@@ -160,9 +160,34 @@ std::vector<BendConstraint> bendConstraints(const Mesh& mesh) {
         }
         bend.restAngle = hingeAngle(wing0, wing1, edgeStart, edgeEnd);
         bend.stiffnessShare = 3.0f * frame.edge.lengthSquared() / area;
+        bend.isometricWeights = isometricBendWeights(wing0, wing1, edgeStart, edgeEnd);
         constraints.push_back(bend);
     }
     return constraints;
+}
+
+/*
+* A triangle's doubled area is the edge's length times the wing's height, so the height comes from the frame's normals.
+* Each wing's foot lies a share t along the edge; giving the ends -(K (1 - t)) and -(K t) puts the weights' sum at the
+* foot, so for a flat hinge the wings' pulls across the edge (K h each way) cancel and so do those along it.
+*/
+std::array<float, 4> isometricBendWeights(const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd) {
+    const HingeFrame frame = hingeFrame(wing0, wing1, edgeStart, edgeEnd);
+    if (squashed(frame)) {
+        return {};
+    }
+
+    const float lengthSquared = frame.edge.lengthSquared();
+    const float edgeLength = std::sqrt(lengthSquared);
+    const float weight0 = edgeLength / frame.normal0.length();
+    const float weight1 = edgeLength / frame.normal1.length();
+    const float along0 = (wing0 - edgeStart).dot(frame.edge) / lengthSquared;
+    const float along1 = (wing1 - edgeStart).dot(frame.edge) / lengthSquared;
+    return {weight0, weight1, -(weight0 * (1.0f - along0) + weight1 * (1.0f - along1)), -(weight0 * along0 + weight1 * along1)};
+}
+
+Vec3 isometricCurvature(const std::array<float, 4>& weights, const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd) {
+    return wing0 * weights[0] + wing1 * weights[1] + edgeStart * weights[2] + edgeEnd * weights[3];
 }
 
 float hingeAngle(const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd) {
@@ -197,13 +222,54 @@ namespace {
         }
     }
 
+    // One hinge's isometric XPBD step (see solveBend).
+    inline void solveIsometricBendConstraint(ClothParticles& particles, const BendConstraint& bend, float bendingStiffness, float perSecondSquared) {
+        std::vector<Vec3>& positions = particles.positions;
+        const std::uint32_t points[4]{bend.wing0, bend.wing1, bend.edgeStart, bend.edgeEnd};
+        const std::array<float, 4>& weights = bend.isometricWeights;
+
+        float moving = 0.0f;
+        Vec3 curvature{0.0f, 0.0f, 0.0f};
+        for (int point = 0; point < 4; ++point) {
+            moving += particles.inverseMasses[points[point]] * weights[point] * weights[point];
+            curvature = curvature + positions[points[point]] * weights[point];
+        }
+        if (moving == 0.0f) {
+            return;
+        }
+
+        const float scaledCompliance = perSecondSquared / (bendingStiffness * bend.stiffnessShare);
+        const Vec3 multiplier = curvature * (-1.0f / (moving + scaledCompliance));
+        for (int point = 0; point < 4; ++point) {
+            positions[points[point]] = positions[points[point]] + multiplier * (particles.inverseMasses[points[point]] * weights[point]);
+        }
+    }
+
     /*
     * Constraints a job takes at a time, picked by measuring the big sheet (100 x 100) over a sweep: stretch about 20
-    * microseconds a job, bending about 12. Smaller jobs cost more to hand out than they save; larger ones leave threads
-    * idle. A sheet the size of the cloth lab's others has colours of a job or two, so they run on the caller.
+    * microseconds a job, hinge bending about 12. Smaller jobs cost more to hand out than they save; larger ones leave
+    * threads idle. A sheet the size of the cloth lab's others has colours of a job or two, so they run on the caller.
+    * Isometric hinges are so cheap that their jobs must be big: each colour touches nearly every point, and handing
+    * small pieces to other cores moves the points' cache lines between them every colour, costing more than the
+    * arithmetic (256 a job: 23 ms a tick on 16 threads against 7 on one; 2048: 6.1).
     */
     constexpr std::size_t stretchPerJob = 2048;
-    constexpr std::size_t bendPerJob = 256;
+    constexpr std::size_t hingeBendPerJob = 256;
+    constexpr std::size_t isometricBendPerJob = 2048;
+
+    // Calls solve with the model's one-hinge step and job size, chosen once for the whole pass rather than per hinge.
+    template <typename Solve>
+    void withBendStep(BendingModel model, Solve solve) {
+        if (model == BendingModel::Isometric) {
+            solve([](ClothParticles& particles, const BendConstraint& bend, float stiffness, float perSecondSquared) {
+                solveIsometricBendConstraint(particles, bend, stiffness, perSecondSquared);
+            }, isometricBendPerJob);
+        } else {
+            solve([](ClothParticles& particles, const BendConstraint& bend, float stiffness, float perSecondSquared) {
+                solveBendConstraint(particles, bend, stiffness, perSecondSquared);
+            }, hingeBendPerJob);
+        }
+    }
 
     // The lowest colour none of the points has, marked on them; the colour numbers as given by pointsOf.
     template <typename Constraint, typename PointsOf>
@@ -246,15 +312,17 @@ namespace {
     }
 }
 
-void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds) {
+void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds, BendingModel model) {
     if (bendingStiffness <= 0.0f) {
         return;
     }
 
     const float perSecondSquared = 1.0f / (seconds * seconds);
-    for (const BendConstraint& bend : constraints) {
-        solveBendConstraint(particles, bend, bendingStiffness, perSecondSquared);
-    }
+    withBendStep(model, [&](auto step, std::size_t) {
+        for (const BendConstraint& bend : constraints) {
+            step(particles, bend, bendingStiffness, perSecondSquared);
+        }
+    });
 }
 
 std::vector<std::uint32_t> colourStretch(std::vector<StretchConstraint>& constraints, std::size_t pointCount) {
@@ -281,16 +349,18 @@ void solveStretchColours(ClothParticles& particles, const std::vector<StretchCon
 }
 
 void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
-                      float bendingStiffness, float seconds, JobSystem& jobs) {
+                      float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs) {
     if (bendingStiffness <= 0.0f) {
         return;
     }
 
     const float perSecondSquared = 1.0f / (seconds * seconds);
-    for (std::size_t colour = 0; colour + 1 < colours.size(); ++colour) {
-        const std::uint32_t first = colours[colour];
-        jobs.parallelFor(colours[colour + 1] - first, bendPerJob, [&](std::size_t index) {
-            solveBendConstraint(particles, constraints[first + index], bendingStiffness, perSecondSquared);
-        });
-    }
+    withBendStep(model, [&](auto step, std::size_t perJob) {
+        for (std::size_t colour = 0; colour + 1 < colours.size(); ++colour) {
+            const std::uint32_t first = colours[colour];
+            jobs.parallelFor(colours[colour + 1] - first, perJob, [&](std::size_t index) {
+                step(particles, constraints[first + index], bendingStiffness, perSecondSquared);
+            });
+        }
+    });
 }

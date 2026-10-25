@@ -36,7 +36,8 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
 
 /*
 * Which stations have cloth, read when the lab starts. The big sheet (10,000 points) is the solver's heaviest work: about
-* 9 ms a tick on 16 threads, more than a tick's 8.3, so with it on the lab runs a little slower than real time. Off by
+* 6.3 ms a tick on 16 threads with isometric bending, inside a tick's 8.3 (with the hinge model about 11, so the lab
+* runs a little slower than real time). Off by
 * default; on for measuring the solver's threads.
 */
 struct ClothLabStationSettings {

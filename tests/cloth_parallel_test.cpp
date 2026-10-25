@@ -49,8 +49,10 @@ namespace {
     }
 
     // A hanging sheet with a hand, moving pins and a ball to land on: everything a tick solves.
-    Cloth busySheet() {
-        Cloth cloth = makeCloth(Mesh::grid(40, 40, 1.5f, 1.5f), Mat4::translation(0.0f, 1.0f, 0.0f) * Mat4::rotationX(-0.5f * pi), ClothSettings{});
+    Cloth busySheet(BendingModel model) {
+        ClothSettings settings;
+        settings.bendingModel = model;
+        Cloth cloth = makeCloth(Mesh::grid(40, 40, 1.5f, 1.5f), Mat4::translation(0.0f, 1.0f, 0.0f) * Mat4::rotationX(-0.5f * pi), settings);
         addClothPin(cloth, 40 * 41);
         addClothPin(cloth, 40 * 41 + 40);
         return cloth;
@@ -63,18 +65,21 @@ namespace {
         stepCloth(cloth, 1.0f / 120.0f, ball, jobs);
     }
 
-    // On one thread or eight, a cloth comes out the same to the last bit: within a colour, the order cannot matter.
+    // On one thread or eight, a cloth comes out the same to the last bit with either bending: within a colour, the order
+    // cannot matter.
     void testManyThreadsMatchOne() {
         JobSystem serial{0};
         JobSystem parallel{7};
-        Cloth one = busySheet();
-        Cloth many = busySheet();
-        for (int tick = 0; tick < 60; ++tick) {
-            stepBusy(one, tick, serial);
-            stepBusy(many, tick, parallel);
+        for (const BendingModel model : {BendingModel::Isometric, BendingModel::Hinge}) {
+            Cloth one = busySheet(model);
+            Cloth many = busySheet(model);
+            for (int tick = 0; tick < 60; ++tick) {
+                stepBusy(one, tick, serial);
+                stepBusy(many, tick, parallel);
+            }
+            assert(std::memcmp(one.particles.positions.data(), many.particles.positions.data(), one.particles.size() * sizeof(Vec3)) == 0);
+            assert(std::memcmp(one.particles.velocities.data(), many.particles.velocities.data(), one.particles.size() * sizeof(Vec3)) == 0);
         }
-        assert(std::memcmp(one.particles.positions.data(), many.particles.positions.data(), one.particles.size() * sizeof(Vec3)) == 0);
-        assert(std::memcmp(one.particles.velocities.data(), many.particles.velocities.data(), one.particles.size() * sizeof(Vec3)) == 0);
     }
 
     // Several cloths stepped at once, a job each, come out as they do one after another.

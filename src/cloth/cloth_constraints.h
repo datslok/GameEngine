@@ -41,6 +41,9 @@ void solveStretch(ClothParticles& particles, const std::vector<StretchConstraint
 * C = angle - restAngle, the angle between the triangles (0 flat). stiffnessShare is 3 l^2 / A from the rest shape (l the
 * edge's length, A the two triangles' area; discrete shells, Grinspun et al. 2003), so a hinge's compliance is
 * 1 / (B stiffnessShare) for a fabric of bending rigidity B (N m), and the same B drapes alike at any mesh resolution.
+*
+* The same hinge also carries isometric bending's weights (isometricBendWeights), for the cheaper model, which shares
+* the points, the stiffness share and so the colouring.
 */
 struct BendConstraint {
     std::uint32_t wing0 = 0;
@@ -49,10 +52,40 @@ struct BendConstraint {
     std::uint32_t edgeEnd = 0;
     float restAngle = 0.0f;
     float stiffnessShare = 0.0f;
+    std::array<float, 4> isometricWeights{}; // wing0, wing1, edgeStart, edgeEnd
+};
+
+/*
+* How a cloth bends:
+* - Isometric (Bergou, Wardetzky, Harmon, Zorin & Grinspun 2006, "A Quadratic Bending Model for Inextensible Surfaces"):
+*   cloth barely stretches, so its bending energy is exactly quadratic in the positions, through a fixed weighted sum of
+*   the hinge's points. About three times cheaper than the angle; always rests flat, as cloth cut from flat panels does.
+* - Hinge: the true angle between the triangles (Bridson's gradient), resting at the mesh's own angles, for creases
+*   pressed into a curved rest shape (a pleat).
+*/
+enum class BendingModel {
+    Isometric,
+    Hinge,
 };
 
 // Every edge of the mesh shared by exactly two triangles, sorted by its ends, at its angle in the mesh.
 std::vector<BendConstraint> bendConstraints(const Mesh& mesh);
+
+/*
+* Isometric bending's weights K for a hinge's points (wing0, wing1, edgeStart, edgeEnd): each wing 1 / its distance from
+* the edge's line, each end of the edge minus the wings' weights shared by where along the edge their feet lie (the
+* nearer end taking more). They sum to zero and send any flat hinge to zero, so moving or turning flat cloth bends
+* nothing. Bergou et al.'s cotangent weights times -1 / l, scaled so the curvature below is about the angle: a hinge's
+* energy 1/2 B stiffnessShare |C|^2 then matches the angle model's for small folds. From each triangle's own shape, so
+* the same for a hinge made folded. All zero for a squashed hinge.
+*/
+std::array<float, 4> isometricBendWeights(const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd);
+
+/*
+* The hinge's curvature C = sum of K_i x_i, a vector: zero flat, and 2 sin(angle / 2) long for a hinge folded by an
+* angle without stretching (the angle itself while small).
+*/
+Vec3 isometricCurvature(const std::array<float, 4>& weights, const Vec3& wing0, const Vec3& wing1, const Vec3& edgeStart, const Vec3& edgeEnd);
 
 /*
 * The hinge's angle, -pi..pi: 0 flat, its sign telling which way it is folded. From atan2 of the sine and cosine
@@ -71,9 +104,13 @@ std::array<Vec3, 4> hingeAngleGradient(const Vec3& wing0, const Vec3& wing1, con
 /*
 * One pass over the hinges in order, XPBD's multiplier step (starting at 0): delta lambda = -C / (sum of w |grad|^2 +
 * alpha / seconds^2), alpha = 1 / (bendingStiffness stiffnessShare), each point moved by its w times its gradient times
-* delta lambda; C is wrapped to -pi..pi. No bending at all for a stiffness of 0.
+* delta lambda. No bending at all for a stiffness of 0.
+* - Hinge: C is the angle less the rest angle, wrapped to -pi..pi, its gradient Bridson's.
+* - Isometric: C is the curvature vector, whose gradient for point i is just K_i (times the identity), so the step is
+*   one vector, delta lambda = -C / (sum of w_i K_i^2 + alpha / seconds^2), and point i moves by w_i K_i delta lambda:
+*   no normals, angles or square roots. The weights sum to zero, so the centre of mass stays put.
 */
-void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds);
+void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds, BendingModel model);
 
 /*
 * Graph colouring: reorder the constraints into colours, groups in which no two share a point, each constraint taking
@@ -90,4 +127,4 @@ std::vector<std::uint32_t> colourBend(std::vector<BendConstraint>& constraints, 
 void solveStretchColours(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, const std::vector<std::uint32_t>& colours,
                          float compliance, float seconds, JobSystem& jobs);
 void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
-                      float bendingStiffness, float seconds, JobSystem& jobs);
+                      float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs);
