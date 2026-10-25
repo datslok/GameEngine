@@ -3,8 +3,17 @@
 #include "physics/overlap.h"
 #include "scene/deforming_mesh.h"
 
+#include <array>
 #include <cmath>
 #include <stdexcept>
+
+namespace {
+    // In the order of BendingModel's values.
+    constexpr std::array<const char*, 2> bendingModelNames{"Isometric", "Hinge"};
+
+    static_assert(static_cast<int>(BendingModel::Isometric) == 0 && static_cast<int>(BendingModel::Hinge) == 1,
+                  "bendingModelNames lists the models by their values");
+}
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Area density", settings.areaDensity,
@@ -15,6 +24,7 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Drag", settings.drag, {.min = 0.0f, .max = 100.0f, .sliderMax = 5.0f, .unit = "per second"});
     visitor.field("Grab compliance", settings.grabCompliance, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.01f, .unit = "m/N"});
     visitor.field("Bending stiffness", settings.bendingStiffness, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.0005f, .unit = "N m"});
+    visitor.choice("Bending model", settings.bendingModel, bendingModelNames);
     visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 0.1f, .sliderMax = 0.02f, .unit = "m"});
     visitor.field("Static friction", settings.staticFriction, {.min = 0.0f, .max = 2.0f});
     visitor.field("Kinetic friction", settings.kineticFriction, {.min = 0.0f, .max = 2.0f});
@@ -120,9 +130,9 @@ namespace {
                 solveStretchColours(particles, constraints.stretch, constraints.stretchColours, settings.stretchCompliance, substep, jobs);
             }
             if (constraints.bendColours.empty()) {
-                solveBend(particles, constraints.bend, settings.bendingStiffness, substep);
+                solveBend(particles, constraints.bend, settings.bendingStiffness, substep, settings.bendingModel);
             } else {
-                solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep, jobs);
+                solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep, settings.bendingModel, jobs);
             }
             if (constraints.grab) {
                 solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);

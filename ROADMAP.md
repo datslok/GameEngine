@@ -301,7 +301,8 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [ ] Untangling pass (Baraff, Witkin & Kass 2003, "Untangling Cloth") as a safety net: finds intersections that slipped through anyway and pushes the tangled regions apart over the next steps, instead of letting them lock together for good
 - [x] Solver on several threads: a job per cloth, coloured constraints on every core (bit for bit the one-thread result), spinning workers, `src/cloth/` optimised in debug, a big sheet to measure (`cloth-parallel`)
 - [x] A tick budget: ticks a frame may run within 1/60 s, the rest dropped, so an overloaded simulation runs in slow motion instead of spiralling to 3 fps (`tick-budget`)
-- [ ] A faster barrier for the coloured solve: a 100 x 100 sheet gains only 2.8 times on 16 threads (26 to 9.3 ms a tick), its 210 colour barriers a tick costing about 25 microseconds each against 6 of work. Fixed-thread loops meeting at a spinning counter, as cloth solvers use, and one thread per physical core (spinning on both of a core's threads slowed the work), or the GPU
+- [x] Isometric bending (Bergou et al. 2006): about four times cheaper than the hinge angle, the hinge kept as an option for creases (`isometric-bending`)
+- [ ] A faster barrier for the coloured solve: a 100 x 100 sheet gained only 2.8 times on 16 threads with hinge bending (26 to 9.3 ms a tick; with isometric bending 7 to 6.3, the coloured solve's cache lines moving between cores costing as much as the work), its 210 colour barriers a tick costing about 25 microseconds each against 6 of work. Fixed-thread loops meeting at a spinning counter, as cloth solvers use, and one thread per physical core (spinning on both of a core's threads slowed the work), or the GPU
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
   - Bending stiffness (silk vs denim), mass per area, friction

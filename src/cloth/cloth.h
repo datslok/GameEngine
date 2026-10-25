@@ -32,7 +32,9 @@
 *
 * Bending stiffness is the fabric's bending rigidity B, as the cantilever test measures it: silk about 1-5 micro N m,
 * cotton shirting about 10, denim 50-200. Its bending length (B / (areaDensity g))^(1/3), how far a strip sticks out
-* before it droops, is 1.7 cm for the default cotton, near real shirting's 2-3 cm. 0 bends freely.
+* before it droops, is 1.7 cm for the default cotton, near real shirting's 2-3 cm. 0 bends freely. The bending model
+* (BendingModel) is isometric by default, about three times cheaper than the hinge's angle; the hinge rests at the
+* mesh's own angles, for pressed creases.
 *
 * Against bodies the cloth keeps a thickness: real fabric is about a millimetre thick, but a small gap lets it rest on
 * a body instead of flickering half inside it. Friction is cotton's on a smooth surface.
@@ -45,6 +47,7 @@ struct ClothSettings {
     float drag = 0.5f;                 // per second
     float grabCompliance = 0.001f;     // m/N
     float bendingStiffness = 1e-5f;    // N m
+    BendingModel bendingModel = BendingModel::Isometric;
     float thickness = 0.005f;          // m
     float staticFriction = 0.6f;
     float kineticFriction = 0.4f;
