@@ -28,6 +28,18 @@ inline constexpr FloatTolerance arithmeticTolerance{.absolute = 1e-6f, .relative
 inline constexpr FloatTolerance transcendentalTolerance{.absolute = 1e-6f, .relative = 1e-4f};
 inline constexpr FloatTolerance exactTolerance{};
 
+/*
+* sin and cos are another matter: Vulkan allows them an absolute error, 2^-11 (about 5e-4) on -pi..pi, not a relative
+* one, so near a zero of cos the result may be off by far more than its own size (measured on an RTX 5080: 1e-4 where
+* cos is about 2e-4). A result that is amplitude times a sine or cosine gets that allowance times the amplitude, and
+* the transcendental relative one where it is large.
+*/
+inline constexpr float trigonometricAbsoluteError = 4.8828125e-4f; // 2^-11
+
+inline constexpr FloatTolerance trigonometricTolerance(float amplitude) {
+    return FloatTolerance{.absolute = trigonometricAbsoluteError * amplitude, .relative = 1e-4f};
+}
+
 // The compiled test shaders (tests/gpu/shaders, built by make gputest), from the repo root.
 inline std::string gpuTestShader(const char* name) {
     return std::string{"tests/gpu/shaders/"} + name + ".comp.spv";

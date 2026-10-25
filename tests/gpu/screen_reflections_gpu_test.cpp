@@ -107,9 +107,24 @@ namespace {
             const GpuVec4* in = &inputs[i * 7];
             const GpuVec4* out = &outputs[i * 2];
             const ScreenRay ray = screenRay(viewProjections[i], vec3From(in[4]), vec3From(in[5]), in[4][3], size);
-            report.check("screenRay start", pixelTolerance, ray.start, vec3From(out[0]));
-            report.check("screenRay step", pixelTolerance, ray.step, vec3From(out[1]));
-            report.check("screenRay end", endTolerance, ray.end, out[0][3]);
+            /*
+            * A ray whose far end is cut back to just in front of the camera divides by a w near SSR_NEAREST_W, so its step
+            * runs to millions of pixels and its rounding to a few tenths of a percent of that (measured: 0.3% of 7e7).
+            * The march never uses that much of it: what it uses is the step's direction on screen (an error in w scales
+            * x / w and y / w alike, so the direction is well-conditioned) and where the ray stops, start + step x end.
+            */
+            const Vec3 gpuStart = vec3From(out[0]);
+            const Vec3 gpuStep = vec3From(out[1]);
+            const float gpuEnd = out[0][3];
+            const Vec3 across{ray.step.x, ray.step.y, 0.0f};
+            const Vec3 gpuAcross{gpuStep.x, gpuStep.y, 0.0f};
+            report.check("screenRay start", pixelTolerance, ray.start, gpuStart);
+            // Clip x and y are sums of products far larger than themselves (a long ray seen nearly end on), which cancel
+            // digits: measured 1.6e-5 of the direction, past the arithmetic tolerance's 1e-5.
+            const FloatTolerance directionTolerance{.absolute = 1e-5f, .relative = 1e-4f};
+            report.check("screenRay direction", directionTolerance, across.normalized(), gpuAcross.normalized());
+            report.check("screenRay stop", pixelTolerance, ray.start + ray.step * ray.end, gpuStart + gpuStep * gpuEnd);
+            report.check("screenRay end", endTolerance, ray.end, gpuEnd);
         }
     }
 
