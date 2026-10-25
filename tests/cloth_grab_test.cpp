@@ -85,13 +85,20 @@ namespace {
         pinParticle(cloth.particles, 20);
         pinParticle(cloth.particles, 24);
 
-        // Pulled out of the sheet's plane and sideways at 1.2 m/s, within the sheet's reach of its pins.
+        // Pulled out of the sheet's plane and sideways at 1.2 m/s, within the sheet's reach of its pins. It keeps up on
+        // average; tick to tick it jiggles a few millimetres on the hand's spring (measured: about 80 Hz), so its speed
+        // at any one tick says little.
+        float halfway = 0.0f;
         for (int tick = 0; tick < 60; ++tick) {
             cloth.grab = ClothGrab{2, Vec3{0.01f * tick, -0.5f, 0.5f}};
             stepCloth(cloth, 1.0f / 120.0f);
+            if (tick == 29) {
+                halfway = cloth.particles.positions[2].x;
+            }
         }
         assert(nearVec(cloth.particles.positions[2], Vec3{0.01f * 59, -0.5f, 0.5f}, 0.05f));
-        assert(cloth.particles.velocities[2].x > 0.8f);
+        const float averageSpeed = (cloth.particles.positions[2].x - halfway) / (30.0f / 120.0f);
+        assert(near(averageSpeed, 1.2f, 0.2f));
     }
 
     // The sheet's momentum: its mass-weighted velocity, the velocity of its centre of mass.

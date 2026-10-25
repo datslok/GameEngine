@@ -34,6 +34,17 @@ struct ClothLabHookSettings {
 
 void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
 
+/*
+* Which stations have cloth, read when the lab starts. The big sheet (10,000 points) is the solver's heaviest work: about
+* 9 ms a tick on 16 threads, more than a tick's 8.3, so with it on the lab runs a little slower than real time. Off by
+* default; on for measuring the solver's threads.
+*/
+struct ClothLabStationSettings {
+    bool bigSheet = false;
+};
+
+void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor);
+
 inline constexpr float clothLabHookSpeed = 0.5f; // m/s
 inline constexpr float clothLabSmallestHookGap = 0.05f;
 
@@ -68,6 +79,10 @@ public:
     // ModelRenderer drawing it.
     Entity getSheet() const;
     Entity getDrapeSheet() const;
+
+    // The big sheet over the mat, if the stations have it (none otherwise).
+    Entity getBigSheet() const;
+    ClothLabStationSettings& getStationSettings();
     ClothSettings& getClothSettings();
     ClothLabHookSettings& getHookSettings();
     PlayerControls& getControls();
@@ -92,6 +107,11 @@ private:
     Vec3 hookMiddle;
 
     Entity drapeSheet;
+    Entity bigSheet;
+    ClothLabStationSettings stationSettings;
+
+    // Every sheet the lab has.
+    std::vector<Entity> sheets() const;
 
     // The hand, the sheet it holds, and how far from the eye it was grabbed: the hand stays that far along the pointer.
     std::optional<ClothGrab> sheetGrab;

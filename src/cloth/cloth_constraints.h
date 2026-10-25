@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cloth/cloth_particles.h"
+#include "core/job_system.h"
 #include "scene/mesh.h"
 
 #include <array>
@@ -73,3 +74,20 @@ std::array<Vec3, 4> hingeAngleGradient(const Vec3& wing0, const Vec3& wing1, con
 * delta lambda; C is wrapped to -pi..pi. No bending at all for a stiffness of 0.
 */
 void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds);
+
+/*
+* Graph colouring: reorder the constraints into colours, groups in which no two share a point, each constraint taking
+* the lowest colour none of its points has yet, in order, the constraints of a colour kept in their order. Returns where
+* each colour starts, then the end. Within a colour the constraints are independent, so they can be solved on many
+* threads at once with the same result to the last bit; solving the colours in turn is still Gauss-Seidel. Throws
+* std::length_error past 64 colours (a point in more than about 30 constraints).
+*/
+std::vector<std::uint32_t> colourStretch(std::vector<StretchConstraint>& constraints, std::size_t pointCount);
+std::vector<std::uint32_t> colourBend(std::vector<BendConstraint>& constraints, std::size_t pointCount);
+
+// solveStretch and solveBend over coloured constraints, each colour's constraints shared among the jobs' threads (a
+// colour with no more than a job's worth runs on the caller). The same result as the one-thread solves, to the last bit.
+void solveStretchColours(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, const std::vector<std::uint32_t>& colours,
+                         float compliance, float seconds, JobSystem& jobs);
+void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
+                      float bendingStiffness, float seconds, JobSystem& jobs);

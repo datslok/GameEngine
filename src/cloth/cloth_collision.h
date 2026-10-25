@@ -26,7 +26,8 @@ SurfacePoint surfacePoint(const Shape& shape, const Vec3& point);
 * inside a shape, or closer than settings.thickness, is pushed out along the normal to that distance. Then friction on
 * the positions (Macklin et al. 2014), Coulomb's law: the slide along the surface during this substep (from where the
 * point began it) is undone when shorter than staticFriction times the push, and otherwise shortened by kineticFriction
-* times the push. Pinned points are never moved.
+* times the push. Pinned points are never moved. On the caller: shared among threads it was measured slower (each
+* point's test is a few nanoseconds, less than handing it out costs).
 */
 void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings);
 

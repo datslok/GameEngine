@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/asset_manager.h"
+#include "core/job_system.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "engine/golden_view.h"
@@ -74,6 +75,16 @@ public:
         (void)visitor;
     }
 
+    // The engine's job system, for a game's work on every core (cloth). Until the engine gives it its own (before onInit),
+    // a game has serialJobs(), so a game run headless works the same on one thread.
+    JobSystem& getJobs() const {
+        return *jobs;
+    }
+
+    void useJobs(JobSystem& engineJobs) {
+        jobs = &engineJobs;
+    }
+
     // Golden image views (engine/golden.h): fixed scenes the renderer must keep drawing the same, optional.
     virtual std::vector<GoldenView> goldenViews() const {
         return {};
@@ -85,6 +96,9 @@ public:
         (void)world;
         (void)view;
     }
+
+private:
+    JobSystem* jobs = &serialJobs();
 };
 
 /*

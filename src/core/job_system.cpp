@@ -1,6 +1,7 @@
 #include "core/job_system.h"
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <stdexcept>
 
@@ -22,6 +23,11 @@ struct alignas(64) JobSystem::Pile {
 
 unsigned defaultWorkerCount() {
     return std::max(1u, std::thread::hardware_concurrency()) - 1;
+}
+
+JobSystem& serialJobs() {
+    static JobSystem serial{0};
+    return serial;
 }
 
 JobSystem::JobSystem(unsigned workerCount) {
@@ -185,6 +191,18 @@ void JobSystem::workerLoop(std::size_t pile) {
     Job job;
     while (true) {
         if (take(pile, job)) {
+            runJob(job, pile);
+            continue;
+        }
+
+        // Look again for a little while (giving the core to others between looks) before sleeping.
+        const auto spinUntil = std::chrono::steady_clock::now() + std::chrono::duration<double>(workerSpinSeconds);
+        bool found = false;
+        while (!found && std::chrono::steady_clock::now() < spinUntil && !stopping.load()) {
+            std::this_thread::yield();
+            found = queuedJobs.load() > 0 && take(pile, job);
+        }
+        if (found) {
             runJob(job, pile);
             continue;
         }

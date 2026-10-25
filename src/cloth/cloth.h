@@ -68,8 +68,11 @@ struct ClothPin {
 struct Cloth {
     ClothSettings settings;
     ClothParticles particles;
+    // Coloured (colourStretch, colourBend): each list sorted by colour, and where each colour starts.
     std::vector<StretchConstraint> stretch;
     std::vector<BendConstraint> bend;
+    std::vector<std::uint32_t> stretchColours;
+    std::vector<std::uint32_t> bendColours;
 
     // Pins the game moves, by setting their positions from its commands before a tick.
     std::vector<ClothPin> pins;
@@ -82,7 +85,7 @@ struct Cloth {
 };
 
 // A cloth from a mesh's vertices, placed in the world by placement, at rest, with the settings' fabric, a stretch
-// constraint along every edge and a bending constraint on every inside edge of the placed mesh.
+// constraint along every edge and a bending constraint on every inside edge of the placed mesh, coloured.
 Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& settings);
 
 // Pin a point where it is, as a pin the game can move. Throws std::out_of_range for a point the cloth does not have.
@@ -96,9 +99,12 @@ void addClothPin(Cloth& cloth, std::uint32_t particle);
 void stepClothParticles(ClothParticles& particles, const std::vector<StretchConstraint>& stretch, const ClothSettings& settings, float seconds,
                         const std::optional<ClothGrab>& grab = std::nullopt, const std::vector<Shape>& colliders = {});
 
-// One tick of a cloth, colliding with the given still bodies' shapes (in the world).
-void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {});
+/*
+* One tick of a cloth, colliding with the given still bodies' shapes (in the world), each colour of its constraints shared
+* among the jobs' threads: the same result to the last bit on any number of them.
+*/
+void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {}, JobSystem& jobs = serialJobs());
 
-// One tick for every cloth against every Collider in the world (worldColliderShapes), then each cloth's points handed
-// to its DeformingMesh, if it has one.
-void stepCloths(World& world, float seconds);
+// One tick for every cloth against every Collider in the world (worldColliderShapes), a job each, then each cloth's
+// points handed to its DeformingMesh, if it has one.
+void stepCloths(World& world, float seconds, JobSystem& jobs = serialJobs());

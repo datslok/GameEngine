@@ -77,6 +77,7 @@ namespace {
 
     const Pixel hangingSheetColour{150, 30, 35};
     const Pixel drapeSheetColour{225, 215, 190};
+    const Pixel bigSheetColour{150, 165, 190};
 
     // A grid laid flat (the grid faces +z; turned to face up, its top edge at the back) with its middle at centre.
     Mat4 laidFlat(const Vec3& centre) {
@@ -199,6 +200,23 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
     }
     drapeSheet = addSheet(world, assets, drapeMesh, std::move(draping), cottonMaterial(drapeSheetColour));
 
+    // The big sheet: laid flat over the mat, its four corners on hooks that draw in to their span during the first tick.
+    if (stationSettings.bigSheet) {
+        const int squares = clothLabBigSheetSquares;
+        const Mesh bigMesh = Mesh::grid(squares, squares, clothLabBigSheetSize, clothLabBigSheetSize);
+        Cloth big = makeCloth(bigMesh, laidFlat(layout.bigSheetCentre), clothSettings);
+        const std::uint32_t row = static_cast<std::uint32_t>(squares + 1);
+        for (std::uint32_t corner : {0u, static_cast<std::uint32_t>(squares), static_cast<std::uint32_t>(squares) * row,
+                                     static_cast<std::uint32_t>(squares) * row + static_cast<std::uint32_t>(squares)}) {
+            addClothPin(big, corner);
+            ClothPin& pin = big.pins.back();
+            const Vec3 out = pin.position - layout.bigSheetCentre;
+            const float half = 0.5f * clothLabBigSheetCornerSpan;
+            pin.position = layout.bigSheetCentre + Vec3{out.x < 0.0f ? -half : half, 0.0f, out.z < 0.0f ? -half : half};
+        }
+        bigSheet = addSheet(world, assets, bigMesh, std::move(big), cottonMaterial(bigSheetColour));
+    }
+
     controls.spawnBody(world);
 
     const Vec3 towardsSun = directionTowardsSunOn(clothLabLatitudeDegrees, clothLabDayOfYear, clothLabSolarHours);
@@ -241,7 +259,7 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
     if (input.wasMouseButtonPressed(MouseButton::Left) && pointer) {
         const Ray ray{pointer->origin, pointer->direction.normalized()};
         float nearest = clothLabGrabReach;
-        for (const Entity candidate : {sheet, drapeSheet}) {
+        for (const Entity candidate : sheets()) {
             if (const std::optional<ClothHit> hit = raycastCloth(world.get<Cloth>(candidate), ray, nearest)) {
                 sheetGrab = ClothGrab{hit->particle, hit->point};
                 grabbedSheet = candidate;
@@ -267,7 +285,7 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     (void)simulationSeconds;
-    for (const Entity each : {sheet, drapeSheet}) {
+    for (const Entity each : sheets()) {
         Cloth& cloth = world.get<Cloth>(each);
         cloth.settings = clothSettings;
         cloth.grab = each == grabbedSheet ? sheetGrab : std::nullopt;
@@ -280,7 +298,7 @@ void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulat
     hookGapNow += std::clamp(wanted - hookGapNow, -step, step);
     cloth.pins[0].position = hookMiddle - Vec3{0.5f * hookGapNow, 0.0f, 0.0f};
     cloth.pins[1].position = hookMiddle + Vec3{0.5f * hookGapNow, 0.0f, 0.0f};
-    stepCloths(world, tickSeconds);
+    stepCloths(world, tickSeconds, getJobs());
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 
@@ -318,7 +336,14 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Hook gap", settings.hookGap, {.min = clothLabSmallestHookGap, .max = clothLabSheetWidth, .unit = "m"});
 }
 
+void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Big sheet", settings.bigSheet, FieldApplies::AtStartup);
+}
+
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {
+    visitor.group("Stations", [&] {
+        visit(stationSettings, visitor);
+    });
     visitor.group("Cloth", [&] {
         visit(clothSettings, visitor);
     });
@@ -360,6 +385,22 @@ Entity ClothLabGame::getDrapeSheet() const {
 
 Entity ClothLabGame::getGrabbedSheet() const {
     return grabbedSheet;
+}
+
+Entity ClothLabGame::getBigSheet() const {
+    return bigSheet;
+}
+
+ClothLabStationSettings& ClothLabGame::getStationSettings() {
+    return stationSettings;
+}
+
+std::vector<Entity> ClothLabGame::sheets() const {
+    std::vector<Entity> all{sheet, drapeSheet};
+    if (stationSettings.bigSheet) {
+        all.push_back(bigSheet);
+    }
+    return all;
 }
 
 ClothSettings& ClothLabGame::getClothSettings() {
