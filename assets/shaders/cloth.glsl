@@ -45,7 +45,7 @@ struct ClothTick {
     float stretchCompliance;
     float bendingStiffness;
 
-    float bendPerSecondSquared;
+    float perSecondSquared;
     float grabCompliance;
     float kept;
     float thickness;
@@ -61,6 +61,11 @@ struct ClothTick {
     uint grabParticle;
 
     vec4 grabTarget;
+
+    float stretchStiffness;
+    float grabStiffness;
+    uint method;
+    uint unused;
 };
 
 const float CLOTH_FULL_TURN = 6.28318530717958647692;
@@ -102,6 +107,14 @@ void clothStretch(inout vec4 first, inout vec4 second, float restLength, float s
     second.xyz = second.xyz - along * (second.w * multiplier);
 }
 
+// A hinge's curvature vector (isometricCurvature): its points weighted by the hinge's isometric weights.
+vec3 clothIsometricCurvature(vec4 weights, vec3 wing0, vec3 wing1, vec3 edgeStart, vec3 edgeEnd) {
+    vec3 curvature = vec3(0.0) + wing0 * weights.x;
+    curvature = curvature + wing1 * weights.y;
+    curvature = curvature + edgeStart * weights.z;
+    return curvature + edgeEnd * weights.w;
+}
+
 // One hinge's isometric XPBD step (solveBend): one curvature vector and one multiplier, no angles or square roots.
 void clothIsometricBend(inout vec4 wing0, inout vec4 wing1, inout vec4 edgeStart, inout vec4 edgeEnd, vec4 weights, float bendingStiffness,
                         float stiffnessShare, float perSecondSquared) {
@@ -109,10 +122,7 @@ void clothIsometricBend(inout vec4 wing0, inout vec4 wing1, inout vec4 edgeStart
     moving += wing1.w * weights.y * weights.y;
     moving += edgeStart.w * weights.z * weights.z;
     moving += edgeEnd.w * weights.w * weights.w;
-    vec3 curvature = vec3(0.0) + wing0.xyz * weights.x;
-    curvature = curvature + wing1.xyz * weights.y;
-    curvature = curvature + edgeStart.xyz * weights.z;
-    curvature = curvature + edgeEnd.xyz * weights.w;
+    vec3 curvature = clothIsometricCurvature(weights, wing0.xyz, wing1.xyz, edgeStart.xyz, edgeEnd.xyz);
     if (moving == 0.0) {
         return;
     }
@@ -276,6 +286,89 @@ void clothGrab(inout vec4 point, vec3 target, float scaledCompliance) {
 
     float multiplier = -distance / (weight + scaledCompliance);
     point.xyz = point.xyz + away * (weight * multiplier / distance);
+}
+
+// ClothStiffnessBlock: a symmetric 3 x 3 matrix, its diagonal (xx, yy, zz) and the rest (xy, xz, yz).
+struct ClothBlock {
+    vec3 diagonal;
+    vec3 offDiagonal;
+};
+
+ClothBlock clothEmptyBlock() {
+    ClothBlock block;
+    block.diagonal = vec3(0.0);
+    block.offDiagonal = vec3(0.0);
+    return block;
+}
+
+void clothBlockAddDiagonal(inout ClothBlock block, float value) {
+    block.diagonal = block.diagonal + vec3(value);
+}
+
+// value times v v^T.
+void clothBlockAddOuter(inout ClothBlock block, vec3 v, float value) {
+    block.diagonal = block.diagonal + value * v * v;
+    block.offDiagonal = block.offDiagonal + value * v.xxy * v.yzz;
+}
+
+// ClothStiffnessBlock::solve: the block's inverse times force, by the adjugate; zero for a block too near singular.
+vec3 clothBlockSolve(ClothBlock block, vec3 force) {
+    float xx = block.diagonal.x;
+    float yy = block.diagonal.y;
+    float zz = block.diagonal.z;
+    float xy = block.offDiagonal.x;
+    float xz = block.offDiagonal.y;
+    float yz = block.offDiagonal.z;
+    float cofactorXX = yy * zz - yz * yz;
+    float cofactorXY = xz * yz - xy * zz;
+    float cofactorXZ = xy * yz - xz * yy;
+    float determinant = xx * cofactorXX + xy * cofactorXY + xz * cofactorXZ;
+    float size = max(xx, max(yy, zz));
+    if (!(determinant > float(CLOTH_SINGULAR_BLOCK) * size * size * size)) {
+        return vec3(0.0);
+    }
+    float cofactorYY = xx * zz - xz * xz;
+    float cofactorYZ = xy * xz - xx * yz;
+    float cofactorZZ = xx * yy - xy * xy;
+    float scale = 1.0 / determinant;
+    return vec3((cofactorXX * force.x + cofactorXY * force.y + cofactorXZ * force.z) * scale,
+                (cofactorXY * force.x + cofactorYY * force.y + cofactorYZ * force.z) * scale,
+                (cofactorXZ * force.x + cofactorYZ * force.y + cofactorZZ * force.z) * scale);
+}
+
+// The pieces of a point's force and block in vertex block descent (cloth_energy.h's add*Term), each added to what is
+// there; clothPointForceAt (cloth_pass.glsl) adds them in clothPointForce's order.
+void clothInertiaTerm(inout vec3 force, inout ClothBlock block, vec3 here, vec3 predicted, float inertia) {
+    force = force + (predicted - here) * inertia;
+    clothBlockAddDiagonal(block, inertia);
+}
+
+void clothEdgeTerm(inout vec3 force, inout ClothBlock block, vec3 here, vec3 other, float restLength, float stiffness) {
+    vec3 between = here - other;
+    float edgeLength = length(between);
+    if (edgeLength < CLOTH_SHORTEST_EDGE) {
+        return;
+    }
+    vec3 along = between * (1.0 / edgeLength);
+    force = force - along * (stiffness * (edgeLength - restLength));
+    float across = max(0.0, 1.0 - restLength / edgeLength);
+    clothBlockAddDiagonal(block, stiffness * across);
+    clothBlockAddOuter(block, along, stiffness * (1.0 - across));
+}
+
+void clothIsometricHingeTerm(inout vec3 force, inout ClothBlock block, vec3 curvature, float weight, float stiffness) {
+    force = force - curvature * (stiffness * weight);
+    clothBlockAddDiagonal(block, stiffness * weight * weight);
+}
+
+void clothHingeAngleTerm(inout vec3 force, inout ClothBlock block, vec3 slope, float error, float stiffness) {
+    force = force - slope * (stiffness * error);
+    clothBlockAddOuter(block, slope, stiffness);
+}
+
+void clothHandTerm(inout vec3 force, inout ClothBlock block, vec3 here, vec3 target, float stiffness) {
+    force = force - (here - target) * stiffness;
+    clothBlockAddDiagonal(block, stiffness);
 }
 
 // finishClothStep for one point, then the air's drag on a free point.

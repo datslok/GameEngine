@@ -19,9 +19,9 @@ void main() {
 
     if (tick.bendingModel == CLOTH_BEND_ISOMETRIC) {
         clothIsometricBend(wing0, wing1, edgeStart, edgeEnd, bend.isometricWeights, tick.bendingStiffness, bend.stiffnessShare,
-                           tick.bendPerSecondSquared);
+                           tick.perSecondSquared);
     } else {
-        clothHingeBend(wing0, wing1, edgeStart, edgeEnd, bend.restAngle, tick.bendingStiffness, bend.stiffnessShare, tick.bendPerSecondSquared);
+        clothHingeBend(wing0, wing1, edgeStart, edgeEnd, bend.restAngle, tick.bendingStiffness, bend.stiffnessShare, tick.perSecondSquared);
     }
 
     positions[bend.points.x] = wing0;

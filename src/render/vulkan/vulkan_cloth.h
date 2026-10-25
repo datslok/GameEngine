@@ -20,9 +20,9 @@ class VulkanMesh;
 class ImmediateCommands;
 
 /*
-* The cloth passes (cloth_predict, cloth_stretch, cloth_bend and cloth_finish.comp, which all bind the same nine storage
-* buffers, cloth_pass.glsl, so one descriptor set serves them all) and the shape pass (cloth_shape.comp), built once
-* and shared by every cloth.
+* The cloth passes (cloth_predict, cloth_stretch, cloth_bend, cloth_block and cloth_finish.comp, which all bind the same
+* fifteen storage buffers, cloth_pass.glsl, so one descriptor set serves them all) and the shape pass
+* (cloth_shape.comp), built once and shared by every cloth.
 */
 class VulkanClothPipelines {
 public:
@@ -31,6 +31,7 @@ public:
     const ComputePipeline& getPredict() const;
     const ComputePipeline& getStretch() const;
     const ComputePipeline& getBend() const;
+    const ComputePipeline& getBlock() const;
     const ComputePipeline& getFinish() const;
     const ComputePipeline& getShape() const;
 
@@ -38,16 +39,19 @@ private:
     std::unique_ptr<ComputePipeline> predict;
     std::unique_ptr<ComputePipeline> stretch;
     std::unique_ptr<ComputePipeline> bend;
+    std::unique_ptr<ComputePipeline> block;
     std::unique_ptr<ComputePipeline> finish;
     std::unique_ptr<ComputePipeline> shape;
 };
 
 /*
-* One cloth living on the GPU: the CPU solver's XPBD (cloth/cloth.h) ported as it is. Its points and coloured
-* constraints are uploaded once; each tick then needs only its commands (ClothTickCommands: the fabric, the pins'
-* targets, the hand, the bodies), written into a small upload buffer, and runs as a string of dispatches with a barrier
-* after each (clothDispatchesPerTick): per substep the prediction, a dispatch per colour of stretch and of bending
-* (within a colour no two constraints share a point, so each runs at once, as the CPU's threads do), and the end.
+* One cloth living on the GPU: the CPU solver (cloth/cloth.h) ported as it is, XPBD or vertex block descent, as each
+* tick's settings say (the coarse levels not yet). Its points, coloured constraints, per-point lists and point colours
+* are uploaded once; each tick then needs only its commands (ClothTickCommands: the fabric, the pins' targets, the
+* hand, the bodies), written into a small upload buffer, and runs as a string of dispatches with a barrier after each
+* (clothDispatchesPerTick): per substep the prediction, the solver's dispatches (XPBD's a colour of stretch or of
+* bending each, vertex block descent's a colour of points each: within a colour nothing shares a point, so each runs
+* at once, as the CPU's threads do), and the end.
 *
 * The result is the CPU solver's to within rounding, not to the bit (the GPU may fuse a multiply and an add, and
 * rounds division and square roots its own way), and repeats exactly on the same GPU and driver: nothing in a pass
@@ -124,6 +128,7 @@ private:
     std::uint32_t pointCount = 0;
     std::vector<std::uint32_t> stretchColours;
     std::vector<std::uint32_t> bendColours;
+    std::vector<std::uint32_t> vertexColours;
 
     VulkanBuffer positions;
     VulkanBuffer previousPositions;
@@ -131,6 +136,14 @@ private:
     VulkanBuffer stretch;
     VulkanBuffer bend;
     VulkanBuffer pinSlots;
+
+    // Vertex block descent's: the substep's prediction, each point's constraints, the points in colour order.
+    VulkanBuffer predicted;
+    VulkanBuffer edgeStarts;
+    VulkanBuffer pointEdges;
+    VulkanBuffer hingeStarts;
+    VulkanBuffer pointHinges;
+    VulkanBuffer vertexOrder;
 
     // The points before the last tick recorded, for drawing between the last two ticks.
     VulkanBuffer tickStart;

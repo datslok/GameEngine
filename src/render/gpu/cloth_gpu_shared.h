@@ -17,6 +17,10 @@
 #define CLOTH_BEND_ISOMETRIC 0
 #define CLOTH_BEND_HINGE 1
 
+// The solver (GpuClothTick::method), ClothMethod's values.
+#define CLOTH_METHOD_XPBD 0
+#define CLOTH_METHOD_BLOCK_DESCENT 1
+
 // A point no pin moves (pinSlots), and a tick with no hand (GpuClothTick::grabParticle).
 #define CLOTH_NO_PIN 4294967295u
 #define CLOTH_NO_GRAB 4294967295u

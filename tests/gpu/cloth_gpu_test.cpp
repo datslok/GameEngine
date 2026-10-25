@@ -349,6 +349,145 @@ namespace {
         }
     }
 
+    // A 3 x 3 block as the shaders take it: its diagonal (xx, yy, zz), then the rest (xy, xz, yz).
+    void pushBlock(std::vector<GpuVec4>& inputs, const ClothStiffnessBlock& block) {
+        inputs.push_back(gpuVec4(block.xx, block.yy, block.zz));
+        inputs.push_back(gpuVec4(block.xy, block.xz, block.yz));
+    }
+
+    ClothStiffnessBlock blockFrom(const GpuVec4& diagonal, const GpuVec4& rest) {
+        ClothStiffnessBlock block;
+        block.xx = diagonal[0];
+        block.yy = diagonal[1];
+        block.zz = diagonal[2];
+        block.xy = rest[0];
+        block.xz = rest[1];
+        block.yz = rest[2];
+        return block;
+    }
+
+    // A block like a point's: its inertia on the diagonal, a few edges' stiffness along random directions.
+    ClothStiffnessBlock randomBlock(CaseRandom& random) {
+        ClothStiffnessBlock block;
+        block.addDiagonal(random.between(500.0f, 5000.0f));
+        for (int edge = 0; edge < 4; ++edge) {
+            block.addOuter(random.direction(), random.between(0.0f, 4000.0f));
+        }
+        return block;
+    }
+
+    void checkBlock(GpuCheckReport& report, const std::string& name, const FloatTolerance& tolerance, const ClothStiffnessBlock& expected,
+                    const GpuVec4& diagonal, const GpuVec4& rest) {
+        const ClothStiffnessBlock actual = blockFrom(diagonal, rest);
+        report.check(name + " block", tolerance, Vec3{expected.xx, expected.yy, expected.zz}, Vec3{actual.xx, actual.yy, actual.zz});
+        report.check(name + " block", tolerance, Vec3{expected.xy, expected.xz, expected.yz}, Vec3{actual.xy, actual.xz, actual.yz});
+    }
+
+    /*
+    * Each of phi's per-point terms (cloth_energy.h's add*Term) added to a force and block already holding some, with
+    * the default fabric's numbers and others round them. An edge's stiffness across it is k (1 - r / L), which near
+    * rest is a difference of nearly equal numbers, and its force k (L - r) another: their rounding is relative to k and
+    * L, not to the result, so an absolute allowance of a millionth of the stiffnesses used (about 5 N/m in 4,000).
+    */
+    void checkPointTerms(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const FloatTolerance edgeTolerance{.absolute = 5e-3f, .relative = 1e-5f};
+        const std::array<std::uint32_t, 5> functions{GPU_TEST_CLOTH_INERTIA_TERM, GPU_TEST_CLOTH_EDGE_TERM, GPU_TEST_CLOTH_ISOMETRIC_HINGE_TERM,
+                                                     GPU_TEST_CLOTH_HINGE_ANGLE_TERM, GPU_TEST_CLOTH_HAND_TERM};
+        const std::array<const char*, 5> names{"clothInertiaTerm", "clothEdgeTerm", "clothIsometricHingeTerm", "clothHingeAngleTerm", "clothHandTerm"};
+        for (std::size_t kind = 0; kind < functions.size(); ++kind) {
+            CaseRandom random{157 + static_cast<std::uint32_t>(kind)};
+            std::vector<GpuVec4> inputs;
+            std::vector<Vec3> forces;
+            std::vector<ClothStiffnessBlock> blocks;
+            for (int i = 0; i < 300; ++i) {
+                Vec3 force = randomPoint(random, 50.0f);
+                ClothStiffnessBlock block = randomBlock(random);
+                inputs.push_back(gpuVec4(force));
+                pushBlock(inputs, block);
+
+                const Vec3 here = randomPoint(random, 1.0f);
+                if (functions[kind] == GPU_TEST_CLOTH_INERTIA_TERM) {
+                    const Vec3 predicted = here + randomPoint(random, 0.001f);
+                    const float inertia = random.between(100.0f, 1e5f);
+                    inputs.push_back(gpuVec4(here));
+                    inputs.push_back(gpuVec4(predicted, inertia));
+                    inputs.push_back(gpuVec4(0.0f));
+                    addInertiaTerm(force, &block, here, predicted, inertia);
+                } else if (functions[kind] == GPU_TEST_CLOTH_EDGE_TERM) {
+                    const float restLength = random.between(0.01f, 0.1f);
+                    const Vec3 other = here + random.direction() * (restLength * random.between(0.9f, 1.1f));
+                    const float stiffness = random.between(1000.0f, 4000.0f);
+                    inputs.push_back(gpuVec4(here));
+                    inputs.push_back(gpuVec4(other, restLength));
+                    inputs.push_back(gpuVec4(stiffness));
+                    addEdgeTerm(force, &block, here, other, restLength, stiffness);
+                } else if (functions[kind] == GPU_TEST_CLOTH_ISOMETRIC_HINGE_TERM) {
+                    const Vec3 curvature = randomPoint(random, 0.01f);
+                    const float weight = random.between(-2.0f, 2.0f);
+                    const float stiffness = random.between(1e-6f, 1e-3f);
+                    inputs.push_back(gpuVec4(curvature, weight));
+                    inputs.push_back(gpuVec4(stiffness));
+                    inputs.push_back(gpuVec4(0.0f));
+                    addIsometricHingeTerm(force, &block, curvature, weight, stiffness);
+                } else if (functions[kind] == GPU_TEST_CLOTH_HINGE_ANGLE_TERM) {
+                    const Vec3 slope = randomPoint(random, 40.0f);
+                    const float error = random.between(-3.0f, 3.0f);
+                    const float stiffness = random.between(1e-6f, 1e-3f);
+                    inputs.push_back(gpuVec4(slope, error));
+                    inputs.push_back(gpuVec4(stiffness));
+                    inputs.push_back(gpuVec4(0.0f));
+                    addHingeAngleTerm(force, &block, slope, error, stiffness);
+                } else {
+                    const Vec3 target = here + randomPoint(random, 0.3f);
+                    const float stiffness = energyStiffness(ClothSettings{}.grabCompliance) * random.between(0.5f, 2.0f);
+                    inputs.push_back(gpuVec4(here));
+                    inputs.push_back(gpuVec4(target, stiffness));
+                    inputs.push_back(gpuVec4(0.0f));
+                    addHandTerm(force, &block, here, target, stiffness);
+                }
+                forces.push_back(force);
+                blocks.push_back(block);
+            }
+            const std::vector<GpuVec4> outputs = runner.run(shader, functions[kind], inputs, 6, 3);
+
+            const FloatTolerance& tolerance = functions[kind] == GPU_TEST_CLOTH_EDGE_TERM ? edgeTolerance : arithmeticTolerance;
+            for (std::size_t i = 0; i < forces.size(); ++i) {
+                report.check(std::string(names[kind]) + " force", tolerance, forces[i], vec3From(outputs[i * 3]));
+                checkBlock(report, names[kind], tolerance, blocks[i], outputs[i * 3 + 1], outputs[i * 3 + 2]);
+            }
+        }
+    }
+
+    /*
+    * A point's Newton step: blocks like a point's (its inertia and its edges' stiffness, a condition number of ten or
+    * so, which the adjugate's differences of products round by about that many times float's precision), and an empty
+    * block, which moves nothing. (A block only nearly singular is no case: rounding decides which side of the threshold
+    * its determinant lands, differently on each side.)
+    */
+    void checkBlockSolve(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        const FloatTolerance solveTolerance{.absolute = 1e-7f, .relative = 1e-4f};
+        CaseRandom random{167};
+        std::vector<GpuVec4> inputs;
+        std::vector<ClothStiffnessBlock> blocks;
+        std::vector<Vec3> forces;
+        for (int i = 0; i < 400; ++i) {
+            ClothStiffnessBlock block = randomBlock(random);
+            if (i % 50 == 0) {
+                block = ClothStiffnessBlock{};
+            }
+            const Vec3 force = randomPoint(random, 50.0f);
+            pushBlock(inputs, block);
+            inputs.push_back(gpuVec4(force));
+            blocks.push_back(block);
+            forces.push_back(force);
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_BLOCK_SOLVE, inputs, 3, 1);
+
+        for (std::size_t i = 0; i < blocks.size(); ++i) {
+            report.check("clothBlockSolve", solveTolerance, blocks[i].solve(forces[i]), vec3From(outputs[i]));
+        }
+    }
+
     /*
     * A busy sheet: hung flat from two pins sliding sideways, a hand pulling its near edge for the first half second,
     * falling onto a ball, a capsule and a box. Kept: the cloth before each tick, the tick's commands and the cloth after.
@@ -359,9 +498,10 @@ namespace {
         Cloth after;
     };
 
-    std::vector<TickCase> busySheet(BendingModel model) {
+    std::vector<TickCase> busySheet(BendingModel model, ClothMethod method) {
         ClothSettings settings;
         settings.bendingModel = model;
+        settings.method = method;
         const Mat4 level = Mat4::translation(0.0f, 0.6f, 0.0f) * Mat4::rotationX(-0.5f * std::numbers::pi_v<float>);
         Cloth cloth = makeCloth(Mesh::grid(16, 16, 1.0f, 1.0f), level, settings);
         addClothPin(cloth, 16 * 17);
@@ -390,6 +530,20 @@ namespace {
         return cases;
     }
 
+    // Each solver the GPU runs, with each bending model.
+    struct SolverCase {
+        ClothMethod method;
+        BendingModel model;
+        const char* name;
+    };
+
+    constexpr std::array<SolverCase, 4> solverCases{
+        SolverCase{ClothMethod::Xpbd, BendingModel::Isometric, "VulkanCloth isometric"},
+        SolverCase{ClothMethod::Xpbd, BendingModel::Hinge, "VulkanCloth hinge"},
+        SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, "VulkanCloth block descent isometric"},
+        SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Hinge, "VulkanCloth block descent hinge"},
+    };
+
     std::vector<Vec3> runOnGpu(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, const Cloth& start,
                                std::span<const ClothTickCommands> ticks) {
         VulkanCloth cloth{device, pipelines, commands, start};
@@ -405,13 +559,14 @@ namespace {
     * a second (measured: 0.2 mm after 10 ticks, 10 cm after 30, as far as the GPU's rounding moves it), so whole runs
     * cannot be compared point by point. Instead each of its ticks runs on the GPU from the CPU's state before it, with
     * the CPU's commands, and lands within rounding of the CPU's state after it; a missed pass, a wrong order or a sign
-    * moves points by millimetres or more in a tick. The whole run, twice on the GPU, gives the same bits.
+    * moves points by millimetres or more in a tick. The whole run, twice on the GPU, gives the same bits. Both
+    * methods: XPBD's constraint passes and vertex block descent's point passes.
     */
     void checkSolverTicks(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, GpuCheckReport& report) {
         const FloatTolerance tickTolerance{.absolute = 1e-5f, .relative = 0.0f};
-        for (const BendingModel model : {BendingModel::Isometric, BendingModel::Hinge}) {
-            const std::vector<TickCase> cases = busySheet(model);
-            const std::string name = model == BendingModel::Isometric ? "VulkanCloth isometric" : "VulkanCloth hinge";
+        for (const SolverCase& solver : solverCases) {
+            const std::vector<TickCase> cases = busySheet(solver.model, solver.method);
+            const std::string name = solver.name;
             for (const TickCase& tick : cases) {
                 const std::vector<Vec3> gpu = runOnGpu(device, pipelines, commands, tick.before, std::span<const ClothTickCommands>{&tick.commands, 1});
                 for (std::size_t point = 0; point < gpu.size(); ++point) {
@@ -434,22 +589,27 @@ namespace {
     /*
     * A sheet hanging still is not chaotic: it settles the same way from nearby starts, so after two seconds on the GPU
     * its yardstick measures (cloth/cloth_yardstick.h) match the CPU's to well under the differences the yardstick looks
-    * for (a tenth of a millimetre, against centimetres between rungs).
+    * for (a tenth of a millimetre, against centimetres between rungs). With either method.
     */
     void checkSettledSheet(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, GpuCheckReport& report) {
         const float tickSeconds = 1.0f / 120.0f;
-        Cloth cpu = yardstickSheet(10, ClothSettings{});
-        const std::vector<ClothTickCommands> ticks(240, clothTickCommands(cpu, tickSeconds));
-        Cloth gpu = cpu;
-        gpu.particles.positions = runOnGpu(device, pipelines, commands, cpu, ticks);
-        settleYardstick(cpu, 2.0f, tickSeconds);
+        for (const ClothMethod method : {ClothMethod::Xpbd, ClothMethod::VertexBlockDescent}) {
+            ClothSettings settings;
+            settings.method = method;
+            Cloth cpu = yardstickSheet(10, settings);
+            const std::vector<ClothTickCommands> ticks(240, clothTickCommands(cpu, tickSeconds));
+            Cloth gpu = cpu;
+            gpu.particles.positions = runOnGpu(device, pipelines, commands, cpu, ticks);
+            settleYardstick(cpu, 2.0f, tickSeconds);
 
-        const SheetMeasure expected = measureSheet(cpu, 10);
-        const SheetMeasure actual = measureSheet(gpu, 10);
-        const FloatTolerance settledTolerance{.absolute = 1e-4f, .relative = 0.0f};
-        report.check("VulkanCloth settled path stretch", settledTolerance, expected.pathStretch, actual.pathStretch);
-        report.check("VulkanCloth settled worst edge", settledTolerance, expected.worstEdgeStrain, actual.worstEdgeStrain);
-        report.check("VulkanCloth settled sag", settledTolerance, expected.sag, actual.sag);
+            const SheetMeasure expected = measureSheet(cpu, 10);
+            const SheetMeasure actual = measureSheet(gpu, 10);
+            const FloatTolerance settledTolerance{.absolute = 1e-4f, .relative = 0.0f};
+            const std::string name = method == ClothMethod::Xpbd ? "VulkanCloth settled" : "VulkanCloth block descent settled";
+            report.check(name + " path stretch", settledTolerance, expected.pathStretch, actual.pathStretch);
+            report.check(name + " worst edge", settledTolerance, expected.worstEdgeStrain, actual.worstEdgeStrain);
+            report.check(name + " sag", settledTolerance, expected.sag, actual.sag);
+        }
     }
 }
 
@@ -610,6 +770,8 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkContact(runner, report);
     checkGrab(runner, report);
     checkFinishVelocity(runner, report);
+    checkPointTerms(runner, report);
+    checkBlockSolve(runner, report);
     const VulkanClothPipelines pipelines{device};
     ImmediateCommands commands{device};
     checkSolverTicks(device, pipelines, commands, report);

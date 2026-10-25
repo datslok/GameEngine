@@ -178,6 +178,134 @@ namespace {
         assert(std::memcmp(one.data(), many.data(), one.size() * sizeof(Vec3)) == 0);
     }
 
+    bool sameBlock(const ClothStiffnessBlock& a, const ClothStiffnessBlock& b) {
+        return a.xx == b.xx && a.yy == b.yy && a.zz == b.zz && a.xy == b.xy && a.xz == b.xz && a.yz == b.yz;
+    }
+
+    /*
+    * A point's force and block are sums of terms, one per piece of phi it is in, each added to what is there (the
+    * pieces the GPU's per-point pass adds in the same order): the inertia pulls towards the prediction, an edge by
+    * Hooke's law along itself (stiff across it only while stretched, a squashed one not at all), an isometric hinge
+    * against its curvature, a hinge by its angle along its slope, the hand towards its target.
+    */
+    void testPointTerms() {
+        const float stiffness = 2000.0f;
+        Vec3 force{1.0f, 0.0f, 0.0f};
+        ClothStiffnessBlock block;
+        block.xx = 5.0f;
+        addInertiaTerm(force, &block, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 0.5f, 0.0f}, 100.0f);
+        assert(force.x == 1.0f && force.y == -50.0f && force.z == 0.0f);
+        assert(block.xx == 105.0f && block.yy == 100.0f && block.zz == 100.0f && block.xy == 0.0f);
+
+        // Stretched along x by 10%: pulled back by k (L - r), stiff k along, k (1 - r / L) across.
+        force = Vec3{};
+        block = ClothStiffnessBlock{};
+        addEdgeTerm(force, &block, Vec3{0.11f, 0.0f, 0.0f}, Vec3{}, 0.1f, stiffness);
+        assert(near(force.x, -stiffness * 0.01f, 1e-3f) && force.y == 0.0f && force.z == 0.0f);
+        assert(near(block.xx, stiffness, 1e-2f) && near(block.yy, stiffness * (1.0f - 0.1f / 0.11f), 1e-2f) && block.yy == block.zz);
+        assert(block.xy == 0.0f && block.xz == 0.0f && block.yz == 0.0f);
+
+        // Squashed: pushed out, stiff only along.
+        force = Vec3{};
+        block = ClothStiffnessBlock{};
+        addEdgeTerm(force, &block, Vec3{0.0f, 0.09f, 0.0f}, Vec3{}, 0.1f, stiffness);
+        assert(near(force.y, stiffness * 0.01f, 1e-3f) && block.xx == 0.0f && block.zz == 0.0f && near(block.yy, stiffness, 1e-2f));
+
+        // Too short to have a direction: nothing.
+        force = Vec3{};
+        block = ClothStiffnessBlock{};
+        addEdgeTerm(force, &block, Vec3{}, Vec3{}, 0.1f, stiffness);
+        assert(force.x == 0.0f && force.y == 0.0f && force.z == 0.0f && sameBlock(block, ClothStiffnessBlock{}));
+
+        force = Vec3{};
+        block = ClothStiffnessBlock{};
+        addIsometricHingeTerm(force, &block, Vec3{0.0f, 0.0f, 2.0f}, -0.5f, 4.0f);
+        assert(force.z == 4.0f && block.xx == 1.0f && block.yy == 1.0f && block.zz == 1.0f && block.xy == 0.0f);
+
+        force = Vec3{};
+        block = ClothStiffnessBlock{};
+        addHingeAngleTerm(force, &block, Vec3{1.0f, 2.0f, 0.0f}, 0.25f, 4.0f);
+        assert(force.x == -1.0f && force.y == -2.0f && force.z == 0.0f);
+        assert(block.xx == 4.0f && block.yy == 16.0f && block.xy == 8.0f && block.zz == 0.0f);
+
+        force = Vec3{};
+        block = ClothStiffnessBlock{};
+        addHandTerm(force, &block, Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}, 10.0f);
+        assert(force.x == -10.0f && force.z == 10.0f && block.xx == 10.0f && block.zz == 10.0f && block.xy == 0.0f);
+
+        // Without a block the force is the same.
+        Vec3 alone{};
+        addEdgeTerm(alone, nullptr, Vec3{0.11f, 0.0f, 0.0f}, Vec3{}, 0.1f, stiffness);
+        Vec3 withBlock{};
+        ClothStiffnessBlock unused;
+        addEdgeTerm(withBlock, &unused, Vec3{0.11f, 0.0f, 0.0f}, Vec3{}, 0.1f, stiffness);
+        assert(alone.x == withBlock.x);
+    }
+
+    /*
+    * clothPointForce is exactly its terms added in order: the inertia, the point's edges, its hinges (when the fabric
+    * bends), the hand. The GPU's pass sums them the same way, so the order is part of what it mirrors. On a busy sheet,
+    * every point and both bending models, to the bit.
+    */
+    void testPointForceIsItsTerms() {
+        for (const BendingModel model : {BendingModel::Isometric, BendingModel::Hinge}) {
+            ClothSettings settings = blockDescent();
+            settings.bendingModel = model;
+            Cloth cloth = makeCloth(Mesh::grid(6, 6, 0.3f, 0.3f), Mat4::rotationX(-0.4f), settings);
+            addClothPin(cloth, 0);
+            cloth.grab = ClothGrab{17, Vec3{0.1f, 0.2f, 0.3f}};
+            for (std::size_t point = 0; point < cloth.particles.size(); ++point) {
+                cloth.particles.positions[point] = cloth.particles.positions[point] +
+                                                   Vec3{0.003f * std::sin(float(point)), 0.002f * std::cos(1.3f * float(point)), 0.001f * float(point % 5)};
+            }
+            std::vector<Vec3> predicted = cloth.particles.positions;
+            for (Vec3& place : predicted) {
+                place.y -= 0.0001f;
+            }
+
+            const ClothEnergyTerms terms = energyTerms(cloth);
+            const float substep = tick / 15.0f;
+            const float perSecondSquared = 1.0f / (substep * substep);
+            const std::vector<Vec3>& positions = cloth.particles.positions;
+            const ClothPointConstraints& lists = cloth.pointConstraints;
+            for (std::uint32_t point = 0; point < cloth.particles.size(); ++point) {
+                ClothStiffnessBlock expectedBlock;
+                const Vec3 expected = clothPointForce(point, cloth.particles, predicted, terms, perSecondSquared, &expectedBlock);
+                if (cloth.particles.inverseMasses[point] == 0.0f) {
+                    continue;
+                }
+
+                Vec3 force{};
+                ClothStiffnessBlock block;
+                const Vec3 here = positions[point];
+                addInertiaTerm(force, &block, here, predicted[point], perSecondSquared / cloth.particles.inverseMasses[point]);
+                for (std::uint32_t at = lists.edgeStarts[point]; at < lists.edgeStarts[point + 1]; ++at) {
+                    const StretchConstraint& edge = cloth.stretch[lists.edges[at]];
+                    addEdgeTerm(force, &block, here, positions[edge.first == point ? edge.second : edge.first], edge.restLength,
+                                energyStiffness(settings.stretchCompliance));
+                }
+                for (std::uint32_t at = lists.hingeStarts[point]; at < lists.hingeStarts[point + 1]; ++at) {
+                    const BendConstraint& bend = cloth.bend[lists.hinges[at] / 4];
+                    const std::uint32_t corner = lists.hinges[at] % 4;
+                    const float stiffness = settings.bendingStiffness * bend.stiffnessShare;
+                    const Vec3 error = hingeError(bend, positions, model);
+                    if (model == BendingModel::Isometric) {
+                        addIsometricHingeTerm(force, &block, error, bend.isometricWeights[corner], stiffness);
+                    } else {
+                        const Vec3 slope = hingeAngleGradient(positions[bend.wing0], positions[bend.wing1], positions[bend.edgeStart],
+                                                              positions[bend.edgeEnd])[corner];
+                        addHingeAngleTerm(force, &block, slope, error.x, stiffness);
+                    }
+                }
+                if (point == cloth.grab->particle) {
+                    addHandTerm(force, &block, here, cloth.grab->target, energyStiffness(settings.grabCompliance));
+                }
+                assert(force.x == expected.x && force.y == expected.y && force.z == expected.z);
+                assert(sameBlock(block, expectedBlock));
+            }
+        }
+    }
+
     // The hinge model works the same way: a busy sheet bending by angle steps without blowing up, its energy lowered too.
     void testHingeModel() {
         ClothSettings settings = blockDescent();
@@ -198,4 +326,6 @@ void testClothBlockDescent() {
     testHangingSheetSettles();
     testManyThreadsMatchOne();
     testHingeModel();
+    testPointTerms();
+    testPointForceIsItsTerms();
 }

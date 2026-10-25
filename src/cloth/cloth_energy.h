@@ -100,6 +100,20 @@ Vec3 clothPointForce(std::uint32_t point, const ClothParticles& particles, const
                      float perSecondSquared, ClothStiffnessBlock* block = nullptr);
 
 /*
+* The pieces of a point's force and block, each added to what is there (clothPointForce adds them in this order, and
+* cloth.glsl mirrors each): its inertia m / h^2 pulling it to its prediction; an edge to another point, by Hooke's law
+* along it, stiff along it and, while stretched, across it; an isometric hinge's curvature times the point's weight in
+* it; a hinge's angle error along the point's slope of the angle (Gauss-Newton); the hand's spring to its target.
+* stiffness is the term's (1 / compliance, or the hinge's bending stiffness times its share). With no block, the force
+* alone.
+*/
+void addInertiaTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, const Vec3& predicted, float inertia);
+void addEdgeTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, const Vec3& other, float restLength, float stiffness);
+void addIsometricHingeTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& curvature, float weight, float stiffness);
+void addHingeAngleTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& slope, float error, float stiffness);
+void addHandTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, const Vec3& target, float stiffness);
+
+/*
 * phi's gradient at every point, zero where held is set (held may be empty: nothing held). A point at a time, so the
 * same bits on any number of threads.
 */

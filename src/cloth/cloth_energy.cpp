@@ -15,8 +15,8 @@ namespace {
     constexpr std::size_t pointsPerJob = 512;
     constexpr std::size_t constraintsPerChunk = 2048;
 
-    // A block whose determinant is below this share of its largest diagonal cubed is taken as singular.
-    constexpr float singularBlock = 1e-12f;
+    // A block whose determinant is below this share of its largest diagonal cubed is taken as singular (cloth/cloth_shared.h).
+    constexpr float singularBlock = static_cast<float>(CLOTH_SINGULAR_BLOCK);
 
     std::array<std::uint32_t, 4> hingePoints(const BendConstraint& bend) {
         return {bend.wing0, bend.wing1, bend.edgeStart, bend.edgeEnd};
@@ -165,6 +165,50 @@ double clothStepEnergy(const ClothParticles& particles, const std::vector<Vec3>&
     return energy;
 }
 
+void addInertiaTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, const Vec3& predicted, float inertia) {
+    force = force + (predicted - here) * inertia;
+    if (block) {
+        block->addDiagonal(inertia);
+    }
+}
+
+void addEdgeTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, const Vec3& other, float restLength, float stiffness) {
+    const Vec3 between = here - other;
+    const float length = between.length();
+    if (length < shortestEdge) {
+        return;
+    }
+    const Vec3 along = between * (1.0f / length);
+    force = force - along * (stiffness * (length - restLength));
+    if (block) {
+        const float across = std::max(0.0f, 1.0f - restLength / length);
+        block->addDiagonal(stiffness * across);
+        block->addOuter(along, stiffness * (1.0f - across));
+    }
+}
+
+void addIsometricHingeTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& curvature, float weight, float stiffness) {
+    force = force - curvature * (stiffness * weight);
+    if (block) {
+        block->addDiagonal(stiffness * weight * weight);
+    }
+}
+
+void addHingeAngleTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& slope, float error, float stiffness) {
+    force = force - slope * (stiffness * error);
+    if (block) {
+        block->addOuter(slope, stiffness);
+    }
+}
+
+void addHandTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, const Vec3& target, float stiffness) {
+    force = force - (here - target) * stiffness;
+    if (block) {
+        block->addDiagonal(stiffness);
+    }
+}
+
+// The terms in the order cloth_pass.glsl's clothPointForceAt adds them.
 Vec3 clothPointForce(std::uint32_t point, const ClothParticles& particles, const std::vector<Vec3>& predicted, const ClothEnergyTerms& terms,
                      float perSecondSquared, ClothStiffnessBlock* block) {
     const float inverseMass = particles.inverseMasses[point];
@@ -174,27 +218,13 @@ Vec3 clothPointForce(std::uint32_t point, const ClothParticles& particles, const
     const std::vector<Vec3>& positions = particles.positions;
     const ClothPointConstraints& lists = terms.pointConstraints;
     const Vec3 here = positions[point];
-    const float inertia = perSecondSquared / inverseMass;
-    Vec3 force = (predicted[point] - here) * inertia;
-    if (block) {
-        block->addDiagonal(inertia);
-    }
+    Vec3 force{0.0f, 0.0f, 0.0f};
+    addInertiaTerm(force, block, here, predicted[point], perSecondSquared / inverseMass);
 
     const float stretchStiffness = energyStiffness(terms.stretchCompliance);
     for (std::uint32_t at = lists.edgeStarts[point]; at < lists.edgeStarts[point + 1]; ++at) {
         const StretchConstraint& edge = terms.stretch[lists.edges[at]];
-        const Vec3 between = here - positions[edge.first == point ? edge.second : edge.first];
-        const float length = between.length();
-        if (length < shortestEdge) {
-            continue;
-        }
-        const Vec3 along = between * (1.0f / length);
-        force = force - along * (stretchStiffness * (length - edge.restLength));
-        if (block) {
-            const float across = std::max(0.0f, 1.0f - edge.restLength / length);
-            block->addDiagonal(stretchStiffness * across);
-            block->addOuter(along, stretchStiffness * (1.0f - across));
-        }
+        addEdgeTerm(force, block, here, positions[edge.first == point ? edge.second : edge.first], edge.restLength, stretchStiffness);
     }
 
     if (terms.bendingStiffness > 0.0f) {
@@ -204,27 +234,16 @@ Vec3 clothPointForce(std::uint32_t point, const ClothParticles& particles, const
             const float stiffness = terms.bendingStiffness * bend.stiffnessShare;
             const Vec3 error = hingeError(bend, positions, terms.bendingModel);
             if (terms.bendingModel == BendingModel::Isometric) {
-                const float weight = bend.isometricWeights[corner];
-                force = force - error * (stiffness * weight);
-                if (block) {
-                    block->addDiagonal(stiffness * weight * weight);
-                }
+                addIsometricHingeTerm(force, block, error, bend.isometricWeights[corner], stiffness);
             } else {
                 const Vec3 slope = hingeAngleGradient(positions[bend.wing0], positions[bend.wing1], positions[bend.edgeStart], positions[bend.edgeEnd])[corner];
-                force = force - slope * (stiffness * error.x);
-                if (block) {
-                    block->addOuter(slope, stiffness);
-                }
+                addHingeAngleTerm(force, block, slope, error.x, stiffness);
             }
         }
     }
 
     if (terms.grab && terms.grab->particle == point) {
-        const float stiffness = energyStiffness(terms.grabCompliance);
-        force = force - (here - terms.grab->target) * stiffness;
-        if (block) {
-            block->addDiagonal(stiffness);
-        }
+        addHandTerm(force, block, here, terms.grab->target, energyStiffness(terms.grabCompliance));
     }
     return force;
 }
