@@ -90,6 +90,8 @@ each frame:
 
 A slow frame runs several ticks to catch up; a fast frame may run none. The 0.25 s clamp stops a "spiral of death": after a long pause (say, dragging the window), the engine would otherwise try to simulate seconds of backlog at once, making the next frame slow too.
 
+The clamp is not enough when a single tick costs more than the 8.3 ms it simulates (a huge cloth, say). Then every frame owes more ticks than the last, like a pump that cannot keep up with the inflow, until each frame runs 30 ticks and the game shows 3 frames a second. So the ticks also have a budget, 1/60 s of real time a frame by default (`maxTickSecondsPerFrame`): the first tick always runs, another only if one more of the same cost still fits, and the ticks left over are forgotten. An overloaded game runs in slow motion at a smooth frame rate instead, and the camera, which moves per frame, stays responsive. Cheap ticks still catch up after a hitch: twelve 0.3 ms ticks fit easily.
+
 ### Interpolation: why movement looks smooth
 
 After the ticks, some time is left over (`alpha` of a tick). If we drew objects exactly where the last tick put them, motion would stutter: at 240 FPS with 120 ticks, every other frame would show the same position.

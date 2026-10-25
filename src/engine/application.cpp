@@ -60,7 +60,11 @@ void Application::run() {
 
         game.onInput(world, input);
 
+        const double ticksStart = profilerSeconds();
         for (int tick = 0; tick < ticks; ++tick) {
+            if (!fitsTickBudget(tick, profilerSeconds() - ticksStart, settings.maxTickSecondsPerFrame)) {
+                break;
+            }
             ++simulationTicks;
             const double simulationSeconds =
                 static_cast<double>(simulationTicks) * timestep.getTickSeconds();

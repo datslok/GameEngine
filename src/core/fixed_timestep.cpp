@@ -58,3 +58,16 @@ double FixedTimestep::getFrameSeconds() const {
 float FixedTimestep::getAlpha() const {
     return static_cast<float>(accumulator / tickSeconds);
 }
+
+/*
+* A tick that costs more than the time it simulates makes the next frame longer, which asks for more ticks: a spiral
+* that ends at maxFrameSeconds' worth of ticks every frame (3 fps). The first tick always runs, so the game never
+* stops; another runs only if one more of the ticks' average cost still fits. Cheap ticks still catch up after a hitch.
+*/
+bool fitsTickBudget(int ticksRun, double secondsSpent, double budgetSeconds) {
+    if (ticksRun == 0 || budgetSeconds <= 0.0) {
+        return true;
+    }
+    const double averageTick = secondsSpent / static_cast<double>(ticksRun);
+    return secondsSpent + averageTick <= budgetSeconds;
+}

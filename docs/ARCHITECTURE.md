@@ -16,6 +16,7 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
 
 - `EngineSettings` (`engine/engine_settings.h`) is owned by `Application` (constructor argument, `getSettings()`). Its fields:
   - `ticksPerSecond` 120 and `maxFrameSeconds` 0.25, both read only at start-up;
+  - `maxTickSecondsPerFrame` (1/60 s, 0 = no budget), the tick budget, read every frame (see Application);
   - `targetFPS` 120, 0 = unlimited;
   - `presentMode`, applied when it changes;
   - `framesInFlight` (2), applied when it changes;
@@ -347,6 +348,7 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
 - While the UI is open the mouse is freed (`applyMouseMode` asks for mouse look only when the game wants it and the UI is closed).
 - Before each frame it uploads every mesh and texture the `AssetManager` gained since the last frame (the ones past the renderer's counts), so games can load and spawn at any time.
 - It applies `game.wantsMouseLook()` to the window only when it changes (re-applying would undo Escape).
+- **The tick budget:** the ticks `FixedTimestep::advance` asks for run while `fitsTickBudget(ticksRun, secondsSpent, maxTickSecondsPerFrame)` allows: the first always, another only if one more of the frame's average tick still fits. The rest are dropped (already out of the accumulator, so alpha is unchanged and nothing is owed). Without it a tick slower than real time spirals to `maxFrameSeconds`' 30 ticks a frame (3 fps with the cloth lab's big sheet); with it the game runs in slow motion at a usable frame rate, while cheap ticks still catch up after a hitch. Only how many ticks a frame runs depends on the clock, never what a tick does, so determinism is untouched.
 
 ## The Game interface, debug drawing, culling and render stats
 

@@ -75,6 +75,37 @@ void testFixedTimestep() {
         assert(nearlyEqual(timestep.getAlpha(), 0.0));
     }
 
+    // The tick budget: a frame always runs its first tick, and another only while the ticks so far, plus one more of
+    // their average cost, fit in the budget.
+    {
+        assert(fitsTickBudget(0, 0.0, 0.016));
+        assert(fitsTickBudget(0, 0.0, 0.0));
+
+        // Cheap ticks catch up after a hitch: 0.3 ms each, 12 run, a 13th still fits in 16 ms.
+        assert(fitsTickBudget(12, 0.0036, 0.016));
+
+        // The overloaded big sheet: 11.4 ms a tick, a second would end at 22.8 ms.
+        assert(!fitsTickBudget(1, 0.0114, 0.016));
+
+        // Exactly on the budget still fits.
+        assert(fitsTickBudget(3, 0.012, 0.016));
+        assert(!fitsTickBudget(3, 0.0121, 0.016));
+
+        // 0 means no budget: only maxFrameSeconds limits the ticks.
+        assert(fitsTickBudget(30, 0.3, 0.0));
+    }
+
+    // Ticks a frame drops are gone: the game falls behind real time instead of owing them, and the next frame's alpha
+    // comes from the time left over as usual.
+    {
+        FixedTimestep timestep{10.0, 1.0};
+        assert(timestep.advance(0.55) == 5);
+
+        // The loop runs only one of the five; the next frame owes nothing more for them.
+        assert(timestep.advance(0.04) == 0);
+        assert(nearlyEqual(timestep.getAlpha(), 0.9));
+    }
+
     // The clamp must allow at least one tick, or a slow frame could never produce one.
     assert(throwsInvalidArgument(0.0, 1.0));
     assert(throwsInvalidArgument(10.0, 0.05));
