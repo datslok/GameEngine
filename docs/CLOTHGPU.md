@@ -1,0 +1,331 @@
+# Cloth on the GPU: research and plan
+
+Notes and a build plan for simulating large garments on the GPU: tens to hundreds of thousands of points, nearly inextensible fabric, folds and layers that never pass through each other, at real-time rates. This is what the dressmaking game (phase 10) needs, and what phase 7's milestones ask of the solver.
+
+The research half records what the papers and NVIDIA's open-source code say, with their numbers. Each part then says **what it means here**. The plan at the end proposes the build order and the roadmap's new items.
+
+Started Oct 25, 2026, after the CPU solver (XPBD, `src/cloth/`) reached its limits on the cloth lab's 100 x 100 sheet.
+
+**Sources, read by five researchers in parallel on Oct 25, 2026:**
+
+- the papers, as full text where it could be fetched;
+- NVIDIA's Newton engine source (`newton-physics/newton`, main at `f121272e`, Oct 24 2026), whose VBD solver is the one production implementation;
+- the older NVIDIA Warp VBD integrator it grew from (Warp 1.6 and 1.7);
+- the Augmented VBD authors' demo code.
+
+Tags: **[read]** is stated in a source, **[inf]** is our inference, **[check]** must be checked against the source before writing tests. Section, equation and file references point to where each claim came from.
+
+## The problem in one paragraph
+
+The engine's cloth today is XPBD with small steps: 15 substeps a 120 Hz tick, one Gauss-Seidel pass over coloured constraints per substep. Each pass carries a correction about one triangle further across the mesh. A large, fine garment has hundreds of triangles between a pin and its hem, so the stiffness never reaches across within a step, and the cloth sags and stretches more the finer its mesh. We measured it: a strip on a mesh twice as fine droops 75% more at 15 substeps (`cloth_bending_test`, `testCantilever`). This is a **low-frequency error**: smooth, sheet-wide stretch that local passes remove only slowly. Making the same passes faster on the GPU gets to the same wrong answer sooner.
+
+So the questions are, in order:
+
+1. Which **local solver** does the per-point work (XPBD as now, or Vertex Block Descent)?
+2. What removes the **low-frequency error** that every local solver leaves?
+3. How does cloth **collide with itself** without passing through, at this scale?
+4. How does it all live on the GPU, behind the engine's seams?
+
+## The headline finding
+
+**No local solver fixes the low-frequency error, by its authors' own account.** This was the most important result of the research, and it corrected our first guess.
+
+- **VBD paper, section 7 [read]:** "A perturbation applied on a vertex can impact other vertices ... at most as far as the number of colors within a single iteration. Therefore, VBD is not ideal for high-resolution stiff systems ... a global solution using Newton's method may prove to be more effective."
+- **Augmented VBD, section 6 [read]:** "One fundamental limitation of local iterative techniques like AVBD is information propagation ... propagation can take multiple frames. It would be interesting to explore combining AVBD with a global solver."
+- **Periodic Anderson acceleration for VBD (HPG 2026) [read, abstract]:** VBD's "block Gauss-Seidel update propagates information only locally, low-frequency error modes ... decay slowly".
+
+What VBD does improve over XPBD is real but different: a primal formulation (huge mass ratios are fine), a true Newton step per point (more progress per sweep), and fewer colours. The low-frequency stretch needs a **global or hierarchical layer** on top, whichever local solver is chosen.
+
+No published method yet gives 100,000+ inextensible points **with** robust self-collision in real time. The best documented point is Lan et al. 2024: 340,000 points at 4.8 fps on an RTX 3090, penetration-free.
+
+## Part 1: The local solver
+
+### Vertex Block Descent (Chen, Liu, Yang & Yuksel, SIGGRAPH 2024)
+
+[arXiv 2403.06321](https://arxiv.org/abs/2403.06321); code in the authors' Gaia and in NVIDIA Warp, then Newton.
+
+**Implicit Euler as minimisation [read, Eq. 1-3].** One step finds the positions minimising
+
+    G(x) = 1/(2h^2) |x - y|^2_M + E(x),      y = x_t + h v_t + h^2 a_ext
+
+the inertia term pulling each point towards where it would coast, and E the elastic energy. Implicit (backward) Euler is unconditionally stable: it damps rather than blows up.
+
+**The per-point step [read, Eq. 4-9].** Each point i in turn minimises its own share with every other point held still:
+
+    G_i(x) = m_i/(2h^2) |x_i - y_i|^2 + sum over elements j touching i of E_j(x)
+    f_i = -(m_i/h^2)(x_i - y_i) - sum_j dE_j/dx_i
+    H_i = (m_i/h^2) I + sum_j d^2E_j/dx_i^2           (3 x 3)
+    x_i += H_i^-1 f_i                                   (analytic 3 x 3 inverse)
+
+- An element's whole energy enters every point it touches, so each local step lowers the global G (block coordinate descent).
+- One iteration is one Newton step per point, colour by colour. Iterations are a fixed count; there is no convergence test.
+- **Singular blocks [read]:** if |det H_i| is below a threshold, the point skips that iteration (the paper gives none; Warp 1.6 used 1e-5, Newton 1e-8).
+- **Definiteness [read]:** the paper does not force H_i positive definite and says non-definite blocks were rare. **[inf]** Cloth compresses constantly, where StVK's Hessian is indefinite; Newton's choice (below) avoids the problem.
+- **Line search [read]:** optional; 40% more cost for no measured gain; unused.
+
+**Vertex colouring [read, section 3.9, Fig. 8].** Points are coloured so that no element holds two points of one colour; then a colour's points move in parallel.
+
+- Far fewer colours than XPBD's constraint colouring: a tetrahedral mesh needed 8 point colours against 76 element colours; the cloth scene 3.
+- **Newton's colouring [read, `graph_coloring.py`, Warp `coloring.cpp`]:** maximum cardinality search then ordered greedy (30-50% fewer colours than greedy, twice as slow), then balancing towards a largest-to-smallest group ratio of 1.1.
+- **Bending in the colouring [read]:** Newton leaves a hinge's two wing points out of the graph by default (`include_bending=False`), so they may share a colour and race mildly. Its hanging-cloth example turns them in.
+- **[inf]** A triangulated grid with hinges takes roughly 5-8 colours, against our 20 constraint colours (6 stretch, 14 bending).
+
+**Chebyshev acceleration [read, section 3.8, Eq. 18-19].** After each full iteration, extrapolate along the last two:
+
+    x(n) = w_n (xbar(n) - x(n-2)) + x(n-2)
+    w_1 = 1,   w_2 = 2/(2 - rho^2),   w_n = 4/(4 - rho^2 w_(n-1))
+
+- rho is the estimated spectral radius: 0.95 in most scenes, 0.75-0.93 as stiffness rises.
+- A point that collides stops being accelerated for the rest of the step.
+- **Not in Newton [read]:** no Chebyshev and no adaptive initial guess in its code. Augmented VBD's author found Chebyshev "kind of unstable and difficult to tune" [read, secondhand via the Houdini port's notes].
+
+**The initial guess [read, section 3.7, Eq. 17].** Starting from y (inertia and gravity, as XPBD does) makes cloth "behave softer than they should" with few iterations. The adaptive guess scales gravity by how much of it the point actually felt last step:
+
+    x = x_t + h v_t + h^2 a~ a_ext,    a~ = clamp(a_t . a_ext_hat / |a_ext|, 0, 1),   a_t = (v_t - v_(t-1))/h
+
+Newton uses plain inertia.
+
+**Damping [read, Eq. 10-11].** Rayleigh: H_i += (k_d/h) sum of element Hessians, f_i -= that times (x_i - x_t). k_d = 1e-5 for the cloth scene. Newton instead damps the rate of the strain metric FᵀF (rigid turns undamped) and the hinge angle's rate.
+
+**Cloth in the paper is thin [read].** One scene: a tearing sheet of 2,500 points on the **CPU**, StVK membrane (mu = lambda = 1e4), h = 1/300 s, 20 iterations, 11.2 ms a step. Only 3 colours, so most likely no bending at all. No GPU cloth timing. The big GPU numbers are tetrahedral solids:
+
+| Scene | Size | Iterations, step | Time (RTX 4090) |
+|---|---|---|---|
+| Squishy ball | 230K points | 120, 1/120 s | 15 ms a step |
+| Octopi | 15.6K points | 10, 1/300 s | 1.1 ms |
+| Twisting beams | 97K points | 100, 1/300 s | 60 ms |
+
+- **Against XPBD [read, Fig. 19]:** on the 230K squishy ball, VBD 0.031 s a frame against XPBD's 0.32 s at the same settings, XPBD also needing smaller steps to look alike. A solid, not cloth.
+- **Third-party experience [read, MysteryPancake/Houdini-VBD notes; opinion]:** cloth with springs behaves much like Houdini's XPBD (Vellum), with "some weird flattening behaviour"; tetrahedral solids are much more stable.
+
+**GPU layout [read].** The paper: one 16-thread block per point, threads summing the adjacent elements' forces and Hessians through shared memory, about 10 times faster than a thread per point. Newton: 16 lanes per point, a fixed butterfly reduction, two points per 32-lane warp; positions stored as start plus displacement.
+
+### What Newton actually ships for cloth
+
+Newton (`newton/_src/solvers/vbd/`) is where the papers met production. It differs from them on purpose [read]:
+
+- **Membrane: Stable Neo-Hookean, not StVK** (`evaluate_neo_hookean_membrane_force_hessian`, `particle_vbd_kernels.py` 534-664):
+
+        psi = mu/2 (I_C - 2) + lambda'/2 (J - alpha)^2
+        I_C = tr(FᵀF),   J = sqrt(det(FᵀF)),   lambda' = lambda + mu,   alpha = 1 + mu/lambda'
+
+  F is the 3 x 2 deformation gradient [x1 - x0, x2 - x0] Dm^-1, with Dm^-1 the rest triangle's 2 x 2 inverse in its own plane. Its 3 x 3 blocks are made positive definite analytically (the formula is in the code; **[check]** before writing tests). Energy is psi times the rest area.
+- **Units [inf, from the code's scaling]:** with energy per area, mu and lambda are surface moduli in N/m (Young's modulus times thickness), not the Pa the docs say. Isotropic plane stress gives mu = E t / (2(1 + nu)) and lambda = E t nu / (1 - nu^2) **[check]**. Our cotton's tensile stiffness of about 2000 N/m sits there.
+- **Bending: the dihedral angle, Gauss-Newton** (`evaluate_dihedral_angle_based_bending_force_hessian`, 696-848): E = 1/2 k L0 (theta - theta0)^2, Hessian k L0 grad(theta) grad(theta)ᵀ only, always positive semi-definite. Scaled by the rest edge length only, so its stiffness changes with mesh resolution **[inf]**. Ours (B 3 l^2 / A, discrete shells) does not, and should be kept.
+- **No Chebyshev, no adaptive guess, no line search.** Default 10 iterations; examples 4-10 iterations by 10 substeps at 60 fps.
+- **Units for float32 [read]:** its Franka T-shirt example runs in centimetres "for better numerical behaviour".
+- **Deterministic mode [read]:** float atomics rewritten into records, a stable sort and fixed-order reductions; elasticity is deterministic by construction (a gather per point over a fixed adjacency order).
+- **Self-contact is off by default** and "usually needs additional tuning" (Isaac Lab's docs). The solver is marked experimental, its API changing fast.
+- **No published timings** in the repository or Isaac Lab.
+
+### Augmented VBD (Giles, Diaz & Yuksel, SIGGRAPH 2025)
+
+[Project page](https://graphics.cs.utah.edu/research/projects/avbd/). It fixes VBD's other weakness, **stiffness ratios**, with an augmented Lagrangian.
+
+**Hard constraints [read, Eq. 8-12].** An energy 1/2 k C^2 + lambda C per constraint, with after each sweep:
+
+    lambda <- k C + lambda          (clamped to bounds for inequalities)
+    k      <- k + beta |C|          (the penalty ramps with the violation)
+
+- Finite-stiffness energies ramp k from small up to their real stiffness (Eq. 16), so a point sees a mild stiffness ratio in early iterations.
+- **Hessian [read, Eq. 17]:** k JᵀJ plus the constraint curvature's indefinite part lumped to a diagonal of its column norms, solved with LDLᵀ: always positive definite.
+- **Parameters [read, Table 2]:** beta 10 (the demos 1e4-1e5: "will depend on ... the units"), alpha 0.95 (stabilisation against explosive error correction), gamma 0.99 (warm start of k and lambda across steps).
+- **Results [read]:** springs 1:10,000 converge in 5 iterations, 1 with warm start, where VBD still sags at 100; a 1,500-point mass-spring flag at 5 iterations beats VBD at 20. 110,000 rigid blocks in 3.5 ms (RTX 4090, DirectX 11 compute).
+
+**For cloth it is unproven [read].** The paper's cloth is a mass-spring flag and a 10,000-point sheet under 35,000 rigid bodies (16 ms a frame with collision detection). Newton uses AVBD **for rigid bodies only**; its cloth stays plain VBD, and Newton 1.6 already replaced the paper's rigid form with "compliant ALM" (effectively XPBD's compliance inside a primal solver). The Houdini port's author: AVBD about twice as slow as VBD, stiff constraints still exploding, XPBD "better for stiffness" (opinion).
+
+**[inf]** Its value for us is the idea, not the package: stretch edges as hard or compliant augmented-Lagrangian constraints carrying their tension in lambda, so the penalty in the 3 x 3 block stays moderate. That is what XPBD already does with its multipliers.
+
+### What it means here
+
+- **XPBD is not the problem; locality is.** XPBD and VBD share the propagation limit. VBD's gains (mass ratios, fewer colours, a Newton step, contact as energy) are real but secondary for a sheet of equal masses.
+- **VBD earns its place through self-collision.** The penetration-free contact methods below (OGC, DAT) were built inside VBD and assume an energy-based, primal solver. With XPBD they would need adapting.
+- **The decision should be measured, not read.** Both solvers on the same GPU framework, judged by the same tests (Part 5), on our sheets at our units. Neither paper measured large cloth against the other.
+- **Keep our bending energy** (B 3 l^2 / A, isometric or hinge) in either solver: its stiffness does not change with the mesh, which Newton's does.
+
+## Part 2: The low-frequency layer
+
+Every local solver needs one of these on top for large, fine garments.
+
+### Hierarchical position-based dynamics (Müller 2008)
+
+[Paper](https://matthias-research.github.io/pages/publications/hpbd.pdf). A nonlinear multigrid on the PBD hierarchy [read]:
+
+- Coarse levels are subsets of the fine points.
+- Coarse constraints are **unilateral geodesic distance limits**: they grip only once the whole stretch of material between two coarse points is fully stretched. So the hierarchy never stiffens bending or folding; it only stops over-stretch.
+- Only corrections go down to the finer levels, keeping detail; then two symmetric Gauss-Seidel passes on the fine level.
+- **Result [read]:** an 11,500-triangle cloth at 60 fps with the hierarchy, where about 20 plain iterations (12 fps) were needed to match its stiffness.
+- **Limits [read]:** tearing needs the hierarchy rebuilt; MGPBD's authors say such methods "may struggle to ensure physical consistency between levels".
+
+**What it means here [inf].** The cheapest true fix, and it maps straight onto compute shaders: each level is just more coloured constraint passes, the geodesic distances built once per garment. It fits nearly inextensible, freely folding fabric exactly. It composes with XPBD or VBD (a coarse pass before the fine sweeps). Sewing pattern panels are flat 2D shapes, so a regular-grid mesh per panel gives a clean hierarchy (every second point). **[check]** the paper's prolongation (how coarse corrections reach the fine points) before building.
+
+### Tethers and strain limits
+
+- **Long-range attachments (Kim, Chentanez & Müller 2012) [read, abstract]:** a maximum-distance constraint from each point to its nearest attachment along the cloth. Global inextensibility for O(1) cost, but only for attached cloth (a worn garment's shoulders); free cloth gets nothing. Unreal's Chaos tethers can cause "pull string puppet like behavior" [read].
+- **NvCloth [read, docs]:** tethers cooked offline with a slack scale (1.2 = 20%), constraints solved in phases, 300 Hz by default.
+- **Strain limiting [read, C-IPC, StiffGIPC]:** clamping each edge to at most 1.0-1.1 times its rest length after the solve. Local again, so on its own it has the same reach problem.
+
+**What it means here [inf].** Tethers are a cheap option for worn garments in phase 10 (shoulders, waistband), not a solver.
+
+### Global solvers
+
+- **MGPBD (2025) [read]:** XPBD's full system solved by conjugate gradients with algebraic multigrid. Cloth up to 263,000 points stays inextensible where Jacobi XPBD stalls, but **no cloth timings** and offline speeds elsewhere (seconds a frame). Needs explicit sparse matrices, collision only against a static distance field. Too heavy for us now.
+- **Projective dynamics with subspace reuse (Lan et al. 2024, Style3D) [read]:** Jacobi for the high frequencies, a precomputed low-mode subspace of the rest shape for the low ones, penetration-free barriers. 340,000 points at 4.8 fps, a drape of 120,000 degrees of freedom at 25 fps (RTX 3090). Precomputation 6-47 s per garment, quadratic materials only. [arXiv 2403.19272](https://arxiv.org/abs/2403.19272)
+- **Chebyshev (Wang 2015; Wang & Yang 2016) [read]:** a constant-factor speed-up on top of any local solver, best with Jacobi on the GPU, weaker for PBD-style projection; rho tuned by hand. A 15,000-point dress at 26.6 ms (GTX TITAN X, 8 substeps of 40 iterations).
+
+**What it means here [inf].** The subspace is a strong later option for the dressmaking game, where a garment's rest shape is fixed between pattern edits (rebuild in seconds after an edit). The hierarchy comes first: simpler, no precomputed solve, no material limits.
+
+## Part 3: Self-collision
+
+The roadmap's current plan (a broad phase, continuous collision detection on vertex-triangle and edge-edge pairs, then an untangling pass) is what these methods replace.
+
+### Offset Geometric Contact (Chen et al., SIGGRAPH 2025)
+
+[Project page](https://graphics.cs.utah.edu/research/projects/ogc/), [PDF](https://graphics.cs.utah.edu/research/projects/ogc/Offset_Geometric_Contact-SIGGRAPH2025.pdf). Cloth as a surface offset by a radius r to both sides, with contact forces always perpendicular to the feature they push from.
+
+**Why not IPC's contact [read, section 2.2].** IPC inflates every face into a capsule; near edges and corners its forces are not perpendicular to the cloth, stretching it in its own plane and pushing a point's own neighbours apart. With a 5 mm radius that bulges and oscillates, so IPC shrinks the radius, which stiffens everything.
+
+**The blocks [read, Eq. 6-12].** Each feature's offset region, cut so that neighbouring regions do not overlap:
+
+- **face:** a prism of half-height r on both sides, bounded by planes through its edges;
+- **edge:** a cylinder of radius r cut by the planes towards its two neighbouring faces' far corners (a half-cylinder on a border);
+- **vertex:** a ball of radius r cut by planes perpendicular to its edges, empty at saddle points (some neighbour always covers them).
+
+A point's contact set is the features (not its own) whose block holds it; their count is how many layers it is inside. Edge-edge contacts use the same construction on the wireframe.
+
+**The contact energy [read, Eq. 18-20].** Two stages, with d the distance and tau = r/2:
+
+    g(d) = k_c/2 (r - d)^2                 for tau <= d <= r
+    g(d) = -k_c' log(d) + b                for 0 < d < tau
+    k_c' = tau^2 k_c,   b = k_c/2 (r - tau)^2 + k_c' log(tau)
+
+- The paper's Eq. 19 prints k_c' = tau k_c (tau - r)^2; matching slopes needs tau k_c (r - tau), which is tau^2 k_c at tau = r/2. Newton's code has tau^2 k_c [read].
+- Newton continues below d_min = min(1e-5, tau/2) with a quadratic, so the barrier never divides by zero [read].
+- **Per point [read, Newton]:** f = -g'(d) beta n, H = g''(d) beta^2 n nᵀ, beta the point's barycentric weight in the pair. The Hessian drops the normal's own derivative: a Gauss-Newton block, always positive semi-definite.
+- k_c: 1e5 for most cloth, 1e4 on a sphere; units not stated [read].
+
+**The penetration-free guarantee [read, section 3.7, Eq. 21-27].** Each point gets a bound on how far it may move:
+
+    b_v = gamma_p min(distance to the nearest face not its own,
+                      its edges' distances to the nearest other edges,
+                      its faces' distances to the nearest other points),     gamma_p = 0.45
+
+If every point stays within its bound, no pair can close by more than 2 gamma_p < 1 of its gap, so nothing passes through, with **no continuous collision detection**.
+
+- After each iteration, a point past its bound is pulled back along its motion to the bound.
+- Collision detection reruns once a share gamma_e = 0.01 of the points have hit their bounds.
+- Distances are searched within a query radius r_q >= r, which also caps the bounds; the paper suggests r plus the step's inertial motion.
+- **Must start intersection-free**; seams need their stitched features filtered out.
+
+**Collision detection [read].** Two bounding volume hierarchies (faces, edges) over the original features. A thread per point queries faces within r_q; a thread per edge queries edges. About 10% of the run time with VBD.
+
+**Results [read, Table 1, RTX 4090, per step]:**
+
+| Scene | Points | Contact radius | Step, iterations | GPU time (average / max) |
+|---|---|---|---|---|
+| 50 layers on a cylinder | 246K | 2-3 mm | 1/1200 s, 40 | 6.3 / 11.5 ms |
+| Knot | 48K | 2 mm | 1/300 s, 50 | 4.4 / 6.8 ms |
+| Twisted cloth, 8 turns | 10K | 2 mm | 1/300 s, 10 | 0.9 / 1.5 ms |
+| Dress on a moving body | 15.7K | 2 mm | 1/200 s, 20 | 1.2 / 1.4 ms |
+| Robot folding a T-shirt | 13.8K | 2 mm | 1/600 s, 10 | 1.8 / 2.2 ms |
+
+- Every frame was checked for intersections; none were found.
+- Against C-IPC's dress: 24 s a frame against 9.6 ms on the GPU.
+- Body against cloth is plain penalty contact: **cloth can sink into a moving body; only cloth against cloth is guaranteed.**
+- **Limits [read, section 6]:** a force jump where a point enters a block through its open concave side; points falling side by side are slowed to 2 gamma_p of their gap per detection (fixed by DAT below).
+- **No public code.** Several inconsistencies between the table and captions (the 50 layers' point count and radius).
+
+### Divide and Truncate (Chen, Hsu, Ayman & Macklin, 2026)
+
+[arXiv 2604.15513](https://arxiv.org/abs/2604.15513) (not yet read in full; this is from Newton's code). Newton does **not** implement OGC's blocks yet ("Coverage of Offset Geometric Contact will be added once it is available in Newton"); it ships OGC's two-stage energy on plain closest-point contacts, with this guarantee instead [read, `rigid_vbd_kernels.py` 7543-7925, `particle_vbd_kernels.py` 2053-2211]:
+
+- For each contact pair, find a certified separating plane (the closest direction first, then face normals and edge axes).
+- Place it between the two in proportion to how fast each side approaches, keeping at least 5% of the gap on each side.
+- Each point's straight motion is cut at gamma = 0.85 of its crossing with each of its pairs' planes; the smallest cut wins (an atomic minimum), plus a cap of 0.5 gamma r_q on any motion.
+- Only motion **towards** a neighbour is cut, so OGC's slowed falling pairs go away.
+- Runs after **every colour** of every iteration. A pair already intersecting has no separator and is left to the contact forces.
+- Detection on a fixed schedule (before and after the initial guess by default), the hierarchies refitted, rebuilt only when asked. Fixed buffers of 32 vertex-face and 64 edge-edge pairs per feature; overflow is **silently dropped**.
+
+### What it means here
+
+- **The contact energy and a motion bound replace the whole old plan.** No continuous collision detection, no untangling pass: the guarantee holds by construction as long as the cloth starts clean.
+- **DAT is the more practical bound** (direction-aware, already in production); OGC's blocks give the cleaner forces. Read the DAT paper before choosing **[check]**.
+- **Both assume an energy-based solver** whose points take bounded steps, which VBD is. In XPBD, contacts would be inequality constraints with the same truncation after each colour **[inf]**; untested in the literature.
+- **Cloth against bodies stays penalty contact** (our current shapes, later the mannequin's distance field); a moving body can push cloth into itself.
+- **Real time needs small steps:** 1/200-1/1200 s with 10-50 iterations in their scenes. Our 15 substeps a tick are 1/1800 s.
+
+## Part 4: Fitting the GPU and the engine
+
+### The design: the cloth lives on the GPU
+
+- **The renderer owns the cloth's buffers** (positions, rest data, colours, adjacency, contacts) and records each frame's ticks of cloth passes into its command buffer. Nothing is copied up and down per tick except the game's commands (pins, hands, colliders).
+- **Drawn straight from the cloth's buffer:** the deforming mesh's normals and tangents computed in a compute pass, no CPU upload. Interpolation between ticks from the last two ticks' positions, as the CPU path does.
+- **Positions come back a frame or two late**, read back when that frame in flight comes round (as the probe relocation records already do), for picking, grabbing and gameplay queries.
+- **The seam:** games never include `render/`. An interface in `cloth/` (a GPU cloth service) is handed to games the way the job system is (`Game::getJobs`); headless runs and tests keep the CPU solver, which becomes the reference mirror.
+- **Determinism:** GPU cloth is bit-for-bit repeatable on one GPU and driver only, like the golden images, so it leaves `hashSimulationState`; the CPU path keeps its tests.
+
+### Compute shader details from the research
+
+- **One small group per point**, summing its elements' forces and 3 x 3 blocks through shared memory in a fixed tree order: deterministic and, per the VBD paper, about 10 times faster than a thread per point. Subgroup operations (`subgroupAdd`) are faster but their order is the driver's **[inf]**.
+- **Adjacency in compressed rows:** per point, its triangles and hinges with its own corner index, so each group computes only its own block.
+- **No float atomics for sums:** each point gathers its own contacts from lists sorted in a fixed order. A minimum (DAT's cut) is order-free; GLSL has no core float atomicMin, but non-negative floats compare like their bits, so an integer atomicMin on the bits works **[inf]**.
+- **Dispatch count:** a colour per dispatch with a barrier between. With about 6 point colours, a few hierarchy levels and contact passes, about 15-25 dispatches a substep **[inf]**.
+- **Precision:** single-precision error grows with many small steps (Macklin 2019 [read]); Newton runs a garment in centimetres for that reason. Positions relative to the cloth's own centre help **[inf]**.
+
+### Scale and cost
+
+- **RTX 5080 [inf]:** roughly an RTX 4090's class or a little below in compute, so the 4090 timings above are a fair guide.
+- **Typical GPUs:** the cloth's quality (substeps, iterations, hierarchy levels) must be a setting with presets, like the lighting's ([memory: scalable graphics]).
+- **Budget [inf, from OGC's dress]:** a 15,000-point garment with self-collision at about 1.2 ms a step and 4-8 steps a frame is 5-10 ms: real time for one hero garment, as the dressmaking game needs. A 250,000-point pile is far from it.
+
+## Part 5: How we judge it
+
+Before any solver is chosen, tests that measure the problem, on the CPU and the GPU alike:
+
+- **The resolution ladder:** the same 1 m sheet hung from two corners at 25, 50, 100 and 200 squares a side, the same fabric. Measure its stretch (longest path against rest) and its sag once settled. A good solver gives the same answer at every resolution; ours today does not.
+- **The cantilever** (`testCantilever`), already there: droop against resolution and substeps.
+- **Cost per tick** for each rung, on one GPU, as the cloth lab's measurements are now.
+- **Self-collision:** a sheet dropped onto itself into a pile, checked for intersections every frame (phase 7's second milestone), and a twisted sheet.
+- **GPU against CPU:** the shader library's functions against their C++ mirrors (`make gputest`), as for every other shader library.
+
+## The plan
+
+Each step is a branch of its own, explained first, tests first.
+
+1. **The yardstick.** The resolution ladder on today's CPU solver, measured and recorded. Small, and it tells every later step whether it helped.
+2. **The GPU cloth framework.** The GPU-resident design (Part 4) with today's XPBD solver ported as it is (coloured, our units), its GLSL library mirrored by the CPU solver and checked by GPU tests. The big sheet on the GPU, drawn from its buffer, picked and grabbed through the late readback. Measured on the ladder.
+3. **The low-frequency layer.** Hierarchical levels with unilateral geodesic limits (Müller 2008), CPU and GPU, judged on the ladder. Expected to be the biggest visible gain for large garments.
+4. **Vertex Block Descent as a second local solver,** on the same framework: Stable Neo-Hookean membrane in N/m from our fabric's stiffness, our bending energy, point colouring, the adaptive guess, Chebyshev to try. Judged against XPBD on the ladder and cantilever. Keep the better, or both if each wins somewhere.
+5. **Self-collision.** The two-stage contact energy with DAT's motion bound (or OGC's blocks, after reading DAT), a bounding volume hierarchy on the GPU, the pile milestone. Built for whichever solver step 4 keeps.
+6. **Bodies on the GPU:** the engine's collider shapes as now, later the mannequin's distance field (already a roadmap item).
+
+Later, for the dressmaking game: tethers for worn garments, the coarse simulation mesh driving a fine render mesh (already on phase 10's list), and a precomputed subspace per garment if the hierarchy is not enough.
+
+## Where it goes in the roadmap
+
+Agreed with the user on Oct 25, 2026; phase 7's items in `ROADMAP.md` changed to match:
+
+- "A faster barrier for the coloured solve ... or the GPU" became steps 1-2 (the CPU barrier stays an option for the CPU path).
+- Steps 3 and 4 are new items.
+- "Self-collision" and "Untangling pass" became step 5, the untangling pass dropped (the motion bound makes it unnecessary for cloth that starts clean).
+- "Collision with a mannequin" stays as it is (step 6).
+- "Optional, later: IPC" stays, as the offline reference.
+
+## Sources
+
+- Chen, Liu, Yang & Yuksel 2024, "Vertex Block Descent", ACM TOG 43(4). [arXiv 2403.06321](https://arxiv.org/abs/2403.06321), [project](https://graphics.cs.utah.edu/research/projects/vbd/)
+- Giles, Diaz & Yuksel 2025, "Augmented Vertex Block Descent", ACM TOG 44(4) 90. [Project](https://graphics.cs.utah.edu/research/projects/avbd/); demos `savant117/avbd-demo2d`, `avbd-demo3d`
+- Chen et al. 2025, "Offset Geometric Contact", ACM TOG 44(4). [Project](https://graphics.cs.utah.edu/research/projects/ogc/)
+- Chen, Hsu, Ayman & Macklin 2026, "Divide and Truncate". [arXiv 2604.15513](https://arxiv.org/abs/2604.15513)
+- NVIDIA Newton, `newton/_src/solvers/vbd/` (main at `f121272e`). [GitHub](https://github.com/newton-physics/newton); Isaac Lab's [VBD tuning page](https://isaac-sim.github.io/IsaacLab/main/source/how-to/solver_tuning_vbd.html)
+- Müller 2008, "Hierarchical Position Based Dynamics". [PDF](https://matthias-research.github.io/pages/publications/hpbd.pdf)
+- Macklin et al. 2019, "Small Steps in Physics Simulation". [PDF](https://mmacklin.com/smallsteps.pdf)
+- Macklin et al. 2014, "Unified Particle Physics for Real-Time Applications" (Flex). [PDF](https://mmacklin.com/uppfrta_preprint.pdf)
+- Kim, Chentanez & Müller 2012, "Long Range Attachments". [Eurographics](https://diglib.eg.org/handle/10.2312/SCA.SCA12.305-310)
+- Wang 2015, "A Chebyshev Semi-Iterative Approach". [PDF](https://wanghmin.github.io/publication/wang-2015-csi/Wang-2015-CSI.pdf); Wang & Yang 2016, "Descent Methods for Elastic Body Simulation on the GPU". [PDF](https://wanghmin.github.io/publication/wang-2016-dme/Wang-2016-DME.pdf)
+- Wang 2021, "GPU-Based Simulation of Cloth Wrinkles at Submillimeter Levels". [PDF](https://wanghmin.github.io/publication/wang-2021-gbs/Wang-2021-GBS.pdf)
+- Lan et al. 2024, "Efficient GPU Cloth Simulation with Non-distance Barriers and Subspace Reuse". [arXiv 2403.19272](https://arxiv.org/abs/2403.19272)
+- Li et al. 2025, "MGPBD: A Multigrid Accelerated Global XPBD Solver". [arXiv 2505.13390](https://arxiv.org/abs/2505.13390)
+- Huang et al., "StiffGIPC". [arXiv 2411.06224](https://arxiv.org/abs/2411.06224); Li et al. 2021, "Codimensional Incremental Potential Contact". [arXiv 2012.04457](https://arxiv.org/abs/2012.04457)
+- JGS2, SIGGRAPH 2025. [arXiv 2506.06494](https://arxiv.org/abs/2506.06494)
+- MysteryPancake, Houdini-VBD (third-party port and its authors' answers). [GitHub](https://github.com/MysteryPancake/Houdini-VBD)

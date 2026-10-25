@@ -294,19 +294,21 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] Dragging cloth with the mouse: a hand constraint on the grabbed point (`cloth-grab`)
 - [x] Cloth constraints: bending (the hinge angle, Bridson's gradient) and moving pins (hooks on a rail) (`cloth-bending`)
 - [x] Collision with bodies: spheres, capsules and boxes (every `Collider`), positional friction, a sheet draped over the cloth lab's ball (`cloth-collision`)
-- [ ] Collision with a mannequin: a signed distance field around it, built in compute (it can serve later as DDGI's software tracer and for distance-field AO); moving bodies (the surface's velocity in the friction)
-- [ ] Self-collision, so folds and layers never pass through each other
-  - A broad phase (a BVH or spatial hash) only finds nearby pairs.
-  - Cloth is so thin that a fast-moving layer can jump right through another between two substeps, so it also needs continuous collision detection (vertex-triangle and edge-edge pairs checked along their motion during the step) and a cloth thickness that keeps layers apart
-- [ ] Untangling pass (Baraff, Witkin & Kass 2003, "Untangling Cloth") as a safety net: finds intersections that slipped through anyway and pushes the tangled regions apart over the next steps, instead of letting them lock together for good
 - [x] Solver on several threads: a job per cloth, coloured constraints on every core (bit for bit the one-thread result), spinning workers, `src/cloth/` optimised in debug, a big sheet to measure (`cloth-parallel`)
 - [x] A tick budget: ticks a frame may run within 1/60 s, the rest dropped, so an overloaded simulation runs in slow motion instead of spiralling to 3 fps (`tick-budget`)
 - [x] Isometric bending (Bergou et al. 2006): about four times cheaper than the hinge angle, the hinge kept as an option for creases (`isometric-bending`)
-- [ ] A faster barrier for the coloured solve: a 100 x 100 sheet gained only 2.8 times on 16 threads with hinge bending (26 to 9.3 ms a tick; with isometric bending 7 to 6.3, the coloured solve's cache lines moving between cores costing as much as the work), its 210 colour barriers a tick costing about 25 microseconds each against 6 of work. Fixed-thread loops meeting at a spinning counter, as cloth solvers use, and one thread per physical core (spinning on both of a core's threads slowed the work), or the GPU
+- [ ] Cloth on the GPU, for large garments (plan and research: `docs/CLOTHGPU.md`, read it first). Each step its own branch, judged by measurement:
+  - [ ] The yardstick: the same sheet at 25, 50, 100 and 200 squares a side, its stretch and sag measured on today's CPU solver, so every later step is judged on numbers (`cloth-yardstick`)
+  - [ ] The GPU framework: the cloth lives on the GPU, drawn straight from its buffer (normals in compute), picking and dragging through a readback a frame late, the CPU solver kept for headless runs and as the mirror; today's coloured XPBD ported as it is (replaces the faster CPU barrier item: fixed-thread loops at a spinning counter stay an option for the CPU path)
+  - [ ] The low-frequency layer: hierarchical position-based dynamics (Müller 2008), coarser levels with one-sided geodesic distance limits that stop sag and stretch without stiffening folds; CPU and GPU, judged on the yardstick
+  - [ ] Vertex Block Descent (Chen et al. 2024) as a second local solver on the same framework: Stable Neo-Hookean membrane in our fabric's units, our bending energy, point colouring; judged against XPBD on the yardstick and the cantilever, keeping the better or both
+  - [ ] Self-collision, so folds and layers never pass through each other: Offset Geometric Contact's two-stage contact energy with a per-point motion bound (Divide and Truncate, or OGC's own), a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean
+  - [ ] Bodies on the GPU: the engine's collider shapes, then the mannequin below
+- [ ] Collision with a mannequin: a signed distance field around it, built in compute (it can serve later as DDGI's software tracer and for distance-field AO); moving bodies (the surface's velocity in the friction)
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
   - Bending stiffness (silk vs denim), mass per area, friction
-- [ ] Optional, later: IPC or codimensional IPC (incremental potential contact) for hero garments: guaranteed intersection-free at any step size, at a much higher cost per step
+- [ ] Optional, later: IPC or codimensional IPC (incremental potential contact) as an offline reference for judging garments: guaranteed intersection-free, about a thousand times too slow for real time
 
 **Milestone:**
 
