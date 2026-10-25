@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cloth/cloth_block_descent.h"
 #include "cloth/cloth_collision.h"
 #include "cloth/cloth_constraints.h"
 #include "cloth/cloth_grab.h"
@@ -40,9 +41,16 @@
 * Against bodies the cloth keeps a thickness: real fabric is about a millimetre thick, but a small gap lets it rest on
 * a body instead of flickering half inside it. Friction is cotton's on a smooth surface.
 *
-* Coarse levels (cloth_hierarchy.h) carry a pin's pull across a fine sheet each substep, so it stretches as little as a
-* coarse one. Off (0) until the GPU solver has them too, so that both step a cloth alike.
+* The solver (ClothMethod) is XPBD's constraint passes, or Vertex Block Descent (cloth_block_descent.h), which lowers
+* the substep's energy one point at a time and takes coarse levels (cloth_hierarchy.h) between its sweeps, carrying a
+* pin's pull across a fine sheet so it stretches as little as a coarse one. XPBD by default, with no levels, until the
+* GPU solver has the other too, so that both step a cloth alike.
 */
+enum class ClothMethod {
+    Xpbd,
+    VertexBlockDescent,
+};
+
 struct ClothSettings {
     float areaDensity = 0.2f;          // kg per square metre; read when the cloth is made
     float gravity = 9.81f;             // downward acceleration, m/s2
@@ -55,7 +63,8 @@ struct ClothSettings {
     float thickness = 0.005f;          // m
     float staticFriction = 0.6f;
     float kineticFriction = 0.4f;
-    int hierarchyLevels = 0;           // coarse levels used, up to maxClothLevels
+    ClothMethod method = ClothMethod::Xpbd;
+    int hierarchyLevels = 0;           // coarse levels used with vertex block descent, up to maxClothLevels
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -115,6 +124,10 @@ struct Cloth {
     // whenever a point is pinned (pinClothPoint, addClothPin).
     std::vector<Vec3> restPositions;
     ClothHierarchy hierarchy;
+
+    // Each point's constraints and the points' colouring, for vertex block descent and the coarse levels' energy.
+    ClothPointConstraints pointConstraints;
+    ClothVertexColours vertexColours;
 
     // A hand holding one point, set by the game from its commands (never from input inside a tick).
     std::optional<ClothGrab> grab;

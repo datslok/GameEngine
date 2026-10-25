@@ -218,14 +218,44 @@ Only corrections go down, never positions, so the fine level keeps its folds and
 - **On the GPU (the next branch):** each level is a set of limits coloured as today (`colourStretch` colours any edge list), plus one dispatch a level passing its corrections down.
 - **Judged on the yardstick:** path stretch near 0.15% and the same sag on every rung, and its cost a tick.
 
-**Built and measured** (`hierarchical-cloth`, Oct 25 2026; sheets settled 4 s in the tests' debug build, path stretch; the yardstick's own rows are in Part 5). Two of the paper's choices changed:
+**Built, and why it failed** (`hierarchical-cloth`, Oct 25 2026). Built as above, with three parents a point (k = 3, not the paper's 2) and no level under 50 points, both needed to keep it from blowing up. It fixed the yardstick's hanging sheet (36% to 0.3% at 200 squares), but the cloth lab's sheets "jiggle around a lot" (the user). Reproduced: a sheet pinned flat by its four corners (a hammock) never settles with the levels (points at 3-17 m/s, against 0.36 m/s without).
 
-- **Three parents, not two.** With the paper's k = 2 each level is about 3 times smaller than the one below, and many children follow only two parents. It helped (a 128-square sheet from 14.7% to 2%), but hierarchies of 7 or more levels shook a settled sheet apart. With k = 3 (levels about 2.2 times smaller): 32 squares 0.035%, 64 0.11%, 128 0.32%, 200 0.32%, against 1.5%, 5.6%, 14.7% and 33.5% without. k = 4 was mixed (0.19% at 128 squares with 10 levels, but 0.054% against 0.025% at 64) and coarsens more slowly (about 1.8 times a level), so it needs more levels and passes for the same reach.
-- **A smallest level.** Every hierarchy that shook a sheet apart ended in a level of about 30 points or fewer (k = 2 or 3 or 4 alike), each edge spanning a fifth of the sheet; none ending at 50 or more did. Levels stop at 50 points (`smallestClothLevel`): a 200-square sheet gets 9.
-- **The whole motion passed down, confirmed:** the paper's literal re-save on every level, at k = 3, left 0.11%, 0.52%, 1.5% and 1.9%, about 5 times as much. Passing nothing down (only the coarse points corrected) left more still.
-- **Tried and dropped:** weights that also pass on a stretch or turn of the parents (least squares, kept near the paper's) shook every deep hierarchy apart: they go negative where a child lies outside its parents, and a child with two parents off its line cannot be placed by them at all. The fabric's compliance on the coarse limits instead of none changed almost nothing (the points' inverse masses dominate a substep's step); kept, so each level is the same fabric.
-- **Not a one-pass fix:** a sheet stretched 10% all the way down comes back only to 8.6% in one pass (9.8% without), since a parents' average passes on a shift exactly but a stretch only roughly. Each substep's correction is small (gravity moves a point 3 microns), which the layer carries well.
-- **The worst edge stays high** near the corner pins (17% at 200 squares), where one point holds the sheet: local, not the sheet-wide error the layer is for.
+**The root cause, measured.** A substep is an implicit Euler step, the positions minimising
+
+phi(x) = sum m_i |x_i - prediction_i|^2 / (2 h^2) + the fabric's energy,
+
+and every XPBD constraint step lowers it, which is why XPBD is stable. Müller's coarse pass raised phi in every one of 1,800 substeps in every case measured, moving points by up to 8.7 mm a substep where gravity moves them 3 microns:
+
+- **A different target.** The coarse limits aim at zero stretch; the cloth's minimum has the fabric's small stretch, which a hammock needs to sag at all. So the coarse pass pulls one way and the fine pass back, every substep. In nonlinear multigrid terms, the coarse problem lacks the full approximation scheme's tau correction, which makes an exact fine solution a fixed point of the cycle.
+- **Weightless regions.** A coarse limit moves its ends by their own point masses, but each end's whole region follows: the step neither conserves momentum (it would need each coarse point to carry its region's mass, the diagonal of P^T M P) nor pays the region's inertia.
+- **What MGPBD says [read]:** one sentence, no analysis: HPBD and the multilayer solver, "being multi-resolution rather than multigrid methods, … may struggle to ensure physical consistency between levels". Müller 2008 never discusses energy or stability.
+- **Tried and dropped first:** slack in the coarse limits (up to 2%: still shook), the border kept on every level (far worse, 133 m/s), weights that pass on a stretch as well as a shift (negative weights shook it apart), and following only a quarter of the parents' motion (calm, 12-20 times less stretch than the plain solver, rejected by the user as a fudge factor with no theory).
+
+### Galerkin multigrid on the substep's energy (Lu, Yuan, Mo & Hu 2025)
+
+"Fast Galerkin Multigrid Method for Unstructured Meshes", TOG 44(6). [PDF](https://cg.cs.tsinghua.edu.cn/papers/TOG-2025-Fast-Galerkin.pdf). Matrix-free, on the GPU, for exactly min phi(x) [read, Algorithm 3]:
+
+1. Pre-smooth: x <- x - diag(H)^-1 grad phi(x) (vertex-block Jacobi, "inspired by VBD").
+2. Coarse step: dx_c = -diag(P^T H P)^-1 P^T grad phi(x), then x <- x + P dx_c.
+3. Post-smooth as in 1.
+
+- **Why it cannot fight:** the coarse step is built from phi's own gradient, so where phi is at its minimum it is exactly zero (the tau correction built in), and P^T H P carries the region's real mass.
+- **Cheap:** only P^T grad phi (a gather) and each coarse point's 3 x 3 diagonal block are needed; no coarse matrix is stored, and each coarse level connects straight to the finest.
+- **Stability [read]:** fixed step lengths, 0.25 on coarse levels and 0.5 on fine; line search was tried and dropped for its GPU reductions ("coarse layer step lengths often benefit from significantly larger values, sometimes reaching 2.0 or 4.0"). Many small substeps, one cycle each.
+- **Numbers [read]:** up to 6.90 times faster than Jacobi-PCG at a million points (VBD 3.89 times); a 1.15M-point dragon at 1.15 s a frame, a 22K-point teapot at 8 ms (RTX 4090). Piecewise-constant coarse spaces (each fine point one parent); contact a simple penalty.
+
+**The theory behind it [read].** Subspace correction (Tai & Xu 2002; Chen, Hu & Wise 2020): each coarse step minimises the original energy along the coarse space, which is monotone; with a line search "the energy is always decreasing". Monotone multigrid for inequalities (Gräser & Kornhuber 2009): never invent coarse inequalities; restrict the fine ones, and leave points held by an active constraint out of the coarse basis (truncation). Recursive multilevel trust region (Kopaničáková, Krause & Tamstorf 2019): accept a coarse correction only if the fine energy drops.
+
+**Others surveyed [read unless marked]:** Tamstorf, Jones & McCormick 2015 (smoothed aggregation, Galerkin P^T A P, 6-8 times faster than block-diagonal PCG at 371K vertices, CPU, needs sparse matrices); Xian, Tong & Liu 2019 (Galerkin multigrid with 12-DOF affine coarse handles: coarse-grid error reduction 0.058, against 0.4-0.5 for position-only coarse points, our kind; 40K-vertex cloth at 36-75 fps); MGPBD 2025 (XPBD's dual system by AMG-preconditioned CG, needs damping 0.25 for cloth, offline speeds); Lan et al. 2024 (a precomputed low-mode subspace); long-range attachments (Kim, Chentanez & Müller 2012), what Unreal's Chaos and NvCloth ship, only for pinned cloth.
+
+**Built: vertex block descent with Galerkin levels** (`hierarchical-cloth`, rebuilt Oct 25 2026). Müller's levels and weights kept, his limits replaced by Lu's coarse step on phi, with a line search (one reduction a level; it gives the step length with no tuning) and held points (pins, points touching bodies) truncated out.
+
+- **It still shook next to XPBD (0.54 m/s).** XPBD keeps its own bookkeeping: every move from the prediction must come from its multipliers (M (x - prediction) = grad C^T lambda), starting each substep at lambda = 0. A coarse move it did not make breaks that, so it corrects the same stretch again. Coarse step after XPBD instead: worse (1.26 m/s), since nothing smooths the coarse step's fine wrinkles away.
+- **A primal smoother fixes it.** With a smoother that lowers phi itself (vertex block descent, Chen et al. 2024, Part 1) on both sides of the coarse step, the hammock settles calmer than XPBD's (0.039 against 0.077 m/s rms), whatever the number of levels. So the low-frequency layer and vertex block descent are one step, not two: XPBD stays as the default solver, and the levels come with vertex block descent.
+- **Measured** (quick yardstick, release, 16 threads, 15 substeps, settled 4 s): path stretch 0.27%, 0.35%, 0.57% at 25, 50, 100 squares, against XPBD's 1.04%, 3.5%, 9.6% and vertex block descent alone's 0.82%, 2.6%, 10.4% (a local solver too). Every sheet settled to a millimetre a second and hangs within 5 mm of its metre. Full table: Part 5.
+- **The cost is the problem: 8-16 times XPBD's** on the CPU (100 squares 45 ms a tick against 5.6, 50 squares 28 against 1.7). Each level computes phi's gradient and runs its line search over the whole cloth, and each pass ends at a barrier. Already cut: per-point gradient (one pass instead of a colour each), each level's weights straight from the cloth's points (one pass to gather and one to spread, not one per level between), the line search summing points, edges and hinges once each (100 squares 134 to 45 ms).
+- **Tried and dropped:** additive levels (one gradient and one line search a substep for all levels: 40% cheaper, but 3.4% stretch at 100 squares against 0.57%); fewer substeps (5 or 8: stretch 17% or 2.6% at 100 squares, a bigger step is a much harder solve); bigger jobs (slower on large cloths, too few threads for the gradient). Skipping the two finest coarse levels saves about a third for a little stretch (0.57% to 0.71% at 100 squares): a knob, not yet a setting.
+- **On the GPU** (the next step) a pass costs a dispatch, about 2.3 microseconds whatever its size, so the same 75 or so passes a substep should cost a few milliseconds a tick at any size up to tens of thousands of points.
 
 ### Tethers and strain limits
 
@@ -387,21 +417,19 @@ Before any solver is chosen, tests that measure the problem, on the CPU and the 
 - **Cost is the dispatches, not the points:** 330 dispatches a tick at 15 substeps (22 a substep: the prediction, about 20 colours, the end), about 2.3 microseconds each whatever their size, so 40,000 points cost barely more than 700. The 200 sheet is 17 times faster than the CPU's 16 threads; the smallest is slower than the CPU.
 - **What it means for the plan:** the GPU has room for many more substeps or a hierarchy's extra passes on large garments; fewer dispatches (fewer colours, fused passes, a whole small cloth in one workgroup) would help small cloths.
 
-**The low-frequency layer on the CPU** (`hierarchical-cloth`, Oct 25 2026, release, 16 threads; every level each sheet has, three parents a point, none below 50 points; Part 2):
+**Vertex block descent with Galerkin levels on the CPU** (`hierarchical-cloth`, Oct 25 2026, release, 16 threads, settled 10 s; every level each sheet has; Part 2). Path stretch and ms a tick:
 
-| Squares | Levels | Path stretch, 15 substeps | Sag (m) | ms a tick | Path stretch, 60 | ms a tick |
-|---|---|---|---|---|---|---|
-| 25 | 3 | 0.054% (0.97% without) | 1.0004 | 0.63 (0.43) | 0.017% | 2.61 |
-| 50 | 5 | 0.086% (3.2%) | 1.0006 | 3.14 (1.77) | 0.011% | 13.3 |
-| 100 | 7 | 0.154% (9.7%) | 1.0009 | 13.2 (6.06) | 0.014% | 53.3 |
-| 200 | 9 | 0.312% (36%) | 1.0021 | 30.9 (19.8) | 0.030% | 122 |
+| Squares | XPBD, 15 substeps | XPBD, 60 | Vertex block descent, 15 | With its levels, 15 | Sag with levels (m) |
+|---|---|---|---|---|---|
+| 25 | 0.97%, 0.41 | 0.31%, 1.65 | 0.82%, 1.29 | **0.27%, 6.9** (3 levels) | 1.0021 |
+| 50 | 3.2%, 1.65 | 0.39%, 6.8 | 2.8%, 2.7 | **0.35%, 28** (5) | 1.0027 |
+| 100 | 9.7%, 5.7 | 0.87%, 22 | 9.8%, 4.7 | **0.44%, 45** (7) | 1.0034 |
+| 200 | 36%, 17 | 4.7%, 67 | 33%, 13 | **0.74%, 146** (9) | 1.0054 |
 
-- **The goal nearly met:** at 15 substeps the path stretch is 0.05-0.3% on every rung, near the fabric's 0.15%, and every sheet hangs within 2 mm of its metre, where the 200 sheet hung 31 cm too low. It still grows a little with the squares (1.6 to 2 times a rung, against about 3 without).
-- **Cheaper than substeps:** 15 substeps with the levels beat 60 without on every rung, for less: the 200 sheet 0.31% in 31 ms against 4.7% in 80.
-- **Stiffer than the fabric** where it is cheap enough to run long: at 60 substeps 0.01-0.03%, under cotton's 0.15%. The coarse limits are one-sided at the rest length, so once they converge the sheet barely stretches at all; invisible at these sizes.
-- **The cost on the CPU** is 1.5-2.2 times the tick: each level's limits come in a few colours of few constraints, each colour a barrier (the same limit as the fine solve's). On the GPU each level is a few more dispatches.
-- **The worst edge** falls too (872% to 17% at 200 squares) but stays the largest near the corner pins.
-- **Times in this run** for the plain CPU rows were about 20% slower than in `cloth-yardstick`'s (19.8 ms against 16.2 at 200 squares), and the GPU rows varied between 0.9 and 1.7 ms at 15 substeps: the machine's load, not the code.
+- **Nearly independent of the resolution:** 0.3-0.7% on every rung (cotton is about 0.15%), every sheet within 6 mm of its metre and settled to under a millimetre a second; the worst edge 1.2-14% against XPBD's 6-872%.
+- **Vertex block descent alone is no better than XPBD:** a local solver too. Its gain is that it takes the levels, which XPBD cannot (Part 2).
+- **Too dear on the CPU:** 8-17 times XPBD at the same substeps; against XPBD at 60 substeps, dearer below 100 squares and better value above (the 200 sheet 0.74% for 146 ms against 4.7% for 67). The GPU's XPBD at 60 substeps does the 200 sheet in 3.6 ms, so the levels' place is the GPU, where a pass costs a dispatch.
+- **The earlier levels** (Müller's one-sided limits, the first build of this branch) measured 0.054-0.31% here but shook sagging sheets; their numbers are not comparable to a stable solver's.
 
 ## The plan
 
@@ -409,8 +437,8 @@ Each step is a branch of its own, explained first, tests first.
 
 1. **The yardstick (done, `cloth-yardstick`).** The resolution ladder on today's CPU solver, measured and recorded (Part 5). Small, and it tells every later step whether it helped.
 2. **The GPU cloth framework.** The GPU-resident design (Part 4) with today's XPBD solver ported as it is (coloured, our units), its GLSL library mirrored by the CPU solver and checked by GPU tests. The big sheet on the GPU, drawn from its buffer, picked and grabbed through the late readback. Measured on the ladder.
-3. **The low-frequency layer (CPU done, `hierarchical-cloth`; GPU next).** Hierarchical levels with one-sided distance limits (Müller 2008; rest lengths straight across the flat rest shape, Part 2), CPU and GPU, judged on the ladder. Expected to be the biggest visible gain for large garments.
-4. **Vertex Block Descent as a second local solver,** on the same framework: Stable Neo-Hookean membrane in N/m from our fabric's stiffness, our bending energy, point colouring, the adaptive guess, Chebyshev to try. Judged against XPBD on the ladder and cantilever. Keep the better, or both if each wins somewhere.
+3. **The low-frequency layer with Vertex Block Descent (CPU done, `hierarchical-cloth`; GPU next).** Re-planned on Oct 25 2026 when the measurements showed the two belong together (Part 2): Müller's levels with Lu et al.'s Galerkin coarse step on the substep's energy, between vertex block descent sweeps (our fabric's stretch and bending as energies, point colouring); XPBD kept as the default. Next: the GPU port, its cost cut further (fewer passes a level, skipping fine levels), then judged against XPBD on the ladder and the cantilever. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019).
+4. **(Merged into step 3.)**
 5. **Self-collision.** The two-stage contact energy with DAT's motion bound (or OGC's blocks, after reading DAT), a bounding volume hierarchy on the GPU, the pile milestone. Built for whichever solver step 4 keeps.
 6. **Bodies on the GPU:** the engine's collider shapes as now, later the mannequin's distance field (already a roadmap item).
 
@@ -434,6 +462,13 @@ Agreed with the user on Oct 25, 2026; phase 7's items in `ROADMAP.md` changed to
 - Chen, Hsu, Ayman & Macklin 2026, "Divide and Truncate". [arXiv 2604.15513](https://arxiv.org/abs/2604.15513)
 - NVIDIA Newton, `newton/_src/solvers/vbd/` (main at `f121272e`). [GitHub](https://github.com/newton-physics/newton); Isaac Lab's [VBD tuning page](https://isaac-sim.github.io/IsaacLab/main/source/how-to/solver_tuning_vbd.html)
 - Müller 2008, "Hierarchical Position Based Dynamics". [PDF](https://matthias-research.github.io/pages/publications/hpbd.pdf)
+- Lu, Yuan, Mo & Hu 2025, "Fast Galerkin Multigrid Method for Unstructured Meshes", TOG 44(6). [PDF](https://cg.cs.tsinghua.edu.cn/papers/TOG-2025-Fast-Galerkin.pdf)
+- Tamstorf, Jones & McCormick 2015, "Smoothed Aggregation Multigrid for Cloth Simulation". [PDF](https://media.disneyanimation.com/uploads/production/publication_asset/131/asset/paper.pdf)
+- Xian, Tong & Liu 2019, "A Scalable Galerkin Multigrid Method for Real-time Simulation of Deformable Objects". [PDF](https://tiantianliu.cn/papers/xian2019multigrid/xian2019multigrid.pdf)
+- Kopaničáková, Krause & Tamstorf 2019, recursive multilevel trust region for cloth. [PDF](https://media.disneyanimation.com/uploads/production/publication_asset/181/asset/rmtrcloth.pdf)
+- Gräser & Kornhuber 2009, "Multigrid Methods for Obstacle Problems". [PDF](https://opus4.kobv.de/opus4-matheon/files/511/5266_matheon_graeser_kornhuber_obstacle.pdf)
+- Chen, Hu & Wise 2020, "Convergence Analysis of the Fast Subspace Descent Method". [arXiv 1810.04116](https://arxiv.org/abs/1810.04116)
+- Mercier-Aubin & Kry 2024, "A Multi-layer Solver for XPBD". [PDF](https://diglib.eg.org/bitstream/handle/10.1111/cgf15186/v43i8_cgf15186.pdf)
 - Macklin et al. 2019, "Small Steps in Physics Simulation". [PDF](https://mmacklin.com/smallsteps.pdf)
 - Macklin et al. 2014, "Unified Particle Physics for Real-Time Applications" (Flex). [PDF](https://mmacklin.com/uppfrta_preprint.pdf)
 - Kim, Chentanez & Müller 2012, "Long Range Attachments". [Eurographics](https://diglib.eg.org/handle/10.2312/SCA.SCA12.305-310)

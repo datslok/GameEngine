@@ -1,5 +1,8 @@
 #include "cloth/cloth.h"
+#include "cloth/cloth_collision.h"
+#include "cloth/cloth_block_descent.h"
 #include "cloth/cloth_constraints.h"
+#include "cloth/cloth_energy.h"
 #include "cloth/cloth_hierarchy.h"
 #include "cloth/cloth_yardstick.h"
 #include "core/job_system.h"
@@ -8,6 +11,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <numbers>
 #include <optional>
@@ -36,29 +42,71 @@ namespace {
         return neighboursOf(stretchConstraints(Mesh::grid(squares, squares, 1.0f, 1.0f)), static_cast<std::size_t>((squares + 1) * (squares + 1)));
     }
 
-    // A yardstick sheet using every level it has.
-    Cloth sheetWithLevels(int squares) {
+    // Vertex block descent with this many coarse levels.
+    ClothSettings blockDescent(int levels) {
         ClothSettings settings;
-        settings.hierarchyLevels = maxClothLevels;
-        return yardstickSheet(squares, settings);
+        settings.method = ClothMethod::VertexBlockDescent;
+        settings.hierarchyLevels = levels;
+        return settings;
     }
 
-    // Every point of the level reached from its first along the level's limits.
-    bool levelIsConnected(const ClothLevel& level, std::size_t pointCount) {
-        const std::vector<std::vector<std::uint32_t>> neighbours = neighboursOf(level.limits, pointCount);
+    // A yardstick sheet using every level it has.
+    Cloth sheetWithLevels(int squares) {
+        return yardstickSheet(squares, blockDescent(maxClothLevels));
+    }
+
+    // Where a point sits in its level's sorted list.
+    std::size_t indexOnLevel(const ClothLevel& level, std::uint32_t point) {
+        return static_cast<std::size_t>(std::lower_bound(level.points.begin(), level.points.end(), point) - level.points.begin());
+    }
+
+    // Every point of the level reached from its first along the level's mesh.
+    bool levelIsConnected(const ClothLevel& level) {
         std::set<std::uint32_t> reached{level.points.front()};
         std::vector<std::uint32_t> waiting{level.points.front()};
         while (!waiting.empty()) {
-            const std::uint32_t point = waiting.back();
+            const std::size_t index = indexOnLevel(level, waiting.back());
             waiting.pop_back();
-            for (std::uint32_t next : neighbours[point]) {
-                if (reached.insert(next).second) {
-                    waiting.push_back(next);
+            for (std::uint32_t next = level.neighbourStarts[index]; next < level.neighbourStarts[index + 1]; ++next) {
+                if (reached.insert(level.neighbours[next]).second) {
+                    waiting.push_back(level.neighbours[next]);
                 }
             }
         }
         return reached.size() == level.points.size();
     }
+
+    ClothEnergyTerms energyTerms(const Cloth& cloth) {
+        const ClothSettings& settings = cloth.settings;
+        return ClothEnergyTerms{cloth.stretch,           cloth.bend,               cloth.pointConstraints, settings.stretchCompliance,
+                                settings.bendingStiffness, settings.bendingModel, cloth.grab,            settings.grabCompliance};
+    }
+
+    float substepOf(const Cloth& cloth) {
+        return tick / static_cast<float>(cloth.settings.substeps);
+    }
+
+    // The hierarchy's step alone, every level, from the cloth's prediction (its positions unless given).
+    void coarseStep(Cloth& cloth, const std::vector<Shape>& bodies = {}, const std::vector<Vec3>* predicted = nullptr) {
+        ClothHierarchyScratch scratch;
+        scratch.predicted = predicted ? *predicted : cloth.particles.positions;
+        solveClothHierarchy(cloth.particles, cloth.hierarchy, maxClothLevels, energyTerms(cloth), bodies, cloth.settings.thickness, substepOf(cloth),
+                            scratch, serialJobs());
+    }
+
+    // A fixed run of pseudo-random numbers in -1..1, the same on every machine.
+    struct Numbers {
+        std::uint32_t state = 12345;
+        float next() {
+            state = state * 1664525u + 1013904223u;
+            return static_cast<float>(state >> 8) / static_cast<float>(1u << 24) * 2.0f - 1.0f;
+        }
+        Vec3 nextVec() {
+            const float x = next();
+            const float y = next();
+            return Vec3{x, y, next()};
+        }
+    };
 
     /*
     * The paper's greedy choice on a wheel: the hub, visited first, has six coarse neighbours and goes fine; then each
@@ -76,8 +124,9 @@ namespace {
     }
 
     /*
-    * On a grid, every fine point keeps at least clothParentsWanted coarse neighbours (its parents), a kept point (a pin) stays coarse
-    * whatever its neighbours, a good share of the points go fine, and the same grid always gives the same choice.
+    * On a grid, every fine point keeps at least clothParentsWanted coarse neighbours (its parents), a kept point (a pin)
+    * stays coarse whatever its neighbours, a good share of the points go fine, and the same grid always gives the same
+    * choice.
     */
     void testCoarsePointsOfAGrid() {
         const std::vector<std::vector<std::uint32_t>> neighbours = gridNeighbours(12);
@@ -120,9 +169,9 @@ namespace {
 
     /*
     * The hierarchy of a pinned sheet: each level a smaller subset of the one below, no smaller than smallestClothLevel,
-    * holding the pins, connected by its limits; each limit between two of its points, once, at their straight distance
-    * in the rest shape, coloured; every point not on a level has at least clothParentsWanted parents on the level above
-    * its own, weighted to 1, and each level lists those children.
+    * holding the pins, its mesh connected, each neighbour list sorted, on the level and two-way; every point not on a
+    * level has at least clothParentsWanted parents on the level above its own, weighted to 1; each level's weights
+    * from the cloth's points are as many one way as the other; each level's points have a mass.
     */
     void testHierarchyOfASheet() {
         const Cloth cloth = sheetWithLevels(32);
@@ -142,12 +191,28 @@ namespace {
             assert(level.points.size() < below.size() && level.points.size() >= smallestClothLevel);
             assert(std::is_sorted(level.points.begin(), level.points.end()));
             assert(std::includes(below.begin(), below.end(), level.points.begin(), level.points.end()));
+            assert(level.neighbourStarts.size() == level.points.size() + 1 && level.gatherStarts.size() == level.points.size() + 1);
+            assert(level.spreadStarts.size() == pointCount + 1);
+            assert(level.masses.size() == level.points.size());
             for (const ClothPin& pin : cloth.pins) {
                 assert(std::binary_search(level.points.begin(), level.points.end(), pin.particle));
             }
-            for (const std::uint32_t point : level.points) {
+
+            for (std::size_t at = 0; at < level.points.size(); ++at) {
+                const std::uint32_t point = level.points[at];
                 assert(hierarchy.pointLevels[point] >= number);
+                assert(level.masses[at] > 0.0f);
+                const auto first = level.neighbours.begin() + level.neighbourStarts[at];
+                const auto last = level.neighbours.begin() + level.neighbourStarts[at + 1];
+                assert(first != last && std::is_sorted(first, last) && std::adjacent_find(first, last) == last);
+                for (auto other = first; other != last; ++other) {
+                    assert(*other != point && std::binary_search(level.points.begin(), level.points.end(), *other));
+                    const std::size_t otherAt = indexOnLevel(level, *other);
+                    assert(std::binary_search(level.neighbours.begin() + level.neighbourStarts[otherAt],
+                                              level.neighbours.begin() + level.neighbourStarts[otherAt + 1], point));
+                }
             }
+            assert(levelIsConnected(level));
 
             // The children: the points below not on this level, exactly those whose level is the one below.
             std::vector<std::uint32_t> children;
@@ -159,30 +224,15 @@ namespace {
                 const std::uint32_t end = hierarchy.parentStarts[child + 1];
                 assert(end - start >= static_cast<std::uint32_t>(clothParentsWanted));
                 float total = 0.0f;
-                for (std::uint32_t parent = start; parent < end; ++parent) {
-                    assert(std::binary_search(level.points.begin(), level.points.end(), hierarchy.parents[parent].point));
-                    assert(hierarchy.parents[parent].weight > 0.0f && hierarchy.parents[parent].weight <= 1.0f);
-                    total += hierarchy.parents[parent].weight;
+                for (std::uint32_t link = start; link < end; ++link) {
+                    const ClothLink& parent = hierarchy.parents[link];
+                    assert(std::binary_search(level.points.begin(), level.points.end(), parent.point));
+                    assert(parent.weight > 0.0f && parent.weight <= 1.0f);
+                    total += parent.weight;
                 }
                 assert(near(total, 1.0f, 1e-5f));
             }
-
-            std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
-            for (const StretchConstraint& limit : level.limits) {
-                assert(limit.first < limit.second);
-                assert(seen.insert({limit.first, limit.second}).second);
-                assert(std::binary_search(level.points.begin(), level.points.end(), limit.first));
-                assert(std::binary_search(level.points.begin(), level.points.end(), limit.second));
-                assert(limit.restLength == (cloth.restPositions[limit.first] - cloth.restPositions[limit.second]).length());
-            }
-            assert(level.limitColours.front() == 0 && level.limitColours.back() == level.limits.size());
-            for (std::size_t colour = 0; colour + 1 < level.limitColours.size(); ++colour) {
-                std::set<std::uint32_t> used;
-                for (std::uint32_t limit = level.limitColours[colour]; limit < level.limitColours[colour + 1]; ++limit) {
-                    assert(used.insert(level.limits[limit].first).second && used.insert(level.limits[limit].second).second);
-                }
-            }
-            assert(levelIsConnected(level, pointCount));
+            assert(level.spread.size() == level.gather.size());
             below = level.points;
         }
 
@@ -196,7 +246,7 @@ namespace {
     void testSmallAndRepeatable() {
         Cloth small = sheetWithLevels(6);
         assert(small.hierarchy.levels.empty());
-        Cloth plain = yardstickSheet(6, ClothSettings{});
+        Cloth plain = yardstickSheet(6, blockDescent(0));
         for (int step = 0; step < 30; ++step) {
             stepCloth(small, tick);
             stepCloth(plain, tick);
@@ -208,7 +258,8 @@ namespace {
         assert(first.hierarchy.levels.size() == second.hierarchy.levels.size());
         for (std::size_t index = 0; index < first.hierarchy.levels.size(); ++index) {
             assert(first.hierarchy.levels[index].points == second.hierarchy.levels[index].points);
-            assert(first.hierarchy.levels[index].limits.size() == second.hierarchy.levels[index].limits.size());
+            assert(first.hierarchy.levels[index].neighbours == second.hierarchy.levels[index].neighbours);
+            assert(first.hierarchy.levels[index].masses == second.hierarchy.levels[index].masses);
         }
         assert(first.hierarchy.parentStarts == second.hierarchy.parentStarts);
     }
@@ -225,48 +276,161 @@ namespace {
     }
 
     /*
-    * A one-sided limit does nothing while its ends are within its length, and puts them back to it, exactly and in
-    * proportion to their inverse masses, once they are further apart; a pinned end stays.
+    * Spreading a level's values down passes on a shift exactly (the weights sum to 1 all the way down), and gathering up
+    * is its transpose: for any g on the points and d on a level, (P^T g) . d = g . (P d), to rounding.
     */
-    void testLimitsAreOneSided() {
-        ClothParticles particles;
-        particles.positions = {Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}, Vec3{4.0f, 0.0f, 0.0f}};
-        particles.previousPositions = particles.positions;
-        particles.velocities.assign(3, Vec3{0.0f, 0.0f, 0.0f});
-        particles.inverseMasses = {0.0f, 1.0f, 1.0f};
-        const std::vector<StretchConstraint> slack{{0, 1, 2.0f}};
-        solveStretchLimits(particles, slack, {0, 1}, 0.0f, tick, serialJobs());
-        assert(particles.positions[1].x == 1.0f);
+    void testGatherIsTheTransposeOfSpread() {
+        const Cloth cloth = sheetWithLevels(32);
+        const ClothHierarchy& hierarchy = cloth.hierarchy;
+        const std::size_t pointCount = cloth.particles.size();
+        Numbers numbers;
+        for (int number = 1; number <= static_cast<int>(hierarchy.levels.size()); ++number) {
+            const ClothLevel& level = hierarchy.levels[static_cast<std::size_t>(number - 1)];
 
-        const std::vector<StretchConstraint> taut{{1, 2, 1.0f}};
-        solveStretchLimits(particles, taut, {0, 1}, 0.0f, tick, serialJobs());
-        assert(near(particles.positions[1].x, 2.0f, 1e-6f) && near(particles.positions[2].x, 3.0f, 1e-6f));
+            std::vector<Vec3> shift(pointCount, Vec3{0.0f, 0.0f, 0.0f});
+            for (const std::uint32_t point : level.points) {
+                shift[point] = Vec3{0.25f, -1.0f, 2.0f};
+            }
+            prolongFromLevel(hierarchy, shift, number);
+            for (const Vec3& value : shift) {
+                assert(near(value.x, 0.25f, 1e-5f) && near(value.y, -1.0f, 1e-5f) && near(value.z, 2.0f, 1e-5f));
+            }
 
-        const std::vector<StretchConstraint> fromPin{{0, 2, 2.0f}};
-        solveStretchLimits(particles, fromPin, {0, 1}, 0.0f, tick, serialJobs());
-        assert(particles.positions[0].x == 0.0f && near(particles.positions[2].x, 2.0f, 1e-6f));
+            std::vector<Vec3> fine(pointCount);
+            for (Vec3& value : fine) {
+                value = numbers.nextVec();
+            }
+            std::vector<Vec3> coarse(pointCount, Vec3{0.0f, 0.0f, 0.0f});
+            for (const std::uint32_t point : level.points) {
+                coarse[point] = numbers.nextVec();
+            }
+            std::vector<Vec3> gathered = fine;
+            restrictToLevel(hierarchy, gathered, number);
+            std::vector<Vec3> spread = coarse;
+            prolongFromLevel(hierarchy, spread, number);
+
+            double up = 0.0;
+            double down = 0.0;
+            double size = 0.0;
+            for (const std::uint32_t point : level.points) {
+                up += gathered[point].dot(coarse[point]);
+            }
+            for (std::size_t point = 0; point < pointCount; ++point) {
+                down += fine[point].dot(spread[point]);
+                size += std::abs(fine[point].dot(spread[point]));
+            }
+            assert(std::abs(up - down) <= 1e-5 * size);
+        }
     }
 
-    // Steps of the hierarchy alone, from the coarsest level used down to the cloth's points.
-    void hierarchyPass(Cloth& cloth, int levels, const std::optional<ClothGrab>& grab = std::nullopt) {
-        std::vector<Vec3> starts(cloth.particles.size());
-        solveClothHierarchy(cloth.particles, cloth.hierarchy, levels, 0.0f, grab, cloth.settings.grabCompliance, tick / 15.0f, starts, serialJobs());
-    }
-
-    // A sheet at rest is within every limit: the hierarchy moves nothing, to the last bit.
-    void testSheetAtRestStaysPut() {
-        Cloth cloth = sheetWithLevels(32);
-        const std::vector<Vec3> before = cloth.particles.positions;
-        hierarchyPass(cloth, maxClothLevels);
-        assert(std::memcmp(before.data(), cloth.particles.positions.data(), before.size() * sizeof(Vec3)) == 0);
+    // Each coarse point's mass is what its region weighs to its motion: the sum over the free points of the squared
+    // share of its move each takes, times their mass (the diagonal of P^T M P), found here by spreading a unit move.
+    void testRegionMasses() {
+        const Cloth cloth = sheetWithLevels(24);
+        const ClothHierarchy& hierarchy = cloth.hierarchy;
+        const std::size_t pointCount = cloth.particles.size();
+        for (int number = 1; number <= static_cast<int>(hierarchy.levels.size()); ++number) {
+            const ClothLevel& level = hierarchy.levels[static_cast<std::size_t>(number - 1)];
+            for (std::size_t at = 0; at < level.points.size(); at += 7) {
+                std::vector<Vec3> move(pointCount, Vec3{0.0f, 0.0f, 0.0f});
+                move[level.points[at]] = Vec3{1.0f, 0.0f, 0.0f};
+                prolongFromLevel(hierarchy, move, number);
+                double mass = 0.0;
+                for (std::size_t point = 0; point < pointCount; ++point) {
+                    const float inverseMass = cloth.particles.inverseMasses[point];
+                    if (inverseMass > 0.0f) {
+                        mass += double(move[point].x) * move[point].x / inverseMass;
+                    }
+                }
+                assert(std::abs(level.masses[at] - mass) <= 1e-4 * mass);
+            }
+        }
     }
 
     /*
-    * Folding never pulls on the hierarchy: a sheet folded in half along its middle row keeps every edge's length, and
-    * every coarse limit across the fold is slack, so nothing moves (beyond the rounding of the folded positions).
+    * phi by hand: two points 1.5 m apart on an edge 1 m long (compliance 0.01 m/N: 0.5^2 / 0.02 = 12.5 J), the free one
+    * (2 kg) 0.1 m from its prediction over a step of 0.1 s (2 0.01 / 0.02 = 1 J), held by a hand 0.2 m away (compliance
+    * 0.1: 0.04 / 0.2 = 0.2 J). The pinned one's inertia does not count.
+    */
+    void testStepEnergy() {
+        ClothParticles particles;
+        particles.positions = {Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.5f, 0.0f, 0.0f}};
+        particles.previousPositions = particles.positions;
+        particles.velocities.assign(2, Vec3{0.0f, 0.0f, 0.0f});
+        particles.inverseMasses = {0.0f, 0.5f};
+        const std::vector<Vec3> predicted{Vec3{5.0f, 0.0f, 0.0f}, Vec3{1.5f, 0.1f, 0.0f}};
+        const std::vector<StretchConstraint> stretch{{0, 1, 1.0f}};
+        const std::vector<BendConstraint> bend;
+        const ClothPointConstraints lists = clothPointConstraints(stretch, bend, 2);
+        const std::optional<ClothGrab> grab = ClothGrab{1, Vec3{1.5f, 0.2f, 0.0f}};
+        const ClothEnergyTerms terms{stretch, bend, lists, 0.01f, 0.0f, BendingModel::Isometric, grab, 0.1f};
+        assert(near(static_cast<float>(clothStepEnergy(particles, predicted, terms, 0.1f)), 13.7f, 1e-4f));
+    }
+
+    /*
+    * The coarse step never raises phi: over a busy second (pins, a hand, a ball) and over a hammock settled with XPBD,
+    * where Muller's one-sided limits raised it every substep (by 4.5 J on the hammock), phi after the step is never above
+    * phi before it, between the sweeps of vertex block descent as the substep runs them. To rounding: after a sweep the
+    * cloth is so near phi's minimum that what the step gains is micrometres, which float positions resolve only to about
+    * a ten-millionth of a metre, so phi may come out up to a millionth higher (measured 1.4e-6 at most); allowed 1e-5.
+    */
+    void checkStepsLowerEnergy(Cloth cloth, const std::vector<Shape>& bodies) {
+        const float substep = substepOf(cloth);
+        for (int step = 0; step < 120 * cloth.settings.substeps; ++step) {
+            predictCloth(cloth.particles, Vec3{0.0f, -cloth.settings.gravity, 0.0f}, substep);
+            const std::vector<Vec3> predicted = cloth.particles.positions;
+            solveVertexBlocks(cloth.particles, predicted, cloth.vertexColours, energyTerms(cloth), substep, serialJobs());
+            const double before = clothStepEnergy(cloth.particles, predicted, energyTerms(cloth), substep);
+            coarseStep(cloth, bodies, &predicted);
+            assert(clothStepEnergy(cloth.particles, predicted, energyTerms(cloth), substep) <= before * (1.0 + 1e-5));
+            solveVertexBlocks(cloth.particles, predicted, cloth.vertexColours, energyTerms(cloth), substep, serialJobs());
+            solveContacts(cloth.particles, bodies, cloth.settings);
+            finishClothStep(cloth.particles, substep);
+        }
+    }
+
+    // A 2 m sheet of 40 x 40 squares pinned flat by its four corners at full span, 1.2 m up.
+    Cloth hammock(const ClothSettings& settings) {
+        Cloth cloth = makeCloth(Mesh::grid(40, 40, 2.0f, 2.0f), Mat4::translation(0.0f, 1.2f, 0.0f) * Mat4::rotationX(-0.5f * pi), settings);
+        for (const std::uint32_t corner : {0u, 40u, 40u * 41u, 41u * 41u - 1u}) {
+            addClothPin(cloth, corner);
+        }
+        return cloth;
+    }
+
+    void testCoarseStepLowersEnergy() {
+        Cloth busy = makeCloth(Mesh::grid(40, 40, 1.5f, 1.5f), Mat4::translation(0.0f, 1.0f, 0.0f) * Mat4::rotationX(-0.5f * pi), ClothSettings{});
+        addClothPin(busy, 40 * 41);
+        addClothPin(busy, 40 * 41 + 40);
+        busy.grab = ClothGrab{20, Vec3{0.3f, 0.8f, 0.6f}};
+        checkStepsLowerEnergy(busy, {Shape{Sphere{Vec3{0.2f, 0.3f, 0.3f}, 0.35f}}});
+
+        Cloth settled = hammock(ClothSettings{});
+        for (int step = 0; step < 720; ++step) {
+            stepCloth(settled, tick);
+        }
+        checkStepsLowerEnergy(settled, {});
+    }
+
+    // A weightless sheet at rest is at phi's minimum: the coarse step moves nothing (its flat hinges bend by rounding only).
+    void testRestingClothStaysPut() {
+        ClothSettings weightless = blockDescent(maxClothLevels);
+        weightless.gravity = 0.0f;
+        Cloth cloth = yardstickSheet(32, weightless);
+        const std::vector<Vec3> before = cloth.particles.positions;
+        coarseStep(cloth);
+        for (std::size_t point = 0; point < before.size(); ++point) {
+            assert((cloth.particles.positions[point] - before[point]).length() < 1e-6f);
+        }
+    }
+
+    /*
+    * Folding costs nothing without bending: a sheet folded in half along its middle row keeps every edge's length, so
+    * with no bending stiffness it is at phi's minimum too, and stays (beyond the rounding of the folded positions).
     */
     void testFoldedSheetStaysPut() {
         Cloth cloth = sheetWithLevels(16);
+        cloth.settings.bendingStiffness = 0.0f;
         const float fold = cloth.particles.positions[8 * 17].y;
         for (Vec3& position : cloth.particles.positions) {
             if (position.y < fold) {
@@ -274,50 +438,84 @@ namespace {
             }
         }
         const std::vector<Vec3> before = cloth.particles.positions;
-        hierarchyPass(cloth, maxClothLevels);
+        coarseStep(cloth);
         for (std::size_t point = 0; point < before.size(); ++point) {
             assert((cloth.particles.positions[point] - before[point]).length() < 1e-5f);
         }
     }
 
     /*
-    * A sheet stretched 10% all the way down is pulled back further by a hierarchy pass and a fine pass than by the fine
-    * pass alone, but only a little: children follow their parents' average motion, which passes on a shift exactly and
-    * a stretch only roughly. The layer is for the small corrections of each substep, not a big stretch in one go.
+    * Held points never move: a sheet lying flat 3 mm above a box under its left half (within the cloth's 5 mm thickness)
+    * and pinned at a corner of its right half, its prediction fallen by gravity. The points over the box and the pin
+    * stay to the bit; the free ones move.
     */
-    void testHierarchyPullsAStretchedSheetBack() {
-        constexpr int squares = 32;
-        Cloth stretched = sheetWithLevels(squares);
-        for (Vec3& position : stretched.particles.positions) {
-            position.y *= 1.1f;
+    void testHeldPointsStay() {
+        Cloth cloth = makeCloth(Mesh::grid(24, 24, 1.0f, 1.0f), Mat4::translation(0.0f, 0.003f, 0.0f) * Mat4::rotationX(-0.5f * pi),
+                                blockDescent(maxClothLevels));
+        pinClothPoint(cloth, 24);
+        const std::vector<Shape> box{Shape{Aabb{Vec3{-1.0f, -0.5f, -1.0f}, Vec3{-0.01f, 0.0f, 1.0f}}}};
+        const std::vector<Vec3> before = cloth.particles.positions;
+        std::vector<Vec3> predicted = before;
+        for (Vec3& position : predicted) {
+            position.y -= 0.001f;
         }
-        assert(near(measureSheet(stretched, squares).pathStretch, 0.1f, 1e-4f));
+        coarseStep(cloth, box, &predicted);
 
-        Cloth plain = stretched;
-        solveStretchColours(plain.particles, plain.stretch, plain.stretchColours, 0.0f, tick, serialJobs());
-        Cloth layered = stretched;
-        hierarchyPass(layered, maxClothLevels);
-        solveStretchColours(layered.particles, layered.stretch, layered.stretchColours, 0.0f, tick, serialJobs());
-        assert(measureSheet(layered, squares).pathStretch < measureSheet(plain, squares).pathStretch);
+        bool freeMoved = false;
+        for (std::size_t point = 0; point < before.size(); ++point) {
+            const bool overBox = before[point].x < -0.02f;
+            if (overBox || point == 24) {
+                assert(std::memcmp(&cloth.particles.positions[point], &before[point], sizeof(Vec3)) == 0);
+            } else if (std::memcmp(&cloth.particles.positions[point], &before[point], sizeof(Vec3)) != 0) {
+                freeMoved = true;
+            }
+        }
+        assert(freeMoved);
     }
 
     /*
-    * The yardstick's problem turned round: settled with the hierarchy, a sheet stretches a small share of what it does
-    * without (measured 0.035% against 1.5% at 32 squares), less even than a sheet half as fine without, and hangs its
-    * sheet's height.
+    * The yardstick's problem turned round: settled with the levels, a sheet stretches well under half what it does with
+    * XPBD or vertex block descent alone and hangs its sheet's height.
     */
     void testSettledSheetsWithLevels() {
-        Cloth coarsePlain = yardstickSheet(16, ClothSettings{});
-        Cloth finePlain = yardstickSheet(32, ClothSettings{});
-        Cloth fine = sheetWithLevels(32);
-        for (Cloth* cloth : {&coarsePlain, &finePlain, &fine}) {
-            settleYardstick(*cloth, 4.0f, tick);
-        }
-        const float fineStretch = measureSheet(fine, 32).pathStretch;
-        assert(fineStretch < 0.1f * measureSheet(finePlain, 32).pathStretch);
-        assert(fineStretch < measureSheet(coarsePlain, 16).pathStretch);
-        assert(near(measureSheet(fine, 32).sag, 1.0f, 0.005f));
+        Cloth plain = yardstickSheet(32, ClothSettings{});
+        Cloth single = yardstickSheet(32, blockDescent(0));
+        Cloth layered = sheetWithLevels(32);
+        JobSystem jobs;
+        settleYardstick(plain, 4.0f, tick, jobs);
+        settleYardstick(single, 4.0f, tick, jobs);
+        settleYardstick(layered, 4.0f, tick, jobs);
+        assert(measureSheet(layered, 32).pathStretch < 0.5f * measureSheet(plain, 32).pathStretch);
+        assert(measureSheet(layered, 32).pathStretch < 0.5f * measureSheet(single, 32).pathStretch);
+        assert(near(measureSheet(layered, 32).sag, 1.0f, 0.01f));
     }
+
+    // The root-mean-square speed of the hammock over the second after it settles for 6 s: how much it still shakes.
+    float hammockShaking(const ClothSettings& settings) {
+        Cloth cloth = hammock(settings);
+        JobSystem jobs;
+        for (int step = 0; step < 720; ++step) {
+            stepCloth(cloth, tick, {}, jobs);
+        }
+        double squares = 0.0;
+        for (int step = 0; step < 120; ++step) {
+            stepCloth(cloth, tick, {}, jobs);
+            for (const Vec3& velocity : cloth.particles.velocities) {
+                squares += velocity.lengthSquared();
+            }
+        }
+        return static_cast<float>(std::sqrt(squares / (120.0 * cloth.particles.size())));
+    }
+
+    /*
+    * A sagging sheet settles with the levels as it does with XPBD: with Muller's limits this hammock kept shaking at
+    * about 50 times the speed (the user saw the cloth lab's jiggle), since they raised phi every substep; and a correct
+    * coarse step still shook it 7 times as fast next to XPBD's pass, whose multipliers it moves the cloth without.
+    */
+    void testHammockSettles() {
+        assert(hammockShaking(blockDescent(maxClothLevels)) < hammockShaking(ClothSettings{}));
+    }
+
 
     // Asking for more levels than a cloth has uses all it has: the same result to the last bit.
     void testLevelsBeyondTheHierarchy() {
@@ -332,32 +530,14 @@ namespace {
         assert(std::memcmp(all.particles.positions.data(), beyond.particles.positions.data(), all.particles.size() * sizeof(Vec3)) == 0);
     }
 
-    // The point standing for a held point on a level: itself if it is on that level, else one on it, reached by its
-    // heaviest parents.
-    void testPointOnLevel() {
-        const Cloth cloth = sheetWithLevels(16);
-        const ClothHierarchy& hierarchy = cloth.hierarchy;
-        for (std::uint32_t point = 0; point < cloth.particles.size(); ++point) {
-            for (int level = 0; level <= static_cast<int>(hierarchy.levels.size()); ++level) {
-                const std::uint32_t standIn = pointOnLevel(hierarchy, point, level);
-                assert(hierarchy.pointLevels[standIn] >= level);
-                if (hierarchy.pointLevels[point] >= level) {
-                    assert(standIn == point);
-                }
-            }
-        }
-    }
-
     /*
-    * A hand reaches the coarse levels too: pulling one edge of a floating sheet, the far edge follows further in the
-    * first tick with the hierarchy than without, the pull carried across by the coarse points the hand's point stands in
-    * for.
+    * A hand reaches the coarse levels through phi: pulling one edge of a floating sheet, the far edge follows further in
+    * the first tick with the levels than without, the hand's spring part of the energy every level lowers.
     */
     void testHandReachesCoarseLevels() {
         const auto farEdgeMotion = [](int levels) {
-            ClothSettings settings;
+            ClothSettings settings = blockDescent(levels);
             settings.gravity = 0.0f;
-            settings.hierarchyLevels = levels;
             Cloth cloth = makeCloth(Mesh::grid(24, 24, 1.0f, 1.0f), Mat4::identity(), settings);
             const std::uint32_t held = 12;
             const std::uint32_t far = 24 * 25 + 12;
@@ -369,11 +549,10 @@ namespace {
         assert(farEdgeMotion(maxClothLevels) > 2.0f * farEdgeMotion(0));
     }
 
-    // On one thread or eight, a busy sheet with the hierarchy comes out the same to the last bit.
+    // On one thread or eight, a busy sheet with the levels comes out the same to the last bit.
     void testManyThreadsMatchOne() {
         const auto run = [](JobSystem& jobs) {
-            ClothSettings settings;
-            settings.hierarchyLevels = maxClothLevels;
+            const ClothSettings settings = blockDescent(maxClothLevels);
             Cloth cloth = makeCloth(Mesh::grid(40, 40, 1.5f, 1.5f), Mat4::translation(0.0f, 1.0f, 0.0f) * Mat4::rotationX(-0.5f * pi), settings);
             addClothPin(cloth, 40 * 41);
             addClothPin(cloth, 40 * 41 + 40);
@@ -391,11 +570,13 @@ namespace {
         assert(std::memcmp(one.data(), many.data(), one.size() * sizeof(Vec3)) == 0);
     }
 
-    // Off by default until the GPU solver has it too, so both solvers step a cloth alike.
+    // XPBD without levels by default until the GPU solver has the rest too, so both step a cloth alike.
     void testOffByDefault() {
+        assert(ClothSettings{}.method == ClothMethod::Xpbd);
         assert(ClothSettings{}.hierarchyLevels == 0);
     }
 }
+
 
 void testClothHierarchy() {
     testCoarsePointsOfAWheel();
@@ -404,13 +585,16 @@ void testClothHierarchy() {
     testHierarchyOfASheet();
     testSmallAndRepeatable();
     testPinnedPointOnEveryLevel();
-    testLimitsAreOneSided();
-    testSheetAtRestStaysPut();
+    testGatherIsTheTransposeOfSpread();
+    testRegionMasses();
+    testStepEnergy();
+    testCoarseStepLowersEnergy();
+    testRestingClothStaysPut();
     testFoldedSheetStaysPut();
-    testHierarchyPullsAStretchedSheetBack();
+    testHeldPointsStay();
     testSettledSheetsWithLevels();
+    testHammockSettles();
     testLevelsBeyondTheHierarchy();
-    testPointOnLevel();
     testHandReachesCoarseLevels();
     testManyThreadsMatchOne();
     testOffByDefault();

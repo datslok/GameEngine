@@ -13,6 +13,12 @@ namespace {
 
     static_assert(static_cast<int>(BendingModel::Isometric) == 0 && static_cast<int>(BendingModel::Hinge) == 1,
                   "bendingModelNames lists the models by their values");
+
+    // In the order of ClothMethod's values.
+    constexpr std::array<const char*, 2> methodNames{"XPBD", "Vertex block descent"};
+
+    static_assert(static_cast<int>(ClothMethod::Xpbd) == 0 && static_cast<int>(ClothMethod::VertexBlockDescent) == 1,
+                  "methodNames lists the methods by their values");
 }
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor) {
@@ -28,6 +34,7 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 0.1f, .sliderMax = 0.02f, .unit = "m"});
     visitor.field("Static friction", settings.staticFriction, {.min = 0.0f, .max = 2.0f});
     visitor.field("Kinetic friction", settings.kineticFriction, {.min = 0.0f, .max = 2.0f});
+    visitor.choice("Solver", settings.method, methodNames);
     visitor.field("Coarse levels", settings.hierarchyLevels, {.min = 0, .max = maxClothLevels});
 }
 
@@ -52,6 +59,8 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
     }
     cloth.restPositions = cloth.particles.positions;
     cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
+    cloth.pointConstraints = clothPointConstraints(cloth.stretch, cloth.bend, cloth.particles.size());
+    cloth.vertexColours = clothVertexColours(cloth.stretch, cloth.bend, cloth.pointConstraints);
     return cloth;
 }
 
@@ -98,7 +107,9 @@ namespace {
         const std::optional<ClothGrab>& grab;
         const std::vector<Shape>& colliders;
 
-        // The coarse levels, or none.
+        // Vertex block descent's per-point lists and colours and its coarse levels, or none (XPBD alone).
+        const ClothPointConstraints* pointConstraints;
+        const ClothVertexColours* vertexColours;
         const ClothHierarchy* hierarchy;
     };
 
@@ -126,9 +137,10 @@ namespace {
 
     /*
     * Each substep: predict; slide the moving pins a share of the way to where they are going (the last substep exactly
-    * there); the coarse levels, which pull the predicted sheet back towards the pins in a few edges; stretch, then
-    * bending, then the hand, then the bodies, last so nothing is left inside them; velocities from the motion; drag on
-    * the free points.
+    * there); then the solver: XPBD's stretch, bending and hand, or vertex block descent's sweep, with its coarse levels
+    * and a second sweep after them when there are any (smoothing on both sides of the coarse step, as multigrid does:
+    * the coarse step's spreading leaves fine wrinkles a sweep removes); the bodies last, so nothing is left inside them;
+    * velocities from the motion; drag on the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {
@@ -145,9 +157,10 @@ namespace {
             pinStarts.push_back(particles.positions.at(pin.particle));
         }
 
-        // Where the coarse points were before each substep's coarse pass, kept for the whole tick.
-        const bool coarseLevels = constraints.hierarchy != nullptr && settings.hierarchyLevels > 0 && !constraints.hierarchy->levels.empty();
-        std::vector<Vec3> coarseStarts(coarseLevels ? particles.size() : 0);
+        // Vertex block descent's work arrays, kept for the whole tick, and what its energy is made of.
+        const bool blockDescent = settings.method == ClothMethod::VertexBlockDescent && constraints.pointConstraints != nullptr;
+        const bool coarseLevels = blockDescent && constraints.hierarchy != nullptr && settings.hierarchyLevels > 0 && !constraints.hierarchy->levels.empty();
+        ClothHierarchyScratch scratch;
 
         for (int step = 0; step < settings.substeps; ++step) {
             predictCloth(particles, gravity, substep);
@@ -157,23 +170,34 @@ namespace {
                 particles.positions[pin.particle] = slidPinPosition(pinStarts[index], pin.position, step, settings.substeps);
             }
 
-            if (coarseLevels) {
-                solveClothHierarchy(particles, *constraints.hierarchy, settings.hierarchyLevels, settings.stretchCompliance, constraints.grab,
-                                    settings.grabCompliance, substep, coarseStarts, jobs);
-            }
-
-            if (constraints.stretchColours.empty()) {
-                solveStretch(particles, constraints.stretch, settings.stretchCompliance, substep);
+            if (blockDescent) {
+                const ClothEnergyTerms energyTerms{constraints.stretch,       constraints.bend,         *constraints.pointConstraints,
+                                                   settings.stretchCompliance, settings.bendingStiffness, settings.bendingModel,
+                                                   constraints.grab,          settings.grabCompliance};
+                scratch.predicted = particles.positions;
+                solveVertexBlocks(particles, scratch.predicted, *constraints.vertexColours, energyTerms, substep, jobs);
+                if (coarseLevels) {
+                    const std::vector<Shape> bodies = constraints.colliders.empty() ? std::vector<Shape>{}
+                                                                                    : nearbyShapes(particles, constraints.colliders, settings.thickness);
+                    solveClothHierarchy(particles, *constraints.hierarchy, settings.hierarchyLevels, energyTerms, bodies, settings.thickness, substep,
+                                        scratch, jobs);
+                    solveVertexBlocks(particles, scratch.predicted, *constraints.vertexColours, energyTerms, substep, jobs);
+                }
             } else {
-                solveStretchColours(particles, constraints.stretch, constraints.stretchColours, settings.stretchCompliance, substep, jobs);
-            }
-            if (constraints.bendColours.empty()) {
-                solveBend(particles, constraints.bend, settings.bendingStiffness, substep, settings.bendingModel);
-            } else {
-                solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep, settings.bendingModel, jobs);
-            }
-            if (constraints.grab) {
-                solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
+                if (constraints.stretchColours.empty()) {
+                    solveStretch(particles, constraints.stretch, settings.stretchCompliance, substep);
+                } else {
+                    solveStretchColours(particles, constraints.stretch, constraints.stretchColours, settings.stretchCompliance, substep, jobs);
+                }
+                if (constraints.bendColours.empty()) {
+                    solveBend(particles, constraints.bend, settings.bendingStiffness, substep, settings.bendingModel);
+                } else {
+                    solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep, settings.bendingModel,
+                                     jobs);
+                }
+                if (constraints.grab) {
+                    solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
+                }
             }
             if (!constraints.colliders.empty()) {
                 solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings);
@@ -195,12 +219,14 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<BendConstraint> noBend;
     const std::vector<std::uint32_t> noColours;
     const std::vector<ClothPin> noPins;
-    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, nullptr}, settings, seconds, serialJobs());
+    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, nullptr, nullptr, nullptr}, settings, seconds,
+             serialJobs());
 }
 
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs) {
     stepTick(cloth.particles,
-             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, &cloth.hierarchy},
+             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, &cloth.pointConstraints,
+                             &cloth.vertexColours, &cloth.hierarchy},
              cloth.settings, seconds, jobs);
 }
 

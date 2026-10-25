@@ -10,6 +10,7 @@
 #include "render/vulkan/vulkan_device.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -25,6 +27,36 @@ namespace {
 
     // GPU ticks a submission: a second's worth, so the wait for each costs little against the work.
     constexpr int gpuTicksPerSubmission = 120;
+
+    // The quick run's sheets and settling: enough to judge a change in about a minute, not the numbers recorded.
+    constexpr std::array<int, 3> quickRungs{25, 50, 100};
+    constexpr float quickSettleSeconds = 4.0f;
+
+    // What a run settles: its sheets, substeps and settling time, and whether it adds the GPU's rows.
+    struct YardstickPlan {
+        std::vector<int> rungs;
+        std::vector<int> substeps;
+        float settleSeconds = 0.0f;
+        bool gpu = false;
+    };
+
+    YardstickPlan planFor(YardstickRun run, const ClothSettings& fabric) {
+        if (run == YardstickRun::Quick) {
+            return YardstickPlan{{quickRungs.begin(), quickRungs.end()}, {fabric.substeps}, quickSettleSeconds, false};
+        }
+        return YardstickPlan{{yardstickRungs.begin(), yardstickRungs.end()}, {fabric.substeps, convergedSubsteps * fabric.substeps},
+                             yardstickSettleSeconds, true};
+    }
+
+    // The CPU solvers every sheet is settled with, each by the name its rows carry: XPBD, vertex block descent, and
+    // vertex block descent with every coarse level the sheet has.
+    std::vector<std::pair<const char*, ClothSettings>> cpuSolvers(const ClothSettings& settings) {
+        ClothSettings blockDescent = settings;
+        blockDescent.method = ClothMethod::VertexBlockDescent;
+        ClothSettings layered = blockDescent;
+        layered.hierarchyLevels = maxClothLevels;
+        return {{"XPBD", settings}, {"VBD", blockDescent}, {"VBD+L", layered}};
+    }
 
     struct YardstickRow {
         const char* solver;
@@ -51,14 +83,14 @@ namespace {
     }
 
     // Making the sheet (its colouring and coarse levels) is left out of the time: only the ticks are what a game pays every frame.
-    YardstickRow settleOnCpu(int squares, const ClothSettings& settings, float tickSeconds, JobSystem& jobs) {
+    YardstickRow settleOnCpu(const char* solver, int squares, const ClothSettings& settings, float settleSeconds, float tickSeconds, JobSystem& jobs) {
         Cloth cloth = yardstickSheet(squares, settings);
         const auto start = std::chrono::steady_clock::now();
-        const float motion = settleYardstick(cloth, yardstickSettleSeconds, tickSeconds, jobs);
+        const float motion = settleYardstick(cloth, settleSeconds, tickSeconds, jobs);
         const double elapsed = millisecondsSince(start);
-        const int ticks = static_cast<int>(std::lround(yardstickSettleSeconds / tickSeconds));
+        const int ticks = static_cast<int>(std::lround(settleSeconds / tickSeconds));
         const int levels = std::min(settings.hierarchyLevels, static_cast<int>(cloth.hierarchy.levels.size()));
-        return YardstickRow{"CPU", squares, cloth.particles.size(), settings.substeps, levels, 0, measureSheet(cloth, squares), motion, elapsed / ticks};
+        return YardstickRow{solver, squares, cloth.particles.size(), settings.substeps, levels, 0, measureSheet(cloth, squares), motion, elapsed / ticks};
     }
 
     /*
@@ -67,11 +99,11 @@ namespace {
     * before the end and at the end, for the last second's motion and the measures.
     */
     YardstickRow settleOnGpu(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, int squares,
-                             const ClothSettings& settings, float tickSeconds) {
+                             const ClothSettings& settings, float settleSeconds, float tickSeconds) {
         Cloth cloth = yardstickSheet(squares, settings);
         VulkanCloth gpuCloth{device, pipelines, commands, cloth};
         const std::vector<ClothTickCommands> batch(gpuTicksPerSubmission, clothTickCommands(cloth, tickSeconds));
-        const int ticks = static_cast<int>(std::lround(yardstickSettleSeconds / tickSeconds));
+        const int ticks = static_cast<int>(std::lround(settleSeconds / tickSeconds));
         const int lastSecondTicks = std::min(ticks, static_cast<int>(std::lround(1.0f / tickSeconds)));
 
         std::vector<Vec3> before = cloth.particles.positions;
@@ -103,23 +135,26 @@ namespace {
     }
 }
 
-void runClothYardstick(std::ostream& out) {
+void runClothYardstick(std::ostream& out, YardstickRun run) {
     JobSystem jobs;
     const float tickSeconds = static_cast<float>(1.0 / EngineSettings{}.ticksPerSecond);
     const ClothSettings fabric;
-    const std::vector<int> substepChoices{fabric.substeps, convergedSubsteps * fabric.substeps};
+    const YardstickPlan plan = planFor(run, fabric);
 
     // No validation layers: they check every call and would slow the GPU rows down many times.
     std::unique_ptr<VulkanDevice> device;
-    try {
-        device = std::make_unique<VulkanDevice>(nullptr, false);
-    } catch (const std::exception& error) {
-        out << "No GPU rows: " << error.what() << '\n';
+    if (plan.gpu) {
+        try {
+            device = std::make_unique<VulkanDevice>(nullptr, false);
+        } catch (const std::exception& error) {
+            out << "No GPU rows: " << error.what() << '\n';
+        }
     }
 
-    out << "Cloth yardstick: a " << yardstickSheetSize << " m sheet hung from its top corners, settled " << yardstickSettleSeconds
-        << " s, the CPU on " << jobs.getThreadCount() << " threads" << (device ? ", the GPU on " + device->getName() : std::string{})
-        << (isDebugBuild ? " (debug build: times are not comparable)" : "") << '\n';
+    out << "Cloth yardstick" << (run == YardstickRun::Quick ? " (quick)" : "") << ": a " << yardstickSheetSize
+        << " m sheet hung from its top corners, settled " << plan.settleSeconds << " s, the CPU on " << jobs.getThreadCount() << " threads"
+        << (device ? ", the GPU on " + device->getName() : std::string{}) << (isDebugBuild ? " (debug build: times are not comparable)" : "")
+        << '\n';
     out << "solver squares   points  substeps levels dispatches  path stretch  worst edge   sag (m)  last second (mm)  ms per tick\n";
 
     std::unique_ptr<VulkanClothPipelines> pipelines;
@@ -129,16 +164,18 @@ void runClothYardstick(std::ostream& out) {
         commands = std::make_unique<ImmediateCommands>(*device);
     }
 
-    for (const int squares : yardstickRungs) {
-        for (const int substeps : substepChoices) {
+    for (const int squares : plan.rungs) {
+        for (const int substeps : plan.substeps) {
             ClothSettings settings = fabric;
             settings.substeps = substeps;
-            printRow(out, settleOnCpu(squares, settings, tickSeconds, jobs));
-            ClothSettings layered = settings;
-            layered.hierarchyLevels = maxClothLevels;
-            printRow(out, settleOnCpu(squares, layered, tickSeconds, jobs));
+            // Vertex block descent only at the fabric's substeps: at four times as many it would take most of the run.
+            for (const auto& [solver, solverSettings] : cpuSolvers(settings)) {
+                if (substeps == fabric.substeps || solverSettings.method == ClothMethod::Xpbd) {
+                    printRow(out, settleOnCpu(solver, squares, solverSettings, plan.settleSeconds, tickSeconds, jobs));
+                }
+            }
             if (device) {
-                printRow(out, settleOnGpu(*device, *pipelines, *commands, squares, settings, tickSeconds));
+                printRow(out, settleOnGpu(*device, *pipelines, *commands, squares, settings, plan.settleSeconds, tickSeconds));
             }
         }
     }

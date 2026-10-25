@@ -121,6 +121,7 @@ void testClothCollision();
 void testClothParallel();
 void testClothYardstick();
 void testClothHierarchy();
+void testClothBlockDescent();
 void testClothGpu();
 void testGpuClothEngine();
 void testGpuTiming();
@@ -268,6 +269,7 @@ int main(){
     testClothParallel();
     testClothYardstick();
     testClothHierarchy();
+    testClothBlockDescent();
     testClothGpu();
     testGpuClothEngine();
     testGpuTiming();
