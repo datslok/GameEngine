@@ -302,7 +302,9 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
   - [x] The GPU framework: the cloth lives on the GPU, drawn straight from its buffer (normals in compute), picking and dragging through a readback a frame late, the CPU solver kept for headless runs and as the mirror; today's coloured XPBD ported as it is (replaces the faster CPU barrier item: fixed-thread loops at a spinning counter stay an option for the CPU path). Two branches:
     - [x] The solver on the GPU, checked against the CPU's and measured on the yardstick (`gpu-cloth-solver`)
     - [x] The cloth in the game: ticks as commands, drawn from its buffer, the late readback for picking, a "Cloth on GPU" setting (`gpu-cloth-in-game`)
-  - [ ] The low-frequency layer: hierarchical position-based dynamics (Müller 2008), coarser levels with one-sided geodesic distance limits that stop sag and stretch without stiffening folds; CPU and GPU, judged on the yardstick
+  - [ ] The low-frequency layer: hierarchical position-based dynamics (Müller 2008), coarser levels with one-sided distance limits that stop sag and stretch without stiffening folds; CPU and GPU, judged on the yardstick. Two branches:
+    - [x] On the CPU, judged on the yardstick, off by default (`hierarchical-cloth`)
+    - [ ] On the GPU, checked against the CPU's, then on by default for both
   - [ ] Vertex Block Descent (Chen et al. 2024) as a second local solver on the same framework: Stable Neo-Hookean membrane in our fabric's units, our bending energy, point colouring; judged against XPBD on the yardstick and the cantilever, keeping the better or both
   - [ ] Self-collision, so folds and layers never pass through each other: Offset Geometric Contact's two-stage contact energy with a per-point motion bound (Divide and Truncate, or OGC's own), a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean
   - [ ] Bodies on the GPU: the engine's collider shapes, then the mannequin below

@@ -28,6 +28,7 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 0.1f, .sliderMax = 0.02f, .unit = "m"});
     visitor.field("Static friction", settings.staticFriction, {.min = 0.0f, .max = 2.0f});
     visitor.field("Kinetic friction", settings.kineticFriction, {.min = 0.0f, .max = 2.0f});
+    visitor.field("Coarse levels", settings.hierarchyLevels, {.min = 0, .max = maxClothLevels});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
@@ -49,6 +50,8 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
         cloth.triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second),
                                    static_cast<std::uint32_t>(triangle.third)});
     }
+    cloth.restPositions = cloth.particles.positions;
+    cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
     return cloth;
 }
 
@@ -72,8 +75,13 @@ ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std
     return commands;
 }
 
-void addClothPin(Cloth& cloth, std::uint32_t particle) {
+void pinClothPoint(Cloth& cloth, std::uint32_t particle) {
     pinParticle(cloth.particles, particle);
+    cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
+}
+
+void addClothPin(Cloth& cloth, std::uint32_t particle) {
+    pinClothPoint(cloth, particle);
     cloth.pins.push_back(ClothPin{particle, cloth.particles.positions[particle]});
 }
 
@@ -89,6 +97,9 @@ namespace {
         const std::vector<ClothPin>& pins;
         const std::optional<ClothGrab>& grab;
         const std::vector<Shape>& colliders;
+
+        // The coarse levels, or none.
+        const ClothHierarchy* hierarchy;
     };
 
     // The shapes whose boxes meet the box round the cloth, grown by its thickness: most bodies are nowhere near it.
@@ -115,8 +126,9 @@ namespace {
 
     /*
     * Each substep: predict; slide the moving pins a share of the way to where they are going (the last substep exactly
-    * there); stretch, then bending, then the hand, then the bodies, last so nothing is left inside them; velocities from
-    * the motion; drag on the free points.
+    * there); the coarse levels, which pull the predicted sheet back towards the pins in a few edges; stretch, then
+    * bending, then the hand, then the bodies, last so nothing is left inside them; velocities from the motion; drag on
+    * the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {
@@ -133,12 +145,21 @@ namespace {
             pinStarts.push_back(particles.positions.at(pin.particle));
         }
 
+        // Where the coarse points were before each substep's coarse pass, kept for the whole tick.
+        const bool coarseLevels = constraints.hierarchy != nullptr && settings.hierarchyLevels > 0 && !constraints.hierarchy->levels.empty();
+        std::vector<Vec3> coarseStarts(coarseLevels ? particles.size() : 0);
+
         for (int step = 0; step < settings.substeps; ++step) {
             predictCloth(particles, gravity, substep);
 
             for (std::size_t index = 0; index < constraints.pins.size(); ++index) {
                 const ClothPin& pin = constraints.pins[index];
                 particles.positions[pin.particle] = slidPinPosition(pinStarts[index], pin.position, step, settings.substeps);
+            }
+
+            if (coarseLevels) {
+                solveClothHierarchy(particles, *constraints.hierarchy, settings.hierarchyLevels, settings.stretchCompliance, constraints.grab,
+                                    settings.grabCompliance, substep, coarseStarts, jobs);
             }
 
             if (constraints.stretchColours.empty()) {
@@ -174,12 +195,12 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<BendConstraint> noBend;
     const std::vector<std::uint32_t> noColours;
     const std::vector<ClothPin> noPins;
-    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders}, settings, seconds, serialJobs());
+    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, nullptr}, settings, seconds, serialJobs());
 }
 
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs) {
     stepTick(cloth.particles,
-             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders},
+             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, &cloth.hierarchy},
              cloth.settings, seconds, jobs);
 }
 

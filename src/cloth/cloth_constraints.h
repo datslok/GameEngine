@@ -126,5 +126,12 @@ std::vector<std::uint32_t> colourBend(std::vector<BendConstraint>& constraints, 
 // colour with no more than a job's worth runs on the caller). The same result as the one-thread solves, to the last bit.
 void solveStretchColours(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, const std::vector<std::uint32_t>& colours,
                          float compliance, float seconds, JobSystem& jobs);
+
+/*
+* Coloured edges as one-sided limits (the hierarchy's, cloth_hierarchy.h): an edge no longer than its rest length is
+* left alone, a longer one put back to it exactly (compliance 0), its ends moved as solveStretch moves them.
+*/
+void solveStretchLimits(ClothParticles& particles, const std::vector<StretchConstraint>& limits, const std::vector<std::uint32_t>& colours,
+                        float compliance, float seconds, JobSystem& jobs);
 void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
                       float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs);

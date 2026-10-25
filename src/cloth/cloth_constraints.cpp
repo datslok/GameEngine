@@ -94,7 +94,12 @@ std::vector<StretchConstraint> stretchConstraints(const Mesh& mesh) {
 }
 
 namespace {
-    // One edge's XPBD step (see solveStretch); scaledCompliance is the compliance over the step's length squared.
+    /*
+    * One edge's XPBD step (see solveStretch); scaledCompliance is the compliance over the step's length squared. As an
+    * upper limit only (solveStretchLimits), an edge within its rest length is left alone: a template argument rather
+    * than a flag, so the edges solved every substep pay nothing for the check.
+    */
+    template <bool upperLimitOnly = false>
     inline void solveStretchConstraint(ClothParticles& particles, const StretchConstraint& constraint, float scaledCompliance) {
         const float firstWeight = particles.inverseMasses[constraint.first];
         const float secondWeight = particles.inverseMasses[constraint.second];
@@ -109,6 +114,11 @@ namespace {
         const float length = between.length();
         if (length < shortestEdge) {
             return;
+        }
+        if constexpr (upperLimitOnly) {
+            if (length <= constraint.restLength) {
+                return;
+            }
         }
 
         const Vec3 along = between * (1.0f / length);
@@ -343,6 +353,17 @@ void solveStretchColours(ClothParticles& particles, const std::vector<StretchCon
         const std::uint32_t first = colours[colour];
         jobs.parallelFor(colours[colour + 1] - first, stretchPerJob, [&](std::size_t index) {
             solveStretchConstraint(particles, constraints[first + index], scaledCompliance);
+        });
+    }
+}
+
+void solveStretchLimits(ClothParticles& particles, const std::vector<StretchConstraint>& limits, const std::vector<std::uint32_t>& colours,
+                        float compliance, float seconds, JobSystem& jobs) {
+    const float scaledCompliance = compliance / (seconds * seconds);
+    for (std::size_t colour = 0; colour + 1 < colours.size(); ++colour) {
+        const std::uint32_t first = colours[colour];
+        jobs.parallelFor(colours[colour + 1] - first, stretchPerJob, [&](std::size_t index) {
+            solveStretchConstraint<true>(particles, limits[first + index], scaledCompliance);
         });
     }
 }

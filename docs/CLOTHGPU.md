@@ -149,15 +149,83 @@ Every local solver needs one of these on top for large, fine garments.
 
 ### Hierarchical position-based dynamics (Müller 2008)
 
-[Paper](https://matthias-research.github.io/pages/publications/hpbd.pdf). A nonlinear multigrid on the PBD hierarchy [read]:
+[Paper](https://matthias-research.github.io/pages/publications/hpbd.pdf), read in full on Oct 25 2026. A nonlinear multigrid: PBD's own constraint projection run on ever coarser copies of the mesh, coarsest first.
 
-- Coarse levels are subsets of the fine points.
-- Coarse constraints are **unilateral geodesic distance limits**: they grip only once the whole stretch of material between two coarse points is fully stretched. So the hierarchy never stiffens bending or folding; it only stops over-stretch.
-- Only corrections go down to the finer levels, keeping detail; then two symmetric Gauss-Seidel passes on the fine level.
-- **Result [read]:** an 11,500-triangle cloth at 60 fps with the hierarchy, where about 20 plain iterations (12 fps) were needed to match its stiffness.
-- **Limits [read]:** tearing needs the hierarchy rebuilt; MGPBD's authors say such methods "may struggle to ensure physical consistency between levels".
+**The hierarchy [read].**
 
-**What it means here [inf].** The cheapest true fix, and it maps straight onto compute shaders: each level is just more coloured constraint passes, the geodesic distances built once per garment. It fits nearly inextensible, freely folding fabric exactly. It composes with XPBD or VBD (a coarse pass before the fine sweeps). Sewing pattern panels are flat 2D shapes, so a regular-grid mesh per panel gives a clean hierarchy (every second point). **[check]** the paper's prolongation (how coarse corrections reach the fine points) before building.
+- Level 0 is the mesh. Each coarser level l+1 keeps a subset of level l's points. A point's *level* is the coarsest level that holds it.
+- Two points are neighbours on a level when a constraint joins them there. Every point whose level is l must have at least k neighbours on level l+1: its *parents*. The paper uses k = 2.
+- Constraints on one point (contacts, attachments) go with the point to every level it is on.
+- Only stretch is carried to coarser levels. Bending stays on level 0: "increased bending stiffness typically removes small detail and wrinkles".
+
+**Choosing the coarse points [read].** One greedy sweep, for any mesh, disconnected pieces too:
+
+1. Mark every point coarse, and give each a count of its coarse neighbours (at first, all its neighbours).
+2. Visit the points in any order. Mark a point fine if its count is at least k and every fine neighbour's count is above k. Then lower each neighbour's count by one.
+3. Attached (pinned) points help convergence when kept coarse, but keeping all of them crowds the coarse levels. Visit them last, or let them go fine only with some probability.
+
+A bigger k shrinks the levels more slowly: smoother propagation, more work on the coarse levels.
+
+**Parents' weights [read].** With d_ij the rest distance from point i to its parent j:
+
+| | |
+|---|---|
+| Raw weight | ŵ_ij = 1 / (d_ij / max_j d_ij + ε) |
+| Weight | w_ij = ŵ_ij / Σ_j ŵ_ij |
+
+A point lying on a parent follows that parent alone; ε keeps the weight finite. The paper does not give ε's value.
+
+**Coarse constraints, by collapsing edges [read].** Level l+1 starts as a copy of level l's constraints. Each fine point i is then collapsed, one by one, into one of its coarse neighbours j: the one nearest the average of its coarse neighbours' rest positions, which keeps edge lengths even. The edge i-j goes. Each other edge i-k becomes k-j, or goes if k-j already exists. A triangle mesh stays a triangle mesh.
+
+The new edge's rest length is one of two:
+
+- **The sum of the two rest lengths** (k-i plus i-j): a path along the mesh. Never too tight and never bridges a cut, but too loose, since paths along edges are longer than geodesics.
+- **The straight distance in the rest pose:** exact for a flat sheet, too tight for a curved one, and it bridges cuts.
+
+Every coarse constraint is a **one-sided upper limit**, C = d - |p_1 - p_2| >= 0, skipped while the cloth between is slack. So the hierarchy never resists folding or bending, only over-stretch.
+
+**The solve [read].** Once per step, before the plain solver:
+
+1. Start at the coarsest level.
+2. Save the positions q_i of this level's points.
+3. Run one or more PBD passes over this level: its points' one-point constraints and its own stretch limits.
+4. If this is level 0, stop. Otherwise go one level finer.
+5. Move each point of the new level by its parents' corrections: p_i <- p_i + Σ_j w_ij (p_j - q_j), over its parents j.
+6. Go to 2.
+
+Only corrections go down, never positions, so the fine level keeps its folds and wrinkles. The paper then runs the plain solver on level 0 twice, the second pass in reverse order (symmetric Gauss-Seidel).
+
+**Results [read].**
+
+- A sheet 126 rows of triangles tall (Fig. 3): plain PBD needs 5 iterations to hold stretch to 25% and 30 for 5%. With 5 levels, 1 iteration holds 9% and 5 iterations 5%. With 3 levels, 20 iterations for 5%.
+- An 11,500-triangle sheet with the hierarchy and 2 iterations runs at 60 fps. Plain PBD matches its stiffness only at 20 iterations, at 12 fps. The hierarchy adds little cost: all its levels together hold fewer constraints than level 0.
+- An irregular dress, coarsened greedily, at 30 fps. On regular sheets the paper skips the greedy sweep and uses coarser grids.
+- **Limits:** poor coarse meshes show artefacts at very few iterations (gone with 3-4 fine passes). Tearing must cut parent links all the way up. The paper ran the hierarchy serially, before a parallel PBD. MGPBD's authors say such methods "may struggle to ensure physical consistency between levels".
+
+**Where the text is loose [read, inf].**
+
+- **Which points step 5 moves.** "Each particle on level l" must mean the points whose level is l. Points also on level l+1 were moved by that level's own solve, and parents are defined only for the others.
+- **What q holds with three or more levels.** Read literally, q is saved again on every level, after step 5's move. So a parent's p_j - q_j holds only the last level's own solve: the pull a level 2 solve gave a level 1 point never reaches its children on level 0. That pull is then left for the fine solve, the very low-frequency error the hierarchy is meant to carry. Saving every point's q once, before the coarsest level, and passing down each parent's whole motion carries every level's correction. With two levels both readings agree. **We build the second**, and can try the literal one on the yardstick if the numbers disappoint.
+- **Level 0.** The steps solve level 0 last, while the results say the plain solver runs afterwards because the hierarchy "does not consider the original constraints on level 0". In effect the same: the hierarchy's levels from the coarsest to level 1, its corrections passed down to level 0, then our usual substep.
+- **Stiffness and masses.** Coarse points keep their own masses. In XPBD terms a coarse limit is hard (compliance 0), so it needs no multiplier kept between passes.
+
+**What it means here [inf].**
+
+- **Rest lengths: the straight distance in the rest pose.** Every cloth today is a flat `Mesh::grid`, its diagonals all one way. Paths along its edges are far too long: across the diagonals, two edges for √2 of distance, 41% slack, where fabric should stretch about 0.15%. A path-sum limit would never grip there. For garments (phase 10), sewn panels are flat in pattern space, so a panel's pattern distance stays exact; path sums only where a coarse edge crosses a seam. A mesh with a curved rest shape would get limits too tight, but no cloth has one.
+- **Deterministic:** the greedy sweep visits points in index order, pins last, so a mesh always gets the same hierarchy.
+- **Where it runs:** once a substep, after the prediction and after the pins and the hand have moved, before the stretch and bending colours. The velocity comes from the motion as now, so nothing else changes.
+- **One-point constraints on coarse levels:** pins (inverse mass 0, so they pull hardest) and the hand. Contacts with bodies are open: without them a coarse pass may pull points into the ball for the fine contacts to push out; with them, more cost. Start with pins and the hand, and judge on the draped sheet.
+- **On the GPU (the next branch):** each level is a set of limits coloured as today (`colourStretch` colours any edge list), plus one dispatch a level passing its corrections down.
+- **Judged on the yardstick:** path stretch near 0.15% and the same sag on every rung, and its cost a tick.
+
+**Built and measured** (`hierarchical-cloth`, Oct 25 2026; sheets settled 4 s in the tests' debug build, path stretch; the yardstick's own rows are in Part 5). Two of the paper's choices changed:
+
+- **Three parents, not two.** With the paper's k = 2 each level is about 3 times smaller than the one below, and many children follow only two parents. It helped (a 128-square sheet from 14.7% to 2%), but hierarchies of 7 or more levels shook a settled sheet apart. With k = 3 (levels about 2.2 times smaller): 32 squares 0.035%, 64 0.11%, 128 0.32%, 200 0.32%, against 1.5%, 5.6%, 14.7% and 33.5% without. k = 4 was mixed (0.19% at 128 squares with 10 levels, but 0.054% against 0.025% at 64) and coarsens more slowly (about 1.8 times a level), so it needs more levels and passes for the same reach.
+- **A smallest level.** Every hierarchy that shook a sheet apart ended in a level of about 30 points or fewer (k = 2 or 3 or 4 alike), each edge spanning a fifth of the sheet; none ending at 50 or more did. Levels stop at 50 points (`smallestClothLevel`): a 200-square sheet gets 9.
+- **The whole motion passed down, confirmed:** the paper's literal re-save on every level, at k = 3, left 0.11%, 0.52%, 1.5% and 1.9%, about 5 times as much. Passing nothing down (only the coarse points corrected) left more still.
+- **Tried and dropped:** weights that also pass on a stretch or turn of the parents (least squares, kept near the paper's) shook every deep hierarchy apart: they go negative where a child lies outside its parents, and a child with two parents off its line cannot be placed by them at all. The fabric's compliance on the coarse limits instead of none changed almost nothing (the points' inverse masses dominate a substep's step); kept, so each level is the same fabric.
+- **Not a one-pass fix:** a sheet stretched 10% all the way down comes back only to 8.6% in one pass (9.8% without), since a parents' average passes on a shift exactly but a stretch only roughly. Each substep's correction is small (gravity moves a point 3 microns), which the layer carries well.
+- **The worst edge stays high** near the corner pins (17% at 200 squares), where one point holds the sheet: local, not the sheet-wide error the layer is for.
 
 ### Tethers and strain limits
 
@@ -319,13 +387,29 @@ Before any solver is chosen, tests that measure the problem, on the CPU and the 
 - **Cost is the dispatches, not the points:** 330 dispatches a tick at 15 substeps (22 a substep: the prediction, about 20 colours, the end), about 2.3 microseconds each whatever their size, so 40,000 points cost barely more than 700. The 200 sheet is 17 times faster than the CPU's 16 threads; the smallest is slower than the CPU.
 - **What it means for the plan:** the GPU has room for many more substeps or a hierarchy's extra passes on large garments; fewer dispatches (fewer colours, fused passes, a whole small cloth in one workgroup) would help small cloths.
 
+**The low-frequency layer on the CPU** (`hierarchical-cloth`, Oct 25 2026, release, 16 threads; every level each sheet has, three parents a point, none below 50 points; Part 2):
+
+| Squares | Levels | Path stretch, 15 substeps | Sag (m) | ms a tick | Path stretch, 60 | ms a tick |
+|---|---|---|---|---|---|---|
+| 25 | 3 | 0.054% (0.97% without) | 1.0004 | 0.63 (0.43) | 0.017% | 2.61 |
+| 50 | 5 | 0.086% (3.2%) | 1.0006 | 3.14 (1.77) | 0.011% | 13.3 |
+| 100 | 7 | 0.154% (9.7%) | 1.0009 | 13.2 (6.06) | 0.014% | 53.3 |
+| 200 | 9 | 0.312% (36%) | 1.0021 | 30.9 (19.8) | 0.030% | 122 |
+
+- **The goal nearly met:** at 15 substeps the path stretch is 0.05-0.3% on every rung, near the fabric's 0.15%, and every sheet hangs within 2 mm of its metre, where the 200 sheet hung 31 cm too low. It still grows a little with the squares (1.6 to 2 times a rung, against about 3 without).
+- **Cheaper than substeps:** 15 substeps with the levels beat 60 without on every rung, for less: the 200 sheet 0.31% in 31 ms against 4.7% in 80.
+- **Stiffer than the fabric** where it is cheap enough to run long: at 60 substeps 0.01-0.03%, under cotton's 0.15%. The coarse limits are one-sided at the rest length, so once they converge the sheet barely stretches at all; invisible at these sizes.
+- **The cost on the CPU** is 1.5-2.2 times the tick: each level's limits come in a few colours of few constraints, each colour a barrier (the same limit as the fine solve's). On the GPU each level is a few more dispatches.
+- **The worst edge** falls too (872% to 17% at 200 squares) but stays the largest near the corner pins.
+- **Times in this run** for the plain CPU rows were about 20% slower than in `cloth-yardstick`'s (19.8 ms against 16.2 at 200 squares), and the GPU rows varied between 0.9 and 1.7 ms at 15 substeps: the machine's load, not the code.
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.
 
 1. **The yardstick (done, `cloth-yardstick`).** The resolution ladder on today's CPU solver, measured and recorded (Part 5). Small, and it tells every later step whether it helped.
 2. **The GPU cloth framework.** The GPU-resident design (Part 4) with today's XPBD solver ported as it is (coloured, our units), its GLSL library mirrored by the CPU solver and checked by GPU tests. The big sheet on the GPU, drawn from its buffer, picked and grabbed through the late readback. Measured on the ladder.
-3. **The low-frequency layer.** Hierarchical levels with unilateral geodesic limits (Müller 2008), CPU and GPU, judged on the ladder. Expected to be the biggest visible gain for large garments.
+3. **The low-frequency layer (CPU done, `hierarchical-cloth`; GPU next).** Hierarchical levels with one-sided distance limits (Müller 2008; rest lengths straight across the flat rest shape, Part 2), CPU and GPU, judged on the ladder. Expected to be the biggest visible gain for large garments.
 4. **Vertex Block Descent as a second local solver,** on the same framework: Stable Neo-Hookean membrane in N/m from our fabric's stiffness, our bending energy, point colouring, the adaptive guess, Chebyshev to try. Judged against XPBD on the ladder and cantilever. Keep the better, or both if each wins somewhere.
 5. **Self-collision.** The two-stage contact energy with DAT's motion bound (or OGC's blocks, after reading DAT), a bounding volume hierarchy on the GPU, the pile milestone. Built for whichever solver step 4 keeps.
 6. **Bodies on the GPU:** the engine's collider shapes as now, later the mannequin's distance field (already a roadmap item).

@@ -196,7 +196,7 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
     const Mesh drapeMesh = Mesh::grid(clothLabDrapeSheetSquares, clothLabDrapeSheetSquares, clothLabDrapeSheetSize, clothLabDrapeSheetSize);
     Cloth draping = makeCloth(drapeMesh, laidFlat(layout.drapeSheetCentre), clothSettings);
     for (std::uint32_t corner : backCorners(clothLabDrapeSheetSquares, clothLabDrapeSheetSquares)) {
-        pinParticle(draping.particles, corner);
+        pinClothPoint(draping, corner);
     }
     drapeSheet = addSheet(world, assets, drapeMesh, std::move(draping), cottonMaterial(drapeSheetColour));
 

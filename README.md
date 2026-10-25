@@ -131,6 +131,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
   - Optional smooth normals with a crease angle, for models that have none.
 - **An asset manager** that loads each file once and hands out typed handles.
 - **Cloth** (being built): a sheet's points held by stretch constraints, solved with XPBD in 15 substeps a tick, with stiffness from real fabric (1 / compliance, about 2000 N/m for cotton), mass from its weight per area, bending stiffness from the fabric's measured rigidity (folds sized as real cotton's; isometric bending, a fixed weighted sum of each hinge's points, about four times cheaper than the angle between triangles, which stays as an option for pressed creases), pins the game can move (hooks on a rail), and air drag. It collides with every collider shape (spheres, capsules, boxes) with friction, so it drapes over a ball. Cloths are stepped a job each, and a big cloth's constraints are coloured so they are solved on every core, with the same result to the last bit as on one. A hand can grab any point and pull it, a stiff spring that lets the cloth be flung.
+- **Coarse levels against stretch** (CPU only for now, "Coarse levels" in F5's Cloth group, off by default): ever coarser copies of a cloth, each about half as fine, joined by limits that only stop over-stretch, never folding. Each substep they carry a pin's pull across a fine sheet in a few long edges instead of hundreds of short ones, so a 40,000-point sheet stretches about 0.3% instead of 36%, for about 1.5 times the work a tick. Turn off Cloth on GPU to see it in the cloth lab.
 - **Cloth on the GPU** (on by default, "Cloth on GPU" in F5): the same solver ported to compute shaders, one thread per point or constraint, checked against the CPU's to within microns a tick; a 40,000-point sheet takes under a millisecond a tick, 17 times faster than on 16 CPU threads. The cloth is drawn straight from the GPU (its normals and tangents worked out there), and its points come back a couple of frames later for grabbing it with the mouse. Switch it off to compare with the CPU solver; headless runs and tests always use the CPU.
 - **Deforming meshes** (for cloth): meshes whose vertices move every tick, drawn blended between ticks with their normals and tangents worked out again each frame. They cast shadows, show up in ray-traced light and reflections, and give temporal anti-aliasing their motion.
 
@@ -400,7 +401,8 @@ src/              Engine and game source, in layers (lower ones never include hi
   games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground)
                   and games/clothlab (the cloth test ground)
   engine/         The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
-  cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area) and their step
+  cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area), their step
+                  and the coarse levels that keep fine sheets from stretching
   gameplay/       Character movement, spinners, fireflies, grenades, camera controllers
                   and the player controls games share (F1-F3)
   platform/       The window and SDL input translation
