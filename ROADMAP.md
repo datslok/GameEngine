@@ -300,6 +300,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
   - Cloth is so thin that a fast-moving layer can jump right through another between two substeps, so it also needs continuous collision detection (vertex-triangle and edge-edge pairs checked along their motion during the step) and a cloth thickness that keeps layers apart
 - [ ] Untangling pass (Baraff, Witkin & Kass 2003, "Untangling Cloth") as a safety net: finds intersections that slipped through anyway and pushes the tangled regions apart over the next steps, instead of letting them lock together for good
 - [x] Solver on several threads: a job per cloth, coloured constraints on every core (bit for bit the one-thread result), spinning workers, `src/cloth/` optimised in debug, a big sheet to measure (`cloth-parallel`)
+- [x] A tick budget: ticks a frame may run within 1/60 s, the rest dropped, so an overloaded simulation runs in slow motion instead of spiralling to 3 fps (`tick-budget`)
 - [ ] A faster barrier for the coloured solve: a 100 x 100 sheet gains only 2.8 times on 16 threads (26 to 9.3 ms a tick), its 210 colour barriers a tick costing about 25 microseconds each against 6 of work. Fixed-thread loops meeting at a spinning counter, as cloth solvers use, and one thread per physical core (spinning on both of a core's threads slowed the work), or the GPU
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
@@ -378,6 +379,7 @@ A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them int
 **Garments**
 - [ ] Sewing patterns: 2D panel outlines triangulated into cloth meshes, with UVs from the flat layout
 - [ ] Seams: constraints that pull matching panel edges together until they join, starting from panels placed around the body
+- [ ] A coarse simulation mesh driving a fine render mesh: the cloth solved on a few thousand points, each drawn vertex following its nearest simulated triangle (what shipped games do; 1,500 points instead of 10,000 is about 7 times less work, barely visible)
 - [ ] Dressing an animated character: the cloth collides with the skinned body as it moves
 
 **Rendering**
@@ -415,6 +417,7 @@ Deferred until there is a playable FPS slice (phase 12) worth playing together. 
   - Meshes in vertex-cache order with LODs (meshoptimizer).
   - Tangents precomputed
 - [ ] Level of detail: simpler meshes for distant objects, chosen per view (instancing itself moved to phase 6c)
+- [ ] Cloth level of detail and sleeping, for many characters' capes and skirts: distant cloth runs fewer substeps or keeps its last pose, and cloth at rest stops being simulated until something touches or moves it
 
 **FPS**
 - [ ] Hitscan and projectile weapons, recoil and spread

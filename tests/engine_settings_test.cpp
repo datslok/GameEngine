@@ -85,6 +85,17 @@ namespace {
         assert(loaded.empty());
         assert(settings.workerThreads == 5);
     }
+
+    // Ticks may take 1/60 s of a frame by default (an overloaded simulation slows down instead of spiralling), changed
+    // live; 0 turns the budget off.
+    void testTickBudget() {
+        EngineSettings settings;
+        assert(settings.maxTickSecondsPerFrame > 0.0166 && settings.maxTickSecondsPerFrame < 0.0167);
+
+        const std::vector<std::string> none = applySettings({{"maxTickSecondsPerFrame", "0"}}, walkOf(settings), StartupFields::Keep);
+        assert(none.empty());
+        assert(settings.maxTickSecondsPerFrame == 0.0);
+    }
 }
 
 void testEngineSettings() {
@@ -94,4 +105,5 @@ void testEngineSettings() {
     testFramesInFlightAppliesLiveWithinLimits();
     testRendererFramesInFlightAreClamped();
     testWorkerThreads();
+    testTickBudget();
 }

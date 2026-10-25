@@ -25,3 +25,9 @@ private:
     double accumulator = 0.0;
     double frameSeconds = 0.0;
 };
+
+/*
+* Whether a frame that has run ticksRun ticks in secondsSpent may start another within budgetSeconds (0: no budget).
+* The ticks a frame does not run are dropped, so a simulation that costs more than real time slows down smoothly.
+*/
+bool fitsTickBudget(int ticksRun, double secondsSpent, double budgetSeconds);

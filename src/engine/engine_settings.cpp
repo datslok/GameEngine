@@ -29,6 +29,8 @@ void visit(EngineSettings& settings, SettingsVisitor& visitor) {
                   {.min = 1.0f, .max = 10000.0f, .sliderMin = 30.0f, .sliderMax = 480.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Max frame seconds", settings.maxFrameSeconds,
                   {.min = 0.001f, .max = 10.0f, .sliderMax = 1.0f, .unit = "s", .applies = FieldApplies::AtStartup});
+    visitor.field("Max tick seconds per frame", settings.maxTickSecondsPerFrame,
+                  {.min = 0.0f, .max = 1.0f, .sliderMax = 0.1f, .unit = "s (0: no budget)"});
     visitor.field("GPU validation", settings.gpuValidation, FieldApplies::AtStartup);
     visitor.field("Worker threads", settings.workerThreads,
                   {.min = automaticWorkerThreads, .max = 256, .sliderMax = 64, .unit = "(-1: a core each but one)", .applies = FieldApplies::AtStartup});

@@ -22,6 +22,11 @@ struct EngineSettings {
     double ticksPerSecond = 120.0;
     double maxFrameSeconds = 0.25;
 
+    // The real time a frame may spend on ticks (core/fixed_timestep.h, fitsTickBudget): past it the frame drops the
+    // ticks it still owes, so a simulation too slow for real time runs in slow motion at a usable frame rate instead of
+    // spiralling down to a few frames a second. 0 for no budget. Read every frame.
+    double maxTickSecondsPerFrame = 1.0 / 60.0;
+
     // With mailbox presentation the loop is no longer held back by vsync, so this cap sets the real frame rate.
     // 0 means unlimited. Read every frame.
     std::uint64_t targetFPS = 120;
