@@ -145,6 +145,21 @@ void testProfiler() {
         assert(profileText(profiler, 3, false) == "FRAME 5.000  WORK 1.234  MS");
     }
 
+    // Hiding idle sections leaves out those that took no time, but always keeps the first (the total).
+    {
+        Profiler profiler{0.5};
+        const int total = profiler.addSection("TOTAL");
+        profiler.addSection("IDLE");
+        const int busy = profiler.addSection("BUSY");
+        profiler.update(0.0);
+        profiler.record(total, 0.0);
+        profiler.record(busy, 0.002);
+        profiler.update(0.5);
+
+        assert(profileText(profiler, 1, false, true) == "TOTAL 0.0  BUSY 2.0  MS");
+        assert(profileText(profiler, 1, false) == "TOTAL 0.0  IDLE 0.0  BUSY 2.0  MS");
+    }
+
     // A window of no length would publish every frame and one of negative length makes no sense.
     {
         bool threw = false;

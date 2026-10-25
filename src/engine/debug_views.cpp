@@ -129,7 +129,7 @@ std::string videoMemoryText(const VideoMemory& memory) {
  Milliseconds rather than seconds, because frames and systems
 * cost thousandths of a second; the stroke font has no micro sign, so small costs get more decimals instead.
 */
-std::string profileText(const Profiler& profiler, int decimals, bool withWorst) {
+std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle) {
     const auto milliseconds = [decimals](double seconds) {
         char text[32];
         std::snprintf(text, sizeof(text), "%.*f", decimals, seconds * 1000.0);
@@ -139,6 +139,9 @@ std::string profileText(const Profiler& profiler, int decimals, bool withWorst) 
     std::string line;
     for (int section = 0; section < profiler.getSectionCount(); ++section) {
         const SectionTiming& timing = profiler.getTiming(section);
+        if (hideIdle && section > 0 && timing.averageSeconds == 0.0 && timing.worstSeconds == 0.0) {
+            continue;
+        }
         line += profiler.getName(section) + " " + milliseconds(timing.averageSeconds);
         if (withWorst) {
             line += "/" + milliseconds(timing.worstSeconds);
@@ -175,8 +178,27 @@ void recordGpuTimings(Profiler& profiler, const GpuTimings& timings) {
     }
 }
 
-void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug) {
-    debugText(debug, debugReadoutLine(line), debugReadoutTextHeight, profileText(profiler, decimals, withWorst), colour);
+Profiler makeClothProfiler() {
+    Profiler profiler;
+    profiler.addSection("CLOTH");
+    for (std::size_t pass = 0; pass < clothPassCount; ++pass) {
+        profiler.addSection(clothPassName(static_cast<ClothPass>(pass)));
+    }
+    return profiler;
+}
+
+void recordClothTimings(Profiler& profiler, const ClothPassTimings& timings) {
+    if (!timings.valid) {
+        return;
+    }
+    profiler.record(0, timings.totalSeconds);
+    for (std::size_t pass = 0; pass < clothPassCount; ++pass) {
+        profiler.record(static_cast<int>(pass) + 1, timings.passSeconds[pass]);
+    }
+}
+
+void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle) {
+    debugText(debug, debugReadoutLine(line), debugReadoutTextHeight, profileText(profiler, decimals, withWorst, hideIdle), colour);
 }
 
 /*

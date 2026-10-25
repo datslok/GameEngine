@@ -1,6 +1,7 @@
 #include "render/vulkan/vulkan_cloth.h"
 
 #include "render/gpu/compute_dispatch.h"
+#include "render/vulkan/cloth_pass_stamps.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_check.h"
 #include "render/vulkan/vulkan_device.h"
@@ -484,25 +485,29 @@ void VulkanCloth::writeSet(const Slot& slot) {
     writeBuffers(device, slot.set, buffers);
 }
 
-void VulkanCloth::dispatch(VkCommandBuffer commands, const ComputePipeline& pipeline, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step,
-                           std::uint32_t first, std::uint32_t count, std::uint32_t level, std::uint32_t groups) const {
+void VulkanCloth::dispatch(const Recording& recording, const ComputePipeline& pipeline, ClothPass kind, std::uint32_t first, std::uint32_t count,
+                           std::uint32_t level, std::uint32_t groups) const {
     if (count == 0) {
         return;
     }
-    const ClothPushConstants constants{tick, step, first, count, level, pointCount, edgeCount, hingeCount};
-    const std::array<VkDescriptorSet, 2> sets{set, levels ? levels->set : VK_NULL_HANDLE};
+    const VkCommandBuffer commands = recording.commands;
+    const ClothPushConstants constants{recording.tick, recording.step, first, count, level, pointCount, edgeCount, hingeCount};
+    const std::array<VkDescriptorSet, 2> sets{recording.set, levels ? levels->set : VK_NULL_HANDLE};
     const std::uint32_t setCount = pipeline.getResourceSet() + 1;
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.get());
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, setCount, sets.data(), 0, nullptr);
     vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
     vkCmdDispatch(commands, groups > 0 ? groups : workgroupCount(count, clothGroupSize), 1, 1);
     clothBarrier(commands);
+    if (recording.stamps) {
+        recording.stamps->mark(commands, kind);
+    }
 }
 
 // Vertex block descent's sweep: a dispatch per point colour.
-void VulkanCloth::recordSweep(VkCommandBuffer commands, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step) const {
+void VulkanCloth::recordSweep(const Recording& recording) const {
     for (std::size_t colour = 0; colour + 1 < vertexColours.size(); ++colour) {
-        dispatch(commands, pipelines.getBlock(), set, tick, step, vertexColours[colour], vertexColours[colour + 1] - vertexColours[colour]);
+        dispatch(recording, pipelines.getBlock(), ClothPass::Sweep, vertexColours[colour], vertexColours[colour + 1] - vertexColours[colour]);
     }
 }
 
@@ -511,8 +516,7 @@ void VulkanCloth::recordSweep(VkCommandBuffer commands, VkDescriptorSet set, std
 * first: phi's gradient, each level point's step, the steps spread down, the line search's terms and total (one
 * workgroup) and the move. Each level's gradient is taken where the coarser ones left the points.
 */
-void VulkanCloth::recordLevels(VkCommandBuffer commands, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step,
-                               const ClothSettings& settings) const {
+void VulkanCloth::recordLevels(const Recording& recording, const ClothSettings& settings) const {
     const std::uint32_t levelCount = levels ? static_cast<std::uint32_t>(levels->records.size()) : 0u;
     const std::uint32_t used = settings.hierarchyLevels > 0 ? std::min(static_cast<std::uint32_t>(settings.hierarchyLevels), levelCount) : 0u;
     if (used == 0) {
@@ -521,37 +525,40 @@ void VulkanCloth::recordLevels(VkCommandBuffer commands, VkDescriptorSet set, st
 
     const std::uint32_t terms = pointCount + edgeCount + (settings.bendingStiffness > 0.0f ? hingeCount : 0u);
     const std::uint32_t partials = workgroupCount(terms, clothGroupSize);
-    dispatch(commands, pipelines.getHeld(), set, tick, step, 0, pointCount);
+    dispatch(recording, pipelines.getHeld(), ClothPass::Held, 0, pointCount);
     for (std::uint32_t number = used; number >= 1; --number) {
-        dispatch(commands, pipelines.getGradient(), set, tick, step, 0, pointCount, number);
-        dispatch(commands, pipelines.getCoarseStep(), set, tick, step, 0, levels->records[number - 1].pointCount, number);
-        dispatch(commands, pipelines.getSpread(), set, tick, step, 0, pointCount, number);
-        dispatch(commands, pipelines.getLineTerms(), set, tick, step, 0, terms, number);
-        dispatch(commands, pipelines.getLineTotal(), set, tick, step, 0, partials, number, 1);
-        dispatch(commands, pipelines.getLineApply(), set, tick, step, 0, pointCount, number);
+        dispatch(recording, pipelines.getGradient(), ClothPass::Gradient, 0, pointCount, number);
+        dispatch(recording, pipelines.getCoarseStep(), ClothPass::CoarseStep, 0, levels->records[number - 1].pointCount, number);
+        dispatch(recording, pipelines.getSpread(), ClothPass::Spread, 0, pointCount, number);
+        dispatch(recording, pipelines.getLineTerms(), ClothPass::LineTerms, 0, terms, number);
+        dispatch(recording, pipelines.getLineTotal(), ClothPass::LineTotal, 0, partials, number, 1);
+        dispatch(recording, pipelines.getLineApply(), ClothPass::Move, 0, pointCount, number);
     }
-    recordSweep(commands, set, tick, step);
+    recordSweep(recording);
 }
 
 // The points as they are, before the next tick changes them; the shape pass blends from these.
-void VulkanCloth::keepTickStart(VkCommandBuffer commands) {
+void VulkanCloth::keepTickStart(VkCommandBuffer commands, ClothPassStamps* stamps) {
     toCopyBarrier(commands);
     const VkBufferCopy region{0, 0, static_cast<VkDeviceSize>(pointCount) * sizeof(Vec4)};
     if (region.size > 0) {
         vkCmdCopyBuffer(commands, positions.get(), tickStart.get(), 1, &region);
     }
     clothBarrier(commands);
+    if (stamps) {
+        stamps->mark(commands, ClothPass::Copy);
+    }
 }
 
 /*
 * The ticks' records, pins and bodies are written for the whole string first, each tick's pins sliding from where the
 * last one left them. Then, per tick and substep, the CPU solver's order: predict and the pins, the solver (XPBD's
 * stretch colour by colour and bending colour by colour, or vertex block descent's points colour by colour, with its
-* levels and a second sweep when the tick uses any), then the hand, bodies and velocities. The first barrier waits for whatever wrote
-* the points before (an earlier string's passes, its readback copy, the upload). Before the last tick the points are
-* kept aside, so the frame can be drawn between the last two ticks.
+* levels and a second sweep when the tick uses any), then the hand, bodies and velocities. The first barrier waits for
+* whatever wrote the points before (an earlier string's passes, its readback copy, the upload). Before the last tick
+* the points are kept aside, so the frame can be drawn between the last two ticks.
 */
-void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slotIndex) {
+void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slotIndex, ClothPassStamps* stamps) {
     Slot& slot = slotAt(slotIndex);
     std::size_t pinCount = 0;
     std::size_t colliderCount = 0;
@@ -598,34 +605,33 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
     clothBarrier(commands);
     for (std::size_t index = 0; index < ticks.size(); ++index) {
         if (index + 1 == ticks.size()) {
-            keepTickStart(commands);
+            keepTickStart(commands, stamps);
         }
-        const std::uint32_t tick = static_cast<std::uint32_t>(index);
         const ClothSettings& settings = ticks[index].settings;
         for (std::uint32_t step = 0; step < static_cast<std::uint32_t>(settings.substeps); ++step) {
-            dispatch(commands, pipelines.getPredict(), slot.set, tick, step, 0, pointCount);
+            const Recording recording{commands, slot.set, static_cast<std::uint32_t>(index), step, stamps};
+            dispatch(recording, pipelines.getPredict(), ClothPass::Predict, 0, pointCount);
             if (settings.method == ClothMethod::VertexBlockDescent) {
-                recordSweep(commands, slot.set, tick, step);
-                recordLevels(commands, slot.set, tick, step, settings);
+                recordSweep(recording);
+                recordLevels(recording, settings);
             } else {
                 for (std::size_t colour = 0; colour + 1 < stretchColours.size(); ++colour) {
-                    dispatch(commands, pipelines.getStretch(), slot.set, tick, step, stretchColours[colour],
-                             stretchColours[colour + 1] - stretchColours[colour]);
+                    dispatch(recording, pipelines.getStretch(), ClothPass::Stretch, stretchColours[colour], stretchColours[colour + 1] - stretchColours[colour]);
                 }
                 if (settings.bendingStiffness > 0.0f) {
                     for (std::size_t colour = 0; colour + 1 < bendColours.size(); ++colour) {
-                        dispatch(commands, pipelines.getBend(), slot.set, tick, step, bendColours[colour], bendColours[colour + 1] - bendColours[colour]);
+                        dispatch(recording, pipelines.getBend(), ClothPass::Bend, bendColours[colour], bendColours[colour + 1] - bendColours[colour]);
                     }
                 }
             }
-            dispatch(commands, pipelines.getFinish(), slot.set, tick, step, 0, pointCount);
+            dispatch(recording, pipelines.getFinish(), ClothPass::Finish, 0, pointCount);
         }
     }
     device.endLabel(commands);
 }
 
 // The points, then the velocities, one after the other; the copy's writes reach the host once the fence passes.
-void VulkanCloth::recordReadback(VkCommandBuffer commands, std::uint32_t slotIndex) {
+void VulkanCloth::recordReadback(VkCommandBuffer commands, std::uint32_t slotIndex, ClothPassStamps* stamps) {
     Slot& slot = slotAt(slotIndex);
     toCopyBarrier(commands);
 
@@ -639,6 +645,9 @@ void VulkanCloth::recordReadback(VkCommandBuffer commands, std::uint32_t slotInd
 
     memoryBarrier(commands, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
                   VK_ACCESS_2_HOST_READ_BIT);
+    if (stamps) {
+        stamps->mark(commands, ClothPass::Copy);
+    }
 }
 
 namespace {
@@ -726,7 +735,7 @@ bool VulkanCloth::hasShape() const {
 * velocity pass's last-frame stream), building its acceleration structure, and shaders reading a ray hit's corners.
 * The slot written was last read frames ago, which the slot ring (render/gpu/deforming_slots.h) has already waited for.
 */
-void VulkanCloth::recordShape(VkCommandBuffer commands, std::uint32_t meshSlot, float alpha) {
+void VulkanCloth::recordShape(VkCommandBuffer commands, std::uint32_t meshSlot, float alpha, ClothPassStamps* stamps) {
     if (!shape) {
         throw std::logic_error("This GPU cloth has no shape attached");
     }
@@ -750,6 +759,9 @@ void VulkanCloth::recordShape(VkCommandBuffer commands, std::uint32_t meshSlot, 
         readers |= VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
     }
     memoryBarrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, readers, reads);
+    if (stamps) {
+        stamps->mark(commands, ClothPass::Shape);
+    }
     device.endLabel(commands);
 }
 

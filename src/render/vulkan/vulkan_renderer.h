@@ -33,6 +33,7 @@
 #include "render/vulkan/vulkan_reactive_mask.h"
 #include "render/vulkan/vulkan_opaque_picture.h"
 #include "render/vulkan/vulkan_bloom.h"
+#include "render/vulkan/cloth_pass_stamps.h"
 #include "render/vulkan/vulkan_cloth.h"
 #include "render/vulkan/vulkan_compute.h"
 #include "render/vulkan/vulkan_ddgi.h"
@@ -158,6 +159,12 @@ public:
 
     // Each GPU cloth's points and velocities as a finished frame left them (a few frames late), each returned once.
     std::vector<ClothReadback> takeClothReadbacks();
+
+    /*
+    * Whether to time the cloth's passes by kind (RenderStats::cloth): a timestamp after each of the thousand or so a
+    * frame, so only while someone reads them (the debug readout). Off by default, and without timestamp support.
+    */
+    void setClothPassTiming(bool measure);
 
 private:
     SDL_Window* window = nullptr;
@@ -374,6 +381,11 @@ private:
     std::vector<ClothWork> clothWork;
     float clothAlpha = 1.0f;
     std::vector<ClothReadback> clothReadbacks;
+
+    // The cloth passes' timestamps, made the first time they are asked for, and the last frame's not yet reported.
+    bool clothPassTiming = false;
+    std::unique_ptr<ClothPassStamps> clothStamps;
+    ClothPassTimings unreportedClothTimings;
 
     // This frame's slot for each mesh a cloth shapes on the GPU, by mesh index (set by showShapes).
     std::map<std::uint32_t, std::uint32_t> gpuShapeSlots;

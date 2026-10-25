@@ -34,6 +34,13 @@ void testGpuTiming() {
         assert(gpuTimestampCount == gpuPassCount + 1);
     }
 
+    // The cloth runs first, before anything draws it (its shape pass writes the meshes the frame then draws).
+    {
+        assert(static_cast<int>(GpuPass::Cloth) == 0);
+        assert(static_cast<int>(GpuPass::Cloth) + 1 == static_cast<int>(GpuPass::DebugUi));
+        assert(std::string(gpuPassName(GpuPass::Cloth)) == "CLOTH");
+    }
+
     // The ray tracing scene is built first of the scene's passes, then the light probes traced through it, then the
     // clusters' light lists, before anything that could read any of them.
     {
@@ -108,7 +115,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{3, 11, 8, 4, 2, 40, 17, 25, 16, 14, 900, 5, 0, 12, 6, 20, 10, 11, 13, 30, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 11, 8, 4, 2, 40, 17, 25, 16, 14, 900, 5, 0, 12, 6, 20, 10, 11, 13, 30, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -124,7 +131,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1298 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1348 * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

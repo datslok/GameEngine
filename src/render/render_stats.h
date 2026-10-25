@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/gpu/cloth_timing.h"
 #include "render/gpu/eye_adaptation.h"
 #include "render/gpu/gpu_timing.h"
 #include "render/gpu/probe_relocation.h"
@@ -44,6 +45,10 @@ struct RenderStats {
     // How long each pass took on the GPU, from timestamps. They can only be read once the GPU has finished a frame, so
     // these are an earlier frame's (as many back as there are frames in flight); not valid until one has been measured.
     GpuTimings gpu;
+
+    // The cloth's GPU time by kind of pass, as late as gpu; valid only while measured (VulkanRenderer::setClothPassTiming)
+    // and some cloth ran on the GPU.
+    ClothPassTimings cloth;
 
     // The video memory in use and the driver's budget, read as this frame began (render/gpu/video_memory.h).
     VideoMemory videoMemory;

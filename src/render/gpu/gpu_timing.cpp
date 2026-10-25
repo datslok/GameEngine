@@ -4,6 +4,8 @@
 
 const char* gpuPassName(GpuPass pass) {
     switch (pass) {
+    case GpuPass::Cloth:
+        return "CLOTH";
     case GpuPass::DebugUi:
         return "UI";
     case GpuPass::RayScene:

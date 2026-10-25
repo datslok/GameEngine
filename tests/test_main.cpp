@@ -123,6 +123,7 @@ void testClothYardstick();
 void testClothHierarchy();
 void testClothBlockDescent();
 void testClothGpu();
+void testClothTiming();
 void testGpuClothEngine();
 void testGpuTiming();
 void testToneMapping();
@@ -271,6 +272,7 @@ int main(){
     testClothHierarchy();
     testClothBlockDescent();
     testClothGpu();
+    testClothTiming();
     testGpuClothEngine();
     testGpuTiming();
     testToneMapping();

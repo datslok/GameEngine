@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gpu/cloth_gpu.h"
+#include "render/gpu/cloth_timing.h"
 #include "render/gpu/deforming_slots.h"
 #include "render/vulkan/owned_handle.h"
 #include "render/vulkan/vulkan_compute.h"
@@ -18,6 +19,7 @@
 class VulkanDevice;
 class VulkanMesh;
 class ImmediateCommands;
+class ClothPassStamps;
 
 /*
 * The cloth passes (cloth_predict, cloth_stretch, cloth_bend, cloth_block and cloth_finish.comp, which all bind the same
@@ -91,12 +93,13 @@ public:
 
     /*
     * Record the ticks, in order, into commands. Throws std::invalid_argument for a slot the cloth does not have, a tick
-    * whose pin targets are not one per pin, or a hand on a point the cloth does not have.
+    * whose pin targets are not one per pin, or a hand on a point the cloth does not have. With stamps, a timestamp after
+    * each pass, marked with its kind (here and in the other record functions).
     */
-    void recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slot);
+    void recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slot, ClothPassStamps* stamps = nullptr);
 
     // Record a copy of the points and velocities into the slot's read-back buffer, after everything recorded before it.
-    void recordReadback(VkCommandBuffer commands, std::uint32_t slot);
+    void recordReadback(VkCommandBuffer commands, std::uint32_t slot, ClothPassStamps* stamps = nullptr);
 
     // Once the commands with the slot's read-back have finished: the points' positions and velocities they copied.
     std::vector<Vec3> readPositions(std::uint32_t slot) const;
@@ -114,7 +117,7 @@ public:
     * before the last tick to after it, followed by a barrier making the vertices readable by everything that draws or
     * traces them.
     */
-    void recordShape(VkCommandBuffer commands, std::uint32_t meshSlot, float alpha);
+    void recordShape(VkCommandBuffer commands, std::uint32_t meshSlot, float alpha, ClothPassStamps* stamps = nullptr);
 
     std::uint32_t getPointCount() const;
     std::size_t getPinCount() const;
@@ -208,13 +211,23 @@ private:
     void writeSet(const Slot& slot);
     void uploadLevels(ImmediateCommands& uploads, const Cloth& cloth);
 
+    // What a substep's passes are recorded into: the commands, the slot's set, the tick and substep, any stamps.
+    struct Recording {
+        VkCommandBuffer commands = VK_NULL_HANDLE;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        std::uint32_t tick = 0;
+        std::uint32_t step = 0;
+        ClothPassStamps* stamps = nullptr;
+    };
+
     /*
-    * One pass over count items from first, followed by a barrier; a level's pass (one whose set is set 1) binds the
-    * levels' set too and is told its level. groups, if given, is the workgroups to run instead of enough for count.
+    * One pass over count items from first, followed by a barrier and any stamp (marked kind); a level's pass (one whose
+    * set is set 1) binds the levels' set too and is told its level. groups, if given, is the workgroups to run instead
+    * of enough for count.
     */
-    void dispatch(VkCommandBuffer commands, const ComputePipeline& pipeline, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step,
-                  std::uint32_t first, std::uint32_t count, std::uint32_t level = 0, std::uint32_t groups = 0) const;
-    void recordSweep(VkCommandBuffer commands, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step) const;
-    void recordLevels(VkCommandBuffer commands, VkDescriptorSet set, std::uint32_t tick, std::uint32_t step, const ClothSettings& settings) const;
-    void keepTickStart(VkCommandBuffer commands);
+    void dispatch(const Recording& recording, const ComputePipeline& pipeline, ClothPass kind, std::uint32_t first, std::uint32_t count,
+                  std::uint32_t level = 0, std::uint32_t groups = 0) const;
+    void recordSweep(const Recording& recording) const;
+    void recordLevels(const Recording& recording, const ClothSettings& settings) const;
+    void keepTickStart(VkCommandBuffer commands, ClothPassStamps* stamps);
 };
