@@ -43,6 +43,40 @@ std::vector<GpuBend> packBend(const std::vector<BendConstraint>& constraints) {
     return packed;
 }
 
+std::vector<GpuPointEdge> packPointEdges(const Cloth& cloth) {
+    const ClothPointConstraints& lists = cloth.pointConstraints;
+    std::vector<GpuPointEdge> packed(lists.edges.size());
+    for (std::uint32_t point = 0; point + 1 < lists.edgeStarts.size(); ++point) {
+        for (std::uint32_t at = lists.edgeStarts[point]; at < lists.edgeStarts[point + 1]; ++at) {
+            const StretchConstraint& edge = cloth.stretch[lists.edges[at]];
+            packed[at] = GpuPointEdge{edge.first == point ? edge.second : edge.first, edge.restLength};
+        }
+    }
+    return packed;
+}
+
+std::vector<GpuPointHinge> packPointHinges(const Cloth& cloth) {
+    const ClothPointConstraints& lists = cloth.pointConstraints;
+    std::vector<GpuPointHinge> packed;
+    packed.reserve(lists.hinges.size());
+    for (const std::uint32_t entry : lists.hinges) {
+        const BendConstraint& hinge = cloth.bend[entry / 4];
+        GpuPointHinge corner;
+        corner.wing0 = hinge.wing0;
+        corner.wing1 = hinge.wing1;
+        corner.edgeStart = hinge.edgeStart;
+        corner.edgeEnd = hinge.edgeEnd;
+        for (int weight = 0; weight < 4; ++weight) {
+            corner.isometricWeights[weight] = hinge.isometricWeights[weight];
+        }
+        corner.restAngle = hinge.restAngle;
+        corner.stiffnessShare = hinge.stiffnessShare;
+        corner.corner = entry % 4;
+        packed.push_back(corner);
+    }
+    return packed;
+}
+
 GpuCollider packCollider(const Shape& shape) {
     return std::visit([](const auto& held) {
         using Held = std::decay_t<decltype(held)>;

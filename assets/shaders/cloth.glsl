@@ -39,6 +39,21 @@ struct ClothPin {
     vec4 target;
 };
 
+// One of a point's edges and one of its hinge corners, as its per-point lists hold them (GpuPointEdge, GpuPointHinge).
+struct ClothPointEdge {
+    uint other;
+    float restLength;
+};
+
+struct ClothPointHinge {
+    uvec4 points; // wing0, wing1, edgeStart, edgeEnd
+    vec4 isometricWeights;
+    float restAngle;
+    float stiffnessShare;
+    uint corner; // which of the points it is
+    uint unused;
+};
+
 // A point on another level and its weight (render/gpu/cloth_gpu.h's GpuClothLink).
 struct ClothLink {
     uint point;
@@ -355,7 +370,7 @@ vec3 clothBlockSolve(ClothBlock block, vec3 force) {
 }
 
 // The pieces of a point's force and block in vertex block descent (cloth_energy.h's add*Term), each added to what is
-// there; clothPointForceAt (cloth_pass.glsl) adds them in clothPointForce's order.
+// there; clothPointForceLanes (cloth_point_lanes.glsl) adds clothPointForce's terms, split over a point's lanes.
 void clothInertiaTerm(inout vec3 force, inout ClothBlock block, vec3 here, vec3 predicted, float inertia) {
     force = force + (predicted - here) * inertia;
     clothBlockAddDiagonal(block, inertia);

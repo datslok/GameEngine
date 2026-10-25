@@ -8,6 +8,11 @@
 // AMD's 64-wide units.
 #define CLOTH_GROUP_SIZE 64
 
+// Invocations that sum one point's terms together in vertex block descent's sweep and the levels' gradient (a point
+// has about 26: its inertia, about 6 edges, about 18 hinge corners, the hand), each taking every eighth and adding up
+// with the others by subgroup shuffles. A power of two that divides CLOTH_GROUP_SIZE and every subgroup size used.
+#define CLOTH_POINT_LANES 8
+
 // A collider's kind (GpuCollider::kind), in the order of the Shape variant's types.
 #define CLOTH_COLLIDER_SPHERE 0
 #define CLOTH_COLLIDER_CAPSULE 1

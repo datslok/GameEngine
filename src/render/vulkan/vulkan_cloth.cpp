@@ -62,8 +62,27 @@ namespace {
         return description;
     }
 
+    /*
+    * Vertex block descent's sweep and the levels' gradient sum each point's terms over CLOTH_POINT_LANES invocations of
+    * one subgroup, adding them up by shuffles (cloth_point_lanes.glsl). Every desktop GPU has shuffles in compute and
+    * subgroups of 32 or 64, but Vulkan promises neither, so ask.
+    */
+    void checkPointLanes(const VulkanDevice& device) {
+        const VkPhysicalDeviceSubgroupProperties subgroups = device.getSubgroupProperties();
+        if ((subgroups.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) == 0 || (subgroups.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_BIT) == 0 ||
+            subgroups.subgroupSize < clothPointLanes || subgroups.subgroupSize > clothGroupSize) {
+            throw std::runtime_error("This GPU cannot share a cloth point's sums across a group of invocations (subgroup shuffles), which the GPU cloth needs");
+        }
+    }
+
     ComputePipelineDescription clothPass(const char* shader) {
         return computePass(shader, clothBindings, sizeof(ClothPushConstants));
+    }
+
+    // The first cloth pass's description, made once the device is known to run the lanes.
+    ComputePipelineDescription checkedClothPass(const VulkanDevice& device, const char* shader) {
+        checkPointLanes(device);
+        return clothPass(shader);
     }
 
     // A coarse level's pass: the cloth passes' set 0 (shared, from the prediction's pipeline), then its own set 1.
@@ -202,7 +221,7 @@ namespace {
 }
 
 VulkanClothPipelines::VulkanClothPipelines(const VulkanDevice& device):
-    predict(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_predict.comp.spv"))),
+    predict(std::make_unique<ComputePipeline>(device, checkedClothPass(device, "assets/shaders/cloth_predict.comp.spv"))),
     stretch(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_stretch.comp.spv"))),
     bend(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_bend.comp.spv"))),
     block(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_block.comp.spv"))),
@@ -297,6 +316,8 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     const std::vector<GpuBend> packedBend = packBend(cloth.bend);
     const std::vector<std::uint32_t> packedSlots = clothPinSlots(cloth);
     const ClothPointConstraints& lists = cloth.pointConstraints;
+    const std::vector<GpuPointEdge> packedEdges = packPointEdges(cloth);
+    const std::vector<GpuPointHinge> packedHinges = packPointHinges(cloth);
     const std::vector<std::uint32_t>& order = cloth.vertexColours.order;
     for (const ClothPin& pin : cloth.pins) {
         pinPositions.push_back(cloth.particles.positions.at(pin.particle));
@@ -315,9 +336,9 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     pinSlots = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedSlots)), constant, BufferMemory::Gpu};
     predicted = VulkanBuffer{allocator, atLeastSmallest(bytesOf(points)), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     edgeStarts = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.edgeStarts)), constant, BufferMemory::Gpu};
-    pointEdges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.edges)), constant, BufferMemory::Gpu};
+    pointEdges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedEdges)), constant, BufferMemory::Gpu};
     hingeStarts = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.hingeStarts)), constant, BufferMemory::Gpu};
-    pointHinges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.hinges)), constant, BufferMemory::Gpu};
+    pointHinges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedHinges)), constant, BufferMemory::Gpu};
     vertexOrder = VulkanBuffer{allocator, atLeastSmallest(bytesOf(order)), constant, BufferMemory::Gpu};
 
     // Until a tick runs, the cloth is drawn where it is. The prediction needs nothing: each substep writes it first.
@@ -330,9 +351,9 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
         Upload{packedBend.data(), bytesOf(packedBend), bend.get()},
         Upload{packedSlots.data(), bytesOf(packedSlots), pinSlots.get()},
         Upload{lists.edgeStarts.data(), bytesOf(lists.edgeStarts), edgeStarts.get()},
-        Upload{lists.edges.data(), bytesOf(lists.edges), pointEdges.get()},
+        Upload{packedEdges.data(), bytesOf(packedEdges), pointEdges.get()},
         Upload{lists.hingeStarts.data(), bytesOf(lists.hingeStarts), hingeStarts.get()},
-        Upload{lists.hinges.data(), bytesOf(lists.hinges), pointHinges.get()},
+        Upload{packedHinges.data(), bytesOf(packedHinges), pointHinges.get()},
         Upload{order.data(), bytesOf(order), vertexOrder.get()},
     };
     uploadAll(device, uploads, copies);
@@ -504,10 +525,11 @@ void VulkanCloth::dispatch(const Recording& recording, const ComputePipeline& pi
     }
 }
 
-// Vertex block descent's sweep: a dispatch per point colour.
+// Vertex block descent's sweep: a dispatch per point colour, clothPointLanes invocations a point.
 void VulkanCloth::recordSweep(const Recording& recording) const {
     for (std::size_t colour = 0; colour + 1 < vertexColours.size(); ++colour) {
-        dispatch(recording, pipelines.getBlock(), ClothPass::Sweep, vertexColours[colour], vertexColours[colour + 1] - vertexColours[colour]);
+        const std::uint32_t points = vertexColours[colour + 1] - vertexColours[colour];
+        dispatch(recording, pipelines.getBlock(), ClothPass::Sweep, vertexColours[colour], points, 0, workgroupCount(points * clothPointLanes, clothGroupSize));
     }
 }
 
@@ -527,7 +549,7 @@ void VulkanCloth::recordLevels(const Recording& recording, const ClothSettings& 
     const std::uint32_t partials = workgroupCount(terms, clothGroupSize);
     dispatch(recording, pipelines.getHeld(), ClothPass::Held, 0, pointCount);
     for (std::uint32_t number = used; number >= 1; --number) {
-        dispatch(recording, pipelines.getGradient(), ClothPass::Gradient, 0, pointCount, number);
+        dispatch(recording, pipelines.getGradient(), ClothPass::Gradient, 0, pointCount, number, workgroupCount(pointCount * clothPointLanes, clothGroupSize));
         dispatch(recording, pipelines.getCoarseStep(), ClothPass::CoarseStep, 0, levels->records[number - 1].pointCount, number);
         dispatch(recording, pipelines.getSpread(), ClothPass::Spread, 0, pointCount, number);
         dispatch(recording, pipelines.getLineTerms(), ClothPass::LineTerms, 0, terms, number);

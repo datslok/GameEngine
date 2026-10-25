@@ -1,16 +1,20 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
 
 /*
 * One colour of vertex block descent (solveVertexBlocks), all at once: each free point's Newton step on the substep's
-* energy, its force divided by its block. No two points of a colour share an edge or a hinge, so none reads another's
-* move, and each writes only itself.
+* energy, its force divided by its block, summed by its CLOTH_POINT_LANES lanes (cloth_point_lanes.glsl). No two points
+* of a colour share an edge or a hinge, so none reads another's move, and each is written by its first lane, after
+* every lane has read it.
 */
-#include "cloth_pass.glsl"
+#include "cloth_point_lanes.glsl"
 
 void main() {
     uint index;
-    if (!clothItem(index)) {
+    uint lane;
+    if (!clothPointLane(index, lane)) {
         return;
     }
 
@@ -21,6 +25,8 @@ void main() {
     }
 
     ClothBlock block;
-    vec3 force = clothPointForceAt(point, ticks[tickIndex], block);
-    positions[point] = vec4(here.xyz + clothBlockSolve(block, force), here.w);
+    vec3 force = clothPointForceLanes(point, lane, ticks[tickIndex], block);
+    if (lane == 0u) {
+        positions[point] = vec4(here.xyz + clothBlockSolve(block, force), here.w);
+    }
 }

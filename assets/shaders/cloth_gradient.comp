@@ -1,19 +1,28 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_shuffle : require
 
-// phi's gradient at every point (clothEnergyGradient): minus its force, zero at held points.
+// phi's gradient at every point (clothEnergyGradient): minus its force, summed by its lanes, zero at held points.
 #include "cloth_levels.glsl"
+#include "cloth_point_lanes.glsl"
 
 void main() {
     uint point;
-    if (!clothItem(point)) {
+    uint lane;
+    if (!clothPointLane(point, lane)) {
         return;
     }
 
     if (held[point] != 0u) {
-        gradient[point] = vec4(0.0);
+        if (lane == 0u) {
+            gradient[point] = vec4(0.0);
+        }
         return;
     }
     ClothBlock unused;
-    gradient[point] = vec4(clothPointForceAt(point, ticks[tickIndex], unused) * -1.0, 0.0);
+    vec3 force = clothPointForceLanes(point, lane, ticks[tickIndex], unused);
+    if (lane == 0u) {
+        gradient[point] = vec4(force * -1.0, 0.0);
+    }
 }
