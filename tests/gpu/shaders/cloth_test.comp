@@ -1,0 +1,89 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs cloth.glsl's functions on the cases cloth_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "cloth.glsl"
+
+// A body from three inputs: (kind, radius), a, b.
+ClothCollider testCollider(uint first) {
+    ClothCollider collider;
+    collider.kind = uint(testInput(first).x);
+    collider.radius = testInput(first).y;
+    collider.unused = vec2(0.0);
+    collider.a = testInput(first + 1u);
+    collider.b = testInput(first + 2u);
+    return collider;
+}
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_CLOTH_PREDICT) {
+        vec4 point = testInput(0);
+        vec3 velocity = testInput(1).xyz;
+        vec4 gainAndSeconds = testInput(2);
+        vec3 previous;
+        clothPredict(point, velocity, previous, gainAndSeconds.xyz, gainAndSeconds.w);
+        testOutput(0, point);
+        testOutput(1, vec4(velocity, 0.0));
+        testOutput(2, vec4(previous, 0.0));
+    } else if (function == GPU_TEST_CLOTH_PIN_POSITION) {
+        ClothPin pin;
+        pin.start = testInput(0);
+        pin.target = testInput(1);
+        vec4 steps = testInput(2);
+        testOutput(0, vec4(clothPinPosition(pin, uint(steps.x), uint(steps.y)), 0.0));
+    } else if (function == GPU_TEST_CLOTH_STRETCH) {
+        vec4 first = testInput(0);
+        vec4 second = testInput(1);
+        clothStretch(first, second, testInput(2).x, testInput(2).y);
+        testOutput(0, first);
+        testOutput(1, second);
+    } else if (function == GPU_TEST_CLOTH_ISOMETRIC_BEND) {
+        vec4 wing0 = testInput(0);
+        vec4 wing1 = testInput(1);
+        vec4 edgeStart = testInput(2);
+        vec4 edgeEnd = testInput(3);
+        vec4 numbers = testInput(5);
+        clothIsometricBend(wing0, wing1, edgeStart, edgeEnd, testInput(4), numbers.x, numbers.y, numbers.z);
+        testOutput(0, wing0);
+        testOutput(1, wing1);
+        testOutput(2, edgeStart);
+        testOutput(3, edgeEnd);
+    } else if (function == GPU_TEST_CLOTH_HINGE_STATE) {
+        ClothHinge hinge = clothHingeState(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, testInput(3).xyz);
+        testOutput(0, vec4(hinge.angle));
+        for (uint point = 0u; point < 4u; ++point) {
+            testOutput(1u + point, vec4(hinge.gradient[point], 0.0));
+        }
+    } else if (function == GPU_TEST_CLOTH_HINGE_BEND) {
+        vec4 wing0 = testInput(0);
+        vec4 wing1 = testInput(1);
+        vec4 edgeStart = testInput(2);
+        vec4 edgeEnd = testInput(3);
+        vec4 numbers = testInput(4);
+        clothHingeBend(wing0, wing1, edgeStart, edgeEnd, numbers.x, numbers.y, numbers.z, numbers.w);
+        testOutput(0, wing0);
+        testOutput(1, wing1);
+        testOutput(2, edgeStart);
+        testOutput(3, edgeEnd);
+    } else if (function == GPU_TEST_CLOTH_WRAP_ANGLE) {
+        testOutput(0, vec4(clothWrapAngle(testInput(0).x)));
+    } else if (function == GPU_TEST_CLOTH_SURFACE_POINT) {
+        testOutput(0, clothSurfacePoint(testCollider(0u), testInput(3).xyz));
+    } else if (function == GPU_TEST_CLOTH_CONTACT) {
+        vec3 position = testInput(3).xyz;
+        vec4 friction = testInput(5);
+        clothContact(position, testInput(4).xyz, clothSurfacePoint(testCollider(0u), position), friction.x, friction.y, friction.z);
+        testOutput(0, vec4(position, 0.0));
+    } else if (function == GPU_TEST_CLOTH_GRAB) {
+        vec4 point = testInput(0);
+        clothGrab(point, testInput(1).xyz, testInput(2).x);
+        testOutput(0, point);
+    } else if (function == GPU_TEST_CLOTH_FINISH_VELOCITY) {
+        testOutput(0, vec4(clothFinishVelocity(testInput(0), testInput(1).xyz, testInput(2).x, testInput(2).y), 0.0));
+    }
+}

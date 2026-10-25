@@ -1,6 +1,7 @@
 #include "cloth/cloth_collision.h"
 
 #include "cloth/cloth.h"
+#include "cloth/cloth_shared.h"
 #include "math/closest_points.h"
 #include "math/transform.h"
 #include "physics/collider.h"
@@ -10,8 +11,8 @@
 #include <type_traits>
 
 namespace {
-    // Closer than this to a centre or segment there is no direction out of it.
-    constexpr float noDirection = 1e-12f;
+    // Closer than this to a centre or segment there is no direction out of it (squared; cloth/cloth_shared.h).
+    constexpr float noDirection = static_cast<float>(CLOTH_NO_DIRECTION);
 
     const Vec3 straightUp{0.0f, 1.0f, 0.0f};
 

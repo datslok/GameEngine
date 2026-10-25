@@ -1,11 +1,13 @@
 #include "math/closest_points.h"
+#include "math/closest_points_shared.h"
 
 #include <algorithm>
 #include <array>
 
 namespace {
-    // Below this squared length a segment is treated as a single point, so nothing divides by (nearly) zero.
-    constexpr float degenerateLengthSquared = 1e-12f;
+    // Below this squared length a segment is treated as a single point, so nothing divides by (nearly) zero
+    // (math/closest_points_shared.h, which cloth.glsl reads too).
+    constexpr float degenerateLengthSquared = static_cast<float>(CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED);
 
     float clamp01(float value) {
         return std::clamp(value, 0.0f, 1.0f);

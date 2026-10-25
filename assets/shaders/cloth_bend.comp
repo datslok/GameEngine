@@ -1,0 +1,31 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// One colour of hinges, all at once, by the tick's bending model. Not dispatched without bending (a stiffness of 0).
+#include "cloth_pass.glsl"
+
+void main() {
+    uint index;
+    if (!clothItem(index)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    ClothBend bend = bends[index];
+    vec4 wing0 = positions[bend.points.x];
+    vec4 wing1 = positions[bend.points.y];
+    vec4 edgeStart = positions[bend.points.z];
+    vec4 edgeEnd = positions[bend.points.w];
+
+    if (tick.bendingModel == CLOTH_BEND_ISOMETRIC) {
+        clothIsometricBend(wing0, wing1, edgeStart, edgeEnd, bend.isometricWeights, tick.bendingStiffness, bend.stiffnessShare,
+                           tick.bendPerSecondSquared);
+    } else {
+        clothHingeBend(wing0, wing1, edgeStart, edgeEnd, bend.restAngle, tick.bendingStiffness, bend.stiffnessShare, tick.bendPerSecondSquared);
+    }
+
+    positions[bend.points.x] = wing0;
+    positions[bend.points.y] = wing1;
+    positions[bend.points.z] = edgeStart;
+    positions[bend.points.w] = edgeEnd;
+}

@@ -1,11 +1,12 @@
 #include "cloth/cloth_grab.h"
 
 #include "cloth/cloth.h"
+#include "cloth/cloth_shared.h"
 #include "physics/raycast.h"
 
 namespace {
-    // Closer than this the point is on the target, with no direction to pull along.
-    constexpr float onTarget = 1e-9f;
+    // Closer than this the point is on the target, with no direction to pull along (cloth/cloth_shared.h).
+    constexpr float onTarget = static_cast<float>(CLOTH_ON_TARGET);
 }
 
 std::optional<ClothHit> raycastCloth(const Cloth& cloth, const Ray& ray, float maxDistance) {

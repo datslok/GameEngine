@@ -52,6 +52,14 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
     return cloth;
 }
 
+Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps) {
+    if (step + 1 == substeps) {
+        return target;
+    }
+    const float share = static_cast<float>(step + 1) / static_cast<float>(substeps);
+    return start + (target - start) * share;
+}
+
 void addClothPin(Cloth& cloth, std::uint32_t particle) {
     pinParticle(cloth.particles, particle);
     cloth.pins.push_back(ClothPin{particle, cloth.particles.positions[particle]});
@@ -116,12 +124,9 @@ namespace {
         for (int step = 0; step < settings.substeps; ++step) {
             predictCloth(particles, gravity, substep);
 
-            const float share = static_cast<float>(step + 1) / static_cast<float>(settings.substeps);
             for (std::size_t index = 0; index < constraints.pins.size(); ++index) {
                 const ClothPin& pin = constraints.pins[index];
-                particles.positions[pin.particle] = step + 1 == settings.substeps
-                    ? pin.position
-                    : pinStarts[index] + (pin.position - pinStarts[index]) * share;
+                particles.positions[pin.particle] = slidPinPosition(pinStarts[index], pin.position, step, settings.substeps);
             }
 
             if (constraints.stretchColours.empty()) {
