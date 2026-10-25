@@ -23,7 +23,8 @@ vec4 deformTangent(vec3 first, vec3 second, vec3 third, vec2 firstUv, vec2 secon
     vec3 edge2 = third - first;
     vec2 uvEdge1 = secondUv - firstUv;
     vec2 uvEdge2 = thirdUv - firstUv;
-    float uvArea = uvEdge1.x * uvEdge2.y - uvEdge2.x * uvEdge1.y;
+    // precise: unfused, as the CPU rounds it, so a UV triangle with no area gives exactly 0 on both sides.
+    precise float uvArea = uvEdge1.x * uvEdge2.y - uvEdge2.x * uvEdge1.y;
     vec3 alongU = (edge1 * uvEdge2.y - edge2 * uvEdge1.y) * (uvArea < 0.0 ? -1.0 : 1.0);
     return vec4(alongU, uvArea != 0.0 ? 1.0 : 0.0);
 }
