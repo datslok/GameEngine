@@ -298,7 +298,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] A tick budget: ticks a frame may run within 1/60 s, the rest dropped, so an overloaded simulation runs in slow motion instead of spiralling to 3 fps (`tick-budget`)
 - [x] Isometric bending (Bergou et al. 2006): about four times cheaper than the hinge angle, the hinge kept as an option for creases (`isometric-bending`)
 - [ ] Cloth on the GPU, for large garments (plan and research: `docs/CLOTHGPU.md`, read it first). Each step its own branch, judged by measurement:
-  - [ ] The yardstick: the same sheet at 25, 50, 100 and 200 squares a side, its stretch and sag measured on today's CPU solver, so every later step is judged on numbers (`cloth-yardstick`)
+  - [x] The yardstick: a 1 m sheet at 25, 50, 100 and 200 squares a side, measured on the CPU solver (`cloth-yardstick`)
   - [ ] The GPU framework: the cloth lives on the GPU, drawn straight from its buffer (normals in compute), picking and dragging through a readback a frame late, the CPU solver kept for headless runs and as the mirror; today's coloured XPBD ported as it is (replaces the faster CPU barrier item: fixed-thread loops at a spinning counter stay an option for the CPU path)
   - [ ] The low-frequency layer: hierarchical position-based dynamics (Müller 2008), coarser levels with one-sided geodesic distance limits that stop sag and stretch without stiffening folds; CPU and GPU, judged on the yardstick
   - [ ] Vertex Block Descent (Chen et al. 2024) as a second local solver on the same framework: Stable Neo-Hookean membrane in our fabric's units, our bending energy, point colouring; judged against XPBD on the yardstick and the cantilever, keeping the better or both

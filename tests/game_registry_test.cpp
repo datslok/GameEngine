@@ -59,6 +59,11 @@ namespace {
         const LaunchOptions save = parseLaunchOptions({"--golden-save", "--game", "demo"});
         assert(save.game == findGame("demo"));
         assert(save.golden == GoldenMode::Save);
+        assert(!save.clothYardstick);
+
+        const LaunchOptions yardstick = parseLaunchOptions({"--cloth-yardstick"});
+        assert(yardstick.clothYardstick);
+        assert(yardstick.game == nullptr && !yardstick.golden);
     }
 
     // Mistakes are reported, not guessed at.
@@ -68,6 +73,9 @@ namespace {
         assert(throwsInvalidArgument({"--fly"}));
         assert(throwsInvalidArgument({"--golden-save", "--golden-check"}));
         assert(throwsInvalidArgument({"--game", "demo", "--game", "lightlab"}));
+        assert(throwsInvalidArgument({"--cloth-yardstick", "--game", "clothlab"}));
+        assert(throwsInvalidArgument({"--golden-check", "--cloth-yardstick"}));
+        assert(throwsInvalidArgument({"--cloth-yardstick", "--cloth-yardstick"}));
     }
 }
 

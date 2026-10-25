@@ -32,11 +32,13 @@ std::string gameNames();
 
 /*
 * What the command line asks for: a game by name (--game <name>; none named means the default game, or every game for
-* the golden images) and optionally the golden images instead of playing (--golden-save, --golden-check).
+* the golden images) and optionally the golden images instead of playing (--golden-save, --golden-check), or the cloth
+* yardstick (--cloth-yardstick: app/cloth_yardstick_run.h), which plays no game and takes no other option.
 * Throws std::invalid_argument, with the valid choices in the message, for an unknown option or game.
 */
 struct LaunchOptions {
     const GameEntry* game = nullptr;
     std::optional<GoldenMode> golden;
+    bool clothYardstick = false;
 };
 LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments);

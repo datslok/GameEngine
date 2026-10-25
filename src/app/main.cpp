@@ -1,3 +1,4 @@
+#include "app/cloth_yardstick_run.h"
 #include "app/game_registry.h"
 #include "engine/application.h"
 #include "engine/golden_capture.h"
@@ -14,11 +15,16 @@
 * The game is made first, so it outlives the Application that borrows it.
 * --game <name> picks a game (app/game_registry.h; the light lab without it). --golden-save captures the golden images as
 * references, --golden-check compares with them (engine/golden.h), for the named game or else for every game; both exit
-* with 0 on success.
+* with 0 on success. --cloth-yardstick measures the cloth solver (app/cloth_yardstick_run.h) instead of playing.
 */
 int main(int argc, char* argv[]) {
     try {
         const LaunchOptions options = parseLaunchOptions(std::vector<std::string>(argv + 1, argv + argc));
+
+        if (options.clothYardstick) {
+            runClothYardstick(std::cout);
+            return 0;
+        }
 
         if (options.golden) {
             int failures = 0;

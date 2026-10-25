@@ -2628,6 +2628,14 @@ With nothing between, step 3 gives back exactly the predicted velocity, so a she
 **Measured** (best tick of 120, 15 substeps): the cloth lab's two sheets with collisions 4.2 ms a tick in release (0.36 ms of it the collisions), about half a core at 120 ticks a second, and 31 ms in debug, where the lab runs at about a quarter speed. Release, one thread: the cloth lab's 28 x 30 sheet (2,578 edges, about 2,500 hinges) 2.0 ms a tick with bending (0.37 ms with stretch alone), about a quarter of a core at 120 ticks a second; a 100 x 100 sheet 24 ms, too slow for one thread, waiting for the multi-threaded or GPU solver. A hinge solve costs about 45 ns (atan2 only 4.5 ns of it), five times a stretch solve. The debug build is several times slower. Isometric bending (release, the 100 x 100 sheet, 15 substeps): 7 ms a tick on one thread against the hinge's 26 (2.6 of it stretch and the rest of the tick), 6.3 on 16 threads against the hinge's 10.6-11.2, so the big sheet runs in real time.
 - `hashSimulationState` includes every cloth's positions, velocities and inverse masses.
 
+**The yardstick** (`cloth_yardstick`, tested in `cloth_yardstick_test`; docs/CLOTHGPU.md, Part 5, holds its numbers): how every cloth solver is judged.
+
+- `yardstickSheet(squares, settings)`: a 1 m sheet (`yardstickSheetSize`) of squares x squares, upright in the x-y plane, its top edge along y = 0, pinned at its top corners. `yardstickRungs` are 25, 50, 100 and 200.
+- `measureSheet(cloth, squares)` -> `SheetMeasure`: `pathStretch` (the longest column from the top edge to the hem against its rest length, minus 1), `worstEdgeStrain` (the most any edge is stretched), `sag` (the hem's middle below the pins, the mean of its two middle points on an odd sheet; a sheet that cannot stretch hangs it at most 1 m, so more is stretch).
+- `settleYardstick(cloth, seconds, tickSeconds, jobs)`: steps it and returns the farthest any point moved over the last second.
+- **The runner** (`app/cloth_yardstick_run`, `game.exe --cloth-yardstick`, `make yardstick` on the release build): every rung settled `yardstickSettleSeconds` (10) at the fabric's substeps and four times as many, a row each with its time a tick on every core (the sheet's making and colouring left out). The option takes no other.
+- **Why it measures the solver:** a fixed compliance per edge is the same fabric on any square mesh (twice the edges in series, each half as long and carrying half the force), so stretch beyond the fabric's 0.15%, and any difference between rungs, is the solver's error.
+
 ## Deforming meshes
 
 Meshes whose vertices move every tick while their triangles and UVs stay the same (phase 7, `dynamic-meshes`): cloth. `scene/deforming_mesh` (tested in `deforming_mesh_test`), `render/gpu/deforming_slots` (`deforming_slots_test`), `render/vulkan/vulkan_mesh`, `vulkan_ray_tracing`.
