@@ -31,9 +31,10 @@ namespace {
 
     static_assert(sizeof(ClothShapePushConstants) == 8, "ClothShapePushConstants must match cloth_shape.comp's ClothShape block");
 
-    // cloth_pass.glsl's bindings, in order: positions, previous positions, velocities, stretch, bending, pin slots, then
-    // the slot's ticks, pins and bodies.
-    constexpr std::uint32_t clothBindings = 9;
+    // cloth_pass.glsl's bindings, in order: positions, previous positions, velocities, stretch, bending, pin slots, the
+    // slot's ticks, pins and bodies, then the prediction, the per-point edge and hinge lists (starts, items) and the
+    // points in colour order.
+    constexpr std::uint32_t clothBindings = 15;
 
     // cloth_shape.comp's: the points, the points before the last tick, the rest vertices, indices, source vertices, the
     // two adjacency lists (starts and triangles each), and the mesh slot it writes.
@@ -187,6 +188,7 @@ VulkanClothPipelines::VulkanClothPipelines(const VulkanDevice& device):
     predict(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_predict.comp.spv"))),
     stretch(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_stretch.comp.spv"))),
     bend(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_bend.comp.spv"))),
+    block(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_block.comp.spv"))),
     finish(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_finish.comp.spv"))),
     shape(std::make_unique<ComputePipeline>(device, computePass("assets/shaders/cloth_shape.comp.spv", shapeBindings, sizeof(ClothShapePushConstants))))
 {
@@ -202,6 +204,10 @@ const ComputePipeline& VulkanClothPipelines::getStretch() const {
 
 const ComputePipeline& VulkanClothPipelines::getBend() const {
     return *bend;
+}
+
+const ComputePipeline& VulkanClothPipelines::getBlock() const {
+    return *block;
 }
 
 const ComputePipeline& VulkanClothPipelines::getFinish() const {
@@ -223,7 +229,8 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     pipelines(pipelines),
     pointCount(static_cast<std::uint32_t>(cloth.particles.size())),
     stretchColours(cloth.stretchColours),
-    bendColours(cloth.bendColours)
+    bendColours(cloth.bendColours),
+    vertexColours(cloth.vertexColours.colours)
 {
     if (slotCount == 0) {
         throw std::invalid_argument("A GPU cloth needs at least one slot");
@@ -235,6 +242,8 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     const std::vector<GpuStretch> packedStretch = packStretch(cloth.stretch);
     const std::vector<GpuBend> packedBend = packBend(cloth.bend);
     const std::vector<std::uint32_t> packedSlots = clothPinSlots(cloth);
+    const ClothPointConstraints& lists = cloth.pointConstraints;
+    const std::vector<std::uint32_t>& order = cloth.vertexColours.order;
     for (const ClothPin& pin : cloth.pins) {
         pinPositions.push_back(cloth.particles.positions.at(pin.particle));
     }
@@ -250,9 +259,15 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     stretch = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedStretch)), constant, BufferMemory::Gpu};
     bend = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedBend)), constant, BufferMemory::Gpu};
     pinSlots = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedSlots)), constant, BufferMemory::Gpu};
+    predicted = VulkanBuffer{allocator, atLeastSmallest(bytesOf(points)), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
+    edgeStarts = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.edgeStarts)), constant, BufferMemory::Gpu};
+    pointEdges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.edges)), constant, BufferMemory::Gpu};
+    hingeStarts = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.hingeStarts)), constant, BufferMemory::Gpu};
+    pointHinges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.hinges)), constant, BufferMemory::Gpu};
+    vertexOrder = VulkanBuffer{allocator, atLeastSmallest(bytesOf(order)), constant, BufferMemory::Gpu};
 
-    // Until a tick runs, the cloth is drawn where it is.
-    const std::array<Upload, 7> copies{
+    // Until a tick runs, the cloth is drawn where it is. The prediction needs nothing: each substep writes it first.
+    const std::array<Upload, 12> copies{
         Upload{points.data(), bytesOf(points), positions.get()},
         Upload{previous.data(), bytesOf(previous), previousPositions.get()},
         Upload{moving.data(), bytesOf(moving), velocities.get()},
@@ -260,12 +275,17 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
         Upload{packedStretch.data(), bytesOf(packedStretch), stretch.get()},
         Upload{packedBend.data(), bytesOf(packedBend), bend.get()},
         Upload{packedSlots.data(), bytesOf(packedSlots), pinSlots.get()},
+        Upload{lists.edgeStarts.data(), bytesOf(lists.edgeStarts), edgeStarts.get()},
+        Upload{lists.edges.data(), bytesOf(lists.edges), pointEdges.get()},
+        Upload{lists.hingeStarts.data(), bytesOf(lists.hingeStarts), hingeStarts.get()},
+        Upload{lists.hinges.data(), bytesOf(lists.hinges), pointHinges.get()},
+        Upload{order.data(), bytesOf(order), vertexOrder.get()},
     };
     uploadAll(device, uploads, copies);
 
     descriptorPool = storagePool(device, slotCount, clothBindings);
 
-    // Every pass's set layout is the same nine storage buffers, so a set made for one is compatible with them all.
+    // Every pass's set layout is the same fifteen storage buffers, so a set made for one is compatible with them all.
     const VkDescriptorSetLayout layout = pipelines.getPredict().getResourceLayout();
     slots.resize(slotCount);
     for (Slot& slot : slots) {
@@ -315,8 +335,21 @@ void VulkanCloth::ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins
 }
 
 void VulkanCloth::writeSet(const Slot& slot) {
-    const std::array<VkBuffer, clothBindings> buffers{positions.get(), previousPositions.get(), velocities.get(), stretch.get(), bend.get(),
-                                                      pinSlots.get(), slot.ticks.get(), slot.pins.get(), slot.colliders.get()};
+    const std::array<VkBuffer, clothBindings> buffers{positions.get(),
+                                                      previousPositions.get(),
+                                                      velocities.get(),
+                                                      stretch.get(),
+                                                      bend.get(),
+                                                      pinSlots.get(),
+                                                      slot.ticks.get(),
+                                                      slot.pins.get(),
+                                                      slot.colliders.get(),
+                                                      predicted.get(),
+                                                      edgeStarts.get(),
+                                                      pointEdges.get(),
+                                                      hingeStarts.get(),
+                                                      pointHinges.get(),
+                                                      vertexOrder.get()};
     writeBuffers(device, slot.set, buffers);
 }
 
@@ -345,8 +378,9 @@ void VulkanCloth::keepTickStart(VkCommandBuffer commands) {
 
 /*
 * The ticks' records, pins and bodies are written for the whole string first, each tick's pins sliding from where the
-* last one left them. Then, per tick and substep, the CPU solver's order: predict and the pins, stretch colour by
-* colour, bending colour by colour, then the hand, bodies and velocities. The first barrier waits for whatever wrote
+* last one left them. Then, per tick and substep, the CPU solver's order: predict and the pins, the solver (XPBD's
+* stretch colour by colour and bending colour by colour, or vertex block descent's points colour by colour), then the
+* hand, bodies and velocities. The first barrier waits for whatever wrote
 * the points before (an earlier string's passes, its readback copy, the upload). Before the last tick the points are
 * kept aside, so the frame can be drawn between the last two ticks.
 */
@@ -403,12 +437,19 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
         const ClothSettings& settings = ticks[index].settings;
         for (std::uint32_t step = 0; step < static_cast<std::uint32_t>(settings.substeps); ++step) {
             dispatch(commands, pipelines.getPredict(), slot.set, tick, step, 0, pointCount);
-            for (std::size_t colour = 0; colour + 1 < stretchColours.size(); ++colour) {
-                dispatch(commands, pipelines.getStretch(), slot.set, tick, step, stretchColours[colour], stretchColours[colour + 1] - stretchColours[colour]);
-            }
-            if (settings.bendingStiffness > 0.0f) {
-                for (std::size_t colour = 0; colour + 1 < bendColours.size(); ++colour) {
-                    dispatch(commands, pipelines.getBend(), slot.set, tick, step, bendColours[colour], bendColours[colour + 1] - bendColours[colour]);
+            if (settings.method == ClothMethod::VertexBlockDescent) {
+                for (std::size_t colour = 0; colour + 1 < vertexColours.size(); ++colour) {
+                    dispatch(commands, pipelines.getBlock(), slot.set, tick, step, vertexColours[colour], vertexColours[colour + 1] - vertexColours[colour]);
+                }
+            } else {
+                for (std::size_t colour = 0; colour + 1 < stretchColours.size(); ++colour) {
+                    dispatch(commands, pipelines.getStretch(), slot.set, tick, step, stretchColours[colour],
+                             stretchColours[colour + 1] - stretchColours[colour]);
+                }
+                if (settings.bendingStiffness > 0.0f) {
+                    for (std::size_t colour = 0; colour + 1 < bendColours.size(); ++colour) {
+                        dispatch(commands, pipelines.getBend(), slot.set, tick, step, bendColours[colour], bendColours[colour + 1] - bendColours[colour]);
+                    }
                 }
             }
             dispatch(commands, pipelines.getFinish(), slot.set, tick, step, 0, pointCount);

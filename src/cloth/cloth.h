@@ -44,7 +44,7 @@
 * The solver (ClothMethod) is XPBD's constraint passes, or Vertex Block Descent (cloth_block_descent.h), which lowers
 * the substep's energy one point at a time and takes coarse levels (cloth_hierarchy.h) between its sweeps, carrying a
 * pin's pull across a fine sheet so it stretches as little as a coarse one. XPBD by default, with no levels, until the
-* GPU solver has the other too, so that both step a cloth alike.
+* GPU solver has the levels too (it has vertex block descent itself), so that both step a cloth alike.
 */
 enum class ClothMethod {
     Xpbd,

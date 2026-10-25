@@ -1,0 +1,26 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* One colour of vertex block descent (solveVertexBlocks), all at once: each free point's Newton step on the substep's
+* energy, its force divided by its block. No two points of a colour share an edge or a hinge, so none reads another's
+* move, and each writes only itself.
+*/
+#include "cloth_pass.glsl"
+
+void main() {
+    uint index;
+    if (!clothItem(index)) {
+        return;
+    }
+
+    uint point = vertexOrder[index];
+    vec4 here = positions[point];
+    if (here.w <= 0.0) {
+        return;
+    }
+
+    ClothBlock block;
+    vec3 force = clothPointForceAt(point, ticks[tickIndex], block);
+    positions[point] = vec4(here.xyz + clothBlockSolve(block, force), here.w);
+}

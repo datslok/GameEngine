@@ -17,8 +17,47 @@ ClothCollider testCollider(uint first) {
     return collider;
 }
 
+// A block from two inputs: its diagonal, then the rest.
+ClothBlock testBlock(uint first) {
+    ClothBlock block;
+    block.diagonal = testInput(first).xyz;
+    block.offDiagonal = testInput(first + 1u).xyz;
+    return block;
+}
+
+// A term's results: the force, then the block's diagonal and the rest.
+void testTermOutputs(vec3 force, ClothBlock block) {
+    testOutput(0, vec4(force, 0.0));
+    testOutput(1, vec4(block.diagonal, 0.0));
+    testOutput(2, vec4(block.offDiagonal, 0.0));
+}
+
+// The per-point terms' cases: a force and block to add to (inputs 0 to 2), then the term's own numbers (3 to 5).
+bool runPointTerm() {
+    vec3 force = testInput(0).xyz;
+    ClothBlock block = testBlock(1u);
+    if (function == GPU_TEST_CLOTH_INERTIA_TERM) {
+        clothInertiaTerm(force, block, testInput(3).xyz, testInput(4).xyz, testInput(4).w);
+    } else if (function == GPU_TEST_CLOTH_EDGE_TERM) {
+        clothEdgeTerm(force, block, testInput(3).xyz, testInput(4).xyz, testInput(4).w, testInput(5).x);
+    } else if (function == GPU_TEST_CLOTH_ISOMETRIC_HINGE_TERM) {
+        clothIsometricHingeTerm(force, block, testInput(3).xyz, testInput(3).w, testInput(4).x);
+    } else if (function == GPU_TEST_CLOTH_HINGE_ANGLE_TERM) {
+        clothHingeAngleTerm(force, block, testInput(3).xyz, testInput(3).w, testInput(4).x);
+    } else if (function == GPU_TEST_CLOTH_HAND_TERM) {
+        clothHandTerm(force, block, testInput(3).xyz, testInput(4).xyz, testInput(4).w);
+    } else {
+        return false;
+    }
+    testTermOutputs(force, block);
+    return true;
+}
+
 void main() {
     if (outsideTheCases()) {
+        return;
+    }
+    if (runPointTerm()) {
         return;
     }
 
@@ -84,6 +123,8 @@ void main() {
         vec4 point = testInput(0);
         clothGrab(point, testInput(1).xyz, testInput(2).x);
         testOutput(0, point);
+    } else if (function == GPU_TEST_CLOTH_BLOCK_SOLVE) {
+        testOutput(0, vec4(clothBlockSolve(testBlock(0u), testInput(2).xyz), 0.0));
     } else if (function == GPU_TEST_CLOTH_FINISH_VELOCITY) {
         testOutput(0, vec4(clothFinishVelocity(testInput(0), testInput(1).xyz, testInput(2).x, testInput(2).y), 0.0));
     } else if (function == GPU_TEST_DEFORM_BLEND) {

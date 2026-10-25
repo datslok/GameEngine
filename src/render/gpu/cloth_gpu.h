@@ -24,6 +24,8 @@ inline constexpr std::uint32_t clothNoGrab = CLOTH_NO_GRAB;
 
 static_assert(static_cast<int>(BendingModel::Isometric) == CLOTH_BEND_ISOMETRIC && static_cast<int>(BendingModel::Hinge) == CLOTH_BEND_HINGE,
               "The GPU's bending model numbers are BendingModel's values");
+static_assert(static_cast<int>(ClothMethod::Xpbd) == CLOTH_METHOD_XPBD && static_cast<int>(ClothMethod::VertexBlockDescent) == CLOTH_METHOD_BLOCK_DESCENT,
+              "The GPU's solver numbers are ClothMethod's values");
 
 struct GpuStretch {
     std::uint32_t first = 0;
@@ -68,8 +70,9 @@ static_assert(sizeof(GpuClothPin) == 32, "GpuClothPin must match cloth.glsl's Cl
 
 /*
 * One tick: the step's length and everything worked out from it once on the CPU, as the CPU solver works them out
-* (compliances over the substep's length squared, the drag's share kept a substep), so both sides start from the same
-* numbers; its pins (pinCount from pinFirst in the tick's pins) and bodies, and the hand.
+* (XPBD's compliances over the substep's length squared, vertex block descent's stiffnesses (energyStiffness), the
+* drag's share kept a substep), so both sides start from the same numbers; its pins (from pinFirst in the tick's pins)
+* and bodies, the hand, and the solver.
 */
 struct GpuClothTick {
     float substepSeconds = 0.0f;
@@ -77,8 +80,8 @@ struct GpuClothTick {
     float stretchCompliance = 0.0f; // over the substep squared
     float bendingStiffness = 0.0f;
 
-    float bendPerSecondSquared = 0.0f; // 1 / substep squared
-    float grabCompliance = 0.0f;       // over the substep squared
+    float perSecondSquared = 0.0f; // 1 / substep squared
+    float grabCompliance = 0.0f;   // over the substep squared
     float kept = 0.0f;                 // of each velocity, a substep
     float thickness = 0.0f;
 
@@ -93,9 +96,14 @@ struct GpuClothTick {
     std::uint32_t grabParticle = CLOTH_NO_GRAB;
 
     Vec4 grabTarget;
+
+    float stretchStiffness = 0.0f; // N/m, the energy's
+    float grabStiffness = 0.0f;    // N/m, the energy's
+    std::uint32_t method = CLOTH_METHOD_XPBD;
+    std::uint32_t unused = 0;
 };
 
-static_assert(sizeof(GpuClothTick) == 80, "GpuClothTick must match cloth.glsl's ClothTick");
+static_assert(sizeof(GpuClothTick) == 96, "GpuClothTick must match cloth.glsl's ClothTick");
 
 /*
 * A cloth the renderer simulates this frame (VulkanRenderer::setClothWork): which cloth (key, its entity, the same every
@@ -136,7 +144,8 @@ std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth);
 GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst);
 
 /*
-* The dispatches one tick records: per substep, the prediction, one per stretch colour, one per bending colour (none
-* without bending) and the end (the hand, the bodies, the velocities).
+* The dispatches one tick records: per substep, the prediction, the solver's (XPBD: one per stretch colour and one per
+* bending colour, none without bending; vertex block descent: one per point colour) and the end (the hand, the
+* bodies, the velocities).
 */
 std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& settings);

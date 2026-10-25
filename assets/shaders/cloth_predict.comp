@@ -1,7 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// A substep's start for every point (predictCloth), then the moving pins slid a share of the way to their targets.
+// A substep's start for every point (predictCloth), then the moving pins slid a share of the way to their targets; that
+// place is also the prediction vertex block descent's inertia pulls towards.
 #include "cloth_pass.glsl"
 
 void main() {
@@ -22,6 +23,7 @@ void main() {
     }
 
     positions[point] = position;
+    predicted[point] = position;
     previousPositions[point] = vec4(previous, 0.0);
     velocities[point] = vec4(velocity, 0.0);
 }

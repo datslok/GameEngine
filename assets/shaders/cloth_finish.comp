@@ -2,9 +2,10 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* A substep's end for every point, in the CPU solver's order: the hand on its point, then the bodies (each free point
-* pushed out of every body in turn, with friction), then the velocity from the motion, slowed by the air. Each step
-* touches only its own point, so one invocation per point does them all.
+* A substep's end for every point, in the CPU solver's order: XPBD's hand on its point (vertex block descent's is in
+* each point's step), then the bodies (each free point pushed out of every body in turn, with friction), then the
+* velocity from the motion, slowed by the air. Each step touches only its own point, so one invocation per point does
+* them all.
 */
 #include "cloth_pass.glsl"
 
@@ -18,7 +19,7 @@ void main() {
     vec4 position = positions[point];
     vec3 previous = previousPositions[point].xyz;
 
-    if (point == tick.grabParticle) {
+    if (point == tick.grabParticle && tick.method == CLOTH_METHOD_XPBD) {
         clothGrab(position, tick.grabTarget.xyz, tick.grabCompliance);
     }
 

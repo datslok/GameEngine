@@ -16,4 +16,7 @@
 // Closer than this a held point is on the hand's target, with no direction to pull along.
 #define CLOTH_ON_TARGET 1e-9
 
+// A 3 x 3 block whose determinant is below this share of its largest diagonal cubed is taken as singular.
+#define CLOTH_SINGULAR_BLOCK 1e-12
+
 #endif

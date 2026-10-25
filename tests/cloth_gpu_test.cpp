@@ -100,8 +100,11 @@ namespace {
         assert(tick.gravity == settings.gravity);
         assert(tick.stretchCompliance == settings.stretchCompliance / (substep * substep));
         assert(tick.grabCompliance == settings.grabCompliance / (substep * substep));
-        assert(tick.bendPerSecondSquared == 1.0f / (substep * substep));
+        assert(tick.perSecondSquared == 1.0f / (substep * substep));
         assert(tick.bendingStiffness == settings.bendingStiffness);
+        assert(tick.stretchStiffness == energyStiffness(settings.stretchCompliance));
+        assert(tick.grabStiffness == energyStiffness(settings.grabCompliance));
+        assert(tick.method == CLOTH_METHOD_XPBD);
         assert(tick.kept == std::exp(-settings.drag * substep));
         assert(tick.thickness == settings.thickness);
         assert(tick.staticFriction == settings.staticFriction && tick.kineticFriction == settings.kineticFriction);
@@ -111,6 +114,13 @@ namespace {
 
         cloth.grab.reset();
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).grabParticle == clothNoGrab);
+
+        // A perfectly stiff fabric's energy takes the stiffest the energy allows, as on the CPU.
+        cloth.settings.method = ClothMethod::VertexBlockDescent;
+        cloth.settings.stretchCompliance = 0.0f;
+        const GpuClothTick blocks = packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0);
+        assert(blocks.method == CLOTH_METHOD_BLOCK_DESCENT);
+        assert(blocks.stretchStiffness == energyStiffness(0.0f) && blocks.stretchStiffness == 1.0f / stiffestClothCompliance);
 
         ClothTickCommands none = commands;
         none.settings.substeps = 0;
@@ -134,6 +144,13 @@ namespace {
         settings.bendingStiffness = 0.0f;
         settings.substeps = 4;
         assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + stretchColours));
+
+        // Vertex block descent: the prediction, a pass per point colour (bending is in each point's step), the end.
+        const std::uint32_t pointColours = static_cast<std::uint32_t>(cloth.vertexColours.colours.size() - 1);
+        settings.method = ClothMethod::VertexBlockDescent;
+        assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
+        settings.bendingStiffness = 1e-5f;
+        assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
     }
 }
 

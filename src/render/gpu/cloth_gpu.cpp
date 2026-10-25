@@ -72,7 +72,7 @@ std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth) {
     return slots;
 }
 
-// The same expressions as the CPU solver's (cloth.cpp's stepTick, solveStretch, solveBend, solveGrab), in float.
+// The same expressions as the CPU solver's (cloth.cpp's stepTick, solveStretch, solveBend, solveGrab, clothPointForce), in float.
 GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst) {
     const ClothSettings& settings = commands.settings;
     if (settings.substeps < 1) {
@@ -85,7 +85,7 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.gravity = settings.gravity;
     tick.stretchCompliance = settings.stretchCompliance / (substep * substep);
     tick.bendingStiffness = settings.bendingStiffness;
-    tick.bendPerSecondSquared = 1.0f / (substep * substep);
+    tick.perSecondSquared = 1.0f / (substep * substep);
     tick.grabCompliance = settings.grabCompliance / (substep * substep);
     tick.kept = std::exp(-settings.drag * substep);
     tick.thickness = settings.thickness;
@@ -100,6 +100,9 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
         tick.grabParticle = commands.grab->particle;
         tick.grabTarget = Vec4{commands.grab->target.x, commands.grab->target.y, commands.grab->target.z, 1.0f};
     }
+    tick.stretchStiffness = energyStiffness(settings.stretchCompliance);
+    tick.grabStiffness = energyStiffness(settings.grabCompliance);
+    tick.method = static_cast<std::uint32_t>(settings.method);
     return tick;
 }
 
@@ -107,6 +110,10 @@ std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& se
     const auto colours = [](const std::vector<std::uint32_t>& starts) {
         return starts.empty() ? 0u : static_cast<std::uint32_t>(starts.size() - 1);
     };
+    const std::uint32_t substeps = static_cast<std::uint32_t>(settings.substeps);
+    if (settings.method == ClothMethod::VertexBlockDescent) {
+        return substeps * (2u + colours(cloth.vertexColours.colours));
+    }
     const std::uint32_t bendColours = settings.bendingStiffness > 0.0f ? colours(cloth.bendColours) : 0u;
-    return static_cast<std::uint32_t>(settings.substeps) * (2u + colours(cloth.stretchColours) + bendColours);
+    return substeps * (2u + colours(cloth.stretchColours) + bendColours);
 }
