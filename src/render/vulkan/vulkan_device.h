@@ -84,6 +84,9 @@ public:
     std::uint32_t getTimestampValidBits() const;
     double getTimestampPeriod() const;
 
+    // What shaders can do across a subgroup (a wave of invocations run in lockstep): its size, stages and operations.
+    VkPhysicalDeviceSubgroupProperties getSubgroupProperties() const;
+
     // The most textures one bindless array may hold (combined image samplers in an update-after-bind set, for the
     // fragment stage): the smallest of the limits that apply.
     std::uint32_t getBindlessTextureLimit() const;

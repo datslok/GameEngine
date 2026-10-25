@@ -19,6 +19,7 @@
 * bodies. A point's position and inverse mass share a vec4 (w), since every pass that moves a point weighs it.
 */
 inline constexpr std::uint32_t clothGroupSize = CLOTH_GROUP_SIZE;
+inline constexpr std::uint32_t clothPointLanes = CLOTH_POINT_LANES;
 inline constexpr std::uint32_t clothNoPin = CLOTH_NO_PIN;
 inline constexpr std::uint32_t clothNoGrab = CLOTH_NO_GRAB;
 
@@ -169,8 +170,38 @@ struct ClothReadback {
     std::vector<Vec3> velocities;
 };
 
+// One of a point's edges, as its per-point list holds it: the point at the other end and the rest length.
+struct GpuPointEdge {
+    std::uint32_t other = 0;
+    float restLength = 0.0f;
+};
+
+static_assert(sizeof(GpuPointEdge) == 8, "GpuPointEdge must match cloth.glsl's ClothPointEdge");
+
+// One of a point's hinge corners: the hinge's points, weights, rest angle and share, and which corner the point is.
+struct GpuPointHinge {
+    std::uint32_t wing0 = 0;
+    std::uint32_t wing1 = 0;
+    std::uint32_t edgeStart = 0;
+    std::uint32_t edgeEnd = 0;
+    float isometricWeights[4]{};
+    float restAngle = 0.0f;
+    float stiffnessShare = 0.0f;
+    std::uint32_t corner = 0;
+    std::uint32_t unused = 0;
+};
+
+static_assert(sizeof(GpuPointHinge) == 48, "GpuPointHinge must match cloth.glsl's ClothPointHinge");
+
 // Each point's position with its inverse mass in w.
 std::vector<Vec4> packClothPoints(const ClothParticles& particles);
+
+/*
+* Each point's edges and hinge corners in Cloth::pointConstraints' order (its starts unchanged), holding what a term
+* needs, so the GPU reads one entry and then the points instead of an index, a constraint and then the points.
+*/
+std::vector<GpuPointEdge> packPointEdges(const Cloth& cloth);
+std::vector<GpuPointHinge> packPointHinges(const Cloth& cloth);
 
 std::vector<GpuStretch> packStretch(const std::vector<StretchConstraint>& constraints);
 std::vector<GpuBend> packBend(const std::vector<BendConstraint>& constraints);

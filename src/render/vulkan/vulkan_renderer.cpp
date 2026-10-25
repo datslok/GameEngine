@@ -177,13 +177,7 @@ void VulkanRenderer::checkFormats() const {
     // Clustered shading's pixels share their light lists across the wave (subgroupOr in triangle.frag), and the depth
     // measurement combines its invocations' depths the same way (depth_range.comp). Every desktop GPU with Vulkan 1.3
     // has it, but it is not required by the standard for fragment shaders, so ask.
-    VkPhysicalDeviceSubgroupProperties subgroups{};
-    subgroups.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    VkPhysicalDeviceProperties2 properties{};
-    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    properties.pNext = &subgroups;
-    vkGetPhysicalDeviceProperties2(device.getPhysicalDevice(), &properties);
-
+    const VkPhysicalDeviceSubgroupProperties subgroups = device.getSubgroupProperties();
     if ((subgroups.supportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) == 0 || (subgroups.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) == 0 ||
         (subgroups.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) == 0) {
         throw std::runtime_error("This GPU cannot combine values across a group of pixels (subgroup arithmetic), which clustered shading and the cascades' fit need");

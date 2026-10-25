@@ -468,6 +468,16 @@ double VulkanDevice::getTimestampPeriod() const {
     return physicalDevice.properties.limits.timestampPeriod;
 }
 
+VkPhysicalDeviceSubgroupProperties VulkanDevice::getSubgroupProperties() const {
+    VkPhysicalDeviceSubgroupProperties subgroups{};
+    subgroups.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceProperties2 properties{};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.pNext = &subgroups;
+    vkGetPhysicalDeviceProperties2(physicalDevice.physical_device, &properties);
+    return subgroups;
+}
+
 /*
 * A combined image sampler counts as both a sampler and a sampled image, against the per-stage and the per-set limits for
 * update-after-bind sets (at least 500,000 each on GPUs with descriptor indexing, far beyond what the renderer asks).

@@ -159,6 +159,39 @@ namespace {
     }
 
     /*
+    * Each point's lists for the GPU, in ClothPointConstraints' order, holding what its terms need directly: an edge's
+    * other point and rest length, a hinge corner's four points, weights, rest angle, share and which corner the point is,
+    * so a pass reads one entry and then the points, not an index, then a record, then the points.
+    */
+    void testPointLists() {
+        Cloth cloth = makeCloth(Mesh::grid(5, 4, 1.0f, 0.8f), Mat4::rotationX(0.3f), ClothSettings{});
+        const ClothPointConstraints& lists = cloth.pointConstraints;
+        const std::vector<GpuPointEdge> edges = packPointEdges(cloth);
+        const std::vector<GpuPointHinge> hinges = packPointHinges(cloth);
+        assert(edges.size() == lists.edges.size() && hinges.size() == lists.hinges.size() && !hinges.empty());
+
+        for (std::uint32_t point = 0; point < cloth.particles.size(); ++point) {
+            for (std::uint32_t at = lists.edgeStarts[point]; at < lists.edgeStarts[point + 1]; ++at) {
+                const StretchConstraint& edge = cloth.stretch[lists.edges[at]];
+                assert(edges[at].other == (edge.first == point ? edge.second : edge.first));
+                assert(edges[at].restLength == edge.restLength);
+            }
+            for (std::uint32_t at = lists.hingeStarts[point]; at < lists.hingeStarts[point + 1]; ++at) {
+                const BendConstraint& bend = cloth.bend[lists.hinges[at] / 4];
+                const GpuPointHinge& entry = hinges[at];
+                assert(entry.wing0 == bend.wing0 && entry.wing1 == bend.wing1 && entry.edgeStart == bend.edgeStart && entry.edgeEnd == bend.edgeEnd);
+                assert(entry.corner == lists.hinges[at] % 4);
+                assert(entry.restAngle == bend.restAngle && entry.stiffnessShare == bend.stiffnessShare);
+                for (int weight = 0; weight < 4; ++weight) {
+                    assert(entry.isometricWeights[weight] == bend.isometricWeights[weight]);
+                }
+                const std::uint32_t corners[4]{entry.wing0, entry.wing1, entry.edgeStart, entry.edgeEnd};
+                assert(corners[entry.corner] == point);
+            }
+        }
+    }
+
+    /*
     * With levels: the first sweep, the held points, six passes a level (gradient, coarse step, spread, the line search's
     * terms and total, the move), the second sweep. A tick uses as many levels as asked for, up to those the cloth has.
     */
@@ -322,6 +355,7 @@ void testClothGpu() {
     testDispatches();
     testDispatchesWithLevels();
     testLevels();
+    testPointLists();
     testGpuTicksQueue();
     testCpuTicksStepAgain();
 }

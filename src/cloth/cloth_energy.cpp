@@ -230,7 +230,7 @@ void addHandTerm(Vec3& force, ClothStiffnessBlock* block, const Vec3& here, cons
     }
 }
 
-// The terms in the order cloth_pass.glsl's clothPointForceAt adds them.
+// The terms in order; the GPU's clothPointForceLanes (cloth_point_lanes.glsl) adds the same ones split over lanes.
 Vec3 clothPointForce(std::uint32_t point, const ClothParticles& particles, const std::vector<Vec3>& predicted, const ClothEnergyTerms& terms,
                      float perSecondSquared, ClothStiffnessBlock* block) {
     const float inverseMass = particles.inverseMasses[point];
