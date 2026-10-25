@@ -298,7 +298,7 @@ python tools/package_demo.py
 
 It builds the game, then creates `build/GameEngineDemo.zip` with:
 
-- the exe, and `Demo.bat`, which starts the exe with `--game demo` (the exe alone starts the light lab)
+- the exe, and a launcher per game, `LightLab.bat`, `Demo.bat` and `ClothLab.bat`, each starting the exe with its `--game` (the exe alone starts the light lab)
 - every DLL it needs, found automatically, including the image decoders SDL3_image loads at runtime
 - the assets
 - a short README with the controls, copied from the Controls section below, so it never falls behind
