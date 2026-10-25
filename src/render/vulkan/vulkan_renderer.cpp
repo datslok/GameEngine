@@ -820,6 +820,11 @@ FrameContext VulkanRenderer::beginFrame() {
                 "Waiting for the previous frame failed");
 
     readGpuTimings(frame);
+    if (clothStamps) {
+        if (const ClothPassTimings cloth = clothStamps->read(frameIndex); cloth.valid) {
+            unreportedClothTimings = cloth;
+        }
+    }
 
     // The surfaces this frame's last use measured, for fitting the next shadows (kept until used).
     if (const std::optional<ScreenDepthRange> measured = depthRange->collect(frameIndex)) {
@@ -1076,8 +1081,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                          ImDrawData* ui) {
     stats = RenderStats{};
     stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
+    stats.cloth = std::exchange(unreportedClothTimings, ClothPassTimings{});
     showShapes(description);
+    beginGpuPass(frame, GpuPass::Cloth);
     runCloths(frame.commands);
+    endGpuPass(frame, GpuPass::Cloth);
 
     // Video memory as this frame begins: the driver's figures are fetched again once per frame number.
     device.startMemoryFrame(++memoryFrameNumber);
@@ -2376,6 +2384,10 @@ void VulkanRenderer::setClothWork(std::vector<ClothWork> work, float alpha) {
     clothAlpha = alpha;
 }
 
+void VulkanRenderer::setClothPassTiming(bool measure) {
+    clothPassTiming = measure;
+}
+
 std::vector<ClothReadback> VulkanRenderer::takeClothReadbacks() {
     return std::exchange(clothReadbacks, {});
 }
@@ -2421,6 +2433,15 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
         clothPipelines = std::make_unique<VulkanClothPipelines>(device);
     }
 
+    ClothPassStamps* stamps = nullptr;
+    if (clothPassTiming && !clothWork.empty() && device.getTimestampValidBits() > 0) {
+        if (!clothStamps) {
+            clothStamps = std::make_unique<ClothPassStamps>(device, maxFramesInFlight);
+        }
+        stamps = clothStamps.get();
+        stamps->begin(commands, frameIndex);
+    }
+
     for (const ClothWork& work : clothWork) {
         GpuCloth& entry = gpuCloths[work.key];
         if (!entry.cloth) {
@@ -2431,13 +2452,13 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
             }
         }
 
-        entry.cloth->recordTicks(commands, work.ticks, frameIndex);
+        entry.cloth->recordTicks(commands, work.ticks, frameIndex, stamps);
         if (work.mesh.isValid()) {
             if (const auto slot = gpuShapeSlots.find(work.mesh.index); slot != gpuShapeSlots.end()) {
-                entry.cloth->recordShape(commands, slot->second, clothAlpha);
+                entry.cloth->recordShape(commands, slot->second, clothAlpha, stamps);
             }
         }
-        entry.cloth->recordReadback(commands, frameIndex);
+        entry.cloth->recordReadback(commands, frameIndex, stamps);
         entry.readbackPending[frameIndex] = true;
     }
     clothWork.clear();

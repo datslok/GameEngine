@@ -184,7 +184,8 @@ Several games run on one engine, picked at start-up with `--game`.
 - Numbers the shaders share with C++ are written once.
 - **Profiling** in the F4 view:
   - frame, work, tick, update, scene-building and render times, and what each demo system costs per tick, as the average and worst call over each half second
-  - the GPU's own time for each render pass, measured with GPU timestamps: the ray tracing scene's build, the light probes, cluster light lists, shadows, the fog's grid, depth prepass, ambient occlusion, mirrored lights, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the reflection probe's capture, the reflections, the fog over the picture, glass, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
+  - the GPU's own time for each render pass, measured with GPU timestamps: the cloth, the ray tracing scene's build, the light probes, cluster light lists, shadows, the fog's grid, depth prepass, ambient occlusion, mirrored lights, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the reflection probe's capture, the reflections, the fog over the picture, glass, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
+  - the GPU cloth's time by kind of pass (prediction, the solvers' passes, the coarse levels' passes, shaping its mesh), while cloth runs on the GPU
   - render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
 - **Debug drawing:** lines, boxes, spheres and capsules drawn over the scene, with an F4 debug view.
 - **Unit tests** that run without a GPU or window.
@@ -358,7 +359,7 @@ Its light probes follow the camera everywhere. How many and how dense is under G
 **The F4 debug view**
 
 - Timings in pale green: frame, work without the frame cap's sleep, one tick, the camera update, building the scene, and rendering (which includes waiting for the GPU), as average/worst milliseconds.
-- Then the GPU's time for the whole frame and for each pass, averaged, and each simulation system's average cost per tick.
+- Then the GPU's time for the whole frame and for each pass, averaged, the GPU cloth's by kind of pass (only the kinds that ran), and each simulation system's average cost per tick.
 - Bounding boxes around every mesh, collider wireframes in orange, and a marker at each light.
 - How many colliders the hover ray tested out of all of them (the broad phase at work), and the level triangle under the cursor with its normal and how many level triangles that ray tested.
 - The duck's ground normal, slope and movement substeps, and the walk target in MOBA mode.

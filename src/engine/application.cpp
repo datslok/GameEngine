@@ -90,6 +90,7 @@ void Application::run() {
         profiler.record(workSection, workEnd - workStart);
         profiler.update(workEnd);
         gpuProfiler.update(workEnd);
+        clothProfiler.update(workEnd);
 
         // 0 means unlimited.
         if (settings.targetFPS > 0) {
@@ -263,6 +264,11 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         // Also from the previous window: the profiler shows a finished half second at a time.
         drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
         drawProfile(gpuProfiler, gpuProfileReadoutLine, 2, false, profileDebugColour, debugDraw);
+
+        // The cloth's passes by kind, only while some cloth runs on the GPU and only those kinds that took time.
+        if (clothProfiler.getTiming(0).calls > 0) {
+            drawProfile(clothProfiler, clothProfileReadoutLine, 2, false, profileDebugColour, debugDraw, true);
+        }
     }
 
     game.onDebugDraw(world, debugDraw, alpha);
@@ -272,6 +278,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     const double renderStart = profilerSeconds();
     profiler.record(sceneSection, renderStart - sceneStart);
     handOverClothWork(alpha);
+    renderer.setClothPassTiming(game.wantsDebugView());
     const bool rendered = renderer.render(frame, settings.render, ui);
     profiler.record(renderSection, profilerSeconds() - renderStart);
 
@@ -283,6 +290,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     }
 
     recordGpuTimings(gpuProfiler, renderer.getLastFrameStats().gpu);
+    recordClothTimings(clothProfiler, renderer.getLastFrameStats().cloth);
 
     // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
     // so turning clicks into rays (makeCameraRay) matches what is on screen.

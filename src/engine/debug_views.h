@@ -45,8 +45,11 @@ constexpr int engineProfileReadoutLine = 8;
 // The readout line for the GPU's timings per pass (a profiler from makeGpuProfiler).
 constexpr int gpuProfileReadoutLine = 9;
 
-// The engine's readout uses lines 0 to 9; a game's own lines start here.
-constexpr int firstGameReadoutLine = 10;
+// The readout line for the cloth's GPU time by kind of pass (a profiler from makeClothProfiler), while cloth runs there.
+constexpr int clothProfileReadoutLine = 10;
+
+// The engine's readout uses lines 0 to 10; a game's own lines start here.
+constexpr int firstGameReadoutLine = 11;
 
 // The light probes' line: how many, traced (awake ones among them), asleep, off and moved by relocation, or "PROBES -"
 // without probes.
@@ -75,12 +78,21 @@ Profiler makeGpuProfiler();
 // not measured does not count as one that took no time.
 void recordGpuTimings(Profiler& profiler, const GpuTimings& timings);
 
-// A profiler's numbers as one line of text: each section's name and its average per call, then "/" and the worst call
-// if withWorst, in milliseconds with that many decimals, then "MS".
-std::string profileText(const Profiler& profiler, int decimals, bool withWorst);
+// A profiler for the cloth's GPU time: "CLOTH" (all of it) as section 0, then one section per kind in ClothPass order.
+Profiler makeClothProfiler();
+
+// One frame's cloth timings into a profiler from makeClothProfiler; timings that are not valid are left out.
+void recordClothTimings(Profiler& profiler, const ClothPassTimings& timings);
+
+/*
+* A profiler's numbers as one line of text: each section's name and its average per call, then "/" and the worst call
+* if withWorst, in milliseconds with that many decimals, then "MS". With hideIdle, sections after the first that took
+* no time are left out (the cloth's kinds of pass another solver uses), so a long list fits the line.
+*/
+std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle = false);
 
 // profileText drawn on one readout line.
-void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug);
+void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle = false);
 
 // Timings are drawn in this colour (linear pale green), apart from the rest of the readout.
 const Vec3 profileDebugColour{0.45f, 1.0f, 0.55f};

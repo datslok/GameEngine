@@ -6,11 +6,13 @@
 #include <span>
 
 /*
-* The renderer's passes in the order a frame records them, each timed on the GPU. The debug UI is drawn into its own
-* image first; the ray tracing scene is built only while something traces rays (the light probes, the ray debug view);
+* The renderer's passes in the order a frame records them, each timed on the GPU. The cloth runs first (its ticks and
+* the shape pass writing its meshes; render/gpu/cloth_timing.h breaks it down by pass), then the debug UI is drawn into
+* its own image; the ray tracing scene is built only while something traces rays (the light probes, the ray debug view);
 * tone mapping, the debug lines and the overlay share one pass over the screen image but are timed apart.
 */
 enum class GpuPass {
+    Cloth,
     DebugUi,
     RayScene,
     Atmosphere,

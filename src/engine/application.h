@@ -130,8 +130,10 @@ private:
     const int sceneSection = profiler.addSection("SCENE");
     const int renderSection = profiler.addSection("RENDER");
 
-    // The GPU's time per pass, from the renderer's timestamps, averaged over the same window.
+    // The GPU's time per pass, and the cloth's by kind of pass (while the readout shows), from the renderer's
+    // timestamps, averaged over the same window.
     Profiler gpuProfiler = makeGpuProfiler();
+    Profiler clothProfiler = makeClothProfiler();
 
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
