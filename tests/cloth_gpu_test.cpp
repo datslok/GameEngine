@@ -137,11 +137,12 @@ namespace {
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).grabParticle == clothNoGrab);
 
         // Tethers: the stretch they allow, 1 + the slack as the CPU solver adds it, or 0 for none.
-        assert(tick.tetherStretch == 0.0f);
-        cloth.settings.tethers = true;
+        assert(tick.tetherStretch == 1.0f + settings.tetherSlack);
         cloth.settings.tetherSlack = 0.003f;
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).tetherStretch == 1.0f + 0.003f);
         cloth.settings.tethers = false;
+        assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).tetherStretch == 0.0f);
+        cloth.settings.tethers = true;
 
         // A perfectly stiff fabric's energy takes the stiffest the energy allows, as on the CPU.
         cloth.settings.method = ClothMethod::VertexBlockDescent;

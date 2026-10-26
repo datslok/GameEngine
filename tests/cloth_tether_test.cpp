@@ -151,10 +151,18 @@ namespace {
             assert(held.sag > 0.99f && held.sag < 1.005f);
             assert(motion < 0.01f);
 
-            Cloth loose = yardstickSheet(squares, ClothSettings{});
+            ClothSettings untethered;
+            untethered.tethers = false;
+            Cloth loose = yardstickSheet(squares, untethered);
             settleYardstick(loose, 4.0f, tick);
             assert(held.pathStretch < measureSheet(loose, squares).pathStretch);
         }
+    }
+
+    // On by default, since the yardstick judged them: every pinned cloth hangs at its fabric's stretch at any resolution.
+    void testTethersOnByDefault() {
+        assert(ClothSettings{}.tethers);
+        assert(ClothSettings{}.tetherSlack == 0.002f);
     }
 
     // Off, the tethers do nothing: the same sheet ends exactly as with none built.
@@ -183,5 +191,6 @@ void testClothTethers() {
     testSameOnAnyThreads();
     testPinningRebuildsTethers();
     testTethersHoldTheYardstick();
+    testTethersOnByDefault();
     testTethersOffDoNothing();
 }

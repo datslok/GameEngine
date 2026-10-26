@@ -49,7 +49,8 @@
 *
 * Tethers (cloth_tethers.h) carry the pins' pull another way, a string from each point to its nearest pins, with either
 * solver; the slack is how far past its length at rest the cloth may stretch away from a pin before its string goes
-* taut. Off by default until the yardstick has judged them.
+* taut. On by default: on the yardstick a hanging sheet stretches about 0.2% at any resolution with them, as real cotton
+* does, against XPBD's 1-36% without, for about XPBD's cost.
 */
 enum class ClothMethod {
     Xpbd,
@@ -70,7 +71,7 @@ struct ClothSettings {
     float kineticFriction = 0.4f;
     ClothMethod method = ClothMethod::Xpbd;
     int hierarchyLevels = 0;           // coarse levels used with vertex block descent, up to maxClothLevels
-    bool tethers = false;
+    bool tethers = true;
     float tetherSlack = 0.002f;        // share of a tether's rest length
 };
 

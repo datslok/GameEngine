@@ -4,6 +4,7 @@
 #include "cloth/cloth_yardstick.h"
 #include "core/job_system.h"
 #include "scene/mesh.h"
+#include "cloth_helpers.h"
 #include "test_levels.h"
 
 #include <cassert>
@@ -20,7 +21,7 @@ namespace {
     constexpr float pi = std::numbers::pi_v<float>;
 
     ClothSettings blockDescent() {
-        ClothSettings settings;
+        ClothSettings settings = untetheredSettings();
         settings.method = ClothMethod::VertexBlockDescent;
         return settings;
     }
