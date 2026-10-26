@@ -7,6 +7,7 @@
 #include "cloth/cloth_yardstick.h"
 #include "core/job_system.h"
 #include "scene/mesh.h"
+#include "cloth_helpers.h"
 #include "test_levels.h"
 
 #include <algorithm>
@@ -44,7 +45,7 @@ namespace {
 
     // Vertex block descent with this many coarse levels.
     ClothSettings blockDescent(int levels) {
-        ClothSettings settings;
+        ClothSettings settings = untetheredSettings();
         settings.method = ClothMethod::VertexBlockDescent;
         settings.hierarchyLevels = levels;
         return settings;
@@ -399,13 +400,13 @@ namespace {
     }
 
     void testCoarseStepLowersEnergy() {
-        Cloth busy = makeCloth(Mesh::grid(40, 40, 1.5f, 1.5f), Mat4::translation(0.0f, 1.0f, 0.0f) * Mat4::rotationX(-0.5f * pi), ClothSettings{});
+        Cloth busy = makeCloth(Mesh::grid(40, 40, 1.5f, 1.5f), Mat4::translation(0.0f, 1.0f, 0.0f) * Mat4::rotationX(-0.5f * pi), untetheredSettings());
         addClothPin(busy, 40 * 41);
         addClothPin(busy, 40 * 41 + 40);
         busy.grab = ClothGrab{20, Vec3{0.3f, 0.8f, 0.6f}};
         checkStepsLowerEnergy(busy, {Shape{Sphere{Vec3{0.2f, 0.3f, 0.3f}, 0.35f}}});
 
-        Cloth settled = hammock(ClothSettings{});
+        Cloth settled = hammock(untetheredSettings());
         for (int step = 0; step < 720; ++step) {
             stepCloth(settled, tick);
         }
@@ -478,7 +479,7 @@ namespace {
     * XPBD or vertex block descent alone and hangs its sheet's height.
     */
     void testSettledSheetsWithLevels() {
-        Cloth plain = yardstickSheet(32, ClothSettings{});
+        Cloth plain = yardstickSheet(32, untetheredSettings());
         Cloth single = yardstickSheet(32, blockDescent(0));
         Cloth layered = sheetWithLevels(32);
         JobSystem jobs;
@@ -513,7 +514,7 @@ namespace {
     * coarse step still shook it 7 times as fast next to XPBD's pass, whose multipliers it moves the cloth without.
     */
     void testHammockSettles() {
-        assert(hammockShaking(blockDescent(maxClothLevels)) < hammockShaking(ClothSettings{}));
+        assert(hammockShaking(blockDescent(maxClothLevels)) < hammockShaking(untetheredSettings()));
     }
 
 

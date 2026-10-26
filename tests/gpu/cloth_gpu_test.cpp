@@ -326,6 +326,26 @@ namespace {
         }
     }
 
+    // Points inside, on and outside their tether's sphere, at slacks from none to a tenth.
+    void checkTether(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{157};
+        std::vector<GpuVec4> inputs;
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 anchor = randomPoint(random, 1.0f);
+            const float restLength = random.between(0.01f, 1.5f);
+            inputs.push_back(gpuVec4(anchor + random.direction() * (restLength * random.between(0.5f, 1.5f))));
+            inputs.push_back(gpuVec4(anchor));
+            inputs.push_back(gpuVec4(restLength, 1.0f + random.between(0.0f, 0.1f)));
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_TETHER, inputs, 3, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            Vec3 point = vec3From(inputs[i * 3]);
+            solveTether(point, vec3From(inputs[i * 3 + 1]), inputs[i * 3 + 2][0], inputs[i * 3 + 2][1]);
+            report.check("clothTether", arithmeticTolerance, point, vec3From(outputs[i]));
+        }
+    }
+
     void checkFinishVelocity(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{151};
         const float kept = std::exp(-ClothSettings{}.drag * substep);
@@ -589,15 +609,18 @@ namespace {
         BendingModel model;
         int levels;
         const char* name;
+        bool tethers = false;
     };
 
-    constexpr std::array<SolverCase, 6> solverCases{
+    constexpr std::array<SolverCase, 8> solverCases{
         SolverCase{ClothMethod::Xpbd, BendingModel::Isometric, 0, "VulkanCloth isometric"},
         SolverCase{ClothMethod::Xpbd, BendingModel::Hinge, 0, "VulkanCloth hinge"},
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, 0, "VulkanCloth block descent isometric"},
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Hinge, 0, "VulkanCloth block descent hinge"},
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, maxClothLevels, "VulkanCloth levels isometric"},
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Hinge, maxClothLevels, "VulkanCloth levels hinge"},
+        SolverCase{ClothMethod::Xpbd, BendingModel::Isometric, 0, "VulkanCloth tethers", true},
+        SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, 0, "VulkanCloth block descent tethers", true},
     };
 
     // The busy sheet (289 points) has two coarse levels, so the levels' cases run both and the passes between them.
@@ -606,6 +629,7 @@ namespace {
         settings.bendingModel = solver.model;
         settings.method = solver.method;
         settings.hierarchyLevels = solver.levels;
+        settings.tethers = solver.tethers;
         const Mat4 level = Mat4::translation(0.0f, 0.6f, 0.0f) * Mat4::rotationX(-0.5f * std::numbers::pi_v<float>);
         Cloth cloth = makeCloth(Mesh::grid(16, 16, 1.0f, 1.0f), level, settings);
         addClothPin(cloth, 16 * 17);
@@ -682,8 +706,8 @@ namespace {
     /*
     * A sheet hanging still is not chaotic: it settles the same way from nearby starts, so after two seconds on the GPU
     * its yardstick measures (cloth/cloth_yardstick.h) match the CPU's to well under the differences the yardstick looks
-    * for (a tenth of a millimetre, against centimetres between rungs). With either method, and with the levels on a
-    * sheet big enough to have some.
+    * for (a tenth of a millimetre, against centimetres between rungs). With either method, with the levels on a sheet
+    * big enough to have some, and with XPBD's tethers.
     */
     void checkSettledSheet(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, GpuCheckReport& report) {
         struct SettledCase {
@@ -691,17 +715,20 @@ namespace {
             int levels;
             int squares;
             const char* name;
+            bool tethers = false;
         };
-        const std::array<SettledCase, 3> settledCases{
+        const std::array<SettledCase, 4> settledCases{
             SettledCase{ClothMethod::Xpbd, 0, 10, "VulkanCloth settled"},
             SettledCase{ClothMethod::VertexBlockDescent, 0, 10, "VulkanCloth block descent settled"},
             SettledCase{ClothMethod::VertexBlockDescent, maxClothLevels, 20, "VulkanCloth levels settled"},
+            SettledCase{ClothMethod::Xpbd, 0, 20, "VulkanCloth tethers settled", true},
         };
         const float tickSeconds = 1.0f / 120.0f;
         for (const SettledCase& settled : settledCases) {
             ClothSettings settings;
             settings.method = settled.method;
             settings.hierarchyLevels = settled.levels;
+            settings.tethers = settled.tethers;
             Cloth cpu = yardstickSheet(settled.squares, settings);
             assert(settled.levels == 0 || !cpu.hierarchy.levels.empty());
             const std::vector<ClothTickCommands> ticks(240, clothTickCommands(cpu, tickSeconds));
@@ -876,6 +903,7 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkSurfacePoint(runner, report);
     checkContact(runner, report);
     checkGrab(runner, report);
+    checkTether(runner, report);
     checkFinishVelocity(runner, report);
     checkPointTerms(runner, report);
     checkBlockSolve(runner, report);

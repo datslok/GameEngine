@@ -6,6 +6,7 @@
 #include "cloth/cloth_grab.h"
 #include "cloth/cloth_hierarchy.h"
 #include "cloth/cloth_particles.h"
+#include "cloth/cloth_tethers.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "math/mat4.h"
@@ -45,6 +46,11 @@
 * the substep's energy one point at a time and takes coarse levels (cloth_hierarchy.h) between its sweeps, carrying a
 * pin's pull across a fine sheet so it stretches as little as a coarse one. Both run on the GPU too. XPBD by default,
 * with no levels, until the yardstick has judged the two there.
+*
+* Tethers (cloth_tethers.h) carry the pins' pull another way, a string from each point to its nearest pins, with either
+* solver; the slack is how far past its length at rest the cloth may stretch away from a pin before its string goes
+* taut. On by default: on the yardstick a hanging sheet stretches about 0.2% at any resolution with them, as real cotton
+* does, against XPBD's 1-36% without, for about XPBD's cost.
 */
 enum class ClothMethod {
     Xpbd,
@@ -65,6 +71,8 @@ struct ClothSettings {
     float kineticFriction = 0.4f;
     ClothMethod method = ClothMethod::Xpbd;
     int hierarchyLevels = 0;           // coarse levels used with vertex block descent, up to maxClothLevels
+    bool tethers = true;
+    float tetherSlack = 0.002f;        // share of a tether's rest length
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -120,10 +128,11 @@ struct Cloth {
     // The mesh's triangles, for finding the cloth with a ray.
     std::vector<std::array<std::uint32_t, 3>> triangles;
 
-    // Where the points were when the cloth was made, and the coarse levels built from that shape and the pins, rebuilt
-    // whenever a point is pinned (pinClothPoint, addClothPin).
+    // Where the points were when the cloth was made, and the coarse levels and tethers built from that shape and the
+    // pins, rebuilt whenever a point is pinned (pinClothPoint, addClothPin).
     std::vector<Vec3> restPositions;
     ClothHierarchy hierarchy;
+    std::vector<ClothTether> tethers;
 
     // Each point's constraints and the points' colouring, for vertex block descent and the coarse levels' energy.
     ClothPointConstraints pointConstraints;
@@ -149,7 +158,7 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
 Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps);
 
 /*
-* Pin a point where it is, for good, and rebuild the coarse levels so the point anchors every one of them. Throws
+* Pin a point where it is, for good, and rebuild the coarse levels and tethers so the point anchors them. Throws
 * std::out_of_range for a point the cloth does not have.
 */
 void pinClothPoint(Cloth& cloth, std::uint32_t particle);

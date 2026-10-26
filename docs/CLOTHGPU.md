@@ -265,6 +265,12 @@ and every XPBD constraint step lowers it, which is why XPBD is stable. Müller's
 
 **What it means here [inf].** Tethers are a cheap option for worn garments in phase 10 (shoulders, waistband), not a solver.
 
+**Built and measured: XPBD with tethers** (`cloth-tethers`, Oct 26 2026). The question was whether the levels' cost was worth it, so tethers were tried first as the cheap way. Each point gets a string to each of its nearest four pins, its length the distance at rest (for now the straight line, exact for flat pieces with no inward corners) times 1 + a slack of 0.2%, solved after either solver as a projection onto the sphere, since the anchor is pinned.
+
+- **Quick yardstick** (release, 16 threads, 15 substeps): path stretch 0.16%, 0.18%, 0.20% at 25, 50, 100 squares, against XPBD's 1.04%, 3.5%, 9.6% and the levels' 0.27%, 0.35%, 0.57%; worst edge 0.35-1.05% (the levels' 1.2-6.7%); sag 1.002 m; settled to 0.02 mm a second. Cost 0.45, 2.1, 6.8 ms a tick, 12-25% over XPBD's and 7-14 times under the levels'. On the GPU they sit in the end's pass, no dispatch of their own.
+- **So for cloth that hangs from pins, the tethers win outright.** They are no solver: cloth held by contact alone (a sheet on a body, nothing pinned) gets nothing, and that is where the levels would still earn their cost. Their cost cuts wait for phase 10's garments to show whether they are needed.
+- **For a dress,** the distance must be measured over the sewn pattern (exact geodesics: across seams, round armholes; Xin & Wang 2009), never the edges' shortest path (up to 41% too long on a grid with one diagonal a square), and the anchors are regions on the body (a shoulder seam, a waistband), each point tied to the nearest point of each.
+
 ### Global solvers
 
 - **MGPBD (2025) [read]:** XPBD's full system solved by conjugate gradients with algebraic multigrid. Cloth up to 263,000 points stays inextensible where Jacobi XPBD stalls, but **no cloth timings** and offline speeds elsewhere (seconds a frame). Needs explicit sparse matrices, collision only against a static distance field. Too heavy for us now.
@@ -431,6 +437,20 @@ Before any solver is chosen, tests that measure the problem, on the CPU and the 
 - **Too dear on the CPU:** 8-17 times XPBD at the same substeps; against XPBD at 60 substeps, dearer below 100 squares and better value above (the 200 sheet 0.74% for 146 ms against 4.7% for 67). The GPU's XPBD at 60 substeps does the 200 sheet in 3.6 ms, so the levels' place is the GPU, where a pass costs a dispatch.
 - **The earlier levels** (Müller's one-sided limits, the first build of this branch) measured 0.054-0.31% here but shook sagging sheets; their numbers are not comparable to a stable solver's.
 
+**XPBD with tethers** (`cloth-tethers`, Oct 26 2026, `make yardstick`'s `XPBD+T` and `GPU+T` rows, release, 16 threads and the RTX 5080, settled 10 s; Part 2). Path stretch, worst edge, sag and ms a tick, at 15 substeps:
+
+| Squares | XPBD | XPBD + tethers, CPU | XPBD + tethers, GPU | Levels, CPU (Part 2) |
+|---|---|---|---|---|
+| 25 | 0.97%, 5.8%, 1.0072 m, 0.40 | **0.16%, 0.35%, 1.0017 m, 0.44** | 0.76 | 0.27%, 1.2%, 1.0021 m, 7.6 |
+| 50 | 3.2%, 43%, 1.0234 m, 1.67 | **0.18%, 0.63%, 1.0021 m, 2.12** | 0.91 | 0.35%, 2.5%, 1.0027 m, 30 |
+| 100 | 9.7%, 210%, 1.0738 m, 6.05 | **0.20%, 1.05%, 1.0023 m, 7.34** | 0.88 | 0.44%, 5.1%, 1.0034 m, 50 |
+| 200 | 36%, 872%, 1.3110 m, 16.6 | **0.20%, 0.66%, 1.0024 m, 17.5** | 0.90 | 0.74%, 14%, 1.0054 m, 153 |
+
+- **Independent of the resolution:** 0.16-0.20% on every rung, near real cotton's 0.15%, and the worst edge never past about 1%; every sheet settled to a hundredth of a millimetre a second.
+- **Cheap:** 6-27% over XPBD on the CPU (a point's strings are a few multiplies, but a pass over every point each substep); on the GPU the same as XPBD's 0.76-0.90 ms, since the strings ride in the end's pass.
+- **The GPU's rows match the CPU's** to the shown digits on every rung, at 15 and 60 substeps.
+- **At 60 substeps** XPBD with tethers stretches 0.12-0.18%, so four times the substeps buys little: the strings already did the work.
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.
@@ -442,7 +462,9 @@ Each step is a branch of its own, explained first, tests first.
 5. **Self-collision.** The two-stage contact energy with DAT's motion bound (or OGC's blocks, after reading DAT), a bounding volume hierarchy on the GPU, the pile milestone. Built for whichever solver step 4 keeps.
 6. **Bodies on the GPU:** the engine's collider shapes as now, later the mannequin's distance field (already a roadmap item).
 
-Later, for the dressmaking game: tethers for worn garments, the coarse simulation mesh driving a fine render mesh (already on phase 10's list), and a precomputed subspace per garment if the hierarchy is not enough.
+Tethers (`cloth-tethers`, done, Oct 26 2026) hold hanging cloth as well as the levels for about XPBD's cost (Part 5), so the levels' cost cuts are paused until phase 10's garments show whether cloth held by contact needs them.
+
+Later, for the dressmaking game: tethers for worn garments (geodesics over the pattern, anchors on the body), the coarse simulation mesh driving a fine render mesh (already on phase 10's list), and a precomputed subspace per garment if the hierarchy is not enough.
 
 ## Where it goes in the roadmap
 

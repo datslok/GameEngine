@@ -19,4 +19,8 @@
 // A 3 x 3 block whose determinant is below this share of its largest diagonal cubed is taken as singular.
 #define CLOTH_SINGULAR_BLOCK 1e-12
 
+// The most anchors a point is tethered to, its nearest, and a spare tether slot's anchor.
+#define CLOTH_TETHERS_PER_POINT 4
+#define CLOTH_NO_ANCHOR 4294967295u
+
 #endif

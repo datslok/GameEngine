@@ -1,4 +1,5 @@
 #include "cloth/cloth_yardstick.h"
+#include "cloth_helpers.h"
 #include "test_levels.h"
 
 #include <cassert>
@@ -80,7 +81,7 @@ namespace {
     * substeps a tick carry the stiffness further across it, so it stretches less.
     */
     void testSettledSheet() {
-        Cloth few = yardstickSheet(10, ClothSettings{});
+        Cloth few = yardstickSheet(10, untetheredSettings());
         const float motion = settleYardstick(few, 4.0f, tick);
         assert(motion >= 0.0f && motion < 0.01f);
         assert(near(few.particles.positions[110].x, -0.5f, 1e-6f) && near(few.particles.positions[120].y, 0.0f, 1e-6f));
@@ -90,7 +91,7 @@ namespace {
         assert(settled.worstEdgeStrain >= settled.pathStretch);
         assert(settled.sag > 0.9f && settled.sag < 1.1f);
 
-        ClothSettings more;
+        ClothSettings more = untetheredSettings();
         more.substeps = 60;
         Cloth many = yardstickSheet(10, more);
         settleYardstick(many, 4.0f, tick);
@@ -99,12 +100,12 @@ namespace {
 
     /*
     * The problem the yardstick is for, as today's solver has it: the same fabric on a mesh twice as fine stretches
-    * more, since each pass carries a correction only about one edge. A solver with a low-frequency layer should turn
-    * this test round (docs/CLOTHGPU.md).
+    * more, since each pass carries a correction only about one edge (the tethers off: they hide it). A solver with a
+    * low-frequency layer should turn this test round (docs/CLOTHGPU.md).
     */
     void testFinerSheetStretchesMore() {
-        Cloth coarse = yardstickSheet(10, ClothSettings{});
-        Cloth fine = yardstickSheet(20, ClothSettings{});
+        Cloth coarse = yardstickSheet(10, untetheredSettings());
+        Cloth fine = yardstickSheet(20, untetheredSettings());
         settleYardstick(coarse, 4.0f, tick);
         settleYardstick(fine, 4.0f, tick);
         assert(measureSheet(fine, 20).pathStretch > measureSheet(coarse, 10).pathStretch);

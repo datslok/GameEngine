@@ -98,7 +98,13 @@ struct ClothTick {
     float stretchStiffness;
     float grabStiffness;
     uint method;
-    uint unused;
+    float tetherStretch; // 1 + the tethers' slack, 0 with the tethers off
+};
+
+// One tether slot (ClothTether): its anchor, CLOTH_NO_ANCHOR for a spare slot, and its rest length.
+struct ClothTether {
+    uint anchor;
+    float restLength;
 };
 
 const float CLOTH_FULL_TURN = 6.28318530717958647692;
@@ -319,6 +325,17 @@ void clothGrab(inout vec4 point, vec3 target, float scaledCompliance) {
 
     float multiplier = -distance / (weight + scaledCompliance);
     point.xyz = point.xyz + away * (weight * multiplier / distance);
+}
+
+// One tether on its point (solveTether): further from the anchor than restLength times stretchAllowed, it goes back
+// onto that sphere along the line from the anchor; inside it, it stays exactly where it is.
+void clothTether(inout vec3 point, vec3 anchor, float restLength, float stretchAllowed) {
+    vec3 away = point - anchor;
+    float awayLength = length(away);
+    float longest = restLength * stretchAllowed;
+    if (awayLength > longest) {
+        point = anchor + away * (longest / awayLength);
+    }
 }
 
 // ClothStiffnessBlock: a symmetric 3 x 3 matrix, its diagonal (xx, yy, zz) and the rest (xy, xz, yz).

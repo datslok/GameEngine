@@ -37,9 +37,9 @@ namespace {
     static_assert(sizeof(ClothShapePushConstants) == 8, "ClothShapePushConstants must match cloth_shape.comp's ClothShape block");
 
     // cloth_pass.glsl's bindings, in order: positions, previous positions, velocities, stretch, bending, pin slots, the
-    // slot's ticks, pins and bodies, then the prediction, the per-point edge and hinge lists (starts, items) and the
-    // points in colour order.
-    constexpr std::uint32_t clothBindings = 15;
+    // slot's ticks, pins and bodies, then the prediction, the per-point edge and hinge lists (starts, items), the points
+    // in colour order and the tethers.
+    constexpr std::uint32_t clothBindings = 16;
 
     // cloth_levels.glsl's set 1, in order: the gradient, direction, coarse steps and held points, the level records, the
     // levels' points, masses, neighbour starts and neighbours, gather starts and links, spread starts and links, each
@@ -319,6 +319,7 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     const std::vector<GpuPointEdge> packedEdges = packPointEdges(cloth);
     const std::vector<GpuPointHinge> packedHinges = packPointHinges(cloth);
     const std::vector<std::uint32_t>& order = cloth.vertexColours.order;
+    const std::vector<GpuClothTether> packedTethers = packClothTethers(cloth);
     for (const ClothPin& pin : cloth.pins) {
         pinPositions.push_back(cloth.particles.positions.at(pin.particle));
     }
@@ -340,9 +341,10 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     hingeStarts = VulkanBuffer{allocator, atLeastSmallest(bytesOf(lists.hingeStarts)), constant, BufferMemory::Gpu};
     pointHinges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedHinges)), constant, BufferMemory::Gpu};
     vertexOrder = VulkanBuffer{allocator, atLeastSmallest(bytesOf(order)), constant, BufferMemory::Gpu};
+    tethers = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedTethers)), constant, BufferMemory::Gpu};
 
     // Until a tick runs, the cloth is drawn where it is. The prediction needs nothing: each substep writes it first.
-    const std::array<Upload, 12> copies{
+    const std::array<Upload, 13> copies{
         Upload{points.data(), bytesOf(points), positions.get()},
         Upload{previous.data(), bytesOf(previous), previousPositions.get()},
         Upload{moving.data(), bytesOf(moving), velocities.get()},
@@ -355,12 +357,13 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
         Upload{lists.hingeStarts.data(), bytesOf(lists.hingeStarts), hingeStarts.get()},
         Upload{packedHinges.data(), bytesOf(packedHinges), pointHinges.get()},
         Upload{order.data(), bytesOf(order), vertexOrder.get()},
+        Upload{packedTethers.data(), bytesOf(packedTethers), tethers.get()},
     };
     uploadAll(device, uploads, copies);
 
     descriptorPool = storagePool(device, slotCount, clothBindings);
 
-    // Every pass's set layout is the same fifteen storage buffers, so a set made for one is compatible with them all.
+    // Every pass's set layout is the same sixteen storage buffers, so a set made for one is compatible with them all.
     const VkDescriptorSetLayout layout = pipelines.getPredict().getResourceLayout();
     slots.resize(slotCount);
     for (Slot& slot : slots) {
@@ -502,7 +505,8 @@ void VulkanCloth::writeSet(const Slot& slot) {
                                                       pointEdges.get(),
                                                       hingeStarts.get(),
                                                       pointHinges.get(),
-                                                      vertexOrder.get()};
+                                                      vertexOrder.get(),
+                                                      tethers.get()};
     writeBuffers(device, slot.set, buffers);
 }
 

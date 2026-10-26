@@ -123,6 +123,11 @@ void main() {
         vec4 point = testInput(0);
         clothGrab(point, testInput(1).xyz, testInput(2).x);
         testOutput(0, point);
+    } else if (function == GPU_TEST_CLOTH_TETHER) {
+        vec3 point = testInput(0).xyz;
+        vec4 anchor = testInput(1); // its rest length and the stretch allowed in the next input
+        clothTether(point, anchor.xyz, testInput(2).x, testInput(2).y);
+        testOutput(0, vec4(point, 0.0));
     } else if (function == GPU_TEST_CLOTH_LINE_SEARCH_TERMS) {
         // The coarse levels' pieces, cloth_gpu_test.cpp's checkLineSearchTerms.
         ClothBlock block = testBlock(0u);

@@ -299,6 +299,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] Isometric bending (Bergou et al. 2006): about four times cheaper than the hinge angle, the hinge kept as an option for creases (`isometric-bending`)
 - [ ] Cloth on the GPU, for large garments (plan and research: `docs/CLOTHGPU.md`, read it first). Each step its own branch, judged by measurement:
   - [x] The yardstick: a 1 m sheet at 25, 50, 100 and 200 squares a side, measured on the CPU solver (`cloth-yardstick`)
+  - [x] Tethers (long-range attachments): XPBD with a string from each point to its nearest pins, on the CPU and the GPU (`cloth-tethers`)
   - [x] The GPU framework: the cloth lives on the GPU, drawn straight from its buffer (normals in compute), picking and dragging through a readback a frame late, the CPU solver kept for headless runs and as the mirror; today's coloured XPBD ported as it is (replaces the faster CPU barrier item: fixed-thread loops at a spinning counter stay an option for the CPU path). Two branches:
     - [x] The solver on the GPU, checked against the CPU's and measured on the yardstick (`gpu-cloth-solver`)
     - [x] The cloth in the game: ticks as commands, drawn from its buffer, the late readback for picking, a "Cloth on GPU" setting (`gpu-cloth-in-game`)
@@ -307,7 +308,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
     - [ ] On the GPU, checked against the CPU's, in two branches; then the default for large garments if it beats XPBD there. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019)
       - [x] Vertex block descent's sweep: a pass per point colour (`gpu-block-descent`)
       - [x] The coarse levels: gradient, coarse step and spread passes, the line search as a two-stage reduction on the GPU (`gpu-cloth-levels`)
-      - [ ] Its cost cut after measuring: the two finest levels skipped, the reduction in one pass, the move folded into the next level's gradient
+      - [ ] Its cost cut after measuring: the two finest levels skipped, the reduction in one pass, the move folded into the next level's gradient. Paused on Oct 26 2026: tethers hold hanging cloth as well for a fraction of the cost; resume if phase 10's garments need the levels (cloth resting on a body by contact, which tethers cannot help)
   - [ ] Self-collision, so folds and layers never pass through each other: Offset Geometric Contact's two-stage contact energy with a per-point motion bound (Divide and Truncate, or OGC's own), a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean
   - [ ] Bodies on the GPU: the engine's collider shapes, then the mannequin below
 - [ ] Collision with a mannequin: a signed distance field around it, built in compute (it can serve later as DDGI's software tracer and for distance-field AO); moving bodies (the surface's velocity in the friction)
@@ -388,6 +389,7 @@ A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them int
 **Garments**
 - [ ] Sewing patterns: 2D panel outlines triangulated into cloth meshes, with UVs from the flat layout
 - [ ] Seams: constraints that pull matching panel edges together until they join, starting from panels placed around the body
+- [ ] Tethers for garments: the distance along the sewn pattern (exact geodesics, Xin & Wang 2009: across seams, round armholes) in place of today's straight line (`clothRestDistance`), and anchors on the body (a shoulder seam, a waistband), each point tied to the nearest point of each region; first, a dress-sized test (20-30k points in several panels) to see whether tethers are enough
 - [ ] A coarse simulation mesh driving a fine render mesh: the cloth solved on a few thousand points, each drawn vertex following its nearest simulated triangle (what shipped games do; 1,500 points instead of 10,000 is about 7 times less work, barely visible)
 - [ ] Dressing an animated character: the cloth collides with the skinned body as it moves
 

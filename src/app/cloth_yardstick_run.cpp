@@ -61,15 +61,21 @@ namespace {
         return layered;
     }
 
-    // The CPU solvers every sheet is settled with, each by the name its rows carry: XPBD, vertex block descent, and
-    // vertex block descent with its levels.
-    std::vector<std::pair<const char*, ClothSettings>> cpuSolvers(const ClothSettings& settings) {
-        return {{"XPBD", settings}, {"VBD", withBlockDescent(settings)}, {"VBD+L", withLevels(settings)}};
+    ClothSettings withTethers(const ClothSettings& settings) {
+        ClothSettings tethered = settings;
+        tethered.tethers = true;
+        return tethered;
     }
 
-    // The GPU's, the same three.
+    // The CPU solvers every sheet is settled with, each by the name its rows carry: XPBD, XPBD with tethers, vertex
+    // block descent, and vertex block descent with its levels.
+    std::vector<std::pair<const char*, ClothSettings>> cpuSolvers(const ClothSettings& settings) {
+        return {{"XPBD", settings}, {"XPBD+T", withTethers(settings)}, {"VBD", withBlockDescent(settings)}, {"VBD+L", withLevels(settings)}};
+    }
+
+    // The GPU's, the same four.
     std::vector<std::pair<const char*, ClothSettings>> gpuSolvers(const ClothSettings& settings) {
-        return {{"GPU", settings}, {"GPU VBD", withBlockDescent(settings)}, {"GPU VBD+L", withLevels(settings)}};
+        return {{"GPU", settings}, {"GPU+T", withTethers(settings)}, {"GPU VBD", withBlockDescent(settings)}, {"GPU VBD+L", withLevels(settings)}};
     }
 
     struct YardstickRow {

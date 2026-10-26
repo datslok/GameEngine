@@ -79,6 +79,27 @@ namespace {
         }
     }
 
+    /*
+    * Every point's tether slots as the cloth holds them; a cloth with nothing pinned, which holds none, still gets a
+    * full set of spare slots, so a pass can read any point's.
+    */
+    void testTethers() {
+        const Cloth cloth = smallSheet();
+        const std::vector<GpuClothTether> tethers = packClothTethers(cloth);
+        assert(tethers.size() == cloth.particles.size() * tethersPerPoint && tethers.size() == cloth.tethers.size());
+        for (std::size_t index = 0; index < tethers.size(); ++index) {
+            assert(tethers[index].anchor == cloth.tethers[index].anchor && tethers[index].restLength == cloth.tethers[index].restLength);
+        }
+        assert(tethers[0].anchor == 8 && tethers[0 + 1].anchor == 11);
+
+        const Cloth loose = makeCloth(Mesh::grid(3, 2, 3.0f, 2.0f), Mat4::identity(), ClothSettings{});
+        const std::vector<GpuClothTether> spare = packClothTethers(loose);
+        assert(spare.size() == loose.particles.size() * tethersPerPoint);
+        for (const GpuClothTether& tether : spare) {
+            assert(tether.anchor == noTetherAnchor);
+        }
+    }
+
     // A tick's numbers worked out as the CPU solver works them out, so both start from the same bits.
     void testTick() {
         Cloth cloth = smallSheet();
@@ -114,6 +135,14 @@ namespace {
 
         cloth.grab.reset();
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).grabParticle == clothNoGrab);
+
+        // Tethers: the stretch they allow, 1 + the slack as the CPU solver adds it, or 0 for none.
+        assert(tick.tetherStretch == 1.0f + settings.tetherSlack);
+        cloth.settings.tetherSlack = 0.003f;
+        assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).tetherStretch == 1.0f + 0.003f);
+        cloth.settings.tethers = false;
+        assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).tetherStretch == 0.0f);
+        cloth.settings.tethers = true;
 
         // A perfectly stiff fabric's energy takes the stiffest the energy allows, as on the CPU.
         cloth.settings.method = ClothMethod::VertexBlockDescent;
@@ -156,6 +185,12 @@ namespace {
         assert(cloth.hierarchy.levels.empty());
         settings.hierarchyLevels = 3;
         assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
+
+        // The tethers are in the end's pass, so they add none, with either method.
+        settings.tethers = true;
+        assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
+        settings.method = ClothMethod::Xpbd;
+        assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + stretchColours + bendColours));
     }
 
     /*
@@ -351,6 +386,7 @@ void testClothGpu() {
     testConstraints();
     testColliders();
     testPinSlots();
+    testTethers();
     testTick();
     testDispatches();
     testDispatchesWithLevels();
