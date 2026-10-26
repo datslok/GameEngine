@@ -127,7 +127,29 @@ namespace {
     }
 }
 
+namespace {
+    GpuTimings clothTimed(double seconds) {
+        GpuTimings timings;
+        timings.valid = true;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::Cloth)] = seconds;
+        return timings;
+    }
+
+    /*
+    * A cloth tick's GPU time, for the tick budget: a measured frame's cloth time over the ticks it ran; a frame not
+    * measured, or one that ran no ticks, says nothing about a tick's cost and keeps the estimate.
+    */
+    void testGpuTickEstimate() {
+        assert(gpuClothTickSeconds(0.0, clothTimed(0.016), 2) == 0.008);
+        assert(gpuClothTickSeconds(0.008, clothTimed(0.003), 1) == 0.003);
+        assert(gpuClothTickSeconds(0.008, GpuTimings{}, 3) == 0.008);
+        assert(gpuClothTickSeconds(0.008, clothTimed(0.0004), 0) == 0.008);
+        assert(gpuClothTickSeconds(0.0, GpuTimings{}, 0) == 0.0);
+    }
+}
+
 void testGpuClothEngine() {
+    testGpuTickEstimate();
     testDefaults();
     testTakeClothWork();
     testKeys();

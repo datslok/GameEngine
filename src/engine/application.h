@@ -135,6 +135,13 @@ private:
     Profiler gpuProfiler = makeGpuProfiler();
     Profiler clothProfiler = makeClothProfiler();
 
+    // Whether the latest cloth timings had more passes than their stamps (the readout says so instead of going blank).
+    bool clothPassesUnmeasured = false;
+
+    // What one tick of the GPU cloths costs the GPU, from its timings a frame or two late (gpuClothTickSeconds): the
+    // tick budget charges it for every tick while the cloth is on the GPU.
+    double gpuClothTickEstimate = 0.0;
+
     // Counting ticks instead of adding up seconds keeps simulation time exact.
     std::uint64_t simulationTicks = 0;
 

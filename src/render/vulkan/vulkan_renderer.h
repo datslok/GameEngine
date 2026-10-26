@@ -195,6 +195,9 @@ private:
         OwnedHandle<VkQueryPool> timestamps;
         std::uint32_t timestampsWritten = 0;
         bool timestampsComplete = false;
+
+        // The cloth ticks this frame's commands ran, reported with its timings (RenderStats::clothTicks).
+        std::uint32_t clothTicks = 0;
     };
 
     // One per frame in flight; the swapchain was built for swapchainFramesInFlight of them (rebuilt when they differ).
@@ -413,8 +416,10 @@ private:
 
     RenderStats stats;
 
-    // The last frame's GPU timings read back and not yet handed to stats (each frame's are reported once).
+    // The last frame's GPU timings read back and not yet handed to stats (each frame's are reported once), and the
+    // cloth ticks that frame ran.
     GpuTimings unreportedGpuTimings;
+    std::uint32_t unreportedClothTicks = 0;
 
     void checkFormats() const;
     void createFrames();

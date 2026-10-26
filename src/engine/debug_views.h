@@ -94,6 +94,15 @@ std::string profileText(const Profiler& profiler, int decimals, bool withWorst, 
 // profileText drawn on one readout line.
 void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle = false);
 
+// The cloth line while the latest frame had more cloth passes than its stamps (ClothPassTimings::overflowed).
+inline constexpr const char* clothPassesNotMeasuredText = "CLOTH PASSES NOT MEASURED: TOO MANY IN A FRAME";
+
+// The readout's cloth line: clothPassesNotMeasuredText while unmeasured, else the cloth profiler's kinds that took time.
+std::string clothReadoutText(const Profiler& profiler, bool unmeasured);
+
+// clothReadoutText drawn on the cloth's readout line (clothProfileReadoutLine).
+void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debug);
+
 // Timings are drawn in this colour (linear pale green), apart from the rest of the readout.
 const Vec3 profileDebugColour{0.45f, 1.0f, 0.55f};
 

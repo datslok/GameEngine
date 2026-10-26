@@ -27,7 +27,8 @@ public:
     // A stamp after a pass of this kind, into the frame begin last started.
     void mark(VkCommandBuffer commands, ClothPass kind);
 
-    // The frame's timings once its fence has passed; not valid if it was not begun since the last read, or overflowed.
+    // The frame's timings once its fence has passed; not valid if it was not begun since the last read, and marked
+    // overflowed (not valid either) if it had more passes than its stamps.
     ClothPassTimings read(std::uint32_t frame);
 
 private:

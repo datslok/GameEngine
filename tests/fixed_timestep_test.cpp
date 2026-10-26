@@ -95,6 +95,54 @@ void testFixedTimestep() {
         assert(fitsTickBudget(30, 0.3, 0.0));
     }
 
+    // With the ticks' GPU work counted: each tick run is charged its estimated GPU seconds on top of the CPU's.
+    {
+        // Cloth on the GPU with four coarse levels: 8 ms a tick there, almost nothing on the CPU. Two fit in 1/60 s.
+        const double budget = 1.0 / 60.0;
+        assert(fitsTickBudget(0, 0.0, 0.008, budget));
+        assert(fitsTickBudget(1, 0.00005, 0.008, budget));
+        assert(!fitsTickBudget(2, 0.0001, 0.008, budget));
+
+        // No GPU work: the CPU's answers.
+        assert(fitsTickBudget(12, 0.0036, 0.0, 0.016) == fitsTickBudget(12, 0.0036, 0.016));
+        assert(fitsTickBudget(1, 0.0114, 0.0, 0.016) == fitsTickBudget(1, 0.0114, 0.016));
+
+        // The first tick always runs, however dear; 0 is still no budget.
+        assert(fitsTickBudget(0, 0.0, 1.0, budget));
+        assert(fitsTickBudget(30, 0.0, 0.008, 0.0));
+    }
+
+    /*
+    * Why the GPU's work must count, as a model of the loop: work queued for the GPU costs the CPU almost nothing, but
+    * the frame lasts as long as the GPU takes (the CPU waits for it before starting the next), here each tick's 8 ms
+    * plus 4 ms of drawing, and the frame's length is what the next frame owes in ticks. Charged only the CPU's 50
+    * microseconds a tick, every owed tick runs, and since a tick's 8 ms is just under the 8.3 it simulates, the frames
+    * grow until the drawing is shared among enough ticks (8 n + 4 = 8.3 n): about 12 ticks a frame, 100 ms frames, as
+    * the cloth lab showed with four coarse levels. Charged the GPU's time too, two ticks run a frame and frames stay
+    * about 20 ms long (slow motion instead).
+    */
+    {
+        const auto settledTicks = [](double chargedGpuSecondsPerTick) {
+            FixedTimestep timestep{120.0, 0.25};
+            const double cpuSecondsPerTick = 0.00005;
+            const double gpuSecondsPerTick = 0.008;
+            const double drawingSeconds = 0.004;
+            double frameSeconds = 1.0 / 120.0;
+            int run = 0;
+            for (int frame = 0; frame < 200; ++frame) {
+                const int owed = timestep.advance(frameSeconds);
+                run = 0;
+                while (run < owed && fitsTickBudget(run, run * cpuSecondsPerTick, chargedGpuSecondsPerTick, 1.0 / 60.0)) {
+                    ++run;
+                }
+                frameSeconds = run * gpuSecondsPerTick + drawingSeconds;
+            }
+            return run;
+        };
+        assert(settledTicks(0.0) >= 10);
+        assert(settledTicks(0.008) <= 2);
+    }
+
     // Ticks a frame drops are gone: the game falls behind real time instead of owing them, and the next frame's alpha
     // comes from the time left over as usual.
     {

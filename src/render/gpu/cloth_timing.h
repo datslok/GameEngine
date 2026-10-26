@@ -36,9 +36,11 @@ inline constexpr std::size_t clothPassCount = static_cast<std::size_t>(ClothPass
 const char* clothPassName(ClothPass pass);
 
 // How long each kind of cloth pass took on the GPU in one frame, all ticks and cloths together. Not valid for a frame
-// not measured.
+// not measured; overflowed for one with more passes than its stamps (render/vulkan/cloth_pass_stamps.h), not measured
+// either, so the readout can say why.
 struct ClothPassTimings {
     bool valid = false;
+    bool overflowed = false;
     double totalSeconds = 0.0;
     std::array<double, clothPassCount> passSeconds{};
 
