@@ -457,10 +457,10 @@ Each step is a branch of its own, explained first, tests first.
 
 1. **The yardstick (done, `cloth-yardstick`).** The resolution ladder on today's CPU solver, measured and recorded (Part 5). Small, and it tells every later step whether it helped.
 2. **The GPU cloth framework.** The GPU-resident design (Part 4) with today's XPBD solver ported as it is (coloured, our units), its GLSL library mirrored by the CPU solver and checked by GPU tests. The big sheet on the GPU, drawn from its buffer, picked and grabbed through the late readback. Measured on the ladder.
-3. **The low-frequency layer with Vertex Block Descent (CPU done, `hierarchical-cloth`; on the GPU done, `gpu-block-descent` and `gpu-cloth-levels`; its cost cut and the default chosen next, after measuring).** Re-planned on Oct 25 2026 when the measurements showed the two belong together (Part 2): Müller's levels with Lu et al.'s Galerkin coarse step on the substep's energy, between vertex block descent sweeps (our fabric's stretch and bending as energies, point colouring); XPBD kept as the default. Next: the GPU port, its cost cut further (fewer passes a level, skipping fine levels), then judged against XPBD on the ladder and the cantilever. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019).
+3. **The low-frequency layer with Vertex Block Descent (CPU done, `hierarchical-cloth`; on the GPU done, `gpu-block-descent` and `gpu-cloth-levels`; opt-in: XPBD with tethers kept as the default, Part 5; its cost cuts parked in phase 10).** Re-planned on Oct 25 2026 when the measurements showed the two belong together (Part 2): Müller's levels with Lu et al.'s Galerkin coarse step on the substep's energy, between vertex block descent sweeps (our fabric's stretch and bending as energies, point colouring); XPBD kept as the default. Next: the GPU port, its cost cut further (fewer passes a level, skipping fine levels), then judged against XPBD on the ladder and the cantilever. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019).
 4. **(Merged into step 3.)**
-5. **Self-collision.** The two-stage contact energy with DAT's motion bound (or OGC's blocks, after reading DAT), a bounding volume hierarchy on the GPU, the pile milestone. Built for whichever solver step 4 keeps.
-6. **Bodies on the GPU:** the engine's collider shapes as now, later the mannequin's distance field (already a roadmap item).
+5. **Self-collision.** On XPBD, the default since the tethers (Oct 26 2026): distance constraints between points and triangles and between edges, pushed straight out from the feature they touch (OGC's offset geometry) rather than OGC's contact energy, which wants a solver that minimises the substep's energy; DAT's per-point motion bound (or OGC's own); a bounding volume hierarchy on the GPU; the dress and the pile as its tests.
+6. **Bodies on the GPU:** the engine's collider shapes (done with the framework), then the mannequin's distance field (`assets/models/human.obj`), before the dress sewn from two panels that tests whether garments need the levels.
 
 Tethers (`cloth-tethers`, done, Oct 26 2026) hold hanging cloth as well as the levels for about XPBD's cost (Part 5), so the levels' cost cuts are paused until phase 10's garments show whether cloth held by contact needs them.
 
@@ -475,6 +475,8 @@ Agreed with the user on Oct 25, 2026; phase 7's items in `ROADMAP.md` changed to
 - "Self-collision" and "Untangling pass" became step 5, the untangling pass dropped (the motion bound makes it unnecessary for cloth that starts clean).
 - "Collision with a mannequin" stays as it is (step 6).
 - "Optional, later: IPC" stays, as the offline reference.
+
+Re-planned with the user on Oct 26 2026, after the tethers: phase 7 ends with a dress on a mannequin. The mannequin is `assets/models/human.obj` with a signed distance field; phase 10's sewing-pattern and seam items moved into phase 7 (without the editor) for a dress sewn from two panels, the dress-sized test; the levels' cost cuts moved to phase 10, to resume if that dress shows garments need them; self-collision is built on XPBD.
 
 ## Sources
 
