@@ -39,8 +39,8 @@ namespace {
 
     // cloth_pass.glsl's bindings, in order: positions, previous positions, velocities, stretch, bending, pin slots, the
     // slot's ticks, pins and bodies, then the prediction, the per-point edge and hinge lists (starts, items), the points
-    // in colour order, the tethers, the slot's field bodies and the fields' samples.
-    constexpr std::uint32_t clothBindings = 18;
+    // in colour order, the tethers, the slot's field bodies and the fields' samples, the stitches and the stitched points.
+    constexpr std::uint32_t clothBindings = 20;
 
     // cloth_levels.glsl's set 1, in order: the gradient, direction, coarse steps and held points, the level records, the
     // levels' points, masses, neighbour starts and neighbours, gather starts and links, spread starts and links, each
@@ -301,6 +301,7 @@ VulkanClothPipelines::VulkanClothPipelines(const VulkanDevice& device):
     stretch(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_stretch.comp.spv"))),
     bend(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_bend.comp.spv"))),
     block(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_block.comp.spv"))),
+    stitch(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_stitch.comp.spv"))),
     finish(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_finish.comp.spv"))),
     shape(std::make_unique<ComputePipeline>(device, computePass("assets/shaders/cloth_shape.comp.spv", shapeBindings, sizeof(ClothShapePushConstants)))),
     held(std::make_unique<ComputePipeline>(device, levelPass("assets/shaders/cloth_held.comp.spv", *predict))),
@@ -327,6 +328,10 @@ const ComputePipeline& VulkanClothPipelines::getBend() const {
 
 const ComputePipeline& VulkanClothPipelines::getBlock() const {
     return *block;
+}
+
+const ComputePipeline& VulkanClothPipelines::getStitch() const {
+    return *stitch;
 }
 
 const ComputePipeline& VulkanClothPipelines::getFinish() const {
@@ -377,6 +382,7 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     pointCount(static_cast<std::uint32_t>(cloth.particles.size())),
     edgeCount(static_cast<std::uint32_t>(cloth.stretch.size())),
     hingeCount(static_cast<std::uint32_t>(cloth.bend.size())),
+    stitchCount(static_cast<std::uint32_t>(cloth.stitches.size())),
     stretchColours(cloth.stretchColours),
     bendColours(cloth.bendColours),
     vertexColours(cloth.vertexColours.colours)
@@ -396,6 +402,8 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     const std::vector<GpuPointHinge> packedHinges = packPointHinges(cloth);
     const std::vector<std::uint32_t>& order = cloth.vertexColours.order;
     const std::vector<GpuClothTether> packedTethers = packClothTethers(cloth);
+    const std::vector<GpuClothStitch> packedStitches = packClothStitches(cloth);
+    const std::vector<std::uint32_t> packedStitched = clothStitchedPoints(cloth);
     for (const ClothPin& pin : cloth.pins) {
         pinPositions.push_back(cloth.particles.positions.at(pin.particle));
     }
@@ -418,10 +426,12 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     pointHinges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedHinges)), constant, BufferMemory::Gpu};
     vertexOrder = VulkanBuffer{allocator, atLeastSmallest(bytesOf(order)), constant, BufferMemory::Gpu};
     tethers = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedTethers)), constant, BufferMemory::Gpu};
+    stitches = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedStitches)), constant, BufferMemory::Gpu};
+    stitched = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedStitched)), constant, BufferMemory::Gpu};
     noFieldSamples = VulkanBuffer{allocator, smallestBuffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 
     // Until a tick runs, the cloth is drawn where it is. The prediction needs nothing: each substep writes it first.
-    const std::array<Upload, 13> copies{
+    const std::array<Upload, 15> copies{
         Upload{points.data(), bytesOf(points), positions.get()},
         Upload{previous.data(), bytesOf(previous), previousPositions.get()},
         Upload{moving.data(), bytesOf(moving), velocities.get()},
@@ -435,12 +445,14 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
         Upload{packedHinges.data(), bytesOf(packedHinges), pointHinges.get()},
         Upload{order.data(), bytesOf(order), vertexOrder.get()},
         Upload{packedTethers.data(), bytesOf(packedTethers), tethers.get()},
+        Upload{packedStitches.data(), bytesOf(packedStitches), stitches.get()},
+        Upload{packedStitched.data(), bytesOf(packedStitched), stitched.get()},
     };
     uploadAll(device, uploads, copies);
 
     descriptorPool = storagePool(device, slotCount, clothBindings);
 
-    // Every pass's set layout is the same eighteen storage buffers, so a set made for one is compatible with them all.
+    // Every pass's set layout is the same twenty storage buffers, so a set made for one is compatible with them all.
     const VkDescriptorSetLayout layout = pipelines.getPredict().getResourceLayout();
     slots.resize(slotCount);
     for (Slot& slot : slots) {
@@ -586,7 +598,9 @@ void VulkanCloth::writeSet(const Slot& slot) {
                                                       vertexOrder.get(),
                                                       tethers.get(),
                                                       slot.fields.get(),
-                                                      slot.fieldSamples};
+                                                      slot.fieldSamples,
+                                                      stitches.get(),
+                                                      stitched.get()};
     writeBuffers(device, slot.set, buffers);
 }
 
@@ -750,6 +764,7 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
                     }
                 }
             }
+            dispatch(recording, pipelines.getStitch(), ClothPass::Stitch, 0, stitchCount);
             dispatch(recording, pipelines.getFinish(), ClothPass::Finish, 0, pointCount);
         }
     }

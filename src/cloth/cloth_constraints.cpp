@@ -147,22 +147,25 @@ std::vector<BendConstraint> bendConstraints(const Mesh& mesh) {
             continue;
         }
 
-        BendConstraint bend{wings[0], wings[1], edge.first, edge.second, 0.0f, 0.0f};
-        const Vec3 wing0 = at(mesh, bend.wing0);
-        const Vec3 wing1 = at(mesh, bend.wing1);
-        const Vec3 edgeStart = at(mesh, bend.edgeStart);
-        const Vec3 edgeEnd = at(mesh, bend.edgeEnd);
-        const HingeFrame frame = hingeFrame(wing0, wing1, edgeStart, edgeEnd);
-        const float area = 0.5f * (frame.normal0.length() + frame.normal1.length());
-        if (squashed(frame)) {
-            continue;
+        const std::array<std::uint32_t, 4> points{wings[0], wings[1], edge.first, edge.second};
+        if (const std::optional<BendConstraint> bend = restHinge(points, {at(mesh, points[0]), at(mesh, points[1]), at(mesh, points[2]), at(mesh, points[3])})) {
+            constraints.push_back(*bend);
         }
-        bend.restAngle = hingeAngle(wing0, wing1, edgeStart, edgeEnd);
-        bend.stiffnessShare = 3.0f * frame.edge.lengthSquared() / area;
-        bend.isometricWeights = isometricBendWeights(wing0, wing1, edgeStart, edgeEnd);
-        constraints.push_back(bend);
     }
     return constraints;
+}
+
+std::optional<BendConstraint> restHinge(const std::array<std::uint32_t, 4>& points, const std::array<Vec3, 4>& rest) {
+    const HingeFrame frame = hingeFrame(rest[0], rest[1], rest[2], rest[3]);
+    if (squashed(frame)) {
+        return std::nullopt;
+    }
+    const float area = 0.5f * (frame.normal0.length() + frame.normal1.length());
+    BendConstraint bend{points[0], points[1], points[2], points[3], 0.0f, 0.0f};
+    bend.restAngle = hingeAngle(rest[0], rest[1], rest[2], rest[3]);
+    bend.stiffnessShare = 3.0f * frame.edge.lengthSquared() / area;
+    bend.isometricWeights = isometricBendWeights(rest[0], rest[1], rest[2], rest[3]);
+    return bend;
 }
 
 /*

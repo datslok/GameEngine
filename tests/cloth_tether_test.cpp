@@ -23,11 +23,79 @@ namespace {
         return tethers[point * tethersPerPoint + rank];
     }
 
-    // For now the distance along the cloth is the straight line between the points at rest.
+    // The distance from a point to each anchor along the cloth at rest.
+    std::vector<float> restDistances(const ClothRestPaths& paths, std::uint32_t point) {
+        std::vector<float> distances;
+        paths.distances(point, distances);
+        return distances;
+    }
+
+    // A cloth that is not cut into pieces is measured by straight lines between its points at rest.
     void testRestDistanceIsTheStraightLine() {
         const std::vector<Vec3> rest{Vec3{0.0f, 0.0f, 0.0f}, Vec3{3.0f, 4.0f, 0.0f}};
-        assert(near(clothRestDistance(rest, 0, 1), 5.0f, 1e-6f));
-        assert(near(clothRestDistance(rest, 1, 0), 5.0f, 1e-6f));
+        assert(near(restDistances(ClothRestPaths{rest, ClothPieces{}, {1}}, 0)[0], 5.0f, 1e-6f));
+        assert(near(restDistances(ClothRestPaths{rest, ClothPieces{}, {0}}, 1)[0], 5.0f, 1e-6f));
+    }
+
+    /*
+    * An L-shaped piece, 2 m along each leg, its inward corner at (1, 1), with one more point inside its foot: along the
+    * fabric, the top of the upright to the end of the foot goes round the corner (1 + 1, not the straight 1.41 across
+    * the gap), a line that only grazes the corner is straight, and a point that sees the anchor straight is too. A
+    * point on another piece is no distance at all from it (infinity: no tether crosses a seam).
+    */
+    void testRestDistanceRoundAnInwardCorner() {
+        const std::vector<Vec3> rest{Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}, Vec3{2.0f, 1.0f, 0.0f}, Vec3{1.0f, 1.0f, 0.0f},
+                                     Vec3{1.0f, 2.0f, 0.0f}, Vec3{0.0f, 2.0f, 0.0f}, Vec3{1.5f, 0.5f, 0.0f}, Vec3{5.0f, 5.0f, 0.0f}};
+        ClothPieces pieces;
+        pieces.pieceOf = {0, 0, 0, 0, 0, 0, 0, 1};
+        pieces.outlines = {{0, 1, 2, 3, 4, 5}, {7}};
+
+        const ClothRestPaths paths{rest, pieces, {4, 1}};
+        const std::vector<float> fromFootEnd = restDistances(paths, 2);
+        assert(near(fromFootEnd[0], 2.0f, 1e-5f) && near(fromFootEnd[1], 1.0f, 1e-5f));
+        assert(near(restDistances(paths, 5)[1], 2.8284271f, 1e-5f));
+        const std::vector<float> fromInside = restDistances(paths, 6);
+        assert(near(fromInside[0], 0.7071068f + 1.0f, 1e-5f) && near(fromInside[1], 0.7071068f, 1e-5f));
+        assert(std::isinf(restDistances(paths, 7)[0]));
+    }
+
+    /*
+    * A cloth in two pieces, each pinned at one point: every point is tethered to its own piece's anchor alone, at its
+    * distance round the piece's inward corner.
+    */
+    void testTethersStayOnTheirPiece() {
+        const std::vector<Vec3> rest{Vec3{0.0f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}, Vec3{2.0f, 1.0f, 0.0f}, Vec3{1.0f, 1.0f, 0.0f},
+                                     Vec3{1.0f, 2.0f, 0.0f}, Vec3{0.0f, 2.0f, 0.0f},
+                                     Vec3{3.0f, 0.0f, 0.0f}, Vec3{4.0f, 0.0f, 0.0f}, Vec3{3.0f, 1.0f, 0.0f}};
+        ClothPieces pieces;
+        pieces.pieceOf = {0, 0, 0, 0, 0, 0, 1, 1, 1};
+        pieces.outlines = {{0, 1, 2, 3, 4, 5}, {6, 7, 8}};
+        std::vector<float> inverseMasses(rest.size(), 1.0f);
+        inverseMasses[4] = 0.0f;
+        inverseMasses[6] = 0.0f;
+
+        const std::vector<ClothTether> tethers = clothTethers(rest, inverseMasses, pieces);
+        assert(tetherOf(tethers, 2, 0).anchor == 4 && near(tetherOf(tethers, 2, 0).restLength, 2.0f, 1e-5f));
+        assert(tetherOf(tethers, 2, 1).anchor == noTetherAnchor);
+        assert(tetherOf(tethers, 7, 0).anchor == 6 && near(tetherOf(tethers, 7, 0).restLength, 1.0f, 1e-5f));
+        assert(tetherOf(tethers, 7, 1).anchor == noTetherAnchor);
+    }
+
+    // Pinning several points at once is pinning them one after another, with the levels and tethers rebuilt once.
+    void testPinningSeveralAtOnce() {
+        Cloth one = standingSheet();
+        addClothPin(one, 20);
+        addClothPin(one, 24);
+        Cloth both = standingSheet();
+        addClothPins(both, {20, 24});
+
+        assert(both.pins.size() == 2 && both.pins[0].particle == 20 && both.pins[1].particle == 24);
+        assert(both.particles.inverseMasses == one.particles.inverseMasses);
+        assert(both.tethers.size() == one.tethers.size());
+        for (std::size_t index = 0; index < both.tethers.size(); ++index) {
+            assert(both.tethers[index].anchor == one.tethers[index].anchor && both.tethers[index].restLength == one.tethers[index].restLength);
+        }
+        assert(both.hierarchy.levels.size() == one.hierarchy.levels.size());
     }
 
     // A cloth with no pinned point has nothing to hang from, so no tethers at all.
@@ -184,6 +252,9 @@ namespace {
 
 void testClothTethers() {
     testRestDistanceIsTheStraightLine();
+    testRestDistanceRoundAnInwardCorner();
+    testTethersStayOnTheirPiece();
+    testPinningSeveralAtOnce();
     testNoAnchorsNoTethers();
     testEachPointTetheredToItsAnchors();
     testNearestAnchorsOnly();

@@ -102,8 +102,8 @@ struct ClothTick {
 
     uint fieldFirst;
     uint fieldCount;
-    uint unused0;
-    uint unused1;
+    float stitchClosingStep; // how far a stitch's gap may close in a substep, m
+    uint unused;
 };
 
 // A field body (GpuClothField): its first sample with the spacing in w, its samples along each axis with where they start
@@ -118,6 +118,12 @@ struct ClothField {
 struct ClothTether {
     uint anchor;
     float restLength;
+};
+
+// One stitch (ClothStitch): the two points sewn together.
+struct ClothStitch {
+    uint first;
+    uint second;
 };
 
 const float CLOTH_FULL_TURN = 6.28318530717958647692;
@@ -398,6 +404,33 @@ void clothTether(inout vec3 point, vec3 anchor, float restLength, float stretchA
     if (awayLength > longest) {
         point = anchor + away * (longest / awayLength);
     }
+}
+
+// One stitch (solveStitch): its gap pulled in to its width at the substep's start less the closing step, or, once that
+// is nothing, shut where the two points' inverse masses balance.
+void clothStitch(inout vec3 first, inout vec3 second, float firstWeight, float secondWeight, vec3 firstPrevious, vec3 secondPrevious,
+                 float closingStep) {
+    float weights = firstWeight + secondWeight;
+    if (weights <= 0.0) {
+        return;
+    }
+
+    float widest = length(secondPrevious - firstPrevious) - closingStep;
+    vec3 gap = second - first;
+    if (widest <= 0.0) {
+        vec3 joined = first + gap * (firstWeight / weights);
+        first = joined;
+        second = joined;
+        return;
+    }
+
+    float gapLength = length(gap);
+    if (gapLength <= widest) {
+        return;
+    }
+    vec3 move = gap * ((gapLength - widest) / (gapLength * weights));
+    first = first + move * firstWeight;
+    second = second - move * secondWeight;
 }
 
 // ClothStiffnessBlock: a symmetric 3 x 3 matrix, its diagonal (xx, yy, zz) and the rest (xy, xz, yz).

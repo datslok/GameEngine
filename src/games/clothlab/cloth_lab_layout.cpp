@@ -45,8 +45,8 @@ std::vector<ClothLabBlock> ClothLabLayout::blocks() const {
 
 std::vector<Aabb> ClothLabLayout::stations() const {
     const Aabb drape = enclosing(enclosing(boundsOf(Shape{ball}), pedestal.bounds()), frameBounds(drapeFrame));
-    const float sheetReach = 0.5f * clothLabDropSheetSize;
-    const Aabb mannequin{mannequinFeet - Vec3{sheetReach, 0.0f, sheetReach}, dropSheetCentre + Vec3{sheetReach, 0.0f, sheetReach}};
+    const Vec3 reach{clothLabMannequinStationHalfWidth, 0.0f, clothLabMannequinStationHalfWidth};
+    const Aabb mannequin{mannequinFeet - reach, mannequinFeet + reach + Vec3{0.0f, clothLabMannequinStationHeight, 0.0f}};
     return {drape, mat.bounds(), frameBounds(fabricFrame), mannequin};
 }
 
@@ -76,7 +76,6 @@ ClothLabLayout buildClothLabLayout() {
     layout.sheetCentre = Vec3{bar.barCentre.x - 0.5f * bar.barHalfLength, clothLabBarUnderside(bar), bar.barCentre.z + 0.5f * clothLabSheetDepth};
 
     layout.mannequinFeet = Vec3{-7.5f, 0.0f, -1.0f};
-    layout.dropSheetCentre = layout.mannequinFeet + Vec3{0.0f, clothLabMannequinHeight + clothLabDropSheetClearance, 0.0f};
     return layout;
 }
 

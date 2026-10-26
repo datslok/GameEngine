@@ -3,10 +3,12 @@
 
 /*
 * A substep's end for every point, in the CPU solver's order: XPBD's hand on its point (vertex block descent's is in
-* each point's step), then the tethers to its nearest pins, then the bodies (each free point pushed out of every body in
-* turn, with friction, the shapes and then the field bodies), then the velocity from the motion, slowed by the air. Each step touches only its own point, so
-* one invocation per point does them all. A tether reads its anchor, a pinned point, which nothing here moves; so a
-* pinned point's position is not written back (it is unchanged), and no invocation writes what another reads.
+* each point's step), then the tethers to its nearest pins (clothHandAndTethers; for a point in a stitch, the stitch
+* pass before this one has done both and then its stitch), then the bodies (each free point pushed out of every body
+* in turn, with friction, the shapes and then the field bodies), then the velocity from the motion, slowed by the air.
+* Each step touches only its own point, so one invocation per point does them all. A tether reads its anchor, a pinned
+* point, which nothing here moves; so a pinned point's position is not written back (it is unchanged), and no
+* invocation writes what another reads.
 */
 #include "cloth_pass.glsl"
 
@@ -20,21 +22,11 @@ void main() {
     vec4 position = positions[point];
     vec3 previous = previousPositions[point].xyz;
 
-    if (point == tick.grabParticle && tick.method == CLOTH_METHOD_XPBD) {
-        clothGrab(position, tick.grabTarget.xyz, tick.grabCompliance);
+    if (stitched[point] == 0u) {
+        clothHandAndTethers(point, position, tick);
     }
 
     if (position.w != 0.0) {
-        if (tick.tetherStretch > 0.0) {
-            for (uint rank = 0u; rank < CLOTH_TETHERS_PER_POINT; ++rank) {
-                ClothTether tether = tethers[point * CLOTH_TETHERS_PER_POINT + rank];
-                if (tether.anchor == CLOTH_NO_ANCHOR) {
-                    break;
-                }
-                clothTether(position.xyz, positions[tether.anchor].xyz, tether.restLength, tick.tetherStretch);
-            }
-        }
-
         for (uint body = 0u; body < tick.colliderCount; ++body) {
             ClothCollider collider = colliders[tick.colliderFirst + body];
             clothContact(position.xyz, previous, clothSurfacePoint(collider, position.xyz), tick.thickness, tick.staticFriction,

@@ -1,4 +1,5 @@
 #include "app/game_registry.h"
+#include "games/clothlab/cloth_lab_dress.h"
 #include "games/clothlab/cloth_lab_game.h"
 #include "games/clothlab/cloth_lab_layout.h"
 #include "physics/overlap.h"
@@ -16,6 +17,7 @@
 #include "scene/model_renderer.h"
 #include "scene/probe_volume.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <string>
@@ -32,9 +34,10 @@ namespace {
         AssetManager assets;
         ClothLabGame game{ControlMode::FreeCamera, true};
 
-        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr) {
+        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr, bool pinnedDress = true) {
             game.getStationSettings().bigSheet = bigSheet;
             game.getStationSettings().mannequin = mannequin;
+            game.getStationSettings().pinnedDress = pinnedDress;
             if (jobs != nullptr) {
                 game.useJobs(*jobs);
             }
@@ -435,42 +438,104 @@ namespace {
             raycast(lab.game.getLevel(), Ray{Vec3{layout.mannequinFeet.x, 1.3f, layout.mannequinFeet.z + 2.0f}, Vec3{0.0f, 0.0f, -1.0f}});
         assert(hit && hit->hit.distance < 2.0f);
 
-        // Off, there is none, and no sheet to drop on it.
+        // Off, there is none, and no dress.
         ClothLab without;
         int none = 0;
         without.world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider&) { ++none; });
-        assert(none == 0 && !without.world.isAlive(without.game.getMannequinSheet()));
+        assert(none == 0 && !without.world.isAlive(without.game.getDress()));
+    }
+
+    // The widest gap between a stitch's two points.
+    float widestStitch(const Cloth& cloth) {
+        float widest = 0.0f;
+        for (const ClothStitch& stitch : cloth.stitches) {
+            widest = std::max(widest, (cloth.particles.positions[stitch.first] - cloth.particles.positions[stitch.second]).length());
+        }
+        return widest;
     }
 
     /*
-    * The mannequin's milestone, started: a free sheet laid flat above its head falls onto it and comes to rest on its
-    * head and shoulders, nothing inside the body or below the floor.
+    * The mannequin's milestone: the dress, laid round it unsewn, is weightless while its seams pull shut, then gravity
+    * comes on and it settles onto the shoulders: every seam shut, nothing inside the body, its top on the shoulders and
+    * its hem well off the floor, about where the pattern puts it below them. Pinned (the lab's default), its straps are
+    * carried onto the shoulders and pinned there, every other point tethered to them and within its tethers; held by
+    * contact alone, nothing is pinned.
     */
-    void testTheSheetDropsOntoTheMannequin() {
+    void checkTheDressHangsOnTheMannequin(bool pinned) {
         JobSystem jobs;
-        ClothLab lab{false, true, &jobs};
+        ClothLab lab{false, true, &jobs, pinned};
         const ClothLabLayout layout = buildClothLabLayout();
-        const Entity sheet = lab.game.getMannequinSheet();
-        const Cloth& cloth = lab.world.get<Cloth>(sheet);
-        assert(cloth.pins.empty());
-        assert(cloth.particles.size() == static_cast<std::size_t>((clothLabDropSheetSquares + 1) * (clothLabDropSheetSquares + 1)));
-        for (const Vec3& point : cloth.particles.positions) {
-            assert(near(point.y, layout.dropSheetCentre.y));
+        const Cloth& dress = lab.world.get<Cloth>(lab.game.getDress());
+        assert(!dress.stitches.empty());
+        assert(widestStitch(dress) > 0.1f);
+        if (pinned) {
+            // Both points of each of the two shoulders' nine stitches.
+            assert(dress.pins.size() == 36 && !dress.tethers.empty());
+        } else {
+            assert(dress.pins.empty() && dress.tethers.empty());
         }
-        assert(layout.dropSheetCentre.y > layout.mannequinFeet.y + clothLabMannequinHeight);
 
-        for (int tick = 0; tick < 240; ++tick) {
+        const int sewingTicks = static_cast<int>(dressSewingSeconds * 120.0f);
+        for (int tick = 0; tick < sewingTicks; ++tick) {
             runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
         }
+        // Shut, or within a tick of it: pinned, the stitch at one armpit, under the arm's root, is the last (8 mm to go).
+        assert(widestStitch(dress) < 0.01f);
+
+        for (int tick = sewingTicks; tick < 2 * sewingTicks; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        assert(widestStitch(dress) < 1e-5f);
 
         std::shared_ptr<const SignedDistanceField> field;
         lab.world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider& collider) { field = collider.field; });
-        for (const Vec3& point : cloth.particles.positions) {
+        float highest = 0.0f;
+        float lowest = 10.0f;
+        for (const Vec3& point : dress.particles.positions) {
             assert(sampleField(*field, point).distance > 0.0f);
-            assert(point.y > 0.0f);
+            highest = std::max(highest, point.y);
+            lowest = std::min(lowest, point.y);
         }
-        const std::size_t middle = static_cast<std::size_t>(clothLabDropSheetSquares / 2) * (clothLabDropSheetSquares + 1) + clothLabDropSheetSquares / 2;
-        assert(cloth.particles.positions[middle].y > layout.mannequinFeet.y + clothLabMannequinHeight - 0.1f);
+        const float shoulders = layout.mannequinFeet.y + dressShoulderHeight;
+        assert(highest > shoulders - 0.05f && highest < shoulders + 0.1f);
+        assert(lowest > layout.mannequinFeet.y + 0.3f);
+
+        if (pinned) {
+            // On the shoulders, the cloth's thickness off the skin, where they were put.
+            for (const ClothPin& pin : dress.pins) {
+                const Vec3& point = dress.particles.positions[pin.particle];
+                assert(point.x == pin.position.x && point.y == pin.position.y && point.z == pin.position.z);
+                assert(std::abs(sampleField(*field, point).distance - dress.settings.thickness) < 0.002f);
+                assert(point.y > shoulders - 0.08f && point.y < shoulders + 0.08f);
+            }
+            /*
+            * Every free point is tethered, and within its tethers unless the body holds it further out: the back
+            * neckline's middle rides up the back of the neck, where the straight line to the straps runs through the
+            * neck, and the bodies have the last word (cloth.h), so the fabric there lies taut round the neck instead.
+            */
+            const float touching = dress.settings.thickness + 0.001f;
+            for (std::size_t point = 0; point < dress.particles.size(); ++point) {
+                if (dress.particles.inverseMasses[point] == 0.0f) {
+                    continue;
+                }
+                assert(dress.tethers[point * tethersPerPoint].anchor != noTetherAnchor);
+                if (sampleField(*field, dress.particles.positions[point]).distance <= touching) {
+                    continue;
+                }
+                for (std::size_t rank = 0; rank < tethersPerPoint; ++rank) {
+                    const ClothTether& tether = dress.tethers[point * tethersPerPoint + rank];
+                    if (tether.anchor != noTetherAnchor) {
+                        const float length = (dress.particles.positions[point] - dress.particles.positions[tether.anchor]).length();
+                        assert(length <= tether.restLength * (1.0f + dress.settings.tetherSlack) + 1e-5f);
+                    }
+                }
+            }
+        }
+    }
+
+    void testTheDressHangsOnTheMannequin() {
+        checkTheDressHangsOnTheMannequin(true);
+        checkTheDressHangsOnTheMannequin(false);
     }
 
     // It has golden views, looking at its stations.
@@ -495,6 +560,6 @@ void testClothLab() {
     testTheBigSheetSags();
     testTheMannequinIsPlaced();
     testTheMannequinStands();
-    testTheSheetDropsOntoTheMannequin();
+    testTheDressHangsOnTheMannequin();
     testItHasGoldenViews();
 }

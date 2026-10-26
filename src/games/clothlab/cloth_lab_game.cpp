@@ -1,6 +1,7 @@
 #include "games/clothlab/cloth_lab_game.h"
 
 #include "core/srgb.h"
+#include "games/clothlab/cloth_lab_dress.h"
 #include "games/clothlab/cloth_lab_layout.h"
 #include "gameplay/first_person_body.h"
 #include "math/transform.h"
@@ -76,7 +77,7 @@ namespace {
     // The line from the held point to the hand, while dragging.
     const Vec3 grabLineColour{1.0f, 0.8f, 0.2f};
 
-    // Cotton seen from both sides: the hanging sheet deep red, the drape sheet cream.
+    // Cotton seen from both sides: the hanging sheet deep red, the drape sheet cream, the dress a dusty rose.
     Material cottonMaterial(const Pixel& colour) {
         Material material;
         material.colour = colour;
@@ -88,7 +89,7 @@ namespace {
     const Pixel hangingSheetColour{150, 30, 35};
     const Pixel drapeSheetColour{225, 215, 190};
     const Pixel bigSheetColour{150, 165, 190};
-    const Pixel dropSheetColour{95, 125, 90};
+    const Pixel dressColour{185, 110, 120};
 
     // A grid laid flat (the grid faces +z; turned to face up, its top edge at the back) with its middle at centre.
     Mat4 laidFlat(const Vec3& centre) {
@@ -230,7 +231,7 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
     }
 
     // The mannequin: its model placed on its spot, part of the level (drawn, walked against, static for the probes), and
-    // a distance field round it for the cloth, built on every core; then a free sheet laid flat above its head.
+    // a distance field round it for the cloth, built on every core; then the dress round it.
     if (stationSettings.mannequin) {
         const MeshHandle body = assets.loadMesh(clothLabMannequinModel);
         const Mesh& model = assets.getMesh(body);
@@ -244,11 +245,21 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
         ModelRenderer mannequin;
         mannequin.parts.push_back(RenderPart{body, mannequinMaterial(), placement});
         const Entity standing = addStatic(std::move(mannequin));
-        world.add(standing, DistanceFieldCollider{std::make_shared<const SignedDistanceField>(buildSignedDistanceField(
-                                collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, getJobs()))});
+        const std::shared_ptr<const SignedDistanceField> field = std::make_shared<const SignedDistanceField>(
+            buildSignedDistanceField(collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, getJobs()));
+        world.add(standing, DistanceFieldCollider{field});
 
-        const Mesh dropMesh = Mesh::grid(clothLabDropSheetSquares, clothLabDropSheetSquares, clothLabDropSheetSize, clothLabDropSheetSize);
-        mannequinSheet = addSheet(world, assets, dropMesh, makeCloth(dropMesh, laidFlat(layout.dropSheetCentre), clothSettings), cottonMaterial(dropSheetColour));
+        // The dress: its two panels cut from the pattern, wrapped round the mannequin and sewn there, its straps
+        // pinned and carried onto the shoulders unless it is held by contact alone.
+        const PatternMesh pattern = meshPattern(twoPanelDress(), dressSpacing);
+        const std::vector<Vec3> start = dressAroundMannequin(pattern, layout.mannequinFeet);
+        Cloth sewn = makeCloth(pattern.mesh, start, clothSettings, clothSewing(pattern));
+        if (stationSettings.pinnedDress) {
+            const DressStrapPins straps = dressStrapPins(pattern, start, *field, clothSettings.thickness);
+            addClothPins(sewn, straps.points, getJobs());
+            strapPaths = straps.paths;
+        }
+        dress = addSheet(world, assets, pattern.mesh, std::move(sewn), cottonMaterial(dressColour));
     }
 
     controls.spawnBody(world);
@@ -316,13 +327,26 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
 /*
 * The fabric's settings reach the sheet every tick, so the debug UI's changes apply at once (its mass per area only when
 * it is made). The hooks step towards their gap at their speed, in ticks, so where they are depends only on the ticks.
+* The dress is weightless for its first moments, while its seams pull shut round the mannequin, as garment software
+* sews before it drapes: falling while half sewn, its straps would miss the shoulders.
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
-    (void)simulationSeconds;
     for (const Entity each : sheets()) {
         Cloth& cloth = world.get<Cloth>(each);
         cloth.settings = clothSettings;
         cloth.grab = each == grabbedSheet ? sheetGrab : std::nullopt;
+        if (each == dress && simulationSeconds < dressSewingSeconds) {
+            cloth.settings.gravity = 0.0f;
+        }
+    }
+
+    // The straps' pins go where they are due at the tick's end; the substeps slide them there.
+    if (!strapPaths.empty()) {
+        Cloth& sewn = world.get<Cloth>(dress);
+        const float tickEnd = static_cast<float>(simulationSeconds) + tickSeconds;
+        for (std::size_t index = 0; index < strapPaths.size(); ++index) {
+            sewn.pins[index].position = strapPinPosition(strapPaths[index], tickEnd);
+        }
     }
 
     Cloth& cloth = world.get<Cloth>(sheet);
@@ -373,6 +397,7 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor) {
 void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Big sheet", settings.bigSheet, FieldApplies::AtStartup);
     visitor.field("Mannequin", settings.mannequin, FieldApplies::AtStartup);
+    visitor.field("Dress pinned at the shoulders", settings.pinnedDress, FieldApplies::AtStartup);
 }
 
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {
@@ -426,8 +451,8 @@ Entity ClothLabGame::getBigSheet() const {
     return bigSheet;
 }
 
-Entity ClothLabGame::getMannequinSheet() const {
-    return mannequinSheet;
+Entity ClothLabGame::getDress() const {
+    return dress;
 }
 
 ClothLabStationSettings& ClothLabGame::getStationSettings() {
@@ -440,7 +465,7 @@ std::vector<Entity> ClothLabGame::sheets() const {
         all.push_back(bigSheet);
     }
     if (stationSettings.mannequin) {
-        all.push_back(mannequinSheet);
+        all.push_back(dress);
     }
     return all;
 }

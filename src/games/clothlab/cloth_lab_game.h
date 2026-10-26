@@ -2,6 +2,7 @@
 
 #include "cloth/cloth.h"
 #include "core/settings_visitor.h"
+#include "games/clothlab/cloth_lab_dress.h"
 #include "games/clothlab/cloth_lab_layout.h"
 #include "ecs/world.h"
 #include "engine/game.h"
@@ -41,11 +42,14 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
 * default; on for measuring the solver's threads.
 *
 * The mannequin (assets/models/human.obj, with a distance field of about 6 million samples built at the start, under a
-* second on every core) and the sheet dropped onto it: on by default.
+* second on every core) and the dress sewn round it (cloth_lab_dress.h, about 12,000 points): on by default. The dress
+* is pinned at the shoulders and tethered to its straps by default; off, it is held up by contact with the shoulders
+* alone, as the dress yardstick also measures it.
 */
 struct ClothLabStationSettings {
     bool bigSheet = false;
     bool mannequin = true;
+    bool pinnedDress = true;
 };
 
 void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor);
@@ -88,8 +92,8 @@ public:
     // The big sheet over the mat, if the stations have it (none otherwise).
     Entity getBigSheet() const;
 
-    // The sheet dropped onto the mannequin, if the stations have it (none otherwise).
-    Entity getMannequinSheet() const;
+    // The dress sewn round the mannequin, if the stations have it (none otherwise).
+    Entity getDress() const;
     ClothLabStationSettings& getStationSettings();
     ClothSettings& getClothSettings();
     ClothLabHookSettings& getHookSettings();
@@ -116,8 +120,11 @@ private:
 
     Entity drapeSheet;
     Entity bigSheet;
-    Entity mannequinSheet;
+    Entity dress;
     ClothLabStationSettings stationSettings;
+
+    // Each of the dress's pins' way onto the shoulders, in the order of its pins (none held by contact alone).
+    std::vector<StrapPinPath> strapPaths;
 
     // Every sheet the lab has.
     std::vector<Entity> sheets() const;

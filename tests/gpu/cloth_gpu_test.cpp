@@ -350,6 +350,40 @@ namespace {
     }
 
     /*
+    * Stitches wide open, closing, within a step of shut and shut, their points free or pinned, closing faster or
+    * slower than the step allows.
+    */
+    void checkStitch(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{163};
+        std::vector<GpuVec4> inputs;
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 firstPrevious = randomPoint(random, 1.0f);
+            const Vec3 secondPrevious = firstPrevious + random.direction() * random.between(0.0f, 0.2f);
+            const float closingStep = random.between(0.0001f, 0.05f);
+            const float firstWeight = i % 7 == 0 ? 0.0f : random.between(0.5f, 50.0f);
+            const float secondWeight = i % 11 == 0 ? 0.0f : random.between(0.5f, 50.0f);
+            const Vec3 first = firstPrevious + randomPoint(random, 0.05f);
+            const Vec3 second = secondPrevious + randomPoint(random, 0.05f);
+            inputs.push_back(GpuVec4{first.x, first.y, first.z, firstWeight});
+            inputs.push_back(GpuVec4{second.x, second.y, second.z, secondWeight});
+            inputs.push_back(gpuVec4(firstPrevious));
+            inputs.push_back(gpuVec4(secondPrevious));
+            inputs.push_back(gpuVec4(closingStep));
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_STITCH, inputs, 5, 2);
+
+        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+            const GpuVec4& firstInput = inputs[i * 5];
+            const GpuVec4& secondInput = inputs[i * 5 + 1];
+            Vec3 first = vec3From(firstInput);
+            Vec3 second = vec3From(secondInput);
+            solveStitch(first, second, firstInput[3], secondInput[3], vec3From(inputs[i * 5 + 2]), vec3From(inputs[i * 5 + 3]), inputs[i * 5 + 4][0]);
+            report.check("clothStitch", arithmeticTolerance, first, vec3From(outputs[i * 2]));
+            report.check("clothStitch", arithmeticTolerance, second, vec3From(outputs[i * 2 + 1]));
+        }
+    }
+
+    /*
     * A field body's sample on random points in and round a field's box (fieldCell), random corners blended at the
     * share found (blendFieldCell), and the slope made the way out (fieldSurface), equal corners among them.
     */
@@ -663,16 +697,21 @@ namespace {
         Cloth after;
     };
 
-    // Each solver the GPU runs, with each bending model; vertex block descent with and without its coarse levels.
+    /*
+    * Each solver the GPU runs, with each bending model; vertex block descent with and without its coarse levels; with
+    * the tethers; and sewn: the sheet's left and right edges stitched together below its pins, closing into a tube, the
+    * hand on a stitched point (so the stitch pass does its hand as well as its tethers).
+    */
     struct SolverCase {
         ClothMethod method;
         BendingModel model;
         int levels;
         const char* name;
         bool tethers = false;
+        bool sewn = false;
     };
 
-    constexpr std::array<SolverCase, 8> solverCases{
+    constexpr std::array<SolverCase, 10> solverCases{
         SolverCase{ClothMethod::Xpbd, BendingModel::Isometric, 0, "VulkanCloth isometric"},
         SolverCase{ClothMethod::Xpbd, BendingModel::Hinge, 0, "VulkanCloth hinge"},
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, 0, "VulkanCloth block descent isometric"},
@@ -681,6 +720,8 @@ namespace {
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Hinge, maxClothLevels, "VulkanCloth levels hinge"},
         SolverCase{ClothMethod::Xpbd, BendingModel::Isometric, 0, "VulkanCloth tethers", true},
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, 0, "VulkanCloth block descent tethers", true},
+        SolverCase{ClothMethod::Xpbd, BendingModel::Isometric, 0, "VulkanCloth sewn", true, true},
+        SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, 0, "VulkanCloth block descent sewn", true, true},
     };
 
     // A small ball as a field body, beside the busy sheet's shapes: 1 cm samples, a 3 cm band.
@@ -702,6 +743,12 @@ namespace {
         addClothPin(cloth, 16 * 17);
         addClothPin(cloth, 16 * 17 + 16);
         assert(solver.levels == 0 || cloth.hierarchy.levels.size() >= 2);
+        if (solver.sewn) {
+            for (std::uint32_t row = 0; row < 16; ++row) {
+                cloth.stitches.push_back(ClothStitch{row * 17, row * 17 + 16});
+            }
+        }
+        const std::uint32_t held = solver.sewn ? 0u : 8u;
         const std::vector<Shape> bodies{Sphere{Vec3{0.1f, 0.2f, 0.0f}, 0.25f}, Capsule{Vec3{-0.4f, 0.1f, -0.3f}, Vec3{0.4f, 0.1f, -0.3f}, 0.08f},
                                         Aabb{Vec3{-0.6f, -0.2f, -0.6f}, Vec3{0.6f, 0.0f, 0.6f}}};
 
@@ -715,7 +762,7 @@ namespace {
             cloth.pins[0].position = pinStart0 + along;
             cloth.pins[1].position = pinStart1 + along;
             if (tick <= 60) {
-                cloth.grab = ClothGrab{8, Vec3{0.0f, 0.8f + 0.004f * static_cast<float>(tick), 0.7f}};
+                cloth.grab = ClothGrab{held, Vec3{0.0f, 0.8f + 0.004f * static_cast<float>(tick), 0.7f}};
             } else {
                 cloth.grab.reset();
             }
@@ -978,6 +1025,7 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkContact(runner, report);
     checkGrab(runner, report);
     checkTether(runner, report);
+    checkStitch(runner, report);
     checkField(runner, report);
     checkFinishVelocity(runner, report);
     checkPointTerms(runner, report);

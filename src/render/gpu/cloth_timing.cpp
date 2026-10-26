@@ -28,6 +28,8 @@ const char* clothPassName(ClothPass pass) {
         return "TOTAL";
     case ClothPass::Move:
         return "MOVE";
+    case ClothPass::Stitch:
+        return "STITCH";
     case ClothPass::Finish:
         return "FINISH";
     case ClothPass::Shape:
