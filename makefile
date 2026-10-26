@@ -92,7 +92,7 @@ RUNTIME_DLLS := $(FSR_DLL) $(STREAMLINE_DLLS)
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test shaders clean release run-release test-release golden golden-save gputest gputest-release yardstick yardstick-quick
+.PHONY: all run test test-slow shaders clean release run-release test-release test-slow-release golden golden-save gputest gputest-release yardstick yardstick-quick
 
 all: $(TARGET) $(RUNTIME_DLLS) shaders
 
@@ -188,6 +188,10 @@ run: $(TARGET) $(RUNTIME_DLLS) shaders
 test: $(TEST_TARGET) shaders
 	./$(TEST_TARGET)
 
+# The slow tests (tests/test_main.cpp, runSlowTests): vertex block descent and its coarse levels, left out of make test.
+test-slow: $(TEST_TARGET) shaders
+	./$(TEST_TARGET) --slow
+
 # Golden images (src/engine/golden.h): golden-save renders every game's fixed views as the references in
 # tests/golden/<GPU>/<game>/, golden compares fresh captures with them (captures and difference heatmaps go to
 # build/golden/<GPU>/<game>/). They need a GPU.
@@ -213,6 +217,9 @@ run-release:
 
 test-release:
 	$(MAKE) BUILD=release test
+
+test-slow-release:
+	$(MAKE) BUILD=release test-slow
 
 gputest-release:
 	$(MAKE) BUILD=release gputest
