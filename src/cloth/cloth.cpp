@@ -36,6 +36,8 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Kinetic friction", settings.kineticFriction, {.min = 0.0f, .max = 2.0f});
     visitor.choice("Solver", settings.method, methodNames);
     visitor.field("Coarse levels", settings.hierarchyLevels, {.min = 0, .max = maxClothLevels});
+    visitor.field("Tethers", settings.tethers);
+    visitor.field("Tether slack", settings.tetherSlack, {.min = 0.0f, .max = 0.5f, .sliderMax = 0.02f, .unit = "of the rest length"});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
@@ -87,6 +89,7 @@ ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std
 void pinClothPoint(Cloth& cloth, std::uint32_t particle) {
     pinParticle(cloth.particles, particle);
     cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
+    cloth.tethers = clothTethers(cloth.restPositions, cloth.particles.inverseMasses);
 }
 
 void addClothPin(Cloth& cloth, std::uint32_t particle) {
@@ -106,6 +109,7 @@ namespace {
         const std::vector<ClothPin>& pins;
         const std::optional<ClothGrab>& grab;
         const std::vector<Shape>& colliders;
+        const std::vector<ClothTether>& tethers;
 
         // Vertex block descent's per-point lists and colours and its coarse levels, or none (XPBD alone).
         const ClothPointConstraints* pointConstraints;
@@ -139,8 +143,9 @@ namespace {
     * Each substep: predict; slide the moving pins a share of the way to where they are going (the last substep exactly
     * there); then the solver: XPBD's stretch, bending and hand, or vertex block descent's sweep, with its coarse levels
     * and a second sweep after them when there are any (smoothing on both sides of the coarse step, as multigrid does:
-    * the coarse step's spreading leaves fine wrinkles a sweep removes); the bodies last, so nothing is left inside them;
-    * velocities from the motion; drag on the free points.
+    * the coarse step's spreading leaves fine wrinkles a sweep removes); the tethers, when on, after either solver, so the
+    * pins' strings have the last word on stretch; the bodies last, so nothing is left inside them; velocities from the
+    * motion; drag on the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {
@@ -199,6 +204,9 @@ namespace {
                     solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
                 }
             }
+            if (settings.tethers) {
+                solveTethers(particles, constraints.tethers, settings.tetherSlack, jobs);
+            }
             if (!constraints.colliders.empty()) {
                 solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings);
             }
@@ -219,14 +227,15 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<BendConstraint> noBend;
     const std::vector<std::uint32_t> noColours;
     const std::vector<ClothPin> noPins;
-    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, nullptr, nullptr, nullptr}, settings, seconds,
-             serialJobs());
+    const std::vector<ClothTether> noTethers;
+    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noTethers, nullptr, nullptr, nullptr}, settings,
+             seconds, serialJobs());
 }
 
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs) {
     stepTick(cloth.particles,
-             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, &cloth.pointConstraints,
-                             &cloth.vertexColours, &cloth.hierarchy},
+             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, cloth.tethers,
+                             &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy},
              cloth.settings, seconds, jobs);
 }
 

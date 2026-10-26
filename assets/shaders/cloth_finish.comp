@@ -3,9 +3,10 @@
 
 /*
 * A substep's end for every point, in the CPU solver's order: XPBD's hand on its point (vertex block descent's is in
-* each point's step), then the bodies (each free point pushed out of every body in turn, with friction), then the
-* velocity from the motion, slowed by the air. Each step touches only its own point, so one invocation per point does
-* them all.
+* each point's step), then the tethers to its nearest pins, then the bodies (each free point pushed out of every body in
+* turn, with friction), then the velocity from the motion, slowed by the air. Each step touches only its own point, so
+* one invocation per point does them all. A tether reads its anchor, a pinned point, which nothing here moves; so a
+* pinned point's position is not written back (it is unchanged), and no invocation writes what another reads.
 */
 #include "cloth_pass.glsl"
 
@@ -24,13 +25,23 @@ void main() {
     }
 
     if (position.w != 0.0) {
+        if (tick.tetherStretch > 0.0) {
+            for (uint rank = 0u; rank < CLOTH_TETHERS_PER_POINT; ++rank) {
+                ClothTether tether = tethers[point * CLOTH_TETHERS_PER_POINT + rank];
+                if (tether.anchor == CLOTH_NO_ANCHOR) {
+                    break;
+                }
+                clothTether(position.xyz, positions[tether.anchor].xyz, tether.restLength, tick.tetherStretch);
+            }
+        }
+
         for (uint body = 0u; body < tick.colliderCount; ++body) {
             ClothCollider collider = colliders[tick.colliderFirst + body];
             clothContact(position.xyz, previous, clothSurfacePoint(collider, position.xyz), tick.thickness, tick.staticFriction,
                          tick.kineticFriction);
         }
-    }
 
-    positions[point] = position;
+        positions[point] = position;
+    }
     velocities[point] = vec4(clothFinishVelocity(position, previous, tick.substepSeconds, tick.kept), 0.0);
 }

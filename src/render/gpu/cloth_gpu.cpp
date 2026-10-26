@@ -99,6 +99,14 @@ GpuCollider packCollider(const Shape& shape) {
     }, shape);
 }
 
+std::vector<GpuClothTether> packClothTethers(const Cloth& cloth) {
+    std::vector<GpuClothTether> packed(cloth.particles.size() * tethersPerPoint);
+    for (std::size_t index = 0; index < std::min(packed.size(), cloth.tethers.size()); ++index) {
+        packed[index] = GpuClothTether{cloth.tethers[index].anchor, cloth.tethers[index].restLength};
+    }
+    return packed;
+}
+
 std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth) {
     std::vector<std::uint32_t> slots(cloth.particles.size(), clothNoPin);
     for (std::size_t pin = 0; pin < cloth.pins.size(); ++pin) {
@@ -107,7 +115,7 @@ std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth) {
     return slots;
 }
 
-// The same expressions as the CPU solver's (cloth.cpp's stepTick, solveStretch, solveBend, solveGrab, clothPointForce), in float.
+// The same expressions as the CPU solver's (cloth.cpp's stepTick, solveStretch, solveBend, solveGrab, solveTethers, clothPointForce), in float.
 GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst) {
     const ClothSettings& settings = commands.settings;
     if (settings.substeps < 1) {
@@ -138,6 +146,7 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.stretchStiffness = energyStiffness(settings.stretchCompliance);
     tick.grabStiffness = energyStiffness(settings.grabCompliance);
     tick.method = static_cast<std::uint32_t>(settings.method);
+    tick.tetherStretch = settings.tethers ? 1.0f + settings.tetherSlack : 0.0f;
     return tick;
 }
 

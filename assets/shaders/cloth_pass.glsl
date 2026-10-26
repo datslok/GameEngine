@@ -1,6 +1,6 @@
 // What every cloth pass (cloth_*.comp) binds, one layout for all of them (render/vulkan/vulkan_cloth.h): the cloth's
 // points and constraints, the frame's ticks with their pins and bodies, vertex block descent's prediction, per-point
-// lists and point colours, and push constants saying which tick and substep this dispatch is and which range of points
+// lists and point colours, the tethers, and push constants saying which tick and substep this dispatch is and which range of points
 // or constraints it covers. One invocation per point or constraint.
 
 #ifndef CLOTH_PASS_GLSL
@@ -73,6 +73,12 @@ layout(std430, set = 0, binding = 13) readonly buffer ClothPointHinges {
 // The points sorted by colour (ClothVertexColours::order): a vertex block descent dispatch covers one colour's range.
 layout(std430, set = 0, binding = 14) readonly buffer ClothVertexOrder {
     uint vertexOrder[];
+};
+
+// Each point's tether slots (CLOTH_TETHERS_PER_POINT from point * CLOTH_TETHERS_PER_POINT), nearest anchor first, the
+// spare ones last.
+layout(std430, set = 0, binding = 15) readonly buffer ClothTethers {
+    ClothTether tethers[];
 };
 
 // Must match ClothPushConstants in render/vulkan/vulkan_cloth.cpp.

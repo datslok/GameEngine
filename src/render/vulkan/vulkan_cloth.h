@@ -192,6 +192,9 @@ private:
     VulkanBuffer pointHinges;
     VulkanBuffer vertexOrder;
 
+    // Each point's tether slots, read by the end's pass when a tick has the tethers on.
+    VulkanBuffer tethers;
+
     // The points before the last tick recorded, for drawing between the last two ticks.
     VulkanBuffer tickStart;
 

@@ -124,6 +124,7 @@ void testClothHierarchy();
 void testClothBlockDescent();
 void testClothGpu();
 void testClothTiming();
+void testClothTethers();
 void testGpuClothEngine();
 void testGpuTiming();
 void testToneMapping();
@@ -273,6 +274,7 @@ int main(){
     testClothBlockDescent();
     testClothGpu();
     testClothTiming();
+    testClothTethers();
     testGpuClothEngine();
     testGpuTiming();
     testToneMapping();

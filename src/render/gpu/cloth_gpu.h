@@ -61,6 +61,14 @@ struct GpuCollider {
 
 static_assert(sizeof(GpuCollider) == 48, "GpuCollider must match cloth.glsl's ClothCollider");
 
+// One tether slot (ClothTether): its anchor, or noTetherAnchor for a spare slot, and its rest length.
+struct GpuClothTether {
+    std::uint32_t anchor = noTetherAnchor;
+    float restLength = 0.0f;
+};
+
+static_assert(sizeof(GpuClothTether) == 8, "GpuClothTether must match cloth.glsl's ClothTether");
+
 // Where a moving pin's point starts the tick and where it ends it (ClothPin), slid evenly through the substeps.
 struct GpuClothPin {
     Vec4 start;
@@ -73,7 +81,7 @@ static_assert(sizeof(GpuClothPin) == 32, "GpuClothPin must match cloth.glsl's Cl
 * One tick: the step's length and everything worked out from it once on the CPU, as the CPU solver works them out
 * (XPBD's compliances over the substep's length squared, vertex block descent's stiffnesses (energyStiffness), the
 * drag's share kept a substep), so both sides start from the same numbers; its pins (from pinFirst in the tick's pins)
-* and bodies, the hand, and the solver.
+* and bodies, the hand, the solver, and the stretch the tethers allow (1 + the slack, 0 with the tethers off).
 */
 struct GpuClothTick {
     float substepSeconds = 0.0f;
@@ -101,7 +109,7 @@ struct GpuClothTick {
     float stretchStiffness = 0.0f; // N/m, the energy's
     float grabStiffness = 0.0f;    // N/m, the energy's
     std::uint32_t method = CLOTH_METHOD_XPBD;
-    std::uint32_t unused = 0;
+    float tetherStretch = 0.0f;
 };
 
 static_assert(sizeof(GpuClothTick) == 96, "GpuClothTick must match cloth.glsl's ClothTick");
@@ -207,6 +215,9 @@ std::vector<GpuStretch> packStretch(const std::vector<StretchConstraint>& constr
 std::vector<GpuBend> packBend(const std::vector<BendConstraint>& constraints);
 GpuCollider packCollider(const Shape& shape);
 
+// Every point's tether slots (Cloth::tethers), or all spare for a cloth with none, so a pass can read any point's.
+std::vector<GpuClothTether> packClothTethers(const Cloth& cloth);
+
 // For each point, which of the cloth's pins moves it (its place in Cloth::pins), or clothNoPin.
 std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth);
 
@@ -229,6 +240,7 @@ std::uint32_t clothLevelsUsed(const Cloth& cloth, const ClothSettings& settings)
 /*
 * The dispatches one tick records: per substep, the prediction, the solver's (XPBD: one per stretch colour and one per
 * bending colour, none without bending; vertex block descent: one per point colour, and with coarse levels the held
-* points, clothDispatchesPerLevel a level and a second sweep) and the end (the hand, the bodies, the velocities).
+* points, clothDispatchesPerLevel a level and a second sweep) and the end (the hand, the tethers, the bodies, the
+* velocities).
 */
 std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& settings);
