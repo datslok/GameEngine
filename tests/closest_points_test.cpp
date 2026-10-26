@@ -194,6 +194,19 @@ namespace {
         assertVector(closestPointOnTriangle(Vec3{-2.0f, 1.5f, 0.0f}, a, b, c), Vec3{0.0f, 1.5f, 0.0f});
         assertVector(closestPointOnTriangle(Vec3{3.0f, 3.0f, 1.0f}, a, b, c), Vec3{2.0f, 2.0f, 0.0f});
 
+        // The same seven regions name the feature the closest point lies on (for inside-outside tests by its normal).
+        const auto feature = [&](const Vec3& point) {
+            return closestTriangleFeature(point, a, b, c).feature;
+        };
+        assert(feature(Vec3{1.0f, 1.0f, 3.0f}) == TriangleFeature::Face);
+        assert(feature(Vec3{-1.0f, -1.0f, 2.0f}) == TriangleFeature::CornerA);
+        assert(feature(Vec3{6.0f, -1.0f, 0.0f}) == TriangleFeature::CornerB);
+        assert(feature(Vec3{-1.0f, 6.0f, -2.0f}) == TriangleFeature::CornerC);
+        assert(feature(Vec3{2.0f, -3.0f, 1.0f}) == TriangleFeature::EdgeAB);
+        assert(feature(Vec3{3.0f, 3.0f, 1.0f}) == TriangleFeature::EdgeBC);
+        assert(feature(Vec3{-2.0f, 1.5f, 0.0f}) == TriangleFeature::EdgeCA);
+        assertVector(closestTriangleFeature(Vec3{3.0f, 3.0f, 1.0f}, a, b, c).point, Vec3{2.0f, 2.0f, 0.0f});
+
         // Random points and triangles: never further than the sampled nearest point, never much nearer.
         Numbers numbers;
         for (int i = 0; i < 200; ++i) {

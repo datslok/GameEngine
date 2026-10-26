@@ -2,6 +2,7 @@
 #include "games/clothlab/cloth_lab_game.h"
 #include "games/clothlab/cloth_lab_layout.h"
 #include "physics/overlap.h"
+#include "physics/signed_distance_field.h"
 #include "physics/static_level.h"
 #include "cloth/cloth.h"
 #include "core/job_system.h"
@@ -22,16 +23,21 @@
 
 namespace {
     /*
-    * A fresh cloth lab, initialised headless. Without its big sheet unless asked for: 10,000 points on one thread would
-    * make every test here take many seconds.
+    * A fresh cloth lab, initialised headless. Without its big sheet or mannequin unless asked for: 10,000 points, or a
+    * distance field of millions of samples, on one thread would make every test here take seconds. jobs, if given, are
+    * the game's from the start.
     */
     struct ClothLab {
         World world;
         AssetManager assets;
         ClothLabGame game{ControlMode::FreeCamera, true};
 
-        explicit ClothLab(bool bigSheet = false) {
+        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr) {
             game.getStationSettings().bigSheet = bigSheet;
+            game.getStationSettings().mannequin = mannequin;
+            if (jobs != nullptr) {
+                game.useJobs(*jobs);
+            }
             game.onInit(world, assets);
         }
     };
@@ -89,7 +95,7 @@ namespace {
     // The stations stand apart, and none covers where the player starts.
     void testStationsStandApart() {
         const std::vector<Aabb> stations = buildClothLabLayout().stations();
-        assert(stations.size() == 3);
+        assert(stations.size() == 4);
         for (std::size_t first = 0; first < stations.size(); ++first) {
             for (std::size_t second = first + 1; second < stations.size(); ++second) {
                 assert(!overlaps(stations[first], stations[second]));
@@ -382,6 +388,91 @@ namespace {
         assert(!without.world.isAlive(without.game.getBigSheet()));
     }
 
+    /*
+    * The mannequin is placed by its model's box: scaled to the lab's height, its feet's middle (the box's bottom, centred
+    * across and front to back) on the station's spot.
+    */
+    void testTheMannequinIsPlaced() {
+        const Aabb model{Vec3{-5.8f, -0.06f, -1.85f}, Vec3{5.8f, 20.68f, 1.95f}};
+        const Vec3 feet{-7.5f, 0.0f, -1.0f};
+        const Mat4 placement = clothLabMannequinPlacement(model, feet);
+        const Vec3 bottom = transformPoint(placement, Vec3{0.0f, model.minimum.y, 0.05f});
+        assert(near(bottom.x, feet.x) && near(bottom.y, feet.y) && near(bottom.z, feet.z));
+        const Vec3 top = transformPoint(placement, Vec3{0.0f, model.maximum.y, 0.05f});
+        assert(near(top.y - bottom.y, clothLabMannequinHeight));
+        const Vec3 hand = transformPoint(placement, Vec3{5.8f, 10.0f, 0.05f});
+        assert(near(hand.x - feet.x, 5.8f * clothLabMannequinHeight / (model.maximum.y - model.minimum.y)));
+    }
+
+    /*
+    * The mannequin station: the model standing at its spot, drawn and walked against like the rest of the level, and a
+    * distance field round it for the cloth, solid at its chest and a little way above its head.
+    */
+    void testTheMannequinStands() {
+        JobSystem jobs;
+        ClothLab lab{false, true, &jobs};
+        const ClothLabLayout layout = buildClothLabLayout();
+
+        int bodies = 0;
+        lab.world.each<DistanceFieldCollider, ModelRenderer>([&](Entity, const DistanceFieldCollider& collider, const ModelRenderer& renderer) {
+            ++bodies;
+            assert(renderer.isStatic && renderer.parts.size() == 1);
+            const SignedDistanceField& field = *collider.field;
+            assert(field.spacing == clothLabMannequinFieldSpacing && field.band == clothLabMannequinFieldBand);
+            const Aabb bounds = field.bounds();
+            assert(std::abs(bounds.minimum.y - layout.mannequinFeet.y) < 0.05f);
+            assert(std::abs(bounds.maximum.y - (layout.mannequinFeet.y + clothLabMannequinHeight)) < 0.05f);
+
+            const Vec3 chest{layout.mannequinFeet.x, layout.mannequinFeet.y + 1.3f, layout.mannequinFeet.z};
+            assert(sampleField(field, chest).distance < 0.0f);
+            const Vec3 aboveHead{layout.mannequinFeet.x, layout.mannequinFeet.y + clothLabMannequinHeight + 0.01f, layout.mannequinFeet.z};
+            assert(sampleField(field, aboveHead).distance > 0.0f);
+        });
+        assert(bodies == 1);
+
+        // The player cannot walk through it: the level has a surface at its chest's height there.
+        const std::optional<LevelHit> hit =
+            raycast(lab.game.getLevel(), Ray{Vec3{layout.mannequinFeet.x, 1.3f, layout.mannequinFeet.z + 2.0f}, Vec3{0.0f, 0.0f, -1.0f}});
+        assert(hit && hit->hit.distance < 2.0f);
+
+        // Off, there is none, and no sheet to drop on it.
+        ClothLab without;
+        int none = 0;
+        without.world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider&) { ++none; });
+        assert(none == 0 && !without.world.isAlive(without.game.getMannequinSheet()));
+    }
+
+    /*
+    * The mannequin's milestone, started: a free sheet laid flat above its head falls onto it and comes to rest on its
+    * head and shoulders, nothing inside the body or below the floor.
+    */
+    void testTheSheetDropsOntoTheMannequin() {
+        JobSystem jobs;
+        ClothLab lab{false, true, &jobs};
+        const ClothLabLayout layout = buildClothLabLayout();
+        const Entity sheet = lab.game.getMannequinSheet();
+        const Cloth& cloth = lab.world.get<Cloth>(sheet);
+        assert(cloth.pins.empty());
+        assert(cloth.particles.size() == static_cast<std::size_t>((clothLabDropSheetSquares + 1) * (clothLabDropSheetSquares + 1)));
+        for (const Vec3& point : cloth.particles.positions) {
+            assert(near(point.y, layout.dropSheetCentre.y));
+        }
+        assert(layout.dropSheetCentre.y > layout.mannequinFeet.y + clothLabMannequinHeight);
+
+        for (int tick = 0; tick < 240; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+
+        std::shared_ptr<const SignedDistanceField> field;
+        lab.world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider& collider) { field = collider.field; });
+        for (const Vec3& point : cloth.particles.positions) {
+            assert(sampleField(*field, point).distance > 0.0f);
+            assert(point.y > 0.0f);
+        }
+        const std::size_t middle = static_cast<std::size_t>(clothLabDropSheetSquares / 2) * (clothLabDropSheetSquares + 1) + clothLabDropSheetSquares / 2;
+        assert(cloth.particles.positions[middle].y > layout.mannequinFeet.y + clothLabMannequinHeight - 0.1f);
+    }
+
     // It has golden views, looking at its stations.
     void testItHasGoldenViews() {
         ClothLab lab;
@@ -402,5 +493,8 @@ void testClothLab() {
     testCollidersMatchTheLayout();
     testTheDrapeSheetSettlesOverTheBall();
     testTheBigSheetSags();
+    testTheMannequinIsPlaced();
+    testTheMannequinStands();
+    testTheSheetDropsOntoTheMannequin();
     testItHasGoldenViews();
 }

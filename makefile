@@ -125,6 +125,8 @@ $(OBJECT_DIR)/src/render/vulkan/vulkan_dlss.o: CXXFLAGS += -Wno-deprecated-decla
 # (31 ms a tick against 8.3), and inner loops this hot are rarely what one steps through. -O2 after -O0 wins; -g stays.
 ifeq ($(BUILD),debug)
 $(OBJECT_DIR)/src/cloth/%.o: CXXFLAGS += -O2
+# So is building a body's distance field: the cloth lab's mannequin is about 6 million samples, built at every start.
+$(OBJECT_DIR)/src/physics/signed_distance_field.o: CXXFLAGS += -O2
 endif
 
 # ImGui's Vulkan backend calls Vulkan through volk, which it includes as <volk.h>.

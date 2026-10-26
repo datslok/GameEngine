@@ -45,7 +45,9 @@ std::vector<ClothLabBlock> ClothLabLayout::blocks() const {
 
 std::vector<Aabb> ClothLabLayout::stations() const {
     const Aabb drape = enclosing(enclosing(boundsOf(Shape{ball}), pedestal.bounds()), frameBounds(drapeFrame));
-    return {drape, mat.bounds(), frameBounds(fabricFrame)};
+    const float sheetReach = 0.5f * clothLabDropSheetSize;
+    const Aabb mannequin{mannequinFeet - Vec3{sheetReach, 0.0f, sheetReach}, dropSheetCentre + Vec3{sheetReach, 0.0f, sheetReach}};
+    return {drape, mat.bounds(), frameBounds(fabricFrame), mannequin};
 }
 
 /*
@@ -72,5 +74,15 @@ ClothLabLayout buildClothLabLayout() {
     layout.fabricFrame = ClothLabFrame{Vec3{4.5f, 2.0f + clothLabBarHalfThickness, -1.35f}, 1.8f};
     const ClothLabFrame& bar = layout.fabricFrame;
     layout.sheetCentre = Vec3{bar.barCentre.x - 0.5f * bar.barHalfLength, clothLabBarUnderside(bar), bar.barCentre.z + 0.5f * clothLabSheetDepth};
+
+    layout.mannequinFeet = Vec3{-7.5f, 0.0f, -1.0f};
+    layout.dropSheetCentre = layout.mannequinFeet + Vec3{0.0f, clothLabMannequinHeight + clothLabDropSheetClearance, 0.0f};
     return layout;
+}
+
+Mat4 clothLabMannequinPlacement(const Aabb& modelBounds, const Vec3& feet) {
+    const float scale = clothLabMannequinHeight / (modelBounds.maximum.y - modelBounds.minimum.y);
+    const Vec3 middle = modelBounds.centre();
+    return Mat4::translation(feet.x - scale * middle.x, feet.y - scale * modelBounds.minimum.y, feet.z - scale * middle.z) *
+           Mat4::scaling(scale, scale, scale);
 }

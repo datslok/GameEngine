@@ -32,5 +32,27 @@ ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& 
 // The point on the triangle a, b, c nearest to point: on its face, one of its edges or one of its corners.
 Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c);
 
+// Which part of a triangle a, b, c its nearest point lies on (edge CA runs from c to a).
+enum class TriangleFeature {
+    Face,
+    EdgeAB,
+    EdgeBC,
+    EdgeCA,
+    CornerA,
+    CornerB,
+    CornerC,
+};
+
+struct TriangleClosest {
+    Vec3 point;
+    TriangleFeature feature = TriangleFeature::Face;
+};
+
+/*
+* closestPointOnTriangle's point and the feature it lies on, for telling a point's side of a closed mesh by that
+* feature's normal. A triangle with no area gives its nearest edge.
+*/
+TriangleClosest closestTriangleFeature(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c);
+
 // The nearest points between the segment from s0 to s1 and the triangle a, b, c (zero distance where the segment pierces it).
 ClosestPoints closestPointsSegmentTriangle(const Vec3& s0, const Vec3& s1, const Vec3& a, const Vec3& b, const Vec3& c);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "math/aabb.h"
+#include "math/mat4.h"
 #include "math/vec3.h"
 #include "physics/shapes.h"
 
@@ -11,7 +12,8 @@
 * in front of where the player starts (ROADMAP.md, phase 7):
 *   - draping: a ball on a pedestal, under a bar to pin a sheet's corners to;
 *   - piling: a mat on the floor, where a sheet dropped onto itself folds into a pile;
-*   - fabrics: a wide bar to hang two sheets side by side (silk beside denim).
+*   - fabrics: a wide bar to hang two sheets side by side (silk beside denim);
+*   - the mannequin: a human figure to drape cloth on, and later the dress sewn from two panels.
 * Kept apart from the game so the tests can check it without building one.
 */
 
@@ -43,6 +45,22 @@ inline constexpr int clothLabBigSheetSquares = 100;
 inline constexpr float clothLabBigSheetSize = 2.0f;
 inline constexpr float clothLabBigSheetCornerSpan = 1.6f;
 inline constexpr float clothLabBigSheetHeight = 1.2f;
+
+/*
+* The mannequin: this model (watertight, its arms out in an A-pose, facing +z, towards where the player starts), scaled
+* to this height, and the distance field the cloth collides with round it (physics/signed_distance_field.h): samples
+* 5 mm apart, real distances within 3 cm of the skin. The band must stay wider than any cloth's thickness.
+*/
+inline constexpr const char* clothLabMannequinModel = "assets/models/human.obj";
+inline constexpr float clothLabMannequinHeight = 1.75f;           // m
+inline constexpr float clothLabMannequinFieldSpacing = 0.005f;    // m
+inline constexpr float clothLabMannequinFieldBand = 0.03f;        // m
+
+// The sheet dropped onto it: squares x squares, size metres square, laid flat this far above the mannequin's head and
+// centred over its feet, pinned nowhere.
+inline constexpr int clothLabDropSheetSquares = 60;
+inline constexpr float clothLabDropSheetSize = 1.6f;
+inline constexpr float clothLabDropSheetClearance = 0.2f;
 
 // The floor's collision box reaches this far below the ground, so nothing can pass through it in a substep.
 inline constexpr float clothLabFloorDepth = 1.0f;
@@ -79,6 +97,12 @@ struct ClothLabLayout {
     // Fabrics.
     ClothLabFrame fabricFrame;
 
+    // The mannequin: the middle of its feet on the floor.
+    Vec3 mannequinFeet;
+
+    // Where the dropped sheet's middle starts: over the mannequin's head.
+    Vec3 dropSheetCentre;
+
     // Where the flat drape sheet's middle starts: level with the drape bar's underside, half its size in front of it.
     Vec3 drapeSheetCentre;
 
@@ -97,3 +121,9 @@ struct ClothLabLayout {
 };
 
 ClothLabLayout buildClothLabLayout();
+
+/*
+* Where the mannequin's model goes, from its box in the model's own units: scaled to clothLabMannequinHeight, the middle
+* of its box's bottom (centred across and front to back) on feet. The model already faces +z.
+*/
+Mat4 clothLabMannequinPlacement(const Aabb& modelBounds, const Vec3& feet);
