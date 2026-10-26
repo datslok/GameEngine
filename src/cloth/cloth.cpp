@@ -74,7 +74,7 @@ Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int subste
     return start + (target - start) * share;
 }
 
-ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders) {
+ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders, const ClothFields& fields) {
     ClothTickCommands commands;
     commands.settings = cloth.settings;
     commands.seconds = seconds;
@@ -83,6 +83,7 @@ ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std
     }
     commands.grab = cloth.grab;
     commands.colliders = colliders;
+    commands.fields = fields;
     return commands;
 }
 
@@ -109,6 +110,7 @@ namespace {
         const std::vector<ClothPin>& pins;
         const std::optional<ClothGrab>& grab;
         const std::vector<Shape>& colliders;
+        const ClothFields& fields;
         const std::vector<ClothTether>& tethers;
 
         // Vertex block descent's per-point lists and colours and its coarse levels, or none (XPBD alone).
@@ -117,23 +119,43 @@ namespace {
         const ClothHierarchy* hierarchy;
     };
 
+    // The box round the cloth's points, grown by its thickness.
+    Aabb clothReach(const ClothParticles& particles, float thickness) {
+        Aabb around{particles.positions.front(), particles.positions.front()};
+        for (const Vec3& position : particles.positions) {
+            around = enclosing(around, Aabb{position, position});
+        }
+        const Vec3 margin{thickness, thickness, thickness};
+        return Aabb{around.minimum - margin, around.maximum + margin};
+    }
+
     // The shapes whose boxes meet the box round the cloth, grown by its thickness: most bodies are nowhere near it.
     std::vector<Shape> nearbyShapes(const ClothParticles& particles, const std::vector<Shape>& shapes, float thickness) {
         if (shapes.empty() || particles.size() == 0) {
             return {};
         }
 
-        Aabb around{particles.positions.front(), particles.positions.front()};
-        for (const Vec3& position : particles.positions) {
-            around = enclosing(around, Aabb{position, position});
-        }
-        const Vec3 margin{thickness, thickness, thickness};
-        around = Aabb{around.minimum - margin, around.maximum + margin};
-
+        const Aabb around = clothReach(particles, thickness);
         std::vector<Shape> nearby;
         for (const Shape& shape : shapes) {
             if (overlaps(around, boundsOf(shape))) {
                 nearby.push_back(shape);
+            }
+        }
+        return nearby;
+    }
+
+    // The same for field bodies, by their fields' boxes.
+    ClothFields nearbyFields(const ClothParticles& particles, const ClothFields& fields, float thickness) {
+        if (fields.empty() || particles.size() == 0) {
+            return {};
+        }
+
+        const Aabb around = clothReach(particles, thickness);
+        ClothFields nearby;
+        for (const std::shared_ptr<const SignedDistanceField>& field : fields) {
+            if (overlaps(around, field->bounds())) {
+                nearby.push_back(field);
             }
         }
         return nearby;
@@ -185,7 +207,7 @@ namespace {
                     const std::vector<Shape> bodies = constraints.colliders.empty() ? std::vector<Shape>{}
                                                                                     : nearbyShapes(particles, constraints.colliders, settings.thickness);
                     solveClothHierarchy(particles, *constraints.hierarchy, settings.hierarchyLevels, energyTerms, bodies, settings.thickness, substep,
-                                        scratch, jobs);
+                                        scratch, jobs, nearbyFields(particles, constraints.fields, settings.thickness));
                     solveVertexBlocks(particles, scratch.predicted, *constraints.vertexColours, energyTerms, substep, jobs);
                 }
             } else {
@@ -207,8 +229,9 @@ namespace {
             if (settings.tethers) {
                 solveTethers(particles, constraints.tethers, settings.tetherSlack, jobs);
             }
-            if (!constraints.colliders.empty()) {
-                solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings);
+            if (!constraints.colliders.empty() || !constraints.fields.empty()) {
+                solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings,
+                              nearbyFields(particles, constraints.fields, settings.thickness));
             }
             finishClothStep(particles, substep);
 
@@ -228,13 +251,14 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<std::uint32_t> noColours;
     const std::vector<ClothPin> noPins;
     const std::vector<ClothTether> noTethers;
-    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noTethers, nullptr, nullptr, nullptr}, settings,
-             seconds, serialJobs());
+    const ClothFields noFields;
+    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noFields, noTethers, nullptr, nullptr, nullptr},
+             settings, seconds, serialJobs());
 }
 
-void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs) {
+void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs, const ClothFields& fields) {
     stepTick(cloth.particles,
-             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, cloth.tethers,
+             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, fields, cloth.tethers,
                              &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy},
              cloth.settings, seconds, jobs);
 }
@@ -249,10 +273,11 @@ void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders,
 */
 void stepCloths(World& world, float seconds, JobSystem& jobs, ClothSolver solver) {
     const std::vector<Shape> colliders = worldColliderShapes(world);
+    const ClothFields fields = worldDistanceFields(world);
     if (solver == ClothSolver::Gpu) {
         world.each<Cloth>([&](Entity, Cloth& cloth) {
             cloth.onGpu = true;
-            cloth.gpuTicks.push_back(clothTickCommands(cloth, seconds, colliders));
+            cloth.gpuTicks.push_back(clothTickCommands(cloth, seconds, colliders, fields));
         });
         return;
     }
@@ -267,7 +292,7 @@ void stepCloths(World& world, float seconds, JobSystem& jobs, ClothSolver solver
     });
 
     jobs.parallelFor(cloths.size(), 1, [&](std::size_t index) {
-        stepCloth(*cloths[index], seconds, colliders, jobs);
+        stepCloth(*cloths[index], seconds, colliders, jobs, fields);
         if (meshes[index] != nullptr) {
             meshes[index]->positions = cloths[index]->particles.positions;
         }

@@ -99,6 +99,17 @@ GpuCollider packCollider(const Shape& shape) {
     }, shape);
 }
 
+GpuClothField packClothField(const SignedDistanceField& field, std::uint32_t firstSample) {
+    GpuClothField record;
+    record.origin = Vec4{field.origin.x, field.origin.y, field.origin.z, field.spacing};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        record.counts[axis] = static_cast<std::uint32_t>(field.counts[axis]);
+    }
+    record.firstSample = firstSample;
+    record.band = field.band;
+    return record;
+}
+
 std::vector<GpuClothTether> packClothTethers(const Cloth& cloth) {
     std::vector<GpuClothTether> packed(cloth.particles.size() * tethersPerPoint);
     for (std::size_t index = 0; index < std::min(packed.size(), cloth.tethers.size()); ++index) {
@@ -116,7 +127,7 @@ std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth) {
 }
 
 // The same expressions as the CPU solver's (cloth.cpp's stepTick, solveStretch, solveBend, solveGrab, solveTethers, clothPointForce), in float.
-GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst) {
+GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst, std::uint32_t fieldFirst) {
     const ClothSettings& settings = commands.settings;
     if (settings.substeps < 1) {
         throw std::invalid_argument("A cloth needs at least one substep a tick");
@@ -147,6 +158,8 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.grabStiffness = energyStiffness(settings.grabCompliance);
     tick.method = static_cast<std::uint32_t>(settings.method);
     tick.tetherStretch = settings.tethers ? 1.0f + settings.tetherSlack : 0.0f;
+    tick.fieldFirst = fieldFirst;
+    tick.fieldCount = static_cast<std::uint32_t>(commands.fields.size());
     return tick;
 }
 

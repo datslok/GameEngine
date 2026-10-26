@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cloth/cloth_collision.h"
 #include "cloth/cloth_constraints.h"
 #include "cloth/cloth_energy.h"
 #include "cloth/cloth_particles.h"
@@ -151,5 +152,6 @@ struct ClothHierarchyScratch {
 * solve. Sums are made in fixed chunks in a fixed order, so any number of threads gives the same bits.
 */
 void solveClothHierarchy(ClothParticles& particles, const ClothHierarchy& hierarchy, int levels, const ClothEnergyTerms& terms,
-                         const std::vector<Shape>& bodies, float thickness, float seconds, ClothHierarchyScratch& scratch, JobSystem& jobs);
+                         const std::vector<Shape>& bodies, float thickness, float seconds, ClothHierarchyScratch& scratch, JobSystem& jobs,
+                         const ClothFields& fields = {});
 

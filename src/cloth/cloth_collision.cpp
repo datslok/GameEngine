@@ -59,32 +59,64 @@ SurfacePoint surfacePoint(const Shape& shape, const Vec3& point) {
     }, shape);
 }
 
-void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings) {
+namespace {
+    // One body's push and friction on a point (solveContacts).
+    void contact(Vec3& position, const Vec3& previous, const SurfacePoint& surface, const ClothSettings& settings) {
+        const float push = settings.thickness - surface.distance;
+        if (push <= 0.0f) {
+            return;
+        }
+
+        position = position + surface.normal * push;
+
+        const Vec3 moved = position - previous;
+        const Vec3 slide = moved - surface.normal * surface.normal.dot(moved);
+        const float slideLength = slide.length();
+        if (slideLength < settings.staticFriction * push) {
+            position = position - slide;
+        } else if (slideLength > 0.0f) {
+            position = position - slide * std::min(settings.kineticFriction * push / slideLength, 1.0f);
+        }
+    }
+}
+
+void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings, const ClothFields& fields) {
     for (std::size_t index = 0; index < particles.size(); ++index) {
         if (particles.inverseMasses[index] == 0.0f) {
             continue;
         }
 
         Vec3& position = particles.positions[index];
+        const Vec3& previous = particles.previousPositions[index];
         for (const Shape& shape : shapes) {
-            const SurfacePoint surface = surfacePoint(shape, position);
-            const float push = settings.thickness - surface.distance;
-            if (push <= 0.0f) {
-                continue;
-            }
-
-            position = position + surface.normal * push;
-
-            const Vec3 moved = position - particles.previousPositions[index];
-            const Vec3 slide = moved - surface.normal * surface.normal.dot(moved);
-            const float slideLength = slide.length();
-            if (slideLength < settings.staticFriction * push) {
-                position = position - slide;
-            } else if (slideLength > 0.0f) {
-                position = position - slide * std::min(settings.kineticFriction * push / slideLength, 1.0f);
-            }
+            contact(position, previous, surfacePoint(shape, position), settings);
+        }
+        for (const std::shared_ptr<const SignedDistanceField>& field : fields) {
+            contact(position, previous, surfacePoint(*field, position), settings);
         }
     }
+}
+
+SurfacePoint surfacePoint(const SignedDistanceField& field, const Vec3& point) {
+    return fieldSurface(sampleField(field, point));
+}
+
+SurfacePoint fieldSurface(const FieldPoint& sampled) {
+    const float slope = sampled.gradient.length();
+    if (slope * slope < noDirection) {
+        return SurfacePoint{sampled.distance, straightUp};
+    }
+    return SurfacePoint{sampled.distance, sampled.gradient * (1.0f / slope)};
+}
+
+ClothFields worldDistanceFields(const World& world) {
+    ClothFields fields;
+    world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider& collider) {
+        if (collider.field) {
+            fields.push_back(collider.field);
+        }
+    });
+    return fields;
 }
 
 std::vector<Shape> worldColliderShapes(const World& world) {

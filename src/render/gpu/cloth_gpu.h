@@ -3,6 +3,7 @@
 #include "cloth/cloth.h"
 #include "math/vec4.h"
 #include "physics/shapes.h"
+#include "physics/signed_distance_field.h"
 #include "render/gpu/cloth_gpu_shared.h"
 #include "scene/asset_handles.h"
 #include "scene/deforming_mesh.h"
@@ -69,6 +70,21 @@ struct GpuClothTether {
 
 static_assert(sizeof(GpuClothTether) == 8, "GpuClothTether must match cloth.glsl's ClothTether");
 
+/*
+* A field body (DistanceFieldCollider): where its first sample is, with the spacing in w, its samples along each axis,
+* where they start in the fields' buffer (one buffer of every field's samples, shared by the cloths:
+* render/vulkan/vulkan_cloth.h, VulkanClothFields), and its band.
+*/
+struct GpuClothField {
+    Vec4 origin;
+    std::uint32_t counts[3]{};
+    std::uint32_t firstSample = 0;
+    float band = 0.0f;
+    float unused[3]{};
+};
+
+static_assert(sizeof(GpuClothField) == 48, "GpuClothField must match cloth.glsl's ClothField");
+
 // Where a moving pin's point starts the tick and where it ends it (ClothPin), slid evenly through the substeps.
 struct GpuClothPin {
     Vec4 start;
@@ -80,8 +96,8 @@ static_assert(sizeof(GpuClothPin) == 32, "GpuClothPin must match cloth.glsl's Cl
 /*
 * One tick: the step's length and everything worked out from it once on the CPU, as the CPU solver works them out
 * (XPBD's compliances over the substep's length squared, vertex block descent's stiffnesses (energyStiffness), the
-* drag's share kept a substep), so both sides start from the same numbers; its pins (from pinFirst in the tick's pins)
-* and bodies, the hand, the solver, and the stretch the tethers allow (1 + the slack, 0 with the tethers off).
+* drag's share kept a substep), so both sides start from the same numbers; its pins (from pinFirst in the tick's pins),
+* bodies and field bodies, the hand, the solver, and the stretch the tethers allow (1 + the slack, 0 with the tethers off).
 */
 struct GpuClothTick {
     float substepSeconds = 0.0f;
@@ -110,9 +126,13 @@ struct GpuClothTick {
     float grabStiffness = 0.0f;    // N/m, the energy's
     std::uint32_t method = CLOTH_METHOD_XPBD;
     float tetherStretch = 0.0f;
+
+    std::uint32_t fieldFirst = 0;
+    std::uint32_t fieldCount = 0;
+    std::uint32_t unused[2]{};
 };
 
-static_assert(sizeof(GpuClothTick) == 96, "GpuClothTick must match cloth.glsl's ClothTick");
+static_assert(sizeof(GpuClothTick) == 112, "GpuClothTick must match cloth.glsl's ClothTick");
 
 /*
 * A cloth the renderer simulates this frame (VulkanRenderer::setClothWork): which cloth (key, its entity, the same every
@@ -215,6 +235,9 @@ std::vector<GpuStretch> packStretch(const std::vector<StretchConstraint>& constr
 std::vector<GpuBend> packBend(const std::vector<BendConstraint>& constraints);
 GpuCollider packCollider(const Shape& shape);
 
+// A field body's record, its samples starting at firstSample in the fields' buffer.
+GpuClothField packClothField(const SignedDistanceField& field, std::uint32_t firstSample);
+
 // Every point's tether slots (Cloth::tethers), or all spare for a cloth with none, so a pass can read any point's.
 std::vector<GpuClothTether> packClothTethers(const Cloth& cloth);
 
@@ -222,10 +245,10 @@ std::vector<GpuClothTether> packClothTethers(const Cloth& cloth);
 std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth);
 
 /*
-* A tick's record, its pins from pinFirst and bodies from colliderFirst in the frame's lists. Throws
-* std::invalid_argument for fewer than one substep, as the CPU solver does.
+* A tick's record, its pins from pinFirst, bodies from colliderFirst and field bodies from fieldFirst in the frame's
+* lists. Throws std::invalid_argument for fewer than one substep, as the CPU solver does.
 */
-GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst);
+GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinFirst, std::uint32_t colliderFirst, std::uint32_t fieldFirst = 0);
 
 // The levels of a cloth with pointCount points (a hierarchy built for no points, a cloth's before makeCloth, has none).
 GpuClothLevels packClothLevels(const ClothHierarchy& hierarchy, std::size_t pointCount);

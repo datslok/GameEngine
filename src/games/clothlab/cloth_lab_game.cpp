@@ -6,6 +6,8 @@
 #include "math/transform.h"
 #include "math/angles.h"
 #include "physics/collider.h"
+#include "physics/signed_distance_field.h"
+#include "scene/collision_mesh.h"
 #include "scene/atmosphere.h"
 #include "scene/deforming_mesh.h"
 #include "scene/light.h"
@@ -55,6 +57,14 @@ namespace {
         return material;
     }
 
+    // A shop mannequin's pale matte finish.
+    Material mannequinMaterial() {
+        Material material;
+        material.colour = Pixel{215, 210, 200};
+        material.roughness = 0.7f;
+        return material;
+    }
+
     Material steelMaterial() {
         Material material;
         material.colour = Pixel{180, 182, 186};
@@ -78,6 +88,7 @@ namespace {
     const Pixel hangingSheetColour{150, 30, 35};
     const Pixel drapeSheetColour{225, 215, 190};
     const Pixel bigSheetColour{150, 165, 190};
+    const Pixel dropSheetColour{95, 125, 90};
 
     // A grid laid flat (the grid faces +z; turned to face up, its top edge at the back) with its middle at centre.
     Mat4 laidFlat(const Vec3& centre) {
@@ -156,6 +167,7 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
         const Entity entity = world.create();
         world.add(entity, Transform{});
         world.add(entity, std::move(renderer));
+        return entity;
     };
 
     addStatic(makeMeshRenderer(assets.addMesh(Mesh::plane(clothLabFloorHalfSize)), floorMaterial()));
@@ -215,6 +227,28 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
             pin.position = layout.bigSheetCentre + Vec3{out.x < 0.0f ? -half : half, 0.0f, out.z < 0.0f ? -half : half};
         }
         bigSheet = addSheet(world, assets, bigMesh, std::move(big), cottonMaterial(bigSheetColour));
+    }
+
+    // The mannequin: its model placed on its spot, part of the level (drawn, walked against, static for the probes), and
+    // a distance field round it for the cloth, built on every core; then a free sheet laid flat above its head.
+    if (stationSettings.mannequin) {
+        const MeshHandle body = assets.loadMesh(clothLabMannequinModel);
+        const Mesh& model = assets.getMesh(body);
+        Aabb modelBounds{Vec3{model.vertices.front().x, model.vertices.front().y, model.vertices.front().z},
+                         Vec3{model.vertices.front().x, model.vertices.front().y, model.vertices.front().z}};
+        for (const Vec4& vertex : model.vertices) {
+            modelBounds = enclosing(modelBounds, Aabb{Vec3{vertex.x, vertex.y, vertex.z}, Vec3{vertex.x, vertex.y, vertex.z}});
+        }
+        const Mat4 placement = clothLabMannequinPlacement(modelBounds, layout.mannequinFeet);
+
+        ModelRenderer mannequin;
+        mannequin.parts.push_back(RenderPart{body, mannequinMaterial(), placement});
+        const Entity standing = addStatic(std::move(mannequin));
+        world.add(standing, DistanceFieldCollider{std::make_shared<const SignedDistanceField>(buildSignedDistanceField(
+                                collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, getJobs()))});
+
+        const Mesh dropMesh = Mesh::grid(clothLabDropSheetSquares, clothLabDropSheetSquares, clothLabDropSheetSize, clothLabDropSheetSize);
+        mannequinSheet = addSheet(world, assets, dropMesh, makeCloth(dropMesh, laidFlat(layout.dropSheetCentre), clothSettings), cottonMaterial(dropSheetColour));
     }
 
     controls.spawnBody(world);
@@ -338,6 +372,7 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor) {
 
 void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Big sheet", settings.bigSheet, FieldApplies::AtStartup);
+    visitor.field("Mannequin", settings.mannequin, FieldApplies::AtStartup);
 }
 
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {
@@ -391,6 +426,10 @@ Entity ClothLabGame::getBigSheet() const {
     return bigSheet;
 }
 
+Entity ClothLabGame::getMannequinSheet() const {
+    return mannequinSheet;
+}
+
 ClothLabStationSettings& ClothLabGame::getStationSettings() {
     return stationSettings;
 }
@@ -399,6 +438,9 @@ std::vector<Entity> ClothLabGame::sheets() const {
     std::vector<Entity> all{sheet, drapeSheet};
     if (stationSettings.bigSheet) {
         all.push_back(bigSheet);
+    }
+    if (stationSettings.mannequin) {
+        all.push_back(mannequinSheet);
     }
     return all;
 }

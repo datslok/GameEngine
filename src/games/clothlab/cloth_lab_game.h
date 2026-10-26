@@ -39,9 +39,13 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
 * 6.3 ms a tick on 16 threads with isometric bending, inside a tick's 8.3 (with the hinge model about 11, so the lab
 * runs a little slower than real time). Off by
 * default; on for measuring the solver's threads.
+*
+* The mannequin (assets/models/human.obj, with a distance field of about 6 million samples built at the start, under a
+* second on every core) and the sheet dropped onto it: on by default.
 */
 struct ClothLabStationSettings {
     bool bigSheet = false;
+    bool mannequin = true;
 };
 
 void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor);
@@ -83,6 +87,9 @@ public:
 
     // The big sheet over the mat, if the stations have it (none otherwise).
     Entity getBigSheet() const;
+
+    // The sheet dropped onto the mannequin, if the stations have it (none otherwise).
+    Entity getMannequinSheet() const;
     ClothLabStationSettings& getStationSettings();
     ClothSettings& getClothSettings();
     ClothLabHookSettings& getHookSettings();
@@ -109,6 +116,7 @@ private:
 
     Entity drapeSheet;
     Entity bigSheet;
+    Entity mannequinSheet;
     ClothLabStationSettings stationSettings;
 
     // Every sheet the lab has.

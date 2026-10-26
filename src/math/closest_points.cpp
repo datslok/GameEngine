@@ -186,7 +186,7 @@ ClosestPoints closestPointsSegmentBox(const Vec3& a, const Vec3& b, const Aabb& 
 * barycentric coordinates, and they say which region it is in; only that region's case is then worked out. Corners are
 * checked first because they need the fewest products. Follows Ericson, "Real-Time Collision Detection", section 5.1.5.
 */
-Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c) {
+TriangleClosest closestTriangleFeature(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c) {
     const Vec3 ab = b - a;
     const Vec3 ac = c - a;
 
@@ -194,51 +194,56 @@ Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, con
     const float d1 = ab.dot(ap);
     const float d2 = ac.dot(ap);
     if (d1 <= 0.0f && d2 <= 0.0f) {
-        return a;
+        return {a, TriangleFeature::CornerA};
     }
 
     const Vec3 bp = point - b;
     const float d3 = ab.dot(bp);
     const float d4 = ac.dot(bp);
     if (d3 >= 0.0f && d4 <= d3) {
-        return b;
+        return {b, TriangleFeature::CornerB};
     }
 
     const float vc = d1 * d4 - d3 * d2;
     if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
-        return a + ab * (d1 / (d1 - d3));
+        return {a + ab * (d1 / (d1 - d3)), TriangleFeature::EdgeAB};
     }
 
     const Vec3 cp = point - c;
     const float d5 = ab.dot(cp);
     const float d6 = ac.dot(cp);
     if (d6 >= 0.0f && d5 <= d6) {
-        return c;
+        return {c, TriangleFeature::CornerC};
     }
 
     const float vb = d5 * d2 - d1 * d6;
     if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
-        return a + ac * (d2 / (d2 - d6));
+        return {a + ac * (d2 / (d2 - d6)), TriangleFeature::EdgeCA};
     }
 
     const float va = d3 * d6 - d5 * d4;
     if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
-        return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+        return {b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))), TriangleFeature::EdgeBC};
     }
 
     // Inside the face region. The three products are proportional to the barycentric weights; a triangle with no area
     // makes them all zero, and then its nearest edge is the answer.
     const float total = va + vb + vc;
     if (total <= 0.0f) {
-        Vec3 best = closestPointOnSegment(point, a, b);
-        for (const Vec3& candidate : {closestPointOnSegment(point, b, c), closestPointOnSegment(point, c, a)}) {
-            if ((candidate - point).lengthSquared() < (best - point).lengthSquared()) {
+        TriangleClosest best{closestPointOnSegment(point, a, b), TriangleFeature::EdgeAB};
+        for (const TriangleClosest& candidate : {TriangleClosest{closestPointOnSegment(point, b, c), TriangleFeature::EdgeBC},
+                                                 TriangleClosest{closestPointOnSegment(point, c, a), TriangleFeature::EdgeCA}}) {
+            if ((candidate.point - point).lengthSquared() < (best.point - point).lengthSquared()) {
                 best = candidate;
             }
         }
         return best;
     }
-    return a + ab * (vb / total) + ac * (vc / total);
+    return {a + ab * (vb / total) + ac * (vc / total), TriangleFeature::Face};
+}
+
+Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c) {
+    return closestTriangleFeature(point, a, b, c).point;
 }
 
 /*

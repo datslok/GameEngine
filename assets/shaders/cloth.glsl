@@ -99,6 +99,19 @@ struct ClothTick {
     float grabStiffness;
     uint method;
     float tetherStretch; // 1 + the tethers' slack, 0 with the tethers off
+
+    uint fieldFirst;
+    uint fieldCount;
+    uint unused0;
+    uint unused1;
+};
+
+// A field body (GpuClothField): its first sample with the spacing in w, its samples along each axis with where they start
+// in the fields' buffer in w, and its band in x.
+struct ClothField {
+    vec4 origin;
+    uvec4 counts;
+    vec4 band;
 };
 
 // One tether slot (ClothTether): its anchor, CLOTH_NO_ANCHOR for a spare slot, and its rest length.
@@ -276,6 +289,55 @@ vec4 clothOutOfBox(vec3 minimum, vec3 maximum, vec3 point) {
     vec3 normal = vec3(0.0);
     normal[nearest / 2] = (nearest % 2 == 0) ? -1.0 : 1.0;
     return vec4(normal, -depths[nearest]);
+}
+
+/*
+* fieldCell: the cell a point is in (its lowest corner's sample) and its share across it along each axis, the far faces
+* in the last cell; false outside the field's box.
+*/
+bool clothFieldCell(vec3 point, vec3 origin, float spacing, uvec3 counts, out ivec3 cell, out vec3 share) {
+    vec3 local = (point - origin) * (1.0 / spacing);
+    cell = ivec3(0);
+    share = vec3(0.0);
+    for (int axis = 0; axis < 3; ++axis) {
+        float coordinate = local[axis];
+        if (!(coordinate >= 0.0) || coordinate > float(counts[axis] - 1u)) {
+            return false;
+        }
+        cell[axis] = min(int(coordinate), int(counts[axis]) - 2);
+        share[axis] = coordinate - float(cell[axis]);
+    }
+    return true;
+}
+
+float clothFieldStep(float from, float to, float t) {
+    return from + (to - from) * t;
+}
+
+// blendFieldCell: the blend of a cell's corners (c000, c100, c010, c110, c001, c101, c011, c111) at share (w), its slope (xyz).
+vec4 clothFieldBlend(float corners[8], vec3 share, float spacing) {
+    float x00 = clothFieldStep(corners[0], corners[1], share.x);
+    float x10 = clothFieldStep(corners[2], corners[3], share.x);
+    float x01 = clothFieldStep(corners[4], corners[5], share.x);
+    float x11 = clothFieldStep(corners[6], corners[7], share.x);
+    float y0 = clothFieldStep(x00, x10, share.y);
+    float y1 = clothFieldStep(x01, x11, share.y);
+
+    float perMetre = 1.0 / spacing;
+    float slopeX = clothFieldStep(clothFieldStep(corners[1] - corners[0], corners[3] - corners[2], share.y),
+                                  clothFieldStep(corners[5] - corners[4], corners[7] - corners[6], share.y), share.z);
+    float slopeY = clothFieldStep(x10 - x00, x11 - x01, share.z);
+    float slopeZ = y1 - y0;
+    return vec4(vec3(slopeX, slopeY, slopeZ) * perMetre, clothFieldStep(y0, y1, share.z));
+}
+
+// surfacePoint for a field body, from its blend (xyz the slope, w the distance): the slope made a unit normal, or up where it vanishes.
+vec4 clothFieldSurface(vec4 blended) {
+    float slope = length(blended.xyz);
+    if (slope * slope < CLOTH_NO_DIRECTION) {
+        return vec4(0.0, 1.0, 0.0, blended.w);
+    }
+    return vec4(blended.xyz * (1.0 / slope), blended.w);
 }
 
 // surfacePoint: the way out of a body (xyz) and the distance from its surface, negative inside (w).

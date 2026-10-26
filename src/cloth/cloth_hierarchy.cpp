@@ -166,13 +166,16 @@ namespace {
     }
 
     // Held points: the pinned, and those within thickness of a body, which the contacts hold.
-    void markHeldPoints(const ClothParticles& particles, const std::vector<Shape>& bodies, float thickness, ClothHierarchyScratch& scratch,
+    void markHeldPoints(const ClothParticles& particles, const std::vector<Shape>& bodies, const ClothFields& fields, float thickness, ClothHierarchyScratch& scratch,
                         JobSystem& jobs) {
         scratch.held.resize(particles.size());
         jobs.parallelFor(particles.size(), pointsPerJob, [&](std::size_t point) {
             bool held = particles.inverseMasses[point] == 0.0f;
             for (const Shape& body : bodies) {
                 held = held || surfacePoint(body, particles.positions[point]).distance < thickness;
+            }
+            for (const std::shared_ptr<const SignedDistanceField>& field : fields) {
+                held = held || surfacePoint(*field, particles.positions[point]).distance < thickness;
             }
             scratch.held[point] = held ? 1 : 0;
         });
@@ -339,7 +342,8 @@ void prolongFromLevel(const ClothHierarchy& hierarchy, std::vector<Vec3>& values
 * down), so a level never undoes a coarser one's work.
 */
 void solveClothHierarchy(ClothParticles& particles, const ClothHierarchy& hierarchy, int levels, const ClothEnergyTerms& terms,
-                         const std::vector<Shape>& bodies, float thickness, float seconds, ClothHierarchyScratch& scratch, JobSystem& jobs) {
+                         const std::vector<Shape>& bodies, float thickness, float seconds, ClothHierarchyScratch& scratch, JobSystem& jobs,
+                         const ClothFields& fields) {
     const int used = std::min(levels, static_cast<int>(hierarchy.levels.size()));
     if (used < 1) {
         return;
@@ -350,7 +354,7 @@ void solveClothHierarchy(ClothParticles& particles, const ClothHierarchy& hierar
     scratch.gradient.resize(pointCount);
     scratch.direction.resize(pointCount);
     scratch.coarseSteps.resize(pointCount);
-    markHeldPoints(particles, bodies, thickness, scratch, jobs);
+    markHeldPoints(particles, bodies, fields, thickness, scratch, jobs);
 
     const float perSecondSquared = 1.0f / (seconds * seconds);
     const float stiffness = energyStiffness(terms.stretchCompliance);

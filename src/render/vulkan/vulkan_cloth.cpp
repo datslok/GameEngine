@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -38,8 +39,8 @@ namespace {
 
     // cloth_pass.glsl's bindings, in order: positions, previous positions, velocities, stretch, bending, pin slots, the
     // slot's ticks, pins and bodies, then the prediction, the per-point edge and hinge lists (starts, items), the points
-    // in colour order and the tethers.
-    constexpr std::uint32_t clothBindings = 16;
+    // in colour order, the tethers, the slot's field bodies and the fields' samples.
+    constexpr std::uint32_t clothBindings = 18;
 
     // cloth_levels.glsl's set 1, in order: the gradient, direction, coarse steps and held points, the level records, the
     // levels' points, masses, neighbour starts and neighbours, gather starts and links, spread starts and links, each
@@ -220,6 +221,81 @@ namespace {
     }
 }
 
+VulkanClothFields::VulkanClothFields(const VulkanDevice& device) :
+    device(device),
+    samples(device.getAllocator(), smallestBuffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu)
+{
+}
+
+/*
+* Rebuilt rather than grown in place: the old buffer may still be read by frames in flight, so the GPU is waited for
+* first, and every field held so far goes into the new one in the order they came. Samples are counted in 32 bits,
+* enough for about 700 fields the mannequin's size.
+*/
+void VulkanClothFields::hold(ImmediateCommands& uploads, const ClothFields& wanted) {
+    bool missing = false;
+    for (const std::shared_ptr<const SignedDistanceField>& field : wanted) {
+        if (std::find(fields.begin(), fields.end(), field) == fields.end()) {
+            fields.push_back(field);
+            missing = true;
+        }
+    }
+    if (!missing) {
+        return;
+    }
+
+    vulkanCheck(vkDeviceWaitIdle(device.getDevice()), "Waiting for the GPU before replacing the cloth's fields failed");
+    firsts.clear();
+    std::vector<Upload> copies;
+    std::uint64_t sampleCount = 0;
+    for (const std::shared_ptr<const SignedDistanceField>& field : fields) {
+        firsts.push_back(static_cast<std::uint32_t>(sampleCount));
+        copies.push_back(Upload{field->distances.data(), bytesOf(field->distances), VK_NULL_HANDLE});
+        sampleCount += field->distances.size();
+    }
+    if (sampleCount > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::length_error("The cloth's fields hold more samples than 32 bits count");
+    }
+
+    const VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    samples = VulkanBuffer{device.getAllocator(), atLeastSmallest(static_cast<VkDeviceSize>(sampleCount * sizeof(float))), usage, BufferMemory::Gpu};
+
+    // One copy each into its place: uploadAll copies to the start of a buffer, so each field is staged and copied with
+    // its offset here instead.
+    VkDeviceSize stagingBytes = 0;
+    for (const Upload& copy : copies) {
+        stagingBytes += copy.bytes;
+    }
+    VulkanBuffer staging{device.getAllocator(), atLeastSmallest(stagingBytes), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    auto* destination = static_cast<std::byte*>(staging.getMapped());
+    VkDeviceSize offset = 0;
+    for (const Upload& copy : copies) {
+        std::memcpy(destination + offset, copy.data, static_cast<std::size_t>(copy.bytes));
+        offset += copy.bytes;
+    }
+    staging.flush();
+    uploads.run([&](VkCommandBuffer commands) {
+        if (stagingBytes > 0) {
+            const VkBufferCopy region{0, 0, stagingBytes};
+            vkCmdCopyBuffer(commands, staging.get(), samples.get(), 1, &region);
+        }
+        clothBarrier(commands);
+    });
+}
+
+VkBuffer VulkanClothFields::getSamples() const {
+    return samples.get();
+}
+
+std::uint32_t VulkanClothFields::firstSample(const SignedDistanceField& field) const {
+    for (std::size_t index = 0; index < fields.size(); ++index) {
+        if (fields[index].get() == &field) {
+            return firsts[index];
+        }
+    }
+    throw std::invalid_argument("A cloth's tick names a field body the GPU does not hold");
+}
+
 VulkanClothPipelines::VulkanClothPipelines(const VulkanDevice& device):
     predict(std::make_unique<ComputePipeline>(device, checkedClothPass(device, "assets/shaders/cloth_predict.comp.spv"))),
     stretch(std::make_unique<ComputePipeline>(device, clothPass("assets/shaders/cloth_stretch.comp.spv"))),
@@ -342,6 +418,7 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     pointHinges = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedHinges)), constant, BufferMemory::Gpu};
     vertexOrder = VulkanBuffer{allocator, atLeastSmallest(bytesOf(order)), constant, BufferMemory::Gpu};
     tethers = VulkanBuffer{allocator, atLeastSmallest(bytesOf(packedTethers)), constant, BufferMemory::Gpu};
+    noFieldSamples = VulkanBuffer{allocator, smallestBuffer, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 
     // Until a tick runs, the cloth is drawn where it is. The prediction needs nothing: each substep writes it first.
     const std::array<Upload, 13> copies{
@@ -363,13 +440,15 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
 
     descriptorPool = storagePool(device, slotCount, clothBindings);
 
-    // Every pass's set layout is the same sixteen storage buffers, so a set made for one is compatible with them all.
+    // Every pass's set layout is the same eighteen storage buffers, so a set made for one is compatible with them all.
     const VkDescriptorSetLayout layout = pipelines.getPredict().getResourceLayout();
     slots.resize(slotCount);
     for (Slot& slot : slots) {
         slot.set = allocateSet(device, descriptorPool.get(), layout);
         slot.readback = VulkanBuffer{allocator, atLeastSmallest(2 * bytesOf(points)), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
-        ensureCapacity(slot, 1, 1, 1);
+        slot.fieldSamples = noFieldSamples.get();
+        ensureCapacity(slot, 1, 1, 1, 1);
+        writeSet(slot);
     }
 
     if (!cloth.hierarchy.levels.empty()) {
@@ -466,7 +545,7 @@ const VulkanCloth::Slot& VulkanCloth::slotAt(std::uint32_t slot) const {
 }
 
 // Each list grows to the next power of two that holds it, so a cloth settles on its buffers after a few frames.
-void VulkanCloth::ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins, std::size_t colliders) {
+bool VulkanCloth::ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins, std::size_t colliders, std::size_t fields) {
     const VmaAllocator allocator = device.getAllocator();
     bool grew = false;
     const auto grow = [&](VulkanBuffer& buffer, std::size_t count, std::size_t itemBytes) {
@@ -485,9 +564,8 @@ void VulkanCloth::ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins
     grow(slot.ticks, ticks, sizeof(GpuClothTick));
     grow(slot.pins, pins, sizeof(GpuClothPin));
     grow(slot.colliders, colliders, sizeof(GpuCollider));
-    if (grew) {
-        writeSet(slot);
-    }
+    grow(slot.fields, fields, sizeof(GpuClothField));
+    return grew;
 }
 
 void VulkanCloth::writeSet(const Slot& slot) {
@@ -506,7 +584,9 @@ void VulkanCloth::writeSet(const Slot& slot) {
                                                       hingeStarts.get(),
                                                       pointHinges.get(),
                                                       vertexOrder.get(),
-                                                      tethers.get()};
+                                                      tethers.get(),
+                                                      slot.fields.get(),
+                                                      slot.fieldSamples};
     writeBuffers(device, slot.set, buffers);
 }
 
@@ -584,10 +664,12 @@ void VulkanCloth::keepTickStart(VkCommandBuffer commands, ClothPassStamps* stamp
 * whatever wrote the points before (an earlier string's passes, its readback copy, the upload). Before the last tick
 * the points are kept aside, so the frame can be drawn between the last two ticks.
 */
-void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slotIndex, ClothPassStamps* stamps) {
+void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slotIndex, ClothPassStamps* stamps,
+                              const VulkanClothFields* fields) {
     Slot& slot = slotAt(slotIndex);
     std::size_t pinCount = 0;
     std::size_t colliderCount = 0;
+    std::size_t fieldCount = 0;
     for (const ClothTickCommands& tick : ticks) {
         if (tick.pinTargets.size() != pinPositions.size()) {
             throw std::invalid_argument("A GPU cloth's tick needs one target per pin");
@@ -595,22 +677,35 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
         if (tick.grab && tick.grab->particle >= pointCount) {
             throw std::invalid_argument("A GPU cloth's hand holds a point the cloth does not have");
         }
+        if (!tick.fields.empty() && fields == nullptr) {
+            throw std::invalid_argument("A GPU cloth's tick has field bodies but nothing holds their fields");
+        }
         pinCount += tick.pinTargets.size();
         colliderCount += tick.colliders.size();
+        fieldCount += tick.fields.size();
     }
     if (ticks.empty()) {
         return;
     }
-    ensureCapacity(slot, ticks.size(), pinCount, colliderCount);
+
+    // The slot's set was last used by the commands this slot's frame ran before, which have finished, so it may be written.
+    const VkBuffer samples = fields != nullptr ? fields->getSamples() : noFieldSamples.get();
+    const bool samplesMoved = samples != slot.fieldSamples;
+    slot.fieldSamples = samples;
+    if (ensureCapacity(slot, ticks.size(), pinCount, colliderCount, fieldCount) || samplesMoved) {
+        writeSet(slot);
+    }
 
     auto* tickRecords = static_cast<GpuClothTick*>(slot.ticks.getMapped());
     auto* pinRecords = static_cast<GpuClothPin*>(slot.pins.getMapped());
     auto* colliderRecords = static_cast<GpuCollider*>(slot.colliders.getMapped());
+    auto* fieldRecords = static_cast<GpuClothField*>(slot.fields.getMapped());
     std::uint32_t pinFirst = 0;
     std::uint32_t colliderFirst = 0;
+    std::uint32_t fieldFirst = 0;
     for (std::size_t index = 0; index < ticks.size(); ++index) {
         const ClothTickCommands& tick = ticks[index];
-        tickRecords[index] = packClothTick(tick, pinFirst, colliderFirst);
+        tickRecords[index] = packClothTick(tick, pinFirst, colliderFirst, fieldFirst);
         for (std::size_t pin = 0; pin < tick.pinTargets.size(); ++pin) {
             const Vec3& start = pinPositions[pin];
             const Vec3& target = tick.pinTargets[pin];
@@ -620,12 +715,17 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
         for (std::size_t body = 0; body < tick.colliders.size(); ++body) {
             colliderRecords[colliderFirst + body] = packCollider(tick.colliders[body]);
         }
+        for (std::size_t body = 0; body < tick.fields.size(); ++body) {
+            fieldRecords[fieldFirst + body] = packClothField(*tick.fields[body], fields->firstSample(*tick.fields[body]));
+        }
         pinFirst += static_cast<std::uint32_t>(tick.pinTargets.size());
         colliderFirst += static_cast<std::uint32_t>(tick.colliders.size());
+        fieldFirst += static_cast<std::uint32_t>(tick.fields.size());
     }
     slot.ticks.flush();
     slot.pins.flush();
     slot.colliders.flush();
+    slot.fields.flush();
 
     device.beginLabel(commands, "Cloth");
     clothBarrier(commands);

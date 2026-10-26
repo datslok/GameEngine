@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -98,6 +99,26 @@ namespace {
         for (const GpuClothTether& tether : spare) {
             assert(tether.anchor == noTetherAnchor);
         }
+    }
+
+    // A field body's record: where its first sample is, its spacing, its samples along each axis, where they start in the
+    // fields' buffer, and its band.
+    void testFieldRecords() {
+        SignedDistanceField field;
+        field.origin = Vec3{-1.0f, 0.5f, 2.0f};
+        field.spacing = 0.005f;
+        field.counts = {213, 365, 79};
+        field.band = 0.03f;
+        const GpuClothField record = packClothField(field, 1234);
+        assert(record.origin.x == -1.0f && record.origin.y == 0.5f && record.origin.z == 2.0f && record.origin.w == 0.005f);
+        assert(record.counts[0] == 213 && record.counts[1] == 365 && record.counts[2] == 79);
+        assert(record.firstSample == 1234 && record.band == 0.03f);
+
+        // A tick names its fields from fieldFirst in the frame's list.
+        ClothTickCommands commands = clothTickCommands(smallSheet(), 1.0f / 120.0f, {}, {std::make_shared<const SignedDistanceField>(field)});
+        const GpuClothTick tick = packClothTick(commands, 0, 0, 5);
+        assert(tick.fieldFirst == 5 && tick.fieldCount == 1);
+        assert(packClothTick(clothTickCommands(smallSheet(), 1.0f / 120.0f), 0, 0).fieldCount == 0);
     }
 
     // A tick's numbers worked out as the CPU solver works them out, so both start from the same bits.
@@ -387,6 +408,7 @@ void testClothGpu() {
     testColliders();
     testPinSlots();
     testTethers();
+    testFieldRecords();
     testTick();
     testDispatches();
     testDispatchesWithLevels();
