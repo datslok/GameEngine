@@ -270,7 +270,8 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | Command | What it does |
 |---|---|
 | `make test` | Builds and runs the tests (`build/tests.exe`) |
-| `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides |
+| `make test-release` | Builds and runs the tests optimised, which can catch bugs the debug build hides; the quicker of the two, the one to run routinely |
+| `make test-slow`, `make test-slow-release` | Runs the slow tests left out of the others: vertex block descent and its coarse levels (about half a minute in release) |
 | `make golden` | Renders every game's golden views and compares them with the references in `tests/golden/<GPU>/<game>/`. Needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/<game>/` |
 | `make golden-save` | Renders the golden views and saves them as the new references. Only on purpose, after a change that is meant to alter the picture |
 | `make yardstick` | Measures the cloth solver: a 1 m sheet at four resolutions, its stretch, sag and cost a tick (release build; `docs/CLOTHGPU.md` holds the numbers) |
