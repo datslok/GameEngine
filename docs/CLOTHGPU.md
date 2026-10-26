@@ -478,6 +478,8 @@ Agreed with the user on Oct 25, 2026; phase 7's items in `ROADMAP.md` changed to
 
 Re-planned with the user on Oct 26 2026, after the tethers: phase 7 ends with a dress on a mannequin. The mannequin is `assets/models/human.obj` with a signed distance field; phase 10's sewing-pattern and seam items moved into phase 7 (without the editor) for a dress sewn from two panels, the dress-sized test; the levels' cost cuts moved to phase 10, to resume if that dress shows garments need them; self-collision is built on XPBD.
 
+The dress (`two-panel-dress`, Oct 26 2026): two panels cut from a pattern into 12,027 points, sewn round the mannequin by stitches closing at a set speed, on the CPU and the GPU (docs/ARCHITECTURE.md, Cloth, Sewing). In the lab its straps are pinned onto the shoulders and the rest tethered to them, the tethers measured along each flat panel round its armhole (the straight line across the cut-out is shorter than the fabric); held by contact alone it is one click away. The dress-sized test (`dress-yardstick`) measures both, and vertex block descent's levels held by contact, next.
+
 ## Sources
 
 - Chen, Liu, Yang & Yuksel 2024, "Vertex Block Descent", ACM TOG 43(4). [arXiv 2403.06321](https://arxiv.org/abs/2403.06321), [project](https://graphics.cs.utah.edu/research/projects/vbd/)
