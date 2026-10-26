@@ -2,7 +2,9 @@
 
 #include "cloth/cloth_pattern.h"
 #include "math/vec3.h"
+#include "physics/signed_distance_field.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -57,8 +59,45 @@ inline constexpr float dressShoulderHeight = 1.44f;                   // m above
 // How long the dress is weightless while its seams pull shut round the body, before gravity lets it settle.
 inline constexpr float dressSewingSeconds = 1.0f;
 
-// The two panels' outlines and the four seams joining them.
+// The two panels' outlines and the four seams joining them: the two side seams, then the two shoulders.
 Pattern twoPanelDress();
+
+// Which of the pattern's seams are the shoulders, where the straps are pinned.
+inline constexpr std::array<std::uint32_t, 2> dressShoulderSeams{2, 3};
 
 // Each point's start: its panel wrapped round the mannequin standing on feet (each piece's flat positions on the cylinder).
 std::vector<Vec3> dressAroundMannequin(const PatternMesh& meshed, const Vec3& feet);
+
+/*
+* Pinned at the shoulders (the lab's default), as a dressmaker pins a dress on a dress form: both points of each
+* shoulder stitch are pins the lab carries onto the shoulders while the dress sews, and every other point is tethered
+* to its nearest strap pins on its own panel (cloth_tethers.h), so the dress hangs from its straps as a pinned sheet
+* hangs from its hooks, about 0.2% stretched, rather than as far as XPBD alone lets it.
+*
+* A pin goes exactly where it is put, through the body if its way does, so the way has two legs: across, from its
+* start to where it meets its partner (the middle of their starts, above the shoulder), by dressStrapsMeetSeconds;
+* then down onto the shoulder by the end of the sewing, each leg eased in and out (smoothStep) so the straps start and
+* stop gently. Pins from the start, moved by the lab, because GPU cloth takes its pins when it is first uploaded.
+*/
+inline constexpr float dressStrapsMeetSeconds = 0.5f;
+
+struct StrapPinPath {
+    Vec3 start;
+    Vec3 meeting;
+    Vec3 onShoulder;
+};
+
+// Where a strap pin is seconds after the dress was made.
+Vec3 strapPinPosition(const StrapPinPath& path, float seconds);
+
+/*
+* The strap pins, both points of every shoulder stitch in the stitches' order, and their ways: a pair's meeting point
+* the middle of their starts, its place on the shoulder straight below that where the body's surface is thickness away
+* (stepping down through the body's field a millimetre at a time; the meeting point itself if nothing is below).
+*/
+struct DressStrapPins {
+    std::vector<std::uint32_t> points;
+    std::vector<StrapPinPath> paths;
+};
+
+DressStrapPins dressStrapPins(const PatternMesh& meshed, const std::vector<Vec3>& start, const SignedDistanceField& body, float thickness);

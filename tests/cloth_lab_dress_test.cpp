@@ -99,7 +99,7 @@ namespace {
             stitches += seam.size();
         }
         // Two side seams of about 63 cm and two shoulders of 7.6 cm: 2 x 64 + 2 x 9 stitches.
-        assert(stitches == sewnSeams(meshed).stitches.size() && stitches == 146);
+        assert(stitches == clothSewing(meshed).stitches.size() && stitches == 146);
     }
 
     /*
@@ -131,7 +131,7 @@ namespace {
         const PatternMesh meshed = meshPattern(twoPanelDress(), 0.03f);
         ClothSettings settings;
         settings.gravity = 0.0f;
-        Cloth dress = makeCloth(meshed.mesh, dressAroundMannequin(meshed, Vec3{}), settings, sewnSeams(meshed));
+        Cloth dress = makeCloth(meshed.mesh, dressAroundMannequin(meshed, Vec3{}), settings, clothSewing(meshed));
 
         const int ticks = static_cast<int>(dressSewingSeconds / tick);
         for (int step = 0; step < ticks; ++step) {
@@ -145,8 +145,45 @@ namespace {
     }
 }
 
+namespace {
+    // The shoulder seams are the ones the strap pins hold: each a front shoulder sewn to a back one.
+    void testTheShoulderSeams() {
+        const Pattern pattern = twoPanelDress();
+        for (const std::uint32_t seam : dressShoulderSeams) {
+            const PatternSeam& shoulder = pattern.seams.at(seam);
+            assert(shoulder.firstEdge == edgeIndex(DressEdge::RightShoulder) || shoulder.firstEdge == edgeIndex(DressEdge::LeftShoulder));
+            assert(shoulder.secondEdge == edgeIndex(DressEdge::RightShoulder) || shoulder.secondEdge == edgeIndex(DressEdge::LeftShoulder));
+        }
+    }
+
+    /*
+    * A strap pin's way onto its shoulder: from its start across to the meeting point over the shoulder, then down
+    * onto it, each leg eased in and out (no jolt where one meets the next), and there it stays.
+    */
+    void testAStrapPinsWay() {
+        const StrapPinPath path{Vec3{0.0f, 1.5f, 0.3f}, Vec3{0.0f, 1.5f, 0.0f}, Vec3{0.0f, 1.4f, 0.0f}};
+        const auto at = [&](float seconds) { return strapPinPosition(path, seconds); };
+
+        assert(at(0.0f).z == 0.3f && at(0.0f).y == 1.5f);
+        assert(near(at(0.5f * dressStrapsMeetSeconds).z, 0.15f, 1e-5f));
+        assert(near(at(dressStrapsMeetSeconds).z, 0.0f, 1e-6f) && near(at(dressStrapsMeetSeconds).y, 1.5f, 1e-6f));
+        assert(near(at(0.5f * (dressStrapsMeetSeconds + dressSewingSeconds)).y, 1.45f, 1e-5f));
+        assert(near(at(dressSewingSeconds).y, 1.4f, 1e-6f));
+        assert(at(dressSewingSeconds + 3.0f).y == at(dressSewingSeconds).y);
+
+        // Eased: a moment after each leg starts or before it ends, it has hardly moved.
+        const float moment = 0.001f;
+        assert(std::abs(at(moment).z - 0.3f) < 1e-4f);
+        assert(std::abs(at(dressStrapsMeetSeconds - moment).z) < 1e-4f);
+        assert(std::abs(at(dressStrapsMeetSeconds + moment).y - 1.5f) < 1e-4f);
+        assert(std::abs(at(dressSewingSeconds - moment).y - 1.4f) < 1e-4f);
+    }
+}
+
 void testClothLabDress() {
     testThePattern();
+    testTheShoulderSeams();
+    testAStrapPinsWay();
     testTheDressMeshes();
     testTheDressStartsRoundTheMannequin();
     testTheDressSewsShutInTheAir();

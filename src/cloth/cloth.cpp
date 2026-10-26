@@ -54,7 +54,7 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
     return makeCloth(placed, start, settings);
 }
 
-Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSeams& seams) {
+Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSewing& sewing) {
     if (start.size() != rest.vertices.size()) {
         throw std::invalid_argument("A cloth needs one starting position per vertex");
     }
@@ -64,8 +64,9 @@ Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSet
     cloth.particles = makeClothParticles(rest, settings.areaDensity);
     cloth.stretch = stretchConstraints(rest);
     cloth.bend = bendConstraints(rest);
-    cloth.bend.insert(cloth.bend.end(), seams.hinges.begin(), seams.hinges.end());
-    cloth.stitches = seams.stitches;
+    cloth.bend.insert(cloth.bend.end(), sewing.hinges.begin(), sewing.hinges.end());
+    cloth.stitches = sewing.stitches;
+    cloth.pieces = sewing.pieces;
     cloth.stretchColours = colourStretch(cloth.stretch, cloth.particles.size());
     cloth.bendColours = colourBend(cloth.bend, cloth.particles.size());
     for (const Triangle& triangle : rest.triangles) {
@@ -102,15 +103,30 @@ ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std
     return commands;
 }
 
+namespace {
+    // The coarse levels and tethers, anchored by whatever is pinned now.
+    void rebuildAnchoring(Cloth& cloth, JobSystem& jobs) {
+        cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
+        cloth.tethers = clothTethers(cloth.restPositions, cloth.particles.inverseMasses, cloth.pieces, jobs);
+    }
+}
+
 void pinClothPoint(Cloth& cloth, std::uint32_t particle) {
     pinParticle(cloth.particles, particle);
-    cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
-    cloth.tethers = clothTethers(cloth.restPositions, cloth.particles.inverseMasses);
+    rebuildAnchoring(cloth, serialJobs());
 }
 
 void addClothPin(Cloth& cloth, std::uint32_t particle) {
     pinClothPoint(cloth, particle);
     cloth.pins.push_back(ClothPin{particle, cloth.particles.positions[particle]});
+}
+
+void addClothPins(Cloth& cloth, const std::vector<std::uint32_t>& particles, JobSystem& jobs) {
+    for (const std::uint32_t particle : particles) {
+        pinParticle(cloth.particles, particle);
+        cloth.pins.push_back(ClothPin{particle, cloth.particles.positions[particle]});
+    }
+    rebuildAnchoring(cloth, jobs);
 }
 
 namespace {
@@ -182,8 +198,8 @@ namespace {
     * there); then the solver: XPBD's stretch, bending and hand, or vertex block descent's sweep, with its coarse levels
     * and a second sweep after them when there are any (smoothing on both sides of the coarse step, as multigrid does:
     * the coarse step's spreading leaves fine wrinkles a sweep removes); the tethers, when on, after either solver, so the
-    * pins' strings have the last word on stretch; the stitches, closing their seams; the bodies last, so nothing is left inside them; velocities from the
-    * motion; drag on the free points.
+    * pins' strings have the last word on stretch; the stitches, closing their seams; the bodies last, so nothing is
+    * left inside them; velocities from the motion; drag on the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {

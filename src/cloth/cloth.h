@@ -130,8 +130,10 @@ struct Cloth {
     // Pins the game moves, by setting their positions from its commands before a tick.
     std::vector<ClothPin> pins;
 
-    // Where its pieces are sewn together, if it is sewn: each point in one stitch at most.
+    // Where its pieces are sewn together, if it is sewn: each point in one stitch at most. Its pieces, for measuring
+    // its tethers along each one (none for a sheet).
     std::vector<ClothStitch> stitches;
+    ClothPieces pieces;
 
     // The mesh's triangles, for finding the cloth with a ray.
     std::vector<std::array<std::uint32_t, 3>> triangles;
@@ -167,7 +169,7 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
 * whose points start, still, at start, one per vertex (the pieces laid round a body), sewn by the seams' stitches, their
 * hinges coloured with the rest of the bending. Throws std::invalid_argument for a start of the wrong size.
 */
-Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSeams& seams = {});
+Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSewing& sewing = {});
 
 // Where a moving pin is after substep step (0..substeps - 1) of a tick: slid evenly from start, exactly on target at the end.
 Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps);
@@ -180,6 +182,13 @@ void pinClothPoint(Cloth& cloth, std::uint32_t particle);
 
 // Pin a point where it is, as a pin the game can move (pinClothPoint, then a ClothPin).
 void addClothPin(Cloth& cloth, std::uint32_t particle);
+
+/*
+* Pin several points where they are, as pins the game can move in this order, rebuilding the coarse levels and tethers
+* once, on the jobs' threads (measuring tethers along a dress's pieces takes a moment). Throws std::out_of_range for a
+* point the cloth does not have.
+*/
+void addClothPins(Cloth& cloth, const std::vector<std::uint32_t>& particles, JobSystem& jobs = serialJobs());
 
 /*
 * One tick of points held by stretch constraints (and a hand, if one holds a point), in settings.substeps substeps: each

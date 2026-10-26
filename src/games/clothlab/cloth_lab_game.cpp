@@ -245,12 +245,20 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
         ModelRenderer mannequin;
         mannequin.parts.push_back(RenderPart{body, mannequinMaterial(), placement});
         const Entity standing = addStatic(std::move(mannequin));
-        world.add(standing, DistanceFieldCollider{std::make_shared<const SignedDistanceField>(buildSignedDistanceField(
-                                collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, getJobs()))});
+        const std::shared_ptr<const SignedDistanceField> field = std::make_shared<const SignedDistanceField>(
+            buildSignedDistanceField(collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, getJobs()));
+        world.add(standing, DistanceFieldCollider{field});
 
-        // The dress: its two panels cut from the pattern, wrapped round the mannequin and sewn there.
+        // The dress: its two panels cut from the pattern, wrapped round the mannequin and sewn there, its straps
+        // pinned and carried onto the shoulders unless it is held by contact alone.
         const PatternMesh pattern = meshPattern(twoPanelDress(), dressSpacing);
-        Cloth sewn = makeCloth(pattern.mesh, dressAroundMannequin(pattern, layout.mannequinFeet), clothSettings, sewnSeams(pattern));
+        const std::vector<Vec3> start = dressAroundMannequin(pattern, layout.mannequinFeet);
+        Cloth sewn = makeCloth(pattern.mesh, start, clothSettings, clothSewing(pattern));
+        if (stationSettings.pinnedDress) {
+            const DressStrapPins straps = dressStrapPins(pattern, start, *field, clothSettings.thickness);
+            addClothPins(sewn, straps.points, getJobs());
+            strapPaths = straps.paths;
+        }
         dress = addSheet(world, assets, pattern.mesh, std::move(sewn), cottonMaterial(dressColour));
     }
 
@@ -332,6 +340,15 @@ void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulat
         }
     }
 
+    // The straps' pins go where they are due at the tick's end; the substeps slide them there.
+    if (!strapPaths.empty()) {
+        Cloth& sewn = world.get<Cloth>(dress);
+        const float tickEnd = static_cast<float>(simulationSeconds) + tickSeconds;
+        for (std::size_t index = 0; index < strapPaths.size(); ++index) {
+            sewn.pins[index].position = strapPinPosition(strapPaths[index], tickEnd);
+        }
+    }
+
     Cloth& cloth = world.get<Cloth>(sheet);
 
     const float wanted = std::clamp(hookSettings.hookGap, clothLabSmallestHookGap, clothLabSheetWidth);
@@ -380,6 +397,7 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor) {
 void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Big sheet", settings.bigSheet, FieldApplies::AtStartup);
     visitor.field("Mannequin", settings.mannequin, FieldApplies::AtStartup);
+    visitor.field("Dress pinned at the shoulders", settings.pinnedDress, FieldApplies::AtStartup);
 }
 
 void ClothLabGame::visitSettings(SettingsVisitor& visitor) {

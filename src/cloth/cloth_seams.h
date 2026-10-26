@@ -2,6 +2,7 @@
 
 #include "cloth/cloth_constraints.h"
 #include "cloth/cloth_particles.h"
+#include "cloth/cloth_tethers.h"
 #include "math/vec3.h"
 
 #include <array>
@@ -49,8 +50,9 @@ void solveStitches(ClothParticles& particles, const std::vector<ClothStitch>& st
 std::vector<BendConstraint> seamHinges(const std::vector<Vec3>& restPositions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
                                        const std::vector<ClothStitch>& seam);
 
-// What a cloth sewn from pieces has besides its mesh: its stitches and the hinges across its seams.
-struct ClothSeams {
+// What a cloth sewn from pieces has besides its mesh: its stitches, the hinges across its seams, and its pieces.
+struct ClothSewing {
     std::vector<ClothStitch> stitches;
     std::vector<BendConstraint> hinges;
+    ClothPieces pieces;
 };

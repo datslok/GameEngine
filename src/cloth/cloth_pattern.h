@@ -72,8 +72,8 @@ struct PatternMesh {
 */
 PatternMesh meshPattern(const Pattern& pattern, float spacing);
 
-// The cloth's seams: every stitch, and the hinges across each seam (seamHinges) from the flat rest shape.
-ClothSeams sewnSeams(const PatternMesh& meshed);
+// How the cloth is sewn: every stitch, the hinges across each seam (seamHinges) from the flat rest shape, and its pieces' outlines for its tethers.
+ClothSewing clothSewing(const PatternMesh& meshed);
 
 /*
 * A point of a piece wrapped round an upright cylinder of radius round the axis through axisFoot: the piece's x runs

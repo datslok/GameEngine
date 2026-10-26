@@ -285,7 +285,7 @@ PatternMesh meshPattern(const Pattern& pattern, float spacing) {
     return meshed;
 }
 
-ClothSeams sewnSeams(const PatternMesh& meshed) {
+ClothSewing clothSewing(const PatternMesh& meshed) {
     std::vector<Vec3> rest;
     rest.reserve(meshed.mesh.vertices.size());
     for (const Vec4& vertex : meshed.mesh.vertices) {
@@ -297,13 +297,23 @@ ClothSeams sewnSeams(const PatternMesh& meshed) {
         triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second), static_cast<std::uint32_t>(triangle.third)});
     }
 
-    ClothSeams seams;
+    ClothSewing sewing;
     for (const std::vector<ClothStitch>& seam : meshed.seams) {
-        seams.stitches.insert(seams.stitches.end(), seam.begin(), seam.end());
+        sewing.stitches.insert(sewing.stitches.end(), seam.begin(), seam.end());
         const std::vector<BendConstraint> hinges = seamHinges(rest, triangles, seam);
-        seams.hinges.insert(seams.hinges.end(), hinges.begin(), hinges.end());
+        sewing.hinges.insert(sewing.hinges.end(), hinges.begin(), hinges.end());
     }
-    return seams;
+
+    // Each outline is its edges' points in turn, each edge's last left to the next edge's first.
+    sewing.pieces.pieceOf = meshed.pieces;
+    for (const std::vector<std::vector<std::uint32_t>>& edges : meshed.edgePoints) {
+        std::vector<std::uint32_t> outline;
+        for (const std::vector<std::uint32_t>& edge : edges) {
+            outline.insert(outline.end(), edge.begin(), edge.end() - 1);
+        }
+        sewing.pieces.outlines.push_back(std::move(outline));
+    }
+    return sewing;
 }
 
 Vec3 wrapOnCylinder(const Vec2& flat, const Vec3& axisFoot, float radius, float facing) {

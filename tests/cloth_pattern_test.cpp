@@ -186,8 +186,8 @@ namespace {
         }
         assert(secondLeft > firstRight);
 
-        const ClothSeams seams = sewnSeams(meshed);
-        assert(seams.stitches.size() == 5 && seams.hinges.size() == 4);
+        const ClothSewing sewing = clothSewing(meshed);
+        assert(sewing.stitches.size() == 5 && sewing.hinges.size() == 4);
     }
 
     // A corner where two sewn edges meet would be in two stitches, which the stitches cannot take: rejected.

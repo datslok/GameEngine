@@ -114,11 +114,11 @@ namespace {
         for (const Vec4& vertex : grid.vertices) {
             start.push_back(Vec3{vertex.x * 2.0f, vertex.y, 3.0f});
         }
-        ClothSeams seams;
-        seams.stitches = {ClothStitch{0, 8}};
-        seams.hinges = {BendConstraint{1, 3, 0, 4, 0.0f, 1.0f, {1.0f, 1.0f, -1.0f, -1.0f}}};
+        ClothSewing sewing;
+        sewing.stitches = {ClothStitch{0, 8}};
+        sewing.hinges = {BendConstraint{1, 3, 0, 4, 0.0f, 1.0f, {1.0f, 1.0f, -1.0f, -1.0f}}};
 
-        const Cloth cloth = makeCloth(grid, start, ClothSettings{}, seams);
+        const Cloth cloth = makeCloth(grid, start, ClothSettings{}, sewing);
         const Cloth plain = makeCloth(grid, Mat4::identity(), ClothSettings{});
         assert(cloth.particles.size() == 9);
         for (std::size_t index = 0; index < 9; ++index) {
@@ -160,18 +160,18 @@ namespace {
         }
 
         // The left and right columns, the same rows on each panel.
-        ClothSeams seams;
+        ClothSewing sewing;
         const std::uint32_t row = static_cast<std::uint32_t>(squares + 1);
         for (std::uint32_t side : {0u, static_cast<std::uint32_t>(squares)}) {
             for (std::uint32_t along = 0; along < row; ++along) {
-                seams.stitches.push_back(ClothStitch{along * row + side, perPanel + along * row + side});
+                sewing.stitches.push_back(ClothStitch{along * row + side, perPanel + along * row + side});
             }
         }
 
         ClothSettings settings;
         settings.gravity = 0.0f;
         settings.seamSpeed = 1.0f;
-        Cloth cloth = makeCloth(rest, start, settings, seams);
+        Cloth cloth = makeCloth(rest, start, settings, sewing);
 
         // 10 cm at 1 m/s takes 0.1 s, twelve ticks: half way after six, none shut; then the gap stays shut.
         const auto narrowestGap = [&] {

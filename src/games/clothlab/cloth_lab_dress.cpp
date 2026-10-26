@@ -1,6 +1,7 @@
 #include "games/clothlab/cloth_lab_dress.h"
 
 #include "math/angles.h"
+#include "math/smooth_step.h"
 
 #include <iterator>
 
@@ -18,6 +19,10 @@ namespace {
 
     // Points along each curve; the mesher spaces the edge's own points evenly along this polyline.
     constexpr int curveSegments = 24;
+
+    // How the shoulder is found below a strap's meeting point: steps of a millimetre, down to 30 cm.
+    constexpr float shoulderSearchStep = 0.001f;
+    constexpr int shoulderSearchSteps = 300;
 
     // A quadratic Bezier curve from start to end, leaving start towards bend and arriving at end from it.
     std::vector<Vec2> curve(const Vec2& start, const Vec2& bend, const Vec2& end) {
@@ -82,6 +87,35 @@ Pattern twoPanelDress() {
     pattern.seams = {seam(DressEdge::RightSide, DressEdge::LeftSide), seam(DressEdge::LeftSide, DressEdge::RightSide),
                      seam(DressEdge::RightShoulder, DressEdge::LeftShoulder), seam(DressEdge::LeftShoulder, DressEdge::RightShoulder)};
     return pattern;
+}
+
+Vec3 strapPinPosition(const StrapPinPath& path, float seconds) {
+    if (seconds < dressStrapsMeetSeconds) {
+        return path.start + (path.meeting - path.start) * smoothStep(0.0f, dressStrapsMeetSeconds, seconds);
+    }
+    return path.meeting + (path.onShoulder - path.meeting) * smoothStep(dressStrapsMeetSeconds, dressSewingSeconds, seconds);
+}
+
+DressStrapPins dressStrapPins(const PatternMesh& meshed, const std::vector<Vec3>& start, const SignedDistanceField& body, float thickness) {
+    DressStrapPins pins;
+    for (const std::uint32_t seam : dressShoulderSeams) {
+        for (const ClothStitch& stitch : meshed.seams.at(seam)) {
+            const Vec3 meeting = (start.at(stitch.first) + start.at(stitch.second)) * 0.5f;
+            Vec3 onShoulder = meeting;
+            for (int step = 1; step <= shoulderSearchSteps; ++step) {
+                const Vec3 below = meeting - Vec3{0.0f, shoulderSearchStep * static_cast<float>(step), 0.0f};
+                if (sampleField(body, below).distance <= thickness) {
+                    onShoulder = below;
+                    break;
+                }
+            }
+            for (const std::uint32_t point : {stitch.first, stitch.second}) {
+                pins.points.push_back(point);
+                pins.paths.push_back(StrapPinPath{start[point], meeting, onShoulder});
+            }
+        }
+    }
+    return pins;
 }
 
 std::vector<Vec3> dressAroundMannequin(const PatternMesh& meshed, const Vec3& feet) {
