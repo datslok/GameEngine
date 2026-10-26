@@ -22,8 +22,8 @@ class ImmediateCommands;
 class ClothPassStamps;
 
 /*
-* The cloth passes (cloth_predict, cloth_stretch, cloth_bend, cloth_block and cloth_finish.comp, which all bind the same
-* fifteen storage buffers, cloth_pass.glsl, so one descriptor set serves them all), the coarse levels' passes
+* The cloth passes (cloth_predict, cloth_stretch, cloth_bend, cloth_block, cloth_stitch and cloth_finish.comp, which all
+* bind the same twenty storage buffers, cloth_pass.glsl, so one descriptor set serves them all), the coarse levels' passes
 * (cloth_held, cloth_gradient, cloth_coarse_step, cloth_spread, cloth_line_terms, cloth_line_total and
 * cloth_line_apply.comp: the same set 0, and the levels' sixteen buffers at set 1, cloth_levels.glsl) and the shape pass
 * (cloth_shape.comp), built once and shared by every cloth.
@@ -36,6 +36,7 @@ public:
     const ComputePipeline& getStretch() const;
     const ComputePipeline& getBend() const;
     const ComputePipeline& getBlock() const;
+    const ComputePipeline& getStitch() const;
     const ComputePipeline& getFinish() const;
     const ComputePipeline& getShape() const;
 
@@ -52,6 +53,7 @@ private:
     std::unique_ptr<ComputePipeline> stretch;
     std::unique_ptr<ComputePipeline> bend;
     std::unique_ptr<ComputePipeline> block;
+    std::unique_ptr<ComputePipeline> stitch;
     std::unique_ptr<ComputePipeline> finish;
     std::unique_ptr<ComputePipeline> shape;
     std::unique_ptr<ComputePipeline> held;
@@ -71,8 +73,8 @@ private:
 * (clothDispatchesPerTick): per substep the prediction, the solver's dispatches (XPBD's a colour of stretch or of
 * bending each, vertex block descent's a colour of points each: within a colour nothing shares a point, so each runs
 * at once, as the CPU's threads do; with levels, the held points, each level's passes coarsest first and a second
-* sweep), and the end. A level's line search sums its terms on the GPU and leaves its step length there for the move,
-* so a tick never waits for the CPU.
+* sweep), a sewn cloth's stitches (one invocation per stitch, owning both its points), and the end. A level's line
+* search sums its terms on the GPU and leaves its step length there for the move, so a tick never waits for the CPU.
 *
 * The result is the CPU solver's to within rounding, not to the bit (the GPU may fuse a multiply and an add, and
 * rounds division and square roots its own way), and repeats exactly on the same GPU and driver: nothing in a pass
@@ -205,6 +207,7 @@ private:
     std::uint32_t pointCount = 0;
     std::uint32_t edgeCount = 0;
     std::uint32_t hingeCount = 0;
+    std::uint32_t stitchCount = 0;
     std::vector<std::uint32_t> stretchColours;
     std::vector<std::uint32_t> bendColours;
     std::vector<std::uint32_t> vertexColours;
@@ -226,6 +229,10 @@ private:
 
     // Each point's tether slots, read by the end's pass when a tick has the tethers on.
     VulkanBuffer tethers;
+
+    // A sewn cloth's stitches, read by the stitch pass, and each point's flag saying whether it is in one.
+    VulkanBuffer stitches;
+    VulkanBuffer stitched;
 
     // Bound as the field samples while no ticks have field bodies.
     VulkanBuffer noFieldSamples;

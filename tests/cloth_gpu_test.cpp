@@ -101,6 +101,41 @@ namespace {
         }
     }
 
+    // The small sheet sewn to itself at two pairs of points, as a cloth sewn from pieces is.
+    Cloth sewnSheet() {
+        const Mesh grid = Mesh::grid(3, 2, 3.0f, 2.0f);
+        std::vector<Vec3> start;
+        for (const Vec4& vertex : grid.vertices) {
+            start.push_back(Vec3{vertex.x, vertex.y, vertex.z});
+        }
+        ClothSewing sewing;
+        sewing.stitches = {ClothStitch{0, 11}, ClothStitch{3, 8}};
+        return makeCloth(grid, start, ClothSettings{}, sewing);
+    }
+
+    /*
+    * A sewn cloth's stitches as the stitch pass reads them, one record each in the cloth's order, and each point's flag
+    * saying whether it is in one (the end's pass leaves such a point's hand and tethers to the stitch pass); a sheet
+    * has no stitches and no point flagged.
+    */
+    void testStitches() {
+        const Cloth cloth = sewnSheet();
+        const std::vector<GpuClothStitch> stitches = packClothStitches(cloth);
+        assert(stitches.size() == 2 && stitches[0].first == 0 && stitches[0].second == 11 && stitches[1].first == 3 && stitches[1].second == 8);
+
+        const std::vector<std::uint32_t> stitched = clothStitchedPoints(cloth);
+        assert(stitched.size() == cloth.particles.size());
+        for (std::uint32_t point = 0; point < stitched.size(); ++point) {
+            assert(stitched[point] == ((point == 0 || point == 11 || point == 3 || point == 8) ? 1u : 0u));
+        }
+
+        const Cloth sheet = smallSheet();
+        assert(packClothStitches(sheet).empty());
+        for (const std::uint32_t flag : clothStitchedPoints(sheet)) {
+            assert(flag == 0);
+        }
+    }
+
     // A field body's record: where its first sample is, its spacing, its samples along each axis, where they start in the
     // fields' buffer, and its band.
     void testFieldRecords() {
@@ -165,6 +200,9 @@ namespace {
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).tetherStretch == 0.0f);
         cloth.settings.tethers = true;
 
+        // Stitches: how far a gap may close in a substep, the seam speed times the substep as the CPU solver works it out.
+        assert(tick.stitchClosingStep == settings.seamSpeed * substep);
+
         // A perfectly stiff fabric's energy takes the stiffest the energy allows, as on the CPU.
         cloth.settings.method = ClothMethod::VertexBlockDescent;
         cloth.settings.stretchCompliance = 0.0f;
@@ -212,6 +250,12 @@ namespace {
         assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + pointColours));
         settings.method = ClothMethod::Xpbd;
         assert(clothDispatchesPerTick(cloth, settings) == 4 * (2 + stretchColours + bendColours));
+
+        // A sewn cloth adds the stitch pass to every substep, with either method.
+        const Cloth sewn = sewnSheet();
+        assert(clothDispatchesPerTick(sewn, settings) == 4 * (3 + stretchColours + bendColours));
+        settings.method = ClothMethod::VertexBlockDescent;
+        assert(clothDispatchesPerTick(sewn, settings) == 4 * (3 + pointColours));
     }
 
     /*
@@ -408,6 +452,7 @@ void testClothGpu() {
     testColliders();
     testPinSlots();
     testTethers();
+    testStitches();
     testFieldRecords();
     testTick();
     testDispatches();

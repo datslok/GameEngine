@@ -8,31 +8,9 @@
 
 void solveStitches(ClothParticles& particles, const std::vector<ClothStitch>& stitches, float closingStep) {
     for (const ClothStitch& stitch : stitches) {
-        const float firstWeight = particles.inverseMasses[stitch.first];
-        const float secondWeight = particles.inverseMasses[stitch.second];
-        const float weights = firstWeight + secondWeight;
-        if (weights <= 0.0f) {
-            continue;
-        }
-
-        const float widest = (particles.previousPositions[stitch.second] - particles.previousPositions[stitch.first]).length() - closingStep;
-        Vec3& first = particles.positions[stitch.first];
-        Vec3& second = particles.positions[stitch.second];
-        const Vec3 gap = second - first;
-        if (widest <= 0.0f) {
-            const Vec3 joined = first + gap * (firstWeight / weights);
-            first = joined;
-            second = joined;
-            continue;
-        }
-
-        const float distance = gap.length();
-        if (distance <= widest) {
-            continue;
-        }
-        const Vec3 move = gap * ((distance - widest) / (distance * weights));
-        first = first + move * firstWeight;
-        second = second - move * secondWeight;
+        solveStitch(particles.positions[stitch.first], particles.positions[stitch.second], particles.inverseMasses[stitch.first],
+                    particles.inverseMasses[stitch.second], particles.previousPositions[stitch.first], particles.previousPositions[stitch.second],
+                    closingStep);
     }
 }
 

@@ -1,0 +1,34 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* A sewn cloth's stitches, between the solver and the substep's end, one invocation per stitch. On the CPU every point
+* takes its hand and tethers and then every stitch is solved; a stitch moves two points, so an invocation per point
+* would read its partner while the partner's invocation writes it. Each point is in one stitch at most, so an
+* invocation per stitch owns both its points: it gives each the hand and tethers the end's pass would have (which
+* skips them for stitched points), then solves the stitch, the same order as the CPU's. Pinned points are not written.
+*/
+#include "cloth_pass.glsl"
+
+void main() {
+    uint index;
+    if (!clothItem(index)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    ClothStitch stitch = stitches[index];
+    vec4 first = positions[stitch.first];
+    vec4 second = positions[stitch.second];
+    clothHandAndTethers(stitch.first, first, tick);
+    clothHandAndTethers(stitch.second, second, tick);
+    clothStitch(first.xyz, second.xyz, first.w, second.w, previousPositions[stitch.first].xyz, previousPositions[stitch.second].xyz,
+                tick.stitchClosingStep);
+
+    if (first.w != 0.0) {
+        positions[stitch.first] = first;
+    }
+    if (second.w != 0.0) {
+        positions[stitch.second] = second;
+    }
+}

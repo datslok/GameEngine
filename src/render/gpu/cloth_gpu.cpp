@@ -118,6 +118,24 @@ std::vector<GpuClothTether> packClothTethers(const Cloth& cloth) {
     return packed;
 }
 
+std::vector<GpuClothStitch> packClothStitches(const Cloth& cloth) {
+    std::vector<GpuClothStitch> packed;
+    packed.reserve(cloth.stitches.size());
+    for (const ClothStitch& stitch : cloth.stitches) {
+        packed.push_back(GpuClothStitch{stitch.first, stitch.second});
+    }
+    return packed;
+}
+
+std::vector<std::uint32_t> clothStitchedPoints(const Cloth& cloth) {
+    std::vector<std::uint32_t> stitched(cloth.particles.size(), 0u);
+    for (const ClothStitch& stitch : cloth.stitches) {
+        stitched.at(stitch.first) = 1u;
+        stitched.at(stitch.second) = 1u;
+    }
+    return stitched;
+}
+
 std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth) {
     std::vector<std::uint32_t> slots(cloth.particles.size(), clothNoPin);
     for (std::size_t pin = 0; pin < cloth.pins.size(); ++pin) {
@@ -160,6 +178,7 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.tetherStretch = settings.tethers ? 1.0f + settings.tetherSlack : 0.0f;
     tick.fieldFirst = fieldFirst;
     tick.fieldCount = static_cast<std::uint32_t>(commands.fields.size());
+    tick.stitchClosingStep = settings.seamSpeed * substep;
     return tick;
 }
 
@@ -215,12 +234,13 @@ std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& se
         return starts.empty() ? 0u : static_cast<std::uint32_t>(starts.size() - 1);
     };
     const std::uint32_t substeps = static_cast<std::uint32_t>(settings.substeps);
+    const std::uint32_t ends = cloth.stitches.empty() ? 2u : 3u;
     if (settings.method == ClothMethod::VertexBlockDescent) {
         const std::uint32_t sweep = colours(cloth.vertexColours.colours);
         const std::uint32_t levels = clothLevelsUsed(cloth, settings);
         const std::uint32_t layered = levels > 0 ? 1u + clothDispatchesPerLevel * levels + sweep : 0u;
-        return substeps * (2u + sweep + layered);
+        return substeps * (ends + sweep + layered);
     }
     const std::uint32_t bendColours = settings.bendingStiffness > 0.0f ? colours(cloth.bendColours) : 0u;
-    return substeps * (2u + colours(cloth.stretchColours) + bendColours);
+    return substeps * (ends + colours(cloth.stretchColours) + bendColours);
 }

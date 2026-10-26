@@ -33,9 +33,38 @@ struct ClothStitch {
 };
 
 /*
-* One pass over the stitches in order, each gap pulled in to its width at the substep's start (the points' previous
-* positions) less closingStep (metres); once that is nothing, both points land on the same spot to the last bit, the
-* point where their inverse masses balance. Two pinned points stay as they are.
+* One stitch (solveStitches' step, mirrored by cloth.glsl's clothStitch): its gap pulled in to its width at the
+* substep's start (the points' previous positions) less closingStep (metres); once that is nothing, both points land on
+* the same spot to the last bit, the point where their inverse masses balance. Two pinned points stay as they are.
+*/
+inline void solveStitch(Vec3& first, Vec3& second, float firstWeight, float secondWeight, const Vec3& firstPrevious, const Vec3& secondPrevious,
+                        float closingStep) {
+    const float weights = firstWeight + secondWeight;
+    if (weights <= 0.0f) {
+        return;
+    }
+
+    const float widest = (secondPrevious - firstPrevious).length() - closingStep;
+    const Vec3 gap = second - first;
+    if (widest <= 0.0f) {
+        const Vec3 joined = first + gap * (firstWeight / weights);
+        first = joined;
+        second = joined;
+        return;
+    }
+
+    const float distance = gap.length();
+    if (distance <= widest) {
+        return;
+    }
+    const Vec3 move = gap * ((distance - widest) / (distance * weights));
+    first = first + move * firstWeight;
+    second = second - move * secondWeight;
+}
+
+/*
+* One pass over the stitches in order. Each point is in one stitch at most (meshPattern makes sure), so no two touch
+* the same point and any order, or all at once (the GPU's stitch pass), gives the same result.
 */
 void solveStitches(ClothParticles& particles, const std::vector<ClothStitch>& stitches, float closingStep);
 

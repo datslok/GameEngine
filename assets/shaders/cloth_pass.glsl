@@ -1,7 +1,7 @@
 // What every cloth pass (cloth_*.comp) binds, one layout for all of them (render/vulkan/vulkan_cloth.h): the cloth's
 // points and constraints, the frame's ticks with their pins and bodies, vertex block descent's prediction, per-point
-// lists and point colours, the tethers, and push constants saying which tick and substep this dispatch is and which range of points
-// or constraints it covers. One invocation per point or constraint.
+// lists and point colours, the tethers, the stitches, and push constants saying which tick and substep this dispatch is and which
+// range of points or constraints it covers. One invocation per point or constraint.
 
 #ifndef CLOTH_PASS_GLSL
 #define CLOTH_PASS_GLSL
@@ -91,6 +91,15 @@ layout(std430, set = 0, binding = 17) readonly buffer ClothFieldSamples {
     float fieldSamples[];
 };
 
+// A sewn cloth's stitches, and each point's flag: 1 if it is in one (the stitch pass does its hand and tethers).
+layout(std430, set = 0, binding = 18) readonly buffer ClothStitches {
+    ClothStitch stitches[];
+};
+
+layout(std430, set = 0, binding = 19) readonly buffer ClothStitched {
+    uint stitched[];
+};
+
 // Must match ClothPushConstants in render/vulkan/vulkan_cloth.cpp.
 layout(push_constant) uniform ClothDispatch {
     uint tickIndex;
@@ -117,6 +126,27 @@ vec4 clothFieldSurfacePoint(ClothField field, vec3 point) {
                                 fieldSamples[first + slice], fieldSamples[first + slice + 1u], fieldSamples[first + slice + row],
                                 fieldSamples[first + slice + row + 1u]);
     return clothFieldSurface(clothFieldBlend(corners, share, field.origin.w));
+}
+
+/*
+* The first of a substep's end for one point, as the CPU solver orders it: XPBD's hand, if it holds the point (vertex
+* block descent's is in each point's step), then the tethers to its nearest pins. A tether reads its anchor, a pinned
+* point, which nothing in the end's passes moves. cloth_finish.comp does this for most points, cloth_stitch.comp for
+* the stitched ones, before their stitches.
+*/
+void clothHandAndTethers(uint point, inout vec4 position, ClothTick tick) {
+    if (point == tick.grabParticle && tick.method == CLOTH_METHOD_XPBD) {
+        clothGrab(position, tick.grabTarget.xyz, tick.grabCompliance);
+    }
+    if (position.w != 0.0 && tick.tetherStretch > 0.0) {
+        for (uint rank = 0u; rank < CLOTH_TETHERS_PER_POINT; ++rank) {
+            ClothTether tether = tethers[point * CLOTH_TETHERS_PER_POINT + rank];
+            if (tether.anchor == CLOTH_NO_ANCHOR) {
+                break;
+            }
+            clothTether(position.xyz, positions[tether.anchor].xyz, tether.restLength, tick.tetherStretch);
+        }
+    }
 }
 
 // This invocation's place in the range, or false past its end (the last workgroup's spare invocations).
