@@ -277,41 +277,34 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 
 ## Phase 7: Cloth simulation ← current
 
-The physics half of the dressmaking game: fabric that drapes, folds and piles up without passing through itself. It comes early because it is the other thing we most want to see.
+The physics half of the dressmaking game: fabric that drapes, folds and piles up without passing through itself, ending with a first dress sewn from two panels hanging on a mannequin. It comes early because it is the other thing we most want to see.
 
 - It builds on phase 5's particle store and collision shapes and phase 6's compute pipelines.
-- The CPU solver does not depend on the renderer, so it can start earlier (any time after quaternions) if we want cloth sooner.
 - Cloth code lives in its own module on top of the core, like the FPS and MOBA code.
-- Garments, sewing and the game itself follow in phase 10, once phase 9 has skinned characters to dress.
+- The pattern editor, garments on moving characters and the game itself follow in phase 10, once phase 9 has skinned characters to dress.
+- The solver's plan and research: `docs/CLOTHGPU.md` (read it first).
 
 **Items**
 
 - [x] Job system: a work-stealing thread pool with `parallelFor` (`job-system`)
 - [x] Cloth lab: a test ground with a station for each milestone, `--game clothlab` (`cloth-lab`)
-- [x] Dynamic meshes: deforming meshes uploaded every frame, normals and tangents recomputed (`dynamic-meshes`)
-- [x] Particle store for cloth: the sheet's points as plain arrays, lumped masses, pins, the step (`cloth-particles`)
-- [x] XPBD solver: substeps, compliance, stretch constraints and pins, a sheet hanging in the cloth lab (`xpbd-cloth`)
-- [x] Dragging cloth with the mouse: a hand constraint on the grabbed point (`cloth-grab`)
-- [x] Cloth constraints: bending (the hinge angle, Bridson's gradient) and moving pins (hooks on a rail) (`cloth-bending`)
-- [x] Collision with bodies: spheres, capsules and boxes (every `Collider`), positional friction, a sheet draped over the cloth lab's ball (`cloth-collision`)
-- [x] Solver on several threads: a job per cloth, coloured constraints on every core (bit for bit the one-thread result), spinning workers, `src/cloth/` optimised in debug, a big sheet to measure (`cloth-parallel`)
-- [x] A tick budget: ticks a frame may run within 1/60 s, the rest dropped, so an overloaded simulation runs in slow motion instead of spiralling to 3 fps (`tick-budget`)
-- [x] Isometric bending (Bergou et al. 2006): about four times cheaper than the hinge angle, the hinge kept as an option for creases (`isometric-bending`)
-- [ ] Cloth on the GPU, for large garments (plan and research: `docs/CLOTHGPU.md`, read it first). Each step its own branch, judged by measurement:
-  - [x] The yardstick: a 1 m sheet at 25, 50, 100 and 200 squares a side, measured on the CPU solver (`cloth-yardstick`)
-  - [x] Tethers (long-range attachments): XPBD with a string from each point to its nearest pins, on the CPU and the GPU (`cloth-tethers`)
-  - [x] The GPU framework: the cloth lives on the GPU, drawn straight from its buffer (normals in compute), picking and dragging through a readback a frame late, the CPU solver kept for headless runs and as the mirror; today's coloured XPBD ported as it is (replaces the faster CPU barrier item: fixed-thread loops at a spinning counter stay an option for the CPU path). Two branches:
-    - [x] The solver on the GPU, checked against the CPU's and measured on the yardstick (`gpu-cloth-solver`)
-    - [x] The cloth in the game: ticks as commands, drawn from its buffer, the late readback for picking, a "Cloth on GPU" setting (`gpu-cloth-in-game`)
-  - [ ] The low-frequency layer with Vertex Block Descent (one item since Oct 25 2026: Müller 2008's hierarchy on XPBD shook sagging sheets, and coarse levels need a solver that minimises the substep's energy itself): Galerkin multigrid levels (Lu et al. 2025) between vertex block descent sweeps (Chen et al. 2024), judged against XPBD on the yardstick and the cantilever. Branches:
-    - [x] On the CPU, beside XPBD and off by default (`hierarchical-cloth`)
-    - [ ] On the GPU, checked against the CPU's, in two branches; then the default for large garments if it beats XPBD there. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019)
-      - [x] Vertex block descent's sweep: a pass per point colour (`gpu-block-descent`)
-      - [x] The coarse levels: gradient, coarse step and spread passes, the line search as a two-stage reduction on the GPU (`gpu-cloth-levels`)
-      - [ ] Its cost cut after measuring: the two finest levels skipped, the reduction in one pass, the move folded into the next level's gradient. Paused on Oct 26 2026: tethers hold hanging cloth as well for a fraction of the cost; resume if phase 10's garments need the levels (cloth resting on a body by contact, which tethers cannot help)
-  - [ ] Self-collision, so folds and layers never pass through each other: Offset Geometric Contact's two-stage contact energy with a per-point motion bound (Divide and Truncate, or OGC's own), a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean
-  - [ ] Bodies on the GPU: the engine's collider shapes, then the mannequin below
-- [ ] Collision with a mannequin: a signed distance field around it, built in compute (it can serve later as DDGI's software tracer and for distance-field AO); moving bodies (the surface's velocity in the friction)
+- [x] Dynamic meshes: deforming meshes drawn blended between ticks, normals and tangents recomputed (`dynamic-meshes`)
+- [x] Particle store: the points as plain arrays, lumped masses, pins, the step (`cloth-particles`)
+- [x] XPBD solver: substeps, compliance, stretch constraints, a hanging sheet (`xpbd-cloth`)
+- [x] Dragging cloth with the mouse (`cloth-grab`)
+- [x] Bending and moving pins (`cloth-bending`)
+- [x] Collision with bodies: spheres, capsules and boxes, with friction (`cloth-collision`)
+- [x] The solver on every core, bit for bit the one-thread result (`cloth-parallel`)
+- [x] A tick budget: an overloaded simulation runs in slow motion (`tick-budget`)
+- [x] Isometric bending (Bergou et al. 2006), the hinge kept for creases (`isometric-bending`)
+- [x] The yardstick: a 1 m sheet at four resolutions, its stretch, sag and cost (`cloth-yardstick`)
+- [x] Cloth on the GPU: the solver (`gpu-cloth-solver`), in the game with the late readback (`gpu-cloth-in-game`), its time in F4 (`cloth-gpu-timing`)
+- [x] Vertex block descent with Galerkin coarse levels, on the CPU and the GPU, opt-in (`hierarchical-cloth`, `gpu-block-descent`, `gpu-cloth-levels`, `cloth-point-lanes`); its cost cuts parked in phase 10
+- [x] Tethers: a string from each point to its nearest pins, on by default (`cloth-tethers`)
+- [ ] GPU cloth ticks inside the tick budget: a GPU tick costs the CPU nothing, so an overloaded GPU spirals (seen with four coarse levels: 12 ticks a frame, 105 ms frames) instead of slowing down; and F4's cloth line says so when a frame has more passes than its stamps, instead of going blank
+- [ ] The mannequin: `assets/models/human.obj` (watertight, one piece, 24k quads, arms out in an A-pose) scaled to 1.75 m in a cloth lab station and drawn as a mesh, with a narrow-band signed distance field built from its triangles at load (about 1 cm cells) that the cloth collides with on the CPU and the GPU; a sheet dropped over its shoulders. A still pose: moving bodies wait for phase 9's skinning
+- [ ] A dress sewn from two panels: a sleeveless dress's front and back cut from 2D outlines into flat cloth meshes (UVs from the flat layout), placed around the mannequin, seams pulled shut by constraints until they join, held up by contact and friction. The dress-sized test: its stretch and cost held by contact alone, and with its shoulders pinned and tethered (tethers across seams measured along the sewn pattern, exact geodesics, if that version is kept), deciding whether garments need the coarse levels
+- [ ] Self-collision on XPBD, so folds and layers never pass through each other: distance constraints between points and triangles and between edges, kept a thickness apart and pushed straight out from the feature they touch (Offset Geometric Contact's idea), a per-point motion bound so nothing tunnels in a substep, a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean. Its tests: the dress, and a sheet dropped onto itself
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
   - Bending stiffness (silk vs denim), mass per area, friction
@@ -320,6 +313,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 **Milestone:**
 
 - a sheet pinned at two corners drapes over a sphere;
+- a dress sewn from two panels hangs on the mannequin;
 - a sheet dropped onto itself folds into a pile with no intersections (the self-collision stress test);
 - a silk sheet and a denim sheet fall visibly differently.
 
@@ -387,11 +381,11 @@ Euphoria-style characters: a simulated body held up by joint motors and kept sta
 A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them into garments and see them hang and move on a body. Needs phase 9's skinned characters and phase 6's physically based materials.
 
 **Garments**
-- [ ] Sewing patterns: 2D panel outlines triangulated into cloth meshes, with UVs from the flat layout
-- [ ] Seams: constraints that pull matching panel edges together until they join, starting from panels placed around the body
-- [ ] Tethers for garments: the distance along the sewn pattern (exact geodesics, Xin & Wang 2009: across seams, round armholes) in place of today's straight line (`clothRestDistance`), and anchors on the body (a shoulder seam, a waistband), each point tied to the nearest point of each region; first, a dress-sized test (20-30k points in several panels) to see whether tethers are enough
+- [ ] Garments from any panels: phase 7's two-panel dress (outlines cut into flat meshes, seams pulled shut) for the pattern editor's panels and seams, with darts, gathers and sleeves
+- [ ] Tethers for worn garments: anchors on a moving body (a shoulder seam, a waistband), each point tied to the nearest point of each region, with the distance along the sewn pattern (exact geodesics, Xin & Wang 2009: across seams, round armholes) in place of the straight line (`clothRestDistance`), if phase 7's dress did not need it already
+- [ ] If garments held by contact stretch (phase 7's dress decides): vertex block descent's coarse levels made cheap enough: the two finest levels skipped, the line search's reduction in one pass, the move folded into the next level's gradient, a workgroup per coarse point for its gather. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019)
 - [ ] A coarse simulation mesh driving a fine render mesh: the cloth solved on a few thousand points, each drawn vertex following its nearest simulated triangle (what shipped games do; 1,500 points instead of 10,000 is about 7 times less work, barely visible)
-- [ ] Dressing an animated character: the cloth collides with the skinned body as it moves
+- [ ] Dressing an animated character: the cloth collides with the skinned body as it moves (its distance field following the bones, the surface's velocity in the friction)
 
 **Rendering**
 - [ ] Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
@@ -401,7 +395,7 @@ A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them int
 - [ ] Pattern editor: draw and edit panel outlines, choose which edges are sewn together
 - [ ] Fabric choice, colours and prints per panel
 
-**Milestone:** a simple skirt sewn from two panels hangs on a mannequin and swings as it turns; then a garment follows an animated character as it walks.
+**Milestone:** a garment drawn in the pattern editor hangs on the mannequin and swings as it turns; then it follows an animated character as it walks.
 
 ## Phase 11: Networking
 
