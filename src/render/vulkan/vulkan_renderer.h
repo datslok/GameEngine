@@ -380,6 +380,9 @@ private:
         std::array<bool, maxFramesInFlight> readbackPending{};
     };
     std::unique_ptr<VulkanClothPipelines> clothPipelines;
+
+    // Every field body's samples any cloth has met, shared by them all.
+    std::unique_ptr<VulkanClothFields> clothFields;
     std::map<std::uint64_t, GpuCloth> gpuCloths;
     std::vector<ClothWork> clothWork;
     float clothAlpha = 1.0f;

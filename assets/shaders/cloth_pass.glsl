@@ -81,6 +81,16 @@ layout(std430, set = 0, binding = 15) readonly buffer ClothTethers {
     ClothTether tethers[];
 };
 
+// The frame's field bodies, from each tick's fieldFirst, and every field's samples, one field after another (x fastest,
+// then y, then z), shared by every cloth.
+layout(std430, set = 0, binding = 16) readonly buffer ClothFields {
+    ClothField fields[];
+};
+
+layout(std430, set = 0, binding = 17) readonly buffer ClothFieldSamples {
+    float fieldSamples[];
+};
+
 // Must match ClothPushConstants in render/vulkan/vulkan_cloth.cpp.
 layout(push_constant) uniform ClothDispatch {
     uint tickIndex;
@@ -92,6 +102,22 @@ layout(push_constant) uniform ClothDispatch {
     uint clothEdgeCount;
     uint clothHingeCount;
 };
+
+// sampleField and surfacePoint for a field body: its cell's eight corners read and blended; outside its box, a band away, up.
+vec4 clothFieldSurfacePoint(ClothField field, vec3 point) {
+    ivec3 cell;
+    vec3 share;
+    if (!clothFieldCell(point, field.origin.xyz, field.origin.w, field.counts.xyz, cell, share)) {
+        return vec4(0.0, 1.0, 0.0, field.band.x);
+    }
+    uint row = field.counts.x;
+    uint slice = field.counts.x * field.counts.y;
+    uint first = field.counts.w + uint(cell.z) * slice + uint(cell.y) * row + uint(cell.x);
+    float corners[8] = float[8](fieldSamples[first], fieldSamples[first + 1u], fieldSamples[first + row], fieldSamples[first + row + 1u],
+                                fieldSamples[first + slice], fieldSamples[first + slice + 1u], fieldSamples[first + slice + row],
+                                fieldSamples[first + slice + row + 1u]);
+    return clothFieldSurface(clothFieldBlend(corners, share, field.origin.w));
+}
 
 // This invocation's place in the range, or false past its end (the last workgroup's spare invocations).
 bool clothItem(out uint index) {

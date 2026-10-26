@@ -61,6 +61,15 @@ struct FieldPoint {
 FieldPoint sampleField(const SignedDistanceField& field, const Vec3& point);
 
 /*
+* sampleField's two steps, mirrored by cloth.glsl on the GPU. First the cell a point is in (its lowest corner's sample)
+* and its share across the cell along each axis, 0..1 (the far faces in the last cell); false outside the box.
+*/
+bool fieldCell(const SignedDistanceField& field, const Vec3& point, std::array<int, 3>& cell, Vec3& share);
+
+// Then the blend of the cell's corners (c000, c100, c010, c110, c001, c101, c011, c111: x fastest) at share, and its slope.
+FieldPoint blendFieldCell(const std::array<float, 8>& corners, const Vec3& share, float spacing);
+
+/*
 * Component: a body cloth collides with, given by its field already placed in the world (the entity's Transform is not
 * used). Shared, since a field is large (the mannequin's: about 6 million samples) and never changes. Not a Collider:
 * the player, picking and the physics' own queries do not see it.

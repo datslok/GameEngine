@@ -86,6 +86,32 @@ private:
 * commands that used it may still run, and takes one recordTicks per submission (a second would overwrite the first's
 * ticks before they run). The pins are the cloth's when it was uploaded.
 */
+/*
+* The field bodies' samples on the GPU (DistanceFieldCollider; each tick's GpuClothField records say where each starts):
+* every field one after another in one storage buffer, shared by every cloth, since a field is large (the cloth lab's
+* mannequin is 24.6 MB) and the same for every cloth that meets it. A field is uploaded once, when it is first wanted:
+* the buffer is then built again holding every field so far, after the GPU has finished with the old one (rare: a
+* field appears when its body is made). It keeps the fields it holds alive.
+*/
+class VulkanClothFields {
+public:
+    explicit VulkanClothFields(const VulkanDevice& device);
+
+    // Hold every one of these fields; if any is new, wait for the GPU and build the buffer again through uploads.
+    void hold(ImmediateCommands& uploads, const ClothFields& wanted);
+
+    VkBuffer getSamples() const;
+
+    // Where a held field's samples start in the buffer. Throws std::invalid_argument for a field not held.
+    std::uint32_t firstSample(const SignedDistanceField& field) const;
+
+private:
+    const VulkanDevice& device;
+    ClothFields fields;
+    std::vector<std::uint32_t> firsts;
+    VulkanBuffer samples;
+};
+
 class VulkanCloth {
 public:
     VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& uploads, const Cloth& cloth,
@@ -93,10 +119,12 @@ public:
 
     /*
     * Record the ticks, in order, into commands. Throws std::invalid_argument for a slot the cloth does not have, a tick
-    * whose pin targets are not one per pin, or a hand on a point the cloth does not have. With stamps, a timestamp after
-    * each pass, marked with its kind (here and in the other record functions).
+    * whose pin targets are not one per pin, a hand on a point the cloth does not have, or field bodies without fields
+    * holding them. With stamps, a timestamp after each pass, marked with its kind (here and in the other record
+    * functions).
     */
-    void recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slot, ClothPassStamps* stamps = nullptr);
+    void recordTicks(VkCommandBuffer commands, std::span<const ClothTickCommands> ticks, std::uint32_t slot, ClothPassStamps* stamps = nullptr,
+                     const VulkanClothFields* fields = nullptr);
 
     // Record a copy of the points and velocities into the slot's read-back buffer, after everything recorded before it.
     void recordReadback(VkCommandBuffer commands, std::uint32_t slot, ClothPassStamps* stamps = nullptr);
@@ -127,8 +155,12 @@ private:
         VulkanBuffer ticks;
         VulkanBuffer pins;
         VulkanBuffer colliders;
+        VulkanBuffer fields;
         VulkanBuffer readback;
         VkDescriptorSet set = VK_NULL_HANDLE;
+
+        // The field samples its set binds (VulkanClothFields', or the cloth's empty stand-in).
+        VkBuffer fieldSamples = VK_NULL_HANDLE;
     };
 
     // The coarse levels (render/gpu/cloth_gpu.h's GpuClothLevels) and the work arrays their passes hand on: set 1.
@@ -195,6 +227,9 @@ private:
     // Each point's tether slots, read by the end's pass when a tick has the tethers on.
     VulkanBuffer tethers;
 
+    // Bound as the field samples while no ticks have field bodies.
+    VulkanBuffer noFieldSamples;
+
     // The points before the last tick recorded, for drawing between the last two ticks.
     VulkanBuffer tickStart;
 
@@ -210,7 +245,8 @@ private:
 
     Slot& slotAt(std::uint32_t slot);
     const Slot& slotAt(std::uint32_t slot) const;
-    void ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins, std::size_t colliders);
+    // Whether any of the slot's lists had to grow (its set must then be written again).
+    bool ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins, std::size_t colliders, std::size_t fields);
     void writeSet(const Slot& slot);
     void uploadLevels(ImmediateCommands& uploads, const Cloth& cloth);
 

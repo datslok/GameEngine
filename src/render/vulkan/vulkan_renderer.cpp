@@ -2427,6 +2427,18 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
 
     if (!clothWork.empty() && !clothPipelines) {
         clothPipelines = std::make_unique<VulkanClothPipelines>(device);
+        clothFields = std::make_unique<VulkanClothFields>(device);
+    }
+
+    // Before any cloth records: a new field body waits for the GPU and replaces the fields' buffer the sets bind.
+    ClothFields wanted;
+    for (const ClothWork& work : clothWork) {
+        for (const ClothTickCommands& tick : work.ticks) {
+            wanted.insert(wanted.end(), tick.fields.begin(), tick.fields.end());
+        }
+    }
+    if (!wanted.empty()) {
+        clothFields->hold(uploads, wanted);
     }
 
     ClothPassStamps* stamps = nullptr;
@@ -2451,7 +2463,7 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
             }
         }
 
-        entry.cloth->recordTicks(commands, work.ticks, frameIndex, stamps);
+        entry.cloth->recordTicks(commands, work.ticks, frameIndex, stamps, clothFields.get());
         if (work.mesh.isValid()) {
             if (const auto slot = gpuShapeSlots.find(work.mesh.index); slot != gpuShapeSlots.end()) {
                 entry.cloth->recordShape(commands, slot->second, clothAlpha, stamps);

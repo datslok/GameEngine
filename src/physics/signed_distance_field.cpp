@@ -268,53 +268,56 @@ SignedDistanceField buildSignedDistanceField(const TriangleMesh& mesh, float spa
     return field;
 }
 
+bool fieldCell(const SignedDistanceField& field, const Vec3& point, std::array<int, 3>& cell, Vec3& share) {
+    const Vec3 local = (point - field.origin) * (1.0f / field.spacing);
+    const std::array<float, 3> coordinates{local.x, local.y, local.z};
+    std::array<float, 3> shares{};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        const float coordinate = coordinates[axis];
+        if (!(coordinate >= 0.0f) || coordinate > static_cast<float>(field.counts[axis] - 1)) {
+            return false;
+        }
+        cell[axis] = std::min(static_cast<int>(coordinate), field.counts[axis] - 2);
+        shares[axis] = coordinate - static_cast<float>(cell[axis]);
+    }
+    share = Vec3{shares[0], shares[1], shares[2]};
+    return true;
+}
+
 /*
 * The blend is written as nested steps a + (b - a) t, so equal corners give exactly their value and no slope. The
 * slope along each axis is the blend's derivative: the difference across the cell, blended over the other two axes,
 * over the spacing.
 */
-FieldPoint sampleField(const SignedDistanceField& field, const Vec3& point) {
-    const Vec3 local = (point - field.origin) * (1.0f / field.spacing);
-    const std::array<float, 3> coordinates{local.x, local.y, local.z};
-    std::array<int, 3> cell{};
-    std::array<float, 3> share{};
-    for (std::size_t axis = 0; axis < 3; ++axis) {
-        const float coordinate = coordinates[axis];
-        if (!(coordinate >= 0.0f) || coordinate > static_cast<float>(field.counts[axis] - 1)) {
-            return FieldPoint{field.band, Vec3{0.0f, 0.0f, 0.0f}};
-        }
-        cell[axis] = std::min(static_cast<int>(coordinate), field.counts[axis] - 2);
-        share[axis] = coordinate - static_cast<float>(cell[axis]);
-    }
-
-    const int x = cell[0];
-    const int y = cell[1];
-    const int z = cell[2];
-    const float c000 = field.at(x, y, z);
-    const float c100 = field.at(x + 1, y, z);
-    const float c010 = field.at(x, y + 1, z);
-    const float c110 = field.at(x + 1, y + 1, z);
-    const float c001 = field.at(x, y, z + 1);
-    const float c101 = field.at(x + 1, y, z + 1);
-    const float c011 = field.at(x, y + 1, z + 1);
-    const float c111 = field.at(x + 1, y + 1, z + 1);
-    const float fx = share[0];
-    const float fy = share[1];
-    const float fz = share[2];
-
+FieldPoint blendFieldCell(const std::array<float, 8>& corners, const Vec3& share, float spacing) {
+    const auto [c000, c100, c010, c110, c001, c101, c011, c111] = corners;
     const auto blend = [](float from, float to, float t) {
         return from + (to - from) * t;
     };
-    const float x00 = blend(c000, c100, fx);
-    const float x10 = blend(c010, c110, fx);
-    const float x01 = blend(c001, c101, fx);
-    const float x11 = blend(c011, c111, fx);
-    const float y0 = blend(x00, x10, fy);
-    const float y1 = blend(x01, x11, fy);
+    const float x00 = blend(c000, c100, share.x);
+    const float x10 = blend(c010, c110, share.x);
+    const float x01 = blend(c001, c101, share.x);
+    const float x11 = blend(c011, c111, share.x);
+    const float y0 = blend(x00, x10, share.y);
+    const float y1 = blend(x01, x11, share.y);
 
-    const float perMetre = 1.0f / field.spacing;
-    const float slopeX = blend(blend(c100 - c000, c110 - c010, fy), blend(c101 - c001, c111 - c011, fy), fz);
-    const float slopeY = blend(x10 - x00, x11 - x01, fz);
+    const float perMetre = 1.0f / spacing;
+    const float slopeX = blend(blend(c100 - c000, c110 - c010, share.y), blend(c101 - c001, c111 - c011, share.y), share.z);
+    const float slopeY = blend(x10 - x00, x11 - x01, share.z);
     const float slopeZ = y1 - y0;
-    return FieldPoint{blend(y0, y1, fz), Vec3{slopeX, slopeY, slopeZ} * perMetre};
+    return FieldPoint{blend(y0, y1, share.z), Vec3{slopeX, slopeY, slopeZ} * perMetre};
+}
+
+FieldPoint sampleField(const SignedDistanceField& field, const Vec3& point) {
+    std::array<int, 3> cell{};
+    Vec3 share;
+    if (!fieldCell(field, point, cell, share)) {
+        return FieldPoint{field.band, Vec3{0.0f, 0.0f, 0.0f}};
+    }
+    const int x = cell[0];
+    const int y = cell[1];
+    const int z = cell[2];
+    return blendFieldCell({field.at(x, y, z), field.at(x + 1, y, z), field.at(x, y + 1, z), field.at(x + 1, y + 1, z), field.at(x, y, z + 1),
+                           field.at(x + 1, y, z + 1), field.at(x, y + 1, z + 1), field.at(x + 1, y + 1, z + 1)},
+                          share, field.spacing);
 }

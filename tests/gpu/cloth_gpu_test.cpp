@@ -4,6 +4,8 @@
 #include "cloth/cloth.h"
 #include "cloth/cloth_yardstick.h"
 #include "math/angles.h"
+#include "physics/signed_distance_field.h"
+#include "scene/collision_mesh.h"
 #include "render/gpu/cloth_gpu.h"
 #include "render/vulkan/immediate_commands.h"
 #include "render/vulkan/vulkan_cloth.h"
@@ -16,6 +18,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstddef>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <string>
@@ -346,6 +349,63 @@ namespace {
         }
     }
 
+    /*
+    * A field body's sample on random points in and round a field's box (fieldCell), random corners blended at the
+    * share found (blendFieldCell), and the slope made the way out (fieldSurface), equal corners among them.
+    */
+    void checkField(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{163};
+        SignedDistanceField field;
+        field.origin = Vec3{-0.4f, 0.1f, -0.3f};
+        field.spacing = 0.005f;
+        field.counts = {120, 200, 60};
+        field.band = 0.03f;
+        const Vec3 extent = field.bounds().maximum - field.origin;
+
+        std::vector<GpuVec4> inputs;
+        std::vector<std::array<float, 8>> cornerSets;
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 point = field.origin + Vec3{extent.x * random.between(-0.05f, 1.05f), extent.y * random.between(-0.05f, 1.05f),
+                                                   extent.z * random.between(-0.05f, 1.05f)};
+            std::array<float, 8> corners{};
+            const float level = random.between(-0.03f, 0.03f);
+            for (float& corner : corners) {
+                corner = i % 10 == 0 ? level : level + random.between(-0.006f, 0.006f);
+            }
+            cornerSets.push_back(corners);
+            inputs.push_back(gpuVec4(point, field.spacing));
+            inputs.push_back(gpuVec4(field.origin));
+            inputs.push_back(gpuVec4(static_cast<float>(field.counts[0]), static_cast<float>(field.counts[1]), static_cast<float>(field.counts[2])));
+            inputs.push_back(gpuVec4(corners[0], corners[1], corners[2], corners[3]));
+            inputs.push_back(gpuVec4(corners[4], corners[5], corners[6], corners[7]));
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_FIELD, inputs, 5, 4);
+
+        for (std::size_t i = 0; i < cornerSets.size(); ++i) {
+            std::array<int, 3> cell{};
+            Vec3 share;
+            const bool inside = fieldCell(field, vec3From(inputs[i * 5]), cell, share);
+            const GpuVec4& gpuCell = outputs[i * 4];
+            report.check("clothFieldCell inside", exactTolerance, inside ? 1.0f : 0.0f, gpuCell[0]);
+            if (!inside) {
+                continue;
+            }
+            report.check("clothFieldCell cell", exactTolerance, Vec3{static_cast<float>(cell[0]), static_cast<float>(cell[1]), static_cast<float>(cell[2])},
+                         Vec3{gpuCell[1], gpuCell[2], gpuCell[3]});
+            // A share is a coordinate (up to a few hundred cells) less its cell: float keeps it to about 3e-5.
+            const FloatTolerance shareTolerance{.absolute = 1e-4f, .relative = 0.0f};
+            report.check("clothFieldCell share", shareTolerance, share, vec3From(outputs[i * 4 + 1]));
+
+            const Vec3 gpuShare = vec3From(outputs[i * 4 + 1]);
+            const FieldPoint blended = blendFieldCell(cornerSets[i], gpuShare, field.spacing);
+            report.check("clothFieldBlend distance", arithmeticTolerance, blended.distance, outputs[i * 4 + 2][3]);
+            report.check("clothFieldBlend slope", arithmeticTolerance, blended.gradient, vec3From(outputs[i * 4 + 2]));
+
+            const SurfacePoint surface = fieldSurface(blended);
+            report.check("clothFieldSurface", arithmeticTolerance, surface.normal, vec3From(outputs[i * 4 + 3]));
+        }
+    }
+
     void checkFinishVelocity(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{151};
         const float kept = std::exp(-ClothSettings{}.drag * substep);
@@ -623,6 +683,13 @@ namespace {
         SolverCase{ClothMethod::VertexBlockDescent, BendingModel::Isometric, 0, "VulkanCloth block descent tethers", true},
     };
 
+    // A small ball as a field body, beside the busy sheet's shapes: 1 cm samples, a 3 cm band.
+    std::shared_ptr<const SignedDistanceField> busyFieldBall() {
+        static const std::shared_ptr<const SignedDistanceField> field = std::make_shared<const SignedDistanceField>(buildSignedDistanceField(
+            collisionMesh(Mesh::sphere(32, 16), Mat4::translation(-0.3f, 0.3f, 0.25f) * Mat4::scaling(0.15f, 0.15f, 0.15f)), 0.01f, 0.03f));
+        return field;
+    }
+
     // The busy sheet (289 points) has two coarse levels, so the levels' cases run both and the passes between them.
     std::vector<TickCase> busySheet(const SolverCase& solver) {
         ClothSettings settings;
@@ -652,8 +719,9 @@ namespace {
             } else {
                 cloth.grab.reset();
             }
-            const ClothTickCommands commands = clothTickCommands(cloth, tickSeconds, bodies);
-            stepCloth(cloth, tickSeconds, bodies);
+            const ClothFields fields{busyFieldBall()};
+            const ClothTickCommands commands = clothTickCommands(cloth, tickSeconds, bodies, fields);
+            stepCloth(cloth, tickSeconds, bodies, serialJobs(), fields);
             cases.push_back(TickCase{before, commands, cloth});
         }
         return cases;
@@ -662,8 +730,14 @@ namespace {
     std::vector<Vec3> runOnGpu(const VulkanDevice& device, const VulkanClothPipelines& pipelines, ImmediateCommands& commands, const Cloth& start,
                                std::span<const ClothTickCommands> ticks) {
         VulkanCloth cloth{device, pipelines, commands, start};
+        VulkanClothFields fields{device};
+        ClothFields wanted;
+        for (const ClothTickCommands& tick : ticks) {
+            wanted.insert(wanted.end(), tick.fields.begin(), tick.fields.end());
+        }
+        fields.hold(commands, wanted);
         commands.run([&](VkCommandBuffer buffer) {
-            cloth.recordTicks(buffer, ticks, 0);
+            cloth.recordTicks(buffer, ticks, 0, nullptr, &fields);
             cloth.recordReadback(buffer, 0);
         });
         return cloth.readPositions(0);
@@ -673,7 +747,7 @@ namespace {
     * A busy sheet is chaotic: nudging one point by a micrometre on the CPU alone moves it by tens of centimetres within
     * a second (measured: 0.2 mm after 10 ticks, 10 cm after 30, as far as the GPU's rounding moves it), so whole runs
     * cannot be compared point by point. Instead each of its ticks runs on the GPU from the CPU's state before it, with
-    * the CPU's commands, and lands within rounding of the CPU's state after it; a missed pass, a wrong order or a sign
+    * the CPU's commands (its bodies a ball, a capsule, a box and a smaller ball given as a distance field), and lands within rounding of the CPU's state after it; a missed pass, a wrong order or a sign
     * moves points by millimetres or more in a tick. The whole run, twice on the GPU, gives the same bits. Both
     * methods: XPBD's constraint passes and vertex block descent's point passes, with and without its levels (whose
     * line search sums in float on the GPU, in double on the CPU: a step length a millionth off moves points by
@@ -904,6 +978,7 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkContact(runner, report);
     checkGrab(runner, report);
     checkTether(runner, report);
+    checkField(runner, report);
     checkFinishVelocity(runner, report);
     checkPointTerms(runner, report);
     checkBlockSolve(runner, report);

@@ -4,7 +4,7 @@
 /*
 * A substep's end for every point, in the CPU solver's order: XPBD's hand on its point (vertex block descent's is in
 * each point's step), then the tethers to its nearest pins, then the bodies (each free point pushed out of every body in
-* turn, with friction), then the velocity from the motion, slowed by the air. Each step touches only its own point, so
+* turn, with friction, the shapes and then the field bodies), then the velocity from the motion, slowed by the air. Each step touches only its own point, so
 * one invocation per point does them all. A tether reads its anchor, a pinned point, which nothing here moves; so a
 * pinned point's position is not written back (it is unchanged), and no invocation writes what another reads.
 */
@@ -39,6 +39,10 @@ void main() {
             ClothCollider collider = colliders[tick.colliderFirst + body];
             clothContact(position.xyz, previous, clothSurfacePoint(collider, position.xyz), tick.thickness, tick.staticFriction,
                          tick.kineticFriction);
+        }
+        for (uint body = 0u; body < tick.fieldCount; ++body) {
+            clothContact(position.xyz, previous, clothFieldSurfacePoint(fields[tick.fieldFirst + body], position.xyz), tick.thickness,
+                         tick.staticFriction, tick.kineticFriction);
         }
 
         positions[point] = position;

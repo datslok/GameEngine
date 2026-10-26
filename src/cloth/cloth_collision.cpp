@@ -98,7 +98,10 @@ void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, 
 }
 
 SurfacePoint surfacePoint(const SignedDistanceField& field, const Vec3& point) {
-    const FieldPoint sampled = sampleField(field, point);
+    return fieldSurface(sampleField(field, point));
+}
+
+SurfacePoint fieldSurface(const FieldPoint& sampled) {
     const float slope = sampled.gradient.length();
     if (slope * slope < noDirection) {
         return SurfacePoint{sampled.distance, straightUp};

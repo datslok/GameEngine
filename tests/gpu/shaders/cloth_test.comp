@@ -128,6 +128,19 @@ void main() {
         vec4 anchor = testInput(1); // its rest length and the stretch allowed in the next input
         clothTether(point, anchor.xyz, testInput(2).x, testInput(2).y);
         testOutput(0, vec4(point, 0.0));
+    } else if (function == GPU_TEST_CLOTH_FIELD) {
+        // A point's cell in a field (its origin, spacing and sample counts), then a cell's corners blended at that share.
+        ivec3 cell;
+        vec3 share;
+        bool inside = clothFieldCell(testInput(0).xyz, testInput(1).xyz, testInput(0).w, uvec3(testInput(2).xyz), cell, share);
+        vec4 low = testInput(3);
+        vec4 high = testInput(4);
+        float corners[8] = float[8](low.x, low.y, low.z, low.w, high.x, high.y, high.z, high.w);
+        vec4 blended = clothFieldBlend(corners, share, testInput(0).w);
+        testOutput(0, vec4(inside ? 1.0 : 0.0, vec3(cell)));
+        testOutput(1, vec4(share, 0.0));
+        testOutput(2, blended);
+        testOutput(3, clothFieldSurface(blended));
     } else if (function == GPU_TEST_CLOTH_LINE_SEARCH_TERMS) {
         // The coarse levels' pieces, cloth_gpu_test.cpp's checkLineSearchTerms.
         ClothBlock block = testBlock(0u);

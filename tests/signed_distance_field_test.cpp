@@ -131,6 +131,37 @@ namespace {
         assert(sampleField(field, corner + Vec3{0.01f, 0.0f, 0.0f}).distance == field.band);
     }
 
+    /*
+    * The two steps a sample takes, which the GPU mirrors: the cell a point is in and its share across it (none outside
+    * the box), then the blend of the cell's eight corners.
+    */
+    void testCellAndBlend() {
+        SignedDistanceField field;
+        field.origin = Vec3{1.0f, 2.0f, 3.0f};
+        field.spacing = 0.5f;
+        field.counts = {3, 4, 5};
+        field.band = 1.0f;
+        field.distances.assign(3 * 4 * 5, 0.25f);
+
+        std::array<int, 3> cell{};
+        Vec3 share;
+        assert(fieldCell(field, Vec3{1.6f, 3.1f, 4.9f}, cell, share));
+        assert(cell[0] == 1 && cell[1] == 2 && cell[2] == 3);
+        assert(near(share.x, 0.2f, 1e-5f) && near(share.y, 0.2f, 1e-5f) && near(share.z, 0.8f, 1e-5f));
+
+        // On the far faces, the last cell all the way across; past them, or before the first sample, none.
+        assert(fieldCell(field, Vec3{2.0f, 3.5f, 5.0f}, cell, share));
+        assert(cell[0] == 1 && cell[1] == 2 && cell[2] == 3 && share.x == 1.0f && share.y == 1.0f && share.z == 1.0f);
+        assert(!fieldCell(field, Vec3{2.01f, 3.0f, 4.0f}, cell, share));
+        assert(!fieldCell(field, Vec3{1.5f, 1.99f, 4.0f}, cell, share));
+
+        // Equal corners blend to exactly their value with no slope; a corner raised by one slopes by one over the spacing.
+        const FieldPoint flat = blendFieldCell({0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f}, Vec3{0.3f, 0.6f, 0.9f}, 0.5f);
+        assert(flat.distance == 0.25f && flat.gradient.x == 0.0f && flat.gradient.y == 0.0f && flat.gradient.z == 0.0f);
+        const FieldPoint raised = blendFieldCell({0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, 0.5f);
+        assert(raised.distance == 0.0f && near(raised.gradient.x, 2.0f, 1e-6f) && raised.gradient.y == 0.0f && raised.gradient.z == 0.0f);
+    }
+
     // Each slab of the grid is a job of its own, so any number of threads gives the same field to the last bit.
     void testSameOnAnyThreads() {
         const TriangleMesh ball = collisionMesh(Mesh::sphere(32, 16), Mat4::scaling(0.2f, 0.2f, 0.2f));
@@ -167,6 +198,7 @@ void testSignedDistanceField() {
     testBallBetweenSamples();
     testOutsideTheBox();
     testBlending();
+    testCellAndBlend();
     testSameOnAnyThreads();
     testBadFields();
 }

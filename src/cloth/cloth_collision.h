@@ -34,6 +34,9 @@ using ClothFields = std::vector<std::shared_ptr<const SignedDistanceField>>;
 */
 SurfacePoint surfacePoint(const SignedDistanceField& field, const Vec3& point);
 
+// Its last step, from a sample (sampleField): the slope made a unit normal, or up where it vanishes (cloth.glsl's clothFieldSurface).
+SurfacePoint fieldSurface(const FieldPoint& sampled);
+
 /*
 * The cloth against still bodies, one-sided constraints with no give, solved after the cloth's own: each free point
 * inside a shape, or closer than settings.thickness, is pushed out along the normal to that distance. Then friction on

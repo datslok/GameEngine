@@ -17,5 +17,8 @@ void main() {
     for (uint body = 0u; body < tick.colliderCount && !isHeld; ++body) {
         isHeld = clothSurfacePoint(colliders[tick.colliderFirst + body], position.xyz).w < tick.thickness;
     }
+    for (uint body = 0u; body < tick.fieldCount && !isHeld; ++body) {
+        isHeld = clothFieldSurfacePoint(fields[tick.fieldFirst + body], position.xyz).w < tick.thickness;
+    }
     held[point] = isHeld ? 1u : 0u;
 }
