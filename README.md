@@ -276,8 +276,9 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 | `make test-slow`, `make test-slow-release` | Runs the slow tests left out of the others: vertex block descent and its coarse levels (about half a minute in release) |
 | `make golden` | Renders every game's golden views and compares them with the references in `tests/golden/<GPU>/<game>/`. Needs a GPU; captures and difference heatmaps go to `build/golden/<GPU>/<game>/` |
 | `make golden-save` | Renders the golden views and saves them as the new references. Only on purpose, after a change that is meant to alter the picture |
-| `make yardstick` | Measures the cloth solver: a 1 m sheet at four resolutions, its stretch, sag and cost a tick (release build; `docs/CLOTHGPU.md` holds the numbers) |
-| `make yardstick-quick` | The same in about a minute, for development: the CPU rows only, three resolutions, settled less |
+| `make yardstick` | Measures the cloth solver: a 1 m sheet at four resolutions, its stretch, sag and cost a tick, then the dress-sized test (release build; `docs/CLOTHGPU.md` holds the numbers) |
+| `make yardstick-quick` | The same in a few minutes, for development: the CPU rows only, three resolutions, settled less |
+| `make yardstick-dress` | The dress-sized test alone: the cloth lab's dress on the mannequin at four resolutions, held by contact and pinned at the shoulders, its stretch, hem and cost |
 | `make gputest` | Runs every shader library's functions in compute shaders on the GPU and compares them with their C++ mirrors (`build/gputests.exe`), then the golden images. Needs a GPU; `make gputest-release` for the optimised build |
 
 **Good to know**

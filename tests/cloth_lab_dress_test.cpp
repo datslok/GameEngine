@@ -1,13 +1,16 @@
 #include "cloth/cloth.h"
 #include "cloth/cloth_pattern.h"
+#include "cloth/cloth_yardstick.h"
 #include "cloth_helpers.h"
 #include "games/clothlab/cloth_lab_dress.h"
+#include "scene/collision_mesh.h"
 #include "test_levels.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 namespace {
@@ -180,6 +183,83 @@ namespace {
     }
 }
 
+namespace {
+    // The hem's points: every point of both panels' hems, each once, all on the pattern's bottom line.
+    void testTheDressHem() {
+        const PatternMesh meshed = meshPattern(twoPanelDress(), 0.03f);
+        const std::vector<std::uint32_t> hem = dressHemPoints(meshed);
+        const std::uint32_t hemEdge = edgeIndex(DressEdge::Hem);
+        assert(hem.size() == meshed.edgePoints[0][hemEdge].size() + meshed.edgePoints[1][hemEdge].size());
+        assert(std::set<std::uint32_t>(hem.begin(), hem.end()).size() == hem.size());
+        for (const std::uint32_t point : hem) {
+            assert(meshed.flatPositions[point].y == 0.0f);
+        }
+    }
+
+    /*
+    * A tick of the dress: the fabric's settings, but weightless while it sews (ticks starting before the sewing ends),
+    * and its strap pins where their ways have them at the tick's end.
+    */
+    void testPreparingADressTick() {
+        Cloth dress = yardstickSheet(2, ClothSettings{});
+        const std::vector<StrapPinPath> straps{StrapPinPath{Vec3{-0.5f, 0.0f, 0.0f}, Vec3{-0.4f, 0.1f, 0.0f}, Vec3{-0.4f, 0.0f, 0.0f}},
+                                               StrapPinPath{Vec3{0.5f, 0.0f, 0.0f}, Vec3{0.4f, 0.1f, 0.0f}, Vec3{0.4f, 0.0f, 0.0f}}};
+        ClothSettings fabric;
+        fabric.substeps = 7;
+
+        prepareDressTick(dress, straps, fabric, 0.0, tick);
+        assert(dress.settings.gravity == 0.0f && dress.settings.substeps == 7);
+        for (std::size_t index = 0; index < straps.size(); ++index) {
+            const Vec3 due = strapPinPosition(straps[index], tick);
+            assert(dress.pins[index].position.x == due.x && dress.pins[index].position.y == due.y);
+        }
+
+        prepareDressTick(dress, straps, fabric, dressSewingSeconds - 0.5 * tick, tick);
+        assert(dress.settings.gravity == 0.0f);
+        prepareDressTick(dress, straps, fabric, dressSewingSeconds, tick);
+        assert(dress.settings.gravity == fabric.gravity);
+        assert(near(dress.pins[1].position.x, 0.4f, 1e-6f) && near(dress.pins[1].position.y, 0.0f, 1e-6f));
+
+        // Held by contact alone, there are no straps to move.
+        Cloth unpinned = yardstickSheet(2, ClothSettings{});
+        const Vec3 before = unpinned.pins[0].position;
+        prepareDressTick(unpinned, {}, fabric, 0.0, tick);
+        assert(unpinned.pins[0].position.x == before.x && unpinned.settings.gravity == 0.0f);
+    }
+
+    /*
+    * The dress made round a body (a box standing in for the mannequin, its shoulders at dressShoulderHeight): one point
+    * a vertex, sewn, its hem the pattern's; pinned, both points of every shoulder stitch are its pins, in order with
+    * their ways, each way ending on the body's top, and the rest tethered; held by contact alone, no pins and no tethers.
+    */
+    void testTheDressRoundABody() {
+        const Vec3 feet{2.0f, 0.0f, -1.0f};
+        const float halfHeight = 0.5f * dressShoulderHeight;
+        const SignedDistanceField body = buildSignedDistanceField(
+            collisionMesh(Mesh::cube(), Mat4::translation(feet.x, feet.y + halfHeight, feet.z - 0.02f) * Mat4::scaling(0.21f, halfHeight, 0.12f)), 0.01f, 0.03f);
+        const PatternMesh meshed = meshPattern(twoPanelDress(), 0.03f);
+
+        const DressOnMannequin pinned = dressOnMannequin(body, feet, 0.03f, ClothSettings{}, true);
+        assert(pinned.cloth.particles.size() == meshed.mesh.vertices.size() && pinned.mesh.vertices.size() == meshed.mesh.vertices.size());
+        assert(pinned.cloth.stitches.size() == clothSewing(meshed).stitches.size());
+        assert(pinned.hem == dressHemPoints(meshed));
+
+        std::size_t shoulderStitches = 0;
+        for (const std::uint32_t seam : dressShoulderSeams) {
+            shoulderStitches += meshed.seams.at(seam).size();
+        }
+        assert(pinned.cloth.pins.size() == 2 * shoulderStitches && pinned.strapPaths.size() == pinned.cloth.pins.size());
+        assert(!pinned.cloth.tethers.empty());
+        for (const StrapPinPath& path : pinned.strapPaths) {
+            assert(path.onShoulder.y > feet.y + dressShoulderHeight && path.onShoulder.y < feet.y + dressShoulderHeight + ClothSettings{}.thickness + 0.01f);
+        }
+
+        const DressOnMannequin byContact = dressOnMannequin(body, feet, 0.03f, ClothSettings{}, false);
+        assert(byContact.cloth.pins.empty() && byContact.strapPaths.empty() && byContact.cloth.tethers.empty());
+        assert(byContact.hem == pinned.hem);
+    }
+}
+
 void testClothLabDress() {
     testThePattern();
     testTheShoulderSeams();
@@ -187,4 +267,7 @@ void testClothLabDress() {
     testTheDressMeshes();
     testTheDressStartsRoundTheMannequin();
     testTheDressSewsShutInTheAir();
+    testTheDressHem();
+    testPreparingADressTick();
+    testTheDressRoundABody();
 }

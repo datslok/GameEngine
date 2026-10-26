@@ -451,6 +451,30 @@ Before any solver is chosen, tests that measure the problem, on the CPU and the 
 - **The GPU's rows match the CPU's** to the shown digits on every rung, at 15 and 60 substeps.
 - **At 60 substeps** XPBD with tethers stretches 0.12-0.18%, so four times the substeps buys little: the strings already did the work.
 
+**The dress-sized test** (`dress-yardstick`, `make yardstick-dress`, Oct 26 2026, release, 16 threads and the RTX 5080). The cloth lab's dress on the mannequin, sewn 1 s and settled to 10 s, XPBD at 15 substeps. Vertex block descent and its levels were left out at the user's request: their cost (8-17 times XPBD's on the CPU) had already ruled them out.
+
+The pass mark, set before measuring: 1% strain at the 99th percentile at 1 cm, about where stretch starts to show in cotton (which itself stretches about 0.15%).
+
+| Spacing | Points | Held by | Mean stretch | 99th percentile | Worst edge | Hem above the floor | CPU ms a tick | GPU ms a tick |
+|---|---|---|---|---|---|---|---|---|
+| 2 cm | 3,070 | contact | 0.32% | 4.4% | 22% | 0.598 m | 3.7 | 0.98 |
+| 2 cm | 3,070 | pins and tethers | 0.49% | 7.2% | 74% | 0.631 m | 4.2 | 1.00 |
+| 1.4 cm | 6,201 | contact | 0.54% | 6.9% | 26% | 0.582 m | 7.9 | 1.13 |
+| 1.4 cm | 6,201 | pins and tethers | 0.75% | 11.3% | 109% | 0.608 m | 8.5 | 1.05 |
+| 1 cm | 12,027 | contact | 0.96% | 10.5% | 33% | 0.568 m | 14.1 | 1.10 |
+| 1 cm | 12,027 | pins and tethers | 1.14% | 15.3% | 124% | 0.586 m | 15.2 | 1.18 |
+| 0.7 cm | 24,438 | contact | 2.0% | 19.1% | 102% | 0.531 m | 26.1 | 1.17 |
+| 0.7 cm | 24,438 | pins and tethers | 1.86% | 19.1% | 308% | 0.560 m | 27.7 | 1.20 |
+
+- **It fails, at every rung, held either way.** The mean stretch roughly doubles with each step finer, and the hem drops 7 cm between the coarsest and the finest. This is the sheet's problem again: XPBD's local passes carry the weight's pull up the cloth one edge a substep.
+- **It is the solver's error, not contact's:** the 1 cm dress held by contact at 60 substeps (a one-off diagnostic run) stretched 0.115% on average and 1.7% at the 99th percentile, worst edge 13%, its hem 5.4 cm higher (0.622 m), for 57 ms a tick on the CPU.
+- **Where it stretches:** the bodice, 1.0-1.5 m up. At 1 cm, 4% of the edges were over 5%, three quarters of them within 1 cm of the body. The whole dress hangs from the shoulders through two 7 cm straps, so that is where the load path is longest and narrowest. The worst edges sit at the armpits' corners, the straps' outer edges and round the front neckline.
+- **The tethers do not help a worn garment.** A tether is a straight line from a point to its pins, as long as the path along the flat panel. On a body the straight line from a strap to the waist runs through the bust, so it is shorter than the cloth draped over it and the tether stays slack. Where one is taut, it pulls the cloth into the body and the two fight: the back neckline's middle, tethered through the neck, is the worst edge pinned (124% at 1 cm). They help a sheet hanging free (Part 5 above), not cloth lying on a body.
+- **The GPU matches the CPU** to about the shown digits (the worst edge varies more, since the settled shapes differ a little), and costs 1.0-1.2 ms a tick at any size (420-450 dispatches). The CPU's 14 ms at 1 cm is over the tick's 8.3 ms; the lab runs the dress on the GPU.
+- **Seams and contact held:** every seam shut (0.00 mm) and no point inside the body (the nearest 4.2-5.0 mm off it, the cloth's thickness being 5).
+
+**What it decides:** garments need more than XPBD and tethers. The cure has to carry load along the cloth over long distances without vertex block descent's cost. The options were put to the user next.
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.
@@ -478,7 +502,7 @@ Agreed with the user on Oct 25, 2026; phase 7's items in `ROADMAP.md` changed to
 
 Re-planned with the user on Oct 26 2026, after the tethers: phase 7 ends with a dress on a mannequin. The mannequin is `assets/models/human.obj` with a signed distance field; phase 10's sewing-pattern and seam items moved into phase 7 (without the editor) for a dress sewn from two panels, the dress-sized test; the levels' cost cuts moved to phase 10, to resume if that dress shows garments need them; self-collision is built on XPBD.
 
-The dress (`two-panel-dress`, Oct 26 2026): two panels cut from a pattern into 12,027 points, sewn round the mannequin by stitches closing at a set speed, on the CPU and the GPU (docs/ARCHITECTURE.md, Cloth, Sewing). In the lab its straps are pinned onto the shoulders and the rest tethered to them, the tethers measured along each flat panel round its armhole (the straight line across the cut-out is shorter than the fabric); held by contact alone it is one click away. The dress-sized test (`dress-yardstick`) measures both, and vertex block descent's levels held by contact, next.
+The dress (`two-panel-dress`, Oct 26 2026): two panels cut from a pattern into 12,027 points, sewn round the mannequin by stitches closing at a set speed, on the CPU and the GPU (docs/ARCHITECTURE.md, Cloth, Sewing). In the lab its straps are pinned onto the shoulders and the rest tethered to them, the tethers measured along each flat panel round its armhole (the straight line across the cut-out is shorter than the fabric); held by contact alone it is one click away. The dress-sized test (`dress-yardstick`, Oct 26 2026, Part 5) measured both with XPBD (vertex block descent left out at the user's request, for its cost): both fail the 1% mark at every resolution, so garments need more than XPBD and tethers.
 
 ## Sources
 

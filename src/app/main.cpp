@@ -15,7 +15,7 @@
 * The game is made first, so it outlives the Application that borrows it.
 * --game <name> picks a game (app/game_registry.h; the light lab without it). --golden-save captures the golden images as
 * references, --golden-check compares with them (engine/golden.h), for the named game or else for every game; both exit
-* with 0 on success. --cloth-yardstick (or --cloth-yardstick-quick) measures the cloth solver (app/cloth_yardstick_run.h) instead of playing.
+* with 0 on success. --cloth-yardstick (or --cloth-yardstick-quick, or --cloth-yardstick-dress) measures the cloth solver (app/cloth_yardstick_run.h) instead of playing.
 */
 int main(int argc, char* argv[]) {
     try {

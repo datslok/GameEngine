@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -12,6 +14,11 @@ namespace {
     // Point (row, column) of a sheet of squares a side, rows counted up from the hem (Mesh::grid).
     std::size_t sheetPoint(int squares, int row, int column) {
         return static_cast<std::size_t>(row) * static_cast<std::size_t>(squares + 1) + static_cast<std::size_t>(column);
+    }
+
+    // How far an edge is stretched: its length over its rest length, less 1 (negative when squashed).
+    float edgeStrain(const std::vector<Vec3>& positions, const StretchConstraint& edge) {
+        return (positions[edge.second] - positions[edge.first]).length() / edge.restLength - 1.0f;
     }
 }
 
@@ -41,8 +48,7 @@ SheetMeasure measureSheet(const Cloth& cloth, int squares) {
     }
 
     for (const StretchConstraint& edge : cloth.stretch) {
-        const float length = (positions[edge.second] - positions[edge.first]).length();
-        measure.worstEdgeStrain = std::max(measure.worstEdgeStrain, length / edge.restLength - 1.0f);
+        measure.worstEdgeStrain = std::max(measure.worstEdgeStrain, edgeStrain(positions, edge));
     }
 
     const float pinHeight = 0.5f * (positions[sheetPoint(squares, squares, 0)].y + positions[sheetPoint(squares, squares, squares)].y);
@@ -51,8 +57,52 @@ SheetMeasure measureSheet(const Cloth& cloth, int squares) {
     return measure;
 }
 
+/*
+* The percentile is the strain at place ceil(share x edges) in the edges sorted by strain, counted from 1: the least
+* strain that share of them are at or below.
+*/
+GarmentMeasure measureGarment(const Cloth& cloth, const std::vector<std::uint32_t>& hem, float floorHeight, const ClothFields& fields) {
+    const std::vector<Vec3>& positions = cloth.particles.positions;
+    GarmentMeasure measure;
+
+    std::vector<float> strains;
+    strains.reserve(cloth.stretch.size());
+    double stretchSum = 0.0;
+    for (const StretchConstraint& edge : cloth.stretch) {
+        const float strain = edgeStrain(positions, edge);
+        strains.push_back(strain);
+        stretchSum += std::max(strain, 0.0f);
+        measure.worstEdgeStrain = std::max(measure.worstEdgeStrain, strain);
+    }
+    if (!strains.empty()) {
+        measure.meanStretch = static_cast<float>(stretchSum / static_cast<double>(strains.size()));
+        const double place = std::ceil(static_cast<double>(garmentStrainPercentile) * static_cast<double>(strains.size()));
+        const auto at = strains.begin() + std::max<std::ptrdiff_t>(static_cast<std::ptrdiff_t>(place), 1) - 1;
+        std::nth_element(strains.begin(), at, strains.end());
+        measure.percentileStrain = *at;
+    }
+
+    for (const ClothStitch& stitch : cloth.stitches) {
+        measure.worstSeamGap = std::max(measure.worstSeamGap, (positions[stitch.second] - positions[stitch.first]).length());
+    }
+
+    double heightSum = 0.0;
+    for (const std::uint32_t point : hem) {
+        heightSum += positions[point].y - floorHeight;
+    }
+    measure.hemHeight = hem.empty() ? 0.0f : static_cast<float>(heightSum / static_cast<double>(hem.size()));
+
+    measure.closestToBody = std::numeric_limits<float>::infinity();
+    for (const std::shared_ptr<const SignedDistanceField>& field : fields) {
+        for (const Vec3& position : positions) {
+            measure.closestToBody = std::min(measure.closestToBody, surfacePoint(*field, position).distance);
+        }
+    }
+    return measure;
+}
+
 // The positions a second before the end are kept as the ticks pass them, so the run needs no history of its own.
-float settleYardstick(Cloth& cloth, float seconds, float tickSeconds, JobSystem& jobs) {
+float settleYardstick(Cloth& cloth, float seconds, float tickSeconds, JobSystem& jobs, const ClothFields& fields, const ClothTickPreparation& prepare) {
     const int ticks = static_cast<int>(std::lround(seconds / tickSeconds));
     const int lastSecondTicks = std::min(ticks, static_cast<int>(std::lround(1.0f / tickSeconds)));
 
@@ -61,7 +111,10 @@ float settleYardstick(Cloth& cloth, float seconds, float tickSeconds, JobSystem&
         if (tick == ticks - lastSecondTicks) {
             before = cloth.particles.positions;
         }
-        stepCloth(cloth, tickSeconds, {}, jobs);
+        if (prepare) {
+            prepare(cloth, tick);
+        }
+        stepCloth(cloth, tickSeconds, {}, jobs, fields);
     }
 
     float farthest = 0.0f;

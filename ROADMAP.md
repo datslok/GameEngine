@@ -304,7 +304,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] GPU cloth ticks inside the tick budget, and F4's cloth line saying when a frame had too many passes to time (`gpu-tick-budget`)
 - [x] The mannequin: `human.obj` in a cloth lab station with a signed distance field (5 mm samples) the cloth collides with on the CPU and the GPU, a sheet dropped over its shoulders (`mannequin`)
 - [x] A dress sewn from two panels on the mannequin, pinned at its shoulders and tethered along each panel, on the CPU and the GPU (`two-panel-dress`)
-- [ ] The dress-sized test: the dress's stretch and cost held by contact alone with XPBD, with vertex block descent's coarse levels, and pinned at its shoulders and tethered, deciding whether garments need the coarse levels (`dress-yardstick`)
+- [x] The dress-sized test: XPBD fails it held by contact or pinned and tethered, so garments need more (`dress-yardstick`)
 - [ ] Self-collision on XPBD, so folds and layers never pass through each other: distance constraints between points and triangles and between edges, kept a thickness apart and pushed straight out from the feature they touch (Offset Geometric Contact's idea), a per-point motion bound so nothing tunnels in a substep, a bounding volume hierarchy on the GPU; no continuous collision detection and no untangling pass, as long as the cloth starts clean. Its tests: the dress, and a sheet dropped onto itself
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
