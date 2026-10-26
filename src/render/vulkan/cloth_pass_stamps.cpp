@@ -50,7 +50,9 @@ ClothPassTimings ClothPassStamps::read(std::uint32_t frame) {
     }
     stamps.begun = false;
     if (stamps.overflowed) {
-        return {};
+        ClothPassTimings unmeasured;
+        unmeasured.overflowed = true;
+        return unmeasured;
     }
 
     std::vector<std::uint64_t> ticks(stamps.kinds.size() + 1);

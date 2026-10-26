@@ -102,6 +102,26 @@ namespace {
         assert(line.find("CLOTH 2.00") != std::string::npos && line.find(std::string(clothPassName(ClothPass::Gradient)) + " 2.00") != std::string::npos);
         assert(line.find(clothPassName(ClothPass::Stretch)) == std::string::npos);
     }
+
+    /*
+    * A frame with more cloth passes than its stamps is not measured, and says so: it records nothing, and the readout's
+    * cloth line names why instead of going blank, until a frame is measured again.
+    */
+    void testTooManyPasses() {
+        ClothPassTimings overflowed;
+        overflowed.overflowed = true;
+        assert(!overflowed.valid);
+
+        Profiler profiler = makeClothProfiler();
+        profiler.update(0.0);
+        recordClothTimings(profiler, overflowed);
+        profiler.update(defaultProfileWindowSeconds);
+        assert(profiler.getTiming(0).calls == 0);
+
+        assert(clothReadoutText(profiler, true) == clothPassesNotMeasuredText);
+        assert(clothReadoutText(profiler, false) == profileText(profiler, 2, false, true));
+        assert(std::string(clothPassesNotMeasuredText).find("NOT MEASURED") != std::string::npos);
+    }
 }
 
 void testClothTiming() {
@@ -110,4 +130,5 @@ void testClothTiming() {
     testRollOver();
     testEdges();
     testProfiler();
+    testTooManyPasses();
 }

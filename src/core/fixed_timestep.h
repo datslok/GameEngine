@@ -31,3 +31,10 @@ private:
 * The ticks a frame does not run are dropped, so a simulation that costs more than real time slows down smoothly.
 */
 bool fitsTickBudget(int ticksRun, double secondsSpent, double budgetSeconds);
+
+/*
+* The same with the ticks' GPU work counted: each of the ticksRun ticks is charged gpuSecondsPerTick on top of the
+* cpuSeconds they took. Work queued for the GPU (cloth on the GPU) costs the CPU almost nothing, yet the frame lasts as
+* long as the GPU takes, so the CPU's clock alone would let an overloaded GPU spiral.
+*/
+bool fitsTickBudget(int ticksRun, double cpuSeconds, double gpuSecondsPerTick, double budgetSeconds);

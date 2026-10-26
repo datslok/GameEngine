@@ -5,6 +5,13 @@
 #include <algorithm>
 #include <utility>
 
+double gpuClothTickSeconds(double estimate, const GpuTimings& timings, std::uint32_t ticks) {
+    if (!timings.valid || ticks == 0) {
+        return estimate;
+    }
+    return timings.seconds(GpuPass::Cloth) / static_cast<double>(ticks);
+}
+
 std::uint64_t clothKey(Entity entity) {
     return (static_cast<std::uint64_t>(entity.generation) << 32) | entity.index;
 }

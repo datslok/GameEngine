@@ -815,7 +815,7 @@ FrameContext VulkanRenderer::beginFrame() {
 
     readGpuTimings(frame);
     if (clothStamps) {
-        if (const ClothPassTimings cloth = clothStamps->read(frameIndex); cloth.valid) {
+        if (const ClothPassTimings cloth = clothStamps->read(frameIndex); cloth.valid || cloth.overflowed) {
             unreportedClothTimings = cloth;
         }
     }
@@ -956,6 +956,7 @@ void VulkanRenderer::readGpuTimings(Frame& frame) {
 
     vulkanCheck(result, "Reading the GPU timestamps failed");
     unreportedGpuTimings = gpuTimingsFromTicks(ticks, device.getTimestampPeriod(), device.getTimestampValidBits());
+    unreportedClothTicks = frame.clothTicks;
 }
 
 /*
@@ -1075,6 +1076,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                          ImDrawData* ui) {
     stats = RenderStats{};
     stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
+    stats.clothTicks = std::exchange(unreportedClothTicks, 0u);
     stats.cloth = std::exchange(unreportedClothTimings, ClothPassTimings{});
     showShapes(description);
     beginGpuPass(frame, GpuPass::Cloth);
@@ -2436,7 +2438,10 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
         stamps->begin(commands, frameIndex);
     }
 
+    std::uint32_t& ticksRun = frames[frameIndex].clothTicks;
+    ticksRun = 0;
     for (const ClothWork& work : clothWork) {
+        ticksRun = std::max(ticksRun, static_cast<std::uint32_t>(work.ticks.size()));
         GpuCloth& entry = gpuCloths[work.key];
         if (!entry.cloth) {
             entry.cloth = std::make_unique<VulkanCloth>(device, *clothPipelines, uploads, *work.cloth, maxFramesInFlight);

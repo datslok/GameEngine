@@ -71,3 +71,7 @@ bool fitsTickBudget(int ticksRun, double secondsSpent, double budgetSeconds) {
     const double averageTick = secondsSpent / static_cast<double>(ticksRun);
     return secondsSpent + averageTick <= budgetSeconds;
 }
+
+bool fitsTickBudget(int ticksRun, double cpuSeconds, double gpuSecondsPerTick, double budgetSeconds) {
+    return fitsTickBudget(ticksRun, cpuSeconds + static_cast<double>(ticksRun) * gpuSecondsPerTick, budgetSeconds);
+}

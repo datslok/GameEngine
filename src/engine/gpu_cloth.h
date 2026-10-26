@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "math/aabb.h"
 #include "render/gpu/cloth_gpu.h"
+#include "render/gpu/gpu_timing.h"
 #include "scene/deforming_mesh.h"
 
 #include <cstdint>
@@ -16,6 +17,14 @@
 * the cloths, so picking, grabbing and the debug lines keep working on them. Their meshes are shaped on the GPU, so
 * the frame lists them with bounds grown by how far their points can have moved since.
 */
+
+/*
+* The GPU's time for one tick of every cloth on it, for the tick budget (fitsTickBudget): a measured frame's cloth time
+* over the ticks it ran (RenderStats::clothTicks). A frame not measured, or one that ran no ticks, says nothing about a
+* tick's cost, so the estimate stays. The cloth's time includes its once-a-frame work (shaping the meshes, the copy
+* back), so with few ticks a frame the estimate errs high, and the budget towards dropping a tick.
+*/
+double gpuClothTickSeconds(double estimate, const GpuTimings& timings, std::uint32_t ticks);
 
 // A cloth's key for the renderer: its entity's slot and generation, so a recycled slot is a new cloth.
 std::uint64_t clothKey(Entity entity);

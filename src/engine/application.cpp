@@ -63,9 +63,11 @@ void Application::run() {
         game.useClothSolver(settings.clothOnGpu ? ClothSolver::Gpu : ClothSolver::Cpu);
         game.onInput(world, input);
 
+        // A GPU cloth tick only queues work, so its cost is the GPU's, charged from the last measured frame's.
+        const double gpuSecondsPerTick = settings.clothOnGpu ? gpuClothTickEstimate : 0.0;
         const double ticksStart = profilerSeconds();
         for (int tick = 0; tick < ticks; ++tick) {
-            if (!fitsTickBudget(tick, profilerSeconds() - ticksStart, settings.maxTickSecondsPerFrame)) {
+            if (!fitsTickBudget(tick, profilerSeconds() - ticksStart, gpuSecondsPerTick, settings.maxTickSecondsPerFrame)) {
                 break;
             }
             ++simulationTicks;
@@ -265,9 +267,10 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
         drawProfile(gpuProfiler, gpuProfileReadoutLine, 2, false, profileDebugColour, debugDraw);
 
-        // The cloth's passes by kind, only while some cloth runs on the GPU and only those kinds that took time.
-        if (clothProfiler.getTiming(0).calls > 0) {
-            drawProfile(clothProfiler, clothProfileReadoutLine, 2, false, profileDebugColour, debugDraw, true);
+        // The cloth's passes by kind, only while some cloth runs on the GPU and only those kinds that took time; or why
+        // they could not be measured.
+        if (clothProfiler.getTiming(0).calls > 0 || clothPassesUnmeasured) {
+            drawClothReadout(clothProfiler, clothPassesUnmeasured, debugDraw);
         }
     }
 
@@ -289,8 +292,11 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         return;
     }
 
-    recordGpuTimings(gpuProfiler, renderer.getLastFrameStats().gpu);
-    recordClothTimings(clothProfiler, renderer.getLastFrameStats().cloth);
+    const RenderStats& stats = renderer.getLastFrameStats();
+    recordGpuTimings(gpuProfiler, stats.gpu);
+    recordClothTimings(clothProfiler, stats.cloth);
+    gpuClothTickEstimate = gpuClothTickSeconds(gpuClothTickEstimate, stats.gpu, stats.clothTicks);
+    clothPassesUnmeasured = stats.cloth.overflowed;
 
     // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
     // so turning clicks into rays (makeCameraRay) matches what is on screen.

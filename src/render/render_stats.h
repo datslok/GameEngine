@@ -46,6 +46,10 @@ struct RenderStats {
     // these are an earlier frame's (as many back as there are frames in flight); not valid until one has been measured.
     GpuTimings gpu;
 
+    // The GPU cloth ticks the frame gpu timed ran (every cloth runs the same ticks), as late as gpu: with gpu's cloth
+    // time, what a tick costs the GPU (engine/gpu_cloth.h, gpuClothTickSeconds).
+    std::uint32_t clothTicks = 0;
+
     // The cloth's GPU time by kind of pass, as late as gpu; valid only while measured (VulkanRenderer::setClothPassTiming)
     // and some cloth ran on the GPU.
     ClothPassTimings cloth;

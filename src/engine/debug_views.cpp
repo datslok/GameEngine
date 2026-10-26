@@ -201,6 +201,17 @@ void drawProfile(const Profiler& profiler, int line, int decimals, bool withWors
     debugText(debug, debugReadoutLine(line), debugReadoutTextHeight, profileText(profiler, decimals, withWorst, hideIdle), colour);
 }
 
+std::string clothReadoutText(const Profiler& profiler, bool unmeasured) {
+    if (unmeasured) {
+        return clothPassesNotMeasuredText;
+    }
+    return profileText(profiler, 2, false, true);
+}
+
+void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debug) {
+    debugText(debug, debugReadoutLine(clothProfileReadoutLine), debugReadoutTextHeight, clothReadoutText(profiler, unmeasured), profileDebugColour);
+}
+
 /*
 * A margin from the window's corner, then one line every lineSpacing pixels: a little more than the text height, so
 * lines do not touch.
