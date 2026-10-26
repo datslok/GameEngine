@@ -6,6 +6,7 @@
 #include "cloth/cloth_grab.h"
 #include "cloth/cloth_hierarchy.h"
 #include "cloth/cloth_particles.h"
+#include "cloth/cloth_seams.h"
 #include "cloth/cloth_tethers.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
@@ -51,6 +52,8 @@
 * solver; the slack is how far past its length at rest the cloth may stretch away from a pin before its string goes
 * taut. On by default: on the yardstick a hanging sheet stretches about 0.2% at any resolution with them, as real cotton
 * does, against XPBD's 1-36% without, for about XPBD's cost.
+*
+* A cloth sewn from pieces (cloth_seams.h) pulls its stitches shut no faster than the seam speed, then holds them shut.
 */
 enum class ClothMethod {
     Xpbd,
@@ -73,6 +76,7 @@ struct ClothSettings {
     int hierarchyLevels = 0;           // coarse levels used with vertex block descent, up to maxClothLevels
     bool tethers = true;
     float tetherSlack = 0.002f;        // share of a tether's rest length
+    float seamSpeed = 1.0f;            // m/s
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -126,6 +130,9 @@ struct Cloth {
     // Pins the game moves, by setting their positions from its commands before a tick.
     std::vector<ClothPin> pins;
 
+    // Where its pieces are sewn together, if it is sewn: each point in one stitch at most.
+    std::vector<ClothStitch> stitches;
+
     // The mesh's triangles, for finding the cloth with a ray.
     std::vector<std::array<std::uint32_t, 3>> triangles;
 
@@ -154,6 +161,13 @@ ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std
 // A cloth from a mesh's vertices, placed in the world by placement, at rest, with the settings' fabric, a stretch
 // constraint along every edge and a bending constraint on every inside edge of the placed mesh, coloured.
 Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& settings);
+
+/*
+* A cloth whose rest shape is the mesh as it is (a flat pattern: its lengths, masses, bending and rest positions) but
+* whose points start, still, at start, one per vertex (the pieces laid round a body), sewn by the seams' stitches, their
+* hinges coloured with the rest of the bending. Throws std::invalid_argument for a start of the wrong size.
+*/
+Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSeams& seams = {});
 
 // Where a moving pin is after substep step (0..substeps - 1) of a tick: slid evenly from start, exactly on target at the end.
 Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps);

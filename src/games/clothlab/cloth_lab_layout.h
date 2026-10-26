@@ -13,7 +13,7 @@
 *   - draping: a ball on a pedestal, under a bar to pin a sheet's corners to;
 *   - piling: a mat on the floor, where a sheet dropped onto itself folds into a pile;
 *   - fabrics: a wide bar to hang two sheets side by side (silk beside denim);
-*   - the mannequin: a human figure to drape cloth on, and later the dress sewn from two panels.
+*   - the mannequin: a human figure wearing the dress sewn from two panels (cloth_lab_dress.h).
 * Kept apart from the game so the tests can check it without building one.
 */
 
@@ -56,11 +56,9 @@ inline constexpr float clothLabMannequinHeight = 1.75f;           // m
 inline constexpr float clothLabMannequinFieldSpacing = 0.005f;    // m
 inline constexpr float clothLabMannequinFieldBand = 0.03f;        // m
 
-// The sheet dropped onto it: squares x squares, size metres square, laid flat this far above the mannequin's head and
-// centred over its feet, pinned nowhere.
-inline constexpr int clothLabDropSheetSquares = 60;
-inline constexpr float clothLabDropSheetSize = 1.6f;
-inline constexpr float clothLabDropSheetClearance = 0.2f;
+// The space the mannequin's station takes round its feet: its outstretched hands, and the dress round it.
+inline constexpr float clothLabMannequinStationHalfWidth = 0.6f;  // m
+inline constexpr float clothLabMannequinStationHeight = 1.85f;    // m
 
 // The floor's collision box reaches this far below the ground, so nothing can pass through it in a substep.
 inline constexpr float clothLabFloorDepth = 1.0f;
@@ -99,9 +97,6 @@ struct ClothLabLayout {
 
     // The mannequin: the middle of its feet on the floor.
     Vec3 mannequinFeet;
-
-    // Where the dropped sheet's middle starts: over the mannequin's head.
-    Vec3 dropSheetCentre;
 
     // Where the flat drape sheet's middle starts: level with the drape bar's underside, half its size in front of it.
     Vec3 drapeSheetCentre;

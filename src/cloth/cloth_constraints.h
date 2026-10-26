@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 /*
@@ -70,6 +71,12 @@ enum class BendingModel {
 
 // Every edge of the mesh shared by exactly two triangles, sorted by its ends, at its angle in the mesh.
 std::vector<BendConstraint> bendConstraints(const Mesh& mesh);
+
+/*
+* The hinge on points (wing0, wing1, edgeStart, edgeEnd) resting where rest puts them: its rest angle, stiffness share
+* and isometric weights. None for a squashed hinge (a triangle or the edge with no size), which could bend nothing.
+*/
+std::optional<BendConstraint> restHinge(const std::array<std::uint32_t, 4>& points, const std::array<Vec3, 4>& rest);
 
 /*
 * Isometric bending's weights K for a hinge's points (wing0, wing1, edgeStart, edgeEnd): each wing 1 / its distance from

@@ -38,28 +38,43 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Coarse levels", settings.hierarchyLevels, {.min = 0, .max = maxClothLevels});
     visitor.field("Tethers", settings.tethers);
     visitor.field("Tether slack", settings.tetherSlack, {.min = 0.0f, .max = 0.5f, .sliderMax = 0.02f, .unit = "of the rest length"});
+    visitor.field("Seam speed", settings.seamSpeed, {.min = 0.01f, .max = 100.0f, .sliderMax = 5.0f, .unit = "m/s"});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
 Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& settings) {
     Mesh placed = mesh;
+    std::vector<Vec3> start;
+    start.reserve(placed.vertices.size());
     for (Vec4& vertex : placed.vertices) {
         const Vec3 position = transformPoint(placement, Vec3{vertex.x, vertex.y, vertex.z});
         vertex = Vec4{position.x, position.y, position.z, 1.0f};
+        start.push_back(position);
+    }
+    return makeCloth(placed, start, settings);
+}
+
+Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSeams& seams) {
+    if (start.size() != rest.vertices.size()) {
+        throw std::invalid_argument("A cloth needs one starting position per vertex");
     }
 
     Cloth cloth;
     cloth.settings = settings;
-    cloth.particles = makeClothParticles(placed, settings.areaDensity);
-    cloth.stretch = stretchConstraints(placed);
-    cloth.bend = bendConstraints(placed);
+    cloth.particles = makeClothParticles(rest, settings.areaDensity);
+    cloth.stretch = stretchConstraints(rest);
+    cloth.bend = bendConstraints(rest);
+    cloth.bend.insert(cloth.bend.end(), seams.hinges.begin(), seams.hinges.end());
+    cloth.stitches = seams.stitches;
     cloth.stretchColours = colourStretch(cloth.stretch, cloth.particles.size());
     cloth.bendColours = colourBend(cloth.bend, cloth.particles.size());
-    for (const Triangle& triangle : placed.triangles) {
+    for (const Triangle& triangle : rest.triangles) {
         cloth.triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second),
                                    static_cast<std::uint32_t>(triangle.third)});
     }
     cloth.restPositions = cloth.particles.positions;
+    cloth.particles.positions = start;
+    cloth.particles.previousPositions = start;
     cloth.hierarchy = buildClothHierarchy(cloth.restPositions, cloth.stretch, cloth.particles.inverseMasses);
     cloth.pointConstraints = clothPointConstraints(cloth.stretch, cloth.bend, cloth.particles.size());
     cloth.vertexColours = clothVertexColours(cloth.stretch, cloth.bend, cloth.pointConstraints);
@@ -112,6 +127,7 @@ namespace {
         const std::vector<Shape>& colliders;
         const ClothFields& fields;
         const std::vector<ClothTether>& tethers;
+        const std::vector<ClothStitch>& stitches;
 
         // Vertex block descent's per-point lists and colours and its coarse levels, or none (XPBD alone).
         const ClothPointConstraints* pointConstraints;
@@ -166,7 +182,7 @@ namespace {
     * there); then the solver: XPBD's stretch, bending and hand, or vertex block descent's sweep, with its coarse levels
     * and a second sweep after them when there are any (smoothing on both sides of the coarse step, as multigrid does:
     * the coarse step's spreading leaves fine wrinkles a sweep removes); the tethers, when on, after either solver, so the
-    * pins' strings have the last word on stretch; the bodies last, so nothing is left inside them; velocities from the
+    * pins' strings have the last word on stretch; the stitches, closing their seams; the bodies last, so nothing is left inside them; velocities from the
     * motion; drag on the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
@@ -229,6 +245,9 @@ namespace {
             if (settings.tethers) {
                 solveTethers(particles, constraints.tethers, settings.tetherSlack, jobs);
             }
+            if (!constraints.stitches.empty()) {
+                solveStitches(particles, constraints.stitches, settings.seamSpeed * substep);
+            }
             if (!constraints.colliders.empty() || !constraints.fields.empty()) {
                 solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings,
                               nearbyFields(particles, constraints.fields, settings.thickness));
@@ -251,15 +270,17 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<std::uint32_t> noColours;
     const std::vector<ClothPin> noPins;
     const std::vector<ClothTether> noTethers;
+    const std::vector<ClothStitch> noStitches;
     const ClothFields noFields;
-    stepTick(particles, TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noFields, noTethers, nullptr, nullptr, nullptr},
+    stepTick(particles,
+             TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noFields, noTethers, noStitches, nullptr, nullptr, nullptr},
              settings, seconds, serialJobs());
 }
 
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs, const ClothFields& fields) {
     stepTick(cloth.particles,
              TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, fields, cloth.tethers,
-                             &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy},
+                             cloth.stitches, &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy},
              cloth.settings, seconds, jobs);
 }
 

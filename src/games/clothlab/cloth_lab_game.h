@@ -41,7 +41,7 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
 * default; on for measuring the solver's threads.
 *
 * The mannequin (assets/models/human.obj, with a distance field of about 6 million samples built at the start, under a
-* second on every core) and the sheet dropped onto it: on by default.
+* second on every core) and the dress sewn round it (cloth_lab_dress.h, about 12,000 points): on by default.
 */
 struct ClothLabStationSettings {
     bool bigSheet = false;
@@ -88,8 +88,8 @@ public:
     // The big sheet over the mat, if the stations have it (none otherwise).
     Entity getBigSheet() const;
 
-    // The sheet dropped onto the mannequin, if the stations have it (none otherwise).
-    Entity getMannequinSheet() const;
+    // The dress sewn round the mannequin, if the stations have it (none otherwise).
+    Entity getDress() const;
     ClothLabStationSettings& getStationSettings();
     ClothSettings& getClothSettings();
     ClothLabHookSettings& getHookSettings();
@@ -116,7 +116,7 @@ private:
 
     Entity drapeSheet;
     Entity bigSheet;
-    Entity mannequinSheet;
+    Entity dress;
     ClothLabStationSettings stationSettings;
 
     // Every sheet the lab has.

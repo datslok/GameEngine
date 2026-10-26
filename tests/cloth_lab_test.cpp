@@ -1,4 +1,5 @@
 #include "app/game_registry.h"
+#include "games/clothlab/cloth_lab_dress.h"
 #include "games/clothlab/cloth_lab_game.h"
 #include "games/clothlab/cloth_lab_layout.h"
 #include "physics/overlap.h"
@@ -16,6 +17,7 @@
 #include "scene/model_renderer.h"
 #include "scene/probe_volume.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <string>
@@ -435,42 +437,58 @@ namespace {
             raycast(lab.game.getLevel(), Ray{Vec3{layout.mannequinFeet.x, 1.3f, layout.mannequinFeet.z + 2.0f}, Vec3{0.0f, 0.0f, -1.0f}});
         assert(hit && hit->hit.distance < 2.0f);
 
-        // Off, there is none, and no sheet to drop on it.
+        // Off, there is none, and no dress.
         ClothLab without;
         int none = 0;
         without.world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider&) { ++none; });
-        assert(none == 0 && !without.world.isAlive(without.game.getMannequinSheet()));
+        assert(none == 0 && !without.world.isAlive(without.game.getDress()));
+    }
+
+    // The widest gap between a stitch's two points.
+    float widestStitch(const Cloth& cloth) {
+        float widest = 0.0f;
+        for (const ClothStitch& stitch : cloth.stitches) {
+            widest = std::max(widest, (cloth.particles.positions[stitch.first] - cloth.particles.positions[stitch.second]).length());
+        }
+        return widest;
     }
 
     /*
-    * The mannequin's milestone, started: a free sheet laid flat above its head falls onto it and comes to rest on its
-    * head and shoulders, nothing inside the body or below the floor.
+    * The mannequin's milestone: the dress, laid round it unsewn, is weightless while its seams pull shut, then gravity
+    * comes on and it settles onto the shoulders, held up by them alone: every seam shut, nothing inside the body, its
+    * top on the shoulders and its hem well off the floor, about where the pattern puts it below them.
     */
-    void testTheSheetDropsOntoTheMannequin() {
+    void testTheDressHangsOnTheMannequin() {
         JobSystem jobs;
         ClothLab lab{false, true, &jobs};
         const ClothLabLayout layout = buildClothLabLayout();
-        const Entity sheet = lab.game.getMannequinSheet();
-        const Cloth& cloth = lab.world.get<Cloth>(sheet);
-        assert(cloth.pins.empty());
-        assert(cloth.particles.size() == static_cast<std::size_t>((clothLabDropSheetSquares + 1) * (clothLabDropSheetSquares + 1)));
-        for (const Vec3& point : cloth.particles.positions) {
-            assert(near(point.y, layout.dropSheetCentre.y));
-        }
-        assert(layout.dropSheetCentre.y > layout.mannequinFeet.y + clothLabMannequinHeight);
+        const Cloth& dress = lab.world.get<Cloth>(lab.game.getDress());
+        assert(dress.pins.empty() && !dress.stitches.empty());
+        assert(widestStitch(dress) > 0.1f);
 
-        for (int tick = 0; tick < 240; ++tick) {
+        const int sewingTicks = static_cast<int>(dressSewingSeconds * 120.0f);
+        for (int tick = 0; tick < sewingTicks; ++tick) {
             runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
         }
+        assert(widestStitch(dress) < 1e-5f);
+
+        for (int tick = sewingTicks; tick < 2 * sewingTicks; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        assert(widestStitch(dress) < 1e-5f);
 
         std::shared_ptr<const SignedDistanceField> field;
         lab.world.each<DistanceFieldCollider>([&](Entity, const DistanceFieldCollider& collider) { field = collider.field; });
-        for (const Vec3& point : cloth.particles.positions) {
+        float highest = 0.0f;
+        float lowest = 10.0f;
+        for (const Vec3& point : dress.particles.positions) {
             assert(sampleField(*field, point).distance > 0.0f);
-            assert(point.y > 0.0f);
+            highest = std::max(highest, point.y);
+            lowest = std::min(lowest, point.y);
         }
-        const std::size_t middle = static_cast<std::size_t>(clothLabDropSheetSquares / 2) * (clothLabDropSheetSquares + 1) + clothLabDropSheetSquares / 2;
-        assert(cloth.particles.positions[middle].y > layout.mannequinFeet.y + clothLabMannequinHeight - 0.1f);
+        const float shoulders = layout.mannequinFeet.y + dressShoulderHeight;
+        assert(highest > shoulders - 0.05f && highest < shoulders + 0.1f);
+        assert(lowest > layout.mannequinFeet.y + 0.3f);
     }
 
     // It has golden views, looking at its stations.
@@ -495,6 +513,6 @@ void testClothLab() {
     testTheBigSheetSags();
     testTheMannequinIsPlaced();
     testTheMannequinStands();
-    testTheSheetDropsOntoTheMannequin();
+    testTheDressHangsOnTheMannequin();
     testItHasGoldenViews();
 }
