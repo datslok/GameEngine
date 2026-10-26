@@ -1,9 +1,13 @@
 #pragma once
 
 #include "cloth/cloth.h"
+#include "cloth/cloth_collision.h"
 #include "core/job_system.h"
 
 #include <array>
+#include <cstdint>
+#include <functional>
+#include <vector>
 
 /*
 * The yardstick every cloth solver is judged by (docs/CLOTHGPU.md, Part 5): the same 1 m sheet of the same fabric hung
@@ -41,7 +45,39 @@ struct SheetMeasure {
 SheetMeasure measureSheet(const Cloth& cloth, int squares);
 
 /*
-* Step the cloth for seconds in ticks of tickSeconds, sharing its colours among the jobs' threads, and return the
-* farthest any point moved over the last simulated second (or the whole run, if shorter), in m: how settled it is.
+* What the dress-sized test reads off a garment, which has no columns or corners to measure along (docs/CLOTHGPU.md,
+* Part 5):
+* - meanStretch: the mean of every edge's stretch, length / rest length - 1, a squashed edge counting as none: the
+*   garment-wide, low-frequency stretch a solver removes slowly, spread over its edges.
+* - percentileStrain: the strain garmentStrainPercentile of the edges are at or below: the stretch where the garment
+*   carries its weight, without the odd edge pinched at a seam or a corner of the body.
+* - worstEdgeStrain: the most any edge is stretched.
+* - worstSeamGap: the widest any stitch stands open, in m (0 once every seam has shut).
+* - hemHeight: the hem points' mean height above the floor, in m: a garment that stretches hangs lower.
+* - closestToBody: the least signed distance of any point from the field bodies' surfaces, in m, negative inside one
+*   (the band where none is near; infinity with no bodies). Contact keeps it at about the cloth's thickness.
 */
-float settleYardstick(Cloth& cloth, float seconds, float tickSeconds, JobSystem& jobs = serialJobs());
+inline constexpr float garmentStrainPercentile = 0.99f;
+
+struct GarmentMeasure {
+    float meanStretch = 0.0f;
+    float percentileStrain = 0.0f;
+    float worstEdgeStrain = 0.0f;
+    float worstSeamGap = 0.0f;  // m
+    float hemHeight = 0.0f;     // m
+    float closestToBody = 0.0f; // m
+};
+
+// The measures of a garment as it is now, given its hem's points, the floor's height and the bodies it wears.
+GarmentMeasure measureGarment(const Cloth& cloth, const std::vector<std::uint32_t>& hem, float floorHeight, const ClothFields& fields = {});
+
+// What a settling does to the cloth before each tick (counted from 0): moving its pins, changing its settings.
+using ClothTickPreparation = std::function<void(Cloth& cloth, int tick)>;
+
+/*
+* Step the cloth for seconds in ticks of tickSeconds against the field bodies, sharing its colours among the jobs'
+* threads, each tick readied by prepare (if given), and return the farthest any point moved over the last simulated
+* second (or the whole run, if shorter), in m: how settled it is.
+*/
+float settleYardstick(Cloth& cloth, float seconds, float tickSeconds, JobSystem& jobs = serialJobs(), const ClothFields& fields = {},
+                      const ClothTickPreparation& prepare = {});

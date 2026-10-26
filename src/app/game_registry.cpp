@@ -86,15 +86,17 @@ LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments) {
             }
 
             options.golden = argument == "--golden-save" ? GoldenMode::Save : GoldenMode::Check;
-        } else if (argument == "--cloth-yardstick" || argument == "--cloth-yardstick-quick") {
+        } else if (argument == "--cloth-yardstick" || argument == "--cloth-yardstick-quick" || argument == "--cloth-yardstick-dress") {
             if (options.clothYardstick) {
-                throw std::invalid_argument("Give --cloth-yardstick or --cloth-yardstick-quick once");
+                throw std::invalid_argument("Give one of --cloth-yardstick, --cloth-yardstick-quick and --cloth-yardstick-dress, once");
             }
 
-            options.clothYardstick = argument == "--cloth-yardstick" ? YardstickRun::Full : YardstickRun::Quick;
+            options.clothYardstick = argument == "--cloth-yardstick"         ? YardstickRun::Full
+                                     : argument == "--cloth-yardstick-quick" ? YardstickRun::Quick
+                                                                             : YardstickRun::Dress;
         } else {
             throw std::invalid_argument("Unknown option \"" + argument + "\". Options: --game <" + gameNames() +
-                                        ">, --golden-save, --golden-check, --cloth-yardstick, --cloth-yardstick-quick");
+                                        ">, --golden-save, --golden-check, --cloth-yardstick, --cloth-yardstick-quick, --cloth-yardstick-dress");
         }
     }
 

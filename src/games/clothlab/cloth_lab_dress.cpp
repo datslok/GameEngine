@@ -1,7 +1,9 @@
 #include "games/clothlab/cloth_lab_dress.h"
 
+#include "games/clothlab/cloth_lab_layout.h"
 #include "math/angles.h"
 #include "math/smooth_step.h"
+#include "scene/collision_mesh.h"
 
 #include <iterator>
 
@@ -126,4 +128,42 @@ std::vector<Vec3> dressAroundMannequin(const PatternMesh& meshed, const Vec3& fe
         start.push_back(wrapOnCylinder(meshed.flatPositions[point], feet + dressAxisOffset, dressWrapRadius, facing));
     }
     return start;
+}
+
+std::vector<std::uint32_t> dressHemPoints(const PatternMesh& meshed) {
+    std::vector<std::uint32_t> hem;
+    for (const DressPiece piece : {DressPiece::Front, DressPiece::Back}) {
+        const std::vector<std::uint32_t>& points = meshed.edgePoints.at(index(piece)).at(index(DressEdge::Hem));
+        hem.insert(hem.end(), points.begin(), points.end());
+    }
+    return hem;
+}
+
+SignedDistanceField mannequinField(const Mesh& model, const Mat4& placement, JobSystem& jobs) {
+    return buildSignedDistanceField(collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, jobs);
+}
+
+DressOnMannequin dressOnMannequin(const SignedDistanceField& body, const Vec3& feet, float spacing, const ClothSettings& settings, bool pinned,
+                                  JobSystem& jobs) {
+    const PatternMesh pattern = meshPattern(twoPanelDress(), spacing);
+    const std::vector<Vec3> start = dressAroundMannequin(pattern, feet);
+    DressOnMannequin dress{pattern.mesh, makeCloth(pattern.mesh, start, settings, clothSewing(pattern)), {}, dressHemPoints(pattern)};
+    if (pinned) {
+        const DressStrapPins straps = dressStrapPins(pattern, start, body, settings.thickness);
+        addClothPins(dress.cloth, straps.points, jobs);
+        dress.strapPaths = straps.paths;
+    }
+    return dress;
+}
+
+void prepareDressTick(Cloth& dress, const std::vector<StrapPinPath>& strapPaths, const ClothSettings& fabric, double simulationSeconds, float tickSeconds) {
+    dress.settings = fabric;
+    if (simulationSeconds < dressSewingSeconds) {
+        dress.settings.gravity = 0.0f;
+    }
+
+    const float tickEnd = static_cast<float>(simulationSeconds) + tickSeconds;
+    for (std::size_t pin = 0; pin < strapPaths.size(); ++pin) {
+        dress.pins[pin].position = strapPinPosition(strapPaths[pin], tickEnd);
+    }
 }

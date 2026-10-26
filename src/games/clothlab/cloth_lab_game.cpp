@@ -8,10 +8,10 @@
 #include "math/angles.h"
 #include "physics/collider.h"
 #include "physics/signed_distance_field.h"
-#include "scene/collision_mesh.h"
 #include "scene/atmosphere.h"
 #include "scene/deforming_mesh.h"
 #include "scene/light.h"
+#include "scene/model.h"
 #include "scene/model_renderer.h"
 #include "scene/probe_volume.h"
 #include "scene/sun.h"
@@ -235,31 +235,19 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
     if (stationSettings.mannequin) {
         const MeshHandle body = assets.loadMesh(clothLabMannequinModel);
         const Mesh& model = assets.getMesh(body);
-        Aabb modelBounds{Vec3{model.vertices.front().x, model.vertices.front().y, model.vertices.front().z},
-                         Vec3{model.vertices.front().x, model.vertices.front().y, model.vertices.front().z}};
-        for (const Vec4& vertex : model.vertices) {
-            modelBounds = enclosing(modelBounds, Aabb{Vec3{vertex.x, vertex.y, vertex.z}, Vec3{vertex.x, vertex.y, vertex.z}});
-        }
-        const Mat4 placement = clothLabMannequinPlacement(modelBounds, layout.mannequinFeet);
+        const Mat4 placement = clothLabMannequinPlacement(meshBounds(model), layout.mannequinFeet);
 
         ModelRenderer mannequin;
         mannequin.parts.push_back(RenderPart{body, mannequinMaterial(), placement});
         const Entity standing = addStatic(std::move(mannequin));
-        const std::shared_ptr<const SignedDistanceField> field = std::make_shared<const SignedDistanceField>(
-            buildSignedDistanceField(collisionMesh(model, placement), clothLabMannequinFieldSpacing, clothLabMannequinFieldBand, getJobs()));
+        const std::shared_ptr<const SignedDistanceField> field = std::make_shared<const SignedDistanceField>(mannequinField(model, placement, getJobs()));
         world.add(standing, DistanceFieldCollider{field});
 
         // The dress: its two panels cut from the pattern, wrapped round the mannequin and sewn there, its straps
         // pinned and carried onto the shoulders unless it is held by contact alone.
-        const PatternMesh pattern = meshPattern(twoPanelDress(), dressSpacing);
-        const std::vector<Vec3> start = dressAroundMannequin(pattern, layout.mannequinFeet);
-        Cloth sewn = makeCloth(pattern.mesh, start, clothSettings, clothSewing(pattern));
-        if (stationSettings.pinnedDress) {
-            const DressStrapPins straps = dressStrapPins(pattern, start, *field, clothSettings.thickness);
-            addClothPins(sewn, straps.points, getJobs());
-            strapPaths = straps.paths;
-        }
-        dress = addSheet(world, assets, pattern.mesh, std::move(sewn), cottonMaterial(dressColour));
+        DressOnMannequin sewn = dressOnMannequin(*field, layout.mannequinFeet, dressSpacing, clothSettings, stationSettings.pinnedDress, getJobs());
+        strapPaths = std::move(sewn.strapPaths);
+        dress = addSheet(world, assets, sewn.mesh, std::move(sewn.cloth), cottonMaterial(dressColour));
     }
 
     controls.spawnBody(world);
@@ -327,25 +315,15 @@ void ClothLabGame::updateGrab(const World& world, const Input& input) {
 /*
 * The fabric's settings reach the sheet every tick, so the debug UI's changes apply at once (its mass per area only when
 * it is made). The hooks step towards their gap at their speed, in ticks, so where they are depends only on the ticks.
-* The dress is weightless for its first moments, while its seams pull shut round the mannequin, as garment software
-* sews before it drapes: falling while half sewn, its straps would miss the shoulders.
+* The dress sews weightless at first, its straps carried onto the shoulders (prepareDressTick).
 */
 void ClothLabGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
     for (const Entity each : sheets()) {
         Cloth& cloth = world.get<Cloth>(each);
         cloth.settings = clothSettings;
         cloth.grab = each == grabbedSheet ? sheetGrab : std::nullopt;
-        if (each == dress && simulationSeconds < dressSewingSeconds) {
-            cloth.settings.gravity = 0.0f;
-        }
-    }
-
-    // The straps' pins go where they are due at the tick's end; the substeps slide them there.
-    if (!strapPaths.empty()) {
-        Cloth& sewn = world.get<Cloth>(dress);
-        const float tickEnd = static_cast<float>(simulationSeconds) + tickSeconds;
-        for (std::size_t index = 0; index < strapPaths.size(); ++index) {
-            sewn.pins[index].position = strapPinPosition(strapPaths[index], tickEnd);
+        if (each == dress) {
+            prepareDressTick(cloth, strapPaths, clothSettings, simulationSeconds, tickSeconds);
         }
     }
 

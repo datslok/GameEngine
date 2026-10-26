@@ -92,7 +92,7 @@ RUNTIME_DLLS := $(FSR_DLL) $(STREAMLINE_DLLS)
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test test-slow shaders clean release run-release test-release test-slow-release golden golden-save gputest gputest-release yardstick yardstick-quick
+.PHONY: all run test test-slow shaders clean release run-release test-release test-slow-release golden golden-save gputest gputest-release yardstick yardstick-quick yardstick-dress
 
 all: $(TARGET) $(RUNTIME_DLLS) shaders
 
@@ -233,6 +233,11 @@ yardstick:
 yardstick-quick:
 	$(MAKE) BUILD=release all
 	./build/release/game.exe --cloth-yardstick-quick
+
+# The dress-sized test alone (the full run's last table): the dress on the mannequin at four spacings, CPU and GPU.
+yardstick-dress:
+	$(MAKE) BUILD=release all
+	./build/release/game.exe --cloth-yardstick-dress
 
 clean:
 	rm -rf build/obj build/game.exe build/tests.exe build/gputests.exe build/*.dll build/release $(SHADER_BINARIES) $(GPU_TEST_SHADER_BINARIES)

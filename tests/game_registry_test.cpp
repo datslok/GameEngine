@@ -68,6 +68,10 @@ namespace {
         const LaunchOptions quick = parseLaunchOptions({"--cloth-yardstick-quick"});
         assert(quick.clothYardstick == YardstickRun::Quick);
         assert(quick.game == nullptr && !quick.golden);
+
+        const LaunchOptions dress = parseLaunchOptions({"--cloth-yardstick-dress"});
+        assert(dress.clothYardstick == YardstickRun::Dress);
+        assert(dress.game == nullptr && !dress.golden);
     }
 
     // Mistakes are reported, not guessed at.
@@ -82,6 +86,8 @@ namespace {
         assert(throwsInvalidArgument({"--cloth-yardstick", "--cloth-yardstick"}));
         assert(throwsInvalidArgument({"--cloth-yardstick", "--cloth-yardstick-quick"}));
         assert(throwsInvalidArgument({"--cloth-yardstick-quick", "--game", "clothlab"}));
+        assert(throwsInvalidArgument({"--cloth-yardstick-dress", "--cloth-yardstick"}));
+        assert(throwsInvalidArgument({"--golden-save", "--cloth-yardstick-dress"}));
     }
 }
 

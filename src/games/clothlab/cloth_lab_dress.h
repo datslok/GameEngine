@@ -1,8 +1,12 @@
 #pragma once
 
+#include "cloth/cloth.h"
 #include "cloth/cloth_pattern.h"
+#include "core/job_system.h"
+#include "math/mat4.h"
 #include "math/vec3.h"
 #include "physics/signed_distance_field.h"
+#include "scene/mesh.h"
 
 #include <array>
 #include <cstdint>
@@ -101,3 +105,31 @@ struct DressStrapPins {
 };
 
 DressStrapPins dressStrapPins(const PatternMesh& meshed, const std::vector<Vec3>& start, const SignedDistanceField& body, float thickness);
+
+// The hem's points, the front's along its hem and then the back's: where the dress-sized test reads how low it hangs.
+std::vector<std::uint32_t> dressHemPoints(const PatternMesh& meshed);
+
+// The mannequin's distance field, its model placed in the world (clothLabMannequinPlacement), built on the jobs' threads.
+SignedDistanceField mannequinField(const Mesh& model, const Mat4& placement, JobSystem& jobs = serialJobs());
+
+/*
+* The dress as the cloth lab and the dress-sized test make it: cut from the pattern at spacing, wrapped round the
+* mannequin standing on feet and sewn there, with the fabric's settings; pinned at the shoulders (its strap pins and
+* their ways, the rest tethered) or held by contact alone (no pins, no ways). Its mesh, one vertex a point, to draw.
+*/
+struct DressOnMannequin {
+    Mesh mesh;
+    Cloth cloth;
+    std::vector<StrapPinPath> strapPaths;
+    std::vector<std::uint32_t> hem;
+};
+
+DressOnMannequin dressOnMannequin(const SignedDistanceField& body, const Vec3& feet, float spacing, const ClothSettings& settings, bool pinned,
+                                  JobSystem& jobs = serialJobs());
+
+/*
+* Ready the dress for the tick starting simulationSeconds after it was made: the fabric's settings, but weightless
+* while its seams pull shut (as garment software sews before it drapes: falling while half sewn, its straps would miss
+* the shoulders), and its strap pins where their ways have them at the tick's end (the substeps slide them there).
+*/
+void prepareDressTick(Cloth& dress, const std::vector<StrapPinPath>& strapPaths, const ClothSettings& fabric, double simulationSeconds, float tickSeconds);
