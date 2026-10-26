@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string_view>
 
 void testPixelBuffer();
 void testRasterizer();
@@ -149,7 +150,23 @@ void testLightFalloff();
 void testClusters();
 void testComputeDispatch();
 
-int main(){
+/*
+* The slow tests, run only with --slow (make test-slow): vertex block descent and its coarse levels, opt-in solvers
+* parked until phase 10 needs them, whose tests settle sheets with every level on one thread (about 31 s in release, as
+* much as all the routine tests together). Run them when the cloth solver changes.
+*/
+void runSlowTests() {
+    testClothHierarchy();
+    testClothBlockDescent();
+}
+
+int main(int argumentCount, char** arguments) {
+    if (argumentCount > 1 && std::string_view{arguments[1]} == "--slow") {
+        runSlowTests();
+        std::cout << "All slow tests passed!\n";
+        return 0;
+    }
+
     testPixelBuffer();
     testRasterizer();
     testFilledTriangle();
@@ -270,8 +287,6 @@ int main(){
     testClothCollision();
     testClothParallel();
     testClothYardstick();
-    testClothHierarchy();
-    testClothBlockDescent();
     testClothGpu();
     testClothTiming();
     testClothTethers();
