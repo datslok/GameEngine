@@ -463,7 +463,9 @@ docs/             ENGINE_GUIDE.md: how the engine works and why, for people lear
                   BUILDLOG.md: the history of finished roadmap items (when, why, measurements, dead ends)
                   ILLUMINATION.md: research notes for global illumination (DDGI papers, formulas, numbers)
                   LUMEN.md: research notes on Lumen and its alternatives, and a plan for this engine
+                  CLOTHGPU.md: research notes and the plan for cloth (roadmap phase 7), with the yardstick's numbers
                   RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
+                  DESTRUCTION.md: plan and research notes for destruction and flight (roadmap phase 15)
 tools/            package_demo.py (the shareable zip), fetch_streamline.py (DLSS's DLLs), make_glb_demo.py
 assets/
   models/         OBJ and glTF test models (the gallery: Khronos's CompareNormal,
