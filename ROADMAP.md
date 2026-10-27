@@ -1,6 +1,6 @@
 # Roadmap
 
-A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**. Eventually it should also host a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic), and a **solar system** simulated at real scale.
+A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**. Eventually it should also host a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic), a **solar system** simulated at real scale, and a **superhero game**: flying fast enough to feel it and bringing down buildings by real physics.
 
 The core stays genre-agnostic. Genre code (camera styles, weapons, abilities, netcode tuning, cloth and sewing, orbital mechanics) lives in modules on top.
 
@@ -334,6 +334,7 @@ Euphoria-style characters: a simulated body held up by joint motors and kept sta
   - An XPBD substep solver (Müller et al. 2020; 10 substeps per tick, 1.2 kHz), with gyroscopic torque.
   - Capsule contacts against the static level from `contact(capsule, triangle)`, restitution 0 and friction 0.8.
   - Capsules only: there is no oriented box. `Mesh::capsule` to draw them.
+  - Shapes behind one interface, so phase 15 can add boxes and convex hulls for destruction
   - Tests: momentum and angular momentum conserved in flight, the tennis-racket theorem's tumble, a dropped capsule rests without jitter, and the same run twice is bit-identical
 - [ ] Joints (`joints`): ball and hinge `Joint`s with swing-twist limits and soft limits
   - Capsule-against-capsule self-collision between unjoined parts.
@@ -478,7 +479,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 ### Physics
 
 - [ ] More rigid-body dynamics, extending phase 8's solver (bodies, joints and capsule contacts come with the ragdolls)
-  - Oriented boxes with box contacts (separating axes), stacking and piles of crates.
+  - Oriented boxes with box contacts (separating axes), stacking and piles of crates (or with phase 15's convex bodies, whichever comes first).
   - **Particles colliding with each other** (grenades knocking each other about) are part of this. They were left out of phase 5 because piles need this phase's iterative contact solver:
     - find pairs with the uniform grid over each particle's swept box;
     - detect the touch by sweeping in relative motion (a ray against a sphere of the summed radii, so fast crossings are not missed);
@@ -560,3 +561,35 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up.
   - Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API
 - [ ] Scripting for gameplay code
+
+## Phase 15: Destruction and a flying superhero
+
+A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it, and bring down whole buildings that fall by real physics. Buildings are chunks bonded together, carrying their weight down to the ground; break the right supports and the load shifts, the next supports overload, and it comes down floor by floor.
+
+- **The plan and research:** `docs/DESTRUCTION.md` (read it first): the feel of speed, rigid bodies for debris, fracture, why buildings collapse (bond stress, progressive collapse, real materials' numbers), dust and light.
+- **When:** numbered after phase 14 to keep the other phases' numbers; it can start any time after phase 8's rigid bodies, and is better after phase 9's audio (sound is half of feeling fast).
+- **Units:** real-world values, as for cloth and ragdolls: gravity 9.81, real sizes and material strengths (concrete 20-40 MPa in compression), so big things fall as slowly as they should.
+
+**Items**
+
+- [ ] Convex rigid bodies (`convex-bodies`): boxes, then convex hulls, on phase 8's XPBD bodies
+  - Contacts by separating axes (boxes) and GJK with EPA (hulls), friction, sleeping and islands.
+  - Speculative contacts, so fast debris does not pass through floors.
+  - Tests: a box resting on a slope at its friction angle, a stack standing still, momentum through collisions, bit-identical runs
+- [ ] Fracture (`voronoi-fracture`): each building's blocks cut into Voronoi chunks at load, more seeds where hits are likely
+  - The bond graph: chunks sharing a face are bonded (its area and normal); chunks on the ground are supports; intact parts clustered into one body (as Unreal's Chaos does).
+  - Tests: the cells fill the block (volumes sum), each is convex, bonds only across shared faces
+- [ ] The stress solver (`stress-solver`): statics on the bond graph, K u = f by conjugate gradients, warm-started
+  - Each bond's force split into compression or tension along its normal and shear across it, as stress over its area (as NVIDIA Blast does).
+  - An intact building is kinematic and costs nothing until something changes it; impacts are forces over their duration.
+  - Tests against hand calculations: a column's base carries the weight above, a cantilever's root the bending moment w L^2 / 2, a beam on two supports splits its load by the lever rule, a removed support's load moves to the others
+- [ ] Breaking (`bond-breaking`): elastic and fatal limits (damage between them), pieces cut off from the ground found by union-find and turned into falling clusters, the excess force into the pieces' speed
+  - Tests: a ten-storey frame stands with a quarter of its base columns gone and collapses with half (the worked example in `docs/DESTRUCTION.md`)
+- [ ] On the GPU (`gpu-destruction`): thousands of chunks and the stress solve as passes, measured on a ladder of building sizes
+- [ ] Debris and dust: small debris as particles that hit the world but not each other; dust as density in the volumetric fog's grid, lit for free; each collapse a `ProbeEvent`
+- [ ] Flight (`flight-controller`): hover, cruise, boost and a quick stop, turns limited by sideways acceleration so speed widens the arcs, every move a sweep
+  - The feel: field of view widening with speed, camera shake, motion blur from TAA's velocity image, wind streaks, a vapour cone and sonic boom near Mach 1, hit-stop on big impacts.
+- [ ] A destruction lab (`games/destructionlab/`): a few buildings of different structures (a concrete frame, a brick house, a steel tower) to fly at and judge
+- [ ] A city, once the lab's buildings work: streaming, levels of detail and a floating origin (phase 12's, phase 13's and phase 14's items)
+
+**Milestone:** fly into the base of a ten-storey concrete building at the speed of sound; its load shifts, the next columns fail, and it comes down floor by floor in about three seconds, in a cloud of dust.
