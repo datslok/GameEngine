@@ -341,22 +341,45 @@ If every point stays within its bound, no pair can close by more than 2 gamma_p 
 
 ### Divide and Truncate (Chen, Hsu, Ayman & Macklin, 2026)
 
-[arXiv 2604.15513](https://arxiv.org/abs/2604.15513) (not yet read in full; this is from Newton's code). Newton does **not** implement OGC's blocks yet ("Coverage of Offset Geometric Contact will be added once it is available in Newton"); it ships OGC's two-stage energy on plain closest-point contacts, with this guarantee instead [read, `rigid_vbd_kernels.py` 7543-7925, `particle_vbd_kernels.py` 2053-2211]:
+[arXiv 2604.15513](https://arxiv.org/abs/2604.15513), "Divide and Truncate: A Penetration and Inversion Free Framework for Coupled Multi-physics Systems" (read Oct 28 2026). A guarantee that nothing passes through anything, run **after** the solver as a post-process on each point's displacement, whatever the solver; the contact forces come from elsewhere (they use OGC's).
 
-- For each contact pair, find a certified separating plane (the closest direction first, then face normals and edge axes).
-- Place it between the two in proportion to how fast each side approaches, keeping at least 5% of the gap on each side.
-- Each point's straight motion is cut at gamma = 0.85 of its crossing with each of its pairs' planes; the smallest cut wins (an atomic minimum), plus a cap of 0.5 gamma r_q on any motion.
-- Only motion **towards** a neighbour is cut, so OGC's slowed falling pairs go away.
-- Runs after **every colour** of every iteration. A pair already intersecting has no separator and is left to the contact forces.
-- Detection on a fixed schedule (before and after the initial guess by default), the hierarchies refitted, rebuilt only when asked. Fixed buffers of 32 vertex-face and 64 edge-edge pairs per feature; overflow is **silently dropped**.
+**The idea [read, Sec. 3.1-3.2].** Divide space into regions that belong to one primitive each, and cut every displacement so each primitive stays in its own region. The isotropic version is OGC's bound: a point's region a ball of radius under half its distance to anything near (Eq. 1-3), its displacement scaled by t in [0, 1] to fit (Eq. 4).
+
+**Planar-DAT, the one to use [read, Sec. 3.3].** One plane per contact pair, found at collision detection:
+
+- **Point and triangle:** the normal from the triangle's closest point c to the point, n = normalize(x_v - c); the plane through p = x_v - lambda (x_v - c) (Eq. 5-8).
+- **Edge and edge:** between the two closest points, p = c_e + lambda (c_e' - c_e), n = normalize(c_e' - c_e) (Eq. 12).
+- **Where the plane sits (Eq. 9-11):** in proportion to how fast each side approaches it. delta_v = max(-dx_v . n, 0), delta_t = max(dx_a . n, dx_b . n, dx_c . n, 0), lambda = delta_t / (delta_t + delta_v), or 0.5 when neither approaches. A layer falling onto one at rest gets nearly all the room.
+- **The cut (Eq. 16):** a point's straight motion x_v + t dx_v meets the plane at t_i; its share is 1 if t_i < 0 or t_i >= 1 / gamma_r, else gamma_r t_i. Only motion **towards** the plane is cut: sliding along it or moving away is free.
+- **Many pairs:** every point starts at t = 1 and each pair writes its cut to its four points by an atomic minimum (Alg. 2). Every point's motion is also capped at 0.5 gamma_r r_q, for features too far to have been found (Alg. 2, lines 9-11).
+- **gamma_r** is not given in the paper; NVIDIA Newton's code uses 0.85.
+- **Displacements are measured from the positions at collision detection,** not from the last iteration (Sec. 4.1); a detection commits the motion and starts again (Alg. 3).
+
+**How they ran it [read, Sec. 4-5].**
+
+- With vertex block descent on the GPU, the cut after each colour (Sec. 5.1) and once after the initial guess; detection every 5 iterations, by a BVH; query radius r_q = 1.5 r_c.
+- **Cloth:** contact radius 2-2.5 mm, steps of 1/300-1/600 s, 10 iterations, OGC's energy, k_c 5e4-1e5 (Table 1). Cloth twist release, 10K points: 1.1 ms a step; unrolling cloth, 3K: 0.45 ms; a 200-layer cloth drop, 4M points and 20M contact pairs: 12.6 ms a step (an RTX PRO 6000 Blackwell).
+- **Cost:** collision detection 64% of a step, the planar cut 13% (Fig. 5); about 10% more a pass than the isotropic cut.
+- **Against OGC's bound:** the isotropic cut damps sliding and locks dense contact (the cloth drop and yarn deadlocked; cloth twist and oscillation damped); planar converged at least 2 times faster in dense contact (Sec. 5.1), 2.2-2.3 times on average over 9M random displacements, up to 158-178 times (Sec. 5.3). Against continuous collision detection: 265-289 times faster, CCD's error plateauing as its time of impact locks everything (Sec. 5.3, Fig. 16).
+
+**Limits [read, Sec. 6].**
+
+- Contacts beyond the query radius fall back to the isotropic cap, which can bring damping back for large motions.
+- A cut short of convergence does not keep momentum or energy.
+- It needs a start where nothing passes through anything (Sec. 3.1, 3.3); pairs already crossing are not handled.
+- Convergence is shown by experiment (one cloth twist over 500 iterations, Fig. 16), not proved. "Never falls into deadlock in our tests."
+- Inherits OGC's force jump at concave places.
+- **Only vertex block descent was tried,** not XPBD.
+
+**What Newton ships [read, `rigid_vbd_kernels.py` 7543-7925, `particle_vbd_kernels.py` 2053-2211]:** OGC's two-stage energy on plain closest-point contacts (not OGC's blocks yet) with Planar-DAT, the separating plane certified (the closest direction first, then face normals and edge axes), at least 5% of the gap kept on each side, gamma 0.85, the cut after every colour; detection before and after the initial guess, the hierarchies refitted; fixed buffers of 32 point-triangle and 64 edge-edge pairs per feature, overflow **silently dropped**.
 
 ### What it means here
 
 - **The contact energy and a motion bound replace the whole old plan.** No continuous collision detection, no untangling pass: the guarantee holds by construction as long as the cloth starts clean.
-- **DAT is the more practical bound** (direction-aware, already in production); OGC's blocks give the cleaner forces. Read the DAT paper before choosing **[check]**.
-- **Both assume an energy-based solver** whose points take bounded steps, which VBD is. In XPBD, contacts would be inequality constraints with the same truncation after each colour **[inf]**; untested in the literature.
+- **Planar-DAT is the bound to use** (read Oct 28 2026; the user chose it over OGC's simpler bound): direction-aware, so sliding and separating are never slowed, where OGC's bound damps and can lock dense contact. OGC's blocks give the cleaner forces.
+- **It suits our XPBD** **[inf]**: the paper only tried vertex block descent, but its cut is a post-process on positions for any solver, and our XPBD takes one pass a substep with nothing carried between passes (Small Steps), so a cut cannot spoil any bookkeeping, unlike the coarse levels' moves (Part 2). In XPBD, contacts are inequality constraints. Untested in the literature: the tests must show it.
 - **Cloth against bodies stays penalty contact** (our current shapes, later the mannequin's distance field); a moving body can push cloth into itself.
-- **Real time needs small steps:** 1/200-1/1200 s with 10-50 iterations in their scenes. Our 15 substeps a tick are 1/1800 s.
+- **Real time needs small steps:** 1/200-1/1200 s with 10-50 iterations in their scenes. Our 30 substeps a tick are 1/3600 s.
 
 ## Part 4: Fitting the GPU and the engine
 
@@ -531,7 +554,13 @@ Each step is a branch of its own, explained first, tests first.
 2. **The GPU cloth framework.** The GPU-resident design (Part 4) with today's XPBD solver ported as it is (coloured, our units), its GLSL library mirrored by the CPU solver and checked by GPU tests. The big sheet on the GPU, drawn from its buffer, picked and grabbed through the late readback. Measured on the ladder.
 3. **The low-frequency layer with Vertex Block Descent (CPU done, `hierarchical-cloth`; on the GPU done, `gpu-block-descent` and `gpu-cloth-levels`; opt-in: XPBD with tethers kept as the default, Part 5; its cost cuts parked in phase 10).** Re-planned on Oct 25 2026 when the measurements showed the two belong together (Part 2): Müller's levels with Lu et al.'s Galerkin coarse step on the substep's energy, between vertex block descent sweeps (our fabric's stretch and bending as energies, point colouring); XPBD kept as the default. Next: the GPU port, its cost cut further (fewer passes a level, skipping fine levels), then judged against XPBD on the ladder and the cantilever. Still to try: Stable Neo-Hookean membrane, the adaptive initial guess, Chebyshev, affine coarse handles (Xian 2019).
 4. **(Merged into step 3.)**
-5. **Self-collision.** On XPBD, the default since the tethers (Oct 26 2026): distance constraints between points and triangles and between edges, pushed straight out from the feature they touch (OGC's offset geometry) rather than OGC's contact energy, which wants a solver that minimises the substep's energy; DAT's per-point motion bound (or OGC's own); a bounding volume hierarchy on the GPU; the dress and the pile as its tests.
+5. **Self-collision.** Agreed with the user on Oct 28 2026, two branches, `cloth-self-collision` (the CPU) and then `gpu-self-collision`:
+   - **Thickness:** each layer padded 2.5 mm a side, so layers rest 5 mm apart, as cloth keeps from bodies (`ClothSettings::thickness`).
+   - **Contacts as XPBD constraints:** point against triangle and edge against edge, at least 5 mm apart, pushed straight out from the nearest feature (face, edge or corner; OGC's offset geometry), shared by inverse mass and barycentric weight, with positional friction as against bodies. Not OGC's contact energy, which wants a solver that minimises the substep's energy.
+   - **Skipping neighbours:** a point never meets its own triangles or edges, and stitched points count as one point, or a sewn dress would push its seams open.
+   - **Finding pairs:** every 5 substeps (6 a tick) within about 1 cm, the positions then recorded for the cut; the engine's `UniformGrid` on the CPU, a spatial hash grid (a counting sort into cells) on the GPU, the user's choice over a BVH since cloth triangles are all about one size.
+   - **The order in a substep:** the solver, the self-contacts, the tethers, the stitches, the bodies, then **Planar-DAT's cut last** (gamma 0.85), so no crossing survives a substep; the cut may pull a point a fraction of a millimetre back towards a body, which the next substep's contact pushes out. Moving more than about 3 m/s (0.5 x 0.85 x 1 cm per 5 substeps) is slowed; finding pairs more often would lift that.
+   - **Tests:** a crossings counter (every edge against every triangle not its own, slow, for tests only) on a sheet dropped onto itself, two sheets stacked and the dress, a new column in the dress test; the cut never slowing sliding or separating; the plane's place and the cut against the paper's equations. First, check whether the 0.7 cm pinned dress's swaying hem (`cheaper-substeps`, gone with `dress-ease`) returns.
 6. **Bodies on the GPU:** the engine's collider shapes (done with the framework), then the mannequin's distance field (`assets/models/human.obj`), before the dress sewn from two panels that tests whether garments need the levels.
 
 Tethers (`cloth-tethers`, done, Oct 26 2026) hold hanging cloth as well as the levels for about XPBD's cost (Part 5), so the levels' cost cuts are paused until phase 10's garments show whether cloth held by contact needs them.
