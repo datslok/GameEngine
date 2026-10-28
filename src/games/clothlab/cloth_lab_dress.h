@@ -18,9 +18,9 @@
 *
 * Sized from the mannequin itself: its chest about 94 cm round (34 cm across, 25 cm deep), its waist 79 cm, its hips
 * 94 cm, its armpits at 1.20-1.25 m, the tops of its shoulders at 1.44 m and their ends 21 cm from its middle. Each
-* panel is a quarter of the chest round plus a few centimetres to move in, so 50 cm across at the armpit, flaring to
-* 80 cm at the hem; the armholes are cut deep (the dress's armpit 10 cm under the body's), since the arms stand only
-* 5-8 cm off the body there in its A-pose.
+* panel is a quarter of the chest round plus 3.5 cm to move in (14 cm of ease round, a relaxed fit; 6 cm looked tight
+* on the mannequin), so 54 cm across at the armpit, flaring to 84 cm at the hem; the armholes are cut deep (the
+* dress's armpit 10 cm under the body's), since the arms stand only 5-8 cm off the body there in its A-pose.
 *
 * Pattern coordinates in metres: x across the panel from its middle line, y up from the hem. Both panels are drawn
 * seen from outside, so a panel's +x (its outline's right side) is the wearer's left on the front and the wearer's
@@ -51,13 +51,15 @@ inline constexpr float dressSpacing = 0.01f;    // m
 /*
 * Where the panels start, laid round the mannequin before sewing: wrapped round an upright cylinder of this radius,
 * the front facing +z and the back -z, a little behind the middle of the body's box (the chest and hips reach further
-* back than forward), its hem this high, so the shoulder straps start about 10 cm over the shoulders and their seams
+* back than forward), its hem this high, so the shoulder straps start about 15 cm over the shoulders and their seams
 * close in the air above them: started only a few centimetres over them, a seam's straight pull ran through the rounded
-* shoulder, which pushed one strap off sideways into the armpit. The cylinder is wide enough for the hem's flare to
-* reach round to just short of the sides.
+* shoulder, which pushed one strap off sideways into the armpit; at 10 cm the roomier bodice's side seams, closing,
+* dragged one strap off the shoulder's end onto the arm's root, where its seam froze 9 cm open (held by contact). The
+* cylinder is wide enough for the hem's flare to reach round to just short of the sides (wider, held by contact, a
+* shoulder seam opened and the dress fell).
 */
 inline constexpr float dressWrapRadius = 0.29f;                       // m
-inline const Vec3 dressAxisOffset{0.0f, 0.61f, -0.02f};               // from the feet, m: the hem's height and the axis's
+inline const Vec3 dressAxisOffset{0.0f, 0.66f, -0.02f};               // from the feet, m: the hem's height and the axis's
 inline constexpr float dressShoulderHeight = 1.44f;                   // m above the feet: the tops of the mannequin's shoulders
 
 // How long the dress is weightless while its seams pull shut round the body, before gravity lets it settle.

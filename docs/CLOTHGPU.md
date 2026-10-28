@@ -506,6 +506,23 @@ The dress-sized test at the new default (`make yardstick-dress`, sewing sliding 
 - **A swaying hem, not yet explained:** the 0.7 cm pinned dress's back hem keeps swinging about 6 cm through 20 s (followed by a throwaway probe), where it settled to 14 mm a second without the seam fix. It sways with the tethers off too, and every seam is shut within the first second, so the fix only changed the drape it settles from; something feeds the swing energy. The other rungs settle (the 1 cm dress as before: 12 mm against 12). Suspects: the skirt passing through itself, friction on the legs; the first thing for self-collision to look at.
 - **Floats at 30 substeps:** gravity moves a point 0.76 micrometres a substep, which a float 1 m up resolves only to 0.06; a weight on the hand's spring alone there settles 1.65% off (34% at 60 substeps), one reason not to go past 30.
 
+**A roomier dress** (`dress-ease`, Oct 28 2026, 30 substeps). The user found the dress a little small on the mannequin: it had 6 cm of ease at the bust (100 cm round against the chest's 94). Each panel went 2 cm wider at each side seam (54 cm across at the armpit, 84 at the hem; 14 cm of ease, a relaxed fit), straps, neckline and length unchanged, and the dress starts 5 cm higher so its straps still close in the air (at 10 cm over the shoulders the wider bodice dragged one strap onto the arm's root, its seam frozen 9 cm open, held by contact).
+
+| Spacing | Points | Held by | Mean stretch | 99th percentile | Worst edge | Hem above the floor | Last second | CPU ms a tick | GPU ms a tick |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 cm | 3,246 | contact | 0.10% | 1.5% | 9% | 0.609 m | 6 mm | 9.3 | 1.80 |
+| 2 cm | 3,246 | pins and tethers | 0.25% | 4.9% | 82% | 0.636 m | 15 mm | 9.6 | 1.67 |
+| 1.4 cm | 6,573 | contact | 0.15% | 2.2% | 15% | 0.597 m | 17 mm | 17.3 | 1.86 |
+| 1.4 cm | 6,573 | pins and tethers | 0.29% | 4.8% | 115% | 0.627 m | 23 mm | 18.4 | 1.77 |
+| 1 cm | 12,747 | contact | 0.26% | 3.3% | 19% | 0.598 m | 10 mm | 31.7 | 1.86 |
+| 1 cm | 12,747 | pins and tethers | 0.41% | 6.3% | 124% | 0.618 m | 11 mm | 33.7 | 1.86 |
+| 0.7 cm | 25,888 | contact | 0.49% | 5.3% | 36% | 0.581 m | 7 mm | 59.3 | 2.10 |
+| 0.7 cm | 25,888 | pins and tethers | 0.61% | 9.0% | 308% | 0.604 m | 19 mm | 61.1 | 2.05 |
+
+- **Less stretch at every rung,** the bodice no longer pulled tight round the chest: the 1 cm dress held by contact 0.26% mean and 3.3% at the 99th percentile, against 0.30% and 4.0%; its worst edge 19% against 37%. Its hem hangs about a centimetre lower, the bodice's extra width taking up less length.
+- **Every seam shut,** and the 0.7 cm pinned dress's swaying hem is gone (19 mm in its last second, against 74): the sway hung on the drape.
+- **The cost** follows the points (6% more); the GPU stays under 2.1 ms a tick (750-810 dispatches: a few rungs' edges take an eighth colour).
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.
