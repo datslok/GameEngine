@@ -9,9 +9,9 @@
 
 namespace {
     // The right half of the outline, in metres; the left half is its mirror image.
-    const Vec2 hemCorner{0.40f, 0.0f};
-    const Vec2 armpit{0.25f, 0.61f};
-    const Vec2 armholeBend{0.19f, 0.64f};
+    const Vec2 hemCorner{0.42f, 0.0f};
+    const Vec2 armpit{0.27f, 0.61f};
+    const Vec2 armholeBend{0.21f, 0.64f};
     const Vec2 strapOuter{0.19f, 0.92f};
     const Vec2 strapInner{0.12f, 0.95f};
 

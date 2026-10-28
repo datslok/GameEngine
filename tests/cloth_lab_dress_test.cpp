@@ -56,8 +56,8 @@ namespace {
     /*
     * The pattern: a front and a back of eight edges each, both outlines symmetric about their middle line, alike but
     * for the neckline (the front's deeper), sewn at the two sides and the two shoulders with each seam's edges the same
-    * length; and wide enough all the way down for the mannequin, its chest about 94 cm round, so each panel's half is
-    * at least a quarter of that, widening from the armpit to the hem (an A-line).
+    * length; and roomy enough all the way down for the mannequin, its chest about 94 cm round, so each panel's half is
+    * at least a quarter of that plus 3.5 cm (14 cm of ease round), widening from the armpit to the hem (an A-line).
     */
     void testThePattern() {
         const Pattern pattern = twoPanelDress();
@@ -84,7 +84,7 @@ namespace {
 
         const std::vector<Vec2>& side = edgeOf(pattern, DressPiece::Front, DressEdge::RightSide).points;
         for (std::size_t index = 0; index + 1 < side.size(); ++index) {
-            assert(side[index].x >= 0.235f && side[index + 1].y > side[index].y && side[index + 1].x <= side[index].x);
+            assert(side[index].x >= 0.2699f && side[index + 1].y > side[index].y && side[index + 1].x <= side[index].x);
         }
     }
 
@@ -107,7 +107,7 @@ namespace {
 
     /*
     * Laid round the mannequin before sewing: every point on the wrapping cylinder round its middle, the front in front
-    * and the back behind, the shoulder straps above its shoulders.
+    * and the back behind, the shoulder straps 10-20 cm above its shoulders, so their seams close in the air.
     */
     void testTheDressStartsRoundTheMannequin() {
         const Vec3 feet{-7.5f, 0.0f, -1.0f};
@@ -123,7 +123,7 @@ namespace {
             assert(meshed.pieces[index] == static_cast<std::uint32_t>(DressPiece::Front) ? out.z > 0.0f : out.z < 0.0f);
             highest = std::max(highest, start[index].y);
         }
-        assert(highest > feet.y + dressShoulderHeight + 0.05f && highest < feet.y + dressShoulderHeight + 0.15f);
+        assert(highest > feet.y + dressShoulderHeight + 0.1f && highest < feet.y + dressShoulderHeight + 0.2f);
     }
 
     /*

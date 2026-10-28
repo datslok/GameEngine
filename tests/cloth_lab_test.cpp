@@ -479,9 +479,10 @@ namespace {
         for (int tick = 0; tick < sewingTicks; ++tick) {
             runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
         }
-        // Shut, or nearly: pinned, the stitch at one armpit, under the arm's root, is the last (2.6 cm to go, shut 8 ticks
-        // later; with greedy colouring's solving order, 8 mm and a tick).
-        assert(widestStitch(dress) < 0.03f);
+        // Shut, or nearly: pinned, the stitch at one armpit, under the arm's root, is the last. Its pull runs straight
+        // into the armpit, so it waits there until gravity comes on and nudges it along (with the roomier bodice 3.7 cm to
+        // go, shut 11 ticks later; 2.6 cm with the tighter one).
+        assert(widestStitch(dress) < 0.04f);
 
         for (int tick = sewingTicks; tick < 2 * sewingTicks; ++tick) {
             runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
