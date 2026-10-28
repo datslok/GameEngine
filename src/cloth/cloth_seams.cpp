@@ -14,6 +14,16 @@ void solveStitches(ClothParticles& particles, const std::vector<ClothStitch>& st
     }
 }
 
+void markSewing(const ClothParticles& particles, const std::vector<ClothStitch>& stitches, float closingStep, std::vector<std::uint8_t>& sewing) {
+    sewing.assign(particles.size(), 0);
+    for (const ClothStitch& stitch : stitches) {
+        if (stitchWidest(particles.previousPositions[stitch.first], particles.previousPositions[stitch.second], closingStep) > 0.0f) {
+            sewing[stitch.first] = 1;
+            sewing[stitch.second] = 1;
+        }
+    }
+}
+
 namespace {
     using Side = std::pair<std::uint32_t, std::uint32_t>;
 

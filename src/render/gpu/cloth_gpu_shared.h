@@ -26,8 +26,9 @@
 #define CLOTH_METHOD_XPBD 0
 #define CLOTH_METHOD_BLOCK_DESCENT 1
 
-// A point no pin moves (pinSlots), and a tick with no hand (GpuClothTick::grabParticle).
+// A point no pin moves (pinSlots), a tick with no hand (GpuClothTick::grabParticle), and a point in no stitch (stitchPartners).
 #define CLOTH_NO_PIN 4294967295u
 #define CLOTH_NO_GRAB 4294967295u
+#define CLOTH_NO_STITCH 4294967295u
 
 #endif

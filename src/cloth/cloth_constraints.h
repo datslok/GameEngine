@@ -116,12 +116,17 @@ std::array<Vec3, 4> hingeAngleGradient(const Vec3& wing0, const Vec3& wing1, con
 * - Isometric: C is the curvature vector, whose gradient for point i is just K_i (times the identity), so the step is
 *   one vector, delta lambda = -C / (sum of w_i K_i^2 + alpha / seconds^2), and point i moves by w_i K_i delta lambda:
 *   no normals, angles or square roots. The weights sum to zero, so the centre of mass stays put.
+* A solve standing for several substeps of seconds (bendingSubsteps) divides alpha / seconds^2 by them: the correction
+* becomes velocity over one substep, so this gives the impulse that many substeps' bending would.
 */
-void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds, BendingModel model);
+void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds, BendingModel model,
+               int substepsCovered = 1);
 
 /*
 * Graph colouring: reorder the constraints into colours, groups in which no two share a point, each constraint taking
-* the lowest colour none of its points has yet, in order, the constraints of a colour kept in their order. Returns where
+* the lowest colour none of its points has yet, the hardest to fit first (DSatur), the constraints of a colour kept in
+* their order. The fewer colours the fewer GPU dispatches: a mesh's edges take as many as meet at its busiest point,
+* the fewest possible. Returns where
 * each colour starts, then the end. Within a colour the constraints are independent, so they can be solved on many
 * threads at once with the same result to the last bit; solving the colours in turn is still Gauss-Seidel. Throws
 * std::length_error past 64 colours (a point in more than about 30 constraints).
@@ -134,4 +139,4 @@ std::vector<std::uint32_t> colourBend(std::vector<BendConstraint>& constraints, 
 void solveStretchColours(ClothParticles& particles, const std::vector<StretchConstraint>& constraints, const std::vector<std::uint32_t>& colours,
                          float compliance, float seconds, JobSystem& jobs);
 void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
-                      float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs);
+                      float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs, int substepsCovered = 1);

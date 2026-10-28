@@ -5,7 +5,9 @@
 #include "physics/shapes.h"
 #include "physics/signed_distance_field.h"
 
+#include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 struct ClothSettings;
@@ -44,9 +46,11 @@ SurfacePoint fieldSurface(const FieldPoint& sampled);
 * point began it) is undone when shorter than staticFriction times the push, and otherwise shortened by kineticFriction
 * times the push. Pinned points are never moved. On the caller: shared among threads it was measured slower (each
 * point's test is a few nanoseconds, less than handing it out costs). The shapes first, then the field bodies, each in
-* order.
+* order. A point marked in sewing (one byte a point, or none: markSewing in cloth_seams.h) is pushed out without
+* friction, so a seam being sewn slides over the body.
 */
-void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings, const ClothFields& fields = {});
+void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings, const ClothFields& fields = {},
+                   std::span<const std::uint8_t> sewing = {});
 
 // Every Collider's shape placed in the world by its entity's Transform: what cloth collides with.
 std::vector<Shape> worldColliderShapes(const World& world);

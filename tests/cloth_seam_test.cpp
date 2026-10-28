@@ -1,9 +1,12 @@
 #include "cloth/cloth.h"
 #include "cloth/cloth_seams.h"
+#include "math/angles.h"
+#include "physics/shapes.h"
 #include "scene/mesh.h"
 #include "test_levels.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <vector>
@@ -76,6 +79,69 @@ namespace {
         ClothParticles bothHeld = twoPoints(Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}, 0.0f, 0.0f);
         solveStitches(bothHeld, {ClothStitch{0, 1}}, 0.25f);
         assert(bothHeld.positions[0].x == 0.0f && bothHeld.positions[1].x == 1.0f);
+    }
+
+    /*
+    * A stitch is being sewn while its gap at the substep's start is wider than the step: both its points are marked, so
+    * the bodies push them out without friction. Shut stitches and points in none are not marked.
+    */
+    void testSewingPointsAreMarked() {
+        ClothParticles particles;
+        particles.positions = {Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.3f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}, Vec3{1.05f, 0.0f, 0.0f}, Vec3{2.0f, 0.0f, 0.0f}};
+        particles.previousPositions = particles.positions;
+        particles.velocities.assign(5, Vec3{});
+        particles.inverseMasses.assign(5, 1.0f);
+
+        std::vector<std::uint8_t> sewing;
+        markSewing(particles, {ClothStitch{0, 1}, ClothStitch{2, 3}}, 0.1f, sewing);
+        assert((sewing == std::vector<std::uint8_t>{1, 1, 0, 0, 0}));
+
+        // Measured from where the points began the substep, as the stitch is.
+        particles.positions[1] = Vec3{0.05f, 0.0f, 0.0f};
+        particles.previousPositions[3] = Vec3{1.5f, 0.0f, 0.0f};
+        markSewing(particles, {ClothStitch{0, 1}, ClothStitch{2, 3}}, 0.1f, sewing);
+        assert((sewing == std::vector<std::uint8_t>{1, 1, 1, 1, 0}));
+
+        // The widest a stitch may end the substep: its start's gap less the step, nothing or less once shut.
+        assert(near(stitchWidest(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.3f, 0.0f}, 0.1f), 0.2f, 1e-6f));
+        assert(stitchWidest(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.05f, 0.0f}, 0.1f) <= 0.0f);
+    }
+
+    /*
+    * Sewing round a body: two small pieces lying on a ball 140 degrees apart, stitched corner to corner. The stitches
+    * pull along the chord, nearly straight into the ball (a slide of 0.36 of the push, under the static friction's 0.6),
+    * so with friction the points would stick where they lie and the seam stay open. A seam being sewn slides freely, as
+    * a sewing machine pulls fabric over a table: the pieces slide up the ball and meet at its top.
+    */
+    void testSeamSewsRoundABall() {
+        const float radius = 0.1f;
+        ClothSettings settings;
+        settings.gravity = 0.0f;
+        const std::vector<Shape> ball{Shape{Sphere{Vec3{0.0f, 0.0f, 0.0f}, radius}}};
+
+        // Each piece a 1 cm triangle at rest; on the ball at 70 degrees either side of its top, one mirroring the other.
+        Mesh rest;
+        rest.vertices = {Vec4{0.0f, 0.0f, 0.0f, 1.0f}, Vec4{0.01f, 0.0f, 0.0f, 1.0f}, Vec4{0.0f, 0.0f, 0.01f, 1.0f},
+                         Vec4{1.0f, 0.0f, 0.0f, 1.0f}, Vec4{1.01f, 0.0f, 0.0f, 1.0f}, Vec4{1.0f, 0.0f, 0.01f, 1.0f}};
+        rest.triangles = {Triangle{0, 1, 2}, Triangle{3, 5, 4}};
+        const float lying = radius + settings.thickness;
+        const auto onBall = [&](float degrees, float z) {
+            const float angle = radiansFromDegrees(degrees);
+            return Vec3{lying * std::sin(angle), lying * std::cos(angle), z};
+        };
+        const std::vector<Vec3> start{onBall(70.0f, 0.0f), onBall(75.5f, 0.0f), onBall(70.0f, 0.01f),
+                                      onBall(-70.0f, 0.0f), onBall(-75.5f, 0.0f), onBall(-70.0f, 0.01f)};
+        ClothSewing sewing;
+        sewing.stitches = {ClothStitch{0, 3}, ClothStitch{1, 4}, ClothStitch{2, 5}};
+        Cloth cloth = makeCloth(rest, start, settings, sewing);
+
+        for (int ticks = 0; ticks < 120; ++ticks) {
+            stepCloth(cloth, tick, ball);
+        }
+        for (const ClothStitch& stitch : cloth.stitches) {
+            assert(sameBits(cloth.particles.positions[stitch.first], cloth.particles.positions[stitch.second]));
+            assert(cloth.particles.positions[stitch.first].y > 0.9f * radius);
+        }
     }
 
     /*
@@ -210,4 +276,6 @@ void testClothSeams() {
     testSeamHingeIsTheUncutHinge();
     testClothFromRestAndStart();
     testPillowSewsShut();
+    testSewingPointsAreMarked();
+    testSeamSewsRoundABall();
 }

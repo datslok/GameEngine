@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <numbers>
 #include <vector>
@@ -107,6 +108,18 @@ namespace {
         free.positions[0] = Vec3{0.001f, settings.thickness - 0.002f, 0.0f};
         solveContacts(free, floor, slippery);
         assert(near(free.positions[0].x, 0.001f, 1e-6f));
+
+        // A point being sewn is pushed out but keeps its slide, as with no friction; the one beside it sticks.
+        ClothParticles sewn = onePoint(Vec3{0.0f, settings.thickness, 0.0f});
+        sewn.positions.push_back(Vec3{1.0f, settings.thickness - 0.002f, 0.0f});
+        sewn.previousPositions.push_back(Vec3{0.999f, settings.thickness, 0.0f});
+        sewn.velocities.push_back(Vec3{0.0f, 0.0f, 0.0f});
+        sewn.inverseMasses.push_back(100.0f);
+        sewn.positions[0] = Vec3{0.001f, settings.thickness - 0.002f, 0.0f};
+        const std::vector<std::uint8_t> sewing{1, 0};
+        solveContacts(sewn, floor, settings, {}, sewing);
+        assert(nearVec(sewn.positions[0], Vec3{0.001f, settings.thickness, 0.0f}, 1e-6f));
+        assert(nearVec(sewn.positions[1], Vec3{0.999f, settings.thickness, 0.0f}, 1e-6f));
     }
 
     // A point resting on a ball stays where the slope is gentler than its friction angle (atan 0.6, 31 degrees) and

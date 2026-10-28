@@ -114,25 +114,27 @@ namespace {
     }
 
     /*
-    * A sewn cloth's stitches as the stitch pass reads them, one record each in the cloth's order, and each point's flag
-    * saying whether it is in one (the end's pass leaves such a point's hand and tethers to the stitch pass); a sheet
-    * has no stitches and no point flagged.
+    * A sewn cloth's stitches as the stitch pass reads them, one record each in the cloth's order, and each point's
+    * partner across its stitch (the end's pass leaves such a point's hand and tethers to the stitch pass, and pushes it
+    * out of the bodies without friction while the stitch is open); clothNoStitch for a point in none. A sheet has no
+    * stitches and no partners.
     */
     void testStitches() {
         const Cloth cloth = sewnSheet();
         const std::vector<GpuClothStitch> stitches = packClothStitches(cloth);
         assert(stitches.size() == 2 && stitches[0].first == 0 && stitches[0].second == 11 && stitches[1].first == 3 && stitches[1].second == 8);
 
-        const std::vector<std::uint32_t> stitched = clothStitchedPoints(cloth);
-        assert(stitched.size() == cloth.particles.size());
-        for (std::uint32_t point = 0; point < stitched.size(); ++point) {
-            assert(stitched[point] == ((point == 0 || point == 11 || point == 3 || point == 8) ? 1u : 0u));
+        const std::vector<std::uint32_t> partners = clothStitchPartners(cloth);
+        assert(partners.size() == cloth.particles.size());
+        for (std::uint32_t point = 0; point < partners.size(); ++point) {
+            const std::uint32_t expected = point == 0 ? 11u : point == 11 ? 0u : point == 3 ? 8u : point == 8 ? 3u : clothNoStitch;
+            assert(partners[point] == expected);
         }
 
         const Cloth sheet = smallSheet();
         assert(packClothStitches(sheet).empty());
-        for (const std::uint32_t flag : clothStitchedPoints(sheet)) {
-            assert(flag == 0);
+        for (const std::uint32_t partner : clothStitchPartners(sheet)) {
+            assert(partner == clothNoStitch);
         }
     }
 
@@ -227,7 +229,8 @@ namespace {
         const std::uint32_t stretchColours = static_cast<std::uint32_t>(cloth.stretchColours.size() - 1);
         const std::uint32_t bendColours = static_cast<std::uint32_t>(cloth.bendColours.size() - 1);
         ClothSettings settings = cloth.settings;
-        assert(clothDispatchesPerTick(cloth, settings) == 15 * (2 + stretchColours + bendColours));
+        const std::uint32_t substeps = static_cast<std::uint32_t>(settings.substeps);
+        assert(clothDispatchesPerTick(cloth, settings) == substeps * (2 + stretchColours + bendColours));
 
         settings.bendingStiffness = 0.0f;
         settings.substeps = 4;
@@ -254,6 +257,14 @@ namespace {
         // A sewn cloth adds the stitch pass to every substep, with either method.
         const Cloth sewn = sewnSheet();
         assert(clothDispatchesPerTick(sewn, settings) == 4 * (3 + stretchColours + bendColours));
+
+        // XPBD's bending only on its bending substeps: at 15 substeps every fourth, 3, 7, 11 and 14.
+        settings.substeps = 15;
+        settings.bendingInterval = 4;
+        assert(clothDispatchesPerTick(cloth, settings) == 15 * (2 + stretchColours) + 4 * bendColours);
+
+        // Vertex block descent's bending is in each point's step, every substep.
+        settings.substeps = 4;
         settings.method = ClothMethod::VertexBlockDescent;
         assert(clothDispatchesPerTick(sewn, settings) == 4 * (3 + pointColours));
     }

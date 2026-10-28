@@ -383,6 +383,25 @@ namespace {
         }
     }
 
+    // How wide a stitch may end the substep, which says whether it is still being sewn: wide open, closing and shut.
+    void checkStitchWidest(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{167};
+        std::vector<GpuVec4> inputs;
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 firstPrevious = randomPoint(random, 1.0f);
+            const Vec3 secondPrevious = firstPrevious + random.direction() * (i % 5 == 0 ? 0.0f : random.between(0.0f, 0.2f));
+            inputs.push_back(gpuVec4(firstPrevious));
+            inputs.push_back(gpuVec4(secondPrevious));
+            inputs.push_back(gpuVec4(random.between(0.0001f, 0.05f)));
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_STITCH_WIDEST, inputs, 3, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const float widest = stitchWidest(vec3From(inputs[i * 3]), vec3From(inputs[i * 3 + 1]), inputs[i * 3 + 2][0]);
+            report.check("clothStitchWidest", arithmeticTolerance, widest, outputs[i][0]);
+        }
+    }
+
     /*
     * A field body's sample on random points in and round a field's box (fieldCell), random corners blended at the
     * share found (blendFieldCell), and the slope made the way out (fieldSurface), equal corners among them.
@@ -1026,6 +1045,7 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkGrab(runner, report);
     checkTether(runner, report);
     checkStitch(runner, report);
+    checkStitchWidest(runner, report);
     checkField(runner, report);
     checkFinishVelocity(runner, report);
     checkPointTerms(runner, report);

@@ -406,6 +406,12 @@ void clothTether(inout vec3 point, vec3 anchor, float restLength, float stretchA
     }
 }
 
+// The widest a stitch's gap may end this substep (stitchWidest): its width at the substep's start less the closing step;
+// above nothing while it is still being sewn.
+float clothStitchWidest(vec3 firstPrevious, vec3 secondPrevious, float closingStep) {
+    return length(secondPrevious - firstPrevious) - closingStep;
+}
+
 // One stitch (solveStitch): its gap pulled in to its width at the substep's start less the closing step, or, once that
 // is nothing, shut where the two points' inverse masses balance.
 void clothStitch(inout vec3 first, inout vec3 second, float firstWeight, float secondWeight, vec3 firstPrevious, vec3 secondPrevious,
@@ -415,7 +421,7 @@ void clothStitch(inout vec3 first, inout vec3 second, float firstWeight, float s
         return;
     }
 
-    float widest = length(secondPrevious - firstPrevious) - closingStep;
+    float widest = clothStitchWidest(firstPrevious, secondPrevious, closingStep);
     vec3 gap = second - first;
     if (widest <= 0.0) {
         vec3 joined = first + gap * (firstWeight / weights);

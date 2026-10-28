@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <map>
+#include <queue>
 #include <stdexcept>
 #include <utility>
 
@@ -259,6 +260,14 @@ namespace {
     constexpr std::size_t hingeBendPerJob = 256;
     constexpr std::size_t isometricBendPerJob = 2048;
 
+    /*
+    * What a bending solve multiplies alpha by: 1 / seconds^2 over the substeps it stands for, in the GPU's order (the
+    * tick's 1 / seconds^2 packed on the CPU, then divided in the bending pass), so both round alike.
+    */
+    float bendingPerSecondSquared(float seconds, int substepsCovered) {
+        return 1.0f / (seconds * seconds) / static_cast<float>(substepsCovered);
+    }
+
     // Calls solve with the model's one-hinge step and job size, chosen once for the whole pass rather than per hinge.
     template <typename Solve>
     void withBendStep(BendingModel model, Solve solve) {
@@ -273,28 +282,103 @@ namespace {
         }
     }
 
-    // The lowest colour none of the points has, marked on them; the colour numbers as given by pointsOf.
+    // A constraint waiting for its colour, ordered so the queue's top is the most saturated, then the most constrained,
+    // then the first: a strict order, so the colouring is the same every run.
+    struct ColouringEntry {
+        int saturation = 0;
+        std::uint32_t degree = 0;
+        std::uint32_t index = 0;
+
+        bool operator<(const ColouringEntry& other) const {
+            if (saturation != other.saturation) {
+                return saturation < other.saturation;
+            }
+            if (degree != other.degree) {
+                return degree < other.degree;
+            }
+            return index > other.index;
+        }
+    };
+
+    /*
+    * DSatur (Brelaz 1979): colour next the constraint whose neighbours (constraints sharing a point with it) already use
+    * the most different colours, the hardest to fit, giving it the lowest colour none of its points has; ties to the
+    * one with the most neighbours. Greedy colouring in the mesh's order gave the dress 9 stretch and 18 bending colours
+    * against at least 7 and 14 (the most edges and hinges at one point); each colour is a GPU dispatch a substep. Each
+    * point's colours are a bit mask, so a constraint's saturation is the bits set in its points' masks together. The
+    * queue keeps stale entries and skips them when they come up, rather than finding and moving them.
+    */
     template <typename Constraint, typename PointsOf>
     std::vector<std::uint32_t> colourConstraints(std::vector<Constraint>& constraints, std::size_t pointCount, PointsOf pointsOf) {
-        std::vector<std::uint64_t> usedByPoint(pointCount, 0);
-        std::vector<int> colourOf(constraints.size());
-        int colourCount = 0;
-
-        for (std::size_t index = 0; index < constraints.size(); ++index) {
-            const auto points = pointsOf(constraints[index]);
-            std::uint64_t used = 0;
-            for (std::uint32_t point : points) {
-                used |= usedByPoint.at(point);
+        std::vector<std::uint32_t> pointStarts(pointCount + 1, 0);
+        for (const Constraint& constraint : constraints) {
+            for (std::uint32_t point : pointsOf(constraint)) {
+                ++pointStarts.at(point + 1);
             }
+        }
+        for (std::size_t point = 0; point < pointCount; ++point) {
+            pointStarts[point + 1] += pointStarts[point];
+        }
+        std::vector<std::uint32_t> filled(pointStarts.begin(), pointStarts.end() - 1);
+        std::vector<std::uint32_t> pointConstraints(pointStarts.back());
+        for (std::size_t index = 0; index < constraints.size(); ++index) {
+            for (std::uint32_t point : pointsOf(constraints[index])) {
+                pointConstraints[filled[point]++] = static_cast<std::uint32_t>(index);
+            }
+        }
+
+        std::vector<std::uint64_t> usedByPoint(pointCount, 0);
+        const auto usedAround = [&](std::size_t index) {
+            std::uint64_t used = 0;
+            for (std::uint32_t point : pointsOf(constraints[index])) {
+                used |= usedByPoint[point];
+            }
+            return used;
+        };
+
+        std::vector<int> colourOf(constraints.size(), -1);
+        std::vector<int> saturation(constraints.size(), 0);
+        std::vector<std::uint32_t> degree(constraints.size(), 0);
+        std::priority_queue<ColouringEntry> waiting;
+        for (std::size_t index = 0; index < constraints.size(); ++index) {
+            for (std::uint32_t point : pointsOf(constraints[index])) {
+                degree[index] += pointStarts[point + 1] - pointStarts[point] - 1;
+            }
+            waiting.push(ColouringEntry{0, degree[index], static_cast<std::uint32_t>(index)});
+        }
+
+        int colourCount = 0;
+        while (!waiting.empty()) {
+            const ColouringEntry next = waiting.top();
+            waiting.pop();
+            if (colourOf[next.index] >= 0 || next.saturation != saturation[next.index]) {
+                continue;
+            }
+
+            const std::uint64_t used = usedAround(next.index);
             if (~used == 0) {
                 throw std::length_error("A cloth's constraints need more than 64 colours");
             }
             const int colour = std::countr_one(used);
-            for (std::uint32_t point : points) {
+            colourOf[next.index] = colour;
+            colourCount = std::max(colourCount, colour + 1);
+            for (std::uint32_t point : pointsOf(constraints[next.index])) {
                 usedByPoint[point] |= std::uint64_t{1} << colour;
             }
-            colourOf[index] = colour;
-            colourCount = std::max(colourCount, colour + 1);
+
+            for (std::uint32_t point : pointsOf(constraints[next.index])) {
+                for (std::uint32_t slot = pointStarts[point]; slot < pointStarts[point + 1]; ++slot) {
+                    const std::uint32_t neighbour = pointConstraints[slot];
+                    if (colourOf[neighbour] >= 0) {
+                        continue;
+                    }
+                    const int now = std::popcount(usedAround(neighbour));
+                    if (now != saturation[neighbour]) {
+                        saturation[neighbour] = now;
+                        waiting.push(ColouringEntry{now, degree[neighbour], neighbour});
+                    }
+                }
+            }
         }
 
         std::vector<Constraint> sorted;
@@ -314,12 +398,13 @@ namespace {
     }
 }
 
-void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds, BendingModel model) {
+void solveBend(ClothParticles& particles, const std::vector<BendConstraint>& constraints, float bendingStiffness, float seconds, BendingModel model,
+               int substepsCovered) {
     if (bendingStiffness <= 0.0f) {
         return;
     }
 
-    const float perSecondSquared = 1.0f / (seconds * seconds);
+    const float perSecondSquared = bendingPerSecondSquared(seconds, substepsCovered);
     withBendStep(model, [&](auto step, std::size_t) {
         for (const BendConstraint& bend : constraints) {
             step(particles, bend, bendingStiffness, perSecondSquared);
@@ -351,12 +436,12 @@ void solveStretchColours(ClothParticles& particles, const std::vector<StretchCon
 }
 
 void solveBendColours(ClothParticles& particles, const std::vector<BendConstraint>& constraints, const std::vector<std::uint32_t>& colours,
-                      float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs) {
+                      float bendingStiffness, float seconds, BendingModel model, JobSystem& jobs, int substepsCovered) {
     if (bendingStiffness <= 0.0f) {
         return;
     }
 
-    const float perSecondSquared = 1.0f / (seconds * seconds);
+    const float perSecondSquared = bendingPerSecondSquared(seconds, substepsCovered);
     withBendStep(model, [&](auto step, std::size_t perJob) {
         for (std::size_t colour = 0; colour + 1 < colours.size(); ++colour) {
             const std::uint32_t first = colours[colour];

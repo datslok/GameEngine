@@ -31,7 +31,8 @@ namespace {
 
     /*
     * A cloth's constraints are sorted into colours, groups in which no two share a point, so each group can be solved on
-    * many threads at once. A grid needs few: its threads and diagonals six, its hinges a dozen or so.
+    * many threads at once. A grid needs few: its threads and diagonals six, as many as meet at a point inside it (fewer
+    * is impossible), its hinges 13 (DSatur; greedy in the mesh's order gave up to 16).
     */
     void testConstraintsAreColoured() {
         const Cloth cloth = makeCloth(Mesh::grid(10, 8, 1.0f, 1.0f), Mat4::identity(), ClothSettings{});
@@ -44,8 +45,8 @@ namespace {
         checkColours(cloth.bend, cloth.bendColours, [](const BendConstraint& hinge) {
             return std::vector<std::uint32_t>{hinge.wing0, hinge.wing1, hinge.edgeStart, hinge.edgeEnd};
         });
-        assert(cloth.stretchColours.size() - 1 <= 8);
-        assert(cloth.bendColours.size() - 1 <= 16);
+        assert(cloth.stretchColours.size() - 1 == 6);
+        assert(cloth.bendColours.size() - 1 <= 13);
     }
 
     // A hanging sheet with a hand, moving pins and a ball to land on: everything a tick solves.

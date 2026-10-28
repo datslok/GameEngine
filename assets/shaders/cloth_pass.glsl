@@ -96,8 +96,8 @@ layout(std430, set = 0, binding = 18) readonly buffer ClothStitches {
     ClothStitch stitches[];
 };
 
-layout(std430, set = 0, binding = 19) readonly buffer ClothStitched {
-    uint stitched[];
+layout(std430, set = 0, binding = 19) readonly buffer ClothStitchPartners {
+    uint stitchPartners[];
 };
 
 // Must match ClothPushConstants in render/vulkan/vulkan_cloth.cpp.
@@ -110,6 +110,7 @@ layout(push_constant) uniform ClothDispatch {
     uint clothPointCount; // the cloth's points, stretch constraints and hinges
     uint clothEdgeCount;
     uint clothHingeCount;
+    uint bendingSubsteps; // the substeps a bending dispatch stands for (bendingSubsteps in cloth.h)
 };
 
 // sampleField and surfacePoint for a field body: its cell's eight corners read and blended; outside its box, a band away, up.

@@ -40,6 +40,12 @@
 * (BendingModel) is isometric by default, about three times cheaper than the hinge's angle; the hinge rests at the
 * mesh's own angles, for pressed creases.
 *
+* XPBD solves the bending only every bendingInterval-th substep (bendingSubsteps), each solve standing for the substeps
+* since the last, so it costs a share of the dispatches on the GPU and of the time on the CPU. Bending is soft (cotton
+* resists it about a thousand times less than stretch), so solving it less often leaves the drape alike while the
+* stretch, which needs every substep, keeps them: multiple time stepping, as molecular dynamics updates slow forces
+* less often than fast ones. Vertex block descent bends in each point's step, every substep.
+*
 * Against bodies the cloth keeps a thickness: real fabric is about a millimetre thick, but a small gap lets it rest on
 * a body instead of flickering half inside it. Friction is cotton's on a smooth surface.
 *
@@ -64,11 +70,12 @@ struct ClothSettings {
     float areaDensity = 0.2f;          // kg per square metre; read when the cloth is made
     float gravity = 9.81f;             // downward acceleration, m/s2
     float stretchCompliance = 0.0005f; // m/N
-    int substeps = 15;                 // per tick: 1.8 kHz at 120 ticks a second
+    int substeps = 30;                 // per tick: 3.6 kHz at 120 ticks a second
     float drag = 0.5f;                 // per second
     float grabCompliance = 0.001f;     // m/N
     float bendingStiffness = 1e-5f;    // N m
     BendingModel bendingModel = BendingModel::Isometric;
+    int bendingInterval = 1;           // XPBD's bending solved every this many substeps
     float thickness = 0.005f;          // m
     float staticFriction = 0.6f;
     float kineticFriction = 0.4f;
@@ -170,6 +177,13 @@ Cloth makeCloth(const Mesh& mesh, const Mat4& placement, const ClothSettings& se
 * hinges coloured with the rest of the bending. Throws std::invalid_argument for a start of the wrong size.
 */
 Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSettings& settings, const ClothSewing& sewing = {});
+
+/*
+* How many substeps XPBD's bending at substep step (0..substeps - 1) stands for: interval at every interval-th substep,
+* what is left since the last at the tick's last substep, and 0 at the others, where it is not solved; together they
+* cover the tick once. Throws std::invalid_argument for an interval below 1.
+*/
+int bendingSubsteps(int step, int substeps, int interval);
 
 // Where a moving pin is after substep step (0..substeps - 1) of a tick: slid evenly from start, exactly on target at the end.
 Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps);

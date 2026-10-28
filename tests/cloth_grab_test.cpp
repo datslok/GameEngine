@@ -57,13 +57,14 @@ namespace {
     }
 
     /*
-    * The hand is a stiff spring: a weight of m kg held by it alone hangs below the target by m g alpha (within the 1%
-    * floats allow at metre scale, see cloth_solver_test).
+    * The hand is a stiff spring: a weight of m kg held by it alone hangs below the target by m g alpha. Held at the
+    * origin, where floats are finest: at 30 substeps gravity moves the weight 0.76 micrometres a substep, which a float
+    * a metre up resolves only to 0.06, and there the stretch settles 1.65% off (measured; see cloth_solver_test).
     */
     void testGrabIsASpring() {
         ClothParticles particles;
         const float mass = 0.2f;
-        particles.positions = {Vec3{0.0f, 1.0f, 0.0f}};
+        particles.positions = {Vec3{0.0f, 0.0f, 0.0f}};
         particles.previousPositions = particles.positions;
         particles.velocities = {Vec3{0.0f, 0.0f, 0.0f}};
         particles.inverseMasses = {1.0f / mass};
@@ -71,12 +72,12 @@ namespace {
         ClothSettings settings;
         settings.grabCompliance = 0.01f;
         settings.drag = 5.0f;
-        const ClothGrab grab{0, Vec3{0.0f, 1.0f, 0.0f}};
+        const ClothGrab grab{0, Vec3{0.0f, 0.0f, 0.0f}};
         for (int tick = 0; tick < 1200; ++tick) {
             stepClothParticles(particles, {}, settings, 1.0f / 120.0f, grab);
         }
         const float expected = mass * settings.gravity * settings.grabCompliance;
-        assert(near(1.0f - particles.positions[0].y, expected, 0.01f * expected));
+        assert(near(-particles.positions[0].y, expected, 0.01f * expected));
     }
 
     // Held, a point follows the hand through the steps.
@@ -118,7 +119,9 @@ namespace {
     * gravity, no drag) by one point at 1.2 m/s glides on. The towed point carries on forward, and the sheet's centre of
     * mass keeps the speed it had when let go (which sloshes around the towing speed while towed, the sheet bouncing on
     * the hand's spring), unchanged from tick to tick: its own edges push and pull its points equally and oppositely, so
-    * they cannot change its momentum (to the 0.1% floats drift over half a second).
+    * they cannot change its momentum, but for the rounding floats drift over half a second: a velocity is a substep's
+    * rounded motion over the substep, so twice the substeps drift twice as far (measured 0.16% of the glide at 15
+    * substeps, 0.32% at 30).
     */
     void testLetGoPointsFlyOn() {
         ClothSettings settings;
@@ -140,7 +143,7 @@ namespace {
         for (int tick = 0; tick < 60; ++tick) {
             stepCloth(cloth, 1.0f / 120.0f);
         }
-        assert(nearVec(centreOfMassVelocity(cloth.particles), gliding, 0.005f));
+        assert(nearVec(centreOfMassVelocity(cloth.particles), gliding, 0.01f));
     }
 }
 

@@ -33,6 +33,15 @@ struct ClothStitch {
 };
 
 /*
+* The widest a stitch's gap may be at the end of this substep: its width at the substep's start (the points' previous
+* positions) less closingStep (metres). Nothing or less means the stitch shuts, or is shut; more means it is still
+* being sewn (mirrored by cloth.glsl's clothStitchWidest).
+*/
+inline float stitchWidest(const Vec3& firstPrevious, const Vec3& secondPrevious, float closingStep) {
+    return (secondPrevious - firstPrevious).length() - closingStep;
+}
+
+/*
 * One stitch (solveStitches' step, mirrored by cloth.glsl's clothStitch): its gap pulled in to its width at the
 * substep's start (the points' previous positions) less closingStep (metres); once that is nothing, both points land on
 * the same spot to the last bit, the point where their inverse masses balance. Two pinned points stay as they are.
@@ -44,7 +53,7 @@ inline void solveStitch(Vec3& first, Vec3& second, float firstWeight, float seco
         return;
     }
 
-    const float widest = (secondPrevious - firstPrevious).length() - closingStep;
+    const float widest = stitchWidest(firstPrevious, secondPrevious, closingStep);
     const Vec3 gap = second - first;
     if (widest <= 0.0f) {
         const Vec3 joined = first + gap * (firstWeight / weights);
@@ -67,6 +76,17 @@ inline void solveStitch(Vec3& first, Vec3& second, float firstWeight, float seco
 * the same point and any order, or all at once (the GPU's stitch pass), gives the same result.
 */
 void solveStitches(ClothParticles& particles, const std::vector<ClothStitch>& stitches, float closingStep);
+
+/*
+* Which points are being sewn this substep (1) and which not (0), one byte a point in sewing (resized to the points):
+* both points of each stitch still open, its stitchWidest above nothing. The bodies push such points out without
+* friction (solveContacts): a stitch pulls its points along a chord, and where the chord runs into a body (two pieces
+* round a shoulder, an armpit) the pull is mostly into it and only a little along it, so static friction, which holds
+* a slide under 0.6 of the push, would hold the points where they lie and the seam would never shut. Garment software
+* sews the same way, letting the panels slide over the body while the seams pull them together; once shut, a seam's
+* points take friction as any other.
+*/
+void markSewing(const ClothParticles& particles, const std::vector<ClothStitch>& stitches, float closingStep, std::vector<std::uint8_t>& sewing);
 
 /*
 * Bending across a seam, so a sewn seam bends like the fabric round it rather than folding as a free hinge: for each

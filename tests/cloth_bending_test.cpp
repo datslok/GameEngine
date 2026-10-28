@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <numbers>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -114,12 +115,14 @@ namespace {
     }
 
     // How far a strip clamped along its first two columns, sticking out level, droops at its free end once it settles.
-    float cantileverDroop(int columns, int rows, float bendingStiffness, int substeps = 15, BendingModel model = BendingModel::Hinge) {
+    float cantileverDroop(int columns, int rows, float bendingStiffness, int substeps = 15, BendingModel model = BendingModel::Hinge,
+                          int bendingInterval = 1) {
         ClothSettings settings;
         settings.bendingStiffness = bendingStiffness;
         settings.bendingModel = model;
         settings.drag = 3.0f;
         settings.substeps = substeps;
+        settings.bendingInterval = bendingInterval;
         const Mat4 level = Mat4::rotationX(-0.5f * pi);
         Cloth cloth = makeCloth(Mesh::grid(columns, rows, 0.3f, 0.1f), level, settings);
         for (int row = 0; row <= rows; ++row) {
@@ -298,6 +301,59 @@ namespace {
         }
     }
 
+    /*
+    * Which substeps solve the bending, and for how many substeps each stands: every interval-th, the last taking what is
+    * left, so together they cover the tick once. An interval of 1 bends every substep; one past the substeps bends once.
+    */
+    void testBendingSubsteps() {
+        for (int step = 0; step < 15; ++step) {
+            assert(bendingSubsteps(step, 15, 1) == 1);
+        }
+
+        const std::array<int, 15> everyFourth{0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 3};
+        for (int step = 0; step < 15; ++step) {
+            assert(bendingSubsteps(step, 15, 4) == everyFourth[static_cast<std::size_t>(step)]);
+        }
+
+        for (const int substeps : {1, 4, 15, 16, 60}) {
+            for (const int interval : {1, 2, 3, 4, 7, 100}) {
+                int covered = 0;
+                for (int step = 0; step < substeps; ++step) {
+                    covered += bendingSubsteps(step, substeps, interval);
+                }
+                assert(covered == substeps);
+            }
+        }
+        assert(bendingSubsteps(14, 15, 20) == 15 && bendingSubsteps(13, 15, 20) == 0);
+
+        for (const int interval : {0, -3}) {
+            bool threw = false;
+            try {
+                bendingSubsteps(0, 15, interval);
+            } catch (const std::invalid_argument&) {
+                threw = true;
+            }
+            assert(threw);
+        }
+    }
+
+    /*
+    * Bending solved every fourth substep is the same fabric: each solve stands for four substeps, so its compliance over
+    * the substep squared is divided by four, giving the impulse four substeps' bending would (XPBD turns a correction
+    * into velocity over one substep). A strip droops about as far either way, while bending every fourth substep without
+    * that, a fabric four times softer, droops measurably further.
+    */
+    void testBendingInterval() {
+        assert(ClothSettings{}.bendingInterval >= 1);
+        for (const BendingModel model : {BendingModel::Isometric, BendingModel::Hinge}) {
+            const float everySubstep = cantileverDroop(12, 4, 5e-4f, 60, model, 1);
+            const float everyFourth = cantileverDroop(12, 4, 5e-4f, 60, model, 4);
+            const float softer = cantileverDroop(12, 4, 5e-4f / 4.0f, 60, model, 1);
+            assert(std::abs(everyFourth - everySubstep) < 0.05f * everySubstep);
+            assert(softer - everySubstep > 4.0f * std::abs(everyFourth - everySubstep));
+        }
+    }
+
     // With bending and moving pins, the same run twice gives the same bits.
     void testDeterministic() {
         const auto run = [] {
@@ -322,6 +378,8 @@ void testClothBending() {
     testGradientsMatchFiniteDifferences();
     testFoldedHingeOpens();
     testCantilever();
+    testBendingSubsteps();
+    testBendingInterval();
     testMovingPins();
     testIsometricWeights();
     testIsometricCurvature();
