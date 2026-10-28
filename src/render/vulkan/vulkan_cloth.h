@@ -232,7 +232,7 @@ private:
 
     // A sewn cloth's stitches, read by the stitch pass, and each point's flag saying whether it is in one.
     VulkanBuffer stitches;
-    VulkanBuffer stitched;
+    VulkanBuffer stitchPartners;
 
     // Bound as the field samples while no ticks have field bodies.
     VulkanBuffer noFieldSamples;
@@ -264,6 +264,7 @@ private:
         std::uint32_t tick = 0;
         std::uint32_t step = 0;
         ClothPassStamps* stamps = nullptr;
+        std::uint32_t bendingSubsteps = 1; // what XPBD's bending this substep stands for (bendingSubsteps), 0 for none
     };
 
     /*

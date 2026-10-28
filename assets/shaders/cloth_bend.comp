@@ -1,7 +1,9 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// One colour of hinges, all at once, by the tick's bending model. Not dispatched without bending (a stiffness of 0).
+// One colour of hinges, all at once, by the tick's bending model. Not dispatched without bending (a stiffness of 0), nor
+// on a substep that does not bend; one that does stands for bendingSubsteps substeps, dividing 1 / seconds^2 by them
+// as solveBend does.
 #include "cloth_pass.glsl"
 
 void main() {
@@ -12,6 +14,7 @@ void main() {
 
     ClothTick tick = ticks[tickIndex];
     ClothBend bend = bends[index];
+    float perSecondSquared = tick.perSecondSquared / float(bendingSubsteps);
     vec4 wing0 = positions[bend.points.x];
     vec4 wing1 = positions[bend.points.y];
     vec4 edgeStart = positions[bend.points.z];
@@ -19,9 +22,9 @@ void main() {
 
     if (tick.bendingModel == CLOTH_BEND_ISOMETRIC) {
         clothIsometricBend(wing0, wing1, edgeStart, edgeEnd, bend.isometricWeights, tick.bendingStiffness, bend.stiffnessShare,
-                           tick.perSecondSquared);
+                           perSecondSquared);
     } else {
-        clothHingeBend(wing0, wing1, edgeStart, edgeEnd, bend.restAngle, tick.bendingStiffness, bend.stiffnessShare, tick.perSecondSquared);
+        clothHingeBend(wing0, wing1, edgeStart, edgeEnd, bend.restAngle, tick.bendingStiffness, bend.stiffnessShare, perSecondSquared);
     }
 
     positions[bend.points.x] = wing0;

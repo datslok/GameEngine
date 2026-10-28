@@ -23,6 +23,7 @@ inline constexpr std::uint32_t clothGroupSize = CLOTH_GROUP_SIZE;
 inline constexpr std::uint32_t clothPointLanes = CLOTH_POINT_LANES;
 inline constexpr std::uint32_t clothNoPin = CLOTH_NO_PIN;
 inline constexpr std::uint32_t clothNoGrab = CLOTH_NO_GRAB;
+inline constexpr std::uint32_t clothNoStitch = CLOTH_NO_STITCH;
 
 static_assert(static_cast<int>(BendingModel::Isometric) == CLOTH_BEND_ISOMETRIC && static_cast<int>(BendingModel::Hinge) == CLOTH_BEND_HINGE,
               "The GPU's bending model numbers are BendingModel's values");
@@ -254,8 +255,11 @@ std::vector<GpuClothTether> packClothTethers(const Cloth& cloth);
 // The cloth's stitches (Cloth::stitches), in its order; none for a cloth that is not sewn.
 std::vector<GpuClothStitch> packClothStitches(const Cloth& cloth);
 
-// For each point, 1 if it is in a stitch (the stitch pass does its hand and tethers, the end's pass the rest), else 0.
-std::vector<std::uint32_t> clothStitchedPoints(const Cloth& cloth);
+/*
+* For each point, the other point of its stitch, or clothNoStitch. The stitch pass does a stitched point's hand and
+* tethers, the end's pass the rest, which reads the partner to tell whether the stitch is still being sewn (markSewing).
+*/
+std::vector<std::uint32_t> clothStitchPartners(const Cloth& cloth);
 
 // For each point, which of the cloth's pins moves it (its place in Cloth::pins), or clothNoPin.
 std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth);
@@ -277,8 +281,8 @@ inline constexpr std::uint32_t clothDispatchesPerLevel = 6;
 std::uint32_t clothLevelsUsed(const Cloth& cloth, const ClothSettings& settings);
 
 /*
-* The dispatches one tick records: per substep, the prediction, the solver's (XPBD: one per stretch colour and one per
-* bending colour, none without bending; vertex block descent: one per point colour, and with coarse levels the held
+* The dispatches one tick records: per substep, the prediction, the solver's (XPBD: one per stretch colour, and on its
+* bending substeps (bendingSubsteps) one per bending colour, none without bending; vertex block descent: one per point colour, and with coarse levels the held
 * points, clothDispatchesPerLevel a level and a second sweep), the stitches' for a sewn cloth (their points' hand and
 * tethers, then the stitches) and the end (the hand, the tethers, the bodies, the velocities).
 */

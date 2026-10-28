@@ -135,6 +135,9 @@ void main() {
         clothStitch(first.xyz, second.xyz, first.w, second.w, testInput(2).xyz, testInput(3).xyz, testInput(4).x);
         testOutput(0, vec4(first.xyz, 0.0));
         testOutput(1, vec4(second.xyz, 0.0));
+    } else if (function == GPU_TEST_CLOTH_STITCH_WIDEST) {
+        // The two points' places at the substep's start, then the closing step.
+        testOutput(0, vec4(clothStitchWidest(testInput(0).xyz, testInput(1).xyz, testInput(2).x)));
     } else if (function == GPU_TEST_CLOTH_FIELD) {
         // A point's cell in a field (its origin, spacing and sample counts), then a cell's corners blended at that share.
         ivec3 cell;

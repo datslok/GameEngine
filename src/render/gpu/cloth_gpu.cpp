@@ -127,13 +127,13 @@ std::vector<GpuClothStitch> packClothStitches(const Cloth& cloth) {
     return packed;
 }
 
-std::vector<std::uint32_t> clothStitchedPoints(const Cloth& cloth) {
-    std::vector<std::uint32_t> stitched(cloth.particles.size(), 0u);
+std::vector<std::uint32_t> clothStitchPartners(const Cloth& cloth) {
+    std::vector<std::uint32_t> partners(cloth.particles.size(), clothNoStitch);
     for (const ClothStitch& stitch : cloth.stitches) {
-        stitched.at(stitch.first) = 1u;
-        stitched.at(stitch.second) = 1u;
+        partners.at(stitch.first) = stitch.second;
+        partners.at(stitch.second) = stitch.first;
     }
-    return stitched;
+    return partners;
 }
 
 std::vector<std::uint32_t> clothPinSlots(const Cloth& cloth) {
@@ -241,6 +241,11 @@ std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& se
         const std::uint32_t layered = levels > 0 ? 1u + clothDispatchesPerLevel * levels + sweep : 0u;
         return substeps * (ends + sweep + layered);
     }
-    const std::uint32_t bendColours = settings.bendingStiffness > 0.0f ? colours(cloth.bendColours) : 0u;
-    return substeps * (ends + colours(cloth.stretchColours) + bendColours);
+    std::uint32_t bendingSolves = 0;
+    if (settings.bendingStiffness > 0.0f) {
+        for (int step = 0; step < settings.substeps; ++step) {
+            bendingSolves += bendingSubsteps(step, settings.substeps, settings.bendingInterval) > 0 ? 1u : 0u;
+        }
+    }
+    return substeps * (ends + colours(cloth.stretchColours)) + bendingSolves * colours(cloth.bendColours);
 }

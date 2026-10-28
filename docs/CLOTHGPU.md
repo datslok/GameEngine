@@ -475,6 +475,37 @@ The pass mark, set before measuring: 1% strain at the 99th percentile at 1 cm, a
 
 **What it decides:** garments need more than XPBD and tethers. The cure has to carry load along the cloth over long distances without vertex block descent's cost. The options were put to the user next.
 
+**Cheaper substeps** (`cheaper-substeps`, Oct 28 2026, release, 16 threads and the RTX 5080). The dress test showed XPBD's error is convergence, so the question was how to buy substeps. A GPU tick costs its dispatches (about 2.4 microseconds each whatever their size), so first fewer dispatches a substep: the fewest edge colours (DSatur: the dress's edges 7, the fewest possible, against 9) and bending solved only every k-th substep (multiple time stepping). The sweep, the 1 cm dress held by contact on the GPU:
+
+| Substeps, bending every | Dispatches | GPU ms a tick | Mean stretch | 99th percentile | Hem above the floor |
+|---|---|---|---|---|---|
+| 15, every substep | 375 | 0.93 | 0.89% | 9.7% | 0.569 m |
+| 30, every 2nd | 525 | about 1.4 | 0.31% | 4.4% | 0.605 m |
+| 30, every substep | 750 | 1.86 | 0.31% | 4.1% | 0.599 m |
+| 60, every substep | 1500 | 3.91 | 0.13% | 1.9% | 0.644 m |
+
+- **Bending less often is not safe to make the default:** every 4th threw seams open and the hem about at 0.7 cm and finer, and every 2nd, stable for cotton down to 0.5 cm, blew denim up there. Stability depends on spacing, fabric and step together.
+- **The user chose 30 substeps, bending every substep:** a third of the stretch for twice the cost, with no new stability risk.
+
+The dress-sized test at the new default (`make yardstick-dress`, sewing sliding without friction, below):
+
+| Spacing | Points | Held by | Mean stretch | 99th percentile | Worst edge | Hem above the floor | Last second | CPU ms a tick | GPU ms a tick |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 cm | 3,070 | contact | 0.15% | 2.8% | 15% | 0.648 m | 6 mm | 8.0 | 1.60 |
+| 2 cm | 3,070 | pins and tethers | 0.32% | 6.1% | 72% | 0.667 m | 3 mm | 9.0 | 1.81 |
+| 1.4 cm | 6,201 | contact | 0.18% | 2.5% | 16% | 0.622 m | 17 mm | 18.8 | 1.73 |
+| 1.4 cm | 6,201 | pins and tethers | 0.33% | 5.8% | 99% | 0.668 m | 10 mm | 18.1 | 6.73 (a hiccup) |
+| 1 cm | 12,027 | contact | 0.30% | 4.0% | 37% | 0.608 m | 5 mm | 30.6 | 1.71 |
+| 1 cm | 12,027 | pins and tethers | 0.47% | 7.3% | 121% | 0.636 m | 12 mm | 30.7 | 1.68 |
+| 0.7 cm | 24,438 | contact | 0.52% | 6.1% | 36% | 0.585 m | 8 mm | 53.8 | 1.85 |
+| 0.7 cm | 24,438 | pins and tethers | 0.69% | 9.9% | 343% | 0.608 m | 74 mm | 54.6 | 1.93 |
+
+- **About a third of the stretch at every rung** (the 1 cm dress held by contact: 0.96% mean and 10.5% at the 99th percentile at 15 substeps, now 0.30% and 4.0%), its hem 4 cm higher. Still short of the 1% mark at the 99th percentile; still the bodice and the armpits' corners.
+- **The cost:** the CPU 2.0-2.3 times (the 1 cm dress 31 ms a tick, the lab runs it on the GPU); the GPU 1.6-1.9 ms a tick at any size (750 dispatches), against 1.0-1.2.
+- **A seam stuck open, fixed:** at 30 substeps one armpit stitch of the 2 cm pinned dress froze 3.9 mm open (10 on the GPU). The stitch pulls along the chord, which there runs mostly into the body, so static friction undid the slide every substep, and half-length slides made it win. Seams still being sewn now slide over the body without friction (`markSewing`), as garment software sews; every seam shuts at every rung.
+- **A swaying hem, not yet explained:** the 0.7 cm pinned dress's back hem keeps swinging about 6 cm through 20 s (followed by a throwaway probe), where it settled to 14 mm a second without the seam fix. It sways with the tethers off too, and every seam is shut within the first second, so the fix only changed the drape it settles from; something feeds the swing energy. The other rungs settle (the 1 cm dress as before: 12 mm against 12). Suspects: the skirt passing through itself, friction on the legs; the first thing for self-collision to look at.
+- **Floats at 30 substeps:** gravity moves a point 0.76 micrometres a substep, which a float 1 m up resolves only to 0.06; a weight on the hand's spring alone there settles 1.65% off (34% at 60 substeps), one reason not to go past 30.
+
 ## The plan
 
 Each step is a branch of its own, explained first, tests first.

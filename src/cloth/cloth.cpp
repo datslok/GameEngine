@@ -31,6 +31,7 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Grab compliance", settings.grabCompliance, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.01f, .unit = "m/N"});
     visitor.field("Bending stiffness", settings.bendingStiffness, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.0005f, .unit = "N m"});
     visitor.choice("Bending model", settings.bendingModel, bendingModelNames);
+    visitor.field("Bending every", settings.bendingInterval, {.min = 1, .max = 16, .unit = "substeps"});
     visitor.field("Thickness", settings.thickness, {.min = 0.0f, .max = 0.1f, .sliderMax = 0.02f, .unit = "m"});
     visitor.field("Static friction", settings.staticFriction, {.min = 0.0f, .max = 2.0f});
     visitor.field("Kinetic friction", settings.kineticFriction, {.min = 0.0f, .max = 2.0f});
@@ -80,6 +81,16 @@ Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSet
     cloth.pointConstraints = clothPointConstraints(cloth.stretch, cloth.bend, cloth.particles.size());
     cloth.vertexColours = clothVertexColours(cloth.stretch, cloth.bend, cloth.pointConstraints);
     return cloth;
+}
+
+int bendingSubsteps(int step, int substeps, int interval) {
+    if (interval < 1) {
+        throw std::invalid_argument("Bending needs an interval of at least one substep");
+    }
+    if (step + 1 == substeps) {
+        return substeps - (substeps - 1) / interval * interval;
+    }
+    return (step + 1) % interval == 0 ? interval : 0;
 }
 
 Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int substeps) {
@@ -195,11 +206,12 @@ namespace {
 
     /*
     * Each substep: predict; slide the moving pins a share of the way to where they are going (the last substep exactly
-    * there); then the solver: XPBD's stretch, bending and hand, or vertex block descent's sweep, with its coarse levels
+    * there); then the solver: XPBD's stretch, bending (on its bending substeps) and hand, or vertex block descent's sweep, with its coarse levels
     * and a second sweep after them when there are any (smoothing on both sides of the coarse step, as multigrid does:
     * the coarse step's spreading leaves fine wrinkles a sweep removes); the tethers, when on, after either solver, so the
     * pins' strings have the last word on stretch; the stitches, closing their seams; the bodies last, so nothing is
-    * left inside them; velocities from the motion; drag on the free points.
+    * left inside them, without friction for the points of seams still being sewn; velocities from the motion; drag on
+    * the free points.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {
@@ -220,6 +232,7 @@ namespace {
         const bool blockDescent = settings.method == ClothMethod::VertexBlockDescent && constraints.pointConstraints != nullptr;
         const bool coarseLevels = blockDescent && constraints.hierarchy != nullptr && settings.hierarchyLevels > 0 && !constraints.hierarchy->levels.empty();
         ClothHierarchyScratch scratch;
+        std::vector<std::uint8_t> sewing;
 
         for (int step = 0; step < settings.substeps; ++step) {
             predictCloth(particles, gravity, substep);
@@ -248,11 +261,14 @@ namespace {
                 } else {
                     solveStretchColours(particles, constraints.stretch, constraints.stretchColours, settings.stretchCompliance, substep, jobs);
                 }
-                if (constraints.bendColours.empty()) {
-                    solveBend(particles, constraints.bend, settings.bendingStiffness, substep, settings.bendingModel);
-                } else {
-                    solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep, settings.bendingModel,
-                                     jobs);
+                const int bendingCovered = bendingSubsteps(step, settings.substeps, settings.bendingInterval);
+                if (bendingCovered > 0) {
+                    if (constraints.bendColours.empty()) {
+                        solveBend(particles, constraints.bend, settings.bendingStiffness, substep, settings.bendingModel, bendingCovered);
+                    } else {
+                        solveBendColours(particles, constraints.bend, constraints.bendColours, settings.bendingStiffness, substep,
+                                         settings.bendingModel, jobs, bendingCovered);
+                    }
                 }
                 if (constraints.grab) {
                     solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
@@ -262,11 +278,12 @@ namespace {
                 solveTethers(particles, constraints.tethers, settings.tetherSlack, jobs);
             }
             if (!constraints.stitches.empty()) {
+                markSewing(particles, constraints.stitches, settings.seamSpeed * substep, sewing);
                 solveStitches(particles, constraints.stitches, settings.seamSpeed * substep);
             }
             if (!constraints.colliders.empty() || !constraints.fields.empty()) {
                 solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings,
-                              nearbyFields(particles, constraints.fields, settings.thickness));
+                              nearbyFields(particles, constraints.fields, settings.thickness), sewing);
             }
             finishClothStep(particles, substep);
 

@@ -61,8 +61,8 @@ SurfacePoint surfacePoint(const Shape& shape, const Vec3& point) {
 
 namespace {
     // One body's push and friction on a point (solveContacts).
-    void contact(Vec3& position, const Vec3& previous, const SurfacePoint& surface, const ClothSettings& settings) {
-        const float push = settings.thickness - surface.distance;
+    void contact(Vec3& position, const Vec3& previous, const SurfacePoint& surface, float thickness, float staticFriction, float kineticFriction) {
+        const float push = thickness - surface.distance;
         if (push <= 0.0f) {
             return;
         }
@@ -72,27 +72,31 @@ namespace {
         const Vec3 moved = position - previous;
         const Vec3 slide = moved - surface.normal * surface.normal.dot(moved);
         const float slideLength = slide.length();
-        if (slideLength < settings.staticFriction * push) {
+        if (slideLength < staticFriction * push) {
             position = position - slide;
         } else if (slideLength > 0.0f) {
-            position = position - slide * std::min(settings.kineticFriction * push / slideLength, 1.0f);
+            position = position - slide * std::min(kineticFriction * push / slideLength, 1.0f);
         }
     }
 }
 
-void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings, const ClothFields& fields) {
+void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings, const ClothFields& fields,
+                   std::span<const std::uint8_t> sewing) {
     for (std::size_t index = 0; index < particles.size(); ++index) {
         if (particles.inverseMasses[index] == 0.0f) {
             continue;
         }
 
+        const bool beingSewn = !sewing.empty() && sewing[index] != 0;
+        const float staticFriction = beingSewn ? 0.0f : settings.staticFriction;
+        const float kineticFriction = beingSewn ? 0.0f : settings.kineticFriction;
         Vec3& position = particles.positions[index];
         const Vec3& previous = particles.previousPositions[index];
         for (const Shape& shape : shapes) {
-            contact(position, previous, surfacePoint(shape, position), settings);
+            contact(position, previous, surfacePoint(shape, position), settings.thickness, staticFriction, kineticFriction);
         }
         for (const std::shared_ptr<const SignedDistanceField>& field : fields) {
-            contact(position, previous, surfacePoint(*field, position), settings);
+            contact(position, previous, surfacePoint(*field, position), settings.thickness, staticFriction, kineticFriction);
         }
     }
 }

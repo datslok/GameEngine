@@ -254,6 +254,14 @@ namespace {
             assert(path.onShoulder.y > feet.y + dressShoulderHeight && path.onShoulder.y < feet.y + dressShoulderHeight + ClothSettings{}.thickness + 0.01f);
         }
 
+        // Its edges take as few colours as can be: as many as meet at its busiest point (each colour a GPU dispatch).
+        std::vector<std::size_t> edgesAt(pinned.cloth.particles.size(), 0);
+        for (const StretchConstraint& edge : pinned.cloth.stretch) {
+            ++edgesAt[edge.first];
+            ++edgesAt[edge.second];
+        }
+        assert(pinned.cloth.stretchColours.size() - 1 == *std::max_element(edgesAt.begin(), edgesAt.end()));
+
         const DressOnMannequin byContact = dressOnMannequin(body, feet, 0.03f, ClothSettings{}, false);
         assert(byContact.cloth.pins.empty() && byContact.strapPaths.empty() && byContact.cloth.tethers.empty());
         assert(byContact.hem == pinned.hem);
