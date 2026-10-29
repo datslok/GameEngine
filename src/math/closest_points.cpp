@@ -25,16 +25,17 @@ float ClosestPoints::distanceSquared() const {
 * Project the point onto the segment's line and clamp to the ends: the projection is the nearest point on the infinite
 * line, and outside 0..1 the nearest point on the segment is the end it ran past.
 */
-Vec3 closestPointOnSegment(const Vec3& point, const Vec3& a, const Vec3& b) {
-    const Vec3 direction = b - a;
-    const float lengthSquared = direction.lengthSquared();
-
-    if (lengthSquared <= degenerateLengthSquared) {
-        return a;
+namespace {
+    // How far along the segment from a to b its point nearest to point lies, 0 to 1; 0 for a segment with a == b.
+    float segmentShare(const Vec3& point, const Vec3& a, const Vec3& b) {
+        const Vec3 direction = b - a;
+        const float lengthSquared = direction.lengthSquared();
+        return lengthSquared <= degenerateLengthSquared ? 0.0f : clamp01((point - a).dot(direction) / lengthSquared);
     }
+}
 
-    const float t = clamp01((point - a).dot(direction) / lengthSquared);
-    return a + direction * t;
+Vec3 closestPointOnSegment(const Vec3& point, const Vec3& a, const Vec3& b) {
+    return a + (b - a) * segmentShare(point, a, b);
 }
 
 /*
@@ -98,7 +99,7 @@ ClosestPoints closestPointsBetweenSegments(const Vec3& a1, const Vec3& b1, const
         }
     }
 
-    return ClosestPoints{a1 + direction1 * s, a2 + direction2 * t};
+    return ClosestPoints{a1 + direction1 * s, a2 + direction2 * t, s, t};
 }
 
 /*
@@ -194,52 +195,61 @@ TriangleClosest closestTriangleFeature(const Vec3& point, const Vec3& a, const V
     const float d1 = ab.dot(ap);
     const float d2 = ac.dot(ap);
     if (d1 <= 0.0f && d2 <= 0.0f) {
-        return {a, TriangleFeature::CornerA};
+        return {a, TriangleFeature::CornerA, Vec3{1.0f, 0.0f, 0.0f}};
     }
 
     const Vec3 bp = point - b;
     const float d3 = ab.dot(bp);
     const float d4 = ac.dot(bp);
     if (d3 >= 0.0f && d4 <= d3) {
-        return {b, TriangleFeature::CornerB};
+        return {b, TriangleFeature::CornerB, Vec3{0.0f, 1.0f, 0.0f}};
     }
 
     const float vc = d1 * d4 - d3 * d2;
     if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
-        return {a + ab * (d1 / (d1 - d3)), TriangleFeature::EdgeAB};
+        const float along = d1 / (d1 - d3);
+        return {a + ab * along, TriangleFeature::EdgeAB, Vec3{1.0f - along, along, 0.0f}};
     }
 
     const Vec3 cp = point - c;
     const float d5 = ab.dot(cp);
     const float d6 = ac.dot(cp);
     if (d6 >= 0.0f && d5 <= d6) {
-        return {c, TriangleFeature::CornerC};
+        return {c, TriangleFeature::CornerC, Vec3{0.0f, 0.0f, 1.0f}};
     }
 
     const float vb = d5 * d2 - d1 * d6;
     if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
-        return {a + ac * (d2 / (d2 - d6)), TriangleFeature::EdgeCA};
+        const float along = d2 / (d2 - d6);
+        return {a + ac * along, TriangleFeature::EdgeCA, Vec3{1.0f - along, 0.0f, along}};
     }
 
     const float va = d3 * d6 - d5 * d4;
     if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
-        return {b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))), TriangleFeature::EdgeBC};
+        const float along = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return {b + (c - b) * along, TriangleFeature::EdgeBC, Vec3{0.0f, 1.0f - along, along}};
     }
 
     // Inside the face region. The three products are proportional to the barycentric weights; a triangle with no area
     // makes them all zero, and then its nearest edge is the answer.
     const float total = va + vb + vc;
     if (total <= 0.0f) {
-        TriangleClosest best{closestPointOnSegment(point, a, b), TriangleFeature::EdgeAB};
-        for (const TriangleClosest& candidate : {TriangleClosest{closestPointOnSegment(point, b, c), TriangleFeature::EdgeBC},
-                                                 TriangleClosest{closestPointOnSegment(point, c, a), TriangleFeature::EdgeCA}}) {
+        // How far along each edge its nearest point lies, for the weights.
+        const float onAB = segmentShare(point, a, b);
+        const float onBC = segmentShare(point, b, c);
+        const float onCA = segmentShare(point, c, a);
+        TriangleClosest best{a + (b - a) * onAB, TriangleFeature::EdgeAB, Vec3{1.0f - onAB, onAB, 0.0f}};
+        for (const TriangleClosest& candidate : {TriangleClosest{b + (c - b) * onBC, TriangleFeature::EdgeBC, Vec3{0.0f, 1.0f - onBC, onBC}},
+                                                 TriangleClosest{c + (a - c) * onCA, TriangleFeature::EdgeCA, Vec3{onCA, 0.0f, 1.0f - onCA}}}) {
             if ((candidate.point - point).lengthSquared() < (best.point - point).lengthSquared()) {
                 best = candidate;
             }
         }
         return best;
     }
-    return {a + ab * (vb / total) + ac * (vc / total), TriangleFeature::Face};
+    const float onB = vb / total;
+    const float onC = vc / total;
+    return {a + ab * onB + ac * onC, TriangleFeature::Face, Vec3{1.0f - onB - onC, onB, onC}};
 }
 
 Vec3 closestPointOnTriangle(const Vec3& point, const Vec3& a, const Vec3& b, const Vec3& c) {

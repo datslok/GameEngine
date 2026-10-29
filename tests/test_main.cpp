@@ -126,6 +126,7 @@ void testClothBending();
 void testClothCollision();
 void testClothParallel();
 void testClothYardstick();
+void testClothSelfCollision();
 void testClothHierarchy();
 void testClothBlockDescent();
 void testClothGpu();
@@ -301,6 +302,7 @@ int main(int argumentCount, char** arguments) {
     testClothCollision();
     testClothParallel();
     testClothYardstick();
+    testClothSelfCollision();
     testClothGpu();
     testClothTiming();
     testClothTethers();

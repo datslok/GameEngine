@@ -7,6 +7,7 @@
 #include "cloth/cloth_hierarchy.h"
 #include "cloth/cloth_particles.h"
 #include "cloth/cloth_seams.h"
+#include "cloth/cloth_self_collision.h"
 #include "cloth/cloth_tethers.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
@@ -60,6 +61,13 @@
 * does, against XPBD's 1-36% without, for about XPBD's cost.
 *
 * A cloth sewn from pieces (cloth_seams.h) pulls its stitches shut no faster than the seam speed, then holds them shut.
+*
+* Self-collision (cloth_self_collision.h) keeps its layers the thickness apart and never lets one pass through another:
+* pairs of features within the reach are found every selfCollisionInterval substeps, and each substep ends by cutting
+* every point's motion short of the planes between them. Off by default while it runs on the CPU only (the GPU solver
+* ignores it until its port); anything moving faster than about 0.43 x reach per interval (3.8 m/s at 7.5 mm and 3
+* substeps of 30 a tick) is slowed to that. The reach is 1.5 times the thickness: wide enough to find layers before they
+* touch, narrow enough that a 1 cm mesh's flat neighbours (8.7 mm apart) are not pairs, which would cost every substep.
 */
 enum class ClothMethod {
     Xpbd,
@@ -84,6 +92,9 @@ struct ClothSettings {
     bool tethers = true;
     float tetherSlack = 0.002f;        // share of a tether's rest length
     float seamSpeed = 1.0f;            // m/s
+    bool selfCollision = false;
+    int selfCollisionInterval = 3;     // substeps between finding pairs
+    float selfCollisionReach = 0.0075f; // m: pairs closer than this are found (at least the thickness)
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);
@@ -142,8 +153,9 @@ struct Cloth {
     std::vector<ClothStitch> stitches;
     ClothPieces pieces;
 
-    // The mesh's triangles, for finding the cloth with a ray.
+    // The mesh's triangles, for finding the cloth with a ray and for self-collision, with its neighbourhoods and edges.
     std::vector<std::array<std::uint32_t, 3>> triangles;
+    ClothSelfTopology selfTopology;
 
     // Where the points were when the cloth was made, and the coarse levels and tethers built from that shape and the
     // pins, rebuilt whenever a point is pinned (pinClothPoint, addClothPin).

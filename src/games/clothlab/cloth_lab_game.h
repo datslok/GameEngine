@@ -48,6 +48,7 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor);
 */
 struct ClothLabStationSettings {
     bool bigSheet = false;
+    bool pileSheet = true;
     bool mannequin = true;
     bool pinnedDress = true;
 };
@@ -92,6 +93,7 @@ public:
 
     // The big sheet over the mat, if the stations have it (none otherwise).
     Entity getBigSheet() const;
+    Entity getPileSheet() const;
 
     // The dress sewn round the mannequin, if the stations have it (none otherwise).
     Entity getDress() const;
@@ -121,6 +123,7 @@ private:
 
     Entity drapeSheet;
     Entity bigSheet;
+    Entity pileSheet;
     Entity dress;
     ClothLabStationSettings stationSettings;
 

@@ -23,4 +23,8 @@
 #define CLOTH_TETHERS_PER_POINT 4
 #define CLOTH_NO_ANCHOR 4294967295u
 
+// Self-collision's motion cut (Planar-DAT): a point moving towards a dividing plane stops this share of the way there
+// (gamma_r; the paper gives none, NVIDIA Newton uses 0.85).
+#define CLOTH_CUT_RELAXATION 0.85
+
 #endif
