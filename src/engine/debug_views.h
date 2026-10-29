@@ -51,8 +51,11 @@ constexpr int gpuProfileReadoutLine = 9;
 // The readout line for the cloth's GPU time by kind of pass (a profiler from makeClothProfiler), while cloth runs there.
 constexpr int clothProfileReadoutLine = 10;
 
-// The engine's readout uses lines 0 to 10; a game's own lines start here.
-constexpr int firstGameReadoutLine = 11;
+// The readout line for GPU self-collision's pairs (clothSelfPairsText), while a GPU cloth has self-collision.
+constexpr int clothSelfReadoutLine = 11;
+
+// The engine's readout uses lines 0 to 11; a game's own lines start here.
+constexpr int firstGameReadoutLine = 12;
 
 // The light probes' line: how many, traced (awake ones among them), asleep, off and moved by relocation, or "PROBES -"
 // without probes.
@@ -105,6 +108,12 @@ std::string clothReadoutText(const Profiler& profiler, bool unmeasured);
 
 // clothReadoutText drawn on the cloth's readout line (clothProfileReadoutLine).
 void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debug);
+
+// The self-collision line: "SELF PAIRS" found, then those LOST past the pairs' room and the LARGE items.
+std::string clothSelfPairsText(const ClothSelfPairCounts& counts);
+
+// clothSelfPairsText drawn on its readout line (clothSelfReadoutLine).
+void drawClothSelfPairs(const ClothSelfPairCounts& counts, DebugDraw& debug);
 
 // Timings are drawn in this colour (linear pale green), apart from the rest of the readout.
 const Vec3 profileDebugColour{0.45f, 1.0f, 0.55f};

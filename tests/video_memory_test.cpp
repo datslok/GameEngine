@@ -71,7 +71,8 @@ namespace {
         assert(engineProfileReadoutLine == cameraReadoutLine + 1);
         assert(gpuProfileReadoutLine == engineProfileReadoutLine + 1);
         assert(clothProfileReadoutLine == gpuProfileReadoutLine + 1);
-        assert(firstGameReadoutLine == clothProfileReadoutLine + 1);
+        assert(clothSelfReadoutLine == clothProfileReadoutLine + 1);
+        assert(firstGameReadoutLine == clothSelfReadoutLine + 1);
     }
 }
 

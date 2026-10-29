@@ -1078,6 +1078,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.gpu = std::exchange(unreportedGpuTimings, GpuTimings{});
     stats.clothTicks = std::exchange(unreportedClothTicks, 0u);
     stats.cloth = std::exchange(unreportedClothTimings, ClothPassTimings{});
+    stats.clothSelf = std::exchange(unreportedClothSelf, ClothSelfPairCounts{});
     showShapes(description);
     beginGpuPass(frame, GpuPass::Cloth);
     runCloths(frame.commands);
@@ -2393,6 +2394,14 @@ void VulkanRenderer::collectClothReadbacks() {
         if (entry.readbackPending[frameIndex]) {
             entry.readbackPending[frameIndex] = false;
             clothReadbacks.push_back(ClothReadback{key, entry.cloth->readPositions(frameIndex), entry.cloth->readVelocities(frameIndex)});
+            const ClothSelfPairCounts pairs = entry.cloth->readSelfPairs(frameIndex);
+            entry.cloth->askForPairRoom(pairs);
+            if (pairs.measured) {
+                unreportedClothSelf.measured = true;
+                unreportedClothSelf.found += pairs.found;
+                unreportedClothSelf.lost += pairs.lost;
+                unreportedClothSelf.large += pairs.large;
+            }
         }
     }
 }
@@ -2422,6 +2431,14 @@ void VulkanRenderer::runCloths(VkCommandBuffer commands) {
             if (stale(work)) {
                 gpuCloths.erase(work.key);
             }
+        }
+    }
+
+    // A cloth whose pairs outgrew their room gets more, once no frame in flight still reads its set: rare, as rooms double.
+    if (std::any_of(gpuCloths.begin(), gpuCloths.end(), [](const auto& entry) { return entry.second.cloth->wantsPairRoom(); })) {
+        device.waitIdle();
+        for (auto& [key, entry] : gpuCloths) {
+            entry.cloth->growPairRoom(uploads);
         }
     }
 

@@ -326,6 +326,9 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         if (clothProfiler.getTiming(0).calls > 0 || clothPassesUnmeasured) {
             drawClothReadout(clothProfiler, clothPassesUnmeasured, debugDraw);
         }
+        if (clothSelfPairs.measured) {
+            drawClothSelfPairs(clothSelfPairs, debugDraw);
+        }
     }
 
     game.onDebugDraw(world, debugDraw, alpha);
@@ -351,6 +354,9 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     recordClothTimings(clothProfiler, stats.cloth);
     gpuClothTickEstimate = gpuClothTickSeconds(gpuClothTickEstimate, stats.gpu, stats.clothTicks);
     clothPassesUnmeasured = stats.cloth.overflowed;
+    if (stats.clothSelf.measured || stats.clothTicks > 0) {
+        clothSelfPairs = stats.clothSelf;
+    }
 
     // The renderer fitted its copy of the camera to the frame. The game's camera gets the same aspect ratio,
     // so turning clicks into rays (makeCameraRay) matches what is on screen.

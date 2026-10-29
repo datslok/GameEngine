@@ -36,6 +36,8 @@ const char* clothPassName(ClothPass pass) {
         return "SHAPE";
     case ClothPass::Copy:
         return "COPY";
+    case ClothPass::Search:
+        return "SEARCH";
     case ClothPass::Self:
         return "SELF";
     case ClothPass::Count:

@@ -156,6 +156,17 @@ public:
     std::vector<Vec3> readPositions(std::uint32_t slot) const;
     std::vector<Vec3> readVelocities(std::uint32_t slot) const;
 
+    // Likewise what the last pair search before the read-back found; not measured for a cloth without self-collision.
+    ClothSelfPairCounts readSelfPairs(std::uint32_t slot) const;
+
+    /*
+    * A search that found more pairs than their room asks for more (clothSelfPairRoom); growPairRoom then makes it, and
+    * must wait until no frame in flight still uses the cloth's self-collision set (the renderer waits for the GPU).
+    */
+    void askForPairRoom(const ClothSelfPairCounts& counts);
+    bool wantsPairRoom() const;
+    void growPairRoom(ImmediateCommands& uploads);
+
     /*
     * Shape this deforming mesh from the cloth's points (the mesh must have been uploaded as deforming from the topology's
     * rest shape, with one Mesh vertex per point). Throws std::invalid_argument for a topology of another size.
@@ -284,6 +295,9 @@ private:
         VkDescriptorSet set = VK_NULL_HANDLE;
     };
     std::unique_ptr<SelfCollision> self;
+    std::uint32_t wantedPairRoom = 0; // asked for by askForPairRoom, 0 for none
+    // The self-collision set pointed at its buffers, in binding order.
+    void writeSelfSet();
 
     Slot& slotAt(std::uint32_t slot);
     const Slot& slotAt(std::uint32_t slot) const;
@@ -314,10 +328,11 @@ private:
 
     /*
     * A self-collision pass (its own set 1), told the mode in its level: over count items, or groups workgroups if
-    * given, or as many as the last pair search kept (indirect). Followed by a barrier and any stamp, as dispatch.
+    * given, or as many as the last pair search kept (indirect). Followed by a barrier and any stamp of its kind (the
+    * search's or a substep's), as dispatch.
     */
-    void dispatchSelf(const Recording& recording, const ComputePipeline& pipeline, std::uint32_t count, std::uint32_t mode = 0, std::uint32_t groups = 0,
-                      bool indirect = false) const;
+    void dispatchSelf(const Recording& recording, const ComputePipeline& pipeline, ClothPass kind, std::uint32_t count, std::uint32_t mode = 0,
+                      std::uint32_t groups = 0, bool indirect = false) const;
     // The pair search (clothSelfDispatchesPerSearch), and a substep's contacts, cut and end (clothSelfDispatchesPerSubstep).
     void recordPairSearch(const Recording& recording) const;
     void recordSelfSubstep(const Recording& recording) const;

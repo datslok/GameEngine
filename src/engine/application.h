@@ -178,6 +178,9 @@ private:
     // Whether the latest cloth timings had more passes than their stamps (the readout says so instead of going blank).
     bool clothPassesUnmeasured = false;
 
+    // What the GPU cloths' self-collision last found (pairs, those lost, large items), shown below the cloth line.
+    ClothSelfPairCounts clothSelfPairs;
+
     // What one tick of the GPU cloths costs the GPU, from its timings a frame or two late (gpuClothTickSeconds): the
     // tick budget charges it for every tick while the cloth is on the GPU.
     double gpuClothTickEstimate = 0.0;

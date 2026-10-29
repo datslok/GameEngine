@@ -10,7 +10,8 @@
 * timestamp before the frame's first cloth pass and one after each, every gap credited to the kind of pass it follows,
 * so a frame's thousand or so dispatches add up into a dozen numbers. Sweep is vertex block descent's points; Move is a
 * level's line search moving the points; Stitch is a sewn cloth's stitches; Copy is the copies of the points (kept for
-* drawing between ticks, and read back); Self is self-collision's passes (its pair search, contacts and cut).
+* drawing between ticks, and read back); Search is self-collision's pair search (the hash, the pairs and their dispatch
+* sizes) and Self its passes every substep (contacts, their sums applied, the cut, the end).
 */
 enum class ClothPass {
     Predict,
@@ -28,6 +29,7 @@ enum class ClothPass {
     Finish,
     Shape,
     Copy,
+    Search,
     Self,
     Count,
 };
@@ -49,6 +51,19 @@ struct ClothPassTimings {
     double seconds(ClothPass pass) const {
         return passSeconds[static_cast<std::size_t>(pass)];
     }
+};
+
+/*
+* What the GPU cloths' self-collision found in a frame's last pair search, all cloths together: the pairs found, those
+* found past the pairs' room and so dropped (a layer they guard can pass through), and the items too large for the hash,
+* which every point and edge then reads. Read back with the points, so as late as they are; not measured while no GPU
+* cloth has self-collision.
+*/
+struct ClothSelfPairCounts {
+    bool measured = false;
+    std::uint64_t found = 0;
+    std::uint64_t lost = 0;
+    std::uint64_t large = 0;
 };
 
 /*

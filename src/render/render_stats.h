@@ -54,6 +54,9 @@ struct RenderStats {
     // and some cloth ran on the GPU.
     ClothPassTimings cloth;
 
+    // What the GPU cloths' self-collision found, as late as their points come back; not measured without it.
+    ClothSelfPairCounts clothSelf;
+
     // The video memory in use and the driver's budget, read as this frame began (render/gpu/video_memory.h).
     VideoMemory videoMemory;
 

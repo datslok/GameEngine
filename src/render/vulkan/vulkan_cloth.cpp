@@ -53,6 +53,9 @@ namespace {
     // and the large items; the pairs and their state; each point's contact sums and cut share.
     constexpr std::uint32_t selfBindings = 18;
 
+    // The pair state's first words (pairs found, lost, large items, one unused), read back after the velocities.
+    constexpr VkDeviceSize selfStateBytes = 4 * sizeof(std::uint32_t);
+
     // cloth_shape.comp's: the points, the points before the last tick, the rest vertices, indices, source vertices, the
     // two adjacency lists (starts and triangles each), and the mesh slot it writes.
     constexpr std::uint32_t shapeBindings = 10;
@@ -515,7 +518,8 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     slots.resize(slotCount);
     for (Slot& slot : slots) {
         slot.set = allocateSet(device, descriptorPool.get(), layout);
-        slot.readback = VulkanBuffer{allocator, atLeastSmallest(2 * bytesOf(points)), VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Readback};
+        slot.readback = VulkanBuffer{allocator, atLeastSmallest(2 * bytesOf(points) + selfStateBytes), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                     BufferMemory::Readback};
         slot.fieldSamples = noFieldSamples.get();
         ensureCapacity(slot, 1, 1, 1, 1);
         writeSet(slot);
@@ -664,16 +668,47 @@ void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& c
 
     made->descriptorPool = storagePool(device, 1, selfBindings);
     made->set = allocateSet(device, made->descriptorPool.get(), pipelines.getSelfHash().getResourceLayout());
-    std::array<VkBuffer, selfBindings> handles{};
-    for (std::size_t binding = 0; binding < selfBindings; ++binding) {
-        handles[binding] = made->buffers[binding].get();
-    }
-    writeBuffers(device, made->set, handles);
     self = std::move(made);
+    writeSelfSet();
 }
 
-void VulkanCloth::dispatchSelf(const Recording& recording, const ComputePipeline& pipeline, std::uint32_t count, std::uint32_t mode, std::uint32_t groups,
-                               bool indirect) const {
+void VulkanCloth::writeSelfSet() {
+    std::array<VkBuffer, selfBindings> handles{};
+    for (std::size_t binding = 0; binding < selfBindings; ++binding) {
+        handles[binding] = self->buffers[binding].get();
+    }
+    writeBuffers(device, self->set, handles);
+}
+
+void VulkanCloth::askForPairRoom(const ClothSelfPairCounts& counts) {
+    if (self && counts.measured) {
+        wantedPairRoom = std::max(wantedPairRoom, clothSelfPairRoom(counts.found, self->info.pairCapacity));
+        if (wantedPairRoom == self->info.pairCapacity) {
+            wantedPairRoom = 0;
+        }
+    }
+}
+
+bool VulkanCloth::wantsPairRoom() const {
+    return wantedPairRoom != 0;
+}
+
+// The pairs' buffer replaced (the pairs in it are lost; the next search finds them again), the info's room uploaded.
+void VulkanCloth::growPairRoom(ImmediateCommands& uploads) {
+    if (!self || wantedPairRoom == 0) {
+        return;
+    }
+    self->info.pairCapacity = wantedPairRoom;
+    wantedPairRoom = 0;
+    self->buffers[14] = VulkanBuffer{device.getAllocator(), static_cast<VkDeviceSize>(self->info.pairCapacity) * sizeof(GpuClothSelfPair),
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, BufferMemory::Gpu};
+    const std::array<Upload, 1> copies{Upload{&self->info, sizeof(GpuClothSelfInfo), self->buffers[7].get()}};
+    uploadAll(device, uploads, copies);
+    writeSelfSet();
+}
+
+void VulkanCloth::dispatchSelf(const Recording& recording, const ComputePipeline& pipeline, ClothPass kind, std::uint32_t count, std::uint32_t mode,
+                               std::uint32_t groups, bool indirect) const {
     const VkCommandBuffer commands = recording.commands;
     const ClothPushConstants constants{recording.tick, recording.step, 0, count, mode, pointCount, edgeCount, hingeCount, recording.bendingSubsteps};
     const std::array<VkDescriptorSet, 2> sets{recording.set, self->set};
@@ -687,7 +722,7 @@ void VulkanCloth::dispatchSelf(const Recording& recording, const ComputePipeline
     }
     clothBarrier(commands);
     if (recording.stamps) {
-        recording.stamps->mark(commands, ClothPass::Self);
+        recording.stamps->mark(commands, kind);
     }
 }
 
@@ -708,19 +743,19 @@ void VulkanCloth::recordPairSearch(const Recording& recording) const {
     vkCmdFillBuffer(commands, self->buffers[15].get(), 0, VK_WHOLE_SIZE, 0);
     clothBarrier(commands);
 
-    dispatchSelf(recording, pipelines.getSelfHash(), items, CLOTH_SELF_COUNT);
-    dispatchSelf(recording, pipelines.getSelfScan(), info.bucketCount, CLOTH_SELF_SCAN_BLOCKS, info.scanBlocks);
-    dispatchSelf(recording, pipelines.getSelfScan(), info.bucketCount, CLOTH_SELF_SCAN_TOTALS, 1);
-    dispatchSelf(recording, pipelines.getSelfScan(), info.bucketCount, CLOTH_SELF_SCAN_ADD, info.scanBlocks);
+    dispatchSelf(recording, pipelines.getSelfHash(), ClothPass::Search, items, CLOTH_SELF_COUNT);
+    dispatchSelf(recording, pipelines.getSelfScan(), ClothPass::Search, info.bucketCount, CLOTH_SELF_SCAN_BLOCKS, info.scanBlocks);
+    dispatchSelf(recording, pipelines.getSelfScan(), ClothPass::Search, info.bucketCount, CLOTH_SELF_SCAN_TOTALS, 1);
+    dispatchSelf(recording, pipelines.getSelfScan(), ClothPass::Search, info.bucketCount, CLOTH_SELF_SCAN_ADD, info.scanBlocks);
 
     toCopyBarrier(commands);
     vkCmdFillBuffer(commands, self->buffers[9].get(), 0, VK_WHOLE_SIZE, 0);
     clothBarrier(commands);
 
-    dispatchSelf(recording, pipelines.getSelfHash(), items, CLOTH_SELF_SCATTER);
-    dispatchSelf(recording, pipelines.getSelfPoints(), pointCount);
-    dispatchSelf(recording, pipelines.getSelfEdges(), info.edgeCount);
-    dispatchSelf(recording, pipelines.getSelfArgs(), 1);
+    dispatchSelf(recording, pipelines.getSelfHash(), ClothPass::Search, items, CLOTH_SELF_SCATTER);
+    dispatchSelf(recording, pipelines.getSelfPoints(), ClothPass::Search, pointCount);
+    dispatchSelf(recording, pipelines.getSelfEdges(), ClothPass::Search, info.edgeCount);
+    dispatchSelf(recording, pipelines.getSelfArgs(), ClothPass::Search, 1);
     memoryBarrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -728,10 +763,10 @@ void VulkanCloth::recordPairSearch(const Recording& recording) const {
 
 // After the end's bodies: the contacts and their sums applied, the cut's shares, and the end with the velocities.
 void VulkanCloth::recordSelfSubstep(const Recording& recording) const {
-    dispatchSelf(recording, pipelines.getSelfContact(), 0, 0, 0, true);
-    dispatchSelf(recording, pipelines.getSelfApply(), pointCount);
-    dispatchSelf(recording, pipelines.getSelfCut(), 0, 0, 0, true);
-    dispatchSelf(recording, pipelines.getSelfEnd(), pointCount);
+    dispatchSelf(recording, pipelines.getSelfContact(), ClothPass::Self, 0, 0, 0, true);
+    dispatchSelf(recording, pipelines.getSelfApply(), ClothPass::Self, pointCount);
+    dispatchSelf(recording, pipelines.getSelfCut(), ClothPass::Self, 0, 0, 0, true);
+    dispatchSelf(recording, pipelines.getSelfEnd(), ClothPass::Self, pointCount);
 }
 
 VulkanCloth::Slot& VulkanCloth::slotAt(std::uint32_t slot) {
@@ -989,6 +1024,10 @@ void VulkanCloth::recordReadback(VkCommandBuffer commands, std::uint32_t slotInd
         const VkBufferCopy velocityRegion{0, bytes, bytes};
         vkCmdCopyBuffer(commands, velocities.get(), slot.readback.get(), 1, &velocityRegion);
     }
+    if (self) {
+        const VkBufferCopy stateRegion{0, 2 * bytes, selfStateBytes};
+        vkCmdCopyBuffer(commands, self->buffers[15].get(), slot.readback.get(), 1, &stateRegion);
+    }
 
     memoryBarrier(commands, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
                   VK_ACCESS_2_HOST_READ_BIT);
@@ -1016,6 +1055,16 @@ std::vector<Vec3> VulkanCloth::readPositions(std::uint32_t slot) const {
 
 std::vector<Vec3> VulkanCloth::readVelocities(std::uint32_t slot) const {
     return readVec4s(slotAt(slot).readback, pointCount, pointCount);
+}
+
+ClothSelfPairCounts VulkanCloth::readSelfPairs(std::uint32_t slot) const {
+    if (!self) {
+        return {};
+    }
+    const VulkanBuffer& readback = slotAt(slot).readback;
+    readback.invalidate();
+    const auto* state = reinterpret_cast<const std::uint32_t*>(static_cast<const Vec4*>(readback.getMapped()) + 2 * static_cast<std::size_t>(pointCount));
+    return ClothSelfPairCounts{true, state[CLOTH_SELF_PAIR_COUNT], state[CLOTH_SELF_PAIRS_LOST], state[CLOTH_SELF_LARGE_COUNT]};
 }
 
 /*

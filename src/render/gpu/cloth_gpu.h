@@ -224,6 +224,13 @@ GpuClothSelf packClothSelf(const Cloth& cloth);
 GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair);
 
 /*
+* The pairs' room after a search found found pairs with room for room: the same while they fit, else the smallest power
+* of two at least a quarter over what was found and twice the room (at most 2^31), so a pile bunching up grows it a few
+* times, not every frame. Pairs past the room are dropped, and a layer they guarded can pass through.
+*/
+std::uint32_t clothSelfPairRoom(std::uint64_t found, std::uint32_t room);
+
+/*
 * A cloth the renderer simulates this frame (VulkanRenderer::setClothWork): which cloth (key, its entity, the same every
 * frame it lives), its state on the CPU (uploaded the first frame the renderer sees it, or after its pins change; read
 * only during that frame's render), the deforming mesh shaped from its points on the GPU with its topology (none to

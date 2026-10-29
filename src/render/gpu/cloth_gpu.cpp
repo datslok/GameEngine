@@ -213,6 +213,15 @@ GpuClothSelf packClothSelf(const Cloth& cloth) {
     return packed;
 }
 
+std::uint32_t clothSelfPairRoom(std::uint64_t found, std::uint32_t room) {
+    if (found <= room) {
+        return room;
+    }
+    constexpr std::uint64_t largest = std::uint64_t{1} << 31;
+    const std::uint64_t wanted = std::max(found + found / 4, 2 * static_cast<std::uint64_t>(room));
+    return static_cast<std::uint32_t>(std::min(std::bit_ceil(wanted), largest));
+}
+
 GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair) {
     GpuClothSelfPair packed;
     for (std::size_t index = 0; index < 4; ++index) {

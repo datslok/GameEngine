@@ -388,10 +388,12 @@ private:
     float clothAlpha = 1.0f;
     std::vector<ClothReadback> clothReadbacks;
 
-    // The cloth passes' timestamps, made the first time they are asked for, and the last frame's not yet reported.
+    // The cloth passes' timestamps, made the first time they are asked for, and the last frame's not yet reported;
+    // likewise the self-collision pair counts read back with the points.
     bool clothPassTiming = false;
     std::unique_ptr<ClothPassStamps> clothStamps;
     ClothPassTimings unreportedClothTimings;
+    ClothSelfPairCounts unreportedClothSelf;
 
     // This frame's slot for each mesh a cloth shapes on the GPU, by mesh index (set by showShapes).
     std::map<std::uint32_t, std::uint32_t> gpuShapeSlots;

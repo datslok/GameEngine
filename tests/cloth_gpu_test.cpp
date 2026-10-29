@@ -328,6 +328,18 @@ namespace {
         assert(packClothSelfPair(edgeEdgePair(cloth.particles.positions, topology.edges[0], topology.edges.back())).kind == CLOTH_PAIR_EDGE_EDGE);
     }
 
+    /*
+    * When a search finds more pairs than the room (the counter keeps counting past it), the room grows to a power of two
+    * a quarter over what was found, at least doubling; enough room stays as it is.
+    */
+    void testSelfPairRoom() {
+        assert(clothSelfPairRoom(1000, 4096) == 4096);
+        assert(clothSelfPairRoom(4096, 4096) == 4096);
+        assert(clothSelfPairRoom(4097, 4096) == 8192);
+        assert(clothSelfPairRoom(55707, 52800) == 131072);
+        assert(clothSelfPairRoom(5'000'000'000ull, 4096) == 0x80000000u);
+    }
+
     // A tick carries self-collision's switch and the reach it looks within, at least the thickness, as the CPU uses it.
     void testSelfTick() {
         Cloth cloth = smallSheet();
@@ -546,6 +558,7 @@ void testClothGpu() {
     testDispatchesWithLevels();
     testSelfDispatches();
     testSelfRecords();
+    testSelfPairRoom();
     testSelfTick();
     testLevels();
     testPointLists();

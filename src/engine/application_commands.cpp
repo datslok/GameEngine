@@ -180,6 +180,9 @@ CommandReply Application::stats() {
     if (clothProfiler.getTiming(0).calls > 0 || clothPassesUnmeasured) {
         lines.push_back(clothReadoutText(clothProfiler, clothPassesUnmeasured));
     }
+    if (clothSelfPairs.measured) {
+        lines.push_back(clothSelfPairsText(clothSelfPairs));
+    }
 
     lines.push_back(std::string{simulation.paused ? "PAUSED" : "RUNNING"} + " AT TICK " + std::to_string(simulationTicks));
 

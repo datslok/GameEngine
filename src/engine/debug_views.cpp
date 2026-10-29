@@ -217,6 +217,14 @@ void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debu
     debugText(debug, debugReadoutLine(clothProfileReadoutLine), debugReadoutTextHeight, clothReadoutText(profiler, unmeasured), profileDebugColour);
 }
 
+std::string clothSelfPairsText(const ClothSelfPairCounts& counts) {
+    return "SELF PAIRS " + std::to_string(counts.found) + "  LOST " + std::to_string(counts.lost) + "  LARGE " + std::to_string(counts.large);
+}
+
+void drawClothSelfPairs(const ClothSelfPairCounts& counts, DebugDraw& debug) {
+    debugText(debug, debugReadoutLine(clothSelfReadoutLine), debugReadoutTextHeight, clothSelfPairsText(counts), profileDebugColour);
+}
+
 /*
 * A margin from the window's corner, then one line every lineSpacing pixels: a little more than the text height, so
 * lines do not touch.
