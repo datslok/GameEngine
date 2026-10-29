@@ -771,6 +771,23 @@ The UI is drawn into an image of its own, then laid over the finished frame last
 
 The HUD (phase 9) will go the same way. As with tone mapping and bloom, the blend's maths is mirrored on the CPU and tested.
 
+### Commands: driving the engine from outside
+
+Everything F5 can do, a program can do too. A running game listens for short text commands, so a script, a tool or an AI can change the game while you watch the window:
+
+```sh
+build/game.exe --send set engine.render.bloom.strength 0.1
+build/game.exe --send screenshot build/shots/bloom.png
+```
+
+**One description pays again.** The commands `set`, `get`, `list` and `reset` are one more visitor over the same `visit()` lists. So every setting can be reached by its key in `settings.cfg`, with its limits enforced, and a setting added later is reachable with nothing more to write.
+
+**Commands, not direct changes.** Each command is a named action with its arguments, kept in a registry with a sentence saying what it does (`help` lists them). This is the **command pattern**, the same idea as the input commands in section 2. It will matter more for the level editor: if each of its buttons only issues a command, then a script can do anything the editor can, and undo is a list of commands played backwards.
+
+**Between frames, like key presses.** Commands arrive whenever they like, but the engine only looks at them at the top of a frame. A tick never sees half a command, and `step 120` runs exactly the 120 ticks playing would have, so the simulation stays deterministic. The time a command takes (a screenshot, a long step) is left out of the clock, so the game does not rush to catch up afterwards.
+
+**A socket on your own computer.** A socket is a numbered mailbox the operating system keeps for a program, its number the **port** (47613 here). The game listens only on 127.0.0.1, the address that means "this computer", so nothing on the network can reach it. `--send` opens a connection, writes one line and reads the reply until the game hangs up. Since each `--send` is a separate run of the program, an AI whose shell commands each start afresh can still hold a conversation with the game.
+
 ### Dithering: noise against banding
 
 Even with gamma, the screen has only 256 levels per channel. A slow, dark fade, such as the flashlight's pool on the ground at night, changes by less than one level over many pixels, so whole patches round to the same level and then jump together: visible rings, or **banding**. It is quantisation, like measuring a gentle slope with a ruler marked only in whole centimetres.

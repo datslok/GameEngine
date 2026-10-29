@@ -558,7 +558,9 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 
 - [ ] Slang trial: one shader source compiled to both SPIR-V and C++, which could replace the hand-written CPU mirrors of the shader libraries
 - [ ] Particle effects for visuals (sparks, smoke, ability effects)
+- [x] Commands from the command line: every setting, pause and step, the camera, screenshots and stats, sent to a running game or run as a script (`command-line-control`)
 - [ ] Level editor or scene file format
+  - Every editing operation (placing, moving and deleting things, saving a level) a command in the `CommandRegistry` (`core/command_registry`), the editor's buttons issuing them, so a script or an AI can do whatever its windows can, and undo is built on the same list
 - [ ] API reference with Doxygen: a `make docs` target generating HTML into `build/docs/`, with Graphviz include and dependency diagrams (they show the source layering)
   - Needs function comments switched from `/* */` to `/** */` so Doxygen picks them up.
   - Complements `docs/ENGINE_GUIDE.md`, which explains concepts rather than the API

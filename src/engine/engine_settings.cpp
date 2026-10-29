@@ -35,6 +35,9 @@ void visit(EngineSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Worker threads", settings.workerThreads,
                   {.min = automaticWorkerThreads, .max = 256, .sliderMax = 64, .unit = "(-1: a core each but one)", .applies = FieldApplies::AtStartup});
     visitor.field("Cloth on GPU", settings.clothOnGpu);
+    visitor.field("Command server", settings.commandServer, FieldApplies::AtStartup);
+    visitor.field("Command port", settings.commandPort,
+                  {.min = 1, .max = 65535, .sliderMin = 1024, .sliderMax = 65535, .applies = FieldApplies::AtStartup});
     visitor.group("Render", [&] {
         visit(settings.render, visitor);
     });

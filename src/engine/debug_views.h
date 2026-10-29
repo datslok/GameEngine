@@ -27,7 +27,10 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 constexpr float debugReadoutTextHeight = 14.0f;
 Vec2 debugReadoutLine(int line);
 
-// The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame.
+// The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame, the
+// lights, shadow tiles, probes, video memory and exposure. renderStatsLines is its text, a line each (also the stats
+// command's), and drawRenderStats draws them.
+std::vector<std::string> renderStatsLines(const RenderStats& stats);
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
 
 // The readout lines drawRenderStats writes the light probes' states (probeStatsText), the video memory

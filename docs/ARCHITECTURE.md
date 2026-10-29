@@ -22,6 +22,7 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
   - `framesInFlight` (2), applied when it changes;
   - `workerThreads` (`automaticWorkerThreads`, -1: one per core but one; 0 runs everything on the main thread), read at start-up through `workerThreadCount` (see Job system);
   - `gpuValidation`, read at start-up and passed to the renderer's constructor (Vulkan's validation layers when installed; MSYS2's, which the makefile points the loader at; see VulkanRenderer). It defaults to `isDebugBuild` from `core/build_info.h`, which the makefile sets by defining `ENGINE_DEBUG_BUILD` in debug builds only;
+  - `commandServer` (on) and `commandPort` (`defaultCommandPort`, 47613), read at start-up (see Commands);
   - and `render`.
 - `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
 - Camera controllers each own a settings struct (`FreeFlyCameraSettings`, `FirstPersonCameraSettings`, `MobaCameraSettings`), passed to the constructor and editable through `getSettings()`.
@@ -71,7 +72,9 @@ One description of every tunable value, walked by several visitors.
   - and `others`: a section the walk lacks (another game's).
 - `parseSettingsText` reads `key = value` lines (blank lines and `#` comments skipped, `\r\n` accepted, malformed lines warned with their number).
 - `findLimitProblems` (tests).
-- `engineAndGameSettings(settings, game)` is the whole tree: `Engine`, then a group named by `Game::title()` (keys `demo.grenade.throwSpeed`, `lightLab.sun.solarHours`), so every game has its own section of the one shared file.
+- `engineAndGameSettings(settings, game)` is the whole tree: `Engine` (`engineSettings(settings)`, also used alone by `--send` to find the port), then a group named by `Game::title()` (keys `demo.grenade.throwSpeed`, `lightLab.sun.solarHours`), so every game has its own section of the one shared file.
+- `describeSettings(walk)` gives each field as `SettingDescription {key, value, kind, atStartup}`, in capture order; `kind` is for people: "number 0 to 1 (slider 0 to 0.2) nits", "whole number 1 to 8", "true or false", "one of Vsync, Mailbox, Immediate" (a missing limit gives "from 0" or "up to 5").
+- `setSetting(walk, key, value)` sets one field live and says what happened (`SettingOutcome`: `Set`, `Clamped`, `Refused` when the text does not read as its kind, `Unknown`, `AtStartupOnly`), with the value afterwards and the reason; it goes through the same `ApplyingVisitor` as the file, which counts its refusals apart from its clamps.
 - `readSettingsFile` (nothing when the file is absent) and `writeSettingsFile`.
 
 **Loading, saving and resetting**
@@ -125,6 +128,57 @@ Drawing: `VulkanRenderer::render(frame, settings, ui)` with `ui` = `ImDrawData*`
 This is mirrored in `render/gpu/overlay_composite` (`overlayOutput`, `blendOverlay`).
 
 Dear ImGui 1.92.9b is vendored unmodified in `external/imgui` (core files, `imgui_impl_sdl3`, `imgui_impl_vulkan`; `VERSION.txt`). The makefile adds its `.cpp` files to the engine sources and turns off `-Warray-bounds` for them only (GCC's false positives at `-O2`).
+
+## Commands
+
+The engine's text interface (`command-line-control`, Oct 29 2026): tools, scripts and AIs drive a running game through named commands, and see the result in its window. The future editor's operations (placing, moving and deleting things, saving a level) are meant to be commands too, its buttons issuing them, so a script or an AI can do whatever its windows can, and undo can be built on the same list.
+
+### The registry
+
+`CommandRegistry` (`core/command_registry`) maps names to handlers.
+
+- `add(name, usage, description, handler)`: names are lower-case letters, digits and dashes, each once (`std::invalid_argument` otherwise); kept in name order. It starts with `help` (`help` lists every usage and description, `help <name>` one), which refers to the registry, so a registry cannot be copied.
+- `execute(line)` splits the line (`splitCommandWords`: spaces and tabs; double quotes keep spaces, a backslash inside them keeps a quote or backslash; outside them a backslash is ordinary, so Windows paths need no quotes; quotes join onto the word round them, as in a shell) and runs the first word's handler on the rest (`CommandArguments`).
+- Every mistake comes back as an error reply, never an exception: an empty line, an unknown name (with up to three near names from `closestNames`: those containing what was typed, ignoring case, then those at most a third of its letters (at least two) away by edit distance, from the whole candidate or its last dotted part), a quote left open, and any `std::exception` a handler throws (`floatArgument` and `intArgument` throw `std::invalid_argument` naming what was wanted).
+- `CommandReply {ok, text}`, made by `commandOk` and `commandError`; on the wire `encodeReply` writes "OK" or "ERROR", a newline, then the text, and `decodeReply` reads it back. `joinCommandWords` rebuilds a line from words, quoting only those that need it (`--send` uses it on its arguments).
+
+### The engine's commands
+
+`engine/engine_commands` holds those needing no window or GPU, so the tests run them headless:
+
+- `addSettingsCommands(registry, walk, defaults)`: `set <key> <value>` (or `key=value`) through `setSetting`, replying with the new value, the clamp's reason, or an error; an unknown key gets the nearest keys, a start-up field the advice to give it with `--set` or save it. `get [key or group]` and `list [key or group]` show values, list with `describeSettings`' kind and "read only at start-up"; a group's name must end at a dot (`engine.render.bloom`, not `engine.render.bloo`); `all` or nothing means every field. `reset <key, group or all>` applies the defaults with `StartupFields::Keep`.
+- `SimulationControl {paused}` and `ticksThisFrame`: a paused frame runs no ticks and drops their time. `addSimulationCommands(registry, control, runTick)`: `pause`, `resume`, and `step [ticks]` (1 to `maxStepTicks`, 100,000), which pauses and runs the ticks at once through `runTick`. Stepping the demo reaches the very state of ticking it (`engine_commands_test`, `hashSimulationState`).
+- `addCameraCommands(registry, game, world)`: `camera` shows `cameraText`; `camera x y z` keeps the direction, `camera x y z tx ty tz` looks at a point, through `Game::poseCamera` (the three games call `PlayerControls::poseFreeCamera`, so the free camera takes the pose over and keeps it). Straight up or down, or at its own place, is refused (the world's up is the camera's).
+
+`Application` adds the rest in `engine/application_commands.cpp`:
+
+- `screenshot <file.png> [width height]`: the window's pixel size by default (16 to 8192 a side), its folder made if missing. The next frame's description (`describeFrame` at the frame's alpha, 1 while paused) goes through `VulkanRenderer::capture` for an SDR `DisplayOutput{}` and the final image is saved with `saveRawImagePng`: the picture without the debug UI and lines. The capture settles temporal anti-aliasing over the same frame first and forgets the live view's history, so the window blurs for a frame or two after.
+- `stats`: `renderStatsLines` (the F4 readout's first lines, which `drawRenderStats` now draws from), the camera, the CPU and GPU profilers' lines (`profileText`), the cloth's while it runs on the GPU, and "PAUSED" or "RUNNING" at the tick count.
+- `wait [frames]`: the queue stops for that many frames (so lighting and anti-aliasing settle before a screenshot), and its reply goes when they are done.
+- `save-settings` (`Application::saveSettings`, shared with F5's Save) and `quit` (the loop ends after the replies are sent).
+
+### Where they run
+
+`Application::runCommands` runs at the top of each frame, before its time is measured: the time commands take is added to `previousFrameStart`, so a slow screenshot or a long step is not game time and no burst of catch-up ticks follows. It takes the server's new requests into `pendingCommands` (after any script queued by `queueCommands`, `--run`), and runs them in order until the queue is empty or a `wait` holds it (`waitFrames`, the held reply in `waiting`). Replies go back to the connection, or for a script to the standard output as "> line" and the reply. Commands land between frames, like key presses, so they never break a tick's determinism; `step` runs `Application::runTick`, the loop's own tick.
+
+### The socket
+
+`platform/command_socket` (Winsock, `-lws2_32`):
+
+- `CommandServer(port)` listens on 127.0.0.1 only (nothing outside the computer can connect), non-blocking, with `SO_EXCLUSIVEADDRUSE` so a second game cannot bind the same port; a taken port throws `std::runtime_error`, and `Application` logs it and runs without commands. Port 0 picks a free one (tests).
+- `poll()` accepts and reads without waiting and hands over each connection's first line (to the newline, a carriage return dropped; a client that closes after a line without one has still sent it; past `maxCommandLineBytes`, 64 KB, it is refused). One command per connection.
+- `reply(id, bytes)` sends blocking (10 s limit) and closes, so a reply of any length ends at the close.
+- `sendCommand(port, line)` is the client: connect, send the line and a newline, read to the close, at most `commandReplySeconds` (300). No game listening is a `std::runtime_error` naming the port.
+- `EngineSettings::commandServer` and `commandPort` (`defaultCommandPort`, 47613, below Windows' range for short-lived ports) are start-up settings; golden captures turn the server off.
+
+### The command line
+
+`app/game_registry`'s `LaunchOptions` and `main`:
+
+- `--set key=value` (any number; split at the first "=", both sides trimmed): applied over `settings.cfg` before anything reads them, start-up fields too; an unknown key or bad value stops the start (`Application`'s constructor throws).
+- `--run <file>`: the script's lines are queued for the first frame (blank lines and `#` comments skipped).
+- `--port <port>`: the game's port (added as `engine.commandPort`) and `--send`'s.
+- `--send <words...>`: everything after it is one command (`joinCommandWords`), sent to the game at `--port`, else `settings.cfg`'s `engine.commandPort`, else the default. It prints the reply (errors to the standard error) and exits with 0 or 1, without opening a window. Only `--port` may come before it; `--set` and `--run` do not go with the golden images or the yardstick.
 
 ## Golden images
 
@@ -344,6 +398,7 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
 
 **Each frame:**
 
+- First the commands (`runCommands`, see Commands), before the frame's time is measured; a paused simulation (`ticksThisFrame`) runs no ticks and draws at alpha 1.
 - After the events, `updateDebugUi` handles F5 and builds the UI before `game.onInput`, so a changed setting applies that frame. Its draw data goes to `render` and on to `VulkanRenderer::render`.
 - While the UI is open the mouse is freed (`applyMouseMode` asks for mouse look only when the game wants it and the UI is closed).
 - Before each frame it uploads every mesh and texture the `AssetManager` gained since the last frame (the ones past the renderer's counts), so games can load and spawn at any time.
@@ -363,6 +418,7 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
   3. `onUpdate(world, input, frameSeconds, alpha)` once.
 - Plus `onInit(world, assets)`, `getCamera()` (the engine sets its aspect ratio), `wantsMouseLook()` and optional `getLightFocus()` (where lights are ranked, default the camera position).
 - Optional `onDebugDraw(const World&, DebugDraw&, alpha)` (called every frame after `onUpdate`) and `wantsDebugView()`.
+- Optional `poseCamera(world, position, target)` for the `camera` command (see Commands); false by default, meaning the camera cannot be placed.
 
 ### Debug drawing
 
@@ -391,7 +447,7 @@ Debug drawing: `DebugDraw` (`scene/debug_draw`) collects `DebugLine`s (`line`, `
 
 ### Render stats
 
-`getLastFrameStats()` returns `RenderStats`, shown on the debug readout's lines:
+`getLastFrameStats()` returns `RenderStats`, shown on the debug readout's lines (`renderStatsLines` gives their text, which `drawRenderStats` draws and the `stats` command replies with):
 
 - drawn, culled, shadowDrawn, shadowCulled, and point lights total, in view, lit and shadowed, shown as a third line of the debug readout;
 - then shadowTilesDrawn, shadowTilesCached and shadowTilesSkipped, a fourth line, ending with `sunShadowDistance` (SUN TO, where the sun's cascades end) when a sun is shadowed;

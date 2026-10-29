@@ -190,6 +190,7 @@ Several games run on one engine, picked at start-up with `--game`.
   - the GPU's own time for each render pass, measured with GPU timestamps: the cloth, the ray tracing scene's build, the light probes, cluster light lists, shadows, the fog's grid, depth prepass, ambient occlusion, mirrored lights, main, the ray tracing debug view, the velocity pass, the depth measurement for the sun's cascades, the reflection probe's capture, the reflections, the fog over the picture, glass, the TAA resolve, eye adaptation, bloom, tone mapping, debug lines and the debug UI
   - the GPU cloth's time by kind of pass (prediction, the solvers' passes, the coarse levels' passes, the stitches, shaping its mesh), while cloth runs on the GPU
   - render passes and images carry names, so RenderDoc and Nsight show the frame as named passes
+- **Commands from the command line**, for scripts, tools and AIs: every setting, pause and step, the camera, screenshots and the F4 readout, sent to a running game (`game.exe --send ...`) or run from a script at start-up, with the effect shown live in the window (see [Controlling a running game](#controlling-a-running-game)).
 - **Debug drawing:** lines, boxes, spheres and capsules drawn over the scene, with an F4 debug view.
 - **Unit tests** that run without a GPU or window.
 - **Golden images:** fixed views of each game rendered once as references (the scene image in half floats and the final image, SDR and HDR). Later captures must match them pixel for pixel, with a difference heatmap when they do not.
@@ -286,6 +287,42 @@ Run these from the **repository root** in the UCRT64 shell. The game loads asset
 - `GAME=` picks the game: `make run GAME=demo` starts the demo. It works for `make run-release`, `make golden` and `make golden-save` too.
 - Only changed files are recompiled, in parallel on every core.
 - New `.cpp` files in `src/` and `tests/` are picked up automatically.
+
+### Controlling a running game
+
+A running game listens for commands on your own computer (127.0.0.1, port 47613; nothing outside it can connect). Send one from a second terminal with the same exe, from the repository root:
+
+```sh
+build/game.exe --send help                                   # every command and what it does
+build/game.exe --send list engine.render.bloom               # settings with their limits
+build/game.exe --send set engine.render.bloom.strength 0.1   # changes it live: you see it in the window
+build/game.exe --send camera 0 2 10 0 1 0                    # stand at 0 2 10, look at 0 1 0
+build/game.exe --send screenshot build/shots/bloom.png       # the picture as the window shows it
+```
+
+The reply is printed, and the exit code is 0 when the command worked and 1 when not, so scripts can check it.
+
+| Command | What it does |
+|---|---|
+| `help [command]` | Lists every command, or shows one |
+| `set <key> <value>` | Changes a setting live, by its key in `settings.cfg` |
+| `get [key or group]`, `list [key or group]` | Shows values; `list` adds each setting's limits and unit |
+| `reset <key, group or all>` | Back to the defaults |
+| `save-settings` | Saves the changed settings to `settings.cfg`, as F5's Save does |
+| `pause`, `resume`, `step [ticks]` | Stops the clock, starts it, or runs exactly that many ticks |
+| `camera [x y z [tx ty tz]]` | Shows the camera, or places it looking at a point |
+| `screenshot <file.png> [width height]` | Saves the picture, without the debug UI |
+| `stats` | The F4 readout as text: draws, lights, probes, video memory, CPU and GPU times |
+| `wait [frames]` | Lets frames draw before the next command, so lighting settles |
+| `quit` | Closes the game |
+
+The same commands work from the start, too:
+
+- `--set key=value` sets a setting before the game starts, even those read only at start-up (`--set engine.ticksPerSecond=60`). Give it as often as you like.
+- `--run script.txt` runs a file of commands, one a line, when the game starts. For example a script with `wait 600`, `screenshot build/shots/a.png` and `quit` takes a picture once the light has settled and closes the game.
+- `--port <port>` picks another port (for the game, and for `--send`).
+
+Commands run between frames, like key presses, so a tick never sees half a command, and `step` runs exactly the ticks playing would. The port can also be changed or the listening turned off in F5 (Engine, Command port and Command server).
 
 ### Building from PowerShell or another terminal
 
@@ -407,13 +444,14 @@ src/              Engine and game source, in layers (lower ones never include hi
   app/            main and the game registry: picks a game by name and starts the engine
   games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground)
                   and games/clothlab (the cloth test ground)
-  engine/         The main loop, the Game interface, fixed-tick updates, the debug UI and the settings file
+  engine/         The main loop, the Game interface, fixed-tick updates, the debug UI, the settings file
+                  and the commands (settings, pause and step, camera, screenshot, stats)
   cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area), their step,
                   the tethers and coarse levels that keep fine sheets from stretching, and sewing patterns:
                   flat pieces cut into cloth and sewn together
   gameplay/       Character movement, spinners, fireflies, grenades, camera controllers
                   and the player controls games share (F1-F3)
-  platform/       The window and SDL input translation
+  platform/       The window, SDL input translation and the commands' local socket
   render/gpu/     The renderer's parts that do not call Vulkan:
                   - physically based shading and normal mapping, and their tested CPU mirrors
                   - shadows: the atlas and its caching, the sun's cascades and their fit to the screen's depths,
@@ -446,8 +484,8 @@ src/              Engine and game source, in layers (lower ones never include hi
   assets/         The asset manager, and OBJ, glTF, image and star catalogue loaders
   input/          Engine keys and the input snapshot (no SDL)
   ecs/            Entities, component storage and the World
-  core/           Fixed timestep, job system, profiler, sRGB conversions, the settings visitor, float tolerances
-                  and small shared types
+  core/           Fixed timestep, job system, profiler, sRGB conversions, the settings visitor, the command registry,
+                  float tolerances and small shared types
   physics/        Collision shapes, overlap tests, raycasts, colliders, picking, the broad phase grid,
                   static level collision, sphere sweeps, particles, the character controller and
                   bodies' signed distance fields

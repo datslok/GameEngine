@@ -64,12 +64,48 @@ struct SectionedSettings {
 };
 SectionedSettings separateSections(const std::vector<SettingEntry>& entries, const SettingsWalk& walk);
 
+/*
+* One field described for people and for commands: its key and value as the file saves them, what it takes ("number 0
+* to 1 (slider 0 to 0.2) nits", "whole number 1 to 8", "true or false", "one of Vsync, Mailbox, Immediate"), and whether
+* it is read only at start-up.
+*/
+struct SettingDescription {
+    std::string key;
+    std::string value;
+    std::string kind;
+    bool atStartup = false;
+};
+
+// Every field a walk visits, in visiting order (the order captureSettings gives).
+std::vector<SettingDescription> describeSettings(const SettingsWalk& walk);
+
+// What setting one field live did (setSetting).
+enum class SettingOutcome {
+    Set,
+    Clamped,       // past its hard limits: set to the nearest limit
+    Refused,       // not a value of its kind: left as it was
+    Unknown,       // no field has the key (a group's name is not a field)
+    AtStartupOnly  // read once at start-up, so changing it now would do nothing: left as it was
+};
+
+struct SettingChange {
+    SettingOutcome outcome = SettingOutcome::Set;
+    std::string value;   // the field's value afterwards, as text (empty when Unknown)
+    std::string message; // why, unless Set
+};
+
+// Set one field of a running game by its full key, as the settings file would, but saying exactly what happened.
+SettingChange setSetting(const SettingsWalk& walk, const std::string& key, const std::string& value);
+
 // Every field whose value is outside its hard limits, or whose slider range is not finite, ordered and inside them.
 std::vector<std::string> findLimitProblems(const SettingsWalk& walk);
 
 // The engine's settings under "engine" and the game's own (Game::visitSettings) under its title ("demo", "lightLab"),
 // as one tree. Each game has a section of its own, so one game's saved settings never land on another's.
 SettingsWalk engineAndGameSettings(EngineSettings& settings, Game& game);
+
+// The engine's settings alone, under "engine", as engineAndGameSettings walks them (no game needed: --send's port).
+SettingsWalk engineSettings(EngineSettings& settings);
 
 // The whole file, or nothing when it does not exist (no settings saved yet). Throws std::runtime_error when an
 // existing file cannot be read or written.

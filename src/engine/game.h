@@ -70,6 +70,15 @@ public:
         return false;
     }
 
+    // Place the camera at position looking at target, for the camera command (engine/engine_commands.h), and keep it
+    // there until the player moves it. Optional: false means this game's camera cannot be placed, the default.
+    virtual bool poseCamera(World& world, const Vec3& position, const Vec3& target) {
+        (void)world;
+        (void)position;
+        (void)target;
+        return false;
+    }
+
     // The game's own tunable values (its settings structs' visit()), optional: the debug UI shows them under the game's
     // title and the settings file saves and loads them with the engine's. Visiting must not change anything by itself.
     virtual void visitSettings(SettingsVisitor& visitor) {
