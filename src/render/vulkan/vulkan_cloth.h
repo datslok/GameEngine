@@ -48,6 +48,18 @@ public:
     const ComputePipeline& getLineTotal() const;
     const ComputePipeline& getLineApply() const;
 
+    // Self-collision's passes (cloth_self_*.comp): the pair search's hash, scan, points' and edges' pairs and dispatch
+    // sizes; each substep's contacts, their sums applied, the cut's shares, and the end with the velocities.
+    const ComputePipeline& getSelfHash() const;
+    const ComputePipeline& getSelfScan() const;
+    const ComputePipeline& getSelfPoints() const;
+    const ComputePipeline& getSelfEdges() const;
+    const ComputePipeline& getSelfArgs() const;
+    const ComputePipeline& getSelfContact() const;
+    const ComputePipeline& getSelfApply() const;
+    const ComputePipeline& getSelfCut() const;
+    const ComputePipeline& getSelfEnd() const;
+
 private:
     std::unique_ptr<ComputePipeline> predict;
     std::unique_ptr<ComputePipeline> stretch;
@@ -63,6 +75,15 @@ private:
     std::unique_ptr<ComputePipeline> lineTerms;
     std::unique_ptr<ComputePipeline> lineTotal;
     std::unique_ptr<ComputePipeline> lineApply;
+    std::unique_ptr<ComputePipeline> selfHash;
+    std::unique_ptr<ComputePipeline> selfScan;
+    std::unique_ptr<ComputePipeline> selfPoints;
+    std::unique_ptr<ComputePipeline> selfEdges;
+    std::unique_ptr<ComputePipeline> selfArgs;
+    std::unique_ptr<ComputePipeline> selfContact;
+    std::unique_ptr<ComputePipeline> selfApply;
+    std::unique_ptr<ComputePipeline> selfCut;
+    std::unique_ptr<ComputePipeline> selfEnd;
 };
 
 /*
@@ -250,12 +271,27 @@ private:
     // None for a cloth without coarse levels.
     std::unique_ptr<Levels> levels;
 
+    /*
+    * Self-collision's buffers (cloth_self_pass.glsl's set 1, render/gpu/cloth_gpu.h's GpuClothSelf): the triangles,
+    * edges, neighbourhoods, rest shape and pieces, uploaded once; the pair search's hash table, the pairs and their
+    * dispatch sizes, and each point's contact sums and cut share, which the passes write. One set: the slots' ticks
+    * run one after another on the queue.
+    */
+    struct SelfCollision {
+        GpuClothSelfInfo info;
+        std::vector<VulkanBuffer> buffers; // in binding order
+        OwnedHandle<VkDescriptorPool> descriptorPool;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+    };
+    std::unique_ptr<SelfCollision> self;
+
     Slot& slotAt(std::uint32_t slot);
     const Slot& slotAt(std::uint32_t slot) const;
     // Whether any of the slot's lists had to grow (its set must then be written again).
     bool ensureCapacity(Slot& slot, std::size_t ticks, std::size_t pins, std::size_t colliders, std::size_t fields);
     void writeSet(const Slot& slot);
     void uploadLevels(ImmediateCommands& uploads, const Cloth& cloth);
+    void uploadSelfCollision(ImmediateCommands& uploads, const Cloth& cloth);
 
     // What a substep's passes are recorded into: the commands, the slot's set, the tick and substep, any stamps.
     struct Recording {
@@ -275,6 +311,16 @@ private:
     void dispatch(const Recording& recording, const ComputePipeline& pipeline, ClothPass kind, std::uint32_t first, std::uint32_t count,
                   std::uint32_t level = 0, std::uint32_t groups = 0) const;
     void recordSweep(const Recording& recording) const;
+
+    /*
+    * A self-collision pass (its own set 1), told the mode in its level: over count items, or groups workgroups if
+    * given, or as many as the last pair search kept (indirect). Followed by a barrier and any stamp, as dispatch.
+    */
+    void dispatchSelf(const Recording& recording, const ComputePipeline& pipeline, std::uint32_t count, std::uint32_t mode = 0, std::uint32_t groups = 0,
+                      bool indirect = false) const;
+    // The pair search (clothSelfDispatchesPerSearch), and a substep's contacts, cut and end (clothSelfDispatchesPerSubstep).
+    void recordPairSearch(const Recording& recording) const;
+    void recordSelfSubstep(const Recording& recording) const;
     void recordLevels(const Recording& recording, const ClothSettings& settings) const;
     void keepTickStart(VkCommandBuffer commands, ClothPassStamps* stamps);
 };

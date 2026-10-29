@@ -29,20 +29,31 @@ void main() {
         clothHandAndTethers(point, position, tick);
     }
 
+    bool touched = false;
     if (position.w != 0.0) {
         bool beingSewn = partner != CLOTH_NO_STITCH && clothStitchWidest(previous, previousPositions[partner].xyz, tick.stitchClosingStep) > 0.0;
         float staticFriction = beingSewn ? 0.0 : tick.staticFriction;
         float kineticFriction = beingSewn ? 0.0 : tick.kineticFriction;
         for (uint body = 0u; body < tick.colliderCount; ++body) {
             ClothCollider collider = colliders[tick.colliderFirst + body];
-            clothContact(position.xyz, previous, clothSurfacePoint(collider, position.xyz), tick.thickness, staticFriction, kineticFriction);
+            vec4 surface = clothSurfacePoint(collider, position.xyz);
+            touched = touched || tick.thickness - surface.w > 0.0;
+            clothContact(position.xyz, previous, surface, tick.thickness, staticFriction, kineticFriction);
         }
         for (uint body = 0u; body < tick.fieldCount; ++body) {
-            clothContact(position.xyz, previous, clothFieldSurfacePoint(fields[tick.fieldFirst + body], position.xyz), tick.thickness,
-                         staticFriction, kineticFriction);
+            vec4 surface = clothFieldSurfacePoint(fields[tick.fieldFirst + body], position.xyz);
+            touched = touched || tick.thickness - surface.w > 0.0;
+            clothContact(position.xyz, previous, surface, tick.thickness, staticFriction, kineticFriction);
         }
 
         positions[point] = position;
+    }
+
+    // With self-collision, its passes come next and the velocity after them (cloth_self_end.comp); meanwhile w says
+    // whether a body held the point up, which the contacts read.
+    if (tick.selfCollision != 0u) {
+        velocities[point].w = touched ? 1.0 : 0.0;
+        return;
     }
     velocities[point] = vec4(clothFinishVelocity(position, previous, tick.substepSeconds, tick.kept), 0.0);
 }

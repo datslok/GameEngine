@@ -174,14 +174,15 @@ static_assert(sizeof(GpuClothSelfEdge) == 8, "GpuClothSelfEdge must match cloth_
 
 /*
 * A pair (ClothSelfPair) as the GPU keeps it: its points (the first side's first), its normal with the gap in w, each
-* point's height above the second side's nearest point, and its kind.
+* point's height above the second side's nearest point, its kind, and its dividing plane's height once placed.
 */
 struct GpuClothSelfPair {
     std::uint32_t points[4]{};
     Vec4 normalGap;
     Vec4 heights;
     std::uint32_t kind = CLOTH_PAIR_POINT_TRIANGLE;
-    std::uint32_t unused[3]{};
+    float plane = -1.0f;
+    std::uint32_t unused[2]{};
 };
 
 static_assert(sizeof(GpuClothSelfPair) == 64, "GpuClothSelfPair must match cloth.glsl's ClothSelfPair");
@@ -198,7 +199,8 @@ struct GpuClothSelfInfo {
     std::uint32_t scanBlocks = 0;
     std::uint32_t pairCapacity = 0;
     float meanRestEdge = 0.0f;
-    std::uint32_t unused[2]{};
+    std::uint32_t pieced = 0; // 1 for a cloth of several pieces (its pieceOf meaningful), 0 for one
+    std::uint32_t unused = 0;
 };
 
 static_assert(sizeof(GpuClothSelfInfo) == 32, "GpuClothSelfInfo must match cloth_self_pass.glsl's");
@@ -211,6 +213,7 @@ struct GpuClothSelf {
     std::vector<std::uint32_t> neighbourStarts;
     std::vector<std::uint32_t> neighbours;
     std::vector<Vec4> restPositions;
+    std::vector<std::uint32_t> pieceOf; // each point's piece, or one 0 for a cloth of one piece (info.pieced 0)
     GpuClothSelfInfo info;
 };
 

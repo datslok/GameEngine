@@ -4,6 +4,7 @@
 #include "cloth/cloth.h"
 #include "cloth/cloth_yardstick.h"
 #include "math/angles.h"
+#include "math/closest_points.h"
 #include "physics/signed_distance_field.h"
 #include "scene/collision_mesh.h"
 #include "render/gpu/cloth_gpu.h"
@@ -399,6 +400,185 @@ namespace {
         for (std::size_t i = 0; i < outputs.size(); ++i) {
             const float widest = stitchWidest(vec3From(inputs[i * 3]), vec3From(inputs[i * 3 + 1]), inputs[i * 3 + 2][0]);
             report.check("clothStitchWidest", arithmeticTolerance, widest, outputs[i][0]);
+        }
+    }
+
+    // A self-collision pair's three inputs: its kind, its normal and gap, its heights.
+    void pushSelfPair(std::vector<GpuVec4>& inputs, const ClothSelfPair& pair) {
+        inputs.push_back(gpuVec4(static_cast<float>(pair.kind)));
+        inputs.push_back(gpuVec4(pair.normal, pair.gap));
+        inputs.push_back(gpuVec4(pair.heights[0], pair.heights[1], pair.heights[2], pair.heights[3]));
+    }
+
+    // Four random points near one another, as cloth features meet: within a few centimetres, a flat triangle in ten.
+    std::array<Vec3, 4> nearbyPoints(CaseRandom& random, int index) {
+        std::array<Vec3, 4> at;
+        for (Vec3& point : at) {
+            point = randomPoint(random, 0.03f);
+        }
+        if (index % 10 == 0) {
+            at[3] = at[1] + (at[2] - at[1]) * 0.4f;
+        }
+        return at;
+    }
+
+    // closestTriangleFeature's point and weights, and closestPointsBetweenSegments' points and shares, on random cases.
+    void checkClosestFeatures(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{167};
+        std::vector<std::array<Vec3, 4>> cases;
+        std::vector<GpuVec4> inputs;
+        for (int i = 0; i < 600; ++i) {
+            cases.push_back(nearbyPoints(random, i));
+            for (const Vec3& point : cases.back()) {
+                inputs.push_back(gpuVec4(point));
+            }
+        }
+        const std::vector<GpuVec4> triangles = runner.run(shader, GPU_TEST_CLOTH_CLOSEST_TRIANGLE, inputs, 4, 2);
+        const std::vector<GpuVec4> segments = runner.run(shader, GPU_TEST_CLOTH_CLOSEST_SEGMENTS, inputs, 4, 3);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            const std::array<Vec3, 4>& at = cases[i];
+            const TriangleClosest triangle = closestTriangleFeature(at[0], at[1], at[2], at[3]);
+            report.check("clothClosestTriangle", arithmeticTolerance, triangle.point, vec3From(triangles[i * 2]));
+            report.check("clothClosestTriangle weights", arithmeticTolerance, triangle.weights, vec3From(triangles[i * 2 + 1]));
+
+            const ClosestPoints closest = closestPointsBetweenSegments(at[0], at[1], at[2], at[3]);
+            report.check("clothClosestSegments", arithmeticTolerance, closest.onFirst, vec3From(segments[i * 3]));
+            report.check("clothClosestSegments", arithmeticTolerance, closest.onSecond, vec3From(segments[i * 3 + 1]));
+            report.check("clothClosestSegments shares", arithmeticTolerance, closest.firstShare, segments[i * 3 + 2][0]);
+            report.check("clothClosestSegments shares", arithmeticTolerance, closest.secondShare, segments[i * 3 + 2][1]);
+        }
+    }
+
+    /*
+    * A pair made from four points (pointTrianglePair, edgeEdgePair), its plane's height for random motions
+    * (dividingHeight), and the cut's share (cutShare), half the cases of each kind.
+    */
+    void checkSelfPairs(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{173};
+        std::vector<ClothSelfPair> pairs;
+        std::vector<std::array<Vec3, 4>> motions;
+        std::vector<GpuVec4> pairInputs;
+        std::vector<GpuVec4> heightInputs;
+        for (int i = 0; i < 600; ++i) {
+            const std::array<Vec3, 4> at = nearbyPoints(random, i);
+            const std::vector<Vec3> positions(at.begin(), at.end());
+            const ClothSelfPair pair = i % 2 == 0 ? pointTrianglePair(positions, 0, {1, 2, 3}) : edgeEdgePair(positions, {0, 1}, {2, 3});
+            pairs.push_back(pair);
+            pairInputs.push_back(gpuVec4(static_cast<float>(pair.kind)));
+            for (const Vec3& point : at) {
+                pairInputs.push_back(gpuVec4(point));
+            }
+
+            std::array<Vec3, 4> moved;
+            for (Vec3& motion : moved) {
+                motion = i % 7 == 0 ? Vec3{} : randomPoint(random, 0.004f);
+            }
+            motions.push_back(moved);
+            pushSelfPair(heightInputs, pair);
+            for (const Vec3& motion : moved) {
+                heightInputs.push_back(gpuVec4(motion));
+            }
+        }
+        const std::vector<GpuVec4> made = runner.run(shader, GPU_TEST_CLOTH_SELF_PAIR, pairInputs, 5, 2);
+        const std::vector<GpuVec4> heights = runner.run(shader, GPU_TEST_CLOTH_DIVIDING_HEIGHT, heightInputs, 7, 1);
+
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+            const ClothSelfPair& pair = pairs[i];
+            report.check("clothMakePair normal", arithmeticTolerance, pair.normal, vec3From(made[i * 2]));
+            report.check("clothMakePair gap", arithmeticTolerance, pair.gap, made[i * 2][3]);
+            for (int corner = 0; corner < 4; ++corner) {
+                report.check("clothMakePair heights", arithmeticTolerance, pair.heights[corner], made[i * 2 + 1][corner]);
+            }
+            report.check("clothDividingHeight", arithmeticTolerance, dividingHeight(pair, motions[i]), heights[i][0]);
+        }
+
+        std::vector<GpuVec4> shareInputs;
+        std::vector<std::array<float, 2>> shareCases;
+        for (int i = 0; i < 600; ++i) {
+            const float room = i % 9 == 0 ? random.between(-0.001f, 0.0f) : random.between(0.0f, 0.01f);
+            const float approach = i % 5 == 0 ? random.between(-0.01f, 0.0f) : random.between(0.0f, 0.02f);
+            shareCases.push_back({room, approach});
+            shareInputs.push_back(gpuVec4(room, approach));
+        }
+        const std::vector<GpuVec4> shares = runner.run(shader, GPU_TEST_CLOTH_CUT_SHARE, shareInputs, 1, 1);
+        for (std::size_t i = 0; i < shareCases.size(); ++i) {
+            report.check("clothCutShare", arithmeticTolerance, cutShare(shareCases[i][0], shareCases[i][1]), shares[i][0]);
+        }
+    }
+
+    /*
+    * One pair's contact moves (selfContactMoves) for random pairs closer than the thickness, a pinned point in some,
+    * with slides since the substep's start under and over friction's limit; and the moves' whole units and their average.
+    */
+    void checkSelfContacts(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{179};
+        const ClothSettings settings;
+        std::vector<ClothSelfPair> pairs;
+        std::vector<std::array<Vec3, 4>> points;
+        std::vector<std::array<Vec3, 4>> previous;
+        std::vector<std::array<float, 4>> masses;
+        std::vector<GpuVec4> inputs;
+        for (int i = 0; i < 600; ++i) {
+            std::array<Vec3, 4> at;
+            for (Vec3& point : at) {
+                point = randomPoint(random, 0.006f);
+            }
+            const std::vector<Vec3> positions(at.begin(), at.end());
+            const ClothSelfPair pair = i % 2 == 0 ? pointTrianglePair(positions, 0, {1, 2, 3}) : edgeEdgePair(positions, {0, 1}, {2, 3});
+            std::array<Vec3, 4> before;
+            std::array<float, 4> weights;
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                before[corner] = at[corner] + randomPoint(random, i % 3 == 0 ? 0.004f : 0.0005f);
+                weights[corner] = randomWeight(random);
+            }
+            pairs.push_back(pair);
+            points.push_back(at);
+            previous.push_back(before);
+            masses.push_back(weights);
+            pushSelfPair(inputs, pair);
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                inputs.push_back(gpuVec4(at[corner], weights[corner]));
+            }
+            for (const Vec3& point : before) {
+                inputs.push_back(gpuVec4(point));
+            }
+            inputs.push_back(gpuVec4(settings.thickness, settings.staticFriction, settings.kineticFriction));
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_SELF_CONTACT, inputs, 12, 6);
+
+        // The moves are a push of millimetres divided among inverse masses of up to 500: relative rounding.
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+            std::array<Vec3, 4> moves{};
+            std::array<float, 4> coefficients{};
+            const bool pushed = selfContactMoves(pairs[i], points[i], previous[i], masses[i], settings.thickness, settings.staticFriction,
+                                                 settings.kineticFriction, moves, coefficients);
+            report.check("clothSelfContactMoves pushed", exactTolerance, pushed ? 1.0f : 0.0f, outputs[i * 6 + 5][0]);
+            if (!pushed) {
+                continue;
+            }
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                report.check("clothSelfContactMoves", arithmeticTolerance, moves[corner], vec3From(outputs[i * 6 + corner]));
+                report.check("clothSelfContactMoves coefficients", arithmeticTolerance, coefficients[corner], outputs[i * 6 + 4][corner]);
+            }
+        }
+
+        std::vector<GpuVec4> unitInputs;
+        std::vector<std::array<float, 3>> unitCases;
+        for (int i = 0; i < 600; ++i) {
+            const float metres = i % 11 == 0 ? random.between(-0.1f, 0.1f) : random.between(-0.005f, 0.005f);
+            const float units = std::round(random.between(-5e7f, 5e7f));
+            const float count = std::round(random.between(1.0f, 40.0f));
+            unitCases.push_back({metres, units, count});
+            unitInputs.push_back(gpuVec4(metres, units, count));
+        }
+        const std::vector<GpuVec4> units = runner.run(shader, GPU_TEST_CLOTH_SELF_MOVE_UNITS, unitInputs, 1, 1);
+        // A unit either way where the product lands on a half: the GPU may round the multiplication differently.
+        constexpr FloatTolerance oneUnit{.absolute = 1.0f, .relative = 0.0f};
+        for (std::size_t i = 0; i < unitCases.size(); ++i) {
+            report.check("clothSelfMoveUnits", oneUnit, static_cast<float>(selfMoveUnits(unitCases[i][0])), units[i][0]);
+            report.check("clothSelfMoveMetres", arithmeticTolerance,
+                         selfMoveMetres(static_cast<std::int64_t>(unitCases[i][1]), static_cast<std::uint32_t>(unitCases[i][2])), units[i][1]);
         }
     }
 
@@ -1046,6 +1226,9 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkTether(runner, report);
     checkStitch(runner, report);
     checkStitchWidest(runner, report);
+    checkClosestFeatures(runner, report);
+    checkSelfPairs(runner, report);
+    checkSelfContacts(runner, report);
     checkField(runner, report);
     checkFinishVelocity(runner, report);
     checkPointTerms(runner, report);

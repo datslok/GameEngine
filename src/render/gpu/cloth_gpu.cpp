@@ -208,6 +208,8 @@ GpuClothSelf packClothSelf(const Cloth& cloth) {
     info.scanBlocks = (info.bucketCount + clothGroupSize - 1) / clothGroupSize;
     info.pairCapacity = clothSelfPairsPerFeature * (static_cast<std::uint32_t>(cloth.particles.size()) + info.edgeCount);
     info.meanRestEdge = topology.meanRestEdge;
+    info.pieced = topology.pieceOf.empty() ? 0u : 1u;
+    packed.pieceOf = topology.pieceOf.empty() ? std::vector<std::uint32_t>{0u} : topology.pieceOf;
     return packed;
 }
 
@@ -219,6 +221,7 @@ GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair) {
     packed.normalGap = Vec4{pair.normal.x, pair.normal.y, pair.normal.z, pair.gap};
     packed.heights = Vec4{pair.heights[0], pair.heights[1], pair.heights[2], pair.heights[3]};
     packed.kind = static_cast<std::uint32_t>(pair.kind);
+    packed.plane = pair.plane;
     return packed;
 }
 

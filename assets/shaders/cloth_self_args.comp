@@ -1,0 +1,17 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The pair passes' dispatch sizes, read by vkCmdDispatchIndirect: a workgroup per CLOTH_GROUP_SIZE pairs kept, so the
+* contacts and the cut cover exactly the pairs found, without the CPU waiting to learn how many. One invocation.
+*/
+#include "cloth_self_pass.glsl"
+
+void main() {
+    if (gl_GlobalInvocationID.x != 0u) {
+        return;
+    }
+    pairState[CLOTH_SELF_DISPATCH] = (clothPairsKept() + CLOTH_GROUP_SIZE - 1u) / CLOTH_GROUP_SIZE;
+    pairState[CLOTH_SELF_DISPATCH + 1] = 1u;
+    pairState[CLOTH_SELF_DISPATCH + 2] = 1u;
+}

@@ -1,0 +1,47 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The self-contacts, all at once (solveSelfContacts): one invocation per pair works out its four points' moves from
+* the points as they are (clothSelfContactMoves) and adds each, in whole units, to its point's sums with atomics, with
+* one to the point's count where the pair's line runs through it. Integer sums do not depend on the order the
+* invocations add them in, so the result is the same every run. A point a body held up this substep (the end's pass
+* marked it in its velocity's w) counts as immovable, as on the CPU.
+*/
+#include "cloth_self_pass.glsl"
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= clothPairsKept()) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    ClothSelfPair pair = pairs[index];
+    vec3 points[4];
+    vec3 previous[4];
+    vec4 inverseMasses;
+    for (int corner = 0; corner < 4; ++corner) {
+        uint point = pair.points[corner];
+        vec4 position = positions[point];
+        points[corner] = position.xyz;
+        previous[corner] = previousPositions[point].xyz;
+        inverseMasses[corner] = velocities[point].w > 0.5 ? 0.0 : position.w;
+    }
+
+    vec3 moves[4];
+    vec4 coefficients;
+    if (!clothSelfContactMoves(pair, points, previous, inverseMasses, tick.thickness, tick.staticFriction, tick.kineticFriction, moves, coefficients)) {
+        return;
+    }
+    for (int corner = 0; corner < 4; ++corner) {
+        if (coefficients[corner] == 0.0 || inverseMasses[corner] == 0.0) {
+            continue;
+        }
+        uint point = pair.points[corner];
+        atomicAdd(pushes[point].x, clothSelfMoveUnits(moves[corner].x));
+        atomicAdd(pushes[point].y, clothSelfMoveUnits(moves[corner].y));
+        atomicAdd(pushes[point].z, clothSelfMoveUnits(moves[corner].z));
+        atomicAdd(pushes[point].w, 1);
+    }
+}

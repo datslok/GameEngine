@@ -1,0 +1,49 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The cut's shares (cutClothMotion): one invocation per pair places its plane at its first cut since the pairs were
+* found (from the points' motion since then, kept in the pair) and works out the share of this substep's motion each of
+* its free points may keep, taking the least for each point by an atomic minimum on the share's bits (shares are never
+* negative, so their bits order as the numbers do), and the same for the point's stitch partner, so a stitch's two
+* points keep the same share.
+*/
+#include "cloth_self_pass.glsl"
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= clothPairsKept()) {
+        return;
+    }
+
+    ClothSelfPair pair = pairs[index];
+    vec3 normal = pair.normalGap.xyz;
+    if (pair.plane < 0.0) {
+        vec3 motions[4];
+        for (int corner = 0; corner < 4; ++corner) {
+            uint point = pair.points[corner];
+            motions[corner] = positions[point].xyz - pairStart[point].xyz;
+        }
+        pair.plane = clothDividingHeight(pair, motions);
+        pairs[index].plane = pair.plane;
+    }
+
+    int firstPoints = pair.kind == CLOTH_PAIR_POINT_TRIANGLE ? 1 : 2;
+    for (int corner = 0; corner < 4; ++corner) {
+        uint point = pair.points[corner];
+        vec4 position = positions[point];
+        if (position.w == 0.0) {
+            continue;
+        }
+        vec3 substepStart = previousPositions[point].xyz;
+        float height = pair.heights[corner] + dot(substepStart - pairStart[point].xyz, normal);
+        float along = dot(position.xyz - substepStart, normal);
+        float share = corner < firstPoints ? clothCutShare(height - pair.plane, -along) : clothCutShare(pair.plane - height, along);
+        uint bits = floatBitsToUint(share);
+        atomicMin(shares[point], bits);
+        uint partner = stitchPartners[point];
+        if (partner != CLOTH_NO_STITCH) {
+            atomicMin(shares[partner], bits);
+        }
+    }
+}

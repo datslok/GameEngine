@@ -36,10 +36,12 @@
 #define CLOTH_SELF_PAIRS_PER_FEATURE 8
 
 // The pair search's hash table: at least this many buckets per triangle and edge (each item's box covers a few cells),
-// a power of two. An item whose box spans more than CLOTH_SELF_CELLS_PER_AXIS cells along an axis (a cloth torn wide
-// open) goes on a list every query reads instead; a query looks at most CLOTH_SELF_QUERY_CELLS_PER_AXIS cells an axis.
+// a power of two. An item whose box spans more than CLOTH_SELF_CELLS_PER_AXIS cells along an axis goes on a list every
+// query reads instead: cells are an edge and two reaches wide, so a triangle's diagonal straddling a cell's side takes
+// three, and only a cloth stretched or torn wide open takes more. A query looks at most CLOTH_SELF_QUERY_CELLS_PER_AXIS
+// cells an axis.
 #define CLOTH_SELF_BUCKETS_PER_ITEM 8
-#define CLOTH_SELF_CELLS_PER_AXIS 2
+#define CLOTH_SELF_CELLS_PER_AXIS 3
 #define CLOTH_SELF_QUERY_CELLS_PER_AXIS 4
 
 // The pair search's modes, in the hash and scan passes' level push constant.

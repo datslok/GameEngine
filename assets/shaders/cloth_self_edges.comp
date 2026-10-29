@@ -1,0 +1,88 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Each edge's pairs with later edges (findClothPairs' second pass): one invocation per edge reads the edges in the
+* buckets of its box's cells (at most CLOTH_SELF_QUERY_CELLS_PER_AXIS an axis) and the large items. An edge in several
+* of those cells is met in each, so a pair is kept only from the cell holding the low corner of where the two boxes
+* overlap (the other edge's grown by the reach): exactly one of the cells visited, since the other edge was written in
+* every cell its box covers. Then as the points' pass: not sharing a point, nearer than the reach, not excused.
+*/
+#include "cloth_self_pass.glsl"
+
+void considerEdge(uint edge, uint other, vec3 ownLow, vec3 ownHigh, ivec3 visited, bool owned, float reach, float cellSize, float thickness) {
+    if (other <= edge) {
+        return;
+    }
+    uvec2 mine = selfEdges[edge];
+    uvec2 theirs = selfEdges[other];
+    vec3 c = positions[theirs.x].xyz;
+    vec3 d = positions[theirs.y].xyz;
+    vec3 otherLow = min(c, d) - vec3(reach);
+    vec3 otherHigh = max(c, d) + vec3(reach);
+    if (any(greaterThan(ownLow, otherHigh)) || any(lessThan(ownHigh, otherLow))) {
+        return;
+    }
+    if (owned && any(notEqual(clothSelfCell(max(ownLow, otherLow), cellSize), visited))) {
+        return;
+    }
+
+    uvec4 points = uvec4(mine, theirs);
+    if (clothShareJoined(points, 2)) {
+        return;
+    }
+    vec3 onFirst;
+    vec3 onSecond;
+    clothClosestSegments(positions[mine.x].xyz, positions[mine.y].xyz, c, d, onFirst, onSecond);
+    if (dot(onFirst - onSecond, onFirst - onSecond) >= reach * reach) {
+        return;
+    }
+
+    vec3 now[4];
+    vec3 rest[4];
+    clothPairPlaces(points, now, rest);
+    if (clothPairExcused(points, 2, clothMakePair(CLOTH_PAIR_EDGE_EDGE, points, rest).normalGap.w, thickness)) {
+        return;
+    }
+    clothKeepPair(clothMakePair(CLOTH_PAIR_EDGE_EDGE, points, now));
+}
+
+void main() {
+    uint edge;
+    if (!clothItem(edge)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    float reach = tick.selfReach;
+    float cellSize = clothSelfCellSize(reach);
+    uvec2 ends = selfEdges[edge];
+    vec3 a = positions[ends.x].xyz;
+    vec3 b = positions[ends.y].xyz;
+    vec3 ownLow = min(a, b);
+    vec3 ownHigh = max(a, b);
+
+    uint large = min(pairState[CLOTH_SELF_LARGE_COUNT], info.triangleCount + info.edgeCount);
+    for (uint index = 0u; index < large; ++index) {
+        if (largeItems[index] >= info.triangleCount) {
+            considerEdge(edge, largeItems[index] - info.triangleCount, ownLow, ownHigh, ivec3(0), false, reach, cellSize, tick.thickness);
+        }
+    }
+
+    ivec3 lowCell = clothSelfCell(ownLow, cellSize);
+    ivec3 highCell = min(clothSelfCell(ownHigh, cellSize), lowCell + ivec3(CLOTH_SELF_QUERY_CELLS_PER_AXIS - 1));
+    for (int x = lowCell.x; x <= highCell.x; ++x) {
+        for (int y = lowCell.y; y <= highCell.y; ++y) {
+            for (int z = lowCell.z; z <= highCell.z; ++z) {
+                ivec3 visited = ivec3(x, y, z);
+                uint bucket = clothSelfBucket(visited);
+                for (uint entry = bucketStarts[bucket]; entry < bucketStarts[bucket + 1u]; ++entry) {
+                    uint item = entries[entry];
+                    if (item >= info.triangleCount) {
+                        considerEdge(edge, item - info.triangleCount, ownLow, ownHigh, visited, true, reach, cellSize, tick.thickness);
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,64 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Each point's pairs with triangles (findClothPairs' first pass): one invocation per point reads the triangles in its
+* cell's bucket (and the large items), each once since the hash wrote it once per bucket, and keeps those it may meet:
+* the point inside the triangle's box grown by the reach (which also drops the other cells' triangles sharing the
+* bucket), not one of its own, nearer than the reach, and not excused (clothPairExcused, measured at rest).
+*/
+#include "cloth_self_pass.glsl"
+
+void considerTriangle(uint point, uint triangle, vec3 here, float reach, float thickness) {
+    uvec4 corners = selfTriangles[triangle];
+    vec3 a = positions[corners.x].xyz;
+    vec3 b = positions[corners.y].xyz;
+    vec3 c = positions[corners.z].xyz;
+    if (any(lessThan(here, min(min(a, b), c) - vec3(reach))) || any(greaterThan(here, max(max(a, b), c) + vec3(reach)))) {
+        return;
+    }
+
+    uvec4 points = uvec4(point, corners.xyz);
+    if (clothShareJoined(points, 1)) {
+        return;
+    }
+    vec3 weights;
+    vec3 nearest = clothClosestTriangle(here, a, b, c, weights);
+    if (dot(nearest - here, nearest - here) >= reach * reach) {
+        return;
+    }
+
+    vec3 now[4];
+    vec3 rest[4];
+    clothPairPlaces(points, now, rest);
+    if (clothPairExcused(points, 1, clothMakePair(CLOTH_PAIR_POINT_TRIANGLE, points, rest).normalGap.w, thickness)) {
+        return;
+    }
+    clothKeepPair(clothMakePair(CLOTH_PAIR_POINT_TRIANGLE, points, now));
+}
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    float reach = tick.selfReach;
+    vec3 here = positions[point].xyz;
+
+    uint large = min(pairState[CLOTH_SELF_LARGE_COUNT], info.triangleCount + info.edgeCount);
+    for (uint index = 0u; index < large; ++index) {
+        if (largeItems[index] < info.triangleCount) {
+            considerTriangle(point, largeItems[index], here, reach, tick.thickness);
+        }
+    }
+
+    uint bucket = clothSelfBucket(clothSelfCell(here, clothSelfCellSize(reach)));
+    for (uint entry = bucketStarts[bucket]; entry < bucketStarts[bucket + 1u]; ++entry) {
+        uint item = entries[entry];
+        if (item < info.triangleCount) {
+            considerTriangle(point, item, here, reach, tick.thickness);
+        }
+    }
+}

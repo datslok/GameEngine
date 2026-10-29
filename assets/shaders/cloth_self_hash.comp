@@ -1,0 +1,72 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The pair search's hash table, built by a counting sort (as the CPU's SpatialHash): one invocation per triangle, then
+* per edge (item = triangle, or triangleCount + edge), each its box grown by the reach cut into cells. Counting
+* (levelNumber CLOTH_SELF_COUNT) adds one to each of its cells' buckets; scattering (CLOTH_SELF_SCATTER), after the scan
+* has turned the counts into where each bucket starts and the counts are cleared again, writes the item at the next
+* place in each. An item is written once per bucket even when two of its cells share one, so a query meets it once. An
+* item spanning more than CLOTH_SELF_CELLS_PER_AXIS cells an axis goes on the large items' list instead (when counting).
+*/
+#include "cloth_self_pass.glsl"
+
+void main() {
+    uint item;
+    if (!clothItem(item)) {
+        return;
+    }
+
+    ClothTick tick = ticks[tickIndex];
+    float reach = tick.selfReach;
+    vec3 low;
+    vec3 high;
+    if (item < info.triangleCount) {
+        uvec4 corners = selfTriangles[item];
+        vec3 a = positions[corners.x].xyz;
+        vec3 b = positions[corners.y].xyz;
+        vec3 c = positions[corners.z].xyz;
+        low = min(min(a, b), c);
+        high = max(max(a, b), c);
+    } else {
+        uvec2 ends = selfEdges[item - info.triangleCount];
+        vec3 a = positions[ends.x].xyz;
+        vec3 b = positions[ends.y].xyz;
+        low = min(a, b);
+        high = max(a, b);
+    }
+    float cellSize = clothSelfCellSize(reach);
+    ivec3 lowCell = clothSelfCell(low - vec3(reach), cellSize);
+    ivec3 highCell = clothSelfCell(high + vec3(reach), cellSize);
+    ivec3 span = highCell - lowCell;
+
+    if (any(greaterThanEqual(span, ivec3(CLOTH_SELF_CELLS_PER_AXIS)))) {
+        if (levelNumber == CLOTH_SELF_COUNT) {
+            largeItems[atomicAdd(pairState[CLOTH_SELF_LARGE_COUNT], 1u)] = item;
+        }
+        return;
+    }
+
+    uint used[CLOTH_SELF_CELLS_PER_AXIS * CLOTH_SELF_CELLS_PER_AXIS * CLOTH_SELF_CELLS_PER_AXIS];
+    uint usedCount = 0u;
+    for (int x = lowCell.x; x <= highCell.x; ++x) {
+        for (int y = lowCell.y; y <= highCell.y; ++y) {
+            for (int z = lowCell.z; z <= highCell.z; ++z) {
+                uint bucket = clothSelfBucket(ivec3(x, y, z));
+                bool seen = false;
+                for (uint earlier = 0u; earlier < usedCount; ++earlier) {
+                    seen = seen || used[earlier] == bucket;
+                }
+                if (seen) {
+                    continue;
+                }
+                used[usedCount++] = bucket;
+                if (levelNumber == CLOTH_SELF_COUNT) {
+                    atomicAdd(bucketCounts[bucket], 1u);
+                } else {
+                    entries[bucketStarts[bucket] + atomicAdd(bucketCounts[bucket], 1u)] = item;
+                }
+            }
+        }
+    }
+}

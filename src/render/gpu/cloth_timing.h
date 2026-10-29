@@ -10,7 +10,7 @@
 * timestamp before the frame's first cloth pass and one after each, every gap credited to the kind of pass it follows,
 * so a frame's thousand or so dispatches add up into a dozen numbers. Sweep is vertex block descent's points; Move is a
 * level's line search moving the points; Stitch is a sewn cloth's stitches; Copy is the copies of the points (kept for
-* drawing between ticks, and read back).
+* drawing between ticks, and read back); Self is self-collision's passes (its pair search, contacts and cut).
 */
 enum class ClothPass {
     Predict,
@@ -28,6 +28,7 @@ enum class ClothPass {
     Finish,
     Shape,
     Copy,
+    Self,
     Count,
 };
 

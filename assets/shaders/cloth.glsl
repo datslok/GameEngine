@@ -103,7 +103,12 @@ struct ClothTick {
     uint fieldFirst;
     uint fieldCount;
     float stitchClosingStep; // how far a stitch's gap may close in a substep, m
-    uint unused;
+    uint selfCollision;      // 1 with self-collision on
+
+    float selfReach; // m: self-collision's pairs are found within this
+    float unusedSelf0;
+    float unusedSelf1;
+    float unusedSelf2;
 };
 
 // A field body (GpuClothField): its first sample with the spacing in w, its samples along each axis with where they start
@@ -582,6 +587,288 @@ vec3 clothFinishVelocity(vec4 point, vec3 previous, float seconds, float kept) {
         velocity = velocity * kept;
     }
     return velocity;
+}
+
+// Self-collision (cloth/cloth_self_collision.h), mirrored function by function.
+
+// A pair of features found close (ClothSelfPair, render/gpu/cloth_gpu.h's GpuClothSelfPair): its points (the first
+// side's first), its normal with the gap in w, each point's height above the second side's nearest point, its kind and
+// its dividing plane's height once placed (below zero until then).
+struct ClothSelfPair {
+    uvec4 points;
+    vec4 normalGap;
+    vec4 heights;
+    uint kind;
+    float plane;
+    uint unused0;
+    uint unused1;
+};
+
+// segmentShare (math/closest_points): how far along a to b its point nearest to point lies.
+float clothSegmentShare(vec3 point, vec3 a, vec3 b) {
+    vec3 direction = b - a;
+    float lengthSquared = dot(direction, direction);
+    return lengthSquared <= CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED ? 0.0 : clamp(dot(point - a, direction) / lengthSquared, 0.0, 1.0);
+}
+
+// closestTriangleFeature (math/closest_points): the nearest point on the triangle, its barycentric weights in weights.
+vec3 clothClosestTriangle(vec3 point, vec3 a, vec3 b, vec3 c, out vec3 weights) {
+    vec3 ab = b - a;
+    vec3 ac = c - a;
+
+    vec3 ap = point - a;
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+    if (d1 <= 0.0 && d2 <= 0.0) {
+        weights = vec3(1.0, 0.0, 0.0);
+        return a;
+    }
+
+    vec3 bp = point - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+    if (d3 >= 0.0 && d4 <= d3) {
+        weights = vec3(0.0, 1.0, 0.0);
+        return b;
+    }
+
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) {
+        float along = d1 / (d1 - d3);
+        weights = vec3(1.0 - along, along, 0.0);
+        return a + ab * along;
+    }
+
+    vec3 cp = point - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+    if (d6 >= 0.0 && d5 <= d6) {
+        weights = vec3(0.0, 0.0, 1.0);
+        return c;
+    }
+
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) {
+        float along = d2 / (d2 - d6);
+        weights = vec3(1.0 - along, 0.0, along);
+        return a + ac * along;
+    }
+
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+        float along = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        weights = vec3(0.0, 1.0 - along, along);
+        return b + (c - b) * along;
+    }
+
+    float total = va + vb + vc;
+    if (total <= 0.0) {
+        float onAB = clothSegmentShare(point, a, b);
+        float onBC = clothSegmentShare(point, b, c);
+        float onCA = clothSegmentShare(point, c, a);
+        vec3 best = a + (b - a) * onAB;
+        weights = vec3(1.0 - onAB, onAB, 0.0);
+        vec3 candidate = b + (c - b) * onBC;
+        if (dot(candidate - point, candidate - point) < dot(best - point, best - point)) {
+            best = candidate;
+            weights = vec3(0.0, 1.0 - onBC, onBC);
+        }
+        candidate = c + (a - c) * onCA;
+        if (dot(candidate - point, candidate - point) < dot(best - point, best - point)) {
+            best = candidate;
+            weights = vec3(onCA, 0.0, 1.0 - onCA);
+        }
+        return best;
+    }
+    float onB = vb / total;
+    float onC = vc / total;
+    weights = vec3(1.0 - onB - onC, onB, onC);
+    return a + ab * onB + ac * onC;
+}
+
+// closestPointsBetweenSegments (math/closest_points): the nearest points, and how far along each they lie (returned).
+vec2 clothClosestSegments(vec3 a1, vec3 b1, vec3 a2, vec3 b2, out vec3 onFirst, out vec3 onSecond) {
+    vec3 direction1 = b1 - a1;
+    vec3 direction2 = b2 - a2;
+    vec3 between = a1 - a2;
+    float lengthSquared1 = dot(direction1, direction1);
+    float lengthSquared2 = dot(direction2, direction2);
+    float f = dot(direction2, between);
+    float s = 0.0;
+    float t = 0.0;
+
+    if (lengthSquared1 <= CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED && lengthSquared2 <= CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED) {
+        onFirst = a1;
+        onSecond = a2;
+        return vec2(0.0);
+    }
+
+    if (lengthSquared1 <= CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED) {
+        t = clamp(f / lengthSquared2, 0.0, 1.0);
+    } else {
+        float c = dot(direction1, between);
+        if (lengthSquared2 <= CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED) {
+            s = clamp(-c / lengthSquared1, 0.0, 1.0);
+        } else {
+            float b = dot(direction1, direction2);
+            float denominator = lengthSquared1 * lengthSquared2 - b * b;
+            if (denominator > CLOSEST_POINTS_DEGENERATE_LENGTH_SQUARED * lengthSquared1 * lengthSquared2) {
+                s = clamp((b * f - c * lengthSquared2) / denominator, 0.0, 1.0);
+            }
+            t = (b * s + f) / lengthSquared2;
+            if (t < 0.0) {
+                t = 0.0;
+                s = clamp(-c / lengthSquared1, 0.0, 1.0);
+            } else if (t > 1.0) {
+                t = 1.0;
+                s = clamp((b - c) / lengthSquared1, 0.0, 1.0);
+            }
+        }
+    }
+
+    onFirst = a1 + direction1 * s;
+    onSecond = a2 + direction2 * t;
+    return vec2(s, t);
+}
+
+// The unit direction from second to first, or fallback where they meet; the distance between them in apart.
+vec3 clothDirectionBetween(vec3 first, vec3 second, vec3 fallback, out float apart) {
+    vec3 between = first - second;
+    apart = length(between);
+    return apart > CLOTH_SHORTEST_EDGE ? between * (1.0 / apart) : fallback;
+}
+
+// A unit vector at right angles to both, or up when they are parallel.
+vec3 clothAcrossBoth(vec3 first, vec3 second) {
+    vec3 across = cross(first, second);
+    float acrossLength = length(across);
+    return acrossLength > CLOTH_SHORTEST_EDGE ? across * (1.0 / acrossLength) : vec3(0.0, 1.0, 0.0);
+}
+
+// pointTrianglePair and edgeEdgePair: a pair of the four points at, numbered points, as they are now.
+ClothSelfPair clothMakePair(uint kind, uvec4 points, vec3 at[4]) {
+    ClothSelfPair pair;
+    pair.points = points;
+    pair.kind = kind;
+    pair.plane = -1.0;
+    pair.unused0 = 0u;
+    pair.unused1 = 0u;
+    vec3 firstNearest;
+    vec3 secondNearest;
+    vec3 fallback;
+    if (kind == CLOTH_PAIR_POINT_TRIANGLE) {
+        vec3 weights;
+        firstNearest = at[0];
+        secondNearest = clothClosestTriangle(at[0], at[1], at[2], at[3], weights);
+        fallback = clothAcrossBoth(at[2] - at[1], at[3] - at[1]);
+    } else {
+        clothClosestSegments(at[0], at[1], at[2], at[3], firstNearest, secondNearest);
+        fallback = clothAcrossBoth(at[1] - at[0], at[3] - at[2]);
+    }
+    float gap;
+    vec3 normal = clothDirectionBetween(firstNearest, secondNearest, fallback, gap);
+    pair.normalGap = vec4(normal, gap);
+    for (int index = 0; index < 4; ++index) {
+        pair.heights[index] = dot(at[index] - secondNearest, normal);
+    }
+    return pair;
+}
+
+// dividingHeight: the plane's height above the second side's nearest point, each side's room in proportion to its approach.
+float clothDividingHeight(ClothSelfPair pair, vec3 motions[4]) {
+    int firstPoints = pair.kind == CLOTH_PAIR_POINT_TRIANGLE ? 1 : 2;
+    float firstApproach = 0.0;
+    float secondApproach = 0.0;
+    for (int index = 0; index < 4; ++index) {
+        float along = dot(motions[index], pair.normalGap.xyz);
+        if (index < firstPoints) {
+            firstApproach = max(firstApproach, -along);
+        } else {
+            secondApproach = max(secondApproach, along);
+        }
+    }
+    float approach = firstApproach + secondApproach;
+    float firstShare = approach > 0.0 ? firstApproach / approach : 0.5;
+    return pair.normalGap.w * (1.0 - firstShare);
+}
+
+// cutShare: the share of a motion kept, for a point room from its plane moving approach towards it.
+float clothCutShare(float room, float approach) {
+    if (approach <= 0.0) {
+        return 1.0;
+    }
+    if (room <= 0.0) {
+        return 0.0;
+    }
+    float reached = room / approach;
+    return reached >= 1.0 / CLOTH_CUT_RELAXATION ? 1.0 : CLOTH_CUT_RELAXATION * reached;
+}
+
+/*
+* selfContactMoves: the pair's contact as its points are now (points, with their inverse masses in inverseMasses, and
+* where they began the substep), how each would move; false when there is no contact. coefficients are each point's
+* weight along the line between the nearest points.
+*/
+bool clothSelfContactMoves(ClothSelfPair pair, vec3 points[4], vec3 previous[4], vec4 inverseMasses, float thickness, float staticFriction,
+                           float kineticFriction, out vec3 moves[4], out vec4 coefficients) {
+    vec3 firstNearest;
+    vec3 secondNearest;
+    if (pair.kind == CLOTH_PAIR_POINT_TRIANGLE) {
+        vec3 weights;
+        firstNearest = points[0];
+        secondNearest = clothClosestTriangle(points[0], points[1], points[2], points[3], weights);
+        coefficients = vec4(1.0, -weights.x, -weights.y, -weights.z);
+    } else {
+        vec2 shares = clothClosestSegments(points[0], points[1], points[2], points[3], firstNearest, secondNearest);
+        coefficients = vec4(1.0 - shares.x, shares.x, shares.y - 1.0, -shares.y);
+    }
+    for (int index = 0; index < 4; ++index) {
+        moves[index] = vec3(0.0);
+    }
+
+    float apart;
+    vec3 normal = clothDirectionBetween(firstNearest, secondNearest, pair.normalGap.xyz, apart);
+    float push = thickness - apart;
+    if (push <= 0.0) {
+        return false;
+    }
+
+    float weights = 0.0;
+    for (int index = 0; index < 4; ++index) {
+        weights += coefficients[index] * coefficients[index] * inverseMasses[index];
+    }
+    if (weights <= 0.0) {
+        return false;
+    }
+
+    float scale = push / weights;
+    vec3 slide = vec3(0.0);
+    for (int index = 0; index < 4; ++index) {
+        moves[index] = normal * (scale * coefficients[index] * inverseMasses[index]);
+        slide = slide + (points[index] + moves[index] - previous[index]) * coefficients[index];
+    }
+
+    vec3 across = slide - normal * dot(normal, slide);
+    float acrossLength = length(across);
+    float held = acrossLength < staticFriction * push ? 1.0 : (acrossLength > 0.0 ? min(kineticFriction * push / acrossLength, 1.0) : 0.0);
+    if (held > 0.0) {
+        vec3 undone = across * (held / weights);
+        for (int index = 0; index < 4; ++index) {
+            moves[index] = moves[index] - undone * (coefficients[index] * inverseMasses[index]);
+        }
+    }
+    return true;
+}
+
+// selfMoveUnits and selfMoveMetres: a move in whole units of CLOTH_SELF_MOVE_SCALE a metre, rounded half to even, and
+// a sum of count of them back as one average move.
+int clothSelfMoveUnits(float metres) {
+    float clamped = clamp(metres, -CLOTH_SELF_LARGEST_MOVE, CLOTH_SELF_LARGEST_MOVE);
+    return int(roundEven(clamped * float(CLOTH_SELF_MOVE_SCALE)));
+}
+
+float clothSelfMoveMetres(int units, uint count) {
+    return float(units) / (float(count) * float(CLOTH_SELF_MOVE_SCALE));
 }
 
 #endif

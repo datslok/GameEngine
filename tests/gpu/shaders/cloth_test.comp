@@ -25,6 +25,19 @@ ClothBlock testBlock(uint first) {
     return block;
 }
 
+// A self-collision pair from three inputs: its kind (x), its normal and gap, its heights; points 0 to 3, its plane unplaced.
+ClothSelfPair testSelfPair(uint first) {
+    ClothSelfPair pair;
+    pair.points = uvec4(0u, 1u, 2u, 3u);
+    pair.kind = uint(testInput(first).x);
+    pair.normalGap = testInput(first + 1u);
+    pair.heights = testInput(first + 2u);
+    pair.plane = -1.0;
+    pair.unused0 = 0u;
+    pair.unused1 = 0u;
+    return pair;
+}
+
 // A term's results: the force, then the block's diagonal and the rest.
 void testTermOutputs(vec3 force, ClothBlock block) {
     testOutput(0, vec4(force, 0.0));
@@ -138,6 +151,52 @@ void main() {
     } else if (function == GPU_TEST_CLOTH_STITCH_WIDEST) {
         // The two points' places at the substep's start, then the closing step.
         testOutput(0, vec4(clothStitchWidest(testInput(0).xyz, testInput(1).xyz, testInput(2).x)));
+    } else if (function == GPU_TEST_CLOTH_CLOSEST_TRIANGLE) {
+        // A point, then a triangle's corners: the nearest point and its weights.
+        vec3 weights;
+        vec3 nearest = clothClosestTriangle(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, testInput(3).xyz, weights);
+        testOutput(0, vec4(nearest, 0.0));
+        testOutput(1, vec4(weights, 0.0));
+    } else if (function == GPU_TEST_CLOTH_CLOSEST_SEGMENTS) {
+        // Two segments' ends: the nearest points and how far along each.
+        vec3 onFirst;
+        vec3 onSecond;
+        vec2 shares = clothClosestSegments(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, testInput(3).xyz, onFirst, onSecond);
+        testOutput(0, vec4(onFirst, 0.0));
+        testOutput(1, vec4(onSecond, 0.0));
+        testOutput(2, vec4(shares, 0.0, 0.0));
+    } else if (function == GPU_TEST_CLOTH_SELF_PAIR) {
+        // The kind (x), then the four points: the pair's normal and gap, and its heights.
+        vec3 at[4] = vec3[4](testInput(1).xyz, testInput(2).xyz, testInput(3).xyz, testInput(4).xyz);
+        ClothSelfPair pair = clothMakePair(uint(testInput(0).x), uvec4(0u, 1u, 2u, 3u), at);
+        testOutput(0, pair.normalGap);
+        testOutput(1, pair.heights);
+    } else if (function == GPU_TEST_CLOTH_DIVIDING_HEIGHT) {
+        // A pair (inputs 0 to 2), then its four points' motions.
+        vec3 motions[4] = vec3[4](testInput(3).xyz, testInput(4).xyz, testInput(5).xyz, testInput(6).xyz);
+        testOutput(0, vec4(clothDividingHeight(testSelfPair(0u), motions)));
+    } else if (function == GPU_TEST_CLOTH_CUT_SHARE) {
+        // The room to the plane and the approach.
+        testOutput(0, vec4(clothCutShare(testInput(0).x, testInput(0).y)));
+    } else if (function == GPU_TEST_CLOTH_SELF_CONTACT) {
+        // A pair (inputs 0 to 2), its points with their inverse masses in w (3 to 6), where they began the substep (7 to
+        // 10), then the thickness and the frictions: each point's move, the coefficients, and whether it pushed.
+        vec3 points[4] = vec3[4](testInput(3).xyz, testInput(4).xyz, testInput(5).xyz, testInput(6).xyz);
+        vec3 previous[4] = vec3[4](testInput(7).xyz, testInput(8).xyz, testInput(9).xyz, testInput(10).xyz);
+        vec4 masses = vec4(testInput(3).w, testInput(4).w, testInput(5).w, testInput(6).w);
+        vec4 fabric = testInput(11);
+        vec3 moves[4];
+        vec4 coefficients;
+        bool pushed = clothSelfContactMoves(testSelfPair(0u), points, previous, masses, fabric.x, fabric.y, fabric.z, moves, coefficients);
+        for (int corner = 0; corner < 4; ++corner) {
+            testOutput(uint(corner), vec4(moves[corner], 0.0));
+        }
+        testOutput(4u, coefficients);
+        testOutput(5u, vec4(pushed ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_CLOTH_SELF_MOVE_UNITS) {
+        // A move in metres (x), then a sum of units (y) over a count (z): the move's units and the sum's average move.
+        vec4 move = testInput(0);
+        testOutput(0, vec4(float(clothSelfMoveUnits(move.x)), clothSelfMoveMetres(int(move.y), uint(move.z)), 0.0, 0.0));
     } else if (function == GPU_TEST_CLOTH_FIELD) {
         // A point's cell in a field (its origin, spacing and sample counts), then a cell's corners blended at that share.
         ivec3 cell;

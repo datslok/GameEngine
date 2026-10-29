@@ -512,18 +512,10 @@ void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start
         }
     }
 
-    // Each free point's share with the cap, then a stitch's two points both the smaller.
-    const float longest = 0.5f * clothCutRelaxation * reach;
-    for (std::size_t point = 0; point < positions.size(); ++point) {
-        if (inverseMasses[point] == 0.0f) {
-            continue;
-        }
-        const float length = (positions[point] - substepStart[point]).length();
-        const float already = (substepStart[point] - start[point]).length();
-        if (already + length * shares[point] > longest) {
-            shares[point] = std::max(longest - already, 0.0f) / length;
-        }
-    }
+    /*
+    * A stitch's two points both take the smaller of their pairs' shares (the GPU's cut writes each pair's share to
+    * both partners), then each point its own cap; a shut stitch's points move alike, so their caps agree.
+    */
     std::vector<float> kept = shares;
     for (std::size_t point = 0; point < partners.size(); ++point) {
         if (partners[point] != clothNoPartner) {
@@ -531,9 +523,20 @@ void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start
         }
     }
 
+    const float longest = 0.5f * clothCutRelaxation * reach;
     for (std::size_t point = 0; point < positions.size(); ++point) {
-        if (inverseMasses[point] != 0.0f && kept[point] < 1.0f) {
-            positions[point] = substepStart[point] + (positions[point] - substepStart[point]) * kept[point];
+        if (inverseMasses[point] == 0.0f) {
+            continue;
+        }
+        const Vec3 motion = positions[point] - substepStart[point];
+        const float length = motion.length();
+        const float already = (substepStart[point] - start[point]).length();
+        float share = kept[point];
+        if (already + length * share > longest) {
+            share = std::max(longest - already, 0.0f) / length;
+        }
+        if (share < 1.0f) {
+            positions[point] = substepStart[point] + motion * share;
         }
     }
 }

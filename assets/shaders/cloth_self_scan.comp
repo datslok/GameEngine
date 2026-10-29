@@ -1,0 +1,67 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Where each hash bucket starts: the counts' running total before it (an exclusive scan), in three passes, as GPUs scan
+* long lists. CLOTH_SELF_SCAN_BLOCKS: each workgroup scans its CLOTH_GROUP_SIZE buckets in shared memory (each
+* invocation adding what is a step back, steps doubling: Hillis and Steele) and writes its block's total.
+* CLOTH_SELF_SCAN_TOTALS: one workgroup turns the blocks' totals into each block's start, each invocation summing a run
+* of them first. CLOTH_SELF_SCAN_ADD: each bucket's block start added, and the last writes the total after it. Integer
+* sums, so the order of the additions does not matter.
+*/
+#include "cloth_self_pass.glsl"
+
+shared uint sums[CLOTH_GROUP_SIZE];
+
+void main() {
+    uint local = gl_LocalInvocationID.x;
+    uint bucket = gl_GlobalInvocationID.x;
+
+    if (levelNumber == CLOTH_SELF_SCAN_BLOCKS) {
+        uint value = bucket < info.bucketCount ? bucketCounts[bucket] : 0u;
+        sums[local] = value;
+        barrier();
+        for (uint offset = 1u; offset < CLOTH_GROUP_SIZE; offset *= 2u) {
+            uint add = local >= offset ? sums[local - offset] : 0u;
+            barrier();
+            sums[local] += add;
+            barrier();
+        }
+        if (bucket < info.bucketCount) {
+            bucketStarts[bucket] = sums[local] - value;
+        }
+        if (local == CLOTH_GROUP_SIZE - 1u) {
+            scanBlocks[gl_WorkGroupID.x] = sums[local];
+        }
+    } else if (levelNumber == CLOTH_SELF_SCAN_TOTALS) {
+        // One workgroup: each invocation a run of blocks, then the runs' totals scanned, then each run written out.
+        uint run = (info.scanBlocks + CLOTH_GROUP_SIZE - 1u) / CLOTH_GROUP_SIZE;
+        uint begin = local * run;
+        uint end = min(begin + run, info.scanBlocks);
+        uint total = 0u;
+        for (uint block = begin; block < end; ++block) {
+            total += scanBlocks[block];
+        }
+        sums[local] = total;
+        barrier();
+        for (uint offset = 1u; offset < CLOTH_GROUP_SIZE; offset *= 2u) {
+            uint add = local >= offset ? sums[local - offset] : 0u;
+            barrier();
+            sums[local] += add;
+            barrier();
+        }
+        uint start = sums[local] - total;
+        for (uint block = begin; block < end; ++block) {
+            uint blockTotal = scanBlocks[block];
+            scanBlocks[block] = start;
+            start += blockTotal;
+        }
+    } else {
+        if (bucket < info.bucketCount) {
+            bucketStarts[bucket] += scanBlocks[gl_WorkGroupID.x];
+            if (bucket + 1u == info.bucketCount) {
+                bucketStarts[info.bucketCount] = bucketStarts[bucket] + bucketCounts[bucket];
+            }
+        }
+    }
+}

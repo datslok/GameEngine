@@ -1,0 +1,37 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The substep's end with self-collision (cutClothMotion's end, then finishClothStep): each free point's motion this
+* substep cut to its share, and its motion since the pairs were found kept within half gamma's share of the reach;
+* then its velocity from the motion, slowed by the air, as cloth_finish.comp does without self-collision. Also clears
+* the point's contact sums for the next substep.
+*/
+#include "cloth_self_pass.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+    pushes[point] = ivec4(0);
+
+    ClothTick tick = ticks[tickIndex];
+    vec4 position = positions[point];
+    vec3 previous = previousPositions[point].xyz;
+    if (position.w != 0.0) {
+        float longest = 0.5 * CLOTH_CUT_RELAXATION * tick.selfReach;
+        vec3 motion = position.xyz - previous;
+        float moved = length(motion);
+        float already = length(previous - pairStart[point].xyz);
+        float share = uintBitsToFloat(shares[point]);
+        if (already + moved * share > longest) {
+            share = max(longest - already, 0.0) / moved;
+        }
+        if (share < 1.0) {
+            position.xyz = previous + motion * share;
+            positions[point] = position;
+        }
+    }
+    velocities[point] = vec4(clothFinishVelocity(position, previous, tick.substepSeconds, tick.kept), 0.0);
+}

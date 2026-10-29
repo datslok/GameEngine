@@ -1,0 +1,34 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* The self-contacts' moves applied (solveSelfContacts' end): each point moved by the average of the moves its pairs
+* gave it, pooled with its stitch partner's so a stitch's two points move as one, neither moved when either is pinned or
+* held by a body. Also readies the cut: each point's share of its motion starts whole. The sums are cleared by the
+* end's pass, after every point here has read its partner's.
+*/
+#include "cloth_self_pass.glsl"
+
+void main() {
+    uint point;
+    if (!clothItem(point)) {
+        return;
+    }
+    shares[point] = floatBitsToUint(1.0);
+
+    ivec4 sum = pushes[point];
+    uint partner = stitchPartners[point];
+    vec4 position = positions[point];
+    if (partner != CLOTH_NO_STITCH) {
+        bool stuck = position.w == 0.0 || positions[partner].w == 0.0 || velocities[point].w > 0.5 || velocities[partner].w > 0.5;
+        if (stuck) {
+            return;
+        }
+        sum += pushes[partner];
+    }
+    if (sum.w > 0) {
+        uint count = uint(sum.w);
+        position.xyz += vec3(clothSelfMoveMetres(sum.x, count), clothSelfMoveMetres(sum.y, count), clothSelfMoveMetres(sum.z, count));
+        positions[point] = position;
+    }
+}

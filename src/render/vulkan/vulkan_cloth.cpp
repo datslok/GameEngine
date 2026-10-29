@@ -48,6 +48,11 @@ namespace {
     // point's level, then the line search's partials and step.
     constexpr std::uint32_t levelBindings = 16;
 
+    // cloth_self_pass.glsl's set 1, in order: the triangles, edges, representatives, neighbour starts and neighbours,
+    // rest positions, pieces and info; the pair start; the bucket counts and starts, the scan's blocks, the entries
+    // and the large items; the pairs and their state; each point's contact sums and cut share.
+    constexpr std::uint32_t selfBindings = 18;
+
     // cloth_shape.comp's: the points, the points before the last tick, the rest vertices, indices, source vertices, the
     // two adjacency lists (starts and triangles each), and the mesh slot it writes.
     constexpr std::uint32_t shapeBindings = 10;
@@ -90,6 +95,13 @@ namespace {
     // A coarse level's pass: the cloth passes' set 0 (shared, from the prediction's pipeline), then its own set 1.
     ComputePipelineDescription levelPass(const char* shader, const ComputePipeline& clothPasses) {
         ComputePipelineDescription description = computePass(shader, levelBindings, sizeof(ClothPushConstants));
+        description.sharedSets = {clothPasses.getResourceLayout()};
+        return description;
+    }
+
+    // A self-collision pass: the cloth passes' set 0, then its own set 1, as a level's pass.
+    ComputePipelineDescription selfPass(const char* shader, const ComputePipeline& clothPasses) {
+        ComputePipelineDescription description = computePass(shader, selfBindings, sizeof(ClothPushConstants));
         description.sharedSets = {clothPasses.getResourceLayout()};
         return description;
     }
@@ -311,7 +323,16 @@ VulkanClothPipelines::VulkanClothPipelines(const VulkanDevice& device):
     spread(std::make_unique<ComputePipeline>(device, levelPass("assets/shaders/cloth_spread.comp.spv", *predict))),
     lineTerms(std::make_unique<ComputePipeline>(device, levelPass("assets/shaders/cloth_line_terms.comp.spv", *predict))),
     lineTotal(std::make_unique<ComputePipeline>(device, levelPass("assets/shaders/cloth_line_total.comp.spv", *predict))),
-    lineApply(std::make_unique<ComputePipeline>(device, levelPass("assets/shaders/cloth_line_apply.comp.spv", *predict)))
+    lineApply(std::make_unique<ComputePipeline>(device, levelPass("assets/shaders/cloth_line_apply.comp.spv", *predict))),
+    selfHash(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_hash.comp.spv", *predict))),
+    selfScan(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_scan.comp.spv", *predict))),
+    selfPoints(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_points.comp.spv", *predict))),
+    selfEdges(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_edges.comp.spv", *predict))),
+    selfArgs(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_args.comp.spv", *predict))),
+    selfContact(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_contact.comp.spv", *predict))),
+    selfApply(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_apply.comp.spv", *predict))),
+    selfCut(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_cut.comp.spv", *predict))),
+    selfEnd(std::make_unique<ComputePipeline>(device, selfPass("assets/shaders/cloth_self_end.comp.spv", *predict)))
 {
 }
 
@@ -369,6 +390,42 @@ const ComputePipeline& VulkanClothPipelines::getLineTotal() const {
 
 const ComputePipeline& VulkanClothPipelines::getLineApply() const {
     return *lineApply;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfHash() const {
+    return *selfHash;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfScan() const {
+    return *selfScan;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfPoints() const {
+    return *selfPoints;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfEdges() const {
+    return *selfEdges;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfArgs() const {
+    return *selfArgs;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfContact() const {
+    return *selfContact;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfApply() const {
+    return *selfApply;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfCut() const {
+    return *selfCut;
+}
+
+const ComputePipeline& VulkanClothPipelines::getSelfEnd() const {
+    return *selfEnd;
 }
 
 /*
@@ -467,6 +524,9 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     if (!cloth.hierarchy.levels.empty()) {
         uploadLevels(uploads, cloth);
     }
+    if (!cloth.triangles.empty()) {
+        uploadSelfCollision(uploads, cloth);
+    }
 }
 
 /*
@@ -541,6 +601,137 @@ void VulkanCloth::uploadLevels(ImmediateCommands& uploads, const Cloth& cloth) {
                                                       made->lineStep.get()};
     writeBuffers(device, made->set, buffers);
     levels = std::move(made);
+}
+
+/*
+* The topology goes into GPU memory once, through one staging buffer. The work buffers need no upload but the contact
+* sums, which start at nothing (each substep's end clears them again): the search writes the pair start, counts and
+* state first, the scan the starts, and each substep's apply the shares. The hash's entries have room for every item in
+* CLOTH_SELF_CELLS_PER_AXIS cubed cells, the most one not on the large items' list covers.
+*/
+void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& cloth) {
+    const GpuClothSelf packed = packClothSelf(cloth);
+    auto made = std::make_unique<SelfCollision>();
+    made->info = packed.info;
+    const GpuClothSelfInfo& info = packed.info;
+
+    const VmaAllocator allocator = device.getAllocator();
+    const VkBufferUsageFlags constant = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    const VkBufferUsageFlags work = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    const auto buffer = [&](VkDeviceSize bytes, VkBufferUsageFlags usage) {
+        made->buffers.push_back(VulkanBuffer{allocator, atLeastSmallest(bytes), usage, BufferMemory::Gpu});
+        return made->buffers.back().get();
+    };
+    const VkDeviceSize items = static_cast<VkDeviceSize>(info.triangleCount) + info.edgeCount;
+    const VkDeviceSize cellsPerItem = static_cast<VkDeviceSize>(CLOTH_SELF_CELLS_PER_AXIS) * CLOTH_SELF_CELLS_PER_AXIS * CLOTH_SELF_CELLS_PER_AXIS;
+    const VkDeviceSize perPoint = static_cast<VkDeviceSize>(pointCount);
+    made->buffers.reserve(selfBindings);
+
+    const VkBuffer triangles = buffer(bytesOf(packed.triangles), constant);
+    const VkBuffer edges = buffer(bytesOf(packed.edges), constant);
+    const VkBuffer joined = buffer(bytesOf(packed.joined), constant);
+    const VkBuffer neighbourStarts = buffer(bytesOf(packed.neighbourStarts), constant);
+    const VkBuffer neighbours = buffer(bytesOf(packed.neighbours), constant);
+    const VkBuffer rest = buffer(bytesOf(packed.restPositions), constant);
+    const VkBuffer pieces = buffer(bytesOf(packed.pieceOf), constant);
+    const VkBuffer infoBuffer = buffer(sizeof(GpuClothSelfInfo), constant);
+    buffer(perPoint * sizeof(Vec4), work);                                         // pair start
+    buffer(static_cast<VkDeviceSize>(info.bucketCount) * sizeof(std::uint32_t), work); // bucket counts
+    buffer((static_cast<VkDeviceSize>(info.bucketCount) + 1) * sizeof(std::uint32_t), work); // bucket starts
+    buffer(static_cast<VkDeviceSize>(info.scanBlocks) * sizeof(std::uint32_t), work);  // scan blocks
+    buffer(items * cellsPerItem * sizeof(std::uint32_t), work);                    // entries
+    buffer(items * sizeof(std::uint32_t), work);                                   // large items
+    buffer(static_cast<VkDeviceSize>(info.pairCapacity) * sizeof(GpuClothSelfPair), work); // pairs
+    buffer(clothSelfStateWords * sizeof(std::uint32_t), work | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT); // pair state
+    const VkBuffer pushSums = buffer(perPoint * 4 * sizeof(std::int32_t), work);   // contact sums
+    buffer(perPoint * sizeof(std::uint32_t), work);                                // cut shares
+
+    const std::array<Upload, 8> copies{
+        Upload{packed.triangles.data(), bytesOf(packed.triangles), triangles},
+        Upload{packed.edges.data(), bytesOf(packed.edges), edges},
+        Upload{packed.joined.data(), bytesOf(packed.joined), joined},
+        Upload{packed.neighbourStarts.data(), bytesOf(packed.neighbourStarts), neighbourStarts},
+        Upload{packed.neighbours.data(), bytesOf(packed.neighbours), neighbours},
+        Upload{packed.restPositions.data(), bytesOf(packed.restPositions), rest},
+        Upload{packed.pieceOf.data(), bytesOf(packed.pieceOf), pieces},
+        Upload{&info, sizeof(GpuClothSelfInfo), infoBuffer},
+    };
+    uploadAll(device, uploads, copies);
+    uploads.run([&](VkCommandBuffer commands) {
+        vkCmdFillBuffer(commands, pushSums, 0, VK_WHOLE_SIZE, 0);
+        clothBarrier(commands);
+    });
+
+    made->descriptorPool = storagePool(device, 1, selfBindings);
+    made->set = allocateSet(device, made->descriptorPool.get(), pipelines.getSelfHash().getResourceLayout());
+    std::array<VkBuffer, selfBindings> handles{};
+    for (std::size_t binding = 0; binding < selfBindings; ++binding) {
+        handles[binding] = made->buffers[binding].get();
+    }
+    writeBuffers(device, made->set, handles);
+    self = std::move(made);
+}
+
+void VulkanCloth::dispatchSelf(const Recording& recording, const ComputePipeline& pipeline, std::uint32_t count, std::uint32_t mode, std::uint32_t groups,
+                               bool indirect) const {
+    const VkCommandBuffer commands = recording.commands;
+    const ClothPushConstants constants{recording.tick, recording.step, 0, count, mode, pointCount, edgeCount, hingeCount, recording.bendingSubsteps};
+    const std::array<VkDescriptorSet, 2> sets{recording.set, self->set};
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.get());
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, 2, sets.data(), 0, nullptr);
+    vkCmdPushConstants(commands, pipeline.getLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+    if (indirect) {
+        vkCmdDispatchIndirect(commands, self->buffers[15].get(), CLOTH_SELF_DISPATCH * sizeof(std::uint32_t));
+    } else {
+        vkCmdDispatch(commands, groups > 0 ? groups : workgroupCount(count, clothGroupSize), 1, 1);
+    }
+    clothBarrier(commands);
+    if (recording.stamps) {
+        recording.stamps->mark(commands, ClothPass::Self);
+    }
+}
+
+/*
+* The points as they are kept as the pairs' start, the bucket counts and the pair state cleared; the hash counted,
+* scanned and, its counts cleared again for cursors, scattered; then the points' pairs, the edges' pairs and the pairs'
+* dispatch sizes, which the indirect dispatches after it read (so a barrier for indirect reads too).
+*/
+void VulkanCloth::recordPairSearch(const Recording& recording) const {
+    const VkCommandBuffer commands = recording.commands;
+    const GpuClothSelfInfo& info = self->info;
+    const std::uint32_t items = info.triangleCount + info.edgeCount;
+
+    toCopyBarrier(commands);
+    const VkBufferCopy start{0, 0, static_cast<VkDeviceSize>(pointCount) * sizeof(Vec4)};
+    vkCmdCopyBuffer(commands, positions.get(), self->buffers[8].get(), 1, &start);
+    vkCmdFillBuffer(commands, self->buffers[9].get(), 0, VK_WHOLE_SIZE, 0);
+    vkCmdFillBuffer(commands, self->buffers[15].get(), 0, VK_WHOLE_SIZE, 0);
+    clothBarrier(commands);
+
+    dispatchSelf(recording, pipelines.getSelfHash(), items, CLOTH_SELF_COUNT);
+    dispatchSelf(recording, pipelines.getSelfScan(), info.bucketCount, CLOTH_SELF_SCAN_BLOCKS, info.scanBlocks);
+    dispatchSelf(recording, pipelines.getSelfScan(), info.bucketCount, CLOTH_SELF_SCAN_TOTALS, 1);
+    dispatchSelf(recording, pipelines.getSelfScan(), info.bucketCount, CLOTH_SELF_SCAN_ADD, info.scanBlocks);
+
+    toCopyBarrier(commands);
+    vkCmdFillBuffer(commands, self->buffers[9].get(), 0, VK_WHOLE_SIZE, 0);
+    clothBarrier(commands);
+
+    dispatchSelf(recording, pipelines.getSelfHash(), items, CLOTH_SELF_SCATTER);
+    dispatchSelf(recording, pipelines.getSelfPoints(), pointCount);
+    dispatchSelf(recording, pipelines.getSelfEdges(), info.edgeCount);
+    dispatchSelf(recording, pipelines.getSelfArgs(), 1);
+    memoryBarrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+}
+
+// After the end's bodies: the contacts and their sums applied, the cut's shares, and the end with the velocities.
+void VulkanCloth::recordSelfSubstep(const Recording& recording) const {
+    dispatchSelf(recording, pipelines.getSelfContact(), 0, 0, 0, true);
+    dispatchSelf(recording, pipelines.getSelfApply(), pointCount);
+    dispatchSelf(recording, pipelines.getSelfCut(), 0, 0, 0, true);
+    dispatchSelf(recording, pipelines.getSelfEnd(), pointCount);
 }
 
 VulkanCloth::Slot& VulkanCloth::slotAt(std::uint32_t slot) {
@@ -722,6 +913,10 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
     for (std::size_t index = 0; index < ticks.size(); ++index) {
         const ClothTickCommands& tick = ticks[index];
         tickRecords[index] = packClothTick(tick, pinFirst, colliderFirst, fieldFirst);
+        // A cloth with no triangles has no self-collision passes, so its end's pass must do the velocities.
+        if (self == nullptr) {
+            tickRecords[index].selfCollision = 0;
+        }
         for (std::size_t pin = 0; pin < tick.pinTargets.size(); ++pin) {
             const Vec3& start = pinPositions[pin];
             const Vec3& target = tick.pinTargets[pin];
@@ -750,9 +945,14 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
             keepTickStart(commands, stamps);
         }
         const ClothSettings& settings = ticks[index].settings;
+        const bool selfCollision = settings.selfCollision && self != nullptr;
+        const std::uint32_t pairInterval = static_cast<std::uint32_t>(std::max(settings.selfCollisionInterval, 1));
         for (std::uint32_t step = 0; step < static_cast<std::uint32_t>(settings.substeps); ++step) {
             const int bendingCovered = bendingSubsteps(static_cast<int>(step), settings.substeps, settings.bendingInterval);
             const Recording recording{commands, slot.set, static_cast<std::uint32_t>(index), step, stamps, static_cast<std::uint32_t>(bendingCovered)};
+            if (selfCollision && step % pairInterval == 0) {
+                recordPairSearch(recording);
+            }
             dispatch(recording, pipelines.getPredict(), ClothPass::Predict, 0, pointCount);
             if (settings.method == ClothMethod::VertexBlockDescent) {
                 recordSweep(recording);
@@ -769,6 +969,9 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
             }
             dispatch(recording, pipelines.getStitch(), ClothPass::Stitch, 0, stitchCount);
             dispatch(recording, pipelines.getFinish(), ClothPass::Finish, 0, pointCount);
+            if (selfCollision) {
+                recordSelfSubstep(recording);
+            }
         }
     }
     device.endLabel(commands);
