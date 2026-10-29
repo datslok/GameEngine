@@ -64,9 +64,8 @@
 *
 * Self-collision (cloth_self_collision.h) keeps its layers the thickness apart and never lets one pass through another:
 * pairs of features within the reach are found every selfCollisionInterval substeps, and each substep ends by cutting
-* every point's motion short of the planes between them. Off by default while it runs on the CPU only (the GPU solver
-* ignores it until its port); anything moving faster than about 0.43 x reach per interval (3.8 m/s at 7.5 mm and 3
-* substeps of 30 a tick) is slowed to that. The reach is 1.5 times the thickness: wide enough to find layers before they
+* every point's motion short of the planes between them, on the CPU and the GPU alike; anything moving faster than about
+* 0.43 x reach per interval (3.8 m/s at 7.5 mm and 3 substeps of 30 a tick) is slowed to that. The reach is 1.5 times the thickness: wide enough to find layers before they
 * touch, narrow enough that a 1 cm mesh's flat neighbours (8.7 mm apart) are not pairs, which would cost every substep.
 */
 enum class ClothMethod {
@@ -92,7 +91,7 @@ struct ClothSettings {
     bool tethers = true;
     float tetherSlack = 0.002f;        // share of a tether's rest length
     float seamSpeed = 1.0f;            // m/s
-    bool selfCollision = false;
+    bool selfCollision = true;
     int selfCollisionInterval = 3;     // substeps between finding pairs
     float selfCollisionReach = 0.0075f; // m: pairs closer than this are found (at least the thickness)
 };

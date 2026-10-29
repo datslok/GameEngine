@@ -2,6 +2,8 @@
 #include "cloth/cloth_constraints.h"
 #include "scene/mesh.h"
 
+#include "cloth_helpers.h"
+
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -117,7 +119,7 @@ namespace {
     // How far a strip clamped along its first two columns, sticking out level, droops at its free end once it settles.
     float cantileverDroop(int columns, int rows, float bendingStiffness, int substeps = 15, BendingModel model = BendingModel::Hinge,
                           int bendingInterval = 1) {
-        ClothSettings settings;
+        ClothSettings settings = withoutSelfCollision();
         settings.bendingStiffness = bendingStiffness;
         settings.bendingModel = model;
         settings.drag = 3.0f;
@@ -357,7 +359,7 @@ namespace {
     // With bending and moving pins, the same run twice gives the same bits.
     void testDeterministic() {
         const auto run = [] {
-            Cloth cloth = makeCloth(Mesh::grid(8, 8, 1.0f, 1.0f), Mat4::rotationX(-0.5f * pi), ClothSettings{});
+            Cloth cloth = makeCloth(Mesh::grid(8, 8, 1.0f, 1.0f), Mat4::rotationX(-0.5f * pi), withoutSelfCollision());
             addClothPin(cloth, 72);
             addClothPin(cloth, 80);
             for (int tick = 0; tick < 120; ++tick) {

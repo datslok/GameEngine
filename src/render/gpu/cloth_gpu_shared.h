@@ -31,4 +31,30 @@
 #define CLOTH_NO_GRAB 4294967295u
 #define CLOTH_NO_STITCH 4294967295u
 
+// Self-collision on the GPU. Room for this many pairs per point and per edge (the dress, resting, has about one per
+// point; a pile of layers several); pairs past it are not kept, and counted (cloth_self_points.comp).
+#define CLOTH_SELF_PAIRS_PER_FEATURE 8
+
+// The pair search's hash table: at least this many buckets per triangle and edge (each item's box covers a few cells),
+// a power of two. An item whose box spans more than CLOTH_SELF_CELLS_PER_AXIS cells along an axis (a cloth torn wide
+// open) goes on a list every query reads instead; a query looks at most CLOTH_SELF_QUERY_CELLS_PER_AXIS cells an axis.
+#define CLOTH_SELF_BUCKETS_PER_ITEM 8
+#define CLOTH_SELF_CELLS_PER_AXIS 2
+#define CLOTH_SELF_QUERY_CELLS_PER_AXIS 4
+
+// The pair search's modes, in the hash and scan passes' level push constant.
+#define CLOTH_SELF_COUNT 0
+#define CLOTH_SELF_SCATTER 1
+#define CLOTH_SELF_SCAN_BLOCKS 0
+#define CLOTH_SELF_SCAN_TOTALS 1
+#define CLOTH_SELF_SCAN_ADD 2
+
+// pairState's words (cloth_self_pass.glsl): how many pairs were found, how many did not fit, the large items' count,
+// then the pairs' dispatch sizes (x, y, z) for vkCmdDispatchIndirect.
+#define CLOTH_SELF_PAIR_COUNT 0
+#define CLOTH_SELF_PAIRS_LOST 1
+#define CLOTH_SELF_LARGE_COUNT 2
+#define CLOTH_SELF_DISPATCH 4
+#define CLOTH_SELF_STATE_WORDS 8
+
 #endif

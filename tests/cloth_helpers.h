@@ -16,6 +16,16 @@ inline ClothSettings untetheredSettings() {
 }
 
 /*
+* Self-collision off, for tests of something else that run cloth on the CPU, where finding pairs ten times a tick costs
+* several times the solver (on the GPU, where the game runs cloth, it is cheap): hanging sheets, cantilevers, the
+* cloth lab's stations. With it on they took the routine tests from about 100 s to 335.
+*/
+inline ClothSettings withoutSelfCollision(ClothSettings settings = {}) {
+    settings.selfCollision = false;
+    return settings;
+}
+
+/*
 * Two level sheets in one mesh, so one cloth: each squares x squares squares of size metres a side, in the x-z plane
 * centred on the y axis, the lower at y = 0 and the upper gap metres above it (vertices of the lower first). For
 * self-collision, which acts within one cloth.

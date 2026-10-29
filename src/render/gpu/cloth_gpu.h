@@ -140,10 +140,85 @@ struct GpuClothTick {
     std::uint32_t fieldFirst = 0;
     std::uint32_t fieldCount = 0;
     float stitchClosingStep = 0.0f; // m
+    std::uint32_t selfCollision = 0; // 1 with self-collision on
+    float selfReach = 0.0f;          // m: pairs closer are found, at least the thickness (as stepCloth uses it)
+    float unusedSelf[3]{};
+};
+
+static_assert(sizeof(GpuClothTick) == 128, "GpuClothTick must match cloth.glsl's ClothTick");
+
+// Self-collision's passes (cloth_self_*.comp) each substep, and each time they find pairs: the hash's count, its scan
+// (three passes), its scatter, the points' pairs, the edges' pairs, the pairs' dispatch sizes.
+inline constexpr std::uint32_t clothSelfDispatchesPerSubstep = 4;
+inline constexpr std::uint32_t clothSelfDispatchesPerSearch = 8;
+inline constexpr std::uint32_t clothSelfPairsPerFeature = CLOTH_SELF_PAIRS_PER_FEATURE;
+inline constexpr std::uint32_t clothSelfBucketsPerItem = CLOTH_SELF_BUCKETS_PER_ITEM;
+inline constexpr std::uint32_t clothSelfStateWords = CLOTH_SELF_STATE_WORDS;
+static_assert(static_cast<int>(ClothPairKind::PointTriangle) == CLOTH_PAIR_POINT_TRIANGLE && static_cast<int>(ClothPairKind::EdgeEdge) == CLOTH_PAIR_EDGE_EDGE,
+              "The GPU's pair kinds are ClothPairKind's values");
+
+// A triangle's corners and an edge's ends, as the self-collision passes read them.
+struct GpuClothSelfTriangle {
+    std::uint32_t corners[3]{};
     std::uint32_t unused = 0;
 };
 
-static_assert(sizeof(GpuClothTick) == 112, "GpuClothTick must match cloth.glsl's ClothTick");
+static_assert(sizeof(GpuClothSelfTriangle) == 16, "GpuClothSelfTriangle must match cloth_self_pass.glsl's");
+
+struct GpuClothSelfEdge {
+    std::uint32_t first = 0;
+    std::uint32_t second = 0;
+};
+
+static_assert(sizeof(GpuClothSelfEdge) == 8, "GpuClothSelfEdge must match cloth_self_pass.glsl's");
+
+/*
+* A pair (ClothSelfPair) as the GPU keeps it: its points (the first side's first), its normal with the gap in w, each
+* point's height above the second side's nearest point, and its kind.
+*/
+struct GpuClothSelfPair {
+    std::uint32_t points[4]{};
+    Vec4 normalGap;
+    Vec4 heights;
+    std::uint32_t kind = CLOTH_PAIR_POINT_TRIANGLE;
+    std::uint32_t unused[3]{};
+};
+
+static_assert(sizeof(GpuClothSelfPair) == 64, "GpuClothSelfPair must match cloth.glsl's ClothSelfPair");
+
+/*
+* The numbers the self-collision passes need besides the tick's: how many triangles and edges (the hash numbers
+* triangles first, then edges), the hash table's buckets (a power of two) and the scan's blocks of them, room for pairs,
+* and the mean edge at rest the hash's cells are sized from (clothSelfCellSize).
+*/
+struct GpuClothSelfInfo {
+    std::uint32_t triangleCount = 0;
+    std::uint32_t edgeCount = 0;
+    std::uint32_t bucketCount = 0;
+    std::uint32_t scanBlocks = 0;
+    std::uint32_t pairCapacity = 0;
+    float meanRestEdge = 0.0f;
+    std::uint32_t unused[2]{};
+};
+
+static_assert(sizeof(GpuClothSelfInfo) == 32, "GpuClothSelfInfo must match cloth_self_pass.glsl's");
+
+// What a cloth's self-collision passes read, packed once (ClothSelfTopology and its triangles).
+struct GpuClothSelf {
+    std::vector<GpuClothSelfTriangle> triangles;
+    std::vector<GpuClothSelfEdge> edges;
+    std::vector<std::uint32_t> joined;
+    std::vector<std::uint32_t> neighbourStarts;
+    std::vector<std::uint32_t> neighbours;
+    std::vector<Vec4> restPositions;
+    GpuClothSelfInfo info;
+};
+
+// A cloth's self-collision records: room for clothSelfPairsPerFeature pairs per point and per edge, and a hash table of
+// the smallest power of two buckets at least clothSelfBucketsPerItem per triangle and edge.
+GpuClothSelf packClothSelf(const Cloth& cloth);
+
+GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair);
 
 /*
 * A cloth the renderer simulates this frame (VulkanRenderer::setClothWork): which cloth (key, its entity, the same every

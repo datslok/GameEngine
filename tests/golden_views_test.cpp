@@ -1,6 +1,7 @@
 #include "app/game_registry.h"
 #include "engine/engine_settings.h"
 #include "engine/golden.h"
+#include "engine/settings_file.h"
 #include "engine/state_hash.h"
 #include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
@@ -20,6 +21,11 @@ namespace {
         std::unique_ptr<Game> game;
 
         PreparedView(const GameEntry& entry, const GoldenView& view): game(entry.make()) {
+            // The cloth lab's self-collision off: here its cloth runs on the CPU, where it is slow (the other games have none).
+            const SettingsWalk walk = [this](SettingsVisitor& visitor) {
+                game->visitSettings(visitor);
+            };
+            setSetting(walk, "cloth.selfCollision", "false");
             game->onInit(world, assets);
             advanceToGoldenView(*game, world, view, EngineSettings{}.ticksPerSecond);
         }

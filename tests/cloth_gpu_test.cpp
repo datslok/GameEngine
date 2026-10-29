@@ -229,6 +229,7 @@ namespace {
         const std::uint32_t stretchColours = static_cast<std::uint32_t>(cloth.stretchColours.size() - 1);
         const std::uint32_t bendColours = static_cast<std::uint32_t>(cloth.bendColours.size() - 1);
         ClothSettings settings = cloth.settings;
+        settings.selfCollision = false;
         const std::uint32_t substeps = static_cast<std::uint32_t>(settings.substeps);
         assert(clothDispatchesPerTick(cloth, settings) == substeps * (2 + stretchColours + bendColours));
 
@@ -267,6 +268,80 @@ namespace {
         settings.substeps = 4;
         settings.method = ClothMethod::VertexBlockDescent;
         assert(clothDispatchesPerTick(sewn, settings) == 4 * (3 + pointColours));
+    }
+
+    /*
+    * Self-collision on the GPU: each substep four more (the contacts, their sums applied, the cut's shares, the cut with
+    * the velocities), and each time pairs are found (every selfCollisionInterval-th substep, from the first) eight: the
+    * hash's count, its scan in three, its scatter, the points' pairs, the edges' pairs, the pairs' dispatch sizes.
+    */
+    void testSelfDispatches() {
+        const Cloth cloth = smallSheet();
+        ClothSettings settings = cloth.settings;
+        settings.substeps = 30;
+        settings.selfCollisionInterval = 3;
+        settings.selfCollision = false;
+        const std::uint32_t plain = clothDispatchesPerTick(cloth, settings);
+
+        settings.selfCollision = true;
+        assert(clothDispatchesPerTick(cloth, settings) == plain + 30 * clothSelfDispatchesPerSubstep + 10 * clothSelfDispatchesPerSearch);
+        assert(clothSelfDispatchesPerSubstep == 4 && clothSelfDispatchesPerSearch == 8);
+
+        // 30 substeps every 4th: found at 0, 4, ..., 28, 8 times.
+        settings.selfCollisionInterval = 4;
+        assert(clothDispatchesPerTick(cloth, settings) == plain + 30 * clothSelfDispatchesPerSubstep + 8 * clothSelfDispatchesPerSearch);
+    }
+
+    /*
+    * What the self-collision passes read, packed once: the triangles and edges, each point's representative and its
+    * neighbours, the rest shape, the mean edge at rest (the hash's cells are it and two reaches wide), a hash table of a
+    * power of two buckets, at least eight per triangle and edge, and room for clothSelfPairsPerFeature pairs per point and
+    * edge. A pair's record holds the CPU's pair as it is.
+    */
+    void testSelfRecords() {
+        const Cloth cloth = sewnSheet();
+        const GpuClothSelf self = packClothSelf(cloth);
+        const ClothSelfTopology& topology = cloth.selfTopology;
+
+        assert(self.triangles.size() == cloth.triangles.size());
+        for (std::size_t index = 0; index < cloth.triangles.size(); ++index) {
+            assert(self.triangles[index].corners[0] == cloth.triangles[index][0] && self.triangles[index].corners[2] == cloth.triangles[index][2]);
+        }
+        assert(self.edges.size() == topology.edges.size());
+        assert(self.edges.back().first == topology.edges.back()[0] && self.edges.back().second == topology.edges.back()[1]);
+        assert(self.joined == topology.joined && self.neighbourStarts == topology.neighbourStarts && self.neighbours == topology.neighbours);
+        assert(self.restPositions.size() == cloth.particles.size() && self.restPositions[3].x == topology.restPositions[3].x);
+        assert(self.info.triangleCount == self.triangles.size() && self.info.edgeCount == self.edges.size());
+        assert(self.info.meanRestEdge == topology.meanRestEdge && topology.meanRestEdge > 0.0f);
+
+        const std::uint32_t items = self.info.triangleCount + self.info.edgeCount;
+        assert(self.info.bucketCount >= 8 * items && (self.info.bucketCount & (self.info.bucketCount - 1)) == 0);
+        assert(self.info.pairCapacity == clothSelfPairsPerFeature * (static_cast<std::uint32_t>(cloth.particles.size()) + self.info.edgeCount));
+        assert(self.info.scanBlocks == (self.info.bucketCount + clothGroupSize - 1) / clothGroupSize);
+
+        const ClothSelfPair pair = pointTrianglePair(cloth.particles.positions, 0, cloth.triangles.back());
+        const GpuClothSelfPair packed = packClothSelfPair(pair);
+        assert(sizeof(GpuClothSelfPair) == 64);
+        assert(packed.points[0] == pair.points[0] && packed.points[3] == pair.points[3]);
+        assert(packed.kind == CLOTH_PAIR_POINT_TRIANGLE);
+        assert(packed.normalGap.x == pair.normal.x && packed.normalGap.w == pair.gap && packed.heights.z == pair.heights[2]);
+        assert(packClothSelfPair(edgeEdgePair(cloth.particles.positions, topology.edges[0], topology.edges.back())).kind == CLOTH_PAIR_EDGE_EDGE);
+    }
+
+    // A tick carries self-collision's switch and the reach it looks within, at least the thickness, as the CPU uses it.
+    void testSelfTick() {
+        Cloth cloth = smallSheet();
+        cloth.settings.selfCollisionReach = 0.009f;
+        GpuClothTick tick = packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0);
+        assert(tick.selfCollision == 1 && tick.selfReach == 0.009f);
+
+        cloth.settings.selfCollisionReach = 0.001f;
+        tick = packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0);
+        assert(tick.selfReach == cloth.settings.thickness);
+
+        cloth.settings.selfCollision = false;
+        assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).selfCollision == 0);
+        assert(sizeof(GpuClothTick) == 128);
     }
 
     /*
@@ -310,6 +385,7 @@ namespace {
         ClothSettings settings;
         settings.method = ClothMethod::VertexBlockDescent;
         settings.substeps = 3;
+        settings.selfCollision = false;
         const Cloth cloth = makeCloth(Mesh::grid(20, 20, 1.0f, 1.0f), Mat4::identity(), settings);
         const std::uint32_t levels = static_cast<std::uint32_t>(cloth.hierarchy.levels.size());
         assert(levels >= 2);
@@ -468,6 +544,9 @@ void testClothGpu() {
     testTick();
     testDispatches();
     testDispatchesWithLevels();
+    testSelfDispatches();
+    testSelfRecords();
+    testSelfTick();
     testLevels();
     testPointLists();
     testGpuTicksQueue();

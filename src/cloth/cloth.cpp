@@ -77,7 +77,7 @@ Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSet
         cloth.triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second),
                                    static_cast<std::uint32_t>(triangle.third)});
     }
-    cloth.selfTopology = clothSelfTopology(cloth.particles.positions, cloth.triangles, cloth.stitches);
+    cloth.selfTopology = clothSelfTopology(cloth.particles.positions, cloth.triangles, cloth.stitches, cloth.pieces.pieceOf);
     cloth.restPositions = cloth.particles.positions;
     cloth.particles.positions = start;
     cloth.particles.previousPositions = start;
@@ -249,6 +249,9 @@ namespace {
         ClothHierarchyScratch scratch;
         std::vector<std::uint8_t> sewing;
 
+        // Which points a body held up this substep, for self-collision (all 0 with no bodies).
+        std::vector<std::uint8_t> touching(particles.size(), 0);
+
         // Self-collision's pairs and the points where they were found, and how far it looks.
         const bool selfCollision = settings.selfCollision && constraints.selfTopology != nullptr && constraints.triangles != nullptr;
         const int pairInterval = std::max(settings.selfCollisionInterval, 1);
@@ -310,11 +313,12 @@ namespace {
             }
             if (!constraints.colliders.empty() || !constraints.fields.empty()) {
                 solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings,
-                              nearbyFields(particles, constraints.fields, settings.thickness), sewing);
+                              nearbyFields(particles, constraints.fields, settings.thickness), sewing, touching);
             }
             if (selfCollision) {
-                solveSelfContacts(particles, selfPairs, settings);
-                cutClothMotion(particles.positions, pairStart, particles.inverseMasses, selfPairs, reach);
+                solveSelfContacts(particles, selfPairs, settings, touching, constraints.selfTopology->partners);
+                cutClothMotion(particles.positions, pairStart, particles.previousPositions, particles.inverseMasses, selfPairs, reach,
+                               constraints.selfTopology->partners);
             }
             finishClothStep(particles, substep);
 

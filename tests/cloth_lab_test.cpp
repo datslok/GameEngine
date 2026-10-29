@@ -34,7 +34,9 @@ namespace {
         AssetManager assets;
         ClothLabGame game{ControlMode::FreeCamera, true};
 
-        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr, bool pinnedDress = true, bool pileSheet = false) {
+        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr, bool pinnedDress = true, bool pileSheet = false,
+                          bool selfCollision = false) {
+            game.getClothSettings().selfCollision = selfCollision;
             game.getStationSettings().bigSheet = bigSheet;
             game.getStationSettings().mannequin = mannequin;
             game.getStationSettings().pinnedDress = pinnedDress;
@@ -503,9 +505,9 @@ namespace {
     * carried onto the shoulders and pinned there, every other point tethered to them and within its tethers; held by
     * contact alone, nothing is pinned.
     */
-    void checkTheDressHangsOnTheMannequin(bool pinned) {
+    void checkTheDressHangsOnTheMannequin(bool pinned, bool selfCollision = false) {
         JobSystem jobs;
-        ClothLab lab{false, true, &jobs, pinned};
+        ClothLab lab{false, true, &jobs, pinned, false, selfCollision};
         const ClothLabLayout layout = buildClothLabLayout();
         const Cloth& dress = lab.world.get<Cloth>(lab.game.getDress());
         assert(!dress.stitches.empty());
@@ -575,6 +577,11 @@ namespace {
                 }
             }
         }
+
+        // With self-collision, nothing has passed through anything, and the seams still shut (checked above).
+        if (selfCollision) {
+            assert(countClothCrossings(dress.particles.positions, dress.triangles, dress.selfTopology) == 0);
+        }
     }
 
     void testTheDressHangsOnTheMannequin() {
@@ -587,6 +594,16 @@ namespace {
         ClothLab lab;
         assert(!lab.game.goldenViews().empty());
     }
+}
+
+/*
+* The dress with self-collision on (slow on the CPU: make test-slow): it sews shut, pinned or held by contact, and
+* nothing passes through anything. Measured once in the routine tests (cloth-self-collision's GPU branch): every seam
+* shut, no crossings.
+*/
+void testClothLabSelfCollision() {
+    checkTheDressHangsOnTheMannequin(true, true);
+    checkTheDressHangsOnTheMannequin(false, true);
 }
 
 void testClothLab() {

@@ -129,6 +129,7 @@ void testClothYardstick();
 void testClothSelfCollision();
 void testClothHierarchy();
 void testClothBlockDescent();
+void testClothLabSelfCollision();
 void testClothGpu();
 void testClothTiming();
 void testClothTethers();
@@ -168,6 +169,7 @@ void testComputeDispatch();
 void runSlowTests() {
     testClothHierarchy();
     testClothBlockDescent();
+    testClothLabSelfCollision();
 }
 
 int main(int argumentCount, char** arguments) {

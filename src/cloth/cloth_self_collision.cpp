@@ -213,8 +213,7 @@ namespace {
         return static_cast<float>(total / static_cast<double>(edges.size()));
     }
 
-    PairNow pairNow(const ClothSelfPair& pair, const std::vector<Vec3>& positions) {
-        const std::array<Vec3, 4> at{positions[pair.points[0]], positions[pair.points[1]], positions[pair.points[2]], positions[pair.points[3]]};
+    PairNow pairNow(const ClothSelfPair& pair, const std::array<Vec3, 4>& at) {
         if (pair.kind == ClothPairKind::PointTriangle) {
             const TriangleClosest closest = closestTriangleFeature(at[0], at[1], at[2], at[3]);
             return {at[0], closest.point, {1.0f, -closest.weights.x, -closest.weights.y, -closest.weights.z}};
@@ -230,18 +229,24 @@ namespace {
 * gathered per representative, sorted, and laid end to end.
 */
 ClothSelfTopology clothSelfTopology(const std::vector<Vec3>& restPositions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
-                                    const std::vector<ClothStitch>& stitches) {
+                                    const std::vector<ClothStitch>& stitches, const std::vector<std::uint32_t>& pieceOf) {
     const std::size_t points = restPositions.size();
     ClothSelfTopology topology;
     topology.restPositions = restPositions;
+    topology.pieceOf = pieceOf;
     topology.joined.resize(points);
     for (std::size_t index = 0; index < points; ++index) {
         topology.joined[index] = static_cast<std::uint32_t>(index);
+    }
+    if (!stitches.empty()) {
+        topology.partners.assign(points, clothNoPartner);
     }
     for (const ClothStitch& stitch : stitches) {
         const std::uint32_t representative = std::min(stitch.first, stitch.second);
         topology.joined.at(stitch.first) = representative;
         topology.joined.at(stitch.second) = representative;
+        topology.partners[stitch.first] = stitch.second;
+        topology.partners[stitch.second] = stitch.first;
     }
 
     for (const std::array<std::uint32_t, 3>& triangle : triangles) {
@@ -272,6 +277,7 @@ ClothSelfTopology clothSelfTopology(const std::vector<Vec3>& restPositions, cons
         topology.neighbours.insert(topology.neighbours.end(), list.begin(), list.end());
     }
     topology.neighbourStarts.push_back(static_cast<std::uint32_t>(topology.neighbours.size()));
+    topology.meanRestEdge = meanEdgeLength(restPositions, topology.edges);
     return topology;
 }
 
@@ -284,6 +290,22 @@ bool nearInCloth(const ClothSelfTopology& topology, std::uint32_t first, std::ui
     const auto begin = topology.neighbours.begin() + topology.neighbourStarts[one];
     const auto end = topology.neighbours.begin() + topology.neighbourStarts[one + 1];
     return std::binary_search(begin, end, other);
+}
+
+/*
+* Only pairs within the reach get here, so measuring the rest gap first costs little.
+*/
+bool clothPairExcused(const ClothSelfTopology& topology, std::span<const std::uint32_t> first, std::span<const std::uint32_t> second, float restGap,
+                      float thickness) {
+    bool near = false;
+    bool acrossPieces = false;
+    for (const std::uint32_t one : first) {
+        for (const std::uint32_t other : second) {
+            near = near || nearInCloth(topology, one, other);
+            acrossPieces = acrossPieces || (!topology.pieceOf.empty() && topology.pieceOf[one] != topology.pieceOf[other]);
+        }
+    }
+    return near && (acrossPieces || restGap < thickness);
 }
 
 int firstSidePoints(ClothPairKind kind) {
@@ -356,7 +378,7 @@ namespace {
 std::vector<ClothSelfPair> findClothPairs(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
                                           const ClothSelfTopology& topology, float reach, float thickness, JobSystem& jobs) {
     const std::vector<std::array<std::uint32_t, 2>>& edges = topology.edges;
-    const float cellSize = std::max(meanEdgeLength(positions, edges) + 2.0f * reach, 1e-4f);
+    const float cellSize = clothSelfCellSize(topology.meanRestEdge, reach);
 
     std::vector<Aabb> boxes(triangles.size());
     for (std::size_t index = 0; index < triangles.size(); ++index) {
@@ -374,8 +396,7 @@ std::vector<ClothSelfPair> findClothPairs(const std::vector<Vec3>& positions, co
             }
             const std::array<Vec3, 3> at = corners(positions, triangles[triangle]);
             if ((closestTriangleFeature(positions[point], at[0], at[1], at[2]).point - positions[point]).lengthSquared() >= reach * reach ||
-                (anyNear(topology, alone, triangles[triangle], true) &&
-                 pointTrianglePair(topology.restPositions, point, triangles[triangle]).gap < thickness)) {
+                clothPairExcused(topology, alone, triangles[triangle], pointTrianglePair(topology.restPositions, point, triangles[triangle]).gap, thickness)) {
                 continue;
             }
             out.push_back(pointTrianglePair(positions, point, triangles[triangle]));
@@ -398,8 +419,8 @@ std::vector<ClothSelfPair> findClothPairs(const std::vector<Vec3>& positions, co
             }
             const ClosestPoints closest = closestPointsBetweenSegments(positions[edges[edge][0]], positions[edges[edge][1]], positions[edges[other][0]],
                                                                       positions[edges[other][1]]);
-            if (closest.distanceSquared() >= reach * reach || (anyNear(topology, edges[edge], edges[other], true) &&
-                                                               edgeEdgePair(topology.restPositions, edges[edge], edges[other]).gap < thickness)) {
+            if (closest.distanceSquared() >= reach * reach ||
+                clothPairExcused(topology, edges[edge], edges[other], edgeEdgePair(topology.restPositions, edges[edge], edges[other]).gap, thickness)) {
                 continue;
             }
             out.push_back(edgeEdgePair(positions, edges[edge], edges[other]));
@@ -449,16 +470,34 @@ float cutShare(float distance, float approach) {
 * motion is cut once. A point whose motion is kept whole is left exactly where it is, not rebuilt from start and its
 * motion, which could round it a little.
 */
-void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start, const std::vector<float>& inverseMasses,
-                    const std::vector<ClothSelfPair>& pairs, float reach) {
+/*
+* The planes are placed from each pair's motion since the pairs were found, but only this substep's motion (from
+* substepStart, where the last substep's cut left each point, inside every plane) is cut. A point's region is the
+* intersection of its planes' half-spaces, convex, so a straight move from a point inside it, cut short of each plane,
+* stays inside. Cutting the whole motion since the pairs were found, as the paper does with its iterations, scaled the
+* sideways part of several substeps' motion by each point's own share, so two layers friction held together slid
+* against each other, the next substep's friction undid it, and the folds of a sheet draped over a ball kept moving at
+* 0.2 m/s; cut a substep at a time they settle. The cap keeps the motion since the pairs were found within half gamma's
+* share of the reach, by the triangle inequality: what is already moved plus this substep's cut motion.
+*
+* Each plane is placed once, at the pair's first cut, and kept: placed afresh every substep from the wobbling speeds of
+* approach, a plane could jump past a point resting near it, which then froze for a substep and moved the next, so a
+* draped sheet's corner tips kept twitching at 5-8 cm/s. The paper places it every iteration, but cuts after solver
+* iterations within one step, not after physical substeps.
+*/
+void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start, const std::vector<Vec3>& substepStart,
+                    const std::vector<float>& inverseMasses, std::vector<ClothSelfPair>& pairs, float reach, std::span<const std::uint32_t> partners) {
     std::vector<float> shares(positions.size(), 1.0f);
 
-    for (const ClothSelfPair& pair : pairs) {
-        std::array<Vec3, 4> motions;
-        for (std::size_t index = 0; index < 4; ++index) {
-            motions[index] = positions[pair.points[index]] - start[pair.points[index]];
+    for (ClothSelfPair& pair : pairs) {
+        if (pair.plane < 0.0f) {
+            std::array<Vec3, 4> motions;
+            for (std::size_t index = 0; index < 4; ++index) {
+                motions[index] = positions[pair.points[index]] - start[pair.points[index]];
+            }
+            pair.plane = dividingHeight(pair, motions);
         }
-        const float plane = dividingHeight(pair, motions);
+        const float plane = pair.plane;
         const int firstPoints = firstSidePoints(pair.kind);
 
         for (int index = 0; index < 4; ++index) {
@@ -466,25 +505,35 @@ void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start
             if (inverseMasses[point] == 0.0f) {
                 continue;
             }
-            const float along = motions[index].dot(pair.normal);
-            const float share = index < firstPoints ? cutShare(pair.heights[index] - plane, -along) : cutShare(plane - pair.heights[index], along);
+            const float height = pair.heights[index] + (substepStart[point] - start[point]).dot(pair.normal);
+            const float along = (positions[point] - substepStart[point]).dot(pair.normal);
+            const float share = index < firstPoints ? cutShare(height - plane, -along) : cutShare(plane - height, along);
             shares[point] = std::min(shares[point], share);
         }
     }
 
+    // Each free point's share with the cap, then a stitch's two points both the smaller.
     const float longest = 0.5f * clothCutRelaxation * reach;
     for (std::size_t point = 0; point < positions.size(); ++point) {
         if (inverseMasses[point] == 0.0f) {
             continue;
         }
-        const Vec3 motion = positions[point] - start[point];
-        const float length = motion.length();
-        float share = shares[point];
-        if (length * share > longest) {
-            share = longest / length;
+        const float length = (positions[point] - substepStart[point]).length();
+        const float already = (substepStart[point] - start[point]).length();
+        if (already + length * shares[point] > longest) {
+            shares[point] = std::max(longest - already, 0.0f) / length;
         }
-        if (share < 1.0f) {
-            positions[point] = start[point] + motion * share;
+    }
+    std::vector<float> kept = shares;
+    for (std::size_t point = 0; point < partners.size(); ++point) {
+        if (partners[point] != clothNoPartner) {
+            kept[point] = std::min(shares[point], shares[partners[point]]);
+        }
+    }
+
+    for (std::size_t point = 0; point < positions.size(); ++point) {
+        if (inverseMasses[point] != 0.0f && kept[point] < 1.0f) {
+            positions[point] = substepStart[point] + (positions[point] - substepStart[point]) * kept[point];
         }
     }
 }
@@ -493,48 +542,116 @@ void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start
 * The constraint C = distance - thickness >= 0 along n, with no give: its gradient on each point is its coefficient
 * times n, so the step lambda = (thickness - distance) / sum(coefficient^2 / mass) moves each point by lambda x
 * coefficient / its mass along n, which opens the gap by exactly what was missing and moves no centre of mass. Friction
-* then works on the slide between the nearest points during the substep, spread the same way.
+* then works on the slide between the nearest points since the substep began, with this push's moves, spread the same
+* way.
 */
-void solveSelfContacts(ClothParticles& particles, const std::vector<ClothSelfPair>& pairs, const ClothSettings& settings) {
-    std::vector<Vec3>& positions = particles.positions;
+bool selfContactMoves(const ClothSelfPair& pair, const std::array<Vec3, 4>& points, const std::array<Vec3, 4>& previous,
+                      const std::array<float, 4>& inverseMasses, float thickness, float staticFriction, float kineticFriction,
+                      std::array<Vec3, 4>& moves, std::array<float, 4>& coefficients) {
+    const PairNow now = pairNow(pair, points);
+    coefficients = now.coefficients;
+    float distance = 0.0f;
+    const Vec3 normal = directionBetween(now.firstNearest, now.secondNearest, pair.normal, distance);
+    const float push = thickness - distance;
+    if (push <= 0.0f) {
+        return false;
+    }
 
-    for (const ClothSelfPair& pair : pairs) {
-        const PairNow now = pairNow(pair, positions);
-        float distance = 0.0f;
-        const Vec3 normal = directionBetween(now.firstNearest, now.secondNearest, pair.normal, distance);
-        const float push = settings.thickness - distance;
-        if (push <= 0.0f) {
-            continue;
-        }
+    float weights = 0.0f;
+    for (std::size_t index = 0; index < 4; ++index) {
+        weights += coefficients[index] * coefficients[index] * inverseMasses[index];
+    }
+    if (weights <= 0.0f) {
+        return false;
+    }
 
-        float weights = 0.0f;
-        for (std::size_t index = 0; index < 4; ++index) {
-            weights += now.coefficients[index] * now.coefficients[index] * particles.inverseMasses[pair.points[index]];
-        }
-        if (weights <= 0.0f) {
-            continue;
-        }
+    const float step = push / weights;
+    Vec3 slide;
+    for (std::size_t index = 0; index < 4; ++index) {
+        moves[index] = normal * (step * coefficients[index] * inverseMasses[index]);
+        slide = slide + (points[index] + moves[index] - previous[index]) * coefficients[index];
+    }
 
-        const float step = push / weights;
-        Vec3 slide;
-        for (std::size_t index = 0; index < 4; ++index) {
-            const std::uint32_t point = pair.points[index];
-            positions[point] = positions[point] + normal * (step * now.coefficients[index] * particles.inverseMasses[point]);
-            slide = slide + (positions[point] - particles.previousPositions[point]) * now.coefficients[index];
-        }
-
-        const Vec3 across = slide - normal * normal.dot(slide);
-        const float acrossLength = across.length();
-        const float held = acrossLength < settings.staticFriction * push ? 1.0f
-                           : acrossLength > 0.0f                         ? std::min(settings.kineticFriction * push / acrossLength, 1.0f)
-                                                                         : 0.0f;
-        if (held <= 0.0f) {
-            continue;
-        }
+    const Vec3 across = slide - normal * normal.dot(slide);
+    const float acrossLength = across.length();
+    const float held = acrossLength < staticFriction * push ? 1.0f
+                       : acrossLength > 0.0f                ? std::min(kineticFriction * push / acrossLength, 1.0f)
+                                                            : 0.0f;
+    if (held > 0.0f) {
         const Vec3 undone = across * (held / weights);
         for (std::size_t index = 0; index < 4; ++index) {
-            const std::uint32_t point = pair.points[index];
-            positions[point] = positions[point] - undone * (now.coefficients[index] * particles.inverseMasses[point]);
+            moves[index] = moves[index] - undone * (coefficients[index] * inverseMasses[index]);
+        }
+    }
+    return true;
+}
+
+// nearbyint rounds half to even in the default rounding mode, as GLSL's roundEven does.
+std::int32_t selfMoveUnits(float metres) {
+    const float clamped = std::clamp(metres, -clothSelfLargestMove, clothSelfLargestMove);
+    return static_cast<std::int32_t>(std::nearbyint(clamped * static_cast<float>(CLOTH_SELF_MOVE_SCALE)));
+}
+
+float selfMoveMetres(std::int64_t units, std::uint32_t count) {
+    return static_cast<float>(units) / (static_cast<float>(count) * static_cast<float>(CLOTH_SELF_MOVE_SCALE));
+}
+
+/*
+* A point counts a pair only where the pair's line runs through it (a non-zero coefficient): a triangle's far corner
+* the nearest point does not touch takes no share, and would otherwise water down the pushes it does get.
+*/
+void solveSelfContacts(ClothParticles& particles, const std::vector<ClothSelfPair>& pairs, const ClothSettings& settings,
+                       std::span<const std::uint8_t> held, std::span<const std::uint32_t> partners) {
+    std::vector<std::array<std::int64_t, 3>> sums(particles.size(), {0, 0, 0});
+    std::vector<std::uint32_t> counts(particles.size(), 0);
+
+    for (const ClothSelfPair& pair : pairs) {
+        std::array<Vec3, 4> points;
+        std::array<Vec3, 4> previous;
+        std::array<float, 4> inverseMasses;
+        for (std::size_t index = 0; index < 4; ++index) {
+            points[index] = particles.positions[pair.points[index]];
+            previous[index] = particles.previousPositions[pair.points[index]];
+            const bool resting = !held.empty() && held[pair.points[index]] != 0;
+            inverseMasses[index] = resting ? 0.0f : particles.inverseMasses[pair.points[index]];
+        }
+
+        std::array<Vec3, 4> moves;
+        std::array<float, 4> coefficients;
+        if (!selfContactMoves(pair, points, previous, inverseMasses, settings.thickness, settings.staticFriction, settings.kineticFriction, moves,
+                              coefficients)) {
+            continue;
+        }
+        for (std::size_t index = 0; index < 4; ++index) {
+            if (coefficients[index] == 0.0f || inverseMasses[index] == 0.0f) {
+                continue;
+            }
+            std::array<std::int64_t, 3>& sum = sums[pair.points[index]];
+            sum[0] += selfMoveUnits(moves[index].x);
+            sum[1] += selfMoveUnits(moves[index].y);
+            sum[2] += selfMoveUnits(moves[index].z);
+            ++counts[pair.points[index]];
+        }
+    }
+
+    for (std::size_t point = 0; point < particles.size(); ++point) {
+        std::array<std::int64_t, 3> sum = sums[point];
+        std::uint32_t count = counts[point];
+        const std::uint32_t partner = partners.empty() ? clothNoPartner : partners[point];
+        if (partner != clothNoPartner) {
+            const bool fixed = particles.inverseMasses[point] == 0.0f || particles.inverseMasses[partner] == 0.0f ||
+                               (!held.empty() && (held[point] != 0 || held[partner] != 0));
+            if (fixed) {
+                continue;
+            }
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                sum[axis] += sums[partner][axis];
+            }
+            count += counts[partner];
+        }
+        if (count > 0) {
+            particles.positions[point] = particles.positions[point] + Vec3{selfMoveMetres(sum[0], count), selfMoveMetres(sum[1], count),
+                                                                            selfMoveMetres(sum[2], count)};
         }
     }
 }
@@ -555,10 +672,11 @@ namespace {
     }
 }
 
-std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
-                                const ClothSelfTopology& topology) {
+std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
+                                                         const ClothSelfTopology& topology) {
+    std::vector<std::array<std::uint32_t, 2>> crossings;
     if (topology.edges.empty()) {
-        return 0;
+        return crossings;
     }
 
     std::vector<Aabb> boxes(triangles.size());
@@ -567,9 +685,9 @@ std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::v
     }
     const SpatialHash grid{std::max(meanEdgeLength(positions, topology.edges), 1e-4f), boxes};
 
-    std::size_t crossings = 0;
     std::vector<std::uint32_t> found;
-    for (const std::array<std::uint32_t, 2>& edge : topology.edges) {
+    for (std::uint32_t edgeIndex = 0; edgeIndex < topology.edges.size(); ++edgeIndex) {
+        const std::array<std::uint32_t, 2>& edge = topology.edges[edgeIndex];
         grid.gather(boxAround(std::array<Vec3, 2>{positions[edge[0]], positions[edge[1]]}, 0.0f), found);
         for (const std::uint32_t index : found) {
             const std::array<std::uint32_t, 3>& triangle = triangles[index];
@@ -579,9 +697,14 @@ std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::v
                 shared = shared || joined == topology.joined[edge[0]] || joined == topology.joined[edge[1]];
             }
             if (!shared && passesThrough(positions[edge[0]], positions[edge[1]], positions[triangle[0]], positions[triangle[1]], positions[triangle[2]])) {
-                ++crossings;
+                crossings.push_back({edgeIndex, index});
             }
         }
     }
     return crossings;
+}
+
+std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
+                                const ClothSelfTopology& topology) {
+    return clothCrossings(positions, triangles, topology).size();
 }

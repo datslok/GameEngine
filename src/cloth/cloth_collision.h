@@ -47,10 +47,11 @@ SurfacePoint fieldSurface(const FieldPoint& sampled);
 * times the push. Pinned points are never moved. On the caller: shared among threads it was measured slower (each
 * point's test is a few nanoseconds, less than handing it out costs). The shapes first, then the field bodies, each in
 * order. A point marked in sewing (one byte a point, or none: markSewing in cloth_seams.h) is pushed out without
-* friction, so a seam being sewn slides over the body.
+* friction, so a seam being sewn slides over the body. With touching (one byte a point), each point a body pushed is
+* marked 1 and the rest 0: self-collision holds those still (solveSelfContacts), as the body holds them up.
 */
 void solveContacts(ClothParticles& particles, const std::vector<Shape>& shapes, const ClothSettings& settings, const ClothFields& fields = {},
-                   std::span<const std::uint8_t> sewing = {});
+                   std::span<const std::uint8_t> sewing = {}, std::span<std::uint8_t> touching = {});
 
 // Every Collider's shape placed in the world by its entity's Transform: what cloth collides with.
 std::vector<Shape> worldColliderShapes(const World& world);

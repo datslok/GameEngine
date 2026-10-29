@@ -27,4 +27,14 @@
 // (gamma_r; the paper gives none, NVIDIA Newton uses 0.85).
 #define CLOTH_CUT_RELAXATION 0.85
 
+// Self-collision's kinds of pair: a point and a triangle, two edges.
+#define CLOTH_PAIR_POINT_TRIANGLE 0
+#define CLOTH_PAIR_EDGE_EDGE 1
+
+// Self-contacts' moves are summed as whole units of this many a metre (nanometres), so any order adds up to the same
+// bits: integer sums do not depend on their order as floating-point sums do. Each move is clamped to the largest first
+// (m), so a sum of hundreds stays within 32 bits.
+#define CLOTH_SELF_MOVE_SCALE 1e9
+#define CLOTH_SELF_LARGEST_MOVE 0.02
+
 #endif

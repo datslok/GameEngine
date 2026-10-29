@@ -1,6 +1,7 @@
 #include "render/gpu/cloth_gpu.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <stdexcept>
 #include <type_traits>
@@ -179,7 +180,46 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.fieldFirst = fieldFirst;
     tick.fieldCount = static_cast<std::uint32_t>(commands.fields.size());
     tick.stitchClosingStep = settings.seamSpeed * substep;
+    tick.selfCollision = settings.selfCollision ? 1u : 0u;
+    tick.selfReach = std::max(settings.selfCollisionReach, settings.thickness);
     return tick;
+}
+
+GpuClothSelf packClothSelf(const Cloth& cloth) {
+    const ClothSelfTopology& topology = cloth.selfTopology;
+    GpuClothSelf packed;
+    for (const std::array<std::uint32_t, 3>& triangle : cloth.triangles) {
+        packed.triangles.push_back(GpuClothSelfTriangle{{triangle[0], triangle[1], triangle[2]}, 0});
+    }
+    for (const std::array<std::uint32_t, 2>& edge : topology.edges) {
+        packed.edges.push_back(GpuClothSelfEdge{edge[0], edge[1]});
+    }
+    packed.joined = topology.joined;
+    packed.neighbourStarts = topology.neighbourStarts;
+    packed.neighbours = topology.neighbours;
+    for (const Vec3& rest : topology.restPositions) {
+        packed.restPositions.push_back(Vec4{rest.x, rest.y, rest.z, 0.0f});
+    }
+
+    GpuClothSelfInfo& info = packed.info;
+    info.triangleCount = static_cast<std::uint32_t>(packed.triangles.size());
+    info.edgeCount = static_cast<std::uint32_t>(packed.edges.size());
+    info.bucketCount = std::bit_ceil(std::max<std::uint32_t>(clothSelfBucketsPerItem * (info.triangleCount + info.edgeCount), clothGroupSize));
+    info.scanBlocks = (info.bucketCount + clothGroupSize - 1) / clothGroupSize;
+    info.pairCapacity = clothSelfPairsPerFeature * (static_cast<std::uint32_t>(cloth.particles.size()) + info.edgeCount);
+    info.meanRestEdge = topology.meanRestEdge;
+    return packed;
+}
+
+GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair) {
+    GpuClothSelfPair packed;
+    for (std::size_t index = 0; index < 4; ++index) {
+        packed.points[index] = pair.points[index];
+    }
+    packed.normalGap = Vec4{pair.normal.x, pair.normal.y, pair.normal.z, pair.gap};
+    packed.heights = Vec4{pair.heights[0], pair.heights[1], pair.heights[2], pair.heights[3]};
+    packed.kind = static_cast<std::uint32_t>(pair.kind);
+    return packed;
 }
 
 GpuClothLevels packClothLevels(const ClothHierarchy& hierarchy, std::size_t pointCount) {
@@ -235,11 +275,15 @@ std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& se
     };
     const std::uint32_t substeps = static_cast<std::uint32_t>(settings.substeps);
     const std::uint32_t ends = cloth.stitches.empty() ? 2u : 3u;
+    const std::uint32_t interval = static_cast<std::uint32_t>(std::max(settings.selfCollisionInterval, 1));
+    const std::uint32_t self = settings.selfCollision
+                                   ? substeps * clothSelfDispatchesPerSubstep + (substeps + interval - 1) / interval * clothSelfDispatchesPerSearch
+                                   : 0u;
     if (settings.method == ClothMethod::VertexBlockDescent) {
         const std::uint32_t sweep = colours(cloth.vertexColours.colours);
         const std::uint32_t levels = clothLevelsUsed(cloth, settings);
         const std::uint32_t layered = levels > 0 ? 1u + clothDispatchesPerLevel * levels + sweep : 0u;
-        return substeps * (ends + sweep + layered);
+        return substeps * (ends + sweep + layered) + self;
     }
     std::uint32_t bendingSolves = 0;
     if (settings.bendingStiffness > 0.0f) {
@@ -247,5 +291,5 @@ std::uint32_t clothDispatchesPerTick(const Cloth& cloth, const ClothSettings& se
             bendingSolves += bendingSubsteps(step, settings.substeps, settings.bendingInterval) > 0 ? 1u : 0u;
         }
     }
-    return substeps * (ends + colours(cloth.stretchColours)) + bendingSolves * colours(cloth.bendColours);
+    return substeps * (ends + colours(cloth.stretchColours)) + bendingSolves * colours(cloth.bendColours) + self;
 }

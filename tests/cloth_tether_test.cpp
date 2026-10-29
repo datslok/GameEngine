@@ -3,6 +3,7 @@
 #include "cloth/cloth_yardstick.h"
 #include "core/job_system.h"
 #include "scene/mesh.h"
+#include "cloth_helpers.h"
 #include "test_levels.h"
 
 #include <cassert>
@@ -174,7 +175,7 @@ namespace {
 
     // Each point's tethers touch only that point, so the points can be shared among threads with the same result to the last bit.
     void testSameOnAnyThreads() {
-        Cloth cloth = yardstickSheet(30, ClothSettings{});
+        Cloth cloth = yardstickSheet(30, withoutSelfCollision());
         const Vec3 pin = cloth.particles.positions[cloth.pins[0].particle];
         for (std::size_t index = 0; index < cloth.particles.size(); ++index) {
             Vec3& position = cloth.particles.positions[index];
@@ -210,7 +211,7 @@ namespace {
     */
     void testTethersHoldTheYardstick() {
         for (const int squares : {25, 50}) {
-            ClothSettings settings;
+            ClothSettings settings = withoutSelfCollision();
             settings.tethers = true;
             Cloth tethered = yardstickSheet(squares, settings);
             const float motion = settleYardstick(tethered, 4.0f, tick);
@@ -219,7 +220,7 @@ namespace {
             assert(held.sag > 0.99f && held.sag < 1.005f);
             assert(motion < 0.01f);
 
-            ClothSettings untethered;
+            ClothSettings untethered = withoutSelfCollision();
             untethered.tethers = false;
             Cloth loose = yardstickSheet(squares, untethered);
             settleYardstick(loose, 4.0f, tick);
@@ -235,7 +236,7 @@ namespace {
 
     // Off, the tethers do nothing: the same sheet ends exactly as with none built.
     void testTethersOffDoNothing() {
-        ClothSettings off;
+        ClothSettings off = withoutSelfCollision();
         off.tethers = false;
         Cloth withTethers = yardstickSheet(10, off);
         Cloth without = withTethers;
