@@ -14,6 +14,11 @@ struct ClosestPoints {
     Vec3 onFirst;
     Vec3 onSecond;
 
+    // For two segments (closestPointsBetweenSegments), how far along each the points lie, 0 at its start and 1 at its
+    // end: onFirst = a1 + (b1 - a1) firstShare. Left at 0 by the other queries.
+    float firstShare = 0.0f;
+    float secondShare = 0.0f;
+
     float distanceSquared() const;
 };
 
@@ -46,6 +51,9 @@ enum class TriangleFeature {
 struct TriangleClosest {
     Vec3 point;
     TriangleFeature feature = TriangleFeature::Face;
+
+    // The point's barycentric weights, for a, b and c in x, y and z: point = a x + b y + c z, each 0 to 1, adding up to 1.
+    Vec3 weights{1.0f, 0.0f, 0.0f};
 };
 
 /*

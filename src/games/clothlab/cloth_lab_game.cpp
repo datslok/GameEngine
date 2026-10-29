@@ -89,6 +89,7 @@ namespace {
     const Pixel hangingSheetColour{150, 30, 35};
     const Pixel drapeSheetColour{225, 215, 190};
     const Pixel bigSheetColour{150, 165, 190};
+    const Pixel pileSheetColour{70, 120, 95};
     const Pixel dressColour{185, 110, 120};
 
     // A grid laid flat (the grid faces +z; turned to face up, its top edge at the back) with its middle at centre.
@@ -228,6 +229,17 @@ void ClothLabGame::onInit(World& world, AssetManager& assets) {
             pin.position = layout.bigSheetCentre + Vec3{out.x < 0.0f ? -half : half, 0.0f, out.z < 0.0f ? -half : half};
         }
         bigSheet = addSheet(world, assets, bigMesh, std::move(big), cottonMaterial(bigSheetColour));
+    }
+
+    // The pile sheet: standing on its bottom edge over the mat, leaning back a little, free to fall over and fold onto
+    // itself (self-collision's station). The grid stands in the x-y plane round its middle; it is raised so its bottom
+    // edge is on the x axis, then turned about that edge.
+    if (stationSettings.pileSheet) {
+        const Mesh pileMesh = Mesh::grid(clothLabPileSheetSquares, clothLabPileSheetSquares, clothLabPileSheetSize, clothLabPileSheetSize);
+        const Vec3 bottom = layout.pileSheetBottom;
+        const Mat4 standing = Mat4::translation(bottom.x, bottom.y, bottom.z) * Mat4::rotationX(-clothLabPileSheetLean) *
+                              Mat4::translation(0.0f, 0.5f * clothLabPileSheetSize, 0.0f);
+        pileSheet = addSheet(world, assets, pileMesh, makeCloth(pileMesh, standing, clothSettings), cottonMaterial(pileSheetColour));
     }
 
     // The mannequin: its model placed on its spot, part of the level (drawn, walked against, static for the probes), and
@@ -380,6 +392,7 @@ void visit(ClothLabHookSettings& settings, SettingsVisitor& visitor) {
 
 void visit(ClothLabStationSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Big sheet", settings.bigSheet, FieldApplies::AtStartup);
+    visitor.field("Pile sheet", settings.pileSheet, FieldApplies::AtStartup);
     visitor.field("Mannequin", settings.mannequin, FieldApplies::AtStartup);
     visitor.field("Dress pinned at the shoulders", settings.pinnedDress, FieldApplies::AtStartup);
 }
@@ -435,6 +448,10 @@ Entity ClothLabGame::getBigSheet() const {
     return bigSheet;
 }
 
+Entity ClothLabGame::getPileSheet() const {
+    return pileSheet;
+}
+
 Entity ClothLabGame::getDress() const {
     return dress;
 }
@@ -447,6 +464,9 @@ std::vector<Entity> ClothLabGame::sheets() const {
     std::vector<Entity> all{sheet, drapeSheet};
     if (stationSettings.bigSheet) {
         all.push_back(bigSheet);
+    }
+    if (stationSettings.pileSheet) {
+        all.push_back(pileSheet);
     }
     if (stationSettings.mannequin) {
         all.push_back(dress);

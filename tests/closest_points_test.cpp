@@ -260,7 +260,42 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The weights and shares self-collision spreads its pushes by: a triangle's nearest point rebuilt from its corners by
+    * the barycentric weights (each 0 to 1, adding to 1) for every feature it can land on, a flat triangle's too; and two
+    * segments' nearest points rebuilt from their ends by the shares.
+    */
+    void testWeightsAndShares() {
+        Numbers numbers;
+        for (int trial = 0; trial < 2000; ++trial) {
+            const Vec3 point = numbers.nextPoint();
+            const Vec3 a = numbers.nextPoint();
+            const Vec3 b = numbers.nextPoint();
+            // Every tenth triangle flat: its third corner on its first edge.
+            const Vec3 c = trial % 10 == 0 ? a + (b - a) * 0.3f : numbers.nextPoint();
+
+            const TriangleClosest closest = closestTriangleFeature(point, a, b, c);
+            const Vec3& weights = closest.weights;
+            assert(weights.x >= 0.0f && weights.y >= 0.0f && weights.z >= 0.0f);
+            assert(nearlyEqual(weights.x + weights.y + weights.z, 1.0f));
+            assertVector(a * weights.x + b * weights.y + c * weights.z, closest.point);
+
+            const ClosestPoints segments = closestPointsBetweenSegments(point, a, b, c);
+            assert(segments.firstShare >= 0.0f && segments.firstShare <= 1.0f);
+            assert(segments.secondShare >= 0.0f && segments.secondShare <= 1.0f);
+            assertVector(point + (a - point) * segments.firstShare, segments.onFirst);
+            assertVector(b + (c - b) * segments.secondShare, segments.onSecond);
+        }
+
+        const TriangleClosest corner = closestTriangleFeature(Vec3{-1.0f, -1.0f, 0.0f}, Vec3{}, Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f});
+        assert(corner.feature == TriangleFeature::CornerA);
+        assertVector(corner.weights, Vec3{1.0f, 0.0f, 0.0f});
+    }
+}
+
 void testClosestPoints() {
+    testWeightsAndShares();
     testPointQueries();
     testSegmentPairs();
     testSegmentBox();

@@ -15,6 +15,34 @@ inline ClothSettings untetheredSettings() {
     return settings;
 }
 
+/*
+* Two level sheets in one mesh, so one cloth: each squares x squares squares of size metres a side, in the x-z plane
+* centred on the y axis, the lower at y = 0 and the upper gap metres above it (vertices of the lower first). For
+* self-collision, which acts within one cloth.
+*/
+inline Mesh stackedSheets(int squares, float size, float gap) {
+    const Mesh sheet = Mesh::grid(squares, squares, size, size);
+    Mesh stacked;
+    for (int layer = 0; layer < 2; ++layer) {
+        const std::size_t offset = stacked.vertices.size();
+        for (const Vec4& vertex : sheet.vertices) {
+            stacked.vertices.push_back(Vec4{vertex.x, gap * static_cast<float>(layer), -vertex.y, 1.0f});
+        }
+        for (Triangle triangle : sheet.triangles) {
+            triangle.first += offset;
+            triangle.second += offset;
+            triangle.third += offset;
+            stacked.triangles.push_back(triangle);
+        }
+        for (Edge edge : sheet.edges) {
+            edge.start += offset;
+            edge.end += offset;
+            stacked.edges.push_back(edge);
+        }
+    }
+    return stacked;
+}
+
 // The smallest corner of any of a flat mesh's triangles (in its x-y plane, as a pattern is cut), in degrees.
 inline double smallestAngleDegrees(const Mesh& mesh) {
     double smallest = 180.0;

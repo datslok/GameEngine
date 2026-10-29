@@ -40,6 +40,9 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Tethers", settings.tethers);
     visitor.field("Tether slack", settings.tetherSlack, {.min = 0.0f, .max = 0.5f, .sliderMax = 0.02f, .unit = "of the rest length"});
     visitor.field("Seam speed", settings.seamSpeed, {.min = 0.01f, .max = 100.0f, .sliderMax = 5.0f, .unit = "m/s"});
+    visitor.field("Self collision", settings.selfCollision);
+    visitor.field("Self collision interval", settings.selfCollisionInterval, {.min = 1, .max = 30, .unit = "substeps"});
+    visitor.field("Self collision reach", settings.selfCollisionReach, {.min = 0.001f, .max = 0.1f, .sliderMax = 0.03f, .unit = "m"});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
@@ -74,6 +77,7 @@ Cloth makeCloth(const Mesh& rest, const std::vector<Vec3>& start, const ClothSet
         cloth.triangles.push_back({static_cast<std::uint32_t>(triangle.first), static_cast<std::uint32_t>(triangle.second),
                                    static_cast<std::uint32_t>(triangle.third)});
     }
+    cloth.selfTopology = clothSelfTopology(cloth.particles.positions, cloth.triangles, cloth.stitches);
     cloth.restPositions = cloth.particles.positions;
     cloth.particles.positions = start;
     cloth.particles.previousPositions = start;
@@ -160,6 +164,10 @@ namespace {
         const ClothPointConstraints* pointConstraints;
         const ClothVertexColours* vertexColours;
         const ClothHierarchy* hierarchy;
+
+        // The cloth's triangles and their neighbourhoods for self-collision, or none.
+        const std::vector<std::array<std::uint32_t, 3>>* triangles;
+        const ClothSelfTopology* selfTopology;
     };
 
     // The box round the cloth's points, grown by its thickness.
@@ -209,9 +217,16 @@ namespace {
     * there); then the solver: XPBD's stretch, bending (on its bending substeps) and hand, or vertex block descent's sweep, with its coarse levels
     * and a second sweep after them when there are any (smoothing on both sides of the coarse step, as multigrid does:
     * the coarse step's spreading leaves fine wrinkles a sweep removes); the tethers, when on, after either solver, so the
-    * pins' strings have the last word on stretch; the stitches, closing their seams; the bodies last, so nothing is
-    * left inside them, without friction for the points of seams still being sewn; velocities from the motion; drag on
-    * the free points.
+    * pins' strings have the last word on stretch; the stitches, closing their seams; the bodies, so nothing is
+    * left inside them, without friction for the points of seams still being sewn; with self-collision, the contacts
+    * between its layers and then the cut, last, so no layer passes through another; velocities from the motion; drag on
+    * the free points. The self-contacts come after the bodies: before them, a body under the bottom layer (a strip
+    * crumpled on the floor) put back every substep the share of the push its points took, the layers' gap shrank by the
+    * cut's 15% margin each window to nothing, and rounding let them through. After them, a point pushed a fraction of a
+    * millimetre into a body is lifted out by the next substep's contact, while the free layer keeps its share. The cut
+    * may also pull a point that little way back towards a body. Self-collision's pairs are found at the start of every
+    * selfCollisionInterval-th substep, from the points as they are then, which the cut measures each motion from until
+    * the next.
     */
     void stepTick(ClothParticles& particles, const TickConstraints& constraints, const ClothSettings& settings, float seconds, JobSystem& jobs) {
         if (settings.substeps < 1) {
@@ -234,7 +249,19 @@ namespace {
         ClothHierarchyScratch scratch;
         std::vector<std::uint8_t> sewing;
 
+        // Self-collision's pairs and the points where they were found, and how far it looks.
+        const bool selfCollision = settings.selfCollision && constraints.selfTopology != nullptr && constraints.triangles != nullptr;
+        const int pairInterval = std::max(settings.selfCollisionInterval, 1);
+        const float reach = std::max(settings.selfCollisionReach, settings.thickness);
+        std::vector<ClothSelfPair> selfPairs;
+        std::vector<Vec3> pairStart;
+
         for (int step = 0; step < settings.substeps; ++step) {
+            if (selfCollision && step % pairInterval == 0) {
+                pairStart = particles.positions;
+                selfPairs = findClothPairs(pairStart, *constraints.triangles, *constraints.selfTopology, reach, settings.thickness, jobs);
+            }
+
             predictCloth(particles, gravity, substep);
 
             for (std::size_t index = 0; index < constraints.pins.size(); ++index) {
@@ -285,6 +312,10 @@ namespace {
                 solveContacts(particles, nearbyShapes(particles, constraints.colliders, settings.thickness), settings,
                               nearbyFields(particles, constraints.fields, settings.thickness), sewing);
             }
+            if (selfCollision) {
+                solveSelfContacts(particles, selfPairs, settings);
+                cutClothMotion(particles.positions, pairStart, particles.inverseMasses, selfPairs, reach);
+            }
             finishClothStep(particles, substep);
 
             // The air slows free points; a pin's velocity stays its motion, which the game drives.
@@ -306,14 +337,15 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<ClothStitch> noStitches;
     const ClothFields noFields;
     stepTick(particles,
-             TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noFields, noTethers, noStitches, nullptr, nullptr, nullptr},
+             TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noFields, noTethers, noStitches, nullptr, nullptr, nullptr,
+                             nullptr, nullptr},
              settings, seconds, serialJobs());
 }
 
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs, const ClothFields& fields) {
     stepTick(cloth.particles,
              TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, fields, cloth.tethers,
-                             cloth.stitches, &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy},
+                             cloth.stitches, &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy, &cloth.triangles, &cloth.selfTopology},
              cloth.settings, seconds, jobs);
 }
 

@@ -47,6 +47,16 @@ inline constexpr float clothLabBigSheetCornerSpan = 1.6f;
 inline constexpr float clothLabBigSheetHeight = 1.2f;
 
 /*
+* The pile sheet on the mat, for self-collision: squares x squares, size metres square, standing on its bottom edge just
+* above the mat, leaning lean radians, so it falls over and folds onto itself. 2 cm squares keep a triangle's height
+* (1.4 cm) well over the 5 mm the layers keep.
+*/
+inline constexpr int clothLabPileSheetSquares = 40;
+inline constexpr float clothLabPileSheetSize = 0.8f;
+inline constexpr float clothLabPileSheetLean = 0.15f;      // radians
+inline constexpr float clothLabPileSheetClearance = 0.02f; // m above the mat
+
+/*
 * The mannequin: this model (watertight, its arms out in an A-pose, facing +z, towards where the player starts), scaled
 * to this height, and the distance field the cloth collides with round it (physics/signed_distance_field.h): samples
 * 5 mm apart, real distances within 3 cm of the skin. The band must stay wider than any cloth's thickness.
@@ -103,6 +113,9 @@ struct ClothLabLayout {
 
     // Where the big sheet's middle starts: above the mat's middle.
     Vec3 bigSheetCentre;
+
+    // The middle of the pile sheet's bottom edge: over the mat's middle, clothLabPileSheetClearance above it.
+    Vec3 pileSheetBottom;
 
     // Where the flat sheet's middle starts: level with the bar's underside, under the middle of its left half, half
     // the sheet's depth in front of it.

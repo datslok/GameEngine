@@ -25,19 +25,20 @@
 
 namespace {
     /*
-    * A fresh cloth lab, initialised headless. Without its big sheet or mannequin unless asked for: 10,000 points, or a
-    * distance field of millions of samples, on one thread would make every test here take seconds. jobs, if given, are
-    * the game's from the start.
+    * A fresh cloth lab, initialised headless. Without its big sheet, pile sheet or mannequin unless asked for: 10,000
+    * points, 1,681 more, or a distance field of millions of samples, on one thread would make every test here take
+    * seconds. jobs, if given, are the game's from the start.
     */
     struct ClothLab {
         World world;
         AssetManager assets;
         ClothLabGame game{ControlMode::FreeCamera, true};
 
-        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr, bool pinnedDress = true) {
+        explicit ClothLab(bool bigSheet = false, bool mannequin = false, JobSystem* jobs = nullptr, bool pinnedDress = true, bool pileSheet = false) {
             game.getStationSettings().bigSheet = bigSheet;
             game.getStationSettings().mannequin = mannequin;
             game.getStationSettings().pinnedDress = pinnedDress;
+            game.getStationSettings().pileSheet = pileSheet;
             if (jobs != nullptr) {
                 game.useJobs(*jobs);
             }
@@ -392,6 +393,47 @@ namespace {
     }
 
     /*
+    * The pile sheet stands on edge over the mat, then with self-collision on falls over and folds onto itself, never
+    * through itself, and stays on the mat. On by default in the game; its station setting turns it off.
+    */
+    void testThePileSheetFoldsOntoItself() {
+        assert(ClothLabStationSettings{}.pileSheet);
+
+        JobSystem jobs{7};
+        ClothLab lab{false, false, &jobs, true, true};
+        lab.game.getClothSettings().selfCollision = true;
+        const ClothLabLayout layout = buildClothLabLayout();
+        const float matTop = layout.mat.centre.y + layout.mat.halfSize.y;
+        const Entity pile = lab.game.getPileSheet();
+        const Cloth& cloth = lab.world.get<Cloth>(pile);
+        assert(cloth.particles.size() == static_cast<std::size_t>((clothLabPileSheetSquares + 1) * (clothLabPileSheetSquares + 1)));
+
+        const auto highest = [&cloth] {
+            float top = -1.0f;
+            for (const Vec3& point : cloth.particles.positions) {
+                top = std::max(top, point.y);
+            }
+            return top;
+        };
+        assert(highest() > matTop + 0.7f);
+
+        for (int tick = 0; tick < 120; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+
+        assert(highest() < matTop + 0.3f);
+        for (const Vec3& point : cloth.particles.positions) {
+            assert(point.y > matTop);
+            assert(std::abs(point.x - layout.mat.centre.x) < layout.mat.halfSize.x);
+            assert(std::abs(point.z - layout.mat.centre.z) < layout.mat.halfSize.z);
+        }
+        assert(countClothCrossings(cloth.particles.positions, cloth.triangles, cloth.selfTopology) == 0);
+
+        ClothLab without;
+        assert(!without.world.isAlive(without.game.getPileSheet()));
+    }
+
+    /*
     * The mannequin is placed by its model's box: scaled to the lab's height, its feet's middle (the box's bottom, centred
     * across and front to back) on the station's spot.
     */
@@ -560,6 +602,7 @@ void testClothLab() {
     testCollidersMatchTheLayout();
     testTheDrapeSheetSettlesOverTheBall();
     testTheBigSheetSags();
+    testThePileSheetFoldsOntoItself();
     testTheMannequinIsPlaced();
     testTheMannequinStands();
     testTheDressHangsOnTheMannequin();
