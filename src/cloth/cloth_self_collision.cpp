@@ -90,7 +90,7 @@ namespace {
     public:
         static constexpr int largeCellsPerAxis = 16;
 
-        SpatialHash(float cellSize, const std::vector<Aabb>& boxes): cellSize(cellSize) {
+        SpatialHash(float cellSize, const std::vector<Aabb>& boxes): cellSize(cellSize), itemCount(boxes.size()) {
             std::size_t cellCount = 0;
             std::vector<std::uint8_t> large(boxes.size(), 0);
             for (std::size_t index = 0; index < boxes.size(); ++index) {
@@ -144,21 +144,45 @@ namespace {
             }
         }
 
-        // Every item whose box may meet region, each once, ascending, into found (replacing what it held).
+        /*
+        * Every item whose box may meet region, each once, into found (replacing what it held): the large items, then
+        * the cells in a fixed order, each bucket in its order, so the same grid and region always give the same list.
+        * An item met twice (in two of the region's cells) is kept the first time, by marking it with the query's number
+        * in a list kept per thread ("mailboxing"), rather than sorting each list, which cost more than the search.
+        */
         void gather(const Aabb& region, std::vector<std::uint32_t>& found) const {
-            found.assign(largeItems.begin(), largeItems.end());
+            static thread_local std::vector<std::uint32_t> seenBy;
+            static thread_local std::uint32_t query = 0;
+            if (seenBy.size() < itemCount) {
+                seenBy.resize(itemCount, 0);
+            }
+            if (++query == 0) {
+                std::fill(seenBy.begin(), seenBy.end(), 0);
+                query = 1;
+            }
+            const auto meet = [&](std::uint32_t item) {
+                if (seenBy[item] != query) {
+                    seenBy[item] = query;
+                    found.push_back(item);
+                }
+            };
+
+            found.clear();
+            for (const std::uint32_t item : largeItems) {
+                meet(item);
+            }
             const GridCell low = cellOf(region.minimum, cellSize);
             const GridCell high = cellOf(region.maximum, cellSize);
             for (int x = low.x; x <= high.x; ++x) {
                 for (int y = low.y; y <= high.y; ++y) {
                     for (int z = low.z; z <= high.z; ++z) {
                         const std::size_t bucket = bucketOf(GridCell{x, y, z});
-                        found.insert(found.end(), items.begin() + starts[bucket], items.begin() + starts[bucket + 1]);
+                        for (std::uint32_t entry = starts[bucket]; entry < starts[bucket + 1]; ++entry) {
+                            meet(items[entry]);
+                        }
                     }
                 }
             }
-            std::sort(found.begin(), found.end());
-            found.erase(std::unique(found.begin(), found.end()), found.end());
         }
 
     private:
@@ -170,6 +194,7 @@ namespace {
         }
 
         float cellSize;
+        std::size_t itemCount;
         std::uint64_t mask = 0;
         std::vector<std::uint32_t> starts;
         std::vector<std::uint32_t> items;
@@ -344,15 +369,16 @@ std::vector<ClothSelfPair> findClothPairs(const std::vector<Vec3>& positions, co
         triangleHash.gather(Aabb{positions[point], positions[point]}, candidates);
         const std::array<std::uint32_t, 1> alone{point};
         for (const std::uint32_t triangle : candidates) {
-            if (!boxes[triangle].contains(positions[point]) || anyNear(topology, alone, triangles[triangle], false) ||
+            if (!boxes[triangle].contains(positions[point]) || anyNear(topology, alone, triangles[triangle], false)) {
+                continue;
+            }
+            const std::array<Vec3, 3> at = corners(positions, triangles[triangle]);
+            if ((closestTriangleFeature(positions[point], at[0], at[1], at[2]).point - positions[point]).lengthSquared() >= reach * reach ||
                 (anyNear(topology, alone, triangles[triangle], true) &&
                  pointTrianglePair(topology.restPositions, point, triangles[triangle]).gap < thickness)) {
                 continue;
             }
-            const ClothSelfPair pair = pointTrianglePair(positions, point, triangles[triangle]);
-            if (pair.gap < reach) {
-                out.push_back(pair);
-            }
+            out.push_back(pointTrianglePair(positions, point, triangles[triangle]));
         }
     });
 
@@ -367,14 +393,16 @@ std::vector<ClothSelfPair> findClothPairs(const std::vector<Vec3>& positions, co
         const Aabb own = boxAround(std::array<Vec3, 2>{positions[edges[edge][0]], positions[edges[edge][1]]}, 0.0f);
         edgeHash.gather(own, candidates);
         for (const std::uint32_t other : candidates) {
-            if (other <= edge || !overlaps(own, boxes[other]) || anyNear(topology, edges[edge], edges[other], false) ||
-                (anyNear(topology, edges[edge], edges[other], true) && edgeEdgePair(topology.restPositions, edges[edge], edges[other]).gap < thickness)) {
+            if (other <= edge || !overlaps(own, boxes[other]) || anyNear(topology, edges[edge], edges[other], false)) {
                 continue;
             }
-            const ClothSelfPair pair = edgeEdgePair(positions, edges[edge], edges[other]);
-            if (pair.gap < reach) {
-                out.push_back(pair);
+            const ClosestPoints closest = closestPointsBetweenSegments(positions[edges[edge][0]], positions[edges[edge][1]], positions[edges[other][0]],
+                                                                      positions[edges[other][1]]);
+            if (closest.distanceSquared() >= reach * reach || (anyNear(topology, edges[edge], edges[other], true) &&
+                                                               edgeEdgePair(topology.restPositions, edges[edge], edges[other]).gap < thickness)) {
+                continue;
             }
+            out.push_back(edgeEdgePair(positions, edges[edge], edges[other]));
         }
     });
 
