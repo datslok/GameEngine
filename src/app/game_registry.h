@@ -2,7 +2,9 @@
 
 #include "engine/game.h"
 #include "engine/golden_capture.h"
+#include "engine/settings_file.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -43,9 +45,19 @@ enum class YardstickRun {
     Dress,
 };
 
+/*
+* The command options (core/command_registry.h): --set key=value (any number) sets settings over settings.cfg before
+* anything reads them, start-up ones too; --run <file> runs a script of commands, one a line, at the first frame; --port
+* is the port --send uses (engine.commandPort's default without it). --send takes every word after it as one command
+* for a game already running, prints its reply and exits, so it takes nothing but --port before it.
+*/
 struct LaunchOptions {
     const GameEntry* game = nullptr;
     std::optional<GoldenMode> golden;
     std::optional<YardstickRun> clothYardstick;
+    std::vector<SettingEntry> settings;
+    std::optional<std::string> script;
+    std::optional<std::uint16_t> port;
+    std::optional<std::vector<std::string>> send;
 };
 LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments);

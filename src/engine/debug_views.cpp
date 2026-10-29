@@ -31,8 +31,7 @@ void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aab
 * tiles drawn and point light cube faces skipped as unseen with how far the sun's cascades reach, the light probes'
 * states, the video memory, and the eye's exposure with the upscaler.
 */
-void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
-
+std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     const std::string camera = "DRAWN " + std::to_string(stats.drawn) + "  CULLED " + std::to_string(stats.culled) +
                                "  CALLS " + std::to_string(stats.drawCalls);
     const std::string shadows = "SHADOW DRAWN " + std::to_string(stats.shadowDrawn) + "  CULLED " + std::to_string(stats.shadowCulled) +
@@ -46,17 +45,23 @@ void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
         tiles += distance;
     }
 
-    debugText(debug, debugReadoutLine(0), debugReadoutTextHeight, camera, boundingBoxColour);
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +
                                "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed);
 
-    debugText(debug, debugReadoutLine(1), debugReadoutTextHeight, shadows, boundingBoxColour);
-    debugText(debug, debugReadoutLine(2), debugReadoutTextHeight, lights, boundingBoxColour);
-    debugText(debug, debugReadoutLine(3), debugReadoutTextHeight, tiles, boundingBoxColour);
-    debugText(debug, debugReadoutLine(probeReadoutLine), debugReadoutTextHeight, probeStatsText(stats.probes), boundingBoxColour);
-    debugText(debug, debugReadoutLine(videoMemoryReadoutLine), debugReadoutTextHeight, videoMemoryText(stats.videoMemory), boundingBoxColour);
-    debugText(debug, debugReadoutLine(exposureReadoutLine), debugReadoutTextHeight,
-              exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale), boundingBoxColour);
+    std::vector<std::string> lines{camera, shadows, lights, tiles};
+    lines.resize(exposureReadoutLine + 1);
+    lines[probeReadoutLine] = probeStatsText(stats.probes);
+    lines[videoMemoryReadoutLine] = videoMemoryText(stats.videoMemory);
+    lines[exposureReadoutLine] = exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale);
+    return lines;
+}
+
+void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
+    const std::vector<std::string> lines = renderStatsLines(stats);
+
+    for (std::size_t line = 0; line < lines.size(); ++line) {
+        debugText(debug, debugReadoutLine(static_cast<int>(line)), debugReadoutTextHeight, lines[line], boundingBoxColour);
+    }
 }
 
 // Hundredths of the scale: the slider's own steps.

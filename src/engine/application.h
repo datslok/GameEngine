@@ -1,16 +1,19 @@
 #pragma once
 
 #include "assets/asset_manager.h"
+#include "core/command_registry.h"
 #include "core/fixed_timestep.h"
 #include "core/job_system.h"
 #include "core/profiler.h"
 #include "engine/debug_views.h"
 #include "engine/debug_ui.h"
 #include "ecs/world.h"
+#include "engine/engine_commands.h"
 #include "engine/engine_settings.h"
 #include "engine/game.h"
 #include "engine/settings_file.h"
 #include "input/input.h"
+#include "platform/command_socket.h"
 #include "platform/window.h"
 #include "engine/golden.h"
 #include "engine/golden_view.h"
@@ -19,6 +22,8 @@
 #include "scene/frame_description.h"
 
 #include <cstdint>
+#include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,14 +37,22 @@ enum class SavedSettings {
 /*
 * The engine: runs the main loop for one Game, and owns everything that is the same for every game (window, renderer, input, World, fixed timestep).
 * The game is borrowed, so it must outlive the Application.
-* Settings saved by the debug UI (savedSettingsPath) are loaded over the given ones before anything reads them.
+* Settings saved by the debug UI (savedSettingsPath) are loaded over the given ones before anything reads them, then
+* launchSettings (--set) over those; a launch setting that is unknown or does not read throws std::invalid_argument.
+*
+* Commands (core/command_registry.h, engine/engine_commands.h) run at the start of each frame, from a script queued
+* before run() and from the command server (EngineSettings::commandServer), one after another in arrival order.
 */
 class Application {
 public:
     Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings = {},
-                SavedSettings saved = SavedSettings::Load);
+                SavedSettings saved = SavedSettings::Load, const std::vector<SettingEntry>& launchSettings = {});
 
     void run();
+
+    // Commands to run at the first frame, in order (--run): blank lines and lines starting with # are skipped. Their
+    // replies are printed to the standard output.
+    void queueCommands(const std::vector<std::string>& lines);
 
     // The engine's tunable values. Most are read every frame (see EngineSettings for the ones read only at start-up).
     EngineSettings& getSettings();
@@ -79,8 +92,35 @@ private:
     SettingsWalk allSettings();
 
     // Remember the settings as they are (the defaults, for saving only what changed and for resetting), then load the
-    // saved file over them. Returns the defaults.
-    static std::vector<SettingEntry> captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved);
+    // saved file over them and the launch settings over those. Returns the defaults.
+    static std::vector<SettingEntry> captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved,
+                                                            const std::vector<SettingEntry>& launchSettings);
+
+    // Save what differs from the defaults to savedSettingsPath, keeping other games' sections. Returns how many
+    // settings were saved; throws std::runtime_error when the file cannot be written.
+    std::size_t saveSettings();
+
+    // One simulation tick, as the loop and the step command run it.
+    void runTick();
+
+    // The engine's commands, those of engine/engine_commands.h and the ones needing the window and GPU.
+    void registerCommands();
+
+    // Take the server's new commands and run what is queued, unless a wait is still counting down its frames.
+    void runCommands();
+
+    // A command's line and who sent it: a connection to reply to, or none for a script (printed).
+    struct PendingCommand {
+        std::optional<std::uint64_t> connection;
+        std::string line;
+    };
+    void answer(const PendingCommand& command, const CommandReply& reply);
+
+    // The picture as the window shows it (without the debug UI and lines), saved as a PNG.
+    CommandReply screenshot(const CommandArguments& arguments);
+
+    // The debug readout's lines (F4) as text, with the simulation's state.
+    CommandReply stats();
 
     Game& game;
 
@@ -153,4 +193,19 @@ private:
 
     // The mouse mode last applied to the window. Only changes are applied, because applying it captures or confines the mouse again, which would undo Escape.
     bool mouseLookEnabled = false;
+
+    // Every command, and whether the simulation's clock runs (pause, step).
+    CommandRegistry commands;
+    SimulationControl simulation;
+
+    // Listening while EngineSettings::commandServer is on and its port was free.
+    std::optional<CommandServer> commandServer;
+
+    // Commands waiting their turn, and a wait command counting down its frames, its reply held until then.
+    std::deque<PendingCommand> pendingCommands;
+    int waitFrames = 0;
+    std::optional<std::pair<PendingCommand, CommandReply>> waiting;
+
+    // Set by the quit command: the loop ends after the commands' replies are sent.
+    bool quitRequested = false;
 };

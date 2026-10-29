@@ -13,10 +13,10 @@
 #include <vector>
 
 Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings,
-                         SavedSettings saved):
+                         SavedSettings saved, const std::vector<SettingEntry>& launchSettings):
     game(game),
     settings(initialSettings),
-    defaultSettings(captureDefaultsAndLoad(settings, game, saved)),
+    defaultSettings(captureDefaultsAndLoad(settings, game, saved, launchSettings)),
     jobs(workerThreadCount(settings)),
     window(title, width, height),
     renderer(window.getSdlWindow(), jobs, settings.gpuValidation, settings.framesInFlight),
@@ -31,6 +31,29 @@ Application::Application(const char* title, int width, int height, Game& game, c
 
     mouseLookEnabled = game.wantsMouseLook();
     window.setMouseLookEnabled(mouseLookEnabled);
+
+    registerCommands();
+
+    // A port in use (a second game running) leaves this one without commands rather than stopping it.
+    if (settings.commandServer) {
+        try {
+            commandServer.emplace(static_cast<std::uint16_t>(settings.commandPort));
+            SDL_Log("Listening for commands on 127.0.0.1:%d (try: game.exe --send help)", settings.commandPort);
+        }
+        catch (const std::exception& error) {
+            SDL_Log("Commands are off: %s", error.what());
+        }
+    }
+}
+
+void Application::queueCommands(const std::vector<std::string>& lines) {
+    for (const std::string& line : lines) {
+        const std::size_t first = line.find_first_not_of(" \t\r");
+
+        if (first != std::string::npos && line[first] != '#') {
+            pendingCommands.push_back({std::nullopt, line});
+        }
+    }
 }
 
 /*
@@ -40,6 +63,16 @@ void Application::run() {
     Uint64 previousFrameStart = SDL_GetTicksNS();
 
     while (true) {
+        // Between frames, before this frame's time is measured: what commands take (a screenshot, many steps) is not
+        // game time, so the clock skips it rather than catching up with a burst of ticks.
+        const Uint64 commandsStart = SDL_GetTicksNS();
+        runCommands();
+        previousFrameStart += SDL_GetTicksNS() - commandsStart;
+
+        if (quitRequested) {
+            break;
+        }
+
         const Uint64 frameStart = SDL_GetTicksNS();
         const double workStart = profilerSeconds();
 
@@ -54,7 +87,7 @@ void Application::run() {
         previousFrameStart = frameStart;
         profiler.record(frameSection, deltaSeconds);
 
-        const int ticks = timestep.advance(deltaSeconds);
+        const int ticks = ticksThisFrame(simulation, timestep.advance(deltaSeconds));
 
         // Before the game reads its settings this frame, so a slider's change shows at once.
         ImDrawData* ui = updateDebugUi();
@@ -70,15 +103,11 @@ void Application::run() {
             if (!fitsTickBudget(tick, profilerSeconds() - ticksStart, gpuSecondsPerTick, settings.maxTickSecondsPerFrame)) {
                 break;
             }
-            ++simulationTicks;
-            const double simulationSeconds =
-                static_cast<double>(simulationTicks) * timestep.getTickSeconds();
-
-            ScopedTimer timer{profiler, tickSection};
-            runFixedUpdate(game, world, static_cast<float>(timestep.getTickSeconds()), simulationSeconds);
+            runTick();
         }
 
-        const float alpha = timestep.getAlpha();
+        // Paused, the picture rests on the last tick rather than sliding between the last two.
+        const float alpha = simulation.paused ? 1.0f : timestep.getAlpha();
         {
             ScopedTimer timer{profiler, updateSection};
             game.onUpdate(world, input, static_cast<float>(timestep.getFrameSeconds()), alpha);
@@ -122,11 +151,27 @@ SettingsWalk Application::allSettings() {
 * cannot be read or holds mistakes never stops the game; each problem is logged and the rest is used. Other games'
 * sections of the shared file are left alone (separateSections).
 */
-std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved) {
+std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& settings, Game& game, SavedSettings saved,
+                                                              const std::vector<SettingEntry>& launchSettings) {
     const SettingsWalk walk = engineAndGameSettings(settings, game);
     std::vector<SettingEntry> defaults = captureSettings(walk);
 
+    // Unlike the file's, a mistake on the command line stops the start: whoever typed it is there to fix it.
+    const auto applyLaunchSettings = [&] {
+        const std::vector<std::string> warnings = applySettings(launchSettings, walk, StartupFields::Apply);
+        std::string problems;
+
+        for (const std::string& warning : warnings) {
+            problems += "\n--set " + warning;
+        }
+
+        if (!problems.empty()) {
+            throw std::invalid_argument("The settings given at launch were not all usable:" + problems);
+        }
+    };
+
     if (saved == SavedSettings::Ignore) {
+        applyLaunchSettings();
         return defaults;
     }
 
@@ -154,13 +199,29 @@ std::vector<SettingEntry> Application::captureDefaultsAndLoad(EngineSettings& se
         SDL_Log("Saved settings not loaded: %s", error.what());
     }
 
+    applyLaunchSettings();
     return defaults;
 }
 
 /*
-* Saving writes only what differs from the defaults, plus the other games' sections as the file holds them now (read
-* afresh, so nothing saved since the start is lost). Resetting leaves the start-up fields alone, since the running
-* engine was built from them.
+* The other games' sections are read afresh from the file, so nothing another game saved since the start is lost.
+*/
+std::size_t Application::saveSettings() {
+    const SettingsWalk walk = allSettings();
+    std::vector<SettingEntry> otherGames;
+
+    if (const std::optional<std::string> saved = readSettingsFile(savedSettingsPath)) {
+        otherGames = separateSections(parseSettingsText(*saved).entries, walk).others;
+    }
+
+    const std::string text = formatSettingsText(captureSettings(walk), defaultSettings, otherGames);
+    writeSettingsFile(savedSettingsPath, text);
+    return parseSettingsText(text).entries.size() - otherGames.size();
+}
+
+/*
+* Saving writes only what differs from the defaults, plus the other games' sections as the file holds them now
+* (saveSettings). Resetting leaves the start-up fields alone, since the running engine was built from them.
 */
 ImDrawData* Application::updateDebugUi() {
     if (input.wasKeyPressed(Key::F5)) {
@@ -173,14 +234,7 @@ ImDrawData* Application::updateDebugUi() {
 
     if (requests.save) {
         try {
-            std::vector<SettingEntry> otherGames;
-            if (const std::optional<std::string> saved = readSettingsFile(savedSettingsPath)) {
-                otherGames = separateSections(parseSettingsText(*saved).entries, walk).others;
-            }
-
-            const std::string text = formatSettingsText(captureSettings(walk), defaultSettings, otherGames);
-            writeSettingsFile(savedSettingsPath, text);
-            const std::size_t changed = parseSettingsText(text).entries.size() - otherGames.size();
+            const std::size_t changed = saveSettings();
             debugUi.setStatus("Saved " + std::to_string(changed) + " changed settings to " + savedSettingsPath);
         }
         catch (const std::exception& error) {

@@ -11,6 +11,10 @@
 // EngineSettings::workerThreads for one worker per core but one.
 inline constexpr int automaticWorkerThreads = -1;
 
+// The port a game listens for commands on, and --send sends to, unless told otherwise. Below Windows' range for
+// short-lived ports (49152 up), so the system does not hand it to another program first.
+inline constexpr int defaultCommandPort = 47613;
+
 /*
 * The engine's tunable values in one place: the main loop's timing and presentation, and the renderer's settings.
 * Application owns one copy; pass your own to its constructor, or change it later through getSettings().
@@ -51,6 +55,11 @@ struct EngineSettings {
     // CPU, or on the CPU's threads. Read every frame: switching moves each cloth across from its latest points (from the
     // GPU, those a few frames old, so it jumps a little).
     bool clothOnGpu = true;
+
+    // Listen for commands (core/command_registry.h) from tools and AIs on 127.0.0.1 at commandPort, which nothing
+    // outside this computer can reach: game.exe --send <command> talks to it. Read once, at start-up.
+    bool commandServer = true;
+    int commandPort = defaultCommandPort;
 
     RenderSettings render;
 };

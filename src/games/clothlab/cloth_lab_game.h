@@ -73,6 +73,7 @@ public:
     void onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) override;
     void onUpdate(World& world, const Input& input, float frameSeconds, float alpha) override;
     Camera& getCamera() override;
+    bool poseCamera(World& world, const Vec3& position, const Vec3& target) override;
     bool wantsMouseLook() const override;
     Vec3 getLightFocus() override;
     bool wantsDebugView() const override;

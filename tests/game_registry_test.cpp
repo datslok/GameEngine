@@ -74,8 +74,51 @@ namespace {
         assert(dress.game == nullptr && !dress.golden);
     }
 
+    /*
+    * The command options: --set (any number, each key=value, the value may hold spaces and =), --run with a script,
+    * --port for the commands' port, and --send, which takes every word after it as the command to send to a running
+    * game, quoting kept apart.
+    */
+    void testCommandOptions() {
+        const LaunchOptions plain = parseLaunchOptions({});
+        assert(plain.settings.empty());
+        assert(!plain.script);
+        assert(!plain.send);
+        assert(!plain.port);
+
+        const LaunchOptions set = parseLaunchOptions({"--set", "engine.targetFPS=60", "--game", "demo", "--set", "demo.title = a=b"});
+        assert(set.game == findGame("demo"));
+        assert(set.settings.size() == 2);
+        assert(set.settings[0].key == "engine.targetFPS" && set.settings[0].value == "60");
+        assert(set.settings[1].key == "demo.title" && set.settings[1].value == "a=b");
+
+        const LaunchOptions script = parseLaunchOptions({"--run", "shots.txt", "--port", "5000"});
+        assert(script.script == "shots.txt");
+        assert(script.port == 5000);
+
+        const LaunchOptions send = parseLaunchOptions({"--port", "5001", "--send", "screenshot", "C:/my shots/a.png", "--game"});
+        assert(send.port == 5001);
+        assert(send.send);
+        assert((*send.send == std::vector<std::string>{"screenshot", "C:/my shots/a.png", "--game"}));
+    }
+
     // Mistakes are reported, not guessed at.
     void testLaunchMistakes() {
+        assert(throwsInvalidArgument({"--set"}));
+        assert(throwsInvalidArgument({"--set", "engine.targetFPS"}));
+        assert(throwsInvalidArgument({"--set", "=60"}));
+        assert(throwsInvalidArgument({"--set", "engine.targetFPS="}));
+        assert(throwsInvalidArgument({"--run"}));
+        assert(throwsInvalidArgument({"--run", "a.txt", "--run", "b.txt"}));
+        assert(throwsInvalidArgument({"--port"}));
+        assert(throwsInvalidArgument({"--port", "0"}));
+        assert(throwsInvalidArgument({"--port", "70000"}));
+        assert(throwsInvalidArgument({"--port", "80x"}));
+        assert(throwsInvalidArgument({"--send"}));
+        assert(throwsInvalidArgument({"--game", "demo", "--send", "help"}));
+        assert(throwsInvalidArgument({"--set", "a=b", "--send", "help"}));
+        assert(throwsInvalidArgument({"--cloth-yardstick", "--set", "a=b"}));
+        assert(throwsInvalidArgument({"--golden-check", "--run", "a.txt"}));
         assert(throwsInvalidArgument({"--game"}));
         assert(throwsInvalidArgument({"--game", "nonsense"}));
         assert(throwsInvalidArgument({"--fly"}));
@@ -94,5 +137,6 @@ namespace {
 void testGameRegistry() {
     testEveryGameIsUsable();
     testLaunchOptions();
+    testCommandOptions();
     testLaunchMistakes();
 }
