@@ -81,6 +81,11 @@ namespace {
         const std::vector<std::string> typo = closestNames("engine.targetFSP", names);
         assert(!typo.empty() && typo.front() == "engine.targetFPS");
 
+        // A typo in a long key's last part is matched by that part, with a part's allowance, not the whole key's: the
+        // light lab's "solarHour" once also offered bloom's radius and the probes' debug switch.
+        const std::vector<std::string> sun{"lightLab.sun.solarHours", "engine.render.bloom.radius", "engine.render.globalIllumination.showProbes"};
+        assert(closestNames("lightLab.sun.solarHour", sun) == std::vector<std::string>{"lightLab.sun.solarHours"});
+
         // Case is ignored.
         assert(closestNames("CLOTHONGPU", names) == std::vector<std::string>{"engine.clothOnGPU"});
 

@@ -176,14 +176,19 @@ std::string joinCommandWords(const std::vector<std::string>& words) {
 }
 
 /*
-* Containing the name is the strongest hint (a key's last parts typed alone). Otherwise up to a third of the name may
-* be wrong, at least two letters: a swapped pair is two edits.
+* Containing the name is the strongest hint (a key's last parts typed alone). Otherwise up to a third of what is compared
+* may be wrong, at least two letters (a swapped pair is two edits): of the whole name against the whole candidate, or of
+* its last dotted part against the candidate's, each with its own length's allowance.
 */
 std::vector<std::string> closestNames(std::string_view name, const std::vector<std::string>& candidates, std::size_t count) {
     const std::string lowerName = lowerCase(name);
+    const std::string_view namePart = lastPart(lowerName);
     std::vector<std::string> containing;
     std::vector<std::pair<std::size_t, std::string>> near;
-    const std::size_t allowed = std::max<std::size_t>(2, lowerName.size() / 3);
+
+    const auto allowance = [](std::string_view text) {
+        return std::max<std::size_t>(2, text.size() / 3);
+    };
 
     for (const std::string& candidate : candidates) {
         const std::string lowerCandidate = lowerCase(candidate);
@@ -193,10 +198,11 @@ std::vector<std::string> closestNames(std::string_view name, const std::vector<s
             continue;
         }
 
-        const std::size_t distance = std::min(editDistance(lowerName, lowerCandidate), editDistance(lastPart(lowerName), lastPart(lowerCandidate)));
+        const std::size_t whole = editDistance(lowerName, lowerCandidate);
+        const std::size_t part = editDistance(namePart, lastPart(lowerCandidate));
 
-        if (distance <= allowed) {
-            near.emplace_back(distance, candidate);
+        if (whole <= allowance(lowerName) || part <= allowance(namePart)) {
+            near.emplace_back(std::min(whole, part), candidate);
         }
     }
 
