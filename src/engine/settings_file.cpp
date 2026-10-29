@@ -1,9 +1,11 @@
 #include "engine/settings_file.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -128,6 +130,9 @@ namespace {
 
         std::vector<std::string> warnings;
 
+        // Values that did not read as their field's kind and were left out (the rest of the warnings only clamped).
+        int refused = 0;
+
         // Keys no field claimed: settings that were renamed or removed, or typing mistakes.
         void warnAboutUnknownKeys() {
             for (const auto& [key, value] : values) {
@@ -149,6 +154,7 @@ namespace {
 
             if (!read) {
                 warnings.push_back(key + ": \"" + *text + "\" is not a number (kept " + floatText(value) + ")");
+                ++refused;
                 return;
             }
 
@@ -166,6 +172,7 @@ namespace {
 
             if (!read) {
                 warnings.push_back(key + ": \"" + *text + "\" is not a whole number (kept " + intText(value) + ")");
+                ++refused;
                 return;
             }
 
@@ -185,6 +192,7 @@ namespace {
             }
 
             warnings.push_back(key + ": \"" + *text + "\" is not true or false (kept " + boolText(value) + ")");
+            ++refused;
         }
 
         void onChoice(const std::string& key, int& index, const char* const* names, int count, FieldApplies applies) override {
@@ -209,6 +217,7 @@ namespace {
             }
 
             warnings.push_back(message + " (kept " + names[index] + ")");
+            ++refused;
         }
 
     private:
@@ -290,6 +299,75 @@ namespace {
             if (index < 0 || index >= count) {
                 problems.push_back(key + ": " + intText(index) + " is not one of its choices");
             }
+        }
+    };
+
+    // "0 to 1", "from 0", "up to 5" or nothing, for limits that may be missing (infinite, or an int's extreme).
+    template<typename Number, typename Text>
+    std::string rangeText(Number min, Number max, bool hasMin, bool hasMax, Text text) {
+        if (hasMin && hasMax) {
+            return text(min) + " to " + text(max);
+        }
+
+        if (hasMin) {
+            return "from " + text(min);
+        }
+
+        return hasMax ? "up to " + text(max) : std::string{};
+    }
+
+    // A number field's kind: its word, its hard limits, its slider's range when it has its own, and its unit.
+    template<typename Limits, typename Text>
+    std::string numberKind(const char* word, const Limits& limits, bool hasMin, bool hasMax, Text text) {
+        std::string kind = word;
+        const std::string range = rangeText(limits.min, limits.max, hasMin, hasMax, text);
+
+        if (!range.empty()) {
+            kind += " " + range;
+        }
+
+        if (limits.sliderMin || limits.sliderMax) {
+            kind += " (slider " + text(limits.lowestSliderValue()) + " to " + text(limits.highestSliderValue()) + ")";
+        }
+
+        if (limits.unit[0] != '\0') {
+            kind += std::string{" "} + limits.unit;
+        }
+
+        return kind;
+    }
+
+    // Describes each field: its value, what it takes and when it applies.
+    class DescribingVisitor final : public KeyedVisitor {
+    public:
+        std::vector<SettingDescription> descriptions;
+
+    protected:
+        void onFloat(const std::string& key, float& value, const FloatLimits& limits) override {
+            const std::string kind = numberKind("number", limits, std::isfinite(limits.min), std::isfinite(limits.max), floatText);
+            descriptions.push_back({key, floatText(value), kind, limits.applies == FieldApplies::AtStartup});
+        }
+
+        void onInt(const std::string& key, int& value, const IntLimits& limits) override {
+            const bool hasMin = limits.min != std::numeric_limits<int>::min();
+            const bool hasMax = limits.max != std::numeric_limits<int>::max();
+            const std::string kind = numberKind("whole number", limits, hasMin, hasMax, intText);
+            descriptions.push_back({key, intText(value), kind, limits.applies == FieldApplies::AtStartup});
+        }
+
+        void onBool(const std::string& key, bool& value, FieldApplies applies) override {
+            descriptions.push_back({key, boolText(value), "true or false", applies == FieldApplies::AtStartup});
+        }
+
+        void onChoice(const std::string& key, int& index, const char* const* names, int count, FieldApplies applies) override {
+            std::string kind = "one of";
+
+            for (int candidate = 0; candidate < count; ++candidate) {
+                kind += candidate == 0 ? " " : ", ";
+                kind += names[candidate];
+            }
+
+            descriptions.push_back({key, names[index], kind, applies == FieldApplies::AtStartup});
         }
     };
 
@@ -412,17 +490,67 @@ ParsedSettings parseSettingsText(std::string_view text) {
     return parsed;
 }
 
+std::vector<SettingDescription> describeSettings(const SettingsWalk& walk) {
+    DescribingVisitor visitor;
+    walk(visitor);
+    return visitor.descriptions;
+}
+
+/*
+* The field is looked up first, so an unknown key and a start-up field are told apart from a bad value; then the value
+* goes through the same visitor the settings file loads with, so a command and the file read values alike.
+*/
+SettingChange setSetting(const SettingsWalk& walk, const std::string& key, const std::string& value) {
+    const std::vector<SettingDescription> fields = describeSettings(walk);
+    const auto field = std::find_if(fields.begin(), fields.end(), [&](const SettingDescription& each) {
+        return each.key == key;
+    });
+
+    if (field == fields.end()) {
+        return {SettingOutcome::Unknown, {}, key + ": no such setting"};
+    }
+
+    if (field->atStartup) {
+        return {SettingOutcome::AtStartupOnly, field->value, key + " is read only at start-up"};
+    }
+
+    ApplyingVisitor visitor{{{key, value}}, StartupFields::Keep};
+    walk(visitor);
+
+    const std::vector<SettingEntry> after = captureSettings(walk);
+    const auto changed = std::find_if(after.begin(), after.end(), [&](const SettingEntry& entry) {
+        return entry.key == key;
+    });
+    const std::string now = changed == after.end() ? std::string{} : changed->value;
+
+    if (visitor.refused > 0) {
+        return {SettingOutcome::Refused, now, visitor.warnings.front()};
+    }
+
+    if (!visitor.warnings.empty()) {
+        return {SettingOutcome::Clamped, now, visitor.warnings.front()};
+    }
+
+    return {SettingOutcome::Set, now, {}};
+}
+
 std::vector<std::string> findLimitProblems(const SettingsWalk& walk) {
     LimitCheckingVisitor visitor;
     walk(visitor);
     return visitor.problems;
 }
 
-SettingsWalk engineAndGameSettings(EngineSettings& settings, Game& game) {
-    return [&settings, &game](SettingsVisitor& visitor) {
+SettingsWalk engineSettings(EngineSettings& settings) {
+    return [&settings](SettingsVisitor& visitor) {
         visitor.group("Engine", [&] {
             visit(settings, visitor);
         });
+    };
+}
+
+SettingsWalk engineAndGameSettings(EngineSettings& settings, Game& game) {
+    return [&settings, &game](SettingsVisitor& visitor) {
+        engineSettings(settings)(visitor);
         visitor.group(game.title(), [&] {
             game.visitSettings(visitor);
         });

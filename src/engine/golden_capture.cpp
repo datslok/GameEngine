@@ -77,8 +77,11 @@ int runGoldenImages(const std::function<std::unique_ptr<Game>()>& makeGame, cons
             throw std::invalid_argument("Golden view names must be lower-case letters, digits and dashes: " + view.name);
         }
 
+        // No command server: captures take no commands, and a game running beside them keeps its port.
         std::unique_ptr<Game> game = makeGame();
-        Application application{"Golden images", 640, 360, *game, EngineSettings{}, SavedSettings::Ignore};
+        EngineSettings goldenSettings;
+        goldenSettings.commandServer = false;
+        Application application{"Golden images", 640, 360, *game, goldenSettings, SavedSettings::Ignore};
         const CapturedFrame captured = application.captureGoldenView(view);
 
         const std::string gpuFolder = goldenFolderName(application.getRendererName());

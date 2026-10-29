@@ -325,6 +325,69 @@ namespace {
         assert(valueOf(parsed.entries, "demo.grenade.throwSpeed") == "20");
     }
 
+    // Each field described for people and commands: its key and value as saved, what it takes, and when it applies.
+    void testSettingsAreDescribed() {
+        Sample sample;
+        const std::vector<SettingDescription> described = describeSettings(walkOf(sample));
+        const std::vector<SettingEntry> captured = captureSettings(walkOf(sample));
+
+        assert(described.size() == captured.size());
+        for (std::size_t index = 0; index < described.size(); ++index) {
+            assert(described[index].key == captured[index].key);
+            assert(described[index].value == captured[index].value);
+        }
+
+        const auto find = [&](const std::string& key) {
+            for (const SettingDescription& description : described) {
+                if (description.key == key) {
+                    return description;
+                }
+            }
+            assert(false && "no such key");
+            return SettingDescription{};
+        };
+
+        assert(find("strength").kind == "number 0 to 1 (slider 0 to 0.2)");
+        assert(find("count").kind == "whole number 0 to 10");
+        assert(find("flavour").kind == "one of Plain, Salted, Spiced");
+        assert(find("innerPart.enabled").kind == "true or false");
+        assert(find("ticks").atStartup);
+        assert(find("startupFlag").atStartup);
+        assert(!find("strength").atStartup);
+    }
+
+    // A single field set by key says what happened: set, clamped, refused, unknown or read only at start-up.
+    void testOneSettingIsSet() {
+        Sample sample;
+        const SettingsWalk walk = walkOf(sample);
+
+        const SettingChange set = setSetting(walk, "innerPart.speed", "4.5");
+        assert(set.outcome == SettingOutcome::Set);
+        assert(sample.inner.speed == 4.5f);
+        assert(set.value == "4.5");
+
+        const SettingChange clamped = setSetting(walk, "count", "50");
+        assert(clamped.outcome == SettingOutcome::Clamped);
+        assert(sample.count == 10);
+        assert(clamped.value == "10");
+        assert(!clamped.message.empty());
+
+        const SettingChange refused = setSetting(walk, "count", "many");
+        assert(refused.outcome == SettingOutcome::Refused);
+        assert(sample.count == 10);
+        assert(!refused.message.empty());
+
+        assert(setSetting(walk, "flavour", "Sour").outcome == SettingOutcome::Refused);
+        assert(sample.flavour == Flavour::Salted);
+
+        assert(setSetting(walk, "nothing", "1").outcome == SettingOutcome::Unknown);
+        assert(setSetting(walk, "innerPart", "1").outcome == SettingOutcome::Unknown);
+
+        const SettingChange startup = setSetting(walk, "ticks", "60");
+        assert(startup.outcome == SettingOutcome::AtStartupOnly);
+        assert(sample.ticks == 120.0);
+    }
+
     // The hard limits agree with the renderer's own checks: their ends are accepted.
     void testLimitsAgreeWithValidation() {
         BloomSettings bloom;
@@ -357,4 +420,6 @@ void testSettingsFile() {
     testEveryGameHasItsOwnSection();
     testOtherGamesSectionsAreKept();
     testLimitsAgreeWithValidation();
+    testSettingsAreDescribed();
+    testOneSettingIsSet();
 }

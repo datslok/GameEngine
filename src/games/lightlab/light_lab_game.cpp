@@ -716,6 +716,12 @@ Camera& LightLabGame::getCamera() {
     return controls.getCamera();
 }
 
+// The free camera takes the pose over, so it stays until the player flies it away.
+bool LightLabGame::poseCamera(World& world, const Vec3& position, const Vec3& target) {
+    controls.poseFreeCamera(world, position, target);
+    return true;
+}
+
 bool LightLabGame::wantsMouseLook() const {
     return controls.wantsMouseLook();
 }

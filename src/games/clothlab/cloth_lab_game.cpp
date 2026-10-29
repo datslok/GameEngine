@@ -349,6 +349,12 @@ Camera& ClothLabGame::getCamera() {
     return controls.getCamera();
 }
 
+// The free camera takes the pose over, so it stays until the player flies it away.
+bool ClothLabGame::poseCamera(World& world, const Vec3& position, const Vec3& target) {
+    controls.poseFreeCamera(world, position, target);
+    return true;
+}
+
 bool ClothLabGame::wantsMouseLook() const {
     return controls.wantsMouseLook();
 }

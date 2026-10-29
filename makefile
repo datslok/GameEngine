@@ -29,7 +29,8 @@ CPPFLAGS := -Isrc -Iexternal -DVK_NO_PROTOTYPES
 # files that include it. -MP adds an empty rule per header, so deleting a header does not break the build.
 DEPFLAGS := -MMD -MP
 # wintrust and crypt32: Streamline's check that its DLL is signed by NVIDIA (render/vulkan/vulkan_dlss.cpp).
-LDLIBS := -lSDL3_image -lSDL3 -lwintrust -lcrypt32
+# ws2_32: Windows sockets, for commands to a running game (platform/command_socket.cpp).
+LDLIBS := -lSDL3_image -lSDL3 -lwintrust -lcrypt32 -lws2_32
 
 GLSLC := glslc
 # The renderer is Vulkan 1.3, so its shaders may use what that guarantees (SPIR-V 1.6; subgroup operations need 1.3).

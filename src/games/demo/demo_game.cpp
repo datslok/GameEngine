@@ -779,6 +779,12 @@ Camera& DemoGame::getCamera() {
     return controls.getCamera();
 }
 
+// The free camera takes the pose over, so it stays until the player flies it away.
+bool DemoGame::poseCamera(World& world, const Vec3& position, const Vec3& target) {
+    controls.poseFreeCamera(world, position, target);
+    return true;
+}
+
 bool DemoGame::wantsMouseLook() const {
     return controls.wantsMouseLook();
 }
