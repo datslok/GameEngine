@@ -487,6 +487,12 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
     - find pairs with the uniform grid over each particle's swept box;
     - detect the touch by sweeping in relative motion (a ray against a sphere of the summed radii, so fast crossings are not missed);
     - respond by running the relative velocity through `bounceVelocity` and sharing the change by mass (an equal and opposite impulse, so momentum is conserved), with the two materials' restitution and friction averaged
+- [ ] A lathe (`lathe`): a spinning part turned smaller by a tool, the material cut off flying away as chips (the user's idea, Oct 30 2026)
+  - The part kept as its profile r(z), a surface of revolution, as CNC lathe simulators keep it: the tool sets r(z) = min(r(z), its own profile), and the mesh is rebuilt by revolving the profile into rings (normals from dr/dz).
+  - Chips carry the removed volume, pi (r_old^2 - r_new^2) dz a sample, times the density, leaving along the tangent at the surface speed omega r: fragments for brittle materials (particles, then phase 15's convex bodies), later a curling ribbon for ductile metals (a stiff, curled strip on the cloth solver).
+  - Optional: the cutting force F = k_c x depth of cut x feed a turn (k_c about 1500-2000 N/mm^2 for steel, **from memory**: check it before writing tests), its power F v slowing the spindle.
+  - The general follow-up, for parts that do not spin, milling and carving: the tool subtracted from a signed distance field, d = max(d_part, -d_tool), remeshed by surface nets.
+  - Tests: a profile cut to a set radius revolves into a closed mesh of that radius, the chips' mass equals the removed volume's, a tool clear of the part removes nothing
 
 ### Lighting and shadows
 
@@ -584,6 +590,11 @@ A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it,
 - [ ] Fracture (`voronoi-fracture`): each building's blocks cut into Voronoi chunks at load, more seeds where hits are likely
   - The bond graph: chunks sharing a face are bonded (its area and normal); chunks on the ground are supports; intact parts clustered into one body (as Unreal's Chaos does).
   - Tests: the cells fill the block (volumes sum), each is convex, bonds only across shared faces
+- [ ] Blade cuts (`blade-cuts`): aim a plane in slow motion and whatever it crosses splits along it, the halves falling as rigid bodies (the user's idea, Oct 30 2026, after Metal Gear Rising's Blade Mode)
+  - `clipMeshByPlane`, shared with `voronoi-fracture`: vertices sorted by their signed distance d to the plane, each crossing edge split at t = d_a / (d_a - d_b) with its positions, UVs and normals blended, the cut's loops capped (ear clipping, since a cap need not be convex) with an inside material and UVs projected onto the plane.
+  - Each half's mass, centre of mass and inertia from its closed surface (the divergence theorem), its collision one convex hull or several; new meshes uploaded and given acceleration structures as they appear, the pieces capped in number and the tiny ones removed.
+  - Slow motion by scaling the time fed to the simulation, the aiming at full speed; a command cuts along a given plane.
+  - Tests: the halves' volumes sum to the whole's, each half is closed (every edge shared by two triangles), a box's halves have their hand-calculated centres of mass and inertia, a plane missing the mesh leaves it whole
 - [ ] The stress solver (`stress-solver`): statics on the bond graph, K u = f by conjugate gradients, warm-started
   - Each bond's force split into compression or tension along its normal and shear across it, as stress over its area (as NVIDIA Blast does).
   - An intact building is kinematic and costs nothing until something changes it; impacts are forces over their duration.
