@@ -922,7 +922,7 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
         if (tick.pinTargets.size() != pinPositions.size()) {
             throw std::invalid_argument("A GPU cloth's tick needs one target per pin");
         }
-        if (tick.grab && tick.grab->particle >= pointCount) {
+        if (tick.hand && tick.hand->particle >= pointCount) {
             throw std::invalid_argument("A GPU cloth's hand holds a point the cloth does not have");
         }
         if (!tick.fields.empty() && fields == nullptr) {

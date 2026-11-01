@@ -30,6 +30,19 @@ std::optional<ClothHit> raycastCloth(const Cloth& cloth, const Ray& ray, float m
     return nearest;
 }
 
+std::optional<ClothHandMove> moveClothHand(const std::optional<ClothHandMove>& last, const std::optional<ClothGrab>& grab,
+                                           const std::vector<Vec3>& positions, float speed, float seconds) {
+    if (!grab) {
+        return std::nullopt;
+    }
+    const Vec3 start = last && last->particle == grab->particle ? last->end : positions.at(grab->particle);
+    const Vec3 way = grab->target - start;
+    const float distance = way.length();
+    const float reach = speed * seconds;
+    const Vec3 end = distance <= reach ? grab->target : start + way * (reach / distance);
+    return ClothHandMove{grab->particle, start, end};
+}
+
 void solveGrab(ClothParticles& particles, const ClothGrab& grab, float compliance, float seconds) {
     const float weight = particles.inverseMasses.at(grab.particle);
     if (weight == 0.0f) {

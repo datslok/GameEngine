@@ -147,6 +147,12 @@ std::uint64_t hashSimulationState(const World& world) {
             hash.add(cloth.grab->particle);
             add(hash, cloth.grab->target);
         }
+        hash.add(cloth.hand.has_value());
+        if (cloth.hand) {
+            hash.add(cloth.hand->particle);
+            add(hash, cloth.hand->start);
+            add(hash, cloth.hand->end);
+        }
     });
 
     return hash.value;

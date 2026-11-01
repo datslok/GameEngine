@@ -129,6 +129,11 @@ vec4 clothFieldSurfacePoint(ClothField field, vec3 point) {
     return clothFieldSurface(clothFieldBlend(corners, share, field.origin.w));
 }
 
+// The hand's place this substep: its share of the tick's way, as the pins slide (ClothHandMove, slidPinPosition).
+vec3 clothHandPlace(ClothTick tick) {
+    return clothPinPosition(ClothPin(tick.grabStart, tick.grabTarget), step, tick.substeps);
+}
+
 /*
 * The first of a substep's end for one point, as the CPU solver orders it: XPBD's hand, if it holds the point (vertex
 * block descent's is in each point's step), then the tethers to its nearest pins. A tether reads its anchor, a pinned
@@ -137,7 +142,7 @@ vec4 clothFieldSurfacePoint(ClothField field, vec3 point) {
 */
 void clothHandAndTethers(uint point, inout vec4 position, ClothTick tick) {
     if (point == tick.grabParticle && tick.method == CLOTH_METHOD_XPBD) {
-        clothGrab(position, tick.grabTarget.xyz, tick.grabCompliance);
+        clothGrab(position, clothHandPlace(tick), tick.grabCompliance);
     }
     if (position.w != 0.0 && tick.tetherStretch > 0.0) {
         for (uint rank = 0u; rank < CLOTH_TETHERS_PER_POINT; ++rank) {

@@ -80,6 +80,7 @@ struct ClothSettings {
     int substeps = 30;                 // per tick: 3.6 kHz at 120 ticks a second
     float drag = 0.5f;                 // per second
     float grabCompliance = 0.001f;     // m/N
+    float handSpeed = 3.0f;            // m/s: the hand's fastest (ClothHandMove), under self-collision's limit (3.8 m/s)
     float bendingStiffness = 1e-5f;    // N m
     BendingModel bendingModel = BendingModel::Isometric;
     int bendingInterval = 1;           // XPBD's bending solved every this many substeps
@@ -120,7 +121,7 @@ struct ClothTickCommands {
     ClothSettings settings;
     float seconds = 0.0f;
     std::vector<Vec3> pinTargets;
-    std::optional<ClothGrab> grab;
+    std::optional<ClothHandMove> hand;
     std::vector<Shape> colliders;
     ClothFields fields;
 };
@@ -166,14 +167,20 @@ struct Cloth {
     ClothPointConstraints pointConstraints;
     ClothVertexColours vertexColours;
 
-    // A hand holding one point, set by the game from its commands (never from input inside a tick).
+    // A hand holding one point, set by the game from its commands (never from input inside a tick), and the hand's way
+    // through the last tick (moveClothHand, by stepCloth or stepCloths): its end is where the hand is.
     std::optional<ClothGrab> grab;
+    std::optional<ClothHandMove> hand;
 
     // Simulated on the GPU (set by stepCloths): its ticks wait here for the renderer, which the engine hands them to
     // once a frame, and its points are the GPU's read back late.
     bool onGpu = false;
     std::vector<ClothTickCommands> gpuTicks;
 };
+
+// The hand's way through the coming tick (moveClothHand, at the cloth's hand speed) into Cloth::hand: before each tick,
+// as stepCloth and stepCloths do it, then clothTickCommands for the GPU.
+void advanceClothHand(Cloth& cloth, float seconds);
 
 // The tick a cloth would take now: its settings, its pins' positions and hand, the given bodies.
 ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders = {}, const ClothFields& fields = {});

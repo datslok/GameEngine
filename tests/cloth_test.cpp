@@ -156,6 +156,11 @@ namespace {
         const std::uint64_t before = hashSimulationState(world);
         world.get<Cloth>(entity).particles.velocities[2].x += 1.0f;
         assert(hashSimulationState(world) != before);
+
+        // So is the hand's place.
+        const std::uint64_t unheld = hashSimulationState(world);
+        world.get<Cloth>(entity).hand = ClothHandMove{1, Vec3{}, Vec3{0.0f, 1.0f, 0.0f}};
+        assert(hashSimulationState(world) != unheld);
     }
 
     // The defaults: a light cotton (200 g/m2, about 2000 N/m stiff) under real gravity, 30 substeps a tick, bending in every one.
@@ -168,6 +173,7 @@ namespace {
         assert(settings.bendingInterval == 1);
         assert(near(settings.drag, 0.5f));
         assert(near(settings.grabCompliance, 0.001f));
+        assert(near(settings.handSpeed, 3.0f));
         assert(near(settings.bendingStiffness, 1e-5f));
     }
 }

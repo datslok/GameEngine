@@ -29,6 +29,7 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Substeps", settings.substeps, {.min = 1, .max = 100, .sliderMax = 40, .unit = "per tick"});
     visitor.field("Drag", settings.drag, {.min = 0.0f, .max = 100.0f, .sliderMax = 5.0f, .unit = "per second"});
     visitor.field("Grab compliance", settings.grabCompliance, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.01f, .unit = "m/N"});
+    visitor.field("Hand speed", settings.handSpeed, {.min = 0.01f, .max = 100.0f, .sliderMax = 10.0f, .unit = "m/s"});
     visitor.field("Bending stiffness", settings.bendingStiffness, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.0005f, .unit = "N m"});
     visitor.choice("Bending model", settings.bendingModel, bendingModelNames);
     visitor.field("Bending every", settings.bendingInterval, {.min = 1, .max = 16, .unit = "substeps"});
@@ -105,6 +106,10 @@ Vec3 slidPinPosition(const Vec3& start, const Vec3& target, int step, int subste
     return start + (target - start) * share;
 }
 
+void advanceClothHand(Cloth& cloth, float seconds) {
+    cloth.hand = moveClothHand(cloth.hand, cloth.grab, cloth.particles.positions, cloth.settings.handSpeed, seconds);
+}
+
 ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std::vector<Shape>& colliders, const ClothFields& fields) {
     ClothTickCommands commands;
     commands.settings = cloth.settings;
@@ -112,7 +117,7 @@ ClothTickCommands clothTickCommands(const Cloth& cloth, float seconds, const std
     for (const ClothPin& pin : cloth.pins) {
         commands.pinTargets.push_back(pin.position);
     }
-    commands.grab = cloth.grab;
+    commands.hand = cloth.hand;
     commands.colliders = colliders;
     commands.fields = fields;
     return commands;
@@ -154,7 +159,7 @@ namespace {
         const std::vector<std::uint32_t>& stretchColours;
         const std::vector<std::uint32_t>& bendColours;
         const std::vector<ClothPin>& pins;
-        const std::optional<ClothGrab>& grab;
+        const std::optional<ClothHandMove>& hand;
         const std::vector<Shape>& colliders;
         const ClothFields& fields;
         const std::vector<ClothTether>& tethers;
@@ -267,6 +272,12 @@ namespace {
 
             predictCloth(particles, gravity, substep);
 
+            // The hand at its share of the tick's way, as the pins below.
+            std::optional<ClothGrab> grab;
+            if (constraints.hand) {
+                grab = ClothGrab{constraints.hand->particle, slidPinPosition(constraints.hand->start, constraints.hand->end, step, settings.substeps)};
+            }
+
             for (std::size_t index = 0; index < constraints.pins.size(); ++index) {
                 const ClothPin& pin = constraints.pins[index];
                 particles.positions[pin.particle] = slidPinPosition(pinStarts[index], pin.position, step, settings.substeps);
@@ -275,7 +286,7 @@ namespace {
             if (blockDescent) {
                 const ClothEnergyTerms energyTerms{constraints.stretch,       constraints.bend,         *constraints.pointConstraints,
                                                    settings.stretchCompliance, settings.bendingStiffness, settings.bendingModel,
-                                                   constraints.grab,          settings.grabCompliance};
+                                                   grab,                      settings.grabCompliance};
                 scratch.predicted = particles.positions;
                 solveVertexBlocks(particles, scratch.predicted, *constraints.vertexColours, energyTerms, substep, jobs);
                 if (coarseLevels) {
@@ -300,8 +311,8 @@ namespace {
                                          settings.bendingModel, jobs, bendingCovered);
                     }
                 }
-                if (constraints.grab) {
-                    solveGrab(particles, *constraints.grab, settings.grabCompliance, substep);
+                if (grab) {
+                    solveGrab(particles, *grab, settings.grabCompliance, substep);
                 }
             }
             if (settings.tethers) {
@@ -340,15 +351,21 @@ void stepClothParticles(ClothParticles& particles, const std::vector<StretchCons
     const std::vector<ClothTether> noTethers;
     const std::vector<ClothStitch> noStitches;
     const ClothFields noFields;
+    // A hand already where it is aimed: these steps keep no hand of their own to move.
+    std::optional<ClothHandMove> hand;
+    if (grab) {
+        hand = ClothHandMove{grab->particle, grab->target, grab->target};
+    }
     stepTick(particles,
-             TickConstraints{stretch, noBend, noColours, noColours, noPins, grab, colliders, noFields, noTethers, noStitches, nullptr, nullptr, nullptr,
+             TickConstraints{stretch, noBend, noColours, noColours, noPins, hand, colliders, noFields, noTethers, noStitches, nullptr, nullptr, nullptr,
                              nullptr, nullptr},
              settings, seconds, serialJobs());
 }
 
 void stepCloth(Cloth& cloth, float seconds, const std::vector<Shape>& colliders, JobSystem& jobs, const ClothFields& fields) {
+    advanceClothHand(cloth, seconds);
     stepTick(cloth.particles,
-             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.grab, colliders, fields, cloth.tethers,
+             TickConstraints{cloth.stretch, cloth.bend, cloth.stretchColours, cloth.bendColours, cloth.pins, cloth.hand, colliders, fields, cloth.tethers,
                              cloth.stitches, &cloth.pointConstraints, &cloth.vertexColours, &cloth.hierarchy, &cloth.triangles, &cloth.selfTopology},
              cloth.settings, seconds, jobs);
 }
@@ -367,6 +384,7 @@ void stepCloths(World& world, float seconds, JobSystem& jobs, ClothSolver solver
     if (solver == ClothSolver::Gpu) {
         world.each<Cloth>([&](Entity, Cloth& cloth) {
             cloth.onGpu = true;
+            advanceClothHand(cloth, seconds);
             cloth.gpuTicks.push_back(clothTickCommands(cloth, seconds, colliders, fields));
         });
         return;

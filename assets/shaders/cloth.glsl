@@ -109,6 +109,8 @@ struct ClothTick {
     float unusedSelf0;
     float unusedSelf1;
     float unusedSelf2;
+
+    vec4 grabStart; // where the hand starts the tick; grabTarget is where it ends
 };
 
 // A field body (GpuClothField): its first sample with the spacing in w, its samples along each axis with where they start

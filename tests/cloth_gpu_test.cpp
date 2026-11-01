@@ -164,12 +164,12 @@ namespace {
         cloth.settings.substeps = 12;
         cloth.settings.bendingModel = BendingModel::Hinge;
         cloth.pins[1].position = Vec3{2.0f, 1.0f, 0.5f};
-        cloth.grab = ClothGrab{3, Vec3{0.0f, -1.0f, 0.25f}};
+        cloth.hand = ClothHandMove{3, Vec3{0.0f, -0.9f, 0.25f}, Vec3{0.0f, -1.0f, 0.25f}};
         const std::vector<Shape> bodies{Sphere{Vec3{}, 1.0f}, Aabb{Vec3{}, Vec3{1.0f, 1.0f, 1.0f}}};
 
         const ClothTickCommands commands = clothTickCommands(cloth, 1.0f / 120.0f, bodies);
         assert(commands.pinTargets.size() == 2 && commands.pinTargets[1].x == 2.0f);
-        assert(commands.grab && commands.grab->particle == 3);
+        assert(commands.hand && commands.hand->particle == 3);
         assert(commands.colliders.size() == 2);
 
         const GpuClothTick tick = packClothTick(commands, 4, 7);
@@ -190,8 +190,9 @@ namespace {
         assert(tick.bendingModel == CLOTH_BEND_HINGE);
         assert(tick.pinFirst == 4 && tick.colliderFirst == 7 && tick.colliderCount == 2);
         assert(tick.grabParticle == 3 && tick.grabTarget.y == -1.0f && tick.grabTarget.z == 0.25f);
+        assert(tick.grabStart.y == -0.9f && tick.grabStart.z == 0.25f);
 
-        cloth.grab.reset();
+        cloth.hand.reset();
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).grabParticle == clothNoGrab);
 
         // Tethers: the stretch they allow, 1 + the slack as the CPU solver adds it, or 0 for none.
@@ -353,7 +354,7 @@ namespace {
 
         cloth.settings.selfCollision = false;
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).selfCollision == 0);
-        assert(sizeof(GpuClothTick) == 128);
+        assert(sizeof(GpuClothTick) == 144);
     }
 
     /*
@@ -521,10 +522,14 @@ namespace {
         assert(samePoints(cloth.particles.positions, before));
         assert(samePoints(scene.world.get<DeformingMesh>(scene.sheet).positions, before));
         assert(cloth.gpuTicks.size() == 2);
+        // The hand moves on the CPU, at its speed: the second tick's way starts where the first ended.
+        assert(cloth.gpuTicks[0].hand && cloth.gpuTicks[1].hand);
+        assert(samePoints({cloth.gpuTicks[1].hand->start}, {cloth.gpuTicks[0].hand->end}));
+        assert(samePoints({cloth.hand->end}, {cloth.gpuTicks[1].hand->end}));
         for (const ClothTickCommands& tick : cloth.gpuTicks) {
             assert(tick.seconds == 1.0f / 120.0f);
             assert(tick.pinTargets.size() == 1 && tick.pinTargets[0].x == 0.25f);
-            assert(tick.grab && tick.grab->particle == 3);
+            assert(tick.hand && tick.hand->particle == 3);
             assert(tick.colliders.size() == 1 && std::holds_alternative<Sphere>(tick.colliders[0]));
             assert(tick.settings.substeps == cloth.settings.substeps);
         }

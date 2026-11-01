@@ -169,9 +169,10 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.pinFirst = pinFirst;
     tick.colliderFirst = colliderFirst;
     tick.colliderCount = static_cast<std::uint32_t>(commands.colliders.size());
-    if (commands.grab) {
-        tick.grabParticle = commands.grab->particle;
-        tick.grabTarget = Vec4{commands.grab->target.x, commands.grab->target.y, commands.grab->target.z, 1.0f};
+    if (commands.hand) {
+        tick.grabParticle = commands.hand->particle;
+        tick.grabTarget = Vec4{commands.hand->end.x, commands.hand->end.y, commands.hand->end.z, 1.0f};
+        tick.grabStart = Vec4{commands.hand->start.x, commands.hand->start.y, commands.hand->start.z, 1.0f};
     }
     tick.stretchStiffness = energyStiffness(settings.stretchCompliance);
     tick.grabStiffness = energyStiffness(settings.grabCompliance);

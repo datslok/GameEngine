@@ -143,9 +143,11 @@ struct GpuClothTick {
     std::uint32_t selfCollision = 0; // 1 with self-collision on
     float selfReach = 0.0f;          // m: pairs closer are found, at least the thickness (as stepCloth uses it)
     float unusedSelf[3]{};
+
+    Vec4 grabStart; // where the hand starts the tick (ClothHandMove::start); grabTarget is where it ends
 };
 
-static_assert(sizeof(GpuClothTick) == 128, "GpuClothTick must match cloth.glsl's ClothTick");
+static_assert(sizeof(GpuClothTick) == 144, "GpuClothTick must match cloth.glsl's ClothTick");
 
 // Self-collision's passes (cloth_self_*.comp) each substep, and each time they find pairs: the hash's count, its scan
 // (three passes), its scatter, the points' pairs, the edges' pairs, the pairs' dispatch sizes.

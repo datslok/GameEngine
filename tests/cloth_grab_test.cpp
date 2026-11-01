@@ -86,9 +86,13 @@ namespace {
         pinParticle(cloth.particles, 20);
         pinParticle(cloth.particles, 24);
 
-        // Pulled out of the sheet's plane and sideways at 1.2 m/s, within the sheet's reach of its pins. It keeps up on
-        // average; tick to tick it jiggles a few millimetres on the hand's spring (measured: about 80 Hz), so its speed
-        // at any one tick says little.
+        // Pulled out of the sheet's plane (the hand gets there at its speed, 0.7 m in about a quarter of a second), then
+        // sideways at 1.2 m/s, within the sheet's reach of its pins. It keeps up on average; tick to tick it jiggles a
+        // few millimetres on the hand's spring (measured: about 80 Hz), so its speed at any one tick says little.
+        cloth.grab = ClothGrab{2, Vec3{0.0f, -0.5f, 0.5f}};
+        for (int tick = 0; tick < 40; ++tick) {
+            stepCloth(cloth, 1.0f / 120.0f);
+        }
         float halfway = 0.0f;
         for (int tick = 0; tick < 60; ++tick) {
             cloth.grab = ClothGrab{2, Vec3{0.01f * tick, -0.5f, 0.5f}};
@@ -100,6 +104,66 @@ namespace {
         assert(nearVec(cloth.particles.positions[2], Vec3{0.01f * 59, -0.5f, 0.5f}, 0.05f));
         const float averageSpeed = (cloth.particles.positions[2].x - halfway) / (30.0f / 120.0f);
         assert(near(averageSpeed, 1.2f, 0.2f));
+    }
+
+    /*
+    * The hand's way through a tick (moveClothHand): none without a grab; a new grab starts at the held point, not where
+    * the game aims, so taking hold never yanks; each tick it goes towards the target no further than the hand's speed
+    * times the tick, and stops on it; holding the same point it carries on from where it got to, and another point
+    * starts again where that point is.
+    */
+    void testTheHandHasASpeedLimit() {
+        const std::vector<Vec3> positions{Vec3{0.0f, 0.0f, 0.0f}, Vec3{1.0f, 0.0f, 0.0f}};
+        const float tick = 1.0f / 120.0f;
+        const float speed = 3.0f;
+        assert(!moveClothHand(std::nullopt, std::nullopt, positions, speed, tick));
+
+        const std::optional<ClothHandMove> first = moveClothHand(std::nullopt, ClothGrab{0, Vec3{1.0f, 0.0f, 0.0f}}, positions, speed, tick);
+        assert(first && first->particle == 0);
+        assert(nearVec(first->start, positions[0], 0.0f));
+        assert(nearVec(first->end, Vec3{speed * tick, 0.0f, 0.0f}, 1e-6f));
+
+        const std::optional<ClothHandMove> second = moveClothHand(first, ClothGrab{0, Vec3{1.0f, 0.0f, 0.0f}}, positions, speed, tick);
+        assert(nearVec(second->start, first->end, 0.0f));
+        assert(nearVec(second->end, Vec3{2.0f * speed * tick, 0.0f, 0.0f}, 1e-6f));
+
+        const ClothHandMove close{0, Vec3{0.99f, 0.0f, 0.0f}, Vec3{0.99f, 0.0f, 0.0f}};
+        assert(nearVec(moveClothHand(close, ClothGrab{0, Vec3{1.0f, 0.0f, 0.0f}}, positions, speed, tick)->end, Vec3{1.0f, 0.0f, 0.0f}, 0.0f));
+
+        const std::optional<ClothHandMove> other = moveClothHand(second, ClothGrab{1, Vec3{1.0f, 1.0f, 0.0f}}, positions, speed, tick);
+        assert(other->particle == 1 && nearVec(other->start, positions[1], 0.0f));
+    }
+
+    /*
+    * The hand jumping far (the mouse moved fast between two frames) reaches the cloth over several ticks at the hand's
+    * speed, sliding through each tick's substeps, never in one go: the held point moves about as far in a tick as the
+    * hand does, then arrives. Jumps of 35 cm in a substep crushed the fabric round the hand until self-collision's cut
+    * let edges through.
+    */
+    void testAJumpIsSpreadOut() {
+        Cloth cloth = standingSheet();
+        pinParticle(cloth.particles, 20);
+        pinParticle(cloth.particles, 24);
+        const Vec3 start = cloth.particles.positions[12];
+        const Vec3 target = start + Vec3{0.0f, 0.0f, 0.5f};
+        const float reach = cloth.settings.handSpeed / 120.0f;
+
+        cloth.grab = ClothGrab{12, target};
+        stepCloth(cloth, 1.0f / 120.0f);
+        assert(cloth.hand && cloth.hand->particle == 12);
+        assert(near((cloth.hand->end - cloth.hand->start).length(), reach, 1e-5f));
+        assert((cloth.particles.positions[12] - start).length() < 2.0f * reach);
+
+        for (int tick = 0; tick < 60; ++tick) {
+            stepCloth(cloth, 1.0f / 120.0f);
+        }
+        // There, held on the hand's spring, which the sheet taut between its pins stretches about 5.5 cm (measured).
+        assert(nearVec(cloth.hand->end, target, 0.0f));
+        assert(nearVec(cloth.particles.positions[12], target, 0.08f));
+
+        cloth.grab.reset();
+        stepCloth(cloth, 1.0f / 120.0f);
+        assert(!cloth.hand);
     }
 
     // The sheet's momentum: its mass-weighted velocity, the velocity of its centre of mass.
@@ -152,5 +216,7 @@ void testClothGrab() {
     testGrabPullsToTheTarget();
     testGrabIsASpring();
     testHeldPointsFollow();
+    testTheHandHasASpeedLimit();
+    testAJumpIsSpreadOut();
     testLetGoPointsFlyOn();
 }

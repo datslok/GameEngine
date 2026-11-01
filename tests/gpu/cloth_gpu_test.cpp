@@ -966,7 +966,9 @@ namespace {
                 cloth.grab.reset();
             }
             const ClothFields fields{busyFieldBall()};
-            const ClothTickCommands commands = clothTickCommands(cloth, tickSeconds, bodies, fields);
+            Cloth queued = cloth;
+            advanceClothHand(queued, tickSeconds);
+            const ClothTickCommands commands = clothTickCommands(queued, tickSeconds, bodies, fields);
             stepCloth(cloth, tickSeconds, bodies, serialJobs(), fields);
             cases.push_back(TickCase{before, commands, cloth});
         }

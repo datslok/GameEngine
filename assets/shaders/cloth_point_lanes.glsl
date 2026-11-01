@@ -76,7 +76,7 @@ vec3 clothPointForceLanes(uint point, uint lane, ClothTick tick, out ClothBlock 
                 clothHingeAngleTerm(force, block, state.gradient[hinge.corner], clothWrapAngle(state.angle - hinge.restAngle), stiffness);
             }
         } else {
-            clothHandTerm(force, block, here.xyz, tick.grabTarget.xyz, tick.grabStiffness);
+            clothHandTerm(force, block, here.xyz, clothHandPlace(tick), tick.grabStiffness);
         }
     }
 
