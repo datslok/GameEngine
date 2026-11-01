@@ -95,6 +95,8 @@ struct ClothSettings {
     bool selfCollision = true;
     int selfCollisionInterval = 3;     // substeps between finding pairs
     float selfCollisionReach = 0.0075f; // m: pairs closer than this are found (at least the thickness)
+    bool untangle = true;              // parts passed through each other go back through (analyseClothTangles)
+    float untangleSpeed = 1.0f;        // m/s: how fast at most
 };
 
 void visit(ClothSettings& settings, SettingsVisitor& visitor);

@@ -86,6 +86,20 @@ enum class ClothPairKind : std::uint8_t {
 };
 
 /*
+* How a pair stands with the cloth's tangles (analyseClothTangles), marked when the pairs are found (markPairTangles).
+* Apart: the usual contact and cut, holding the side each is on. Through: its two sides are parts of the cloth that have
+* passed through each other, so it is pushed back through, at most the untangle step a substep, and the cut leaves it
+* alone. Free: both sides are of one part that has passed through itself, where neither way is surely right (Baraff,
+* Witkin and Kass 2003's red vertices), or it straddles two parts that passed through each other (a side with points in
+* both, at the intersection's edge), where holding its side would hold the tangle: neither pushed nor cut.
+*/
+enum class ClothPairTangle : std::uint8_t {
+    Apart,
+    Through,
+    Free,
+};
+
+/*
 * Two features found close, as they were then: the first side (a point, or an edge's two points) and the second (a
 * triangle's three, or an edge's two). normal points from the second side's nearest point to the first's, gap is the
 * distance between them, and heights are each point's height above the second side's nearest point along the normal:
@@ -101,6 +115,9 @@ struct ClothSelfPair {
     // Its dividing plane's height (dividingHeight), placed at the first cut after it was found and kept until the
     // pairs are found again; below zero until then.
     float plane = -1.0f;
+
+    // How it stands with the cloth's tangles; a Through pair's normal is turned round, pointing to the side it should be on.
+    ClothPairTangle tangle = ClothPairTangle::Apart;
 };
 
 // How many of a pair's points are on its first side: 1 for a point, 2 for an edge.
@@ -171,6 +188,8 @@ float selfMoveMetres(std::int64_t units, std::uint32_t count);
 * difference to the last bit (the GPU finds them in no fixed order). A point many pairs press is moved by their
 * average rather than their sum, which converges a little slower than one at a time but never overshoots.
 *
+* Through pairs are pushed back through (throughContactMoves, untangleStep a substep), Free pairs skipped.
+*
 * A point marked in held (one byte a point, or none: solveContacts' touching) rests on a body this substep and is
 * treated as immovable, as the body holds it up: the free layer on it takes the whole push. Pushing a supported layer
 * into its body instead made the body push it back out the next substep, over and over: a sheet draped over a ball
@@ -181,7 +200,15 @@ float selfMoveMetres(std::int64_t units, std::uint32_t count);
 * them stood a hair open at the substep's end.
 */
 void solveSelfContacts(ClothParticles& particles, const std::vector<ClothSelfPair>& pairs, const ClothSettings& settings,
-                       std::span<const std::uint8_t> held = {}, std::span<const std::uint32_t> partners = {});
+                       std::span<const std::uint8_t> held = {}, std::span<const std::uint32_t> partners = {}, float untangleStep = 0.0f);
+
+/*
+* A Through pair's moves (selfContactMoves' counterpart): its sides pushed along its turned normal until its first side
+* is the thickness past the second, no further than untangleStep a call, shared as a contact's are, without friction
+* (the layers slide back through each other). False when it is already there or nothing can move.
+*/
+bool throughContactMoves(const ClothSelfPair& pair, const std::array<Vec3, 4>& points, const std::array<float, 4>& inverseMasses, float thickness,
+                         float untangleStep, std::array<Vec3, 4>& moves, std::array<float, 4>& coefficients);
 
 /*
 * For tests: how many edges pass through a triangle sharing no point with them (stitched points as one). Slow, every
@@ -193,3 +220,52 @@ std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::v
 // The crossings themselves, as (an index into topology.edges, an index into triangles), edge by edge.
 std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
                                                          const ClothSelfTopology& topology);
+
+// The same, a block of edges a job, joined in the edges' order (the same list on any number of threads).
+std::vector<std::array<std::uint32_t, 2>> findClothCrossings(const std::vector<Vec3>& positions,
+                                                             const std::vector<std::array<std::uint32_t, 3>>& triangles,
+                                                             const ClothSelfTopology& topology, JobSystem& jobs);
+
+/*
+* Which parts of a cloth have passed through which: Baraff, Witkin and Kass 2003's global intersection analysis, found
+* by connected components instead of tracing each intersection path. The cloth is cut along every edge that passes
+* through a triangle (crossings), stitched points as one; each cut edge's smaller side is inside a closed path, the part
+* that went through. Each crossing then joins its edge's inside part to the parts of the crossed triangle's corners: the
+* same part, and it has folded through itself (red); another, and it has crossed that one (if that one is inside too,
+* the two have passed through each other: black and white). A path that does not close (two hems through each other) leaves the cloth in one piece
+* and changes nothing, as in the paper.
+*/
+struct ClothTangles {
+    std::vector<std::uint32_t> part;                   // each point's part, numbered in the points' order
+    std::vector<std::uint32_t> sizes;                  // by part: how many points (stitched points as one)
+    std::vector<std::uint8_t> inside;                  // by part: 1 for a cut edge's smaller side
+    std::vector<std::uint8_t> looped;                  // by part: 1 for one that has passed through itself
+    std::vector<std::array<std::uint32_t, 2>> through; // inside parts that passed through each other, the lower first, sorted
+    std::vector<std::array<std::uint32_t, 2>> crossed; // an inside part and any part it crossed, the lower first, sorted
+};
+
+ClothTangles analyseClothTangles(const std::vector<std::array<std::uint32_t, 2>>& crossings, const std::vector<std::array<std::uint32_t, 3>>& triangles,
+                                 const ClothSelfTopology& topology);
+
+/*
+* Through when all the first side's points are in one inside part and all the second's in another it passed through
+* (Baraff et al.'s black and white); Free when a point on each side is in one part that passed through itself, or in
+* two where one crossed the other (holding their sides would hold the tangle); Apart otherwise, parts that did not cross
+* each other included.
+*/
+ClothPairTangle pairTangle(const ClothSelfPair& pair, const ClothTangles& tangles);
+
+/*
+* Each crossing pushing itself back: where the crossing edge's ends are in different parts, the end in the inside part
+* against the crossed triangle (a point and triangle pair, marked Through), its normal the triangle's turned towards the
+* side the edge's other end is on, the side the inside end came from. Pushing every crossing edge's inside end back
+* shrinks the intersection, much as Volino and Magnenat-Thalmann 2006's contour minimisation moves crossing features
+* along the crossed triangle's normal (the part ContourCraft 2024 kept); in a tight tangle the parts' insides are too
+* small for Baraff et al.'s pairs between them to reach each other. None where the edge's ends are in one part.
+*/
+std::vector<ClothSelfPair> clothCrossingPairs(const std::vector<std::array<std::uint32_t, 2>>& crossings, const std::vector<Vec3>& positions,
+                                              const std::vector<std::array<std::uint32_t, 3>>& triangles, const ClothSelfTopology& topology,
+                                              const ClothTangles& tangles);
+
+// Each pair's tangle (pairTangle), a Through pair's normal turned round, towards the side it should be on.
+void markPairTangles(std::vector<ClothSelfPair>& pairs, const ClothTangles& tangles);

@@ -346,13 +346,13 @@ namespace {
     constexpr std::size_t pairSearchBlock = 256;
 
     /*
-    * Each of count items' pairs, found by find(index, candidates, out) a block of items a job, joined in the items'
-    * order, so the result is the same on any number of threads.
+    * Each of count items' pairs (or crossings), found by find(index, candidates, out) a block of items a job, joined in
+    * the items' order, so the result is the same on any number of threads.
     */
-    template<typename Find>
-    std::vector<ClothSelfPair> findInBlocks(std::size_t count, JobSystem& jobs, Find&& find) {
+    template<typename Result = ClothSelfPair, typename Find>
+    std::vector<Result> findInBlocks(std::size_t count, JobSystem& jobs, Find&& find) {
         const std::size_t blocks = (count + pairSearchBlock - 1) / pairSearchBlock;
-        std::vector<std::vector<ClothSelfPair>> found(blocks);
+        std::vector<std::vector<Result>> found(blocks);
         jobs.parallelFor(blocks, 1, [&](std::size_t block) {
             std::vector<std::uint32_t> candidates;
             const std::size_t end = std::min(count, (block + 1) * pairSearchBlock);
@@ -361,8 +361,8 @@ namespace {
             }
         });
 
-        std::vector<ClothSelfPair> pairs;
-        for (std::vector<ClothSelfPair>& part : found) {
+        std::vector<Result> pairs;
+        for (std::vector<Result>& part : found) {
             pairs.insert(pairs.end(), part.begin(), part.end());
         }
         return pairs;
@@ -490,6 +490,9 @@ void cutClothMotion(std::vector<Vec3>& positions, const std::vector<Vec3>& start
     std::vector<float> shares(positions.size(), 1.0f);
 
     for (ClothSelfPair& pair : pairs) {
+        if (pair.tangle != ClothPairTangle::Apart) {
+            continue;
+        }
         if (pair.plane < 0.0f) {
             std::array<Vec3, 4> motions;
             for (std::size_t index = 0; index < 4; ++index) {
@@ -603,12 +606,40 @@ float selfMoveMetres(std::int64_t units, std::uint32_t count) {
 * A point counts a pair only where the pair's line runs through it (a non-zero coefficient): a triangle's far corner
 * the nearest point does not touch takes no share, and would otherwise water down the pushes it does get.
 */
+bool throughContactMoves(const ClothSelfPair& pair, const std::array<Vec3, 4>& points, const std::array<float, 4>& inverseMasses, float thickness,
+                         float untangleStep, std::array<Vec3, 4>& moves, std::array<float, 4>& coefficients) {
+    const PairNow now = pairNow(pair, points);
+    coefficients = now.coefficients;
+    const float past = (now.firstNearest - now.secondNearest).dot(pair.normal);
+    const float push = std::min(thickness - past, untangleStep);
+    if (push <= 0.0f) {
+        return false;
+    }
+
+    float weights = 0.0f;
+    for (std::size_t index = 0; index < 4; ++index) {
+        weights += coefficients[index] * coefficients[index] * inverseMasses[index];
+    }
+    if (weights <= 0.0f) {
+        return false;
+    }
+
+    const float step = push / weights;
+    for (std::size_t index = 0; index < 4; ++index) {
+        moves[index] = pair.normal * (step * coefficients[index] * inverseMasses[index]);
+    }
+    return true;
+}
+
 void solveSelfContacts(ClothParticles& particles, const std::vector<ClothSelfPair>& pairs, const ClothSettings& settings,
-                       std::span<const std::uint8_t> held, std::span<const std::uint32_t> partners) {
+                       std::span<const std::uint8_t> held, std::span<const std::uint32_t> partners, float untangleStep) {
     std::vector<std::array<std::int64_t, 3>> sums(particles.size(), {0, 0, 0});
     std::vector<std::uint32_t> counts(particles.size(), 0);
 
     for (const ClothSelfPair& pair : pairs) {
+        if (pair.tangle == ClothPairTangle::Free) {
+            continue;
+        }
         std::array<Vec3, 4> points;
         std::array<Vec3, 4> previous;
         std::array<float, 4> inverseMasses;
@@ -621,8 +652,11 @@ void solveSelfContacts(ClothParticles& particles, const std::vector<ClothSelfPai
 
         std::array<Vec3, 4> moves;
         std::array<float, 4> coefficients;
-        if (!selfContactMoves(pair, points, previous, inverseMasses, settings.thickness, settings.staticFriction, settings.kineticFriction, moves,
-                              coefficients)) {
+        const bool moved = pair.tangle == ClothPairTangle::Through
+                               ? throughContactMoves(pair, points, inverseMasses, settings.thickness, untangleStep, moves, coefficients)
+                               : selfContactMoves(pair, points, previous, inverseMasses, settings.thickness, settings.staticFriction,
+                                                  settings.kineticFriction, moves, coefficients);
+        if (!moved) {
             continue;
         }
         for (std::size_t index = 0; index < 4; ++index) {
@@ -677,9 +711,18 @@ namespace {
 
 std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
                                                          const ClothSelfTopology& topology) {
-    std::vector<std::array<std::uint32_t, 2>> crossings;
+    return findClothCrossings(positions, triangles, topology, serialJobs());
+}
+
+/*
+* The triangles' own boxes in a hash a mean edge wide, met by each edge's box; a triangle sharing a point with the edge
+* (stitched points as one) is no crossing.
+*/
+std::vector<std::array<std::uint32_t, 2>> findClothCrossings(const std::vector<Vec3>& positions,
+                                                             const std::vector<std::array<std::uint32_t, 3>>& triangles,
+                                                             const ClothSelfTopology& topology, JobSystem& jobs) {
     if (topology.edges.empty()) {
-        return crossings;
+        return {};
     }
 
     std::vector<Aabb> boxes(triangles.size());
@@ -688,8 +731,8 @@ std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>
     }
     const SpatialHash grid{std::max(meanEdgeLength(positions, topology.edges), 1e-4f), boxes};
 
-    std::vector<std::uint32_t> found;
-    for (std::uint32_t edgeIndex = 0; edgeIndex < topology.edges.size(); ++edgeIndex) {
+    using Crossing = std::array<std::uint32_t, 2>;
+    return findInBlocks<Crossing>(topology.edges.size(), jobs, [&](std::uint32_t edgeIndex, std::vector<std::uint32_t>& found, std::vector<Crossing>& out) {
         const std::array<std::uint32_t, 2>& edge = topology.edges[edgeIndex];
         grid.gather(boxAround(std::array<Vec3, 2>{positions[edge[0]], positions[edge[1]]}, 0.0f), found);
         for (const std::uint32_t index : found) {
@@ -700,11 +743,189 @@ std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>
                 shared = shared || joined == topology.joined[edge[0]] || joined == topology.joined[edge[1]];
             }
             if (!shared && passesThrough(positions[edge[0]], positions[edge[1]], positions[triangle[0]], positions[triangle[1]], positions[triangle[2]])) {
-                crossings.push_back({edgeIndex, index});
+                out.push_back({edgeIndex, index});
+            }
+        }
+    });
+}
+
+namespace {
+    // Of a cut edge's two parts, the one inside: the smaller, the lower-numbered on a tie.
+    std::uint32_t smallerPart(const ClothTangles& tangles, std::uint32_t one, std::uint32_t other) {
+        const bool first = tangles.sizes[one] < tangles.sizes[other] || (tangles.sizes[one] == tangles.sizes[other] && one < other);
+        return first ? one : other;
+    }
+
+    // A point's group in a union-find over the points, halving the way to the root as it goes.
+    std::uint32_t rootOf(std::vector<std::uint32_t>& parent, std::uint32_t point) {
+        while (parent[point] != point) {
+            parent[point] = parent[parent[point]];
+            point = parent[point];
+        }
+        return point;
+    }
+}
+
+/*
+* The parts: a union-find over the stitched representatives, joined along every edge no triangle is crossed by, then
+* numbered in the order of the points. A part's size is how many representatives it has (the cloth's triangles are near
+* one size, as Baraff et al.'s flood fills assume when they count vertices); of a cut edge's two parts the smaller is
+* inside, the lower-numbered on a tie.
+*/
+ClothTangles analyseClothTangles(const std::vector<std::array<std::uint32_t, 2>>& crossings, const std::vector<std::array<std::uint32_t, 3>>& triangles,
+                                 const ClothSelfTopology& topology) {
+    const std::size_t points = topology.joined.size();
+    std::vector<std::uint8_t> cut(topology.edges.size(), 0);
+    for (const std::array<std::uint32_t, 2>& crossing : crossings) {
+        cut[crossing[0]] = 1;
+    }
+
+    std::vector<std::uint32_t> parent(points);
+    for (std::size_t point = 0; point < points; ++point) {
+        parent[point] = static_cast<std::uint32_t>(point);
+    }
+    for (std::size_t index = 0; index < topology.edges.size(); ++index) {
+        if (cut[index] != 0) {
+            continue;
+        }
+        const std::uint32_t first = rootOf(parent, topology.joined[topology.edges[index][0]]);
+        const std::uint32_t second = rootOf(parent, topology.joined[topology.edges[index][1]]);
+        if (first != second) {
+            parent[std::max(first, second)] = std::min(first, second);
+        }
+    }
+
+    ClothTangles tangles;
+    tangles.part.resize(points);
+    std::vector<std::uint32_t> numberOfRoot(points, clothNoPartner);
+    for (std::size_t point = 0; point < points; ++point) {
+        const std::uint32_t root = rootOf(parent, topology.joined[point]);
+        if (numberOfRoot[root] == clothNoPartner) {
+            numberOfRoot[root] = static_cast<std::uint32_t>(tangles.sizes.size());
+            tangles.sizes.push_back(0);
+        }
+        tangles.part[point] = numberOfRoot[root];
+        if (topology.joined[point] == point) {
+            ++tangles.sizes[tangles.part[point]];
+        }
+    }
+    tangles.inside.assign(tangles.sizes.size(), 0);
+    tangles.looped.assign(tangles.sizes.size(), 0);
+
+    // The part a cut edge has inside, or none where the cut does not part it.
+    const auto insideOf = [&](std::uint32_t edgeIndex) {
+        const std::uint32_t first = tangles.part[topology.edges[edgeIndex][0]];
+        const std::uint32_t second = tangles.part[topology.edges[edgeIndex][1]];
+        return first == second ? clothNoPartner : smallerPart(tangles, first, second);
+    };
+    for (const std::array<std::uint32_t, 2>& crossing : crossings) {
+        const std::uint32_t inside = insideOf(crossing[0]);
+        if (inside != clothNoPartner) {
+            tangles.inside[inside] = 1;
+        }
+    }
+
+    for (const std::array<std::uint32_t, 2>& crossing : crossings) {
+        const std::uint32_t inside = insideOf(crossing[0]);
+        if (inside == clothNoPartner) {
+            continue;
+        }
+        for (const std::uint32_t corner : triangles[crossing[1]]) {
+            const std::uint32_t other = tangles.part[corner];
+            if (other == inside) {
+                tangles.looped[inside] = 1;
+                continue;
+            }
+            const std::array<std::uint32_t, 2> both{std::min(inside, other), std::max(inside, other)};
+            tangles.crossed.push_back(both);
+            if (tangles.inside[other] != 0) {
+                tangles.through.push_back(both);
             }
         }
     }
-    return crossings;
+    for (std::vector<std::array<std::uint32_t, 2>>* list : {&tangles.through, &tangles.crossed}) {
+        std::sort(list->begin(), list->end());
+        list->erase(std::unique(list->begin(), list->end()), list->end());
+    }
+    return tangles;
+}
+
+namespace {
+    // Whether the two parts are in the list (through, or crossed).
+    bool joinedIn(const std::vector<std::array<std::uint32_t, 2>>& list, std::uint32_t one, std::uint32_t other) {
+        return one != other && std::binary_search(list.begin(), list.end(), std::array<std::uint32_t, 2>{std::min(one, other), std::max(one, other)});
+    }
+}
+
+ClothPairTangle pairTangle(const ClothSelfPair& pair, const ClothTangles& tangles) {
+    if (tangles.part.empty() || (tangles.crossed.empty() && std::none_of(tangles.looped.begin(), tangles.looped.end(), [](std::uint8_t looped) {
+                                     return looped != 0;
+                                 }))) {
+        return ClothPairTangle::Apart;
+    }
+    const int firstPoints = firstSidePoints(pair.kind);
+
+    // One part for a side, or none when its points are in different parts or the part is not inside.
+    const auto sidePart = [&](int from, int to) {
+        const std::uint32_t part = tangles.part[pair.points[static_cast<std::size_t>(from)]];
+        for (int index = from + 1; index < to; ++index) {
+            if (tangles.part[pair.points[static_cast<std::size_t>(index)]] != part) {
+                return clothNoPartner;
+            }
+        }
+        return tangles.inside[part] != 0 ? part : clothNoPartner;
+    };
+    const std::uint32_t first = sidePart(0, firstPoints);
+    const std::uint32_t second = sidePart(firstPoints, 4);
+    if (first != clothNoPartner && second != clothNoPartner && joinedIn(tangles.through, first, second)) {
+        return ClothPairTangle::Through;
+    }
+
+    for (int index = 0; index < firstPoints; ++index) {
+        const std::uint32_t one = tangles.part[pair.points[static_cast<std::size_t>(index)]];
+        for (int other = firstPoints; other < 4; ++other) {
+            const std::uint32_t another = tangles.part[pair.points[static_cast<std::size_t>(other)]];
+            if ((one == another && tangles.looped[one] != 0) || joinedIn(tangles.crossed, one, another)) {
+                return ClothPairTangle::Free;
+            }
+        }
+    }
+    return ClothPairTangle::Apart;
+}
+
+std::vector<ClothSelfPair> clothCrossingPairs(const std::vector<std::array<std::uint32_t, 2>>& crossings, const std::vector<Vec3>& positions,
+                                              const std::vector<std::array<std::uint32_t, 3>>& triangles, const ClothSelfTopology& topology,
+                                              const ClothTangles& tangles) {
+    std::vector<ClothSelfPair> pairs;
+    for (const std::array<std::uint32_t, 2>& crossing : crossings) {
+        const std::array<std::uint32_t, 2>& edge = topology.edges[crossing[0]];
+        const std::uint32_t one = tangles.part[edge[0]];
+        const std::uint32_t other = tangles.part[edge[1]];
+        if (one == other) {
+            continue;
+        }
+        const bool firstInside = smallerPart(tangles, one, other) == one;
+        const std::uint32_t inside = firstInside ? edge[0] : edge[1];
+        const std::uint32_t outside = firstInside ? edge[1] : edge[0];
+
+        const std::array<std::uint32_t, 3>& triangle = triangles[crossing[1]];
+        const std::array<Vec3, 3> at = corners(positions, triangle);
+        ClothSelfPair pair = pointTrianglePair(positions, inside, triangle);
+        const Vec3 facing = acrossBoth(at[1] - at[0], at[2] - at[0]);
+        pair.normal = facing.dot(positions[outside] - at[0]) >= 0.0f ? facing : facing * -1.0f;
+        pair.tangle = ClothPairTangle::Through;
+        pairs.push_back(pair);
+    }
+    return pairs;
+}
+
+void markPairTangles(std::vector<ClothSelfPair>& pairs, const ClothTangles& tangles) {
+    for (ClothSelfPair& pair : pairs) {
+        pair.tangle = pairTangle(pair, tangles);
+        if (pair.tangle == ClothPairTangle::Through) {
+            pair.normal = pair.normal * -1.0f;
+        }
+    }
 }
 
 std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,

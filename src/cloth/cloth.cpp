@@ -44,6 +44,8 @@ void visit(ClothSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Self collision", settings.selfCollision);
     visitor.field("Self collision interval", settings.selfCollisionInterval, {.min = 1, .max = 30, .unit = "substeps"});
     visitor.field("Self collision reach", settings.selfCollisionReach, {.min = 0.001f, .max = 0.1f, .sliderMax = 0.03f, .unit = "m"});
+    visitor.field("Untangle", settings.untangle);
+    visitor.field("Untangle speed", settings.untangleSpeed, {.min = 0.01f, .max = 10.0f, .sliderMax = 3.0f, .unit = "m/s"});
 }
 
 // The mesh is placed first, so the masses come from the placed sheet's areas (a scaling placement changes them).
@@ -268,6 +270,14 @@ namespace {
             if (selfCollision && step % pairInterval == 0) {
                 pairStart = particles.positions;
                 selfPairs = findClothPairs(pairStart, *constraints.triangles, *constraints.selfTopology, reach, settings.thickness, jobs);
+                if (settings.untangle) {
+                    const std::vector<std::array<std::uint32_t, 2>> crossings =
+                        findClothCrossings(pairStart, *constraints.triangles, *constraints.selfTopology, jobs);
+                    const ClothTangles tangles = analyseClothTangles(crossings, *constraints.triangles, *constraints.selfTopology);
+                    markPairTangles(selfPairs, tangles);
+                    const std::vector<ClothSelfPair> pushes = clothCrossingPairs(crossings, pairStart, *constraints.triangles, *constraints.selfTopology, tangles);
+                    selfPairs.insert(selfPairs.end(), pushes.begin(), pushes.end());
+                }
             }
 
             predictCloth(particles, gravity, substep);
@@ -327,7 +337,7 @@ namespace {
                               nearbyFields(particles, constraints.fields, settings.thickness), sewing, touching);
             }
             if (selfCollision) {
-                solveSelfContacts(particles, selfPairs, settings, touching, constraints.selfTopology->partners);
+                solveSelfContacts(particles, selfPairs, settings, touching, constraints.selfTopology->partners, settings.untangleSpeed * substep);
                 cutClothMotion(particles.positions, pairStart, particles.previousPositions, particles.inverseMasses, selfPairs, reach,
                                constraints.selfTopology->partners);
             }
