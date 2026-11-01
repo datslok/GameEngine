@@ -336,6 +336,18 @@ namespace {
     std::size_t capturePipelineIndex(bool probes, bool cutOut, bool rays) {
         return (probes ? 1u : 0u) | (cutOut ? 2u : 0u) | (rays ? 4u : 0u);
     }
+
+    /*
+    * triangle.vert reads its push constants (a face's view-projection) only in the reflection probe's capture
+    * (PROBE_CAPTURE_VERTEX_CONSTANT), but Vulkan wants push constants a shader names set before it draws. The depth
+    * prepass and the main pass have none of their own, so they push a blank view, which the shader then ignores.
+    * Before, some earlier pass on a compatible layout (the light probes', a shadow tile's) had always pushed one, so the
+    * validation layers said nothing until a frame ran without them.
+    */
+    void pushUnusedView(VkCommandBuffer commands, VkPipelineLayout layout) {
+        const GpuShadowView unused{};
+        vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(unused), &unused);
+    }
 }
 
 /*
@@ -1855,6 +1867,7 @@ void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& m
     renderingOpen = true;
 
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+    pushUnusedView(commands, sceneLayout->getPipelineLayout());
     stats.drawCalls += drawBatches(commands, mainDraws.batches, {depthPrepassPipeline->get(), depthPrepassCutOutPipeline->get(), VK_CULL_MODE_BACK_BIT});
 
     vkCmdEndRendering(commands);
@@ -1907,6 +1920,7 @@ void VulkanRenderer::drawMainPass(FrameContext& frame, const BatchedDraws& mainD
     } else {
         bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
     }
+    pushUnusedView(commands, pipeline.getLayout());
     stats.drawCalls += drawBatches(commands, mainDraws.batches, {pipeline.get(), cutOutPipeline.get(), VK_CULL_MODE_BACK_BIT});
 
     /*
