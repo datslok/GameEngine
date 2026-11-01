@@ -183,6 +183,8 @@ GpuClothTick packClothTick(const ClothTickCommands& commands, std::uint32_t pinF
     tick.stitchClosingStep = settings.seamSpeed * substep;
     tick.selfCollision = settings.selfCollision ? 1u : 0u;
     tick.selfReach = std::max(settings.selfCollisionReach, settings.thickness);
+    tick.untangle = settings.selfCollision && settings.untangle ? 1u : 0u;
+    tick.untangleStep = settings.untangleSpeed * substep;
     return tick;
 }
 
@@ -232,6 +234,28 @@ GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair) {
     packed.heights = Vec4{pair.heights[0], pair.heights[1], pair.heights[2], pair.heights[3]};
     packed.kind = static_cast<std::uint32_t>(pair.kind);
     packed.plane = pair.plane;
+    packed.tangle = static_cast<std::uint32_t>(pair.tangle);
+    return packed;
+}
+
+GpuClothTangles packClothTangles(const ClothTangles& tangles, std::size_t points) {
+    GpuClothTangles packed;
+    packed.partOf = tangles.part.empty() ? std::vector<std::uint32_t>(points, 0u) : tangles.part;
+    packed.partFlags.assign(points, 0u);
+    for (std::size_t part = 0; part < tangles.sizes.size(); ++part) {
+        packed.partFlags[part] = (tangles.inside[part] != 0 ? CLOTH_PART_INSIDE : 0u) | (tangles.looped[part] != 0 ? CLOTH_PART_LOOPED : 0u) |
+                                 (tangles.sizes[part] << CLOTH_PART_SIZE_SHIFT);
+    }
+    for (const std::array<std::uint32_t, 2>& crossed : tangles.crossed) {
+        if (packed.relations.size() == clothTangleRelationRoom) {
+            break;
+        }
+        const bool through = std::binary_search(tangles.through.begin(), tangles.through.end(), crossed);
+        packed.relations.push_back(GpuClothTangleRelation{crossed[0], crossed[1], through ? 1u : 0u, 0u});
+    }
+    packed.header.count = static_cast<std::uint32_t>(packed.relations.size());
+    const bool looped = std::any_of(tangles.looped.begin(), tangles.looped.end(), [](std::uint8_t loop) { return loop != 0; });
+    packed.header.any = !packed.relations.empty() || looped ? 1u : 0u;
     return packed;
 }
 

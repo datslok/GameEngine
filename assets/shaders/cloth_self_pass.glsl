@@ -1,6 +1,7 @@
 // What every self-collision pass (cloth_self_*.comp) binds besides the cloth passes' set 0 (render/vulkan/vulkan_cloth.h,
 // GpuClothSelf): the triangles and edges, who is whose neighbour, the rest shape and pieces, the pair search's hash
-// table, the pairs found, and the contacts' sums and the cut's shares per point.
+// table, the pairs found, the contacts' sums and the cut's shares per point, and untangling's crossings found and the
+// CPU's analysis of them (GpuClothTangles).
 
 #ifndef CLOTH_SELF_PASS_GLSL
 #define CLOTH_SELF_PASS_GLSL
@@ -98,6 +99,27 @@ layout(std430, set = 1, binding = 17) buffer ClothSelfShares {
     uint shares[];
 };
 
+// Each crossing the search found (an edge through a triangle: edge, triangle), up to CLOTH_SELF_CROSSING_ROOM, read
+// back for the CPU's analysis.
+layout(std430, set = 1, binding = 18) buffer ClothSelfCrossings {
+    uvec2 crossings[];
+};
+
+// The CPU's analysis of the crossings a few frames back (GpuClothTangles): each point's part, each part's flags with
+// its size above them, and the relations between parts behind their header (x how many, y whether any tangle).
+layout(std430, set = 1, binding = 19) readonly buffer ClothTanglePartOf {
+    uint partOf[];
+};
+
+layout(std430, set = 1, binding = 20) readonly buffer ClothTanglePartFlags {
+    uint partFlags[];
+};
+
+layout(std430, set = 1, binding = 21) readonly buffer ClothTangleRelations {
+    uvec4 tangleHeader;
+    uvec4 relations[]; // low part, high part, through (1 when both are inside), unused
+};
+
 // The pair search's cell for a point (clothSelfCellSize, cellOf).
 ivec3 clothSelfCell(vec3 point, float cellSize) {
     return ivec3(floor(point / cellSize));
@@ -166,15 +188,114 @@ void clothPairPlaces(uvec4 points, out vec3 now[4], out vec3 rest[4]) {
     }
 }
 
-// Keep a pair found: appended in whatever order the invocations find them (the contacts and the cut do not depend on
-// it), or counted as lost past the room.
-void clothKeepPair(ClothSelfPair pair) {
+// The relation between two parts (searching the sorted relations): 0 none, 1 crossed, 2 passed through each other.
+uint clothPartsRelated(uint one, uint other) {
+    if (one == other) {
+        return 0u;
+    }
+    uvec2 wanted = uvec2(min(one, other), max(one, other));
+    uint low = 0u;
+    uint high = min(tangleHeader.x, uint(CLOTH_TANGLE_RELATION_ROOM));
+    while (low < high) {
+        uint middle = (low + high) / 2u;
+        uvec2 at = relations[middle].xy;
+        if (at.x < wanted.x || (at.x == wanted.x && at.y < wanted.y)) {
+            low = middle + 1u;
+        } else {
+            high = middle;
+        }
+    }
+    if (low < min(tangleHeader.x, uint(CLOTH_TANGLE_RELATION_ROOM)) && all(equal(relations[low].xy, wanted))) {
+        return relations[low].z != 0u ? 2u : 1u;
+    }
+    return 0u;
+}
+
+// One part for a side (points from to to), or none when its points are in different parts or the part is not inside.
+uint clothSidePart(uvec4 points, int from, int to) {
+    uint part = partOf[points[from]];
+    for (int index = from + 1; index < to; ++index) {
+        if (partOf[points[index]] != part) {
+            return CLOTH_NO_STITCH;
+        }
+    }
+    return (partFlags[part] & uint(CLOTH_PART_INSIDE)) != 0u ? part : CLOTH_NO_STITCH;
+}
+
+// pairTangle: Through between two inside parts that passed through each other, Free within a part folded through itself
+// or between parts one crossed, Apart otherwise; Apart outright with no tangle at all.
+uint clothPairTangle(uvec4 points, uint kind) {
+    if (tangleHeader.y == 0u) {
+        return CLOTH_TANGLE_APART;
+    }
+    int firstPoints = kind == CLOTH_PAIR_POINT_TRIANGLE ? 1 : 2;
+    uint first = clothSidePart(points, 0, firstPoints);
+    uint second = clothSidePart(points, firstPoints, 4);
+    if (first != CLOTH_NO_STITCH && second != CLOTH_NO_STITCH && clothPartsRelated(first, second) == 2u) {
+        return CLOTH_TANGLE_THROUGH;
+    }
+    for (int index = 0; index < firstPoints; ++index) {
+        uint one = partOf[points[index]];
+        for (int other = firstPoints; other < 4; ++other) {
+            uint another = partOf[points[other]];
+            if ((one == another && (partFlags[one] & uint(CLOTH_PART_LOOPED)) != 0u) || clothPartsRelated(one, another) != 0u) {
+                return CLOTH_TANGLE_FREE;
+            }
+        }
+    }
+    return CLOTH_TANGLE_APART;
+}
+
+// Store a pair (appended in whatever order the invocations find them: the contacts and the cut do not depend on it), or
+// count it as lost past the room.
+void clothStorePair(ClothSelfPair pair) {
     uint slot = atomicAdd(pairState[CLOTH_SELF_PAIR_COUNT], 1u);
     if (slot < info.pairCapacity) {
         pairs[slot] = pair;
     } else {
         atomicAdd(pairState[CLOTH_SELF_PAIRS_LOST], 1u);
     }
+}
+
+// Keep a pair found (markPairTangles): with untangling on, its tangle marked and a Through pair's normal turned round.
+void clothKeepPair(ClothSelfPair pair) {
+    if (ticks[tickIndex].untangle != 0u) {
+        pair.tangle = clothPairTangle(pair.points, pair.kind);
+        if (pair.tangle == CLOTH_TANGLE_THROUGH) {
+            pair.normalGap.xyz = -pair.normalGap.xyz;
+        }
+    }
+    clothStorePair(pair);
+}
+
+// A crossing found (an edge through a triangle): recorded for the CPU's analysis, and, where the analysis has the
+// edge's ends in different parts, its inside end pushed back across the triangle (clothCrossingPairs): a Through pair
+// against it, its normal turned towards the edge's other end.
+void clothKeepCrossing(uint edge, uint triangle) {
+    uint slot = atomicAdd(pairState[CLOTH_SELF_CROSSING_COUNT], 1u);
+    if (slot < uint(CLOTH_SELF_CROSSING_ROOM)) {
+        crossings[slot] = uvec2(edge, triangle);
+    }
+
+    uvec2 ends = selfEdges[edge];
+    uint one = partOf[ends.x];
+    uint other = partOf[ends.y];
+    if (one == other) {
+        return;
+    }
+    uint oneSize = partFlags[one] >> uint(CLOTH_PART_SIZE_SHIFT);
+    uint otherSize = partFlags[other] >> uint(CLOTH_PART_SIZE_SHIFT);
+    bool firstInside = oneSize < otherSize || (oneSize == otherSize && one < other);
+    uint inside = firstInside ? ends.x : ends.y;
+    uint outside = firstInside ? ends.y : ends.x;
+
+    uvec4 corners = selfTriangles[triangle];
+    uvec4 points = uvec4(inside, corners.xyz);
+    vec3 at[4] = vec3[4](positions[inside].xyz, positions[corners.x].xyz, positions[corners.y].xyz, positions[corners.z].xyz);
+    ClothSelfPair pair = clothMakePair(CLOTH_PAIR_POINT_TRIANGLE, points, at);
+    pair.normalGap.xyz = clothCrossingNormal(at[1], at[2], at[3], positions[outside].xyz);
+    pair.tangle = CLOTH_TANGLE_THROUGH;
+    clothStorePair(pair);
 }
 
 // How many pairs this search kept.

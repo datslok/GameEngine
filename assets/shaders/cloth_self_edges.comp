@@ -6,7 +6,9 @@
 * buckets of its box's cells (at most CLOTH_SELF_QUERY_CELLS_PER_AXIS an axis) and the large items. An edge in several
 * of those cells is met in each, so a pair is kept only from the cell holding the low corner of where the two boxes
 * overlap (the other edge's grown by the reach): exactly one of the cells visited, since the other edge was written in
-* every cell its box covers. Then as the points' pass: not sharing a point, nearer than the reach, not excused.
+* every cell its box covers. Then as the points' pass: not sharing a point, nearer than the reach, not excused. With
+* untangling on, it also looks through the triangles there (findClothCrossings), each once by the same rule, for those
+* it passes through, sharing no point with it.
 */
 #include "cloth_self_pass.glsl"
 
@@ -47,6 +49,32 @@ void considerEdge(uint edge, uint other, vec3 ownLow, vec3 ownHigh, ivec3 visite
     clothKeepPair(clothMakePair(CLOTH_PAIR_EDGE_EDGE, points, now));
 }
 
+void considerTriangle(uint edge, uint triangle, vec3 ownLow, vec3 ownHigh, ivec3 visited, bool owned, float reach, float cellSize) {
+    uvec4 corners = selfTriangles[triangle];
+    vec3 a = positions[corners.x].xyz;
+    vec3 b = positions[corners.y].xyz;
+    vec3 c = positions[corners.z].xyz;
+    vec3 triangleLow = min(min(a, b), c) - vec3(reach);
+    vec3 triangleHigh = max(max(a, b), c) + vec3(reach);
+    if (any(greaterThan(ownLow, triangleHigh)) || any(lessThan(ownHigh, triangleLow))) {
+        return;
+    }
+    if (owned && any(notEqual(clothSelfCell(max(ownLow, triangleLow), cellSize), visited))) {
+        return;
+    }
+
+    uvec2 ends = selfEdges[edge];
+    for (int corner = 0; corner < 3; ++corner) {
+        uint joinedCorner = joined[corners[corner]];
+        if (joinedCorner == joined[ends.x] || joinedCorner == joined[ends.y]) {
+            return;
+        }
+    }
+    if (clothPassesThrough(positions[ends.x].xyz, positions[ends.y].xyz, a, b, c)) {
+        clothKeepCrossing(edge, triangle);
+    }
+}
+
 void main() {
     uint edge;
     if (!clothItem(edge)) {
@@ -62,10 +90,13 @@ void main() {
     vec3 ownLow = min(a, b);
     vec3 ownHigh = max(a, b);
 
+    bool untangling = tick.untangle != 0u;
     uint large = min(pairState[CLOTH_SELF_LARGE_COUNT], info.triangleCount + info.edgeCount);
     for (uint index = 0u; index < large; ++index) {
         if (largeItems[index] >= info.triangleCount) {
             considerEdge(edge, largeItems[index] - info.triangleCount, ownLow, ownHigh, ivec3(0), false, reach, cellSize, tick.thickness);
+        } else if (untangling) {
+            considerTriangle(edge, largeItems[index], ownLow, ownHigh, ivec3(0), false, reach, cellSize);
         }
     }
 
@@ -80,6 +111,8 @@ void main() {
                     uint item = entries[entry];
                     if (item >= info.triangleCount) {
                         considerEdge(edge, item - info.triangleCount, ownLow, ownHigh, visited, true, reach, cellSize, tick.thickness);
+                    } else if (untangling) {
+                        considerTriangle(edge, item, ownLow, ownHigh, visited, true, reach, cellSize);
                     }
                 }
             }

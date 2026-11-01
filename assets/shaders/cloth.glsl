@@ -105,10 +105,10 @@ struct ClothTick {
     float stitchClosingStep; // how far a stitch's gap may close in a substep, m
     uint selfCollision;      // 1 with self-collision on
 
-    float selfReach; // m: self-collision's pairs are found within this
-    float unusedSelf0;
-    float unusedSelf1;
-    float unusedSelf2;
+    float selfReach;    // m: self-collision's pairs are found within this
+    float untangleStep; // m: how far a Through pair may push in a substep
+    uint untangle;      // 1 with untangling on
+    float unusedSelf;
 
     vec4 grabStart; // where the hand starts the tick; grabTarget is where it ends
 };
@@ -602,8 +602,8 @@ struct ClothSelfPair {
     vec4 heights;
     uint kind;
     float plane;
-    uint unused0;
-    uint unused1;
+    uint tangle; // CLOTH_TANGLE_APART, CLOTH_TANGLE_THROUGH or CLOTH_TANGLE_FREE
+    uint unused;
 };
 
 // segmentShare (math/closest_points): how far along a to b its point nearest to point lies.
@@ -753,8 +753,8 @@ ClothSelfPair clothMakePair(uint kind, uvec4 points, vec3 at[4]) {
     pair.points = points;
     pair.kind = kind;
     pair.plane = -1.0;
-    pair.unused0 = 0u;
-    pair.unused1 = 0u;
+    pair.tangle = CLOTH_TANGLE_APART;
+    pair.unused = 0u;
     vec3 firstNearest;
     vec3 secondNearest;
     vec3 fallback;
@@ -860,6 +860,63 @@ bool clothSelfContactMoves(ClothSelfPair pair, vec3 points[4], vec3 previous[4],
         }
     }
     return true;
+}
+
+// throughContactMoves: a Through pair's sides pushed along its turned normal until the first side is the thickness past
+// the second, no further than step, shared as a contact's are, without friction. False when there already.
+bool clothThroughContactMoves(ClothSelfPair pair, vec3 points[4], vec4 inverseMasses, float thickness, float step, out vec3 moves[4],
+                              out vec4 coefficients) {
+    vec3 firstNearest;
+    vec3 secondNearest;
+    if (pair.kind == CLOTH_PAIR_POINT_TRIANGLE) {
+        vec3 weights;
+        firstNearest = points[0];
+        secondNearest = clothClosestTriangle(points[0], points[1], points[2], points[3], weights);
+        coefficients = vec4(1.0, -weights.x, -weights.y, -weights.z);
+    } else {
+        vec2 shares = clothClosestSegments(points[0], points[1], points[2], points[3], firstNearest, secondNearest);
+        coefficients = vec4(1.0 - shares.x, shares.x, shares.y - 1.0, -shares.y);
+    }
+    for (int index = 0; index < 4; ++index) {
+        moves[index] = vec3(0.0);
+    }
+
+    float past = dot(firstNearest - secondNearest, pair.normalGap.xyz);
+    float push = min(thickness - past, step);
+    if (push <= 0.0) {
+        return false;
+    }
+    float weights = 0.0;
+    for (int index = 0; index < 4; ++index) {
+        weights += coefficients[index] * coefficients[index] * inverseMasses[index];
+    }
+    if (weights <= 0.0) {
+        return false;
+    }
+    float scale = push / weights;
+    for (int index = 0; index < 4; ++index) {
+        moves[index] = pair.normalGap.xyz * (scale * coefficients[index] * inverseMasses[index]);
+    }
+    return true;
+}
+
+// segmentPassesThrough: the segment's ends strictly either side of the triangle's plane, the crossing within its edges.
+bool clothPassesThrough(vec3 from, vec3 to, vec3 a, vec3 b, vec3 c) {
+    vec3 normal = cross(b - a, c - a);
+    float fromSide = dot(normal, from - a);
+    float toSide = dot(normal, to - a);
+    if (!((fromSide > 0.0 && toSide < 0.0) || (fromSide < 0.0 && toSide > 0.0))) {
+        return false;
+    }
+    vec3 crossing = from + (to - from) * (fromSide / (fromSide - toSide));
+    return dot(normal, cross(b - a, crossing - a)) >= 0.0 && dot(normal, cross(c - b, crossing - b)) >= 0.0 &&
+           dot(normal, cross(a - c, crossing - c)) >= 0.0;
+}
+
+// crossingNormal: the triangle's unit normal turned towards outside.
+vec3 clothCrossingNormal(vec3 a, vec3 b, vec3 c, vec3 outside) {
+    vec3 facing = clothAcrossBoth(b - a, c - a);
+    return dot(facing, outside - a) >= 0.0 ? facing : -facing;
 }
 
 // selfMoveUnits and selfMoveMetres: a move in whole units of CLOTH_SELF_MOVE_SCALE a metre, rounded half to even, and

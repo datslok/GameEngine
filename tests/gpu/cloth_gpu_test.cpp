@@ -508,6 +508,90 @@ namespace {
     }
 
     /*
+    * Untangling's pieces: whether random segments pass through random triangles (most near enough to, some through a
+    * corner's neighbourhood), compared exactly; the crossed triangle's normal turned towards an edge's outside end; and a
+    * Through pair's moves (throughContactMoves) for random pairs turned round, some points pinned, the step a millimetre
+    * or less.
+    */
+    void checkUntangling(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{181};
+        std::vector<std::array<Vec3, 5>> segments;
+        std::vector<GpuVec4> throughInputs;
+        std::vector<GpuVec4> normalInputs;
+        for (int i = 0; i < 600; ++i) {
+            std::array<Vec3, 5> at;
+            for (Vec3& point : at) {
+                point = randomPoint(random, 0.02f);
+            }
+            at[0].z = std::fabs(at[0].z) + 0.001f;
+            at[1].z = -std::fabs(at[1].z) - 0.001f;
+            for (int corner = 2; corner < 5; ++corner) {
+                at[static_cast<std::size_t>(corner)].z *= 0.1f;
+            }
+            segments.push_back(at);
+            for (const Vec3& point : at) {
+                throughInputs.push_back(gpuVec4(point));
+            }
+            for (int corner = 2; corner < 5; ++corner) {
+                normalInputs.push_back(gpuVec4(at[static_cast<std::size_t>(corner)]));
+            }
+            normalInputs.push_back(gpuVec4(at[i % 2 == 0 ? 0 : 1]));
+        }
+        const std::vector<GpuVec4> through = runner.run(shader, GPU_TEST_CLOTH_PASSES_THROUGH, throughInputs, 5, 1);
+        const std::vector<GpuVec4> normals = runner.run(shader, GPU_TEST_CLOTH_CROSSING_NORMAL, normalInputs, 4, 1);
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            const std::array<Vec3, 5>& at = segments[i];
+            report.check("clothPassesThrough", exactTolerance, segmentPassesThrough(at[0], at[1], at[2], at[3], at[4]) ? 1.0f : 0.0f, through[i][0]);
+            report.check("clothCrossingNormal", arithmeticTolerance, crossingNormal(at[2], at[3], at[4], at[i % 2 == 0 ? 0 : 1]), vec3From(normals[i]));
+        }
+
+        const ClothSettings settings;
+        std::vector<ClothSelfPair> pairs;
+        std::vector<std::array<Vec3, 4>> points;
+        std::vector<std::array<float, 4>> masses;
+        std::vector<float> steps;
+        std::vector<GpuVec4> inputs;
+        for (int i = 0; i < 600; ++i) {
+            std::array<Vec3, 4> at;
+            for (Vec3& point : at) {
+                point = randomPoint(random, 0.006f);
+            }
+            const std::vector<Vec3> positions(at.begin(), at.end());
+            ClothSelfPair pair = i % 2 == 0 ? pointTrianglePair(positions, 0, {1, 2, 3}) : edgeEdgePair(positions, {0, 1}, {2, 3});
+            pair.tangle = ClothPairTangle::Through;
+            pair.normal = pair.normal * -1.0f;
+            std::array<float, 4> weights;
+            for (float& weight : weights) {
+                weight = randomWeight(random);
+            }
+            const float step = random.between(0.0001f, 0.001f);
+            pairs.push_back(pair);
+            points.push_back(at);
+            masses.push_back(weights);
+            steps.push_back(step);
+            pushSelfPair(inputs, pair);
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                inputs.push_back(gpuVec4(at[corner], weights[corner]));
+            }
+            inputs.push_back(gpuVec4(settings.thickness, step));
+        }
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLOTH_THROUGH_CONTACT, inputs, 8, 6);
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+            std::array<Vec3, 4> moves{};
+            std::array<float, 4> coefficients{};
+            const bool pushed = throughContactMoves(pairs[i], points[i], masses[i], settings.thickness, steps[i], moves, coefficients);
+            report.check("clothThroughContactMoves pushed", exactTolerance, pushed ? 1.0f : 0.0f, outputs[i * 6 + 5][0]);
+            if (!pushed) {
+                continue;
+            }
+            for (std::size_t corner = 0; corner < 4; ++corner) {
+                report.check("clothThroughContactMoves", arithmeticTolerance, moves[corner], vec3From(outputs[i * 6 + corner]));
+                report.check("clothThroughContactMoves coefficients", arithmeticTolerance, coefficients[corner], outputs[i * 6 + 4][corner]);
+            }
+        }
+    }
+
+    /*
     * One pair's contact moves (selfContactMoves) for random pairs closer than the thickness, a pinned point in some,
     * with slides since the substep's start under and over friction's limit; and the moves' whole units and their average.
     */
@@ -1231,6 +1315,7 @@ void gpuTestCloth(const VulkanDevice& device, GpuFunctionRunner& runner, GpuChec
     checkClosestFeatures(runner, report);
     checkSelfPairs(runner, report);
     checkSelfContacts(runner, report);
+    checkUntangling(runner, report);
     checkField(runner, report);
     checkFinishVelocity(runner, report);
     checkPointTerms(runner, report);

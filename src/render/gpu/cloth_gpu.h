@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cloth/cloth.h"
+#include "cloth/cloth_self_collision.h"
 #include "math/vec4.h"
 #include "physics/shapes.h"
 #include "physics/signed_distance_field.h"
@@ -142,7 +143,9 @@ struct GpuClothTick {
     float stitchClosingStep = 0.0f; // m
     std::uint32_t selfCollision = 0; // 1 with self-collision on
     float selfReach = 0.0f;          // m: pairs closer are found, at least the thickness (as stepCloth uses it)
-    float unusedSelf[3]{};
+    float untangleStep = 0.0f;  // m: how far a Through pair may push in a substep (the untangle speed times it)
+    std::uint32_t untangle = 0; // 1 with untangling on (and self-collision)
+    float unusedSelf = 0.0f;
 
     Vec4 grabStart; // where the hand starts the tick (ClothHandMove::start); grabTarget is where it ends
 };
@@ -158,6 +161,11 @@ inline constexpr std::uint32_t clothSelfBucketsPerItem = CLOTH_SELF_BUCKETS_PER_
 inline constexpr std::uint32_t clothSelfStateWords = CLOTH_SELF_STATE_WORDS;
 static_assert(static_cast<int>(ClothPairKind::PointTriangle) == CLOTH_PAIR_POINT_TRIANGLE && static_cast<int>(ClothPairKind::EdgeEdge) == CLOTH_PAIR_EDGE_EDGE,
               "The GPU's pair kinds are ClothPairKind's values");
+static_assert(static_cast<int>(ClothPairTangle::Apart) == CLOTH_TANGLE_APART && static_cast<int>(ClothPairTangle::Through) == CLOTH_TANGLE_THROUGH &&
+                  static_cast<int>(ClothPairTangle::Free) == CLOTH_TANGLE_FREE,
+              "The GPU's tangles are ClothPairTangle's values");
+inline constexpr std::uint32_t clothSelfCrossingRoom = CLOTH_SELF_CROSSING_ROOM;
+inline constexpr std::uint32_t clothTangleRelationRoom = CLOTH_TANGLE_RELATION_ROOM;
 
 // A triangle's corners and an edge's ends, as the self-collision passes read them.
 struct GpuClothSelfTriangle {
@@ -184,7 +192,8 @@ struct GpuClothSelfPair {
     Vec4 heights;
     std::uint32_t kind = CLOTH_PAIR_POINT_TRIANGLE;
     float plane = -1.0f;
-    std::uint32_t unused[2]{};
+    std::uint32_t tangle = CLOTH_TANGLE_APART;
+    std::uint32_t unused = 0;
 };
 
 static_assert(sizeof(GpuClothSelfPair) == 64, "GpuClothSelfPair must match cloth.glsl's ClothSelfPair");
@@ -224,6 +233,35 @@ struct GpuClothSelf {
 GpuClothSelf packClothSelf(const Cloth& cloth);
 
 GpuClothSelfPair packClothSelfPair(const ClothSelfPair& pair);
+
+/*
+* The CPU's analysis of a GPU cloth's tangles (analyseClothTangles, from its crossings read back), as the self-collision
+* passes read it: each point's part, each part's flags (CLOTH_PART_INSIDE, CLOTH_PART_LOOPED) with its size above them,
+* and each crossed pair of parts in order with whether both are inside, behind a header with how many and whether there
+* is any tangle (a cloth with none is classified Apart without looking further). Relations past
+* CLOTH_TANGLE_RELATION_ROOM are dropped.
+*/
+struct GpuClothTangleHeader {
+    std::uint32_t count = 0;
+    std::uint32_t any = 0;
+    std::uint32_t unused[2]{};
+};
+
+struct GpuClothTangleRelation {
+    std::uint32_t low = 0;
+    std::uint32_t high = 0;
+    std::uint32_t through = 0;
+    std::uint32_t unused = 0;
+};
+
+struct GpuClothTangles {
+    std::vector<std::uint32_t> partOf;
+    std::vector<std::uint32_t> partFlags;
+    GpuClothTangleHeader header;
+    std::vector<GpuClothTangleRelation> relations;
+};
+
+GpuClothTangles packClothTangles(const ClothTangles& tangles, std::size_t points);
 
 /*
 * The pairs' room after a search found found pairs with room for room: the same while they fit, else the smallest power

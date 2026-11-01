@@ -52,11 +52,24 @@
 #define CLOTH_SELF_SCAN_ADD 2
 
 // pairState's words (cloth_self_pass.glsl): how many pairs were found, how many did not fit, the large items' count,
-// then the pairs' dispatch sizes (x, y, z) for vkCmdDispatchIndirect.
+// the crossings found (edges through a triangle, kept up to CLOTH_SELF_CROSSING_ROOM for the CPU's analysis), then the
+// pairs' dispatch sizes (x, y, z) for vkCmdDispatchIndirect.
 #define CLOTH_SELF_PAIR_COUNT 0
 #define CLOTH_SELF_PAIRS_LOST 1
 #define CLOTH_SELF_LARGE_COUNT 2
+#define CLOTH_SELF_CROSSING_COUNT 3
 #define CLOTH_SELF_DISPATCH 4
 #define CLOTH_SELF_STATE_WORDS 8
+#define CLOTH_SELF_CROSSING_ROOM 2048
+
+// Untangling (cloth/cloth_self_collision.h): a pair's tangle (ClothPairTangle's values); a part's flags, its size above
+// them; room for the relations between parts (crossed, or passed through each other).
+#define CLOTH_TANGLE_APART 0
+#define CLOTH_TANGLE_THROUGH 1
+#define CLOTH_TANGLE_FREE 2
+#define CLOTH_PART_INSIDE 1
+#define CLOTH_PART_LOOPED 2
+#define CLOTH_PART_SIZE_SHIFT 2
+#define CLOTH_TANGLE_RELATION_ROOM 1024
 
 #endif

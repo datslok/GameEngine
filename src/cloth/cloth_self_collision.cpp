@@ -693,20 +693,21 @@ void solveSelfContacts(ClothParticles& particles, const std::vector<ClothSelfPai
     }
 }
 
-namespace {
-    // Whether the segment passes through the triangle's inside: its ends strictly on either side of the plane and the
-    // crossing within all three edges.
-    bool passesThrough(const Vec3& from, const Vec3& to, const Vec3& a, const Vec3& b, const Vec3& c) {
-        const Vec3 normal = (b - a).cross(c - a);
-        const float fromSide = normal.dot(from - a);
-        const float toSide = normal.dot(to - a);
-        if (!((fromSide > 0.0f && toSide < 0.0f) || (fromSide < 0.0f && toSide > 0.0f))) {
-            return false;
-        }
-        const Vec3 crossing = from + (to - from) * (fromSide / (fromSide - toSide));
-        return normal.dot((b - a).cross(crossing - a)) >= 0.0f && normal.dot((c - b).cross(crossing - b)) >= 0.0f &&
-               normal.dot((a - c).cross(crossing - c)) >= 0.0f;
+bool segmentPassesThrough(const Vec3& from, const Vec3& to, const Vec3& a, const Vec3& b, const Vec3& c) {
+    const Vec3 normal = (b - a).cross(c - a);
+    const float fromSide = normal.dot(from - a);
+    const float toSide = normal.dot(to - a);
+    if (!((fromSide > 0.0f && toSide < 0.0f) || (fromSide < 0.0f && toSide > 0.0f))) {
+        return false;
     }
+    const Vec3 crossing = from + (to - from) * (fromSide / (fromSide - toSide));
+    return normal.dot((b - a).cross(crossing - a)) >= 0.0f && normal.dot((c - b).cross(crossing - b)) >= 0.0f &&
+           normal.dot((a - c).cross(crossing - c)) >= 0.0f;
+}
+
+Vec3 crossingNormal(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& outside) {
+    const Vec3 facing = acrossBoth(b - a, c - a);
+    return facing.dot(outside - a) >= 0.0f ? facing : facing * -1.0f;
 }
 
 std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
@@ -742,7 +743,8 @@ std::vector<std::array<std::uint32_t, 2>> findClothCrossings(const std::vector<V
                 const std::uint32_t joined = topology.joined[corner];
                 shared = shared || joined == topology.joined[edge[0]] || joined == topology.joined[edge[1]];
             }
-            if (!shared && passesThrough(positions[edge[0]], positions[edge[1]], positions[triangle[0]], positions[triangle[1]], positions[triangle[2]])) {
+            if (!shared &&
+                segmentPassesThrough(positions[edge[0]], positions[edge[1]], positions[triangle[0]], positions[triangle[1]], positions[triangle[2]])) {
                 out.push_back({edgeIndex, index});
             }
         }
@@ -909,10 +911,8 @@ std::vector<ClothSelfPair> clothCrossingPairs(const std::vector<std::array<std::
         const std::uint32_t outside = firstInside ? edge[1] : edge[0];
 
         const std::array<std::uint32_t, 3>& triangle = triangles[crossing[1]];
-        const std::array<Vec3, 3> at = corners(positions, triangle);
         ClothSelfPair pair = pointTrianglePair(positions, inside, triangle);
-        const Vec3 facing = acrossBoth(at[1] - at[0], at[2] - at[0]);
-        pair.normal = facing.dot(positions[outside] - at[0]) >= 0.0f ? facing : facing * -1.0f;
+        pair.normal = crossingNormal(positions[triangle[0]], positions[triangle[1]], positions[triangle[2]], positions[outside]);
         pair.tangle = ClothPairTangle::Through;
         pairs.push_back(pair);
     }

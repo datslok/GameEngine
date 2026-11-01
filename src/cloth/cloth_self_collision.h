@@ -217,6 +217,14 @@ bool throughContactMoves(const ClothSelfPair& pair, const std::array<Vec3, 4>& p
 std::size_t countClothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
                                 const ClothSelfTopology& topology);
 
+// Whether the segment passes through the triangle's inside: its ends strictly either side of its plane and the crossing
+// within all three edges (mirrored by cloth.glsl's clothPassesThrough).
+bool segmentPassesThrough(const Vec3& from, const Vec3& to, const Vec3& a, const Vec3& b, const Vec3& c);
+
+// The crossed triangle's unit normal turned towards outside, the crossing edge's end out of the inside part
+// (clothCrossingPairs; mirrored by cloth.glsl's clothCrossingNormal).
+Vec3 crossingNormal(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& outside);
+
 // The crossings themselves, as (an index into topology.edges, an index into triangles), edge by edge.
 std::vector<std::array<std::uint32_t, 2>> clothCrossings(const std::vector<Vec3>& positions, const std::vector<std::array<std::uint32_t, 3>>& triangles,
                                                          const ClothSelfTopology& topology);

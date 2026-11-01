@@ -218,7 +218,8 @@ void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debu
 }
 
 std::string clothSelfPairsText(const ClothSelfPairCounts& counts) {
-    return "SELF PAIRS " + std::to_string(counts.found) + "  LOST " + std::to_string(counts.lost) + "  LARGE " + std::to_string(counts.large);
+    return "SELF PAIRS " + std::to_string(counts.found) + "  LOST " + std::to_string(counts.lost) + "  LARGE " + std::to_string(counts.large) +
+           "  CROSSINGS " + std::to_string(counts.crossings);
 }
 
 void drawClothSelfPairs(const ClothSelfPairCounts& counts, DebugDraw& debug) {

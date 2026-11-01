@@ -160,6 +160,13 @@ public:
     ClothSelfPairCounts readSelfPairs(std::uint32_t slot) const;
 
     /*
+    * Untangling's analysis on the CPU (analyseClothTangles) of the crossings the slot's read-back holds, the last pair
+    * search's, packed for the passes (packClothTangles); the next slot recorded uploads it before its ticks, so the
+    * passes work from crossings a few frames old. Nothing to do while nothing crosses and nothing did.
+    */
+    void analyseTangles(std::uint32_t slot);
+
+    /*
     * A search that found more pairs than their room asks for more (clothSelfPairRoom); growPairRoom then makes it, and
     * must wait until no frame in flight still uses the cloth's self-collision set (the renderer waits for the GPU).
     */
@@ -192,6 +199,10 @@ private:
         VulkanBuffer fields;
         VulkanBuffer readback;
         VkDescriptorSet set = VK_NULL_HANDLE;
+
+        // The tangles staged for this slot's commands to copy in, and which analysis they are (SelfCollision::tangleVersion).
+        VulkanBuffer tangles;
+        std::uint64_t tangleVersion = 0;
 
         // The field samples its set binds (VulkanClothFields', or the cloth's empty stand-in).
         VkBuffer fieldSamples = VK_NULL_HANDLE;
@@ -293,7 +304,16 @@ private:
         std::vector<VulkanBuffer> buffers; // in binding order
         OwnedHandle<VkDescriptorPool> descriptorPool;
         VkDescriptorSet set = VK_NULL_HANDLE;
+
+        // What the analysis of its crossings needs, the latest analysis packed, which one it is, and whether it found any.
+        std::vector<std::array<std::uint32_t, 3>> triangles;
+        ClothSelfTopology topology;
+        GpuClothTangles tangles;
+        std::uint64_t tangleVersion = 0;
+        bool tangled = false;
     };
+    // The latest tangles copied into the passes' buffers before the slot's ticks, when the slot has not had them.
+    void recordTangleUpload(VkCommandBuffer commands, Slot& slot);
     std::unique_ptr<SelfCollision> self;
     std::uint32_t wantedPairRoom = 0; // asked for by askForPairRoom, 0 for none
     // The self-collision set pointed at its buffers, in binding order.

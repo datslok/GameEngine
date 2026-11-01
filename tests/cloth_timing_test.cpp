@@ -123,7 +123,8 @@ namespace {
         assert(std::string(clothPassesNotMeasuredText).find("NOT MEASURED") != std::string::npos);
     }
 
-    // Self-collision's pair counts as a readout line: the pairs found, those dropped past the room, the large items.
+    // Self-collision's pair counts as a readout line: the pairs found, those dropped past the room, the large items, and
+    // the edges found through a triangle (crossings).
     void testSelfPairsText() {
         ClothSelfPairCounts counts;
         assert(!counts.measured);
@@ -131,7 +132,8 @@ namespace {
         counts.found = 26000;
         counts.lost = 12;
         counts.large = 3;
-        assert(clothSelfPairsText(counts) == "SELF PAIRS 26000  LOST 12  LARGE 3");
+        counts.crossings = 7;
+        assert(clothSelfPairsText(counts) == "SELF PAIRS 26000  LOST 12  LARGE 3  CROSSINGS 7");
     }
 }
 

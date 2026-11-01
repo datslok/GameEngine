@@ -109,7 +109,8 @@ std::string clothReadoutText(const Profiler& profiler, bool unmeasured);
 // clothReadoutText drawn on the cloth's readout line (clothProfileReadoutLine).
 void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debug);
 
-// The self-collision line: "SELF PAIRS" found, then those LOST past the pairs' room and the LARGE items.
+// The self-collision line: "SELF PAIRS" found, then those LOST past the pairs' room, the LARGE items and the CROSSINGS
+// (edges through a triangle: the cloth tangled).
 std::string clothSelfPairsText(const ClothSelfPairCounts& counts);
 
 // clothSelfPairsText drawn on its readout line (clothSelfReadoutLine).

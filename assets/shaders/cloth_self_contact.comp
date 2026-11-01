@@ -6,7 +6,8 @@
 * the points as they are (clothSelfContactMoves) and adds each, in whole units, to its point's sums with atomics, with
 * one to the point's count where the pair's line runs through it. Integer sums do not depend on the order the
 * invocations add them in, so the result is the same every run. A point a body held up this substep (the end's pass
-* marked it in its velocity's w) counts as immovable, as on the CPU.
+* marked it in its velocity's w) counts as immovable, as on the CPU. A Through pair is pushed back through
+* (clothThroughContactMoves, the tick's untangle step at most), a Free one skipped.
 */
 #include "cloth_self_pass.glsl"
 
@@ -18,6 +19,9 @@ void main() {
 
     ClothTick tick = ticks[tickIndex];
     ClothSelfPair pair = pairs[index];
+    if (pair.tangle == CLOTH_TANGLE_FREE) {
+        return;
+    }
     vec3 points[4];
     vec3 previous[4];
     vec4 inverseMasses;
@@ -31,7 +35,11 @@ void main() {
 
     vec3 moves[4];
     vec4 coefficients;
-    if (!clothSelfContactMoves(pair, points, previous, inverseMasses, tick.thickness, tick.staticFriction, tick.kineticFriction, moves, coefficients)) {
+    bool moved = pair.tangle == CLOTH_TANGLE_THROUGH
+                     ? clothThroughContactMoves(pair, points, inverseMasses, tick.thickness, tick.untangleStep, moves, coefficients)
+                     : clothSelfContactMoves(pair, points, previous, inverseMasses, tick.thickness, tick.staticFriction, tick.kineticFriction, moves,
+                                             coefficients);
+    if (!moved) {
         return;
     }
     for (int corner = 0; corner < 4; ++corner) {

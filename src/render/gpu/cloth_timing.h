@@ -64,6 +64,7 @@ struct ClothSelfPairCounts {
     std::uint64_t found = 0;
     std::uint64_t lost = 0;
     std::uint64_t large = 0;
+    std::uint64_t crossings = 0; // edges found through a triangle (the cloth tangled)
 };
 
 /*

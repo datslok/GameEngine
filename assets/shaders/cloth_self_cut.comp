@@ -6,7 +6,7 @@
 * found (from the points' motion since then, kept in the pair) and works out the share of this substep's motion each of
 * its free points may keep, taking the least for each point by an atomic minimum on the share's bits (shares are never
 * negative, so their bits order as the numbers do), and the same for the point's stitch partner, so a stitch's two
-* points keep the same share.
+* points keep the same share. Pairs going back through, and free ones, are left alone, as the CPU's cut leaves them.
 */
 #include "cloth_self_pass.glsl"
 
@@ -17,6 +17,9 @@ void main() {
     }
 
     ClothSelfPair pair = pairs[index];
+    if (pair.tangle != CLOTH_TANGLE_APART) {
+        return;
+    }
     vec3 normal = pair.normalGap.xyz;
     if (pair.plane < 0.0) {
         vec3 motions[4];

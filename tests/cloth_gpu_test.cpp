@@ -327,6 +327,53 @@ namespace {
         assert(packed.kind == CLOTH_PAIR_POINT_TRIANGLE);
         assert(packed.normalGap.x == pair.normal.x && packed.normalGap.w == pair.gap && packed.heights.z == pair.heights[2]);
         assert(packClothSelfPair(edgeEdgePair(cloth.particles.positions, topology.edges[0], topology.edges.back())).kind == CLOTH_PAIR_EDGE_EDGE);
+
+        // Its tangle, as ClothPairTangle numbers it.
+        assert(packed.tangle == CLOTH_TANGLE_APART);
+        ClothSelfPair through = pair;
+        through.tangle = ClothPairTangle::Through;
+        assert(packClothSelfPair(through).tangle == CLOTH_TANGLE_THROUGH);
+    }
+
+    /*
+    * The tangles as the self-collision passes read them: each point's part; each part's flags (inside, looped) with its
+    * size above them; and the relations, each crossed pair of parts in order with whether both are inside (passed through
+    * each other), behind a header saying how many and whether there is any tangle at all. None, and the header says so.
+    */
+    void testTangleRecords() {
+        ClothTangles tangles;
+        tangles.part = {0, 0, 1, 2, 2};
+        tangles.sizes = {2, 1, 2};
+        tangles.inside = {0, 1, 1};
+        tangles.looped = {0, 0, 1};
+        tangles.crossed = {{0, 1}, {1, 2}};
+        tangles.through = {{1, 2}};
+
+        const GpuClothTangles packed = packClothTangles(tangles, 5);
+        assert(packed.partOf == tangles.part);
+        assert(packed.partFlags.size() == 5);
+        assert(packed.partFlags[0] == (2u << CLOTH_PART_SIZE_SHIFT));
+        assert(packed.partFlags[1] == (CLOTH_PART_INSIDE | (1u << CLOTH_PART_SIZE_SHIFT)));
+        assert(packed.partFlags[2] == (CLOTH_PART_INSIDE | CLOTH_PART_LOOPED | (2u << CLOTH_PART_SIZE_SHIFT)));
+        assert(packed.header.count == 2 && packed.header.any == 1);
+        assert(packed.relations.size() == 2);
+        assert(packed.relations[0].low == 0 && packed.relations[0].high == 1 && packed.relations[0].through == 0);
+        assert(packed.relations[1].low == 1 && packed.relations[1].high == 2 && packed.relations[1].through == 1);
+        assert(sizeof(GpuClothTangleRelation) == 16 && sizeof(GpuClothTangleHeader) == 16);
+
+        const GpuClothTangles none = packClothTangles(ClothTangles{}, 5);
+        assert(none.header.count == 0 && none.header.any == 0 && none.partOf == std::vector<std::uint32_t>(5, 0u));
+
+        // Past the room the relations are cut short; the header says how many it kept.
+        ClothTangles many;
+        many.part.assign(3, 0);
+        many.sizes = {3};
+        many.inside = {1};
+        many.looped = {0};
+        for (std::uint32_t index = 0; index < clothTangleRelationRoom + 5; ++index) {
+            many.crossed.push_back({index, index + 1});
+        }
+        assert(packClothTangles(many, 3).header.count == clothTangleRelationRoom);
     }
 
     /*
@@ -355,6 +402,17 @@ namespace {
         cloth.settings.selfCollision = false;
         assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).selfCollision == 0);
         assert(sizeof(GpuClothTick) == 144);
+
+        // Untangling's switch (only with self-collision) and its step, the speed times the substep.
+        cloth.settings.selfCollision = true;
+        cloth.settings.untangleSpeed = 2.0f;
+        tick = packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0);
+        assert(tick.untangle == 1 && tick.untangleStep == 2.0f * (1.0f / 120.0f) / static_cast<float>(cloth.settings.substeps));
+        cloth.settings.untangle = false;
+        assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).untangle == 0);
+        cloth.settings.untangle = true;
+        cloth.settings.selfCollision = false;
+        assert(packClothTick(clothTickCommands(cloth, 1.0f / 120.0f), 0, 0).untangle == 0);
     }
 
     /*
@@ -563,6 +621,7 @@ void testClothGpu() {
     testDispatchesWithLevels();
     testSelfDispatches();
     testSelfRecords();
+    testTangleRecords();
     testSelfPairRoom();
     testSelfTick();
     testLevels();

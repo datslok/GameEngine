@@ -33,8 +33,8 @@ ClothSelfPair testSelfPair(uint first) {
     pair.normalGap = testInput(first + 1u);
     pair.heights = testInput(first + 2u);
     pair.plane = -1.0;
-    pair.unused0 = 0u;
-    pair.unused1 = 0u;
+    pair.tangle = CLOTH_TANGLE_APART;
+    pair.unused = 0u;
     return pair;
 }
 
@@ -188,6 +188,25 @@ void main() {
         vec3 moves[4];
         vec4 coefficients;
         bool pushed = clothSelfContactMoves(testSelfPair(0u), points, previous, masses, fabric.x, fabric.y, fabric.z, moves, coefficients);
+        for (int corner = 0; corner < 4; ++corner) {
+            testOutput(uint(corner), vec4(moves[corner], 0.0));
+        }
+        testOutput(4u, coefficients);
+        testOutput(5u, vec4(pushed ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_CLOTH_PASSES_THROUGH) {
+        // A segment's ends, then a triangle's corners: whether it passes through.
+        testOutput(0, vec4(clothPassesThrough(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, testInput(3).xyz, testInput(4).xyz) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_CLOTH_CROSSING_NORMAL) {
+        // A triangle's corners, then the crossing edge's outside end: the normal turned towards it.
+        testOutput(0, vec4(clothCrossingNormal(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, testInput(3).xyz), 0.0));
+    } else if (function == GPU_TEST_CLOTH_THROUGH_CONTACT) {
+        // A pair (inputs 0 to 2), its points with their inverse masses in w (3 to 6), then the thickness and the step:
+        // each point's move, the coefficients, and whether it pushed.
+        vec3 points[4] = vec3[4](testInput(3).xyz, testInput(4).xyz, testInput(5).xyz, testInput(6).xyz);
+        vec4 masses = vec4(testInput(3).w, testInput(4).w, testInput(5).w, testInput(6).w);
+        vec3 moves[4];
+        vec4 coefficients;
+        bool pushed = clothThroughContactMoves(testSelfPair(0u), points, masses, testInput(7).x, testInput(7).y, moves, coefficients);
         for (int corner = 0; corner < 4; ++corner) {
             testOutput(uint(corner), vec4(moves[corner], 0.0));
         }

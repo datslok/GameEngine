@@ -2414,11 +2414,13 @@ void VulkanRenderer::collectClothReadbacks() {
             clothReadbacks.push_back(ClothReadback{key, entry.cloth->readPositions(frameIndex), entry.cloth->readVelocities(frameIndex)});
             const ClothSelfPairCounts pairs = entry.cloth->readSelfPairs(frameIndex);
             entry.cloth->askForPairRoom(pairs);
+            entry.cloth->analyseTangles(frameIndex);
             if (pairs.measured) {
                 unreportedClothSelf.measured = true;
                 unreportedClothSelf.found += pairs.found;
                 unreportedClothSelf.lost += pairs.lost;
                 unreportedClothSelf.large += pairs.large;
+                unreportedClothSelf.crossings += pairs.crossings;
             }
         }
     }

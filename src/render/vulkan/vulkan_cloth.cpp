@@ -50,11 +50,17 @@ namespace {
 
     // cloth_self_pass.glsl's set 1, in order: the triangles, edges, representatives, neighbour starts and neighbours,
     // rest positions, pieces and info; the pair start; the bucket counts and starts, the scan's blocks, the entries
-    // and the large items; the pairs and their state; each point's contact sums and cut share.
-    constexpr std::uint32_t selfBindings = 18;
+    // and the large items; the pairs and their state; each point's contact sums and cut share; the crossings found;
+    // the tangles' part of each point, parts' flags and relations.
+    constexpr std::uint32_t selfBindings = 22;
 
-    // The pair state's first words (pairs found, lost, large items, one unused), read back after the velocities.
+    // The pair state's first words (pairs found, lost, large items, crossings), read back after the velocities, then
+    // the crossings themselves.
     constexpr VkDeviceSize selfStateBytes = 4 * sizeof(std::uint32_t);
+    constexpr VkDeviceSize crossingBytes = static_cast<VkDeviceSize>(CLOTH_SELF_CROSSING_ROOM) * 2 * sizeof(std::uint32_t);
+
+    // The tangles' buffers: the relations behind their header, and a slot's staging of all three.
+    constexpr VkDeviceSize relationBytes = sizeof(GpuClothTangleHeader) + static_cast<VkDeviceSize>(CLOTH_TANGLE_RELATION_ROOM) * sizeof(GpuClothTangleRelation);
 
     // cloth_shape.comp's: the points, the points before the last tick, the rest vertices, indices, source vertices, the
     // two adjacency lists (starts and triangles each), and the mesh slot it writes.
@@ -518,7 +524,7 @@ VulkanCloth::VulkanCloth(const VulkanDevice& device, const VulkanClothPipelines&
     slots.resize(slotCount);
     for (Slot& slot : slots) {
         slot.set = allocateSet(device, descriptorPool.get(), layout);
-        slot.readback = VulkanBuffer{allocator, atLeastSmallest(2 * bytesOf(points) + selfStateBytes), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        slot.readback = VulkanBuffer{allocator, atLeastSmallest(2 * bytesOf(points) + selfStateBytes + crossingBytes), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                      BufferMemory::Readback};
         slot.fieldSamples = noFieldSamples.get();
         ensureCapacity(slot, 1, 1, 1, 1);
@@ -654,6 +660,12 @@ void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& c
         buffer(clothSelfStateWords * sizeof(std::uint32_t), work | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT); // pair state
     const VkBuffer pushSums = buffer(perPoint * 4 * sizeof(std::int32_t), work);   // contact sums
     buffer(perPoint * sizeof(std::uint32_t), work);                                // cut shares
+    buffer(crossingBytes, work | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);                // crossings (read back)
+    const VkBuffer partOf = buffer(perPoint * sizeof(std::uint32_t), constant);    // tangles: each point's part
+    const VkBuffer partFlags = buffer(perPoint * sizeof(std::uint32_t), constant); // tangles: each part's flags
+    const VkBuffer relations = buffer(relationBytes, constant);                    // tangles: the relations
+    made->triangles = cloth.triangles;
+    made->topology = cloth.selfTopology;
 
     const std::array<Upload, 8> copies{
         Upload{packed.triangles.data(), bytesOf(packed.triangles), triangles},
@@ -669,6 +681,9 @@ void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& c
     uploads.run([&](VkCommandBuffer commands) {
         vkCmdFillBuffer(commands, pushSums, 0, VK_WHOLE_SIZE, 0);
         vkCmdFillBuffer(commands, pairState, 0, VK_WHOLE_SIZE, 0);
+        vkCmdFillBuffer(commands, partOf, 0, VK_WHOLE_SIZE, 0);
+        vkCmdFillBuffer(commands, partFlags, 0, VK_WHOLE_SIZE, 0);
+        vkCmdFillBuffer(commands, relations, 0, VK_WHOLE_SIZE, 0);
         clothBarrier(commands);
     });
 
@@ -944,6 +959,10 @@ void VulkanCloth::recordTicks(VkCommandBuffer commands, std::span<const ClothTic
         writeSet(slot);
     }
 
+    if (self && slot.tangleVersion != self->tangleVersion) {
+        recordTangleUpload(commands, slot);
+    }
+
     auto* tickRecords = static_cast<GpuClothTick*>(slot.ticks.getMapped());
     auto* pinRecords = static_cast<GpuClothPin*>(slot.pins.getMapped());
     auto* colliderRecords = static_cast<GpuCollider*>(slot.colliders.getMapped());
@@ -1033,6 +1052,8 @@ void VulkanCloth::recordReadback(VkCommandBuffer commands, std::uint32_t slotInd
     if (self) {
         const VkBufferCopy stateRegion{0, 2 * bytes, selfStateBytes};
         vkCmdCopyBuffer(commands, self->buffers[15].get(), slot.readback.get(), 1, &stateRegion);
+        const VkBufferCopy crossingRegion{0, 2 * bytes + selfStateBytes, crossingBytes};
+        vkCmdCopyBuffer(commands, self->buffers[18].get(), slot.readback.get(), 1, &crossingRegion);
     }
 
     memoryBarrier(commands, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
@@ -1070,7 +1091,66 @@ ClothSelfPairCounts VulkanCloth::readSelfPairs(std::uint32_t slot) const {
     const VulkanBuffer& readback = slotAt(slot).readback;
     readback.invalidate();
     const auto* state = reinterpret_cast<const std::uint32_t*>(static_cast<const Vec4*>(readback.getMapped()) + 2 * static_cast<std::size_t>(pointCount));
-    return ClothSelfPairCounts{true, state[CLOTH_SELF_PAIR_COUNT], state[CLOTH_SELF_PAIRS_LOST], state[CLOTH_SELF_LARGE_COUNT]};
+    return ClothSelfPairCounts{true, state[CLOTH_SELF_PAIR_COUNT], state[CLOTH_SELF_PAIRS_LOST], state[CLOTH_SELF_LARGE_COUNT],
+                               state[CLOTH_SELF_CROSSING_COUNT]};
+}
+
+void VulkanCloth::analyseTangles(std::uint32_t slot) {
+    if (!self) {
+        return;
+    }
+    const VulkanBuffer& readback = slotAt(slot).readback;
+    readback.invalidate();
+    const auto* state = reinterpret_cast<const std::uint32_t*>(static_cast<const Vec4*>(readback.getMapped()) + 2 * static_cast<std::size_t>(pointCount));
+    const std::uint32_t count = std::min(state[CLOTH_SELF_CROSSING_COUNT], static_cast<std::uint32_t>(CLOTH_SELF_CROSSING_ROOM));
+    if (count == 0 && !self->tangled) {
+        return;
+    }
+
+    const std::uint32_t* found = state + selfStateBytes / sizeof(std::uint32_t);
+    std::vector<std::array<std::uint32_t, 2>> crossings;
+    crossings.reserve(count);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        const std::uint32_t edge = found[2 * index];
+        const std::uint32_t triangle = found[2 * index + 1];
+        if (edge < self->topology.edges.size() && triangle < self->triangles.size()) {
+            crossings.push_back({edge, triangle});
+        }
+    }
+    // The passes find them in no fixed order; sorted, the same crossings always give the same parts.
+    std::sort(crossings.begin(), crossings.end());
+    self->tangles = packClothTangles(analyseClothTangles(crossings, self->triangles, self->topology), pointCount);
+    self->tangled = !crossings.empty();
+    ++self->tangleVersion;
+}
+
+/*
+* Staged in the slot's own memory (the frame before it may still be reading another slot's), then copied into the
+* buffers the passes read, after whatever passes read them last and before this slot's.
+*/
+void VulkanCloth::recordTangleUpload(VkCommandBuffer commands, Slot& slot) {
+    const GpuClothTangles& tangles = self->tangles;
+    const VkDeviceSize perPoint = static_cast<VkDeviceSize>(pointCount) * sizeof(std::uint32_t);
+    const VkDeviceSize relationsAt = 2 * perPoint;
+    if (slot.tangles.get() == VK_NULL_HANDLE) {
+        slot.tangles = VulkanBuffer{device.getAllocator(), atLeastSmallest(relationsAt + relationBytes), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, BufferMemory::Upload};
+    }
+
+    auto* staged = static_cast<std::uint8_t*>(slot.tangles.getMapped());
+    std::memcpy(staged, tangles.partOf.data(), perPoint);
+    std::memcpy(staged + perPoint, tangles.partFlags.data(), perPoint);
+    std::memcpy(staged + relationsAt, &tangles.header, sizeof(GpuClothTangleHeader));
+    std::memcpy(staged + relationsAt + sizeof(GpuClothTangleHeader), tangles.relations.data(), bytesOf(tangles.relations));
+    slot.tangles.flush();
+
+    toCopyBarrier(commands);
+    const std::array<VkBufferCopy, 3> regions{VkBufferCopy{0, 0, perPoint}, VkBufferCopy{perPoint, 0, perPoint},
+                                              VkBufferCopy{relationsAt, 0, sizeof(GpuClothTangleHeader) + bytesOf(tangles.relations)}};
+    for (std::size_t index = 0; index < regions.size(); ++index) {
+        vkCmdCopyBuffer(commands, slot.tangles.get(), self->buffers[19 + index].get(), 1, &regions[index]);
+    }
+    clothBarrier(commands);
+    slot.tangleVersion = self->tangleVersion;
 }
 
 /*
