@@ -153,7 +153,7 @@ public:
     * first thing in its commands, then its mesh is shaped at alpha between its last two ticks (its frame entry
     * DeformedMesh::shapedOnGpu) and its points copied for the CPU. A cloth seen for the first time, or whose points,
     * pins or mesh changed, is uploaded from its CPU state; cloths no longer listed are dropped. Between frames only;
-    * the work is used once.
+    * the work is used once. A frame drawn without it (a capture's) leaves the cloths alone.
     */
     void setClothWork(std::vector<ClothWork> work, float alpha);
 
@@ -385,6 +385,7 @@ private:
     std::unique_ptr<VulkanClothFields> clothFields;
     std::map<std::uint64_t, GpuCloth> gpuCloths;
     std::vector<ClothWork> clothWork;
+    bool clothWorkGiven = false;
     float clothAlpha = 1.0f;
     std::vector<ClothReadback> clothReadbacks;
 

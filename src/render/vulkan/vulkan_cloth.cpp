@@ -609,9 +609,12 @@ void VulkanCloth::uploadLevels(ImmediateCommands& uploads, const Cloth& cloth) {
 
 /*
 * The topology goes into GPU memory once, through one staging buffer. The work buffers need no upload but the contact
-* sums, which start at nothing (each substep's end clears them again): the search writes the pair start, counts and
-* state first, the scan the starts, and each substep's apply the shares. The hash's entries have room for every item in
-* CLOTH_SELF_CELLS_PER_AXIS cubed cells, the most one not on the large items' list covers.
+* sums, which start at nothing (each substep's end clears them again), and the pair state, which starts with no pairs:
+* a frame that runs none of the cloth's ticks still copies it for the CPU, so before the cloth's first search it would
+* read whatever the memory held (a new cloth in a frame without ticks read a billion pairs and asked for room for them).
+* The search writes the pair start, counts and state first, the scan the starts, and each substep's apply the shares.
+* The hash's entries have room for every item in CLOTH_SELF_CELLS_PER_AXIS cubed cells, the most one not on the large
+* items' list covers.
 */
 void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& cloth) {
     const GpuClothSelf packed = packClothSelf(cloth);
@@ -646,7 +649,9 @@ void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& c
     buffer(items * cellsPerItem * sizeof(std::uint32_t), work);                    // entries
     buffer(items * sizeof(std::uint32_t), work);                                   // large items
     buffer(static_cast<VkDeviceSize>(info.pairCapacity) * sizeof(GpuClothSelfPair), work); // pairs
-    buffer(clothSelfStateWords * sizeof(std::uint32_t), work | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT); // pair state
+    // The pair state is also copied into each frame's readback (its counts for F4 and the pairs' room).
+    const VkBuffer pairState =
+        buffer(clothSelfStateWords * sizeof(std::uint32_t), work | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT); // pair state
     const VkBuffer pushSums = buffer(perPoint * 4 * sizeof(std::int32_t), work);   // contact sums
     buffer(perPoint * sizeof(std::uint32_t), work);                                // cut shares
 
@@ -663,6 +668,7 @@ void VulkanCloth::uploadSelfCollision(ImmediateCommands& uploads, const Cloth& c
     uploadAll(device, uploads, copies);
     uploads.run([&](VkCommandBuffer commands) {
         vkCmdFillBuffer(commands, pushSums, 0, VK_WHOLE_SIZE, 0);
+        vkCmdFillBuffer(commands, pairState, 0, VK_WHOLE_SIZE, 0);
         clothBarrier(commands);
     });
 

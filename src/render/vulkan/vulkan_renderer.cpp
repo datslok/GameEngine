@@ -2381,6 +2381,7 @@ void VulkanRenderer::setClothWork(std::vector<ClothWork> work, float alpha) {
         }
     }
     clothWork = std::move(work);
+    clothWorkGiven = true;
     clothAlpha = alpha;
 }
 
@@ -2416,6 +2417,14 @@ void VulkanRenderer::collectClothReadbacks() {
 * for its points back.
 */
 void VulkanRenderer::runCloths(VkCommandBuffer commands) {
+    // A frame given no work (a capture's frames: the screenshot command, golden images) runs no cloth and keeps every
+    // cloth as it is: taking its empty list as the world's would drop them all, and the next frame would upload them
+    // again from the CPU's points, two frames late.
+    if (!clothWorkGiven) {
+        return;
+    }
+    clothWorkGiven = false;
+
     const auto listed = [&](std::uint64_t key) {
         return std::any_of(clothWork.begin(), clothWork.end(), [key](const ClothWork& work) { return work.key == key; });
     };
