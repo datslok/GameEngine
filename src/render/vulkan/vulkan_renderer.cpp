@@ -333,8 +333,8 @@ namespace {
         return main;
     }
 
-    std::size_t capturePipelineIndex(bool probes, bool cutOut) {
-        return (probes ? 1u : 0u) | (cutOut ? 2u : 0u);
+    std::size_t capturePipelineIndex(bool probes, bool cutOut, bool rays) {
+        return (probes ? 1u : 0u) | (cutOut ? 2u : 0u) | (rays ? 4u : 0u);
     }
 }
 
@@ -353,7 +353,7 @@ void VulkanRenderer::createPipelines() {
 
     for (bool probes : {false, true}) {
         for (bool cutOut : {false, true}) {
-            capturePipelines[capturePipelineIndex(probes, cutOut)] = std::make_unique<VulkanPipeline>(
+            capturePipelines[capturePipelineIndex(probes, cutOut, false)] = std::make_unique<VulkanPipeline>(
                 device, layouts, capturePipeline(probes, cutOut, "assets/shaders/probe_capture.frag.spv", sceneLayout->getPipelineLayout()));
         }
     }
@@ -548,7 +548,7 @@ void VulkanRenderer::createRayTracing() {
 
     for (bool probes : {false, true}) {
         for (bool cutOut : {false, true}) {
-            capturePipelines[capturePipelineIndex(probes, cutOut)] = std::make_unique<VulkanPipeline>(
+            capturePipelines[capturePipelineIndex(probes, cutOut, true)] = std::make_unique<VulkanPipeline>(
                 device, layouts, capturePipeline(probes, cutOut, "assets/shaders/probe_capture_rays.frag.spv", sceneRaysLayout.get()));
         }
     }
@@ -1224,6 +1224,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         reflectionProbe->ensureSize(1);
     }
 
+    // Whether anything may trace rays this frame (render/gpu/render_settings.h): each ray-traced feature below asks.
+    const bool rays = tracesRays(settings, rayTracing != nullptr);
+
     // The light probes, in cascades round what the game's ProbeCascades follows (the camera): their atlases readied
     // first, since the scene set points at them.
     const GlobalIlluminationSettings& illumination = settings.globalIllumination;
@@ -1252,7 +1255,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
     std::vector<MirrorPair> mirrorPairs;
 
-    if (mirroredLights && settings.mirroredLights.enabled && settings.depthPrepass && inverseViewProjection) {
+    if (rays && settings.mirroredLights.enabled && settings.depthPrepass && inverseViewProjection) {
         mirrorPairs = chooseMirrorPairs(lights, description.draws, cameraOrigin, settings.mirroredLights);
     }
 
@@ -1272,9 +1275,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ambientOcclusion->ensureSize(sceneSize);
     }
 
-    // Tinted shadows (render/gpu/transparency.h): on GPUs with ray queries, while glass is anywhere in the world (a window
+    // Tinted shadows (render/gpu/transparency.h): while ray tracing is on and glass is anywhere in the world (a window
     // off screen still shades what is on it), shadowed lights pass through it by rays.
-    const bool glassShadows = rayTracing && settings.transparency.glassShadows &&
+    const bool glassShadows = rays && settings.transparency.glassShadows &&
                               std::any_of(description.draws.begin(), description.draws.end(), [](const DrawItem& draw) { return isTransparent(draw.material); });
 
     // Volumetric fog (render/gpu/volumetric_fog.h), its grid readied before the scene set points at it: the grid's camera
@@ -1296,10 +1299,10 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // The ray tracing scene: every draw as an instance, rebuilt from scratch. Only while something traces rays: the light
     // probes, the debug view, the reflection probe's capture, ray-traced reflections, mirrored lights or glass shadows.
-    const bool rayDebug = rayTracing && settings.rayDebugView != RayDebugView::Off;
+    const bool rayDebug = rays && settings.rayDebugView != RayDebugView::Off;
 
-    const bool captureTracesRays = captureProbe && rayTracing;
-    const bool reflectionsTraceRays = screenReflections && settings.reflections.rayTraced && reflections->tracesRays();
+    const bool captureTracesRays = captureProbe && rays;
+    const bool reflectionsTraceRays = rays && screenReflections && settings.reflections.rayTraced && reflections->tracesRays();
 
     if (rayDebug || traceProbes || captureTracesRays || reflectionsTraceRays || mirrorLight || glassShadows) {
         beginGpuPass(frame, GpuPass::RayScene);
@@ -1413,7 +1416,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The reflection probe, captured where the camera is this frame.
     if (captureProbe) {
         beginGpuPass(frame, GpuPass::ReflectionProbe);
-        drawProbeCapture(frame, captureDraws, sceneSet, traceProbes, probeFar, description.lighting.background, air.has_value());
+        drawProbeCapture(frame, captureDraws, sceneSet, traceProbes, captureTracesRays, probeFar, description.lighting.background, air.has_value());
         endGpuPass(frame, GpuPass::ReflectionProbe);
     }
 
@@ -2065,11 +2068,11 @@ void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparen
 * barriers between them; the probe's own passes follow (finishCapture).
 */
 void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
-                                      float farPlane, const Vec3& background, bool sky) {
+                                      bool traceRays, float farPlane, const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
     const std::uint32_t size = reflectionProbe->getSize();
-    const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false)];
-    const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true)]->get(), VK_CULL_MODE_FRONT_BIT};
+    const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false, traceRays)];
+    const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true, traceRays)]->get(), VK_CULL_MODE_FRONT_BIT};
     const VkPipelineLayout layout = pipeline.getLayout();
     reflectionProbe->beginCapture(commands);
 
@@ -2079,7 +2082,7 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
         beginRendering(commands, {size, size}, &colour, &faceDepth);
         renderingOpen = true;
 
-        if (rayTracing) {
+        if (traceRays) {
             const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
             vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0, nullptr);
         } else {
@@ -2318,7 +2321,7 @@ void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description
 }
 
 bool VulkanRenderer::tracesProbes(const FrameDescription& description, const RenderSettings& settings) const {
-    return ddgi && settings.globalIllumination.enabled && description.lighting.probeCascades.has_value();
+    return ddgi && settings.rayTracing && settings.globalIllumination.enabled && description.lighting.probeCascades.has_value();
 }
 
 std::string VulkanRenderer::getDeviceName() const {

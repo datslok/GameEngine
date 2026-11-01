@@ -64,11 +64,20 @@ struct RenderSettings {
     // become extra roughness, so distant bumpy surfaces do not sparkle. Off shows the raw mips, for comparing.
     bool normalMapFiltering = true;
 
+    // Hardware ray tracing, every feature that traces rays at once: the light probes (all bounce light, since there is
+    // no software tracer yet), ray-traced reflections, mirrored lights, glass shadows, the reflection probe's traced sun
+    // and the ray debug view. Off by default, so the engine draws as on a GPU without ray queries, where it is ignored;
+    // each feature keeps its own switch, read only while this is on.
+    bool rayTracing = false;
+
     // A debug view in place of the lit scene: each pixel's first hit by a hardware-traced ray (render/gpu/ray_tracing.h)
-    // as its normal, albedo or front or back face, to check the ray tracing scene against the drawn one. Only on GPUs
-    // with ray queries; ignored elsewhere.
+    // as its normal, albedo or front or back face, to check the ray tracing scene against the drawn one. Only while ray
+    // tracing is on; ignored otherwise.
     RayDebugView rayDebugView = RayDebugView::Off;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(RenderSettings& settings, SettingsVisitor& visitor);
+
+// Whether a frame may trace rays: ray tracing on and a GPU with ray queries (rayQueries).
+bool tracesRays(const RenderSettings& settings, bool rayQueries);

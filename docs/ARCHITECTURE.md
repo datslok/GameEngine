@@ -24,7 +24,7 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
   - `gpuValidation`, read at start-up and passed to the renderer's constructor (Vulkan's validation layers when installed; MSYS2's, which the makefile points the loader at; see VulkanRenderer). It defaults to `isDebugBuild` from `core/build_info.h`, which the makefile sets by defining `ENGINE_DEBUG_BUILD` in debug builds only;
   - `commandServer` (on) and `commandPort` (`defaultCommandPort`, 47613), read at start-up (see Commands);
   - and `render`.
-- `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
+- `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes), with `rayTracing`, the master switch for everything ray-traced (off by default; see Ray tracing). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
 - Camera controllers each own a settings struct (`FreeFlyCameraSettings`, `FirstPersonCameraSettings`, `MobaCameraSettings`), passed to the constructor and editable through `getSettings()`.
   - The look ones nest the shared `LookSettings`: `radiansPerPixel`, `sprintMultiplier`.
 
@@ -107,7 +107,7 @@ Quality presets (`render/gpu/quality_preset`): `QualityPreset` Low, Medium, High
 | High | = Ultra | | | | 4096 cascades in the grown 384 MB atlas | | 256, 256 rays | sharing 0.1 |
 | Ultra | = `RenderSettings{}`, the default | | | | | | 256, 256 rays | no sharing |
 
-The table also sets reflections (off on Low; Medium 32 steps and a 64-texel probe, High a 128-texel one, Ultra 64 steps and 256), ambient occlusion (off on Low; slices and steps Medium 2 and 3, High 2 and 4, Ultra 3 and 6) and, on Ultra only, the ray-traced features: ray-traced reflections and mirrored lights (`ultra-rt-defaults`, Oct 23 2026, when Ultra's probe rays went from 1024 back to 256, High's).
+The table also sets reflections (off on Low; Medium 32 steps and a 64-texel probe, High a 128-texel one, Ultra 64 steps and 256), ambient occlusion (off on Low; slices and steps Medium 2 and 3, High 2 and 4, Ultra 3 and 6) and, on Ultra only, the ray-traced features: ray-traced reflections and mirrored lights (`ultra-rt-defaults`, Oct 23 2026, when Ultra's probe rays went from 1024 back to 256, High's). Those are read only while `RenderSettings::rayTracing` is on, which no preset touches: presets set quality, ray tracing is its own choice.
 
 - Low: 2 cascades of 1024 left 30 cm walls with ragged sunlit edges, and 1024 saved no memory.
 - High has been the default since `gi-quality-presets`, before which Ultra was the default and High had 2048 cascades.
@@ -1190,6 +1190,16 @@ Hardware ray tracing through ray queries (phase 6d, `ray-queries`): any shader a
 
 **Optional:** `VulkanDevice` turns on `VK_KHR_acceleration_structure`, `VK_KHR_ray_query` and `VK_KHR_deferred_host_operations` with their features when the GPU has them (`supportsRayQueries`, `getScratchAlignment`). Without them `VulkanRenderer::rayTracing` stays null and everything ray-traced is off.
 
+**Off by default** (`ray-tracing-off`, Nov 1 2026, the user's choice: most players' GPUs trace rays slowly or not at all, so the engine is judged on the path without them first). `RenderSettings::rayTracing` ("Ray tracing", F5 Passes, `set engine.render.passes.rayTracing true`, live) is the master switch; `tracesRays(settings, rayQueries)` is true only when it is on and the GPU has ray queries, and the renderer asks it once a frame. It gates every ray-traced feature, each of which keeps its own switch, read only while it is on:
+
+- the light probes (all bounce light: with no software tracer yet, frames without ray tracing get none of it, only the flat ambient; see Light probes);
+- ray-traced reflections (`ReflectionSettings::rayTraced`) and the reflection probe's capture tracing the sun's shadow past its cascades (otherwise `probe_capture.frag`, as on GPUs without ray queries: the capture pipelines are kept both ways, `capturePipelineIndex`);
+- mirrored lights (`MirroredLightSettings::enabled`);
+- tinted shadows through glass (`TransparencySettings::glassShadows`);
+- and the ray debug view.
+
+The acceleration structures for each mesh are still built at upload on GPUs with ray queries, so switching it on needs no rebuild; the frame's top-level structure is built only while something traces rays.
+
 **Buffer device addresses** (a buffer's place in GPU memory, which shaders follow like a pointer and structures are built from) are required, as Vulkan 1.3 itself requires them:
 
 - `bufferDeviceAddress`, VMA's `BUFFER_DEVICE_ADDRESS` flag, `VulkanBuffer::getDeviceAddress`, `UploadArray::getDeviceAddress`.
@@ -1245,7 +1255,7 @@ Scratch memory is allocated one alignment larger and its address rounded up (`cr
 
 The frame's structure is built after the debug UI while something traces rays: the light probes (see Light probes) or the debug view.
 
-The debug view (`RenderSettings::rayDebugView`, F5 Passes; Off by default):
+The debug view (`RenderSettings::rayDebugView`, F5 Passes; Off by default; only while ray tracing is on):
 
 - While it is on, the renderer builds the frame's structure after the debug UI (`GpuPass::RayScene`, TLAS in F4).
 - After the main pass, it draws `ray_debug.frag` over the scene image (`GpuPass::RayDebug`, RAYS; `drawRayDebugView`, the scene colour discarded and redrawn).
@@ -1270,6 +1280,8 @@ Global illumination's light probes (phase 6d, `ddgi-probes`, `ddgi-sampling`, `d
 - and a debug view.
 
 Frames without probes draw exactly as before (the demo's golden images are unchanged), and so do frames without fast lights (the fast atlas stays exactly zero).
+
+The probes are traced with hardware ray queries, so they run only while ray tracing is on (`RenderSettings::rayTracing`, off by default; see Ray tracing): without it `tracesProbes` is false, nothing is traced or read, and what the sun and lamps do not light directly gets the flat ambient alone (the software tracer for GPUs without ray tracing waits in phase 14).
 
 ### Placing probes
 
@@ -2231,7 +2243,7 @@ Six faces in Vulkan's cube order and addressing (+X, -X, +Y, -Y, +Z, -Z; `cubeFa
 
 1. Each face's draws are culled against its own frustum and listed after the velocity pass's in the frame's draw list.
 2. Each face is drawn with the main pass's shading: `triangle.vert` takes the face's view-projection from push constants (specialization constant `PROBE_CAPTURE_VERTEX_CONSTANT`), and `probe_capture.frag` (`scene_surface.glsl` with `PROBE_CAPTURE`) shades every light rather than the clusters' lists (those are the camera's) with no heatmap. The sky is drawn over each face's background (`packCubeFaceRays`); the stars are not.
-3. The sun's cascades are fitted to the camera's view, so the capture sees surfaces they do not cover, which would be lit through walls and roofs. On GPUs with ray queries `probe_capture_rays.frag` traces the sun's shadow there instead (`sunBeyondCascades`, `reachesLight`, shared with the light probes' trace; the ray tracing scene is built for it), in a layout with the ray tracing set; without them it counts as lit, as beyond the shadow distance.
+3. The sun's cascades are fitted to the camera's view, so the capture sees surfaces they do not cover, which would be lit through walls and roofs. While ray tracing is on (see Ray tracing) `probe_capture_rays.frag` traces the sun's shadow there instead (`sunBeyondCascades`, `reachesLight`, shared with the light probes' trace; the ray tracing scene is built for it), in a layout with the ray tracing set; without them it counts as lit, as beyond the shadow distance.
 4. `finishCapture`: the capture's mips (`generateMipmaps`, shared with texture uploads), the distances (`probe_distance.comp`), and the prefiltered levels (`probe_prefilter.comp`, `prefilterTexel`): each texel averages 64 GGX samples round its direction for its level's roughness (Karis's split sum: normal and view along the direction), each read from the capture's level as wide as its share of the lobe (`prefilterSourceLevel`, filtered importance sampling), weighted by n.l. The GGX samples (`ggxSampleHalfway`, `radicalInverse`, `alongNormal`) are the BRDF table's.
 
 ### The parallax search
@@ -2249,7 +2261,7 @@ A picture from one point is wrong seen from another. For a pixel at P (measured 
 
 ### Ray-traced reflections
 
-On GPUs with ray queries, `ReflectionSettings::rayTraced` (on by default: the Ultra preset's, off below it) runs `reflections_rays.comp` (`reflections_pass.glsl` with `REFLECTION_RAYS`) in place of the probe's search: each glossy pixel's mirror ray is traced through the scene, glowing stand-ins for lights included (mask 0xFF), as far as `probeFar`.
+While ray tracing is on (see Ray tracing), `ReflectionSettings::rayTraced` (on by default: the Ultra preset's, off below it) runs `reflections_rays.comp` (`reflections_pass.glsl` with `REFLECTION_RAYS`) in place of the probe's search: each glossy pixel's mirror ray is traced through the scene, glowing stand-ins for lights included (mask 0xFF), as far as `probeFar`.
 
 - A miss brings back the sky: the frame's background plus the atmosphere's light in that direction.
 - A back face brings back nothing.
@@ -2276,7 +2288,7 @@ Light that reaches a surface by way of one reflection off a shiny one: a flashli
 
 | Setting | Default | |
 |---|---|---|
-| `enabled` | on | on GPUs with ray queries, with the depth prepass on; the Ultra preset's, off below it |
+| `enabled` | on | while ray tracing is on (see Ray tracing), with the depth prepass on; the Ultra preset's, off below it |
 | `bounce` | on | the light probes bounce it on (`ddgi_mirror.comp`) |
 | `mirrorRoughness` | 0.25 | surfaces up to this roughness reflect lights, fading out over `MIRROR_ROUGHNESS_FADE` (0.05) more (`mirrorRoughnessFade`); past `MIRROR_FOOTPRINT_ROUGHNESS` (0.1) from a footprint |
 
@@ -2576,7 +2588,7 @@ Only `BLEND` materials use their alpha as coverage (`MATERIAL_BLEND`); an opaque
 - **What it cannot do:** it sees only what the screen shows (a ray leaving the screen reads its edge), glass behind refracting glass is missing from it, and the solid sphere's one bend does not turn the picture upside down as a real glass ball does. Its push constants: `GpuTransparentView::refraction` (whether the picture was kept, pixels per radian, its levels).
 - **Shadows:** a glass ray crossing thick glass also absorbs by its thickness (`candidateGlassTransmittance`), once, at the face the light enters by.
 
-**Tinted shadows** (`TransparencySettings::glassShadows`, on; GPUs with ray queries). Glass casts no shadow map, so on its way to a surface a shadowed light is also passed through the glass between them by a ray that sees only glass (`RAY_MASK_GLASS`):
+**Tinted shadows** (`TransparencySettings::glassShadows`, on; while ray tracing is on, see Ray tracing). Glass casts no shadow map, so on its way to a surface a shadowed light is also passed through the glass between them by a ray that sees only glass (`RAY_MASK_GLASS`):
 
 - **Per pane:** `glassLightTransmittance(alpha, transmission, metallic, baseColour, cosine)`, the share `transparentTransmittance` (also the blend's) with the reflected share Schlick's Fresnel at the angle the light crosses (`schlickFresnel(f0, |cos|)`: a beam meets a smooth pane at one angle, where the view's blend uses the specular albedo, the rough lobe's average).
 - **Which faces:** only those turned towards the light (`glassFaceCounts`: the ray, running from the lit point to the light, meets them from behind), as the camera draws only faces turned towards it, so the lab's pane, a thin box, tints the light once as it tints the view once; double-sided glass counts from both sides.
