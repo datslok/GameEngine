@@ -487,6 +487,12 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
     - find pairs with the uniform grid over each particle's swept box;
     - detect the touch by sweeping in relative motion (a ray against a sphere of the summed radii, so fast crossings are not missed);
     - respond by running the relative velocity through `bounceVelocity` and sharing the change by mass (an equal and opposite impulse, so momentum is conserved), with the two materials' restitution and friction averaged
+- [ ] A lathe (`lathe`): a spinning part turned smaller by a tool, the material cut off flying away as chips (the user's idea, Oct 30 2026)
+  - The part kept as its profile r(z), a surface of revolution, as CNC lathe simulators keep it: the tool sets r(z) = min(r(z), its own profile), and the mesh is rebuilt by revolving the profile into rings (normals from dr/dz).
+  - Chips carry the removed volume, pi (r_old^2 - r_new^2) dz a sample, times the density, leaving along the tangent at the surface speed omega r: fragments for brittle materials (particles, then phase 15's convex bodies), later a curling ribbon for ductile metals (a stiff, curled strip on the cloth solver).
+  - Optional: the cutting force F = k_c x depth of cut x feed a turn (k_c about 1500-2000 N/mm^2 for steel, **from memory**: check it before writing tests), its power F v slowing the spindle.
+  - The general follow-up, for parts that do not spin, milling and carving: the tool subtracted from a signed distance field, d = max(d_part, -d_tool), remeshed by surface nets.
+  - Tests: a profile cut to a set radius revolves into a closed mesh of that radius, the chips' mass equals the removed volume's, a tool clear of the part removes nothing
 
 ### Lighting and shadows
 
@@ -518,7 +524,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 - [ ] More hardware ray tracing in the Vulkan renderer (phase 6b; DDGI's probe rays come first, in 6d)
   - Ray-traced shadows (exact soft shadows from area lights), ray-traced reflections, then ReSTIR-style sampling of many lights or a path-traced reference mode.
   - **Always optional:** settings in `RenderSettings` (so the debug UI and a player's options menu can reach them) switch each ray-traced feature on or off while the game runs, falling back to shadow maps, reflection probes and the software-traced probes.
-  - Off by default and greyed out on GPUs without ray tracing (detected at start-up).
+  - Off by default: done in `ray-tracing-off` (Nov 1 2026), one master switch (`RenderSettings::rayTracing`) over every ray-traced feature, the light probes included, each keeping its own switch under it. Still to do: greyed out on GPUs without ray tracing (detected at start-up).
   - The game is designed, tuned and tested on the non-ray-traced path first, so it looks right without it
 - [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/LUMEN.md`, read Oct 20 2026)
   - **The idea:** probes placed on the visible surfaces themselves, one every 16 pixels plus more at depth and normal edges, 8x8 octahedral, each tracing its own rays, filtered 3x3 in probe space and over time, so light near a surface is what that surface sees.
@@ -584,6 +590,11 @@ A fifth kind of game (the user's idea, Oct 27 2026): fly fast enough to feel it,
 - [ ] Fracture (`voronoi-fracture`): each building's blocks cut into Voronoi chunks at load, more seeds where hits are likely
   - The bond graph: chunks sharing a face are bonded (its area and normal); chunks on the ground are supports; intact parts clustered into one body (as Unreal's Chaos does).
   - Tests: the cells fill the block (volumes sum), each is convex, bonds only across shared faces
+- [ ] Blade cuts (`blade-cuts`): aim a plane in slow motion and whatever it crosses splits along it, the halves falling as rigid bodies (the user's idea, Oct 30 2026, after Metal Gear Rising's Blade Mode)
+  - `clipMeshByPlane`, shared with `voronoi-fracture`: vertices sorted by their signed distance d to the plane, each crossing edge split at t = d_a / (d_a - d_b) with its positions, UVs and normals blended, the cut's loops capped (ear clipping, since a cap need not be convex) with an inside material and UVs projected onto the plane.
+  - Each half's mass, centre of mass and inertia from its closed surface (the divergence theorem), its collision one convex hull or several; new meshes uploaded and given acceleration structures as they appear, the pieces capped in number and the tiny ones removed.
+  - Slow motion by scaling the time fed to the simulation, the aiming at full speed; a command cuts along a given plane.
+  - Tests: the halves' volumes sum to the whole's, each half is closed (every edge shared by two triangles), a box's halves have their hand-calculated centres of mass and inertia, a plane missing the mesh leaves it whole
 - [ ] The stress solver (`stress-solver`): statics on the bond graph, K u = f by conjugate gradients, warm-started
   - Each bond's force split into compression or tension along its normal and shear across it, as stress over its area (as NVIDIA Blast does).
   - An intact building is kinematic and costs nothing until something changes it; impacts are forces over their duration.
