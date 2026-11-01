@@ -80,6 +80,7 @@ public:
     bool wantsDebugView() const override;
     void onDebugDraw(const World& world, DebugDraw& debug, float alpha) override;
     void visitSettings(SettingsVisitor& visitor) override;
+    void addCommands(CommandRegistry& registry, World& world) override;
     std::vector<GoldenView> goldenViews() const override;
     void prepareGoldenView(World& world, const GoldenView& view) override;
 
@@ -102,7 +103,8 @@ public:
     ClothLabHookSettings& getHookSettings();
     PlayerControls& getControls();
 
-    // The hand holding a sheet while the left button is held (the command the next ticks carry out), and which sheet.
+    // The hand holding a sheet while the left button is held, or from the cloth-grab command until cloth-release (the
+    // command the next ticks carry out), and which sheet.
     const std::optional<ClothGrab>& getSheetGrab() const;
     Entity getGrabbedSheet() const;
 
@@ -130,13 +132,17 @@ private:
     // Each of the dress's pins' way onto the shoulders, in the order of its pins (none held by contact alone).
     std::vector<StrapPinPath> strapPaths;
 
-    // Every sheet the lab has.
+    // Every sheet the lab has, and each with its name for commands ("hooks sheet").
     std::vector<Entity> sheets() const;
+    std::vector<std::pair<const char*, Entity>> namedSheets() const;
 
     // The hand, the sheet it holds, and how far from the eye it was grabbed: the hand stays that far along the pointer.
     std::optional<ClothGrab> sheetGrab;
     Entity grabbedSheet;
     float grabDistance = 0.0f;
+
+    // The hand is the commands' (cloth-grab), which the mouse leaves alone until cloth-release.
+    bool handFromCommands = false;
 
     // The floor, the stations' blocks and the ball: built once in onInit, never rebuilt.
     StaticLevel staticLevel;

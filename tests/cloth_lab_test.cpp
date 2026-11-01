@@ -9,6 +9,8 @@
 #include "core/job_system.h"
 #include "cloth/cloth_collision.h"
 #include "cloth/cloth_grab.h"
+#include "cloth/cloth_self_collision.h"
+#include "core/command_registry.h"
 #include "demo_helpers.h"
 #include "scene/deforming_mesh.h"
 #include "engine/game.h"
@@ -302,6 +304,79 @@ namespace {
         input.pressMouseButton(MouseButtonPress{MouseButton::Left, Vec2{800.0f, 450.0f}, 0});
         lab.game.onInput(lab.world, input);
         assert(!lab.game.getSheetGrab().has_value());
+    }
+
+    /*
+    * The hand by commands, for scripts (a drag the same every run): cloth-grab takes the cloth's point nearest a place,
+    * which the mouse does not let go of, cloth-hand moves the hand and the ticks pull the point after it, cloth-release
+    * lets go. Each mistake is an error reply.
+    */
+    void testCommandsDragTheCloth() {
+        ClothLab lab;
+        CommandRegistry registry;
+        lab.game.addCommands(registry, lab.world);
+        const Entity sheet = lab.game.getSheet();
+        const ClothParticles& particles = lab.world.get<Cloth>(sheet).particles;
+        const std::uint32_t chosen = 5 * (clothLabSheetColumns + 1) + 14;
+        const Vec3 point = particles.positions[chosen];
+
+        assert(!registry.execute("cloth-hand 0 1 0").ok);
+        assert(!registry.execute("cloth-release").ok);
+        assert(!registry.execute("cloth-grab 1 2").ok);
+
+        const Vec3 place = point + Vec3{0.0f, 0.0f, 0.002f};
+        assert(registry.execute("cloth-grab " + std::to_string(place.x) + " " + std::to_string(place.y) + " " + std::to_string(place.z)).ok);
+        assert(lab.game.getSheetGrab().has_value());
+        assert(lab.game.getGrabbedSheet() == sheet);
+        assert(lab.game.getSheetGrab()->particle == chosen);
+        assert((lab.game.getSheetGrab()->target - place).length() < 1e-4f);
+
+        // A frame with the mouse not held keeps the commands' hand.
+        lab.game.onInput(lab.world, firstPersonInput({}));
+        assert(lab.game.getSheetGrab().has_value());
+
+        const Vec3 raised = point + Vec3{0.0f, 0.5f, 0.0f};
+        assert(registry.execute("cloth-hand " + std::to_string(raised.x) + " " + std::to_string(raised.y) + " " + std::to_string(raised.z)).ok);
+        assert(near(lab.game.getSheetGrab()->target.y, raised.y));
+        for (int tick = 0; tick < 60; ++tick) {
+            runFixedUpdate(lab.game, lab.world, 1.0f / 120.0f, tick / 120.0);
+        }
+        assert(particles.positions[chosen].y > point.y + 0.4f);
+
+        assert(registry.execute("cloth-release").ok);
+        assert(!lab.game.getSheetGrab().has_value());
+        assert(!registry.execute("cloth-hand 0 1 0").ok);
+    }
+
+    /*
+    * cloth-crossings counts each cloth's edges passing through its own triangles (countClothCrossings): none in a fresh
+    * lab, and some once two points of the hooks' sheet are put either side of a triangle far from them.
+    */
+    void testCommandsCountCrossings() {
+        ClothLab lab;
+        CommandRegistry registry;
+        lab.game.addCommands(registry, lab.world);
+
+        const CommandReply fresh = registry.execute("cloth-crossings");
+        assert(fresh.ok);
+        assert(fresh.text.find("hooks sheet: 0 crossings") != std::string::npos);
+        assert(fresh.text.find("drape sheet: 0 crossings") != std::string::npos);
+        assert(!registry.execute("cloth-crossings 1").ok);
+
+        Cloth& cloth = lab.world.get<Cloth>(lab.game.getSheet());
+        const std::array<std::uint32_t, 3>& far = cloth.triangles.back();
+        const Vec3 a = cloth.particles.positions[far[0]];
+        const Vec3 b = cloth.particles.positions[far[1]];
+        const Vec3 c = cloth.particles.positions[far[2]];
+        const Vec3 centre = (a + b + c) * (1.0f / 3.0f);
+        const Vec3 normal = (b - a).cross(c - a).normalized();
+        cloth.particles.positions[0] = centre + normal * 0.01f;
+        cloth.particles.positions[1] = centre - normal * 0.01f;
+
+        const CommandReply crossed = registry.execute("cloth-crossings");
+        assert(crossed.ok);
+        assert(crossed.text.find("hooks sheet: 0 crossings") == std::string::npos);
+        assert(crossed.text.find("drape sheet: 0 crossings") != std::string::npos);
     }
 
     /*
@@ -616,6 +691,8 @@ void testClothLab() {
     testTheSheetHangs();
     testHooksSlide();
     testTheSheetCanBeDragged();
+    testCommandsDragTheCloth();
+    testCommandsCountCrossings();
     testCollidersMatchTheLayout();
     testTheDrapeSheetSettlesOverTheBall();
     testTheBigSheetSags();

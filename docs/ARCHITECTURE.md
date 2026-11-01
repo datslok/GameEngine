@@ -157,6 +157,8 @@ The engine's text interface (`command-line-control`, Oct 29 2026): tools, script
 - `wait [frames]`: the queue stops for that many frames (so lighting and anti-aliasing settle before a screenshot), and its reply goes when they are done.
 - `save-settings` (`Application::saveSettings`, shared with F5's Save) and `quit` (the loop ends after the replies are sent).
 
+Then the game's own (`Game::addCommands(registry, world)`, empty by default): actions a developer or a script triggers that are not settings. The cloth lab's are its hand and a crossings count (see The cloth lab).
+
 ### Where they run
 
 `Application::runCommands` runs at the top of each frame, before its time is measured: the time commands take is added to `previousFrameStart`, so a slow screenshot or a long step is not game time and no burst of catch-up ticks follows. It takes the server's new requests into `pendingCommands` (after any script queued by `queueCommands`, `--run`), and runs them in order until the queue is empty or a `wait` holds it (`waitFrames`, the held reply in `waiting`). Replies go back to the connection, or for a script to the standard output as "> line" and the reply. Commands land between frames, like key presses, so they never break a tick's determinism; `step` runs `Application::runTick`, the loop's own tick.
@@ -3198,6 +3200,12 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 ### The cloth lab
 
 `ClothLabGame` (`games/clothlab/`, `--game clothlab`, phase 7, `cloth-lab`) is the test ground for cloth: a station for each of phase 7's milestones on a plain floor, tested in `cloth_lab_test`.
+
+**Its commands** (`ClothLabGame::addCommands`), so a script drags a cloth the same way every run:
+
+- `cloth-grab x y z`: the hand takes the point nearest that place of whichever sheet has the nearest (`namedSheets`), its target the place, and holds it until `cloth-release` (`handFromCommands`: `updateGrab` leaves such a hand alone, so the mouse neither moves nor drops it).
+- `cloth-hand x y z` moves the hand's target; the next ticks pull the point after it, as with the mouse.
+- `cloth-crossings`: each sheet's edges passing through its own triangles (`countClothCrossings`, stitched points as one), by name ("hooks sheet", "drape sheet", "big sheet", "pile sheet", "dress"), from the points the CPU has (two frames late with cloth on the GPU). Zero means nothing has passed through.
 
 **The layout** (`cloth_lab_layout`, `buildClothLabLayout`, in metres, along x in front of the player):
 

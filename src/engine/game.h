@@ -2,6 +2,7 @@
 
 #include "assets/asset_manager.h"
 #include "cloth/cloth.h"
+#include "core/command_registry.h"
 #include "core/job_system.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
@@ -77,6 +78,14 @@ public:
         (void)position;
         (void)target;
         return false;
+    }
+
+    // The game's own commands (core/command_registry.h), optional: actions a developer or a script triggers that are not
+    // settings (grabbing a cloth, resetting a station), added once at start-up beside the engine's. They run between
+    // frames, so they may change the world, and should reach the simulation as commands the next ticks carry out.
+    virtual void addCommands(CommandRegistry& registry, World& world) {
+        (void)registry;
+        (void)world;
     }
 
     // The game's own tunable values (its settings structs' visit()), optional: the debug UI shows them under the game's

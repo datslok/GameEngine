@@ -1,5 +1,6 @@
 #include "games/clothlab/cloth_lab_game.h"
 
+#include "cloth/cloth_self_collision.h"
 #include "core/srgb.h"
 #include "games/clothlab/cloth_lab_dress.h"
 #include "games/clothlab/cloth_lab_layout.h"
@@ -18,6 +19,8 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
+#include <string>
 #include <utility>
 
 namespace {
@@ -298,6 +301,10 @@ void ClothLabGame::onInput(World& world, const Input& input) {
 * should look but is free (after Escape), the click that captures it again grabs nothing.
 */
 void ClothLabGame::updateGrab(const World& world, const Input& input) {
+    if (handFromCommands) {
+        return;
+    }
+
     const bool pointing = !controls.wantsMouseLook() || input.isMouseCaptured();
     const std::optional<Ray> pointer = pointing ? controls.pointerRay(input) : std::nullopt;
 
@@ -461,17 +468,98 @@ ClothLabStationSettings& ClothLabGame::getStationSettings() {
 }
 
 std::vector<Entity> ClothLabGame::sheets() const {
-    std::vector<Entity> all{sheet, drapeSheet};
-    if (stationSettings.bigSheet) {
-        all.push_back(bigSheet);
-    }
-    if (stationSettings.pileSheet) {
-        all.push_back(pileSheet);
-    }
-    if (stationSettings.mannequin) {
-        all.push_back(dress);
+    std::vector<Entity> all;
+    for (const auto& [name, each] : namedSheets()) {
+        all.push_back(each);
     }
     return all;
+}
+
+std::vector<std::pair<const char*, Entity>> ClothLabGame::namedSheets() const {
+    std::vector<std::pair<const char*, Entity>> all{{"hooks sheet", sheet}, {"drape sheet", drapeSheet}};
+    if (stationSettings.bigSheet) {
+        all.emplace_back("big sheet", bigSheet);
+    }
+    if (stationSettings.pileSheet) {
+        all.emplace_back("pile sheet", pileSheet);
+    }
+    if (stationSettings.mannequin) {
+        all.emplace_back("dress", dress);
+    }
+    return all;
+}
+
+/*
+* The hand by commands, so a script drags a cloth the same way every run (the mouse's hand depends on the frames):
+* cloth-grab takes the point nearest a place of whichever sheet has the nearest, cloth-hand moves the hand, cloth-release
+* lets go, each a command the next ticks carry out, as the mouse's are. cloth-crossings counts each sheet's edges
+* through its own triangles (countClothCrossings), from the points as the CPU last has them (two frames late on the GPU).
+*/
+void ClothLabGame::addCommands(CommandRegistry& registry, World& world) {
+    const auto placeOf = [](const CommandArguments& arguments) {
+        return Vec3{floatArgument(arguments[0], "x"), floatArgument(arguments[1], "y"), floatArgument(arguments[2], "z")};
+    };
+
+    registry.add("cloth-grab", "cloth-grab <x y z>",
+                 "Takes hold of the cloth point nearest x y z (metres), of any sheet, as the left mouse button does, until cloth-release.",
+                 [this, &world, placeOf](const CommandArguments& arguments) {
+                     if (arguments.size() != 3) {
+                         return commandError("Usage: cloth-grab x y z");
+                     }
+                     const Vec3 place = placeOf(arguments);
+                     float nearest = std::numeric_limits<float>::infinity();
+                     for (const Entity each : sheets()) {
+                         const std::vector<Vec3>& positions = world.get<Cloth>(each).particles.positions;
+                         for (std::size_t point = 0; point < positions.size(); ++point) {
+                             const float distance = (positions[point] - place).length();
+                             if (distance < nearest) {
+                                 nearest = distance;
+                                 sheetGrab = ClothGrab{static_cast<std::uint32_t>(point), place};
+                                 grabbedSheet = each;
+                             }
+                         }
+                     }
+                     handFromCommands = true;
+                     return commandOk("Holding point " + std::to_string(sheetGrab->particle) + ", " + std::to_string(nearest) + " m away");
+                 });
+
+    registry.add("cloth-hand", "cloth-hand <x y z>", "Moves the hand holding a cloth (cloth-grab) to x y z (metres).",
+                 [this, placeOf](const CommandArguments& arguments) {
+                     if (arguments.size() != 3) {
+                         return commandError("Usage: cloth-hand x y z");
+                     }
+                     if (!handFromCommands || !sheetGrab) {
+                         return commandError("No cloth is held: cloth-grab first");
+                     }
+                     sheetGrab->target = placeOf(arguments);
+                     return commandOk();
+                 });
+
+    registry.add("cloth-release", "cloth-release", "Lets go of the cloth held by cloth-grab.", [this](const CommandArguments& arguments) {
+        if (!arguments.empty()) {
+            return commandError("cloth-release takes nothing");
+        }
+        if (!handFromCommands) {
+            return commandError("No cloth is held by cloth-grab");
+        }
+        sheetGrab.reset();
+        handFromCommands = false;
+        return commandOk();
+    });
+
+    registry.add("cloth-crossings", "cloth-crossings", "Counts each sheet's edges passing through its own triangles (0: nothing has passed through).",
+                 [this, &world](const CommandArguments& arguments) {
+                     if (!arguments.empty()) {
+                         return commandError("cloth-crossings takes nothing");
+                     }
+                     std::string text;
+                     for (const auto& [name, each] : namedSheets()) {
+                         const Cloth& cloth = world.get<Cloth>(each);
+                         const std::size_t crossings = countClothCrossings(cloth.particles.positions, cloth.triangles, cloth.selfTopology);
+                         text += std::string{name} + ": " + std::to_string(crossings) + " crossings\n";
+                     }
+                     return commandOk(text);
+                 });
 }
 
 ClothSettings& ClothLabGame::getClothSettings() {

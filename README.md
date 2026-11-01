@@ -318,6 +318,8 @@ The reply is printed, and the exit code is 0 when the command worked and 1 when 
 | `pause`, `resume`, `step [ticks]` | Stops the clock, starts it, or runs exactly that many ticks |
 | `camera [x y z [tx ty tz]]` | Shows the camera, or places it looking at a point |
 | `screenshot <file.png> [width height]` | Saves the picture, without the debug UI |
+| `cloth-grab <x y z>`, `cloth-hand <x y z>`, `cloth-release` | The cloth lab: grab the cloth nearest a place, move the hand, let go |
+| `cloth-crossings` | The cloth lab: how many of each sheet's edges pass through its own triangles |
 | `stats` | The F4 readout as text: draws, lights, probes, video memory, CPU and GPU times |
 | `wait [frames]` | Lets frames draw before the next command, so lighting settles |
 | `quit` | Closes the game |
