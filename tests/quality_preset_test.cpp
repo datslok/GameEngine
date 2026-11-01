@@ -1,3 +1,4 @@
+#include "engine/settings_file.h"
 #include "render/gpu/quality_preset.h"
 #include "render/gpu/render_settings.h"
 #include "render/gpu/shadow_map.h"
@@ -5,6 +6,8 @@
 #include <array>
 #include <cassert>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace {
     // Ultra is the engine as it is tuned: its defaults (the user's choice on Oct 23 2026; it was High).
@@ -55,7 +58,37 @@ namespace {
         assert(RenderSettings{}.reflections.enabled && RenderSettings{}.reflections.maxSteps == 64 && RenderSettings{}.reflections.probeSize == 256);
     }
 
-    // The ray-traced features (on GPUs with ray queries; ignored elsewhere) per preset: Ultra only, as the defaults.
+    // Ray tracing, every feature that traces rays at once (the light probes, ray-traced reflections, mirrored lights,
+    // glass shadows, the reflection probe's traced sun and the ray debug view), is off by default, so the engine draws as
+    // it would on a GPU without it (the user's choice on Nov 1 2026). It is used only where the GPU has ray queries too.
+    void testRayTracingIsOffByDefault() {
+        const RenderSettings defaults;
+        assert(!defaults.rayTracing);
+        assert(!tracesRays(defaults, true) && !tracesRays(defaults, false));
+
+        RenderSettings settings;
+        const SettingsWalk walk = [&settings](SettingsVisitor& visitor) {
+            visit(settings, visitor);
+        };
+        const std::vector<std::string> warnings = applySettings({{"passes.rayTracing", "true"}}, walk, StartupFields::Keep);
+        assert(warnings.empty() && settings.rayTracing);
+        assert(tracesRays(settings, true) && !tracesRays(settings, false));
+    }
+
+    // The presets set quality alone: ray tracing stays as it was, and the preset matches either way.
+    void testPresetsLeaveRayTracingAlone() {
+        for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
+            for (bool on : {false, true}) {
+                RenderSettings settings;
+                settings.rayTracing = on;
+                applyQualityPreset(settings, preset);
+                assert(settings.rayTracing == on);
+                assert(matchingQualityPreset(settings) == preset);
+            }
+        }
+    }
+
+    // The ray-traced features per preset (used only while ray tracing is on): Ultra only, as the defaults.
     void testPresetsSetRayTracedFeatures() {
         for (QualityPreset preset : {QualityPreset::Low, QualityPreset::Medium, QualityPreset::High, QualityPreset::Ultra}) {
             const bool on = preset == QualityPreset::Ultra;
@@ -281,6 +314,8 @@ void testQualityPreset() {
     testPresetsSetReflections();
     testPresetsSetAmbientOcclusion();
     testPresetsSetFog();
+    testRayTracingIsOffByDefault();
+    testPresetsLeaveRayTracingAlone();
     testPresetsSetRayTracedFeatures();
     testPresetsSetTheProbeCascades();
     testLowerPresetsCostLess();

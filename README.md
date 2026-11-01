@@ -26,11 +26,12 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Hardware ray tracing** on GPUs that have it (ray queries: any shader can ask what a ray hits first).
   - An acceleration structure per mesh, compacted, and one rebuilt from every object each frame.
   - A debug view traces one ray per pixel and shows normals, albedo, or front and back faces.
-  - The foundation for global illumination. It is optional, so GPUs without it simply leave it off.
+  - The foundation for global illumination.
+  - **Off by default,** since most GPUs trace rays slowly or not at all. One switch (Ray tracing in F5 Passes, or `game.exe --send set passes.rayTracing true`) turns on everything ray-traced at once: the light probes, ray-traced reflections, mirrored lights, tinted glass shadows and the debug view. Each keeps its own setting too, read while the switch is on.
 - **Reflections:** glossy surfaces mirror their surroundings, blurrier the rougher they are, from two sources.
   - Screen-space reflections: each pixel follows its mirror ray through a pyramid of the depth image and reads last frame's picture where it hits.
-  - A reflection probe round the camera for what the screen does not show (behind you, off its edges): a 360-degree picture captured every frame, with each surface's distance, so reflections land in the right place wherever the shiny surface is, and pre-blurred copies for rougher surfaces. On GPUs with ray tracing the sun's shadows in it are traced where the shadow cascades do not reach, and a setting (Ray-traced, on by default: the Ultra preset's) traces each mirror ray instead, so what a mirror shows is exact even where the probe cannot see it.
-  - Mirrored lights, on GPUs with ray tracing (Mirrored lights in F5 Reflections, on by default: the Ultra preset's): a flashlight shone into a mirror lights the spot its reflection points at, the mirror's shape cut out of the beam, and a chrome ball spreads it faintly all round. Each pixel finds the point on the shiny surface where the law of reflection sends the light to it (manifold next event estimation: Newton's method on the surface, with rays), and the surface's curvature sets how bright it is. Brushed metal softens the spot's edges (its light gathered from a patch round that point), the lit spot bounces round the room through the light probes, and reflections show it.
+  - A reflection probe round the camera for what the screen does not show (behind you, off its edges): a 360-degree picture captured every frame, with each surface's distance, so reflections land in the right place wherever the shiny surface is, and pre-blurred copies for rougher surfaces. With ray tracing on, the sun's shadows in it are traced where the shadow cascades do not reach, and a setting (Ray-traced, on by default: the Ultra preset's) traces each mirror ray instead, so what a mirror shows is exact even where the probe cannot see it.
+  - Mirrored lights, with ray tracing on (Mirrored lights in F5 Reflections, on by default: the Ultra preset's): a flashlight shone into a mirror lights the spot its reflection points at, the mirror's shape cut out of the beam, and a chrome ball spreads it faintly all round. Each pixel finds the point on the shiny surface where the law of reflection sends the light to it (manifold next event estimation: Newton's method on the surface, with rays), and the surface's curvature sets how bright it is. Brushed metal softens the spot's edges (its light gathered from a patch round that point), the lit spot bounces round the room through the light probes, and reflections show it.
   - Where neither finds anything, and on rough surfaces, the light probes stand in. Settings in F5 (Reflections), with a confidence debug view; off on the Low preset. The light lab has a polished slab and a mirror ball north-east of the start, and a mirror in the sunlit room facing the doorway with a brushed steel panel beside it (a rough mirror), to try them on.
 - **Ambient occlusion (GTAO):** creases, corners and the gaps under things darken in the light from all around, where the light probes are too far apart to see them. Each pixel finds, along a few lines through it on screen, how high the surfaces round it rise within half a metre (from the depth image), and the share of the sky between them comes from a closed-form integral. A crease between bright walls darkens less (light bounces back in), and reflections dim in creases too. Settings in F5 (Ambient occlusion); off on the Low preset.
 - **Volumetric fog:** light scattered by the air, so the sun's beams through a window, a flashlight's cone and the street lamps' halos show in the mist, and distant things fade into it. A game places a `Fog` (how thick it is at the ground and how fast it thins upwards, its colour and how much it scatters forward); the light lab has a thin ground mist (its settings under Mist in F5). The air in view is cut into a grid of small cells (froxels) that follows the camera, each lit by the sun with its shadows, the lamps its part of the screen lists with theirs, and the light probes' light from all around; then each pixel is dimmed and lit by the fog in front of it, glass too, and past the grid's 100 m the fog's closed form takes over. Settings in F5 (Fog); off on the Low preset.
@@ -46,6 +47,8 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - Indexed meshes, and textures with mipmaps and trilinear plus anisotropic filtering.
 
 ### Global illumination: light that bounces (DDGI)
+
+The light probes trace their rays with hardware ray tracing, so they need ray tracing on (off by default; see Hardware ray tracing above). Without it, what the sun and lamps do not light directly gets a flat ambient light.
 
 **Where the light probes live**
 
@@ -87,7 +90,7 @@ It began life as a software rasterizer drawing pixels on the CPU, and now render
 - **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
 - **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
 - **Cut-outs and double-sided materials** (glTF's alpha mask and `doubleSided`): leaves, fences and grates with holes, in shadows and ray tracing too, their mips built to keep their coverage so fences do not vanish with distance.
-- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel, with a reactive mask so TAA, FSR and DLSS do not smear it; on ray-tracing GPUs light passing through glass takes its colour (shadows, bounce light and reflections). Thick glass (`KHR_materials_volume`, `KHR_materials_ior`) bends what is seen through it and frosted glass blurs it, more the further behind; the light lab has a glass ball and a frosted panel beside its chrome ball.
+- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel, with a reactive mask so TAA, FSR and DLSS do not smear it; with ray tracing on, light passing through glass takes its colour (shadows, bounce light and reflections). Thick glass (`KHR_materials_volume`, `KHR_materials_ior`) bends what is seen through it and frosted glass blurs it, more the further behind; the light lab has a glass ball and a frosted panel beside its chrome ball.
 - **Frustum culling:** each view, camera or shadow, skips what it cannot see.
 
 **Shadows from every light**
@@ -207,7 +210,9 @@ Several games run on one engine, picked at start-up with `--game`.
 | Low | 2048 | 32 | 0.5 |
 | Medium | 2048 | 64 | 0.3 |
 | High | 4096 | 256 | 0.1 |
-| Ultra (the default) | 4096 | 1024 | none |
+| Ultra (the default) | 4096 | 256 | none |
+
+Ray tracing is not part of any preset: it is its own switch. Ultra's ray-traced reflections and mirrored lights apply only while it is on.
 
 ## Requirements
 

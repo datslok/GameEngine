@@ -43,6 +43,11 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
         visitor.field("Normal map filtering", settings.normalMapFiltering);
+        visitor.field("Ray tracing", settings.rayTracing);
         visitor.choice("Ray debug view", settings.rayDebugView, rayDebugViewNames);
     });
+}
+
+bool tracesRays(const RenderSettings& settings, bool rayQueries) {
+    return settings.rayTracing && rayQueries;
 }

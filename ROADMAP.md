@@ -524,7 +524,7 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 - [ ] More hardware ray tracing in the Vulkan renderer (phase 6b; DDGI's probe rays come first, in 6d)
   - Ray-traced shadows (exact soft shadows from area lights), ray-traced reflections, then ReSTIR-style sampling of many lights or a path-traced reference mode.
   - **Always optional:** settings in `RenderSettings` (so the debug UI and a player's options menu can reach them) switch each ray-traced feature on or off while the game runs, falling back to shadow maps, reflection probes and the software-traced probes.
-  - Off by default and greyed out on GPUs without ray tracing (detected at start-up).
+  - Off by default: done in `ray-tracing-off` (Nov 1 2026), one master switch (`RenderSettings::rayTracing`) over every ray-traced feature, the light probes included, each keeping its own switch under it. Still to do: greyed out on GPUs without ray tracing (detected at start-up).
   - The game is designed, tuned and tested on the non-ray-traced path first, so it looks right without it
 - [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/LUMEN.md`, read Oct 20 2026)
   - **The idea:** probes placed on the visible surfaces themselves, one every 16 pixels plus more at depth and normal edges, 8x8 octahedral, each tracing its own rays, filtered 3x3 in probe space and over time, so light near a surface is what that surface sees.
