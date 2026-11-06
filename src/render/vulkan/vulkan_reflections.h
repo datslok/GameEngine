@@ -62,7 +62,7 @@ public:
     * traced through the scene in place of the probe's search.
     */
     void reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene, VulkanImage& depth,
-                 VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe, const GpuReflectionPass& pass,
+                 VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe, VulkanImage& planarPicture, bool planarDrawn, const GpuReflectionPass& pass,
                  const ReflectionRaySets* rays = nullptr);
 
     bool tracesRays() const;

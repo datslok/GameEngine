@@ -144,6 +144,7 @@ void testBloom();
 void testTaa();
 void testScreenReflections();
 void testReflectionProbe();
+void testPlanarReflection();
 void testMirroredLight();
 void testAmbientOcclusion();
 void testVolumetricFog();
@@ -170,10 +171,45 @@ void runSlowTests() {
     testClothBlockDescent();
 }
 
+/*
+* Tests of work on hold (ROADMAP phases 7 and 16): the light probes and the cloth, left out of make test until that work
+* resumes, for a quicker routine run. make test-parked runs them; they may break meanwhile, which is fine until then.
+*/
+void runParkedTests() {
+    testDdgi();
+    testDdgiSampling();
+    testProbeRelocation();
+    testProbeCascades();
+    testClothLab();
+    testClothLabDress();
+    testCloth();
+    testClothSolver();
+    testClothGrab();
+    testClothBending();
+    testClothCollision();
+    testClothParallel();
+    testClothYardstick();
+    testClothSelfCollision();
+    testClothGpu();
+    testClothTiming();
+    testClothTethers();
+    testClothSeams();
+    testClothPattern();
+    testSignedDistanceField();
+    testClothFieldCollision();
+    testGpuClothEngine();
+}
+
 int main(int argumentCount, char** arguments) {
     if (argumentCount > 1 && std::string_view{arguments[1]} == "--slow") {
         runSlowTests();
         std::cout << "All slow tests passed!\n";
+        return 0;
+    }
+
+    if (argumentCount > 1 && std::string_view{arguments[1]} == "--parked") {
+        runParkedTests();
+        std::cout << "All parked tests passed!\n";
         return 0;
     }
 
@@ -254,10 +290,6 @@ int main(int argumentCount, char** arguments) {
     testSoftShadow();
     testCascades();
     testDepthRange();
-    testDdgi();
-    testDdgiSampling();
-    testProbeRelocation();
-    testProbeCascades();
     testAtmosphere();
     testRayTracing();
     testVideoMemory();
@@ -291,26 +323,8 @@ int main(int argumentCount, char** arguments) {
     testGrenade();
     testProfiler();
     testJobSystem();
-    testClothLab();
-    testClothLabDress();
     testDeformingMesh();
     testDeformingSlots();
-    testCloth();
-    testClothSolver();
-    testClothGrab();
-    testClothBending();
-    testClothCollision();
-    testClothParallel();
-    testClothYardstick();
-    testClothSelfCollision();
-    testClothGpu();
-    testClothTiming();
-    testClothTethers();
-    testClothSeams();
-    testClothPattern();
-    testSignedDistanceField();
-    testClothFieldCollision();
-    testGpuClothEngine();
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();
@@ -318,6 +332,7 @@ int main(int argumentCount, char** arguments) {
     testTaa();
     testScreenReflections();
     testReflectionProbe();
+    testPlanarReflection();
     testMirroredLight();
     testAmbientOcclusion();
     testVolumetricFog();

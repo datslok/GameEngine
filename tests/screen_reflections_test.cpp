@@ -1,6 +1,7 @@
 #include "math/mat4.h"
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/planar_reflection_shared.h"
 #include "render/gpu/screen_reflections.h"
 #include "scene/camera.h"
 
@@ -393,6 +394,13 @@ namespace {
     void testValidation() {
         validateReflections(ReflectionSettings{});
 
+        // Planar mirrors are on by default, within their limit.
+        assert(ReflectionSettings{}.planarMirrors == 1 && ReflectionSettings{}.planarMaxRoughness == 0.4f && ReflectionSettings{}.planarScale == 0.5f);
+        ReflectionSettings tooMany;
+        tooMany.planarMirrors = PLANAR_MAX_MIRRORS + 1;
+        ReflectionSettings noScale;
+        noScale.planarScale = 0.0f;
+
         const auto rejects = [](ReflectionSettings settings) {
             try {
                 validateReflections(settings);
@@ -403,6 +411,7 @@ namespace {
             return false;
         };
 
+        assert(rejects(tooMany) && rejects(noScale));
         assert(rejects(ReflectionSettings{.sharpRoughness = 0.6f, .maxRoughness = 0.6f}));
         assert(rejects(ReflectionSettings{.sharpRoughness = -0.1f}));
         assert(rejects(ReflectionSettings{.maxRoughness = 1.1f}));

@@ -8,6 +8,9 @@
 #define AO_MAX_SLICES 8
 #define AO_MAX_STEPS 16
 
+// The sectors a slice's half circle is cut into, one bit each of a 32-bit mask.
+#define AO_SECTORS 32
+
 // Samples nearer the pixel than this (pixels) would read its own surface: the first step starts here. A footprint
 // smaller than it on screen (a pixel far away, or a tiny radius) is left open.
 #define AO_MIN_SAMPLE_PIXELS 1.5

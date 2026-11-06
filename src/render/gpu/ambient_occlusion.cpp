@@ -4,6 +4,7 @@
 #include "render/gpu/screen_reflections.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
@@ -14,6 +15,10 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Occlusion falloff", settings.falloff, {.min = 0.01f, .max = 1.0f});
     visitor.field("Occlusion slices", settings.slices, {.min = 1, .max = AO_MAX_SLICES});
     visitor.field("Occlusion steps", settings.steps, {.min = 1, .max = AO_MAX_STEPS});
+    visitor.field("Occlusion thickness", settings.thickness, {.min = 0.001f, .max = 100.0f, .sliderMin = 0.01f, .sliderMax = 2.0f, .unit = "m"});
+    visitor.field("Bounce light", settings.indirect);
+    visitor.field("Bounce light radius", settings.indirectRadius, {.min = 0.01f, .max = 100.0f, .sliderMin = 0.2f, .sliderMax = 8.0f, .unit = "m"});
+    visitor.field("Bounce light brightest sample", settings.indirectBrightest, {.min = 0.01f, .max = 1000.0f, .sliderMin = 1.0f, .sliderMax = 32.0f});
     visitor.field("Occlusion bounces", settings.multipleBounces);
     visitor.field("Specular occlusion", settings.specularOcclusion);
 }
@@ -22,6 +27,18 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
 void validateAmbientOcclusion(const AmbientOcclusionSettings& settings) {
     if (!(settings.radius > 0.0f)) {
         throw std::invalid_argument("Ambient occlusion needs a radius above 0");
+    }
+
+    if (!(settings.indirectRadius > 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs an indirect radius above 0");
+    }
+
+    if (!(settings.indirectBrightest > 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs a brightest sample above 0");
+    }
+
+    if (!(settings.thickness > 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs a thickness above 0");
     }
 
     if (!(settings.falloff > 0.0f && settings.falloff <= 1.0f)) {
@@ -81,6 +98,55 @@ float sliceVisibility(const AoSlice& slice, float horizonCosine0, float horizonC
     const float arc0 = (cosine + 2.0f * h0 * sine - std::cos(2.0f * h0 - n)) * 0.25f;
     const float arc1 = (cosine + 2.0f * h1 * sine - std::cos(2.0f * h1 - n)) * 0.25f;
     return slice.projectedLength * (arc0 + arc1);
+}
+
+Vec3 gatheredSampleLight(const Vec3& light, float brightest) {
+    const float largest = std::max({light.x, light.y, light.z});
+    return largest > brightest ? light * (brightest / largest) : light;
+}
+
+namespace {
+    // The weight of the slice from the way to the camera out to angle h, either side (sliceVisibility's arc).
+    float sliceArc(float normalAngle, float h) {
+        return (std::cos(normalAngle) + 2.0f * h * std::sin(normalAngle) - std::cos(2.0f * h - normalAngle)) * 0.25f;
+    }
+}
+
+/*
+* The arc from the way to the camera is sliceArc on both sides, so the weight running from the low horizon up to an
+* angle is the low side's arc less what is left between the angle and the way to the camera (or plus, past it). That over
+* the slice's whole weight is a share with the same weight in every equal step, since the integrand is the light's own.
+*/
+float sectorShare(const AoSlice& slice, float directionCosine, int side) {
+    const float halfTurn = 0.5f * std::numbers::pi_v<float>;
+    const float n = slice.normalAngle;
+    const float low = n - halfTurn;
+    const float high = n + halfTurn;
+    const float angle = std::acos(std::clamp(directionCosine, -1.0f, 1.0f));
+    const float signedAngle = std::clamp(side == 0 ? angle : -angle, low, high);
+    const float arcLow = sliceArc(n, low);
+    const float arcHigh = sliceArc(n, high);
+    const float arc = sliceArc(n, signedAngle);
+    return std::clamp(((signedAngle < 0.0f ? -arc : arc) + arcLow) / (arcLow + arcHigh), 0.0f, 1.0f);
+}
+
+// Rounding each end covers a sector when at least half of it is covered (a surface's own samples mark nothing).
+std::uint32_t sectorMask(float share0, float share1) {
+    const int sectors = AO_SECTORS;
+    const int first = static_cast<int>(std::floor(std::min(share0, share1) * sectors + 0.5f));
+    const int last = static_cast<int>(std::floor(std::max(share0, share1) * sectors + 0.5f));
+    const int count = last - first;
+
+    if (count <= 0) {
+        return 0u;
+    }
+
+    // Shifting a 32-bit value by 32 is undefined, here and in GLSL.
+    if (count >= sectors) {
+        return 0xFFFFFFFFu;
+    }
+
+    return ((1u << count) - 1u) << first;
 }
 
 // Each side's miss: how far the pixel's point is from where its two neighbours on that side, carried on, put it.
@@ -146,15 +212,15 @@ float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return std::max(1.0f - std::abs(neighbourDistance - centreDistance) / (static_cast<float>(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0f);
 }
 
-float ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
-                         const AoDepthImage& depthAt) {
+AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
+                           const AoDepthImage& depthAt, const AoPicture& picture) {
     const int width = static_cast<int>(frame.size.width);
     const int height = static_cast<int>(frame.size.height);
     const Vec2 size{static_cast<float>(width), static_cast<float>(height)};
     const float depth = depthAt(x, y);
 
     if (depth == gpuFarDepth) {
-        return 1.0f;
+        return AoLight{};
     }
 
     const Vec2 pixel{static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f};
@@ -162,7 +228,7 @@ float ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclus
     const float screenRadius = aoScreenRadius(settings.radius, frame.footprint, viewDistanceAtPixel(frame.inverseViewProjection, pixel, depth, size));
 
     if (screenRadius < static_cast<float>(AO_MIN_SAMPLE_PIXELS)) {
-        return 1.0f;
+        return AoLight{};
     }
 
     // The neighbours' points, clamped onto the screen (a neighbour off it lands on a texel already read, and its side's
@@ -179,13 +245,21 @@ float ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclus
     const Vec3 toCamera = (position * -1.0f).normalized();
 
     float visibility = 0.0f;
+    Vec3 gathered;
 
     for (int slice = 0; slice < settings.slices; ++slice) {
         const float angle = std::numbers::pi_v<float> * (static_cast<float>(slice) + sliceNoise) / static_cast<float>(settings.slices);
         const Vec2 onScreen{std::cos(angle), std::sin(angle)};
         const Vec3 direction = positionAtPixel(frame.inverseViewProjection, pixel + onScreen, depth, size) - position;
         const AoSlice plane = aoSlice(normal, toCamera, direction);
-        float horizons[2] = {lowHorizonCosine(plane, 0), lowHorizonCosine(plane, 1)};
+        const float lows[2] = {lowHorizonCosine(plane, 0), lowHorizonCosine(plane, 1)};
+        std::uint32_t marked = 0u;
+        Vec3 sliceLight;
+
+        // Each side remembers its last sample while the surface runs on, to fill the gap to the next.
+        bool runsOn[2] = {false, false};
+        float lastShare[2] = {0.0f, 0.0f};
+        float lastDepth[2] = {0.0f, 0.0f};
 
         for (int step = 0; step < settings.steps; ++step) {
             const float distance = aoSampleDistance(step, settings.steps, stepNoise, screenRadius);
@@ -196,30 +270,62 @@ float ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclus
                 const int sy = static_cast<int>(std::floor(sample.y));
 
                 if (sx < 0 || sy < 0 || sx >= width || sy >= height) {
+                    runsOn[side] = false;
                     continue;
                 }
 
                 const float sampleDepth = depthAt(sx, sy);
 
                 if (sampleDepth == gpuFarDepth) {
+                    runsOn[side] = false;
                     continue;
                 }
 
                 const Vec3 offset = positionAtPixel(frame.inverseViewProjection, Vec2{sx + 0.5f, sy + 0.5f}, sampleDepth, size) - position;
                 const float weight = occluderWeight(offset.length(), settings.radius, settings.falloff);
-                const float low = lowHorizonCosine(plane, side);
-                horizons[side] = std::max(horizons[side], low + (horizonCosine(offset, toCamera) - low) * weight);
+
+                if (weight <= 0.0f) {
+                    runsOn[side] = false;
+                    continue;
+                }
+
+                const float low = lows[side];
+                const float front = sectorShare(plane, low + (horizonCosine(offset, toCamera) - low) * weight, side);
+                const float back = sectorShare(plane, low + (horizonCosine(offset - toCamera * settings.thickness, toCamera) - low) * weight, side);
+                const float behind = -offset.dot(toCamera);
+                float start = std::min(front, back);
+                float end = std::max(front, back);
+
+                if (runsOn[side] && std::abs(behind - lastDepth[side]) < settings.thickness) {
+                    start = std::min(start, lastShare[side]);
+                    end = std::max(end, lastShare[side]);
+                }
+
+                runsOn[side] = true;
+                lastShare[side] = front;
+                lastDepth[side] = behind;
+                const std::uint32_t mask = sectorMask(start, end);
+                const std::uint32_t fresh = mask & ~marked;
+
+                if (fresh != 0u && picture) {
+                    sliceLight = sliceLight + gatheredSampleLight(picture(sx, sy), settings.indirectBrightest) * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
+                }
+
+                marked |= mask;
             }
         }
 
-        visibility += sliceVisibility(plane, horizons[0], horizons[1]);
+        const float sliceWeight = sliceVisibility(plane, lows[0], lows[1]);
+        visibility += sliceWeight * (1.0f - static_cast<float>(std::popcount(marked)) / static_cast<float>(AO_SECTORS));
+        gathered = gathered + sliceLight * sliceWeight;
     }
 
-    return std::clamp(visibility / static_cast<float>(settings.slices), 0.0f, 1.0f);
+    const float slices = static_cast<float>(settings.slices);
+    return AoLight{gathered * (1.0f / slices), std::clamp(visibility / slices, 0.0f, 1.0f)};
 }
 
-GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, RenderSize size,
-                                                 const AmbientOcclusionSettings& settings, std::uint32_t frame) {
+GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
+                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers) {
     GpuAmbientOcclusionPass pass{};
     writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
     const float width = static_cast<float>(size.width);
@@ -229,10 +335,16 @@ GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjecti
     pass.size[2] = 1.0f / width;
     pass.size[3] = 1.0f / height;
     pass.lens[0] = pixelFootprint(viewProjection, height);
-    pass.options[0] = settings.radius;
+    pass.lens[1] = jitter.x;
+    pass.lens[2] = jitter.y;
+    pass.options[0] = gathers ? settings.indirectRadius : settings.radius;
     pass.options[1] = settings.falloff;
     pass.options[2] = static_cast<float>(settings.slices);
     pass.options[3] = static_cast<float>(settings.steps);
     pass.frame[0] = static_cast<std::int32_t>(frame);
+    writeColumnMajor(reprojection, pass.reprojection);
+    pass.gather[0] = settings.thickness;
+    pass.gather[1] = gathers ? 1.0f : 0.0f;
+    pass.gather[2] = settings.indirectBrightest;
     return pass;
 }

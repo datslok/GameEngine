@@ -20,6 +20,8 @@ Finished items are kept to one line, with their branch names so they can be foun
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising, and keep graphics features that cost a lot (ray tracing, GI quality) as settings that scale down to typical GPUs.
 
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16 and 17 (rendering), then 7 onwards, as the phases sit in this file.
+
 ---
 
 ## Phase 0: Foundations (done, Sept 17-19 2026)
@@ -275,7 +277,75 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 
 ✔ (checked by the user, Oct 24 2026)
 
-## Phase 7: Cloth simulation ← current
+## Phase 16: Beautiful without ray tracing ← current
+
+Everything a GPU without ray tracing needs to look finished, before any more ray tracing. Re-planned on Nov 6 2026, the user's choice: DDGI on hold, phase 7 parked.
+
+- Ray tracing stays off by default (`ray-tracing-off`), and the DDGI code stays in the engine, off by default by its own switch too; only work on it stops.
+- Each feature is judged on the typical GPU setup below, not on the RTX 5080's defaults.
+
+**Items**
+
+- [ ] Screen-space global illumination: GTAO grown to gather the colour its horizons block, on by default, off on Low
+  - **Chosen over** the software tracer (kept on hold in phase 14) and baked lighting (Nov 6 2026, the user's choice): cheap, automatic and built on passes that exist.
+  - **Known limit, accepted:** it sees only what is on screen, so a closed room is still lit by the flat ambient and bounce light goes when its source leaves the view.
+- [ ] Planar reflections: flat mirrors drawn for real, a second draw of the scene through the mirror, chosen automatically, one plane a frame; built on `screen-space-gi`, not yet seen on a GPU
+  - Why: a single probe at the camera cannot show what a flat mirror sees past a door frame, and head-on mirrors in rooms looked jagged, at any probe size.
+  - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low.
+- [ ] Contact shadows: short screen-space rays, so small objects sit on what they touch
+- [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
+  - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
+  - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.
+- [ ] Mirrored lights without ray tracing: the image light for flat mirrors
+  - **Moved here from 6e** (Oct 24 2026, the user's choice): only GPUs without ray tracing would use it, as with the software tracer; the rest of image quality comes first.
+- [ ] Steadier volumetric fog: sunbeams through the light lab's window shimmer
+  - Read each froxel's history at its centre, not at its jittered sample point (with the camera still the read now lands up to half a froxel off, so the filter mixes in neighbours with weights that change every frame).
+  - Give each froxel its own phase of the Halton jitter (a hash of its place added and wrapped, a Cranley-Patterson rotation), so the leftover error is fine noise the history and DLSS remove rather than one pattern moving together.
+  - Possibly set the history as a time constant in seconds, as the probes do, so it lags the same at any frame rate.
+- [ ] Materials
+  - Clear coat, anisotropy, subsurface scattering for skin, parallax occlusion mapping, decals
+  - Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
+- [ ] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects
+- [ ] A typical GPU setup: ray tracing off, FSR or TAA in place of DLSS, the High or Medium preset, one switch or command to view it
+  - Ray-traced options greyed out on GPUs without ray queries (detected at start-up)
+
+**Milestone:** with the typical GPU setup, the light lab and the demo look finished by day and at night, at a frame rate a mid-range GPU holds, with no feature that needs ray queries.
+
+---
+
+## Phase 17: Ray tracing and path tracing
+
+The top of the quality ladder, once the path without ray tracing is finished. Always optional, off by default, for GPUs with ray queries. DDGI comes off hold here if it is still wanted.
+
+**Items**
+
+- [ ] More hardware ray tracing: ray-traced shadows and ReSTIR
+  - Ray-traced shadows (exact soft shadows from area lights), ray-traced reflections, then ReSTIR-style sampling of many lights or a path-traced reference mode.
+  - **Always optional:** settings in `RenderSettings` (so the debug UI and a player's options menu can reach them) switch each ray-traced feature on or off while the game runs, falling back to shadow maps, reflection probes and the software-traced probes.
+  - The game is designed, tuned and tested on the non-ray-traced path first, so it looks right without it
+- [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/LUMEN.md`, read Oct 20 2026)
+  - **The idea:** probes placed on the visible surfaces themselves, one every 16 pixels plus more at depth and normal edges, 8x8 octahedral, each tracing its own rays, filtered 3x3 in probe space and over time, so light near a surface is what that surface sees.
+  - **What it fixes:** probe parallax. A probe sits a little off the surface and sees what the surface cannot.
+    - So beside a lit doorway at night the outside wall glows within a probe spacing of the opening (found Oct 20 2026: the lamp-lit jambs and room seen at grazing angles by the probes in front of the wall; wider on Low, narrower on Ultra), and the back room's ceiling glows beside its doorway.
+    - Also indirect shadows smaller than the probe spacing.
+  - **In stages:**
+    1. prerequisites: 6e's motion vectors and TAA (which average away the probes' jittered placement and directions), a normal target in the depth prepass, a hierarchical depth buffer;
+    2. diffuse screen probes with full-length ray queries, hits shaded as the probe rays' are (no surface cache needed with hardware rays), the main pass reading a per-pixel GI image;
+    3. importance sampling from last frame's probes and the BRDF;
+    4. short-range AO to 16 pixels after the temporal filter;
+    5. reflections from the same rays, rough surfaces from the probes.
+  - DDGI's cascades stay as the far field (Lumen's world radiance cache) and as the Low setting.
+  - Presets probes every 32, 16 and 8 px (Lumen's ladder, each level about half the next's cost).
+  - Estimated 1-2 ms on the RTX 5080 at High, to be measured
+- [ ] Path-traced mode: every pixel traces random light paths through the scene with several bounces, which gets every shadow, bounce, reflection and soft light right with nothing approximated
+  - Real time only with one or two paths a pixel, so it needs ReSTIR's reuse of good samples across pixels and frames and a strong denoiser (and upscaling); high-end GPUs only.
+  - Worth it first as a reference: golden views path-traced to convergence offline show what the real-time lighting should look like, so its errors (probe parallax, leaks, missing occlusion) can be measured rather than judged by eye
+
+**Milestone:** path-traced golden views converged offline stand beside the real-time picture, the differences measured; the path-traced mode runs live on a high-end GPU.
+
+---
+
+## Phase 7: Cloth simulation (parked)
 
 The physics half of the dressmaking game: fabric that drapes, folds and piles up without passing through itself, ending with a first dress sewn from two panels hanging on a mannequin. It comes early because it is the other thing we most want to see.
 
@@ -283,6 +353,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - Cloth code lives in its own module on top of the core, like the FPS and MOBA code.
 - The pattern editor, garments on moving characters and the game itself follow in phase 10, once phase 9 has skinned characters to dress.
 - The solver's plan and research: `docs/CLOTHGPU.md` (read it first).
+- **Parked on Nov 6 2026** (the user's choice) for phases 16 and 17. Its unmerged work stays on the `gpu-self-collision` branch; self-collision is to be rebuilt later with a more real-time friendly system, not finished as it stands.
 
 **Items**
 
@@ -307,7 +378,7 @@ The physics half of the dressmaking game: fabric that drapes, folds and piles up
 - [x] The dress-sized test: XPBD fails it held by contact or pinned and tethered, so garments need more (`dress-yardstick`)
 - [x] Cheaper substeps: 30 a tick, the fewest edge colours, bending optionally less often (`cheaper-substeps`)
 - [x] Self-collision on the CPU: contacts a thickness apart and Planar-DAT's cut, the cloth lab's pile sheet (`cloth-self-collision`)
-- [ ] Self-collision on the GPU, on by default then: a spatial hash built in parallel, coloured contacts, the cut as an atomic minimum (`docs/CLOTHGPU.md`, The plan, step 5). Its tests: the dress (a crossings column in the dress test), the pile
+- [ ] Self-collision on the GPU, parked, to be rebuilt with a more real-time friendly system (what was tried is on `gpu-self-collision`), on by default then: a spatial hash built in parallel, coloured contacts, the cut as an atomic minimum (`docs/CLOTHGPU.md`, The plan, step 5). Its tests: the dress (a crossings column in the dress test), the pile
   - Watch for the swaying hem found in `cheaper-substeps`: the 0.7 cm pinned dress's back hem kept swinging about 6 cm through 20 s, fed by something (not the tethers, nor the sewing). Gone with `dress-ease`'s roomier dress (19 mm in its last second), so it hangs on the drape; suspects if it returns: the skirt passing through itself, friction on the legs
 - [ ] Fabric properties: a few presets
   - Different stiffness along the threads (warp and weft) than across them (the bias).
@@ -393,7 +464,6 @@ A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them int
 - [ ] Dressing an animated character: the cloth collides with the skinned body as it moves (its distance field following the bones, the surface's velocity in the friction)
 
 **Rendering**
-- [ ] Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
 - [ ] Weave detail with phase 6a's normal maps
 
 **Game**
@@ -503,16 +573,8 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - **Why not voxels:** chosen over a voxel grid (Oct 20 2026). Epic tried voxels for Lumen (cone tracing, then bit bricks) and dropped them as leaky and slow for exactly this, and AMD's Brixelizer builds the same at run time.
   - Lumen's numbers and robustness fixes (walls thinner than a voxel, the half-voxel expansion) in `docs/LUMEN.md`
   - **Moved here from 6d** (Oct 23 2026, the user's choice): a large piece of work that only GPUs without ray tracing would use; image quality (6e) comes first.
+  - **On hold with DDGI** (Nov 6 2026, the user's choice): it feeds the probes, so phase 16 uses screen-space GI instead. It is the way to fix closed rooms on these GPUs if that is ever wanted.
   - **Expected, not measured:** close to the ray-traced look, since the probes' light is blurry anyway; leaks through walls thinner than the field's voxels unless thickened, thin objects (the light lab's fence) lost at the coarse levels, coarser colour bleeding at hits, and moving objects stamped in each frame. Perhaps 0.5-2 ms for the default's rays on a GTX 1060-class GPU; slower than ray queries on an RTX card.
-- [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
-- [ ] Steadier volumetric fog: sunbeams through the light lab's window shimmer
-  - Read each froxel's history at its centre, not at its jittered sample point (with the camera still the read now lands up to half a froxel off, so the filter mixes in neighbours with weights that change every frame).
-  - Give each froxel its own phase of the Halton jitter (a hash of its place added and wrapped, a Cranley-Patterson rotation), so the leftover error is fine noise the history and DLSS remove rather than one pattern moving together.
-  - Possibly set the history as a time constant in seconds, as the probes do, so it lags the same at any frame rate.
-  - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
-  - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.
-- [ ] Mirrored lights without ray tracing: the image light for flat mirrors
-  - **Moved here from 6e** (Oct 24 2026, the user's choice): only GPUs without ray tracing would use it, as with the software tracer; the rest of image quality comes first.
 - [ ] Physical light units and a camera exposure for all lights
   - Emissive surfaces and the lights they stand for could then be linked physically (the light a surface receives from the moon is the moon's brightness times the solid angle it covers).
   - The exposure would map the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen.
@@ -521,28 +583,6 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 - [ ] Tighter clusters: depth bounds per tile from the prepass and smaller far tiles, since far clusters list 16 or more lamps where 4-8 reach; only if many lights ever cost more than a distance check each
 - [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
 - [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw
-- [ ] More hardware ray tracing in the Vulkan renderer (phase 6b; DDGI's probe rays come first, in 6d)
-  - Ray-traced shadows (exact soft shadows from area lights), ray-traced reflections, then ReSTIR-style sampling of many lights or a path-traced reference mode.
-  - **Always optional:** settings in `RenderSettings` (so the debug UI and a player's options menu can reach them) switch each ray-traced feature on or off while the game runs, falling back to shadow maps, reflection probes and the software-traced probes.
-  - Off by default: done in `ray-tracing-off` (Nov 1 2026), one master switch (`RenderSettings::rayTracing`) over every ray-traced feature, the light probes included, each keeping its own switch under it. Still to do: greyed out on GPUs without ray tracing (detected at start-up).
-  - The game is designed, tuned and tested on the non-ray-traced path first, so it looks right without it
-- [ ] Lumen-like global illumination (as in Unreal Engine 5; research, numbers and a staged plan in `docs/LUMEN.md`, read Oct 20 2026)
-  - **The idea:** probes placed on the visible surfaces themselves, one every 16 pixels plus more at depth and normal edges, 8x8 octahedral, each tracing its own rays, filtered 3x3 in probe space and over time, so light near a surface is what that surface sees.
-  - **What it fixes:** probe parallax. A probe sits a little off the surface and sees what the surface cannot.
-    - So beside a lit doorway at night the outside wall glows within a probe spacing of the opening (found Oct 20 2026: the lamp-lit jambs and room seen at grazing angles by the probes in front of the wall; wider on Low, narrower on Ultra), and the back room's ceiling glows beside its doorway.
-    - Also indirect shadows smaller than the probe spacing.
-  - **In stages:**
-    1. prerequisites: 6e's motion vectors and TAA (which average away the probes' jittered placement and directions), a normal target in the depth prepass, a hierarchical depth buffer;
-    2. diffuse screen probes with full-length ray queries, hits shaded as the probe rays' are (no surface cache needed with hardware rays), the main pass reading a per-pixel GI image;
-    3. importance sampling from last frame's probes and the BRDF;
-    4. short-range AO to 16 pixels after the temporal filter;
-    5. reflections from the same rays, rough surfaces from the probes.
-  - DDGI's cascades stay as the far field (Lumen's world radiance cache) and as the Low setting.
-  - Presets probes every 32, 16 and 8 px (Lumen's ladder, each level about half the next's cost).
-  - Estimated 1-2 ms on the RTX 5080 at High, to be measured
-- [ ] Path-traced mode: every pixel traces random light paths through the scene with several bounces, which gets every shadow, bounce, reflection and soft light right with nothing approximated
-  - Real time only with one or two paths a pixel, so it needs ReSTIR's reuse of good samples across pixels and frames and a strong denoiser (and upscaling); high-end GPUs only.
-  - Worth it first as a reference: golden views path-traced to convergence offline show what the real-time lighting should look like, so its errors (probe parallax, leaks, missing occlusion) can be measured rather than judged by eye
 - [ ] Virtual shadow maps (as in Unreal Engine 5) for the sun, in place of cascades or beside them as the top setting
   - **How:** one huge virtual shadow map (16384 x 16384 per clipmap level, nested levels each twice the last's size around the camera) cut into 128 x 128 pages. Only the pages that pixels on screen actually look up are drawn, into a pool of physical pages, and kept between frames until something in them moves.
   - **Gain:** about one shadow texel per screen pixel at every distance, with no cascade seams, and caching makes still scenes nearly free.

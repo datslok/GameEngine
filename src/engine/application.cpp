@@ -1,4 +1,5 @@
 #include "engine/application.h"
+#include "scene/flat_faces.h"
 #include "engine/debug_views.h"
 #include "engine/golden.h"
 #include "engine/gpu_cloth.h"
@@ -287,6 +288,7 @@ void Application::prepareNewResources() {
             renderer.uploadMesh(buildIndexedMesh(assets.getMesh(next)));
         }
         boundsByMesh.push_back(meshBounds(assets.getMesh(next)));
+        flatFacesByMesh.push_back(assets.isDeforming(next) ? std::vector<FlatFace>{} : findFlatFaces(assets.getMesh(next)));
     }
 
     while (renderer.getTextureCount() < assets.getTextureCount()) {
@@ -401,6 +403,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
 
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);
+    attachFlatFaces(frame.draws, flatFacesByMesh);
     return frame;
 }
 

@@ -1297,6 +1297,31 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The pile sheet,** the cloth lab's self-collision station, the mat's "sheet dropped onto itself" from the layout's plan.
   - **Checked:** the tests (release, tests first: the neighbourhood, flat sheets left alone and a fold over the next square found, the plane and the cut against the paper's equations, rounding past a plane, the cap, pinned points, contacts and friction, the crossings counter, two stacked sheets (falling through without), the strip piling on the floor, determinism, the settings reachable by key, the lab's pile, barycentric weights and segment shares); the release tests pass, the debug game builds without warnings. The user saw it work in the lab on the CPU.
 
+## Phase 16: Beautiful without ray tracing (Nov 6 2026 onwards)
+
+- `replan-beauty-first` (Nov 6 2026): the plan changed. The user: "lets put DDGI on hold for now, build all the features we need for non rtx gpus to look beautiful, and then we make ray tracing and path tracing".
+  - **Why now:** since `ray-tracing-off` the default path has no bounce light at all, only the flat ambient, and most players are on that path.
+  - **Asked first; the user chose** screen-space GI for bounce light, over the software tracer (it restarts probe work, and is large) and baked lighting (it needs a bake tool and cannot follow a moving sun). The accepted cost: closed rooms stay lit by the flat ambient.
+  - **Cloth parked, not merged:** the user chose to leave `gpu-self-collision` unmerged and rebuild self-collision later with a more real-time friendly system. At that point the pile's local pinches were still open and the lab ran about 45 ticks a second with self-collision on.
+  - **DDGI off by its own switch too:** `GlobalIlluminationSettings::enabled` now defaults to off (the user: "turn off ddgi by default"), so turning ray tracing on no longer brings the probes back, and the screen-space bounce light keeps running.
+  - **Numbering:** the new phases are 16 and 17, placed before phase 7 in the roadmap, since renumbering would break the docs' many references.
+
+- `screen-space-gi` (Nov 6 2026): bounce light without ray tracing, the visibility bitmask (Therrien, Levesque and Gilet 2023) grown out of GTAO.
+  - **Explained first; the user chose** to replace GTAO's loop over a separate pass, since one walk gives both results, and cost on weaker GPUs is this phase's point.
+  - **The paper checked** on arXiv's HTML version (the PDF was too big to fetch), through its Algorithm 1 and Table 1. Its timings against GTAO, RTX 2080 at 1080p, sampling alone: 0.75 and 0.77 ms at 12 samples, 1.12 and 1.13 ms at 16, plus 0.3 ms to denoise.
+  - **Three changes from the paper:** sectors of equal light, not equal angle (`sectorShare`), so the cosine is in the count and plain occlusion keeps Jimenez's weighting; no emitter cosine, since sectors measure solid angle and the picture is outgoing light; last frame's finished picture, not this frame's direct light, since this pass runs before the main pass, which also gives many bounces free. Its printed line 18 has what looks like a typo in the upper bound, and line 15 subtracts the view direction; the back here is further from the camera.
+  - **Added: a surface running on fills its gap,** since a slab per sample leaves a wall seen at a far step full of holes, which plain occlusion would have lost over GTAO's solid horizon.
+  - **Found in the running game:** the sun's glint off the steel ball gathered as ordinary light left bright specks on the panel beside it, gone with bounce light off, so each sample is capped (`indirectBrightest`, 8). Mirrors in the rooms showed bright outlines where the probe's search gave up and the flat ambient stood in, so it now falls back to the probe's picture along the ray (`probeGuessedLight`), in the pass only, without ray tracing. Jagged steps at the reflected doorway remain: a head-on mirror is the single probe's worst case, and 1024 texels did not cure it.
+  - **Two radii:** `radius` stays 0.5 m for occlusion beside the probes, whose visibility handles what is bigger, and gathering uses `indirectRadius`, 2 m.
+  - **Checked:** the tests (release, tests first: shares against quadrature, masks, the white furnace adding up to 1, colour taken from the picture, open floor gathering nothing, thin boards letting light behind them, the pass record). The release tests pass, the debug game builds without warnings and the shaders compile. **Not run on a GPU yet:** the user checks it by hand, and `make gputest` and the golden views run only on request. The golden images will differ, since plain occlusion changed too.
+
+- `planar-reflections` (Nov 6 2026, on the `screen-space-gi` branch): flat mirrors drawn for real. The user, in the light lab: "inside the room reflections look really buggy even with probes on".
+  - **Looked at it in the running game:** the debug view showed the probe's search giving up round the reflected doorway; a probe of 1024 texels gave scratchy streaks and no cure, since one depth per direction holds nothing past a door frame.
+  - **Asked first; the user chose** softer probe failures, then planar reflections, one plane by default.
+  - **How:** a mirror is the capture's seventh view (`captureDraws[cubeFaceCount]`, the capture's pipelines, which already cull front faces), through `planarViewProjection`, whose near plane is the mirror; read at the mirror's own pixel. No sky draw of its own: the camera's rays mirrored (`mirroredRays`). Chosen each frame from `FlatFace`s found at load, so nothing is marked by hand.
+  - **Found by the tests:** a list's iterator kept across a `push_back` in `findFlatFaces` crashed the suite.
+  - **Not done yet:** seen on a GPU. Its highlights use the camera's view, not the mirrored eye's.
+
 ## Tools outside the phases
 
 - `ray-tracing-off` (Nov 1 2026): ray tracing off by default. The user: "lets turn off any rtx features by default first", before carrying on with self-collision on the GPU.

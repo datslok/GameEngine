@@ -29,6 +29,7 @@ enum class GpuPass {
     Motion,
     DepthRange,
     ReflectionProbe, // the reflection probe's capture: its six faces, their mips, distances and prefiltered levels
+    PlanarReflection, // a flat mirror's picture: the scene drawn again through it, and its blurrier levels
     Reflections,  // reflections: the depth and colour pyramids and the reflection pass
     FogApply,     // the picture before the glass seen through the fog
     Transparent,  // glass and blended surfaces, sorted, over the picture with its reflections (render/gpu/transparency.h)

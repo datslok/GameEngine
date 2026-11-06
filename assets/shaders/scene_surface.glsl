@@ -114,7 +114,7 @@ layout(set = 1, binding = 9) uniform sampler2D brdfTable;
 layout(set = 1, binding = 22) uniform sampler2D mirroredLight;
 layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
 
-// The visibility in creases and corners (ambient_occlusion.comp), read while ambientOcclusionOptions.x is 1, and the fits
+// The visibility in creases and corners in alpha and the light bounced from the screen in rgb (ambient_occlusion.comp), read while ambientOcclusionOptions.x is 1, and the fits
 // that turn it into the occlusion of the light from all around and of the reflection.
 layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 #include "ambient_occlusion.glsl"
@@ -696,17 +696,18 @@ void main() {
     // ones), the reflection's stand-in by the specular occlusion, which the reflection pass's better light keeps (it is
     // in the specular albedo the reflection surfaces hand on). The screen's occlusion is not in the reflection probe's
     // capture, which has none of its own view; a material's baked occlusion is, being the surface's own. The two count
-    // as whichever is more closed. Without either the light is left exactly as it was.
+    // as whichever is more closed. The light gathered from the screen fills in what the visibility took away, as diffuse
+    // light from all around. Without either the light is left exactly as it was.
     float reflectionOcclusion = 1.0;
     bool screenOcclusion = ambientOcclusionOptions.x != 0 && !captureView && !transparentView;
 
     if (screenOcclusion || material.surfaceParameters.w > 0.0) {
-        float screenVisibility = screenOcclusion ? texelFetch(ambientOcclusion, ivec2(gl_FragCoord.xy), 0).r : 1.0;
-        float visibility = surfaceVisibility(screenVisibility, occlusionTexel, material.surfaceParameters.w);
+        vec4 screenLight = screenOcclusion ? texelFetch(ambientOcclusion, ivec2(gl_FragCoord.xy), 0) : vec4(0.0, 0.0, 0.0, 1.0);
+        float visibility = surfaceVisibility(screenLight.a, occlusionTexel, material.surfaceParameters.w);
         vec3 diffuseOcclusion = ambientOcclusionOptions.y != 0 ? multiBounceOcclusion(visibility, matteColour(albedo.rgb, metallic)) : vec3(visibility);
         reflectionOcclusion = ambientOcclusionOptions.z != 0 ? specularOcclusion(point.nDotV, visibility, roughness) : 1.0;
         mirrorLight *= reflectionOcclusion;
-        ambientReflected = shadeProbeAmbient(point, diffuseLight * diffuseOcclusion, mirrorLight);
+        ambientReflected = shadeProbeAmbient(point, diffuseLight * diffuseOcclusion + screenLight.rgb, mirrorLight);
     }
 
 #ifdef TRANSPARENT

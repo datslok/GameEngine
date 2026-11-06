@@ -93,7 +93,7 @@ RUNTIME_DLLS := $(FSR_DLL) $(STREAMLINE_DLLS)
 # Track whichever filename was used to load this Makefile.
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: all run test test-slow shaders clean release run-release test-release test-slow-release golden golden-save gputest gputest-release yardstick yardstick-quick yardstick-dress
+.PHONY: all run test test-slow test-parked test-parked-release shaders clean release run-release test-release test-slow-release golden golden-save gputest gputest-release yardstick yardstick-quick yardstick-dress
 
 all: $(TARGET) $(RUNTIME_DLLS) shaders
 
@@ -193,6 +193,10 @@ test: $(TEST_TARGET) shaders
 test-slow: $(TEST_TARGET) shaders
 	./$(TEST_TARGET) --slow
 
+# The tests of work on hold (tests/test_main.cpp, runParkedTests): the light probes and the cloth, left out of make test.
+test-parked: $(TEST_TARGET) shaders
+	./$(TEST_TARGET) --parked
+
 # Golden images (src/engine/golden.h): golden-save renders every game's fixed views as the references in
 # tests/golden/<GPU>/<game>/, golden compares fresh captures with them (captures and difference heatmaps go to
 # build/golden/<GPU>/<game>/). They need a GPU.
@@ -221,6 +225,9 @@ test-release:
 
 test-slow-release:
 	$(MAKE) BUILD=release test-slow
+
+test-parked-release:
+	$(MAKE) BUILD=release test-parked
 
 gputest-release:
 	$(MAKE) BUILD=release gputest

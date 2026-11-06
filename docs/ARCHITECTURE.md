@@ -1662,7 +1662,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `enabled` | true | |
+| `enabled` | false | off since Nov 6 2026 (on hold, ROADMAP phase 16); needs `RenderSettings::rayTracing` on too |
 | `probeCascades` | 6 | 4 before `ddgi-far-cascades` |
 | `probeSpacing` | 0.5 m | the densest's |
 | `densestProbesAcross` | 31 | |
@@ -2345,7 +2345,11 @@ How much of the light from all around reaches a point past the small things next
 | `radius` | 0.5 m | how far occluders count: about the densest probes' spacing, which handle what is bigger |
 | `falloff` | 0.6 | the outer share of the radius over which an occluder's weight fades to nothing (`occluderWeight`), so the reach has no hard border |
 | `slices`, `steps` | 3, 6 | slices a pixel each frame, steps along each side (presets: High 2 and 4, Medium 2 and 3; at most `AO_MAX_SLICES` 8 and `AO_MAX_STEPS` 16) |
-| `multipleBounces` | on | a crease's walls bounce light back in (`multiBounceOcclusion`) |
+| `thickness` | 0.25 m | how deep each sample is taken to be along the view: light passes behind it |
+| `indirect` | on | bounce light gathered from last frame's picture; needs anti-aliasing, and stands aside while the light probes run |
+| `indirectRadius` | 2 m | the samples' reach while gathering, in place of `radius` |
+| `indirectBrightest` | 8 | the brightest a gathered sample counts for in its largest channel (`gatheredSampleLight`), so the sun's glint off metal does not speckle what it lights |
+| `multipleBounces` | on | a crease's walls bounce light back in (`multiBounceOcclusion`), while nothing is gathered |
 | `specularOcclusion` | on | the reflection dims in creases too (`specularOcclusion`) |
 
 **The method** (ground-truth ambient occlusion, Jimenez, Wu, Pesce and Jarabo 2016), per pixel of the render size, from the prepass's depth alone:
@@ -2355,6 +2359,19 @@ How much of the light from all around reaches a point past the small things next
 - **Horizons.** Each side walks `steps` texels along the line (`aoSampleDistance`: quadratic in the step, dense near the pixel, staggered by noise, never under `AO_MIN_SAMPLE_PIXELS` 1.5), out to the radius on screen (`aoScreenRadius`, from the pixel footprint per metre and the view distance, at most `AO_MAX_SCREEN_RADIUS` 256). Each sample's point gives the cosine of its angle from the way to the camera (`horizonCosine`), pulled towards the surface's own horizon (`lowHorizonCosine`: the normal's angle plus or minus a right angle) by its falloff weight; each side keeps the highest. Samples off screen or on the sky count as open.
 - **The open arc.** With the normal projected into the slice (`aoSlice`: angle n from the way to the camera, length l), the cosine-weighted open share between the horizons h0 and h1 is l times the integral of cos(θ − n) |sin θ| from h0 to h1, each side (cos n + 2h sin n − cos(2h − n)) / 4, the horizons kept within a right angle of the normal (`sliceVisibility`). Averaged over slices round the way to the camera this is the cosine-weighted visibility exactly, 1 for an open surface whatever its tilt (tested over 2000 slices).
 - **The blur** (`ambient_occlusion_blur.comp`, only without anti-aliasing): the mean over 5 x 5 texels (`AO_BLUR_RADIUS` 2), each weighted by how near its view distance is to the pixel's (`aoBlurWeight`, nothing past `AO_BLUR_DEPTH_SHARE` 10%), so it does not bleed across edges.
+
+**The visibility bitmask and bounce light** (Therrien, Levesque and Gilet 2023, "Screen Space Indirect Lighting with Visibility Bitmask"; `screen-space-gi`). The walk above no longer keeps one horizon a side:
+
+- **Sectors.** A slice's half circle is cut into `AO_SECTORS` (32) sectors, a bit each of one `uint`. Unlike the paper's even angles, each sector is an equal share of the slice's cosine-weighted light (`sectorShare`, built from the closed form), so every bit weighs the same, the paper's cosine term is already in the count, and a solid horizon gives Jimenez's answer to within a sector.
+- **Marking.** A sample marks the arc from its front to its back, `thickness` further along the view (`sectorMask`, covering a sector at least half covered, so a surface's own samples mark nothing). The falloff shrinks both ends towards the surface's horizon, as it did the horizon.
+- **Running on.** A sample within `thickness` of its side's last one in depth also fills the gap to it, so a wall between two far-apart samples is not left full of holes. This is not in the paper.
+- **Gathering.** While gathering, each sample adds last frame's finished picture at its point, reprojected as the reflections do (`reprojectPixel`, nearest texel, nothing if it was off screen), times the share its newly marked sectors hold (`bitCount(fresh) / 32`). The result is scaled by the slice's whole weight; open sectors keep the light from all around. So a picture of 1 everywhere adds up to exactly the missing light (the test's white furnace).
+- **No emitter cosine.** The paper's `n_j · -l_j` is left out: sectors already measure solid angle, and the picture is the light leaving the sample. So a sample seen from behind gives its visible face's colour: expected as a slight leak. It needs a normal for every sample, if it ever shows.
+- **Many bounces.** The picture holds last frame's bounce, so each frame adds one, a geometric series in the albedo, which converges.
+- **The image.** RGBA16F: rgb the gathered light, alpha the visibility. The main pass adds rgb to the diffuse light from all around, after dimming that by the visibility, and turns the Jimenez fit off (`ambientOcclusionOptions.y`), which would count the same bounce twice.
+- **When it gathers** (`gathersLight`): `indirect` on, last frame's picture usable (anti-aliasing on, not the first frame), and no probes in the frame. It then uses `indirectRadius` and always runs the blur, since its noise is far stronger.
+
+**Known limits:** only what is on screen bounces, so light goes when its source leaves the view, and a closed room keeps the flat ambient. Specular highlights in the picture bounce as if they were diffuse. Moving objects' bounce trails a frame behind.
 
 **The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility at its pixel, takes the more closed of it and the material's baked occlusion where it has one (`surfaceVisibility`: min(screen, 1 + strength (texel − 1)), glTF's formula; the minimum, not the product, since both estimate the same open share and a crease both see would darken twice; the baked one also in the reflection probe's capture, being the surface's own) as v, and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
 
@@ -2367,7 +2384,7 @@ With it off and no baked occlusion every factor is exactly 1 and the picture is 
 
 **Tests**: `ambient_occlusion_test` (the closed form against quadrature; an open surface averages exactly 1 tilted or not; half the sky blocked gives a half; the normal at a wall's foot keeps the floor's slope; the screen radius, steps, falloff, bounces, specular occlusion, the baked occlusion's minimum and blur weight; and the pass's loop through a drawn depth image of a floor and a 2 m wall: open floor 1, a metre from the wall over 0.98, the foot under 0.85 with the default radius and 0.506 against 0.5 with a long one, the sky open), `quality_preset_test`, `gpu_timing_test`; GPU tests in `ambient_occlusion_gpu_test` (written and built, not run).
 
-**Not measured yet**: its cost and its look in the game. **Not yet**: half resolution, if the cost calls for it.
+**Not measured yet**: its cost and its look in the game, with bounce light too. **Not yet**: half resolution, if the cost calls for it.
 
 ## Volumetric fog
 

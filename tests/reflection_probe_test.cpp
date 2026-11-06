@@ -433,6 +433,17 @@ namespace {
         assert(lookingUp.x > 0.95f && lookingDown.x < 0.05f);
     }
 
+    // Where the search is unsure, its find gives way to the probe's picture along the ray, not to the flat stand-in. A
+    // pixel too rough for any reflection has no trust to go by.
+    void testProbeGuessedLight() {
+        const Vec3 along{1.0f, 0.0f, 0.0f};
+        const Vec3 found{0.0f, 1.0f, 0.0f};
+        assert(nearVec(probeGuessedLight(along, found, 0.0f, 1.0f), along, 0.0f));
+        assert(nearVec(probeGuessedLight(along, found, 1.0f, 1.0f), found, 0.0f));
+        assert(nearVec(probeGuessedLight(along, found, 0.25f, 0.5f), Vec3{0.5f, 0.5f, 0.0f}, 1e-6f));
+        assert(nearVec(probeGuessedLight(along, found, 0.0f, 0.0f), along, 0.0f));
+    }
+
     // The probe's light in place of the stand-in, as far as it is trusted.
     void testBlendedStandIn() {
         const Vec3 standIn{0.2f, 0.2f, 0.2f};
@@ -457,5 +468,6 @@ void testReflectionProbe() {
     testSearchProbe();
     testLevels();
     testPrefilter();
+    testProbeGuessedLight();
     testBlendedStandIn();
 }

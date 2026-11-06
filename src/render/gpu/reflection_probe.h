@@ -177,6 +177,14 @@ float prefilterSourceLevel(float pdf, std::uint32_t samples, std::uint32_t size)
 Vec3 prefilterTexel(const Vec3& direction, float roughness, std::uint32_t samples, std::uint32_t sourceSize,
                     const std::function<Vec3(const Vec3&, float)>& sample);
 
+/*
+* The probe's light at a glossy pixel whatever the search made of it: its find as far as it trusted it, else the picture
+* along the ray, right in everything but where it lands. The flat stand-in beside a good reflection is a bright line round
+* every edge the search gives up at; a slightly misplaced picture is not. confidence is the search's (its trust times the
+* roughness's fade), rough that fade alone.
+*/
+Vec3 probeGuessedLight(const Vec3& alongRay, const Vec3& found, float confidence, float rough);
+
 // The stand-in swapped for the probe's light by its confidence: what the reflection pass hands on to screen-space
 // reflections as the light they replace.
 Vec3 blendedStandIn(const Vec3& standIn, const Vec3& specularAlbedo, const Vec3& light, float confidence);

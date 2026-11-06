@@ -3,6 +3,7 @@
 
 #include "render/gpu/ambient_occlusion.h"
 
+#include <bit>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -39,13 +40,13 @@ namespace {
             inputs.push_back(GpuVec4{random.between(-1.0f, 1.0f), random.between(0.0f, 300.0f), static_cast<float>(i % 6), 6.0f});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AMBIENT_OCCLUSION, inputs, 11, 6);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AMBIENT_OCCLUSION, inputs, 11, 8);
         // acos near its ends and the cross products near parallel steps can lose digits.
         const FloatTolerance angleTolerance{.absolute = 1e-4f, .relative = 1e-3f};
 
-        for (std::size_t i = 0; i < outputs.size() / 6; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 8; ++i) {
             const GpuVec4* in = &inputs[i * 11];
-            const GpuVec4* out = &outputs[i * 6];
+            const GpuVec4* out = &outputs[i * 8];
             const Vec3 normal = vec3From(in[0]);
             const Vec3 toCamera = vec3From(in[1]);
             const AoSlice slice = aoSlice(normal, toCamera, vec3From(in[2]));
@@ -69,6 +70,10 @@ namespace {
             report.check("aoBlurWeight", arithmeticTolerance, aoBlurWeight(in[8][3], in[8][3] * 1.04f), out[4][3]);
             report.check("multiBounceOcclusion", arithmeticTolerance, multiBounceOcclusion(in[6][3], vec3From(in[9])), vec3From(out[5]));
             report.check("surfaceVisibility", arithmeticTolerance, surfaceVisibility(in[6][3], in[4][3], in[1][3]), out[5][3]);
+            report.check("sectorShare", angleTolerance, Vec3{sectorShare(slice, in[9][3], 0), sectorShare(slice, in[10][0], 1), 0.0f},
+                         Vec3{out[6][0], out[6][1], 0.0f});
+            report.check("sectorMask", arithmeticTolerance, static_cast<float>(std::popcount(sectorMask(in[5][3], in[6][3]))), out[6][2]);
+            report.check("gatheredSampleLight", arithmeticTolerance, gatheredSampleLight(vec3From(in[9]), in[6][3]), vec3From(out[7]));
         }
     }
 }

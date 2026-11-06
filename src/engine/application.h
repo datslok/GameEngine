@@ -1,5 +1,6 @@
 #pragma once
 
+#include "scene/flat_faces.h"
 #include "assets/asset_manager.h"
 #include "core/command_registry.h"
 #include "core/fixed_timestep.h"
@@ -147,6 +148,9 @@ private:
 
     // Each uploaded mesh's bounds, indexed like MeshHandle, for the bounding box view.
     std::vector<Aabb> boundsByMesh;
+
+    // Each mesh's flat faces, for planar reflections; none for a deforming mesh, which stays flat only by chance.
+    std::vector<std::vector<FlatFace>> flatFacesByMesh;
 
     // What every model part was drawn with last frame, so each frame's draws say how they moved (for temporal anti-aliasing).
     MotionHistory motionHistory;

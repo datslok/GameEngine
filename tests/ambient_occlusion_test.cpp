@@ -40,6 +40,7 @@ namespace {
         const AmbientOcclusionSettings defaults;
         assert(defaults.enabled && defaults.radius == 0.5f && defaults.falloff == 0.6f);
         assert(defaults.slices == 3 && defaults.steps == 6 && defaults.multipleBounces && defaults.specularOcclusion);
+        assert(defaults.thickness == 0.25f && defaults.indirect && defaults.indirectRadius == 2.0f && defaults.indirectBrightest == 8.0f);
         validateAmbientOcclusion(defaults);
 
         AmbientOcclusionSettings wrong;
@@ -55,6 +56,15 @@ namespace {
         assert(rejects(wrong));
         wrong = {};
         wrong.steps = 0;
+        assert(rejects(wrong));
+        wrong = {};
+        wrong.thickness = 0.0f;
+        assert(rejects(wrong));
+        wrong = {};
+        wrong.indirectRadius = std::numeric_limits<float>::quiet_NaN();
+        assert(rejects(wrong));
+        wrong = {};
+        wrong.indirectBrightest = 0.0f;
         assert(rejects(wrong));
     }
 
@@ -129,6 +139,65 @@ namespace {
         assert(near(sliceVisibility(slice, 1.0f, lowHorizonCosine(slice, 1)), 0.5f, 1e-5f));
         assert(near(sliceVisibility(slice, 1.0f, 1.0f), 0.0f, 1e-5f));
         assert(near(horizonCosine(Vec3{1.0f, 0.0f, 1.0f}, up), std::sqrt(0.5f), 1e-6f));
+    }
+
+    // A sector's place is its share of the slice's cosine-weighted light, so equal sectors weigh the same: 0 and 1 at
+    // the surface's two horizons, and in between the closed form's share, checked by quadrature.
+    void testSectorShare() {
+        const Vec3 toCamera{0.0f, 0.0f, 1.0f};
+        const Vec3 direction{1.0f, 0.0f, 0.0f};
+
+        for (float tilt : {0.0f, 0.4f, -0.9f, 1.2f}) {
+            const AoSlice slice = aoSlice(Vec3{std::sin(tilt), 0.0f, std::cos(tilt)}, toCamera, direction);
+            assert(near(sectorShare(slice, lowHorizonCosine(slice, 0), 0), 1.0f, 1e-4f));
+            assert(near(sectorShare(slice, lowHorizonCosine(slice, 1), 1), 0.0f, 1e-4f));
+            const float low = tilt - pi * 0.5f;
+            const float high = tilt + pi * 0.5f;
+            const auto weightBetween = [tilt](float from, float to) {
+                double integral = 0.0;
+                const int steps = 20000;
+
+                for (int i = 0; i < steps; ++i) {
+                    const double theta = from + (to - from) * (i + 0.5) / steps;
+                    integral += std::cos(theta - tilt) * std::abs(std::sin(theta));
+                }
+
+                return static_cast<float>(integral * (to - from) / steps);
+            };
+            const float total = weightBetween(low, high);
+
+            for (float share : {0.15f, 0.5f, 0.85f}) {
+                const float angle = low + (high - low) * share;
+                const int side = angle < 0.0f ? 1 : 0;
+                assert(near(sectorShare(slice, std::cos(angle), side), weightBetween(low, angle) / total, 1e-3f));
+            }
+        }
+
+        // Below the surface counts as the horizon, and side 1 lies before side 0.
+        const AoSlice flat = aoSlice(toCamera, toCamera, direction);
+        assert(sectorShare(flat, -0.5f, 0) == 1.0f && sectorShare(flat, -0.5f, 1) == 0.0f);
+        assert(sectorShare(flat, 0.5f, 1) < sectorShare(flat, 1.0f, 0) && sectorShare(flat, 1.0f, 0) < sectorShare(flat, 0.5f, 0));
+    }
+
+    // A sample no brighter than the limit is left alone; a brighter one (the sun's glint off a metal ball) comes down to
+    // it keeping its colour, so one pixel cannot speckle what it lights.
+    void testGatheredSampleLight() {
+        assert(nearVec(gatheredSampleLight(Vec3{1.0f, 2.0f, 0.5f}, 8.0f), Vec3{1.0f, 2.0f, 0.5f}, 0.0f));
+        assert(nearVec(gatheredSampleLight(Vec3{8.0f, 2.0f, 0.0f}, 8.0f), Vec3{8.0f, 2.0f, 0.0f}, 0.0f));
+        assert(nearVec(gatheredSampleLight(Vec3{80.0f, 20.0f, 40.0f}, 8.0f), Vec3{8.0f, 2.0f, 4.0f}, 1e-5f));
+        assert(nearVec(gatheredSampleLight(Vec3{}, 8.0f), Vec3{}, 0.0f));
+    }
+
+    // The sectors an arc covers at least half of (the paper's round criterion), either way round.
+    void testSectorMask() {
+        assert(sectorMask(0.0f, 1.0f) == 0xFFFFFFFFu);
+        assert(sectorMask(0.5f, 1.0f) == 0xFFFF0000u);
+        assert(sectorMask(1.0f, 0.5f) == 0xFFFF0000u);
+        assert(sectorMask(0.0f, 0.25f) == 0x000000FFu);
+        assert(sectorMask(0.5f, 0.5f) == 0u);
+        assert(sectorMask(0.5f, 0.505f) == 0u);
+        assert(sectorMask(1.0f, 1.0f) == 0u);
+        assert(sectorMask(0.5f, 0.53125f) == 0x00010000u);
     }
 
     /*
@@ -258,11 +327,28 @@ namespace {
 
         for (int i = 0; i < grid; ++i) {
             for (int j = 0; j < grid; ++j) {
-                sum += ambientOcclusionAt(x, y, frame, settings, (i + 0.5f) / grid, (j + 0.5f) / grid, depthAt);
+                sum += ambientOcclusionAt(x, y, frame, settings, (i + 0.5f) / grid, (j + 0.5f) / grid, depthAt).visibility;
             }
         }
 
         return static_cast<float>(sum / (grid * grid));
+    }
+
+    // The same with the light gathered from a picture.
+    AoLight averagedLight(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, const AoDepthImage& depthAt, const AoPicture& picture) {
+        const int grid = 8;
+        AoLight sum;
+        sum.visibility = 0.0f;
+
+        for (int i = 0; i < grid; ++i) {
+            for (int j = 0; j < grid; ++j) {
+                const AoLight light = ambientOcclusionAt(x, y, frame, settings, (i + 0.5f) / grid, (j + 0.5f) / grid, depthAt, picture);
+                sum.visibility += light.visibility / (grid * grid);
+                sum.gathered = sum.gathered + light.gathered * (1.0f / (grid * grid));
+            }
+        }
+
+        return sum;
     }
 
     /*
@@ -282,6 +368,7 @@ namespace {
         int x = 0;
         int y = 0;
         AmbientOcclusionSettings settings;
+        settings.radius = 0.5f;
         texelOf(viewProjection, Vec3{0.0f, 0.0f, -2.5f} - eye, x, y);
         assert(averagedOcclusion(x, y, frame, settings, depthAt) > 0.98f);
 
@@ -317,7 +404,68 @@ namespace {
         const float half = averagedOcclusion(x, y, frame, far, depthAt);
         assert(near(half, 0.5f, 0.06f));
 
-        assert(ambientOcclusionAt(static_cast<int>(screenSize.width / 2), 0, frame, settings, 0.5f, 0.5f, depthAt) == 1.0f);
+        const AoLight sky = ambientOcclusionAt(static_cast<int>(screenSize.width / 2), 0, frame, settings, 0.5f, 0.5f, depthAt);
+        assert(sky.visibility == 1.0f && sky.gathered.x == 0.0f);
+
+        /*
+        * The light gathered: seen sectors and open ones share out the whole hemisphere, so a picture of 1 everywhere
+        * (a white furnace) gives exactly the open light's missing share, and nothing is counted twice. It takes the
+        * colour of what it sees, and open floor gathers nothing from itself.
+        */
+        const AoPicture white = [](int, int) { return Vec3{1.0f, 1.0f, 1.0f}; };
+        const AoLight furnace = averagedLight(x, foot, frame, far, depthAt, white);
+        assert(near(furnace.visibility + furnace.gathered.x, 1.0f, 0.02f));
+        assert(furnace.gathered.x > 0.35f);
+
+        const AoPicture red = [](int, int) { return Vec3{0.8f, 0.0f, 0.0f}; };
+        const AoLight tinted = averagedLight(x, foot, frame, far, depthAt, red);
+        assert(near(tinted.gathered.x, furnace.gathered.x * 0.8f, 1e-3f) && tinted.gathered.y == 0.0f && tinted.gathered.z == 0.0f);
+
+        const AoPicture blinding = [](int, int) { return Vec3{1000.0f, 1000.0f, 1000.0f}; };
+        assert(averagedLight(x, foot, frame, far, depthAt, blinding).gathered.x <= furnace.gathered.x * far.indirectBrightest * 1.01f);
+
+        texelOf(viewProjection, Vec3{0.0f, 0.0f, -2.5f} - eye, x, y);
+        assert(averagedLight(x, y, frame, settings, depthAt, white).gathered.x < 0.02f);
+    }
+
+    /*
+    * A thin board 0.3 m in front of a wall the camera faces: a pixel on the wall beside it. Thin, the board blocks only
+    * its own arc and light comes in behind it; assumed thick, it blocks everything behind it too, the halo a horizon
+    * alone leaves.
+    */
+    void testThicknessLetsLightBehind() {
+        const Camera camera{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f,
+                            static_cast<float>(screenSize.width) / static_cast<float>(screenSize.height), 0.1f, 500.0f};
+        const Mat4 viewProjection = cameraRelativeViewProjection(camera);
+        const Mat4 inverseViewProjection = *inverse(viewProjection);
+        const Vec2 size{static_cast<float>(screenSize.width), static_cast<float>(screenSize.height)};
+        std::vector<float> depths(screenSize.width * screenSize.height);
+
+        for (std::uint32_t y = 0; y < screenSize.height; ++y) {
+            for (std::uint32_t x = 0; x < screenSize.width; ++x) {
+                const Vec3 direction = positionAtPixel(inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, 0.5f, size).normalized();
+                const float height = direction.y * (-5.0f / direction.z);
+                const float z = std::abs(height) < 0.1f ? -4.7f : -5.0f;
+                const Vec3 point = direction * (z / direction.z);
+                const Vec4 clip = viewProjection * Vec4{point.x, point.y, point.z, 1.0f};
+                depths[y * screenSize.width + x] = clip.z / clip.w;
+            }
+        }
+
+        const AoDepthImage depthAt = [&](int x, int y) { return depths[static_cast<std::size_t>(y) * screenSize.width + static_cast<std::size_t>(x)]; };
+        const AoFrame frame{inverseViewProjection, screenSize, pixelFootprint(viewProjection, static_cast<float>(screenSize.height))};
+        int x = 0;
+        int y = 0;
+        texelOf(viewProjection, Vec3{0.0f, 0.2f, -5.0f}, x, y);
+
+        AmbientOcclusionSettings thin;
+        thin.radius = 1.0f;
+        thin.slices = 8;
+        thin.steps = 16;
+        thin.thickness = 0.02f;
+        AmbientOcclusionSettings thick = thin;
+        thick.thickness = 5.0f;
+        assert(averagedOcclusion(x, y, frame, thin, depthAt) > averagedOcclusion(x, y, frame, thick, depthAt) + 0.05f);
     }
 
     void testPackPass() {
@@ -326,12 +474,19 @@ namespace {
         AmbientOcclusionSettings settings;
         settings.slices = 2;
         settings.steps = 5;
-        const GpuAmbientOcclusionPass pass = packAmbientOcclusionPass(inverse, viewProjection, RenderSize{200, 100}, settings, 7);
+        const Mat4 reprojection = Mat4::translation(4.0f, 5.0f, 6.0f);
+        const GpuAmbientOcclusionPass pass = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{0.25f, -0.5f}, RenderSize{200, 100}, settings, 7, false);
         assert(pass.inverseViewProjection[12] == 1.0f && pass.inverseViewProjection[13] == 2.0f);
         assert(pass.size[0] == 200.0f && pass.size[1] == 100.0f && pass.size[2] == 1.0f / 200.0f && pass.size[3] == 1.0f / 100.0f);
         assert(near(pass.lens[0], pixelFootprint(viewProjection, 100.0f), 1e-9f));
         assert(pass.options[0] == 0.5f && pass.options[1] == 0.6f && pass.options[2] == 2.0f && pass.options[3] == 5.0f);
         assert(pass.frame[0] == 7);
+        assert(pass.reprojection[12] == 4.0f && pass.lens[1] == 0.25f && pass.lens[2] == -0.5f);
+        assert(pass.gather[0] == 0.25f && pass.gather[1] == 0.0f && pass.gather[2] == 8.0f);
+
+        // Gathering reaches further than occlusion alone.
+        const GpuAmbientOcclusionPass gathering = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{}, RenderSize{200, 100}, settings, 7, true);
+        assert(gathering.options[0] == 2.0f && gathering.gather[1] == 1.0f);
     }
 }
 
@@ -341,6 +496,9 @@ void testAmbientOcclusion() {
     testSliceClosedForm();
     testOpenSurfaceIsFullyVisible();
     testHalfBlocked();
+    testSectorShare();
+    testSectorMask();
+    testGatheredSampleLight();
     testDepthNormal();
     testScreenSteps();
     testMultipleBounces();
@@ -348,5 +506,6 @@ void testAmbientOcclusion() {
     testSurfaceVisibility();
     testBlurWeight();
     testFloorAndWall();
+    testThicknessLetsLightBehind();
     testPackPass();
 }

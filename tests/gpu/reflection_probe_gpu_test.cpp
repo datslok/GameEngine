@@ -1,6 +1,7 @@
 #include "gpu_check.h"
 #include "gpu_test_functions.h"
 
+#include "render/gpu/planar_reflection.h"
 #include "render/gpu/reflection_probe.h"
 
 #include <algorithm>
@@ -101,17 +102,19 @@ namespace {
             inputs.push_back(gpuVec4(colour(50.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PROBE_LEVELS, inputs, 5, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_PROBE_LEVELS, inputs, 5, 3);
 
-        for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
             const GpuVec4* in = &inputs[i * 5];
-            const GpuVec4* out = &outputs[i * 2];
+            const GpuVec4* out = &outputs[i * 3];
             const std::uint32_t levels = static_cast<std::uint32_t>(in[0][1]);
             const std::uint32_t size = static_cast<std::uint32_t>(in[1][0]);
             report.check("probeRoughnessLevel", arithmeticTolerance, probeRoughnessLevel(in[0][0], levels), out[0][0]);
             report.check("prefilterSourceLevel", transcendentalTolerance, prefilterSourceLevel(in[0][2], 64, size), out[0][1]);
             report.check("blendedStandIn", arithmeticTolerance, blendedStandIn(vec3From(in[2]), vec3From(in[3]), vec3From(in[4]), in[1][1]),
                          vec3From(out[1]));
+            report.check("probeGuessedLight", arithmeticTolerance, probeGuessedLight(vec3From(in[2]), vec3From(in[3]), in[1][1], in[0][0]), vec3From(out[2]));
+            report.check("isOnPlanarMirror", arithmeticTolerance, isOnPlanarMirror(vec3From(in[2]), vec3From(in[3]), vec3From(in[3]), in[2][1]), out[2][3]);
         }
     }
 }

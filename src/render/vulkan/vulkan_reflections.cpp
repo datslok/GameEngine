@@ -25,7 +25,7 @@ namespace {
         ComputePipelineDescription reflections;
         reflections.shader = shader;
         reflections.storageBuffers = 1;
-        reflections.sampledImages = 9;
+        reflections.sampledImages = 10;
         reflections.storageImages = 1;
         return reflections;
     }
@@ -169,7 +169,7 @@ void VulkanReflections::buildDepthPyramid(VkCommandBuffer commands, FrameDescrip
 */
 void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& scene,
                                 VulkanImage& depth, VulkanImage& velocity, VulkanImage* previousPicture, VulkanReflectionProbe& probe,
-                                const GpuReflectionPass& pass, const ReflectionRaySets* rays) {
+                                VulkanImage& planarPicture, bool planarDrawn, const GpuReflectionPass& pass, const ReflectionRaySets* rays) {
     VulkanBuffer& record = passRecords.at(frameIndex);
     std::memcpy(record.getMapped(), &pass, sizeof(pass));
     record.flush();
@@ -183,6 +183,11 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
         colourPyramid->getImage().transition(commands, ImageState::ComputeRead, ImageContents::Discard);
     }
 
+    // The mirror's picture is bound even while unused, its contents discarded as the colour pyramid's are.
+    if (!planarDrawn) {
+        planarPicture.transition(commands, ImageState::ComputeRead, ImageContents::Discard);
+    }
+
     const VkImageView probeLight = probe.readableLight(commands);
     const VkImageView probeDistances = probe.readableDistances(commands);
     normals.transition(commands, ImageState::ComputeRead);
@@ -191,7 +196,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
     velocity.transition(commands, ImageState::ComputeRead);
     scene.transition(commands, ImageState::ComputeStorage);
 
-    const std::array<ComputeBinding, 11> bindings{
+    const std::array<ComputeBinding, 12> bindings{
         storageBufferBinding(record.get()),
         sampledBinding(nearest, depthPyramid.getView()),
         sampledBinding(pyramidSampler, colourPyramid->getImage().getView()),
@@ -202,6 +207,7 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
         sampledBinding(pyramidSampler, probeLight),
         sampledBinding(nearestLevels, probeDistances),
         sampledBinding(pyramidSampler, probeDistances),
+        sampledBinding(pyramidSampler, planarPicture.getView()),
         storageImageBinding(scene.getView()),
     };
 

@@ -30,6 +30,21 @@
 * Light bouncing between a crease's walls fills it back in, more for bright ones (multiBounceOcclusion), and the
 * reflection's stand-in is dimmed by Lagarde's fit from the occlusion and the roughness (specularOcclusion).
 *
+* The horizons are kept as a visibility bitmask (Therrien, Levesque and Gilet 2023): a horizon says everything below it
+* is solid, so a thin pole blocks all the light behind it. Instead each slice's half circle is cut into AO_SECTORS
+* sectors, a bit each, and a sample marks only the arc from its front to its back, a fixed thickness behind it along the
+* view; a surface running on from the last sample fills the gap between them, so a wall is not left full of holes. Unlike
+* the paper's even angles, the sectors here are equal shares of the slice's cosine-weighted light (sectorShare, from
+* Jimenez's own closed form), so every bit weighs the same and no solid horizon loses the exact answer's weight.
+*
+* That also gives bounce light (screen-space global illumination). A marked sector does not see the light from all
+* around: it sees the sample that marked it, and last frame's finished picture says how bright that is. So the slice
+* gathers each sample's picture times the share of the light its newly marked sectors hold, only those a nearer sample
+* has not taken. Open sectors get the light from all around, as before, and a white furnace adds up to exactly 1. The
+* main pass adds the gathered light to the diffuse light from all around, and the surface's albedo scales both. As the
+* picture holds last frame's bounce, each frame adds a bounce, a geometric series in the albedo, which converges.
+* Only what is on screen can bounce, and a picture at the first frame or without anti-aliasing is not there to read.
+*
 * The pass runs between the depth prepass and the main pass (ambient_occlusion.comp). This is the API-free part,
 * mirrored by assets/shaders/ambient_occlusion.glsl and checked against it by the GPU tests.
 */
@@ -49,7 +64,22 @@ struct AmbientOcclusionSettings {
     int slices = 3;
     int steps = 6;
 
-    // A crease's walls bouncing light back in, more for bright ones (Jimenez 2016's fit).
+    // How deep each sample is taken to be along the view (metres): light passes behind it. Too thin and walls turn
+    // leaky; too thick and thin things cast halos.
+    float thickness = 0.25f;
+
+    // Bounce light gathered from last frame's picture (screen-space global illumination), needing anti-aliasing and
+    // standing aside for the light probes, which already hold it.
+    bool indirect = true;
+
+    // How far round a point its samples reach while gathering (metres): bounce light carries further than creases.
+    float indirectRadius = 2.0f;
+
+    // The brightest a gathered sample counts for, in the picture's linear light: the sun's glint off a metal ball is
+    // thousands of times brighter than what it stands for, and one such pixel would speckle whatever it lights.
+    float indirectBrightest = 8.0f;
+
+    // A crease's walls bouncing light back in, more for bright ones (Jimenez 2016's fit), while nothing is gathered.
     bool multipleBounces = true;
 
     // The reflection's stand-in dimmed in creases too (Lagarde 2014's fit).
@@ -59,8 +89,8 @@ struct AmbientOcclusionSettings {
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a radius not above 0, a falloff outside (0, 1], or slices or steps outside 1 up to
-// AO_MAX_SLICES and AO_MAX_STEPS.
+// Throws std::invalid_argument for a radius, indirect radius, thickness or brightest sample not above 0, a falloff outside (0, 1], or
+// slices or steps outside 1 up to AO_MAX_SLICES and AO_MAX_STEPS.
 void validateAmbientOcclusion(const AmbientOcclusionSettings& settings);
 
 // An occluder's weight at this distance from the point: 1 up to the falloff's start, fading linearly to 0 at the radius.
@@ -89,6 +119,16 @@ float horizonCosine(const Vec3& offset, const Vec3& toCamera);
 // The cosine-weighted open arc between the horizons (Jimenez 2016's closed form, clamped to the normal's hemisphere),
 // times the projected normal's length: its average over slices round the way to the camera is the visibility.
 float sliceVisibility(const AoSlice& slice, float horizonCosine0, float horizonCosine1);
+
+// A gathered sample's light, brought down to the brightest it may be in its largest channel, keeping its colour.
+Vec3 gatheredSampleLight(const Vec3& light, float brightest);
+
+// Where a direction lies in the slice as a share of its cosine-weighted light, 0 at side 1's horizon to 1 at side 0's:
+// the direction's horizon cosine, on this side of the way to the camera. Directions below the surface count as the horizon.
+float sectorShare(const AoSlice& slice, float directionCosine, int side);
+
+// The bits of the sectors an arc between two shares covers at least half of, the shares either way round.
+std::uint32_t sectorMask(float share0, float share1);
 
 /*
 * The step along a surface one pixel each way across the screen, from the pixel's point and its two neighbours on each
@@ -128,6 +168,15 @@ float aoBlurWeight(float centreDistance, float neighbourDistance);
 // The depth image as the pass reads it (reversed-Z), at a texel inside it.
 using AoDepthImage = std::function<float(int x, int y)>;
 
+// Last frame's picture at the point a texel inside the render shows; empty when there is nothing to gather.
+using AoPicture = std::function<Vec3(int x, int y)>;
+
+// What the pass finds at a pixel: the open share, and the light gathered from what fills the rest.
+struct AoLight {
+    Vec3 gathered;
+    float visibility = 1.0f;
+};
+
 // What the pass knows of the frame: the camera-relative view-projection's inverse, the render size, and a pixel's
 // footprint per metre of view distance.
 struct AoFrame {
@@ -137,25 +186,30 @@ struct AoFrame {
 };
 
 /*
-* The pass's loop, as ambient_occlusion.comp runs it, at texel (x, y): the visibility, 1 for the sky and for points
-* whose radius is under AO_MIN_SAMPLE_PIXELS on screen. sliceNoise turns the slices, stepNoise staggers the steps (0..1).
-* Samples off screen or on the sky count as open.
+* The pass's loop, as ambient_occlusion.comp runs it, at texel (x, y): open with nothing gathered for the sky and for
+* points whose radius is under AO_MIN_SAMPLE_PIXELS on screen. sliceNoise turns the slices, stepNoise staggers the steps
+* (0..1). Samples off screen or on the sky count as open. The reach is settings.radius; the pass record swaps in
+* settings.indirectRadius while gathering, so give the mirror that radius to compare them.
 */
-float ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
-                         const AoDepthImage& depthAt);
+AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
+                           const AoDepthImage& depthAt, const AoPicture& picture = {});
 
 // The pass record (std430, a storage buffer): the camera-relative view-projection's inverse (jitter included), the
-// render size and its inverse, x the pixel footprint per metre, then the radius, falloff, slices and steps, and the frame
-// (turning the noise; 0 while there is no anti-aliasing, whose blur wants it still).
+// render size and its inverse, x the pixel footprint per metre and yz this frame's jitter in render pixels, then the
+// radius, falloff, slices and steps, the frame (turning the noise; 0 while there is no anti-aliasing, whose blur wants it
+// still), this frame's clip space (without the jitter) to last frame's, and x the thickness, y 1 while gathering and z
+// the brightest sample.
 struct GpuAmbientOcclusionPass {
     float inverseViewProjection[16];
     float size[4];
     float lens[4];
     float options[4];
     std::int32_t frame[4];
+    float reprojection[16];
+    float gather[4];
 };
 
-static_assert(sizeof(GpuAmbientOcclusionPass) == 128, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
+static_assert(sizeof(GpuAmbientOcclusionPass) == 208, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
 
-GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, RenderSize size,
-                                                 const AmbientOcclusionSettings& settings, std::uint32_t frame);
+GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
+                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers);

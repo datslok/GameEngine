@@ -64,6 +64,7 @@ namespace {
     void testRayTracingIsOffByDefault() {
         const RenderSettings defaults;
         assert(!defaults.rayTracing);
+        assert(!defaults.globalIllumination.enabled);
         assert(!tracesRays(defaults, true) && !tracesRays(defaults, false));
 
         RenderSettings settings;

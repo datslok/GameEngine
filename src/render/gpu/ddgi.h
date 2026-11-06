@@ -47,8 +47,9 @@ inline constexpr int maxProbesPerVolume = 65535;
 * queries there are no probes yet (a software tracer comes later), and nothing here applies.
 */
 struct GlobalIlluminationSettings {
-    // Trace and update the probes round the frame's ProbeCascades.
-    bool enabled = true;
+    // Trace and update the probes round the frame's ProbeCascades. Off by default, on hold while screen-space bounce light
+    // stands in (ROADMAP phase 16); it needs RenderSettings::rayTracing on too.
+    bool enabled = false;
 
     /*
     * Where the probes are (render/gpu/probe_cascades.h): probeCascades nested grids round the point the game's

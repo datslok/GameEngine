@@ -1,5 +1,8 @@
 #pragma once
 
+#include <span>
+
+#include "scene/flat_faces.h"
 #include "ecs/world.h"
 #include "math/mat4.h"
 #include "scene/asset_handles.h"
@@ -37,6 +40,9 @@ struct DrawItem {
     // The model matrix the same part was drawn with last frame (MotionHistory), so the renderer can tell how it moved
     // (motion vectors for temporal anti-aliasing). None on its first frame, or without a history: treated as not moving.
     std::optional<Mat4> previousModel;
+
+    // The mesh's flat faces (scene/flat_faces.h, attachFlatFaces), held by the engine, which planar reflections choose from.
+    std::span<const FlatFace> flatFaces{};
 
     // A deforming mesh's shape this frame (DeformedMesh::shape, set by attachShapes), 0 for every other mesh: the shadow
     // cache's fingerprint of the casters includes it, so a caster that changes shape where it stands is drawn again.
