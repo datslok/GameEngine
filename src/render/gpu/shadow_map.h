@@ -87,10 +87,9 @@ struct ShadowSettings {
 
     // A flat mirror's own cascades (render/gpu/planar_reflection.h): the sun's shadows for what the mirror shows, which
     // is mostly behind the camera, where its own cascades never reach. 0 leaves the mirror in full sun. They are the
-    // least important shadows, so a full atlas shrinks them first, and no larger than the atlas's largest square. 4096 as the
-    // camera's own: at 2048 the sunlit patches a mirror showed had stepped edges (the light lab's back room).
+    // least important shadows, so a full atlas shrinks them first, and no larger than the atlas's largest square.
     int mirrorCascadeCount = 2;
-    CascadeResolution mirrorCascadeResolution = CascadeResolution::Pixels4096;
+    CascadeResolution mirrorCascadeResolution = CascadeResolution::Pixels2048;
 
     // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
     // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
