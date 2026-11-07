@@ -117,7 +117,14 @@ layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
 // The visibility in creases and corners in alpha and the light bounced from the screen in rgb (ambient_occlusion.comp), read while ambientOcclusionOptions.x is 1, and the fits
 // that turn it into the occlusion of the light from all around and of the reflection.
 layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
+
+// The mean of the picture round each pixel while ambient occlusion gathers light (AoLight::fill), for the sky
+// visibility's blocked share.
+layout(set = 1, binding = 31) uniform sampler2D ambientFill;
 #include "ambient_occlusion.glsl"
+
+// How much of the sky each point sees (render/gpu/sky_visibility.h): the flat ambient light dimmed indoors without probes.
+#include "scene_sky_visibility.glsl"
 
 #ifdef TRANSPARENT
 /*
@@ -716,6 +723,24 @@ void main() {
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
     }
 
+    // Without probes, the flat ambient for the sky the point sees (the grid round the camera, facing the shading normal),
+    // and for the rest the brighter of the bounce guess and the screen's fill, how bright the surroundings really are
+    // (skyLightWithFill). The reflection's stand-in takes the share along the mirror direction with the guess alone: the
+    // fill is what lies round the point, not what a mirror shows, and a bright patch near a mirror would light it up.
+    float skyShare = 1.0;
+
+    if (!probesOn && skyVisibilityRead()) {
+        SkyVisibility sky = skyVisibilityAt(relativePosition, geometricNormal, toCamera);
+        bool filled = ambientOcclusionOptions.x != 0 && !captureView && !transparentView;
+        vec3 fill = filled ? texelFetch(ambientFill, ivec2(gl_FragCoord.xy), 0).rgb : vec3(0.0);
+        float bounceGuess = skyVisibilityOptions.y * skyBlockersLit(sky, skyVisibilityMore.x);
+        float seen = skySeenFacing(sky, shadingNormal);
+        skyShare = skyWithBounce(seen, skyBlockersLit(sky, skyVisibilityMore.x), skyVisibilityOptions.y);
+        diffuseLight = skyLightWithFill(flatAmbient(), seen, bounceGuess, fill);
+        mirrorLight = flatAmbient() * skyVisibilityAlong(sky, reflect(-toCamera, shadingNormal), skyVisibilityOptions.y, skyVisibilityMore.x);
+        ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
+    }
+
 #ifdef TRANSPARENT
     // Glass has no screen-space reflection (it is not in the depth image), so its reflection is the probe's light.
     if (transparentProbe.x > 0.5) {
@@ -781,10 +806,21 @@ void main() {
     reflectionNormal = octahedralEncode(shadingNormal);
     reflectionSurface = vec4(point.specularAlbedo * reflectionOcclusion, normalLength > 0.0 ? roughness : 1.0);
     reflectionStandIn = mirrorLight * point.specularAlbedo;
+
+    // The sky visibility debug view keeps the reflection pass from swapping anything into its grey.
+    if (skyVisibilityOptions.w > 0.5 && !captureView) {
+        reflectionSurface = vec4(0.0, 0.0, 0.0, 1.0);
+        reflectionStandIn = vec3(0.0);
+    }
 #endif
 
     // The heatmap debug view: the picture mostly covered by the colour of how many lights this pixel's cluster lists.
     if (shadingOptions.y != 0 && !captureView) {
         outputColour.rgb = mix(outputColour.rgb, clusterHeatColour(clusterLightCount()), 0.75);
+    }
+
+    // The sky visibility debug view: the share of the sky's light each surface gets, as grey.
+    if (skyVisibilityOptions.w > 0.5 && !captureView) {
+        outputColour.rgb = vec3(skyShare);
     }
 }

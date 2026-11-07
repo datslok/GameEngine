@@ -50,6 +50,7 @@
 #include "render/vulkan/vulkan_ambient_occlusion.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
+#include "render/vulkan/vulkan_sky_visibility.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
 #include "render/vulkan/vulkan_texture.h"
@@ -280,6 +281,10 @@ private:
     // Volumetric fog (render/gpu/volumetric_fog.h): its grid, lit after the shadows, and the picture seen through it.
     std::unique_ptr<VulkanFog> fog;
 
+    // The sky visibility grid (render/gpu/sky_visibility.h): baked on the CPU round the camera, its points copied up
+    // when they change, read by the main pass and the fog without light probes.
+    std::unique_ptr<VulkanSkyVisibility> skyVisibility;
+
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag), each for cut-outs too, indexed by capturePipelineIndex. On GPUs with ray queries each again
     // tracing the sun's shadow past its cascades (probe_capture_rays.frag), for frames with ray tracing on, in a layout
@@ -488,7 +493,15 @@ private:
                                std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred, bool gathersLight,
-                               bool glassShadows, const GpuFog& frameFog);
+                               bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility);
+
+    // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the
+    // sky's reach themselves).
+    bool readsSkyGrid(const FrameDescription& description, const RenderSettings& settings) const;
+
+    // The sky visibility grid followed and baked on the CPU for a frame that reads it, before the frame begins: within
+    // its budget, or everything waiting (captures).
+    void bakeSkyVisibility(const FrameDescription& description, const RenderSettings& settings, bool everything);
 
     // Whether this frame traces (and samples) light probes: ray tracing (the GPU's and the setting), global illumination
     // on, and ProbeCascades.

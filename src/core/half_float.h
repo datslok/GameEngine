@@ -10,6 +10,10 @@
 // The value of a half float's bits, exactly (every half is a float).
 float halfToFloat(std::uint16_t bits);
 
+// The half nearest a float, ties to the even one (as GPUs round, GLSL's packHalf2x16 among them): too big for a half
+// becomes infinity, too small a subnormal or zero, NaN stays NaN.
+std::uint16_t floatToHalf(float value);
+
 // What halfStepDistance returns when one side is NaN and the bits differ: as far apart as anything can be.
 inline constexpr std::uint32_t halfStepDistanceNever = 0xFFFFFFFFu;
 

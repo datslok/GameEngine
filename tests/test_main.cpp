@@ -148,6 +148,8 @@ void testPlanarReflection();
 void testMirroredLight();
 void testAmbientOcclusion();
 void testVolumetricFog();
+void testSkyVisibility();
+void testStaticGeometry();
 void testUpscaling();
 void testDisplayOutput();
 void testSettingsFile();
@@ -336,6 +338,8 @@ int main(int argumentCount, char** arguments) {
     testMirroredLight();
     testAmbientOcclusion();
     testVolumetricFog();
+    testSkyVisibility();
+    testStaticGeometry();
     testUpscaling();
     testDisplayOutput();
     testSettingsFile();

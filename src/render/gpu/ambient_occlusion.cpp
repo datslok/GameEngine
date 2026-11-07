@@ -246,6 +246,8 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
 
     float visibility = 0.0f;
     Vec3 gathered;
+    Vec3 surroundings;
+    float seenWeights = 0.0f; // each sample's weight fades to nothing at the reach, so a bright patch leaving it fades
 
     for (int slice = 0; slice < settings.slices; ++slice) {
         const float angle = std::numbers::pi_v<float> * (static_cast<float>(slice) + sliceNoise) / static_cast<float>(settings.slices);
@@ -307,8 +309,18 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
                 const std::uint32_t mask = sectorMask(start, end);
                 const std::uint32_t fresh = mask & ~marked;
 
-                if (fresh != 0u && picture) {
-                    sliceLight = sliceLight + gatheredSampleLight(picture(sx, sy), settings.indirectBrightest) * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
+                // The fill takes the first slice's samples alone: its blur smooths it anyway, and each read costs a reprojection.
+                if (picture) {
+                    const Vec3 seen = gatheredSampleLight(picture(sx, sy), settings.indirectBrightest);
+
+                    if (slice == 0) {
+                        surroundings = surroundings + seen * weight;
+                        seenWeights += weight;
+                    }
+
+                    if (fresh != 0u) {
+                        sliceLight = sliceLight + seen * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
+                    }
                 }
 
                 marked |= mask;
@@ -321,7 +333,8 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
     }
 
     const float slices = static_cast<float>(settings.slices);
-    return AoLight{gathered * (1.0f / slices), std::clamp(visibility / slices, 0.0f, 1.0f)};
+    const Vec3 fill = seenWeights > 1e-6f ? surroundings * (1.0f / seenWeights) : Vec3{};
+    return AoLight{gathered * (1.0f / slices), std::clamp(visibility / slices, 0.0f, 1.0f), fill};
 }
 
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,

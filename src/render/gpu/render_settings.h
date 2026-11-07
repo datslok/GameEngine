@@ -10,6 +10,7 @@
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/shadow_map.h"
+#include "render/gpu/sky_visibility.h"
 #include "render/gpu/taa.h"
 #include "render/gpu/tone_mapping.h"
 #include "render/gpu/transparency.h"
@@ -41,6 +42,10 @@ struct RenderSettings {
     // Ambient occlusion (render/gpu/ambient_occlusion.h): the light from all around dimmed in creases and corners, from
     // the depth prepass's depths.
     AmbientOcclusionSettings ambientOcclusion;
+
+    // Sky visibility (render/gpu/sky_visibility.h): the flat ambient light dimmed by how much sky each point sees, from a
+    // grid round the camera baked on the CPU against the static level, so rooms go dark without the light probes.
+    SkyVisibilitySettings skyVisibility;
 
     // Glass and blended surfaces (render/gpu/transparency.h): the reactive mask that keeps anti-aliasing from smearing them.
     TransparencySettings transparency;

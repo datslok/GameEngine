@@ -187,6 +187,36 @@ namespace {
             }
         }
     }
+
+    /*
+    * A walk bringing its own marks meets what the grid's own would, each item once, and two walks taking turns with
+    * their own marks never hide items from each other (as threads walking one grid at once would).
+    */
+    void testRayWalkWithItsOwnMarks() {
+        UniformGrid grid{2.0f};
+        grid.insert(0, Aabb{Vec3{1.5f, 0.0f, 0.0f}, Vec3{2.5f, 1.0f, 1.0f}});
+        grid.insert(1, Aabb{Vec3{1.0f, 0.0f, 0.0f}, Vec3{12.0f, 1.0f, 1.0f}});
+        const Ray east{Vec3{-5.0f, 0.5f, 0.5f}, Vec3{1.0f, 0.0f, 0.0f}};
+
+        GridMarks first;
+        GridMarks second;
+        std::vector<std::uint32_t> metFirst;
+        std::vector<std::uint32_t> metSecond;
+        grid.walkRay(east, unlimitedRayDistance, [&](std::uint32_t item, float reach) {
+            metFirst.push_back(item);
+            if (metSecond.empty()) {
+                grid.walkRay(east, unlimitedRayDistance, [&](std::uint32_t other, float otherReach) {
+                    metSecond.push_back(other);
+                    return otherReach;
+                }, second);
+            }
+            return reach;
+        }, first);
+
+        assert((sorted(metFirst) == std::vector<std::uint32_t>{0, 1}));
+        assert((sorted(metSecond) == std::vector<std::uint32_t>{0, 1}));
+        assert((sorted(itemsAlong(grid, east)) == std::vector<std::uint32_t>{0, 1}));
+    }
 }
 
 void testUniformGrid() {
@@ -195,4 +225,5 @@ void testUniformGrid() {
     testLargeItems();
     testRayWalk();
     testRayWalkMissesNothing();
+    testRayWalkWithItsOwnMarks();
 }

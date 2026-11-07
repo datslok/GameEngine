@@ -13,6 +13,7 @@
 #include "engine/engine_settings.h"
 #include "engine/game.h"
 #include "engine/settings_file.h"
+#include "engine/static_geometry.h"
 #include "input/input.h"
 #include "platform/command_socket.h"
 #include "platform/window.h"
@@ -155,6 +156,9 @@ private:
 
     // What every model part was drawn with last frame, so each frame's draws say how they moved (for temporal anti-aliasing).
     MotionHistory motionHistory;
+
+    // The static draws as triangles for the sky visibility grid's rays, rebuilt only when they change.
+    StaticGeometry staticGeometry;
 
     // After the window and renderer, which it uses until it is destroyed.
     DebugUi debugUi;

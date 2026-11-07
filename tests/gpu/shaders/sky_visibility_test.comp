@@ -1,0 +1,34 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs sky_visibility.glsl's functions on the cases sky_visibility_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "sky_visibility.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_SKY_VISIBILITY_SHARES) {
+        // Inputs: (a, b), (normal, bounce share), (direction, floor).
+        vec4 bands = testInput(0);
+        vec4 normal = testInput(1);
+        vec4 direction = testInput(2);
+        SkyVisibility visibility = SkyVisibility(bands.x, bands.yzw);
+        testOutput(0, vec4(skyVisibilityFacing(visibility, normal.xyz, normal.w, direction.w), skyVisibilityAlong(visibility, direction.xyz, normal.w, direction.w),
+                           skyVisibilityInAir(visibility, normal.w, direction.w), skyBlockersLit(visibility, direction.w)));
+        float guess = normal.w * skyBlockersLit(visibility, direction.w);
+        testOutput(1, vec4(skyLightWithFill(vec3(1.0, 0.5, 0.25), skySeenFacing(visibility, normal.xyz), guess, abs(direction.xyz)), 0.0));
+    } else if (function == GPU_TEST_SKY_VISIBILITY_UNPACK) {
+        // Input: the four words, their bits carried in floats.
+        SkyCell cell = unpackSkyCell(floatBitsToUint(testInput(0)));
+        testOutput(0, vec4(cell.visibility.open, cell.visibility.lean));
+        testOutput(1, vec4(cell.reachPositive, float(cell.state)));
+        testOutput(2, vec4(cell.reachNegative, 0.0));
+    } else if (function == GPU_TEST_SKY_CORNER_SEES) {
+        // Inputs: (reaches along +x +y +z, spacing), (reaches along -x -y -z), (offset from the point).
+        vec4 positive = testInput(0);
+        testOutput(0, vec4(skyCornerSees(positive.xyz, testInput(1).xyz, testInput(2).xyz, positive.w) ? 1.0 : 0.0, 0.0, 0.0, 0.0));
+    }
+}

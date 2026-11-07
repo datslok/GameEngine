@@ -11,9 +11,11 @@
 #include "scene/deforming_mesh.h"
 #include "scene/lighting.h"
 #include "scene/material.h"
+#include "physics/static_level.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -105,6 +107,12 @@ struct FrameDescription {
 
     // This frame's shape of every deforming mesh (scene/deforming_mesh.h), for the renderer to upload before drawing.
     std::vector<DeformedMesh> deformedMeshes;
+
+    // The level's parts that never move and stand in the sky's way, as triangles for rays on the CPU (the sky visibility
+    // grid, render/gpu/sky_visibility_bake.h), built by the engine from the static draws (engine/static_geometry.h); none
+    // when nothing blocks the sky. The version changes whenever the level does.
+    std::shared_ptr<const StaticLevel> staticLevel;
+    std::uint64_t staticLevelVersion = 0;
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.

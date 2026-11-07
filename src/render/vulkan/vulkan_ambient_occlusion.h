@@ -17,7 +17,7 @@ class VulkanDevice;
 * Ambient occlusion on the GPU (render/gpu/ambient_occlusion.h): the pass (ambient_occlusion.comp) between the depth
 * prepass and the main pass, the blur (ambient_occlusion_blur.comp) after it while there is no anti-aliasing or it gathers
 * light, and the render-size image the main pass reads (scene set 1, binding 25): the blur's while it runs, else the
-* pass's own.
+* pass's own; and the pass's fill (binding 31), the mean of last frame's picture round each pixel.
 */
 class VulkanAmbientOcclusion {
 public:
@@ -36,6 +36,10 @@ public:
     // The image the main pass samples (set 1, binding 25): the blurred one when blurred is true, else the pass's own.
     SampledImage sampledOcclusion(bool blurred) const;
 
+    // The fill the pass writes beside it (the mean of the picture round each pixel; zero while not gathering), which
+    // the main pass samples (set 1, binding 31). Smooth already, so never blurred.
+    SampledImage sampledFill() const;
+
     /*
     * Record the pass, and the blur when blur is true: the depth (the prepass's, left readable by compute) and last
     * frame's finished picture in, or standIn when there is none to gather from, the occlusion left readable by fragment
@@ -49,9 +53,14 @@ private:
     VkSampler nearest;
     std::unique_ptr<ComputePipeline> occlusionPipeline;
     std::unique_ptr<ComputePipeline> blurPipeline;
+    std::unique_ptr<ComputePipeline> fillBlurPipeline;
     std::vector<VulkanBuffer> passRecords;
 
     RenderSize size;
     VulkanImage noisy;
     VulkanImage blurred;
+    VulkanImage fill;
+    VulkanImage fillAcross; // the fill blurred across, before the pass down
+
+    void blurFill(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, std::uint32_t groupsAcross, std::uint32_t groupsDown);
 };

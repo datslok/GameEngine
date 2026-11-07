@@ -6,8 +6,8 @@
 * lists: the froxel's extinction from the height fog and the light it scatters towards the eye per unit of optical depth,
 * at a point moved round the froxel's middle by this frame's jitter. The light is the directional lights' (each with
 * its cascades' shadow), the point and spot lights its cluster lists (each with its shadow), and the light from all
-* around (the probes', or the flat ambient), through the albedo. Last frame's grid, read where the point was then, keeps
-* the history weight's share, so the frames' samples average into a smooth grid.
+* around (the probes', or the flat ambient as much as the air sees the sky), through the albedo. Last frame's grid,
+* read where the point was then, keeps the history weight's share, so the frames' samples average into a smooth grid.
 */
 #include "render/gpu/shader_shared.h"
 #include "lighting.glsl"
@@ -19,6 +19,7 @@
 #include "scene_probes.glsl"
 #include "scene_shadow_tiles.glsl"
 #include "scene_fog.glsl"
+#include "scene_sky_visibility.glsl"
 
 layout(local_size_x = FOG_LIGHT_GROUP_SIDE, local_size_y = FOG_LIGHT_GROUP_SIDE, local_size_z = FOG_LIGHT_GROUP_SIDE) in;
 
@@ -153,7 +154,8 @@ void main() {
         }
     }
 
-    light += frameFog.options.z > 0.5 ? probeAmbientInAir(position) : flatAmbient();
+    // Without probes, the flat ambient as much as the air there sees the sky (the sky visibility grid, open while unread).
+    light += frameFog.options.z > 0.5 ? probeAmbientInAir(position) : flatAmbient() * skyVisibilityInAirAt(position);
 
     vec4 froxelLight = vec4(light * frameFog.albedo.rgb, fogDensity(frameFog.medium, position.y + cameraOrigin.y));
     vec3 previous = fogVolumeCoordinate(position, frameFog.previousViewProjection, range);

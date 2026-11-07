@@ -907,7 +907,7 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `ShadowTileData` as before.
 - A draw list of `uint32` instance numbers.
 
-`GpuFrameData` (336 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
+`GpuFrameData` (384 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
 
 - the camera-relative view-projection, the camera position, ambient, counts, the atlas texel size;
 - the cluster grid (`clusterTiles`, `clusterScreen`, `clusterSlicing`, `viewRight`, `viewUp`, `viewForward`, laid out as `clusters.glsl`'s `ClusterGrid`);
@@ -915,7 +915,8 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - then the light probes' numbers (`probeOrigin`, `probeSpacing`, `probeAtlas`, `probeLights`, zero without probes; `packProbeSampling`, see Light probes);
 - `textureOptions`: x the surface textures' mip bias (`textureLodBias`, see Temporal anti-aliasing, Upscaling), passed to `triangle.frag`'s three `texture()` reads;
 - `mirroredLightOptions`: x 1 while the main pass adds the mirrored light pass's images, y the frame (the TAA frame mod 1024), turning rough mirrors' samples (see Mirrored lights);
-- and `ambientOcclusionOptions`: x 1 while the main pass reads ambient occlusion, y 1 with multiple bounces, z 1 with specular occlusion (see Ambient occlusion).
+- `ambientOcclusionOptions`: x 1 while the main pass reads ambient occlusion, y 1 with multiple bounces, z 1 with specular occlusion (see Ambient occlusion);
+- and `skyVisibilityOptions` and `skyVisibilityMore`: the cascades read (0 while the grid is not read), the bounce share, the lookup bias, 1 for the debug view, then the blockers' floor (`packSkyVisibilityOptions`, see Sky visibility).
 - It is made by `makeFrameData(lights, relativeViewProjection, cameraOrigin, clusters, clusteredShading, clusterHeatmap, shadows)`; the atlas texel size comes from `shadowAtlasSizeFor(shadows)`.
 
 `GpuShadowView` (64 bytes): a tile's world view-projection, the scene layout's one push constant (vertex stage).
@@ -2420,8 +2421,9 @@ How much of the light from all around reaches a point past the small things next
 - **Many bounces.** The picture holds last frame's bounce, so each frame adds one, a geometric series in the albedo, which converges.
 - **The image.** RGBA16F: rgb the gathered light, alpha the visibility. The main pass adds rgb to the diffuse light from all around, after dimming that by the visibility, and turns the Jimenez fit off (`ambientOcclusionOptions.y`), which would count the same bounce twice.
 - **When it gathers** (`gathersLight`): `indirect` on, last frame's picture usable (anti-aliasing on, not the first frame), and no probes in the frame. It then uses `indirectRadius` and always runs the blur, since its noise is far stronger.
+- **The fill** (`sky-visibility`): while gathering, the pass also averages the picture over its first slice's samples, each by its falloff weight (the occlusion's own, so a bright patch leaving the reach fades rather than steps), into a second RGBA16F image: rgb the mean (`AoLight::fill`), alpha the pixel's view distance (0 for the sky). It says how bright the surroundings really are, which the sky visibility grid's blocked share takes (see Sky visibility). Each pixel's few dozen samples are noisy, and a bright patch among them made the upscalers draw swirls, so a blur of its own smooths it (`ambient_fill_blur.comp`, two passes, across then down, `AO_FILL_BLUR_TAPS` 8 taps each way `AO_FILL_BLUR_STRIDE` 3 pixels apart, weighted by `aoBlurWeight` from the distances in the alpha, so it reads no depth). Main pass: set 1 binding 31 (`AmbientFillBinding`), fragment only. Only the first slice, since each read costs a reprojection: the fill and its blur cost about 0.4 ms at 1080p on an RTX 5080 (AO 0.5-0.6 ms without, 1.0 with, the light lab's sunlit room).
 
-**Known limits:** only what is on screen bounces, so light goes when its source leaves the view, and a closed room keeps the flat ambient. Specular highlights in the picture bounce as if they were diffuse. Moving objects' bounce trails a frame behind.
+**Known limits:** only what is on screen bounces, so light goes when its source leaves the view (the sky visibility grid now dims a closed room's flat ambient, and the fill lights it from what the screen shows round each point). Specular highlights in the picture bounce as if they were diffuse. Moving objects' bounce trails a frame behind.
 
 **The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility at its pixel, takes the more closed of it and the material's baked occlusion where it has one (`surfaceVisibility`: min(screen, 1 + strength (texel − 1)), glTF's formula; the minimum, not the product, since both estimate the same open share and a crease both see would darken twice; the baked one also in the reflection probe's capture, being the surface's own) as v, and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
 
@@ -2435,6 +2437,73 @@ With it off and no baked occlusion every factor is exactly 1 and the picture is 
 **Tests**: `ambient_occlusion_test` (the closed form against quadrature; an open surface averages exactly 1 tilted or not; half the sky blocked gives a half; the normal at a wall's foot keeps the floor's slope; the screen radius, steps, falloff, bounces, specular occlusion, the baked occlusion's minimum and blur weight; and the pass's loop through a drawn depth image of a floor and a 2 m wall: open floor 1, a metre from the wall over 0.98, the foot under 0.85 with the default radius and 0.506 against 0.5 with a long one, the sky open), `quality_preset_test`, `gpu_timing_test`; GPU tests in `ambient_occlusion_gpu_test` (written and built, not run).
 
 **Not measured yet**: its cost and its look in the game, with bounce light too. **Not yet**: half resolution, if the cost calls for it.
+
+## Sky visibility
+
+How much of the sky each point round the camera sees, so the flat ambient light (the sky's light on an open floor, the same for every surface) dims indoors without light probes or ray tracing (`sky-visibility`, phase 16). Without it a closed room got the open sky's light, and the screen-space bounce light, reaching 2 m and seeing only the screen, could not tell a room was closed. `render/gpu/sky_visibility` (the maths, mirrored by `sky_visibility.glsl`, numbers in `sky_visibility_shared.h`), `render/gpu/sky_visibility_bake` (the CPU bake), `engine/static_geometry` (the level it bakes against), `render/vulkan/vulkan_sky_visibility`, `scene_sky_visibility.glsl`.
+
+**What each grid point holds.** V(w) is 1 for each way a ray escapes and 0 where it meets the level, kept as its first two spherical harmonic bands: V(w) ~ a + b . w, with a the share of the sphere open and b three times the mean of V w, pointing to the open side (`skyVisibilityFromRays`; the directions are taken about their own mean, which a finite Fibonacci spiral leaves a little off zero). A surface with normal n then sees the sky in proportion to
+
+  f(n) = (1 / pi) integral of V(w) max(0, n . w) dw = a + (2/3) b . n
+
+(`skySeenFacing`, clamped to 0..1): 1 for a floor under an open sky, 1/2 for a wall in an open field, 0 in a closed box. Along one direction (the reflection's stand-in) it is a + b . d (`skySeenAlong`); for air, a.
+
+**The blocked share.** A blocked way brings back the bounce share beta (`bounceShare`, 0.25) of how lit its blocker is, guessed from the point's own open share: g = clamp(2a, 0, 1), at least `blockersLitFloor` (0.1) (`skyBlockersLit`; under an open sky a point sees half the sphere and its ground sees all of it). The share a surface gets is f + beta g (1 - f) (`skyVisibilityFacing`, `skyVisibilityAlong`, `skyVisibilityInAir`): unchanged outdoors, while a closed room, whose walls see no sky either, keeps only the floor's share. A constant beta (the first try) left every room at a quarter of the sky's light at least, and eye adaptation brightened it back up.
+
+**The fill.** Where ambient occlusion gathers, its fill (see Ambient occlusion: the mean of the picture within 2 m of each pixel, blurred) says how bright the surroundings really are. The main pass's diffuse light from all around is `skyLightWithFill(flat, f, beta g, fill)`: the flat ambient for the sky seen, and for the rest the brighter of the guess and the fill. A room lit through its window then lights its own walls. Without it a crease, which gathers its neighbours' light from the screen, glowed brighter than the flat wall beside it, which got only the dim sky term (seen in the light lab as lines along every seam). The reflection's stand-in keeps the guess alone: the fill is what lies round the point, not what a mirror shows, and a bright patch near a mirror drew a disc on it.
+
+**The grid.** Cascades round the camera, reusing the probes' code (`probeWindow`, `scrolledProbes`, `probeCascadeWeight`, `GpuProbeCascade`):
+
+- Each cascade is a window of 48 x 24 x 48 points (`SKY_VISIBILITY_ACROSS`, `_HIGH`) on a lattice fixed in the world, offset a quarter of the densest spacing so no point lies on a floor, kept as a circular buffer, so a move bakes only the plane it brings in.
+- `cascades` 2 (at most 4), `spacing` 0.5 m, doubling each cascade: the densest reaches about 11 m round the camera and 5 m up and down, the next (1 m apart) twice that; past the last, the open sky as before. 110,592 points.
+- The GPU's copy is one RGBA32_UINT 3D image of 48 x 24 x 192 (room for four cascades, 3.5 MB, cleared to "not baked" at start), one cascade after another along z. Each point is a `GpuSkyCell` of 16 bytes: a and b as halves, the reach along the six axis directions in bytes, and the state (not baked, baked, buried).
+
+**The bake** (on the CPU, on every core):
+
+- Each point casts `rays` (64) rays on a Fibonacci sphere, up to `rayLength` (30 m; a ray running that far counts as open), against the engine's own `StaticLevel` (`StaticGeometry`: every draw that is static, casts shadows and is not seen through, rebuilt when their fingerprint changes).
+- That level uses 1 m collision cells with only floor-sized triangles on the list every ray tests: 1.35 microseconds a ray on the light lab, against 3.1 with the default cells.
+- More than a quarter of a point's rays meeting the back of a triangle (`SKY_VISIBILITY_BURIED_SHARE`) make it buried. Then six short rays along the axes, each up to a spacing, give its reach.
+- Threads walk the level's grid with marks of their own (`GridMarks`, the uniform grid's mailbox made per thread).
+- **Measured** on the light lab, 16 threads: the first fill 0.49 s; a plane of points brought in by a move, about 6 ms of all-core time.
+- **Budget:** `SkyVisibilityGrid::follow` places the cascades and queues the points a move brought in; `bake` takes as many as `bakeMilliseconds` (1 ms) allows, from what a point cost last time (`skyCellsForBudget`). Some cases bake everything at once: the first fill, a new level, a new shape (`sameSkyVisibilityGrid`: spacing, cascades, rays, ray length), more than half the grid waiting, and a capture (screenshot, golden view), whose picture must not depend on what came before. Points still waiting are left out when read.
+- **Where:** `VulkanRenderer::bakeSkyVisibility`, at the start of `render` before the swapchain image is acquired, and in `capture`. A 20-second bake in the unoptimised debug build, holding an acquired image, crashed the validation layer at the next submit; the debug build now compiles the bake and the level's ray code at `-O2` (the makefile), as it does the cloth.
+- **The copy** (`VulkanSkyVisibility::record`) goes into the frame's commands before anything reads the image, through the frame in flight's own staging buffer, only when the grid's version moved.
+
+**Reading it** (`skyVisibilityAt`, mirrored by `sampleSkyVisibility`): each cascade, densest first, adds its blend times its weight round the camera times what the denser ones left. Within one, the eight points round the lookup point (moved off the surface as the probes' self-shadow bias moves it, `lookupBias` 0.3) are blended:
+
+- by nearness (`probeTrilinearWeight`);
+- by side (`probeBackFaceWeight`, crushed as the probes' weights are);
+- and only where `skyCornerSees`: the offset from the point lies within its reach along each axis. Walls in levels mostly stand along the axes, so one in the way cuts that axis short: a cheap stand-in for the probes' distance test against leaks.
+
+Unbaked and buried points are left out; a cascade with none left adds nothing.
+
+**Where it is read:** only without light probes (`readsSkyGrid`: the setting on, a static level, no probes).
+
+- The main pass's diffuse light from all around and the reflection's stand-in, as above. Set 1 binding 29 is the image (exact texels), binding 30 the cascades' records (camera-relative).
+- The fog's light from all around, by the air's share (`skyVisibilityInAirAt`, `fog_light.comp`).
+- The debug view (`debugView`) draws the share facing each surface as grey, with the reflection pass kept out of it.
+
+**Settings** (`SkyVisibilitySettings`, `RenderSettings::skyVisibility`, F5 Sky visibility, `engine.render.skyVisibility.*`): `enabled` (on; off on the Low preset), `bounceShare`, `blockersLitFloor`, `spacing`, `cascades`, `rays`, `rayLength`, `lookupBias`, `bakeMilliseconds`, `debugView`. Changing the ones that shape the grid bakes it again.
+
+**Tests:**
+
+- `sky_visibility_test`:
+  - the bands for an open field, a closed box and an all-open sphere;
+  - the shares and their clamp, the floor, the fill;
+  - the reach test, packing, the cascades;
+  - reading with nothing baked, with every point alike, with buried and walled points left out, and a floor reading what is above it;
+  - the settings and their keys, the presets;
+  - baking over a floor, with a roof beyond the ray length, and in a room with a door (dark, brighter towards the door, buried in its wall, the reach to the wall);
+  - the budget; the grid following the camera a plane at a time, and starting afresh for a new level or shape; the same bake on four threads as on one.
+- `static_geometry_test`; `uniform_grid_test` (walks with their own marks); `half_float_test` (`floatToHalf`); `ambient_occlusion_test` (the fill).
+- GPU tests in `sky_visibility_gpu_test` (written and built, not run).
+
+**Limits:**
+
+- Only the static level counts: a door opening or a crate moving changes nothing.
+- The bounce it brings is a guess wherever the screen has no fill.
+- Faint warm glows appear round bright things mirrors show, from the fill.
+- The golden images differ.
 
 ## Volumetric fog
 

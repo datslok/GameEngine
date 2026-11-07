@@ -1,0 +1,65 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Ambient occlusion's fill blurred (render/gpu/ambient_occlusion.h, AoLight::fill), always while it gathers: one of two
+* passes, across then down (the push constant's direction), each pixel the mean of AO_FILL_BLUR_TAPS texels each way
+* AO_FILL_BLUR_STRIDE apart, each weighted by how near its view distance is to the pixel's (aoBlurWeight), so the fill
+* of a surface in front does not bleed onto one behind. The view distances ride in the fill's alpha, written by the
+* occlusion pass (0 for the sky, which is left out), so no depth is read and no point rebuilt.
+*/
+#include "ambient_occlusion.glsl"
+
+layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
+
+// The occlusion pass's record (GpuAmbientOcclusionPass): only the size is read here.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 inverseViewProjection;
+    vec4 size;
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D source;                    // rgb: the fill so far, a: the view distance
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D blurred;  // the same, blurred along the direction
+
+layout(push_constant) uniform Direction {
+    ivec4 direction; // xy: one texel along the blur
+};
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(pass.size.xy);
+
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    float centre = texelFetch(source, texel, 0).a;
+
+    if (centre <= 0.0) {
+        imageStore(blurred, texel, vec4(0.0));
+        return;
+    }
+
+    vec3 sum = vec3(0.0);
+    float weights = 0.0;
+
+    for (int tap = -AO_FILL_BLUR_TAPS; tap <= AO_FILL_BLUR_TAPS; ++tap) {
+        ivec2 at = texel + direction.xy * (tap * AO_FILL_BLUR_STRIDE);
+
+        if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size))) {
+            continue;
+        }
+
+        vec4 fill = texelFetch(source, at, 0);
+
+        if (fill.a <= 0.0) {
+            continue;
+        }
+
+        float weight = aoBlurWeight(centre, fill.a);
+        sum += fill.rgb * weight;
+        weights += weight;
+    }
+
+    imageStore(blurred, texel, vec4(weights > 0.0 ? sum / weights : vec3(0.0), centre));
+}

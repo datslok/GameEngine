@@ -424,8 +424,16 @@ namespace {
         const AoPicture blinding = [](int, int) { return Vec3{1000.0f, 1000.0f, 1000.0f}; };
         assert(averagedLight(x, foot, frame, far, depthAt, blinding).gathered.x <= furnace.gathered.x * far.indirectBrightest * 1.01f);
 
+        // The fill: the mean of what every sample saw, blocking or not, so an even picture fills with its own colour at
+        // the wall's foot and on open floor alike, a blinding one with the cap; without a picture, nothing.
+        const AoLight footFill = ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, red);
+        assert(near(footFill.fill.x, 0.8f, 1e-5f) && footFill.fill.y == 0.0f && footFill.fill.z == 0.0f);
+        assert(near(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, blinding).fill.x, far.indirectBrightest, 1e-3f));
+        assert(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt).fill.x == 0.0f);
+
         texelOf(viewProjection, Vec3{0.0f, 0.0f, -2.5f} - eye, x, y);
         assert(averagedLight(x, y, frame, settings, depthAt, white).gathered.x < 0.02f);
+        assert(near(ambientOcclusionAt(x, y, frame, settings, 0.5f, 0.5f, depthAt, red).fill.x, 0.8f, 1e-5f));
     }
 
     /*

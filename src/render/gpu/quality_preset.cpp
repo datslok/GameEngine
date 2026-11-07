@@ -30,6 +30,7 @@ namespace {
         int fogWidth = 0;
         int fogHeight = 0;
         int fogSlices = 0;
+        bool skyVisibility = false; // the sky visibility grid
         bool rayTracedReflections = false; // the ray-traced features (Ultra's only)
         bool mirroredLights = false;
 
@@ -65,6 +66,7 @@ namespace {
             .fogWidth = settings.fog.gridWidth,
             .fogHeight = settings.fog.gridHeight,
             .fogSlices = settings.fog.slices,
+            .skyVisibility = settings.skyVisibility.enabled,
             .rayTracedReflections = settings.reflections.rayTraced,
             .mirroredLights = settings.mirroredLights.enabled
         };
@@ -92,7 +94,7 @@ namespace {
                         .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
                         .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64,
                         .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3, .fog = false, .fogWidth = 96, .fogHeight = 54,
-                        .fogSlices = 32, .rayTracedReflections = false, .mirroredLights = false};
+                        .fogSlices = 32, .skyVisibility = false, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
                         .directionalDistance = 120.0f, .cascadeCount = 3,
@@ -100,7 +102,7 @@ namespace {
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
                         .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64,
                         .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3, .fog = true, .fogWidth = 128, .fogHeight = 72,
-                        .fogSlices = 48, .rayTracedReflections = false, .mirroredLights = false};
+                        .fogSlices = 48, .skyVisibility = true, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Ultra:
                 break;
         }
@@ -138,6 +140,7 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.fog.gridWidth = values.fogWidth;
     settings.fog.gridHeight = values.fogHeight;
     settings.fog.slices = values.fogSlices;
+    settings.skyVisibility.enabled = values.skyVisibility;
     settings.reflections.rayTraced = values.rayTracedReflections;
     settings.mirroredLights.enabled = values.mirroredLights;
 }

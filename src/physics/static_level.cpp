@@ -11,6 +11,23 @@ namespace {
             Vec3{std::max({a.x, b.x, c.x}), std::max({a.y, b.y, c.y}), std::max({a.z, b.z, c.z})}
         };
     }
+
+    // The nearest triangle a walk hands over: each is tested within the reach so far, and a hit shrinks it.
+    struct NearestTriangle {
+        const StaticLevel& level;
+        const Ray& ray;
+        std::optional<LevelHit>& best;
+
+        float operator()(std::uint32_t triangle, float reach) const {
+            const auto corners = level.getTriangle(triangle);
+            const std::optional<RayHit> hit = raycastTriangle(ray, corners[0], corners[1], corners[2], reach);
+            if (!hit) {
+                return reach;
+            }
+            best = LevelHit{*hit, triangle};
+            return hit->distance;
+        }
+    };
 }
 
 StaticLevel::StaticLevel(const CollisionSettings& settings)
@@ -77,21 +94,18 @@ const UniformGrid& StaticLevel::getGrid() const {
 */
 std::optional<LevelHit> raycast(const StaticLevel& level, const Ray& ray, float maxDistance, CollisionQueryStats* stats) {
     std::optional<LevelHit> best;
-
-    const GridRayWalk walk = level.getGrid().walkRay(ray, maxDistance, [&](std::uint32_t triangle, float reach) {
-        const auto corners = level.getTriangle(triangle);
-        const std::optional<RayHit> hit = raycastTriangle(ray, corners[0], corners[1], corners[2], reach);
-        if (!hit) {
-            return reach;
-        }
-        best = LevelHit{*hit, triangle};
-        return hit->distance;
-    });
+    const GridRayWalk walk = level.getGrid().walkRay(ray, maxDistance, NearestTriangle{level, ray, best});
 
     if (stats) {
         stats->tested = walk.items;
         stats->cellsWalked = walk.cells;
     }
+    return best;
+}
+
+std::optional<LevelHit> raycast(const StaticLevel& level, const Ray& ray, float maxDistance, GridMarks& marks) {
+    std::optional<LevelHit> best;
+    level.getGrid().walkRay(ray, maxDistance, NearestTriangle{level, ray, best}, marks);
     return best;
 }
 
