@@ -178,6 +178,11 @@ float specularOcclusion(float nDotV, float visibility, float roughness);
 // darken a crease both see twice.
 float surfaceVisibility(float screenVisibility, float occlusionTexel, float occlusionStrength);
 
+// How much a sample at this offset from the point counts towards the fill, for the surface's unit normal: nothing on or
+// below the surface (within AO_FILL_MIN_COSINE of it), rising to 1 straight overhead. Light from the surface's own plane
+// cannot reach it, so a sunlit patch on a floor does not light the floor round it.
+float fillFacingWeight(const Vec3& normal, const Vec3& offset);
+
 // A neighbour's weight in the blur: 1 at the pixel's own view distance, falling to 0 at AO_BLUR_DEPTH_SHARE of it away.
 float aoBlurWeight(float centreDistance, float neighbourDistance);
 
@@ -188,7 +193,8 @@ using AoDepthImage = std::function<float(int x, int y)>;
 using AoPicture = std::function<Vec3(int x, int y)>;
 
 // What the pass finds at a pixel: the open share, the light gathered from what fills the rest, and the fill: the mean of
-// the picture over the first slice's samples within the reach, each by its weight (how bright the surroundings are,
+// the picture over the first slice's samples within the reach that lie above the surface, each by its weight and its
+// facing weight (fillFacingWeight; how bright what the surface sees round it is,
 // which the sky visibility's blocked share takes, sky_visibility.h, skyLightWithFill), nothing without a picture. The
 // GPU blurs its fill (ambient_fill_blur.comp) before the main pass reads it.
 struct AoLight {

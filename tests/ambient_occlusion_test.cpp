@@ -281,6 +281,20 @@ namespace {
         assert(near(surfaceVisibility(0.7f, 0.5f, 1.0f), 0.5f, 1e-6f));
     }
 
+    // Straight overhead counts fully, the surface's own plane and below nothing, the threshold's cosine nothing, and in
+    // between a ramp; the offset's length does not matter.
+    void testFillFacingWeight() {
+        const Vec3 up{0.0f, 1.0f, 0.0f};
+        assert(near(fillFacingWeight(up, Vec3{0.0f, 3.0f, 0.0f}), 1.0f, 1e-6f));
+        assert(fillFacingWeight(up, Vec3{2.0f, 0.0f, 0.0f}) == 0.0f);
+        assert(fillFacingWeight(up, Vec3{2.0f, 0.001f, 1.0f}) == 0.0f);
+        assert(fillFacingWeight(up, Vec3{0.0f, -1.0f, 1.0f}) == 0.0f);
+        const float sine = static_cast<float>(AO_FILL_MIN_COSINE);
+        assert(near(fillFacingWeight(up, Vec3{std::sqrt(1.0f - sine * sine), sine, 0.0f}), 0.0f, 1e-5f));
+        const float halfway = 0.5f * (1.0f + sine);
+        assert(near(fillFacingWeight(up, Vec3{0.0f, halfway, std::sqrt(1.0f - halfway * halfway)} * 4.0f), 0.5f, 1e-5f));
+    }
+
     void testBlurWeight() {
         assert(aoBlurWeight(5.0f, 5.0f) == 1.0f);
         assert(near(aoBlurWeight(5.0f, 5.25f), 0.5f, 1e-5f));
@@ -437,16 +451,34 @@ namespace {
         const AoPicture blinding = [](int, int) { return Vec3{1000.0f, 1000.0f, 1000.0f}; };
         assert(averagedLight(x, foot, frame, far, depthAt, blinding).gathered.x <= furnace.gathered.x * far.indirectBrightest * 1.01f);
 
-        // The fill: the mean of what every sample saw, blocking or not, so an even picture fills with its own colour at
-        // the wall's foot and on open floor alike, a blinding one with the cap; without a picture, nothing.
+        // The fill: the mean of what the samples above the surface saw, so an even picture fills the wall's foot with its
+        // own colour (the wall stands above it), a blinding one with the cap; without a picture, nothing.
         const AoLight footFill = ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, red);
         assert(near(footFill.fill.x, 0.8f, 1e-5f) && footFill.fill.y == 0.0f && footFill.fill.z == 0.0f);
         assert(near(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, blinding).fill.x, far.indirectBrightest, 1e-3f));
         assert(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt).fill.x == 0.0f);
 
+        /*
+        * A bright floor and a dim wall, as a sunlit patch before a wall: the floor at the wall's foot sees only the wall
+        * above it, never the floor round it in its own plane; the wall a little above the foot sees the floor below it,
+        * so it takes the floor's light.
+        */
+        const AoPicture sunlitFloor = [&](int px, int py) {
+            const float height = positionAtPixel(inverseViewProjection, Vec2{px + 0.5f, py + 0.5f}, depthAt(px, py), size).y + eye.y;
+            return std::abs(height) < 1e-3f ? Vec3{5.0f, 5.0f, 5.0f} : Vec3{0.1f, 0.1f, 0.1f};
+        };
+        assert(near(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, sunlitFloor).fill.x, 0.1f, 1e-5f));
+
+        int wallRow = foot - 6;
+        const Vec3 wallPoint = positionAtPixel(inverseViewProjection, Vec2{x + 0.5f, wallRow + 0.5f}, depthAt(x, wallRow), size) + eye;
+        assert(near(wallPoint.z, wallZ, 1e-3f) && wallPoint.y > 0.01f);
+        assert(ambientOcclusionAt(x, wallRow, frame, far, 0.5f, 0.5f, depthAt, sunlitFloor).fill.x > 1.0f);
+
+        // Open floor, nothing above it within the reach: no fill at all, whatever the floor shows.
         texelOf(viewProjection, Vec3{0.0f, 0.0f, -2.5f} - eye, x, y);
         assert(averagedLight(x, y, frame, settings, depthAt, white).gathered.x < 0.02f);
-        assert(near(ambientOcclusionAt(x, y, frame, settings, 0.5f, 0.5f, depthAt, red).fill.x, 0.8f, 1e-5f));
+        assert(ambientOcclusionAt(x, y, frame, settings, 0.5f, 0.5f, depthAt, red).fill.x == 0.0f);
+        assert(ambientOcclusionAt(x, y, frame, settings, 0.5f, 0.5f, depthAt, sunlitFloor).fill.x == 0.0f);
     }
 
     /*
@@ -833,6 +865,7 @@ void testAmbientOcclusion() {
     testSpecularOcclusion();
     testSurfaceVisibility();
     testBlurWeight();
+    testFillFacingWeight();
     testFloorAndWall();
     testThicknessLetsLightBehind();
     testHistoryAge();

@@ -158,6 +158,18 @@ float surfaceVisibility(float screenVisibility, float occlusionTexel, float occl
     return min(screenVisibility, 1.0 + occlusionStrength * (occlusionTexel - 1.0));
 }
 
+// How much a sample at this offset counts towards the fill: nothing on or below the surface, 1 straight overhead.
+float fillFacingWeight(vec3 normal, vec3 offset) {
+    float offsetLength = length(offset);
+
+    if (!(offsetLength > 0.0)) {
+        return 0.0;
+    }
+
+    float lowest = float(AO_FILL_MIN_COSINE);
+    return clamp((dot(normal, offset) / offsetLength - lowest) / (1.0 - lowest), 0.0, 1.0);
+}
+
 float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return max(1.0 - abs(neighbourDistance - centreDistance) / (float(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0);
 }

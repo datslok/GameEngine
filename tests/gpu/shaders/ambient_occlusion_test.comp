@@ -38,7 +38,7 @@ void main() {
         testOutput(4, vec4(depthNormal(centre.xyz, step, offset.xyz), aoBlurWeight(afterNext.w, afterNext.w * 1.04)));
         testOutput(5, vec4(multiBounceOcclusion(beforeNext.w, albedo.rgb), surfaceVisibility(beforeNext.w, centre.w, toCamera.w)));
         testOutput(6, vec4(sectorShare(slice, albedo.w, 0), sectorShare(slice, last.x, 1), float(bitCount(sectorMask(before.w, beforeNext.w))), 0.0));
-        testOutput(7, vec4(gatheredSampleLight(albedo.rgb, beforeNext.w), 0.0));
+        testOutput(7, vec4(gatheredSampleLight(albedo.rgb, beforeNext.w), fillFacingWeight(normal.xyz, offset.xyz)));
     }
 
     if (function == GPU_TEST_AO_HISTORY) {

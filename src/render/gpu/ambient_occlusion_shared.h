@@ -38,6 +38,11 @@
 #define AO_FILL_BLUR_TAPS 12
 #define AO_FILL_BLUR_STRIDE 4
 
+// The fill counts only what lies above the surface: a sample's weight rises from 0 at this cosine between the normal and
+// the way to it (about 6 degrees above the surface, so depth rounding on the surface's own plane counts nothing) to 1
+// straight overhead.
+#define AO_FILL_MIN_COSINE 0.1
+
 // The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
 #define AO_MAX_HISTORY_FRAMES 64
 

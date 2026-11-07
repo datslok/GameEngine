@@ -153,8 +153,9 @@ void main() {
                 if (gathers && (fresh != 0u || slice == 0)) {
                     vec4 seen = pictureAt(at, atDepth);
 
+                    // Only what lies above the surface lights it (fillFacingWeight).
                     if (slice == 0) {
-                        surroundings += seen * weight;
+                        surroundings += seen * (weight * fillFacingWeight(normal, offset));
                     }
 
                     if (fresh != 0u) {
