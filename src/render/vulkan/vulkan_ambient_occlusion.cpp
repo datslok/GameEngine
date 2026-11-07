@@ -22,7 +22,7 @@ VulkanAmbientOcclusion::VulkanAmbientOcclusion(const VulkanDevice& device, VkSam
     ComputePipelineDescription occlusion;
     occlusion.shader = "assets/shaders/ambient_occlusion.comp.spv";
     occlusion.storageBuffers = 1;
-    occlusion.sampledImages = 2;
+    occlusion.sampledImages = 3;
     occlusion.storageImages = 2;
     occlusionPipeline = std::make_unique<ComputePipeline>(device, occlusion);
 
@@ -160,7 +160,7 @@ void VulkanAmbientOcclusion::denoiseInto(VkCommandBuffer commands, FrameDescript
 * accumulate). With the denoiser, the accumulation's image (or the pass's) then goes through its passes (see denoiseInto); whichever the main pass reads ends readable by fragment shaders.
 */
 void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth,
-                                     const SampledImage* gatherPicture, const SampledImage& standIn, const GpuAmbientOcclusionPass& pass, bool blur,
+                                     const SampledImage* gatherPicture, const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass, bool blur,
                                      bool previousCameraKnown) {
     // Whether last frame's history carries over is known here, where what it was made for is kept.
     const bool accumulates = pass.history[2] > 0.5f;
@@ -180,10 +180,11 @@ void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors&
     // The picture's pyramid, read trilinear at each sample's level (aoSampleLevel), already readable by compute.
     const SampledImage picture = gatherPicture != nullptr ? *gatherPicture : standIn;
     const SampledImage depthSample{depth.getView(), nearest, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
-    const std::array<ComputeBinding, 5> occlusionBindings{
+    const std::array<ComputeBinding, 6> occlusionBindings{
         storageBufferBinding(record.get()),
         sampledBinding(depthSample.sampler, depthSample.view, depthSample.layout),
         sampledBinding(picture.sampler, picture.view, picture.layout),
+        sampledBinding(blueNoise.sampler, blueNoise.view, blueNoise.layout),
         storageImageBinding(noisy.getView()),
         storageImageBinding(geometry.getView()),
     };

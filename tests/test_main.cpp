@@ -141,6 +141,7 @@ void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
 void testBloom();
+void testBlueNoise();
 void testTaa();
 void testScreenReflections();
 void testReflectionProbe();
@@ -331,6 +332,7 @@ int main(int argumentCount, char** arguments) {
     testToneMapping();
     testToneMapUniforms();
     testBloom();
+    testBlueNoise();
     testTaa();
     testScreenReflections();
     testReflectionProbe();

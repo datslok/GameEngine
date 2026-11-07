@@ -11,7 +11,6 @@
 */
 #include "screen_reflections.glsl"
 #include "ambient_occlusion.glsl"
-#include "dither.glsl"
 
 layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
 
@@ -28,8 +27,9 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
 
 layout(set = 0, binding = 1) uniform sampler2D depth;                      // exact texels
 layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture's pyramid, trilinear
-layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
-layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D geometry;  // for the denoiser: xyz the normal, w the view depth (0 for the sky and points left open)
+layout(set = 0, binding = 3) uniform sampler2D blueNoise;                  // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D geometry;  // for the denoiser: xyz the normal, w the view depth (0 for the sky and points left open)
 
 // The point at a texel clamped onto the screen (measured from the camera); the sky counts as the fallback point.
 vec3 pointAt(ivec2 texel, vec3 fallback) {
@@ -80,7 +80,7 @@ void main() {
     vec3 toCamera = normalize(-position);
     imageStore(geometry, texel, vec4(normal, viewDistance));
 
-    vec3 noise = aoNoise(pixel, pass.frame.x);
+    vec3 noise = aoNoise(texelFetch(blueNoise, texel % AO_BLUE_NOISE_SIZE, 0).rgb, pass.frame.x);
     float sliceNoise = noise.x;
     float stepNoise = noise.y;
     int slices = int(pass.options.z);

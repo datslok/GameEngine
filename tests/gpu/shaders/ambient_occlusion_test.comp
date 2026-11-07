@@ -56,7 +56,7 @@ void main() {
         testOutput(1, vec4(age, aoCurrentShare(age), aoHistoryTapKept(tap.x, tap.y, tap.z) ? 1.0 : 0.0, aoTapWeight(fract(point.xy), int(tap.w))));
         testOutput(2, accumulatedAo(current, historyLight, age));
         vec3 planeNormal = normalize(historyLight.xyz + vec3(0.1));
-        testOutput(3, vec4(aoNoise(point.xy, int(tap.w * 300.0)), aoPlaneWeight(planeNormal, current.xyz, historyLight.xyz, tap.x, tap.z)));
+        testOutput(3, vec4(aoNoise(current.xyz * 0.12, int(tap.w * 300.0)), aoPlaneWeight(planeNormal, current.xyz, historyLight.xyz, tap.x, tap.z)));
         testOutput(4, vec4(aoDepthRay(reprojection, point.xy, frame.xy), atrousKernelWeight(int(tap.w * 4.0) % 5 - 2, int(tap.w * 13.0) % 5 - 2)));
     }
 }

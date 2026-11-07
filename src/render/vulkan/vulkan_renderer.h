@@ -419,6 +419,7 @@ private:
 
     // Bound in place of the light probes' atlases while there are none (one black texel, never read then).
     std::unique_ptr<VulkanTexture> noProbesTexture;
+    std::unique_ptr<VulkanTexture> blueNoiseTexture; // ambient occlusion's noise tile, three channels
 
     // Bound in place of the light probes' states while there are none (one probe's worth of zeros, never read then).
     VulkanBuffer noProbeStates;

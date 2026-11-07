@@ -1,5 +1,4 @@
 #include "render/gpu/ambient_occlusion.h"
-#include "core/dither.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/screen_reflections.h"
@@ -207,19 +206,13 @@ float aoScreenRadius(float radius, float footprint, float viewDistance) {
     return std::min(radius / (footprint * viewDistance), static_cast<float>(AO_MAX_SCREEN_RADIUS));
 }
 
-/*
-* Interleaved gradient noise moved by the same amount along both axes adds a constant inside it, so the same noise at a
-* shifted pixel is a fixed function of the unshifted one; the stagger therefore starts there but steps on by the golden
-* ratio's fraction a frame (an even, low-discrepancy sequence), which the slices' sequence does not follow.
-*/
-Vec3 aoNoise(Vec2 pixel, int frame) {
-    const float shift = static_cast<float>(AO_NOISE_FRAME_SHIFT) * static_cast<float>(frame);
-    const float slice = interleavedGradientNoise(pixel.x + shift, pixel.y + shift);
-    const float start = interleavedGradientNoise(pixel.x + static_cast<float>(AO_STEP_NOISE_OFFSET_X), pixel.y + static_cast<float>(AO_STEP_NOISE_OFFSET_Y));
-    const float stagger = start + static_cast<float>(AO_STEP_NOISE_FRAME_STEP) * static_cast<float>(frame);
-    const float sectorStart = interleavedGradientNoise(pixel.x + static_cast<float>(AO_SECTOR_NOISE_OFFSET_X), pixel.y + static_cast<float>(AO_SECTOR_NOISE_OFFSET_Y));
-    const float sector = sectorStart + static_cast<float>(AO_SECTOR_NOISE_FRAME_STEP) * static_cast<float>(frame);
-    return Vec3{slice, stagger - std::floor(stagger), sector - std::floor(sector)};
+// Each channel moved on by its step a frame and wrapped (a Cranley-Patterson rotation of the tile).
+Vec3 aoNoise(const Vec3& tileNoise, int frame) {
+    const auto moved = [frame](float start, double step) {
+        const float value = start + static_cast<float>(step) * static_cast<float>(frame);
+        return value - std::floor(value);
+    };
+    return Vec3{moved(tileNoise.x, AO_SLICE_NOISE_FRAME_STEP), moved(tileNoise.y, AO_STEP_NOISE_FRAME_STEP), moved(tileNoise.z, AO_SECTOR_NOISE_FRAME_STEP)};
 }
 
 float aoSampleDistance(int step, int count, float noise, float screenRadius) {

@@ -177,12 +177,14 @@ Vec3 depthNormal(const Vec3& centre, const Vec3& across, const Vec3& downwards);
 float aoScreenRadius(float radius, float footprint, float viewDistance);
 
 /*
-* The pass's three noises at a pixel centre and frame (0..1 each): x turns the slices, y staggers the steps, z offsets the
-* sectors' rounding (sectorMask). They must be independent over the frames: a pixel sees a small bright thing only when its slice points at it, and if the stagger
-* were a fixed function of the angle (as the same noise at a shifted pixel is), its samples would land at the same
-* distances from it every frame, drawing rings round it that no averaging removes.
+* The pass's three noises from the blue noise tile's texel at the pixel (tileNoise, its three channels) and the frame
+* (0..1 each): x turns the slices, y staggers the steps, z offsets the sectors' rounding (sectorMask). Each channel moves
+* on by its own irrational step a frame. They must be independent over the frames: a pixel sees a small bright thing only
+* when its slice points at it, and a stagger tied to the angle lands its samples at the same distances from it every
+* frame, drawing rings round it that no averaging removes; and blue across the screen, so what averaging leaves is fine
+* grain rather than shapes (interleaved gradient noise, used first, left rings and rays that moved).
 */
-Vec3 aoNoise(Vec2 pixel, int frame);
+Vec3 aoNoise(const Vec3& tileNoise, int frame);
 
 // Step index of count's distance along a slice (pixels): spread quadratically (dense near the point, where creases are),
 // staggered by noise (0..1), never under AO_MIN_SAMPLE_PIXELS.

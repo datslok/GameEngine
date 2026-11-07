@@ -7,7 +7,6 @@
 
 #include "render/gpu/ambient_occlusion_shared.h"
 #include "screen_reflections.glsl"
-#include "dither.glsl"
 
 // An occluder's weight at this distance: 1 up to the falloff's start, 0 at the radius.
 float occluderWeight(float distance, float radius, float falloff) {
@@ -136,13 +135,10 @@ float aoScreenRadius(float radius, float footprint, float viewDistance) {
     return min(radius / (footprint * viewDistance), float(AO_MAX_SCREEN_RADIUS));
 }
 
-// The pass's three noises (x the slices' turn, y the steps' stagger, z the sectors' rounding), independent over the frames.
-vec3 aoNoise(vec2 pixel, int frame) {
-    float shift = float(AO_NOISE_FRAME_SHIFT) * float(frame);
-    float start = interleavedGradientNoise(pixel + vec2(float(AO_STEP_NOISE_OFFSET_X), float(AO_STEP_NOISE_OFFSET_Y)));
-    float sectorStart = interleavedGradientNoise(pixel + vec2(float(AO_SECTOR_NOISE_OFFSET_X), float(AO_SECTOR_NOISE_OFFSET_Y)));
-    return vec3(interleavedGradientNoise(pixel + shift), fract(start + float(AO_STEP_NOISE_FRAME_STEP) * float(frame)),
-                fract(sectorStart + float(AO_SECTOR_NOISE_FRAME_STEP) * float(frame)));
+// The pass's three noises from the blue noise tile's texel, each channel moved on by its step a frame and wrapped.
+vec3 aoNoise(vec3 tileNoise, int frame) {
+    vec3 steps = vec3(float(AO_SLICE_NOISE_FRAME_STEP), float(AO_STEP_NOISE_FRAME_STEP), float(AO_SECTOR_NOISE_FRAME_STEP));
+    return fract(tileNoise + steps * float(frame));
 }
 
 // The pyramid level a gathered sample reads: log2 of the steps' spacing round it, never below 0.

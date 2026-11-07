@@ -35,20 +35,14 @@
 #define AO_DENOISE_NORMAL_POWER 32.0
 #define AO_DENOISE_VISIBILITY_PASSES 1
 
-// The pass's noise (aoNoise): the slices' turn is interleaved gradient noise moved this many pixels along both axes a
-// frame (Jimenez's constant, which steps it evenly), and the steps' stagger starts from the noise at the pixel moved by
-// this offset and goes on by the golden ratio's fraction a frame, a sequence of its own, so that over the frames every
-// slice angle meets every step stagger.
-#define AO_NOISE_FRAME_SHIFT 5.588238
-#define AO_STEP_NOISE_OFFSET_X 23.0
-#define AO_STEP_NOISE_OFFSET_Y 41.0
-#define AO_STEP_NOISE_FRAME_STEP 0.6180339887
-
-// The sectors' rounding offset (aoNoise's z): the noise at the pixel moved by this offset, going on by sqrt(2) - 1 a
-// frame, an irrational independent of the golden ratio's, so the steps' and the sectors' sequences never fall into step.
-#define AO_SECTOR_NOISE_OFFSET_X 47.0
-#define AO_SECTOR_NOISE_OFFSET_Y 17.0
-#define AO_SECTOR_NOISE_FRAME_STEP 0.4142135624
+// The pass's noise (aoNoise): a blue noise tile (core/blue_noise.h) this many texels a side, three channels, repeated
+// over the screen, each channel moved on by an irrational step a frame (the golden ratio's fraction, sqrt(2) - 1,
+// sqrt(3) - 1; with 1 independent over the rationals, so no two channels' sequences ever fall into step) and wrapped:
+// blue across the screen, evenly spread over the frames.
+#define AO_BLUE_NOISE_SIZE 64
+#define AO_SLICE_NOISE_FRAME_STEP 0.6180339887
+#define AO_STEP_NOISE_FRAME_STEP 0.4142135624
+#define AO_SECTOR_NOISE_FRAME_STEP 0.7320508076
 
 // The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
 #define AO_MAX_HISTORY_FRAMES 64

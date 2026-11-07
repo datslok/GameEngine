@@ -1,5 +1,5 @@
 #include "math/mat4.h"
-#include "core/dither.h"
+#include "core/blue_noise.h"
 #include "render/gpu/ambient_occlusion.h"
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/gpu_depth_range.h"
@@ -318,25 +318,32 @@ namespace {
     }
 
     /*
-    * Over the frames a pixel's slice angles must meet every step stagger: the frames whose slice noise falls in one
-    * quarter have step noises in all four quarters. Taking the stagger from the same noise at a shifted pixel (the first
-    * way) ties it to the angle, and the same quarter of angles gets one narrow band of staggers.
+    * Over the frames a pixel's three noises must meet in every combination: the frames whose slice noise falls in one
+    * quarter have step and sector noises in all four quarters, and those whose step noise does, sector noises in all
+    * four. A stagger tied to the angle (the first way, interleaved gradient noise at a shifted pixel) got one narrow
+    * band of staggers for a quarter of angles. Frame 0 is the tile itself.
     */
     void testNoisesIndependent() {
-        for (const Vec2 pixel : {Vec2{100.5f, 70.5f}, Vec2{3.5f, 251.5f}, Vec2{611.5f, 12.5f}}) {
-            int quarters[4] = {0, 0, 0, 0};
-            int tiedQuarters[4] = {0, 0, 0, 0};
-            int inQuarter = 0;
+        const std::vector<float> slices = makeBlueNoise(16, 1u);
+        const std::vector<float> steps = makeBlueNoise(16, 2u);
+        const std::vector<float> sectors = makeBlueNoise(16, 3u);
+
+        for (const std::size_t texel : {std::size_t{0}, std::size_t{37}, std::size_t{200}}) {
+            const Vec3 tile{slices[texel], steps[texel], sectors[texel]};
+            assert(aoNoise(tile, 0).x == tile.x && aoNoise(tile, 0).y == tile.y && aoNoise(tile, 0).z == tile.z);
+            int stepBySlice[4] = {0, 0, 0, 0};
             int sectorBySlice[4] = {0, 0, 0, 0};
             int sectorByStep[4] = {0, 0, 0, 0};
+            int inSliceQuarter = 0;
             int inStepQuarter = 0;
 
             for (int frame = 0; frame < 1024; ++frame) {
-                const Vec3 noise = aoNoise(pixel, frame);
+                const Vec3 noise = aoNoise(tile, frame);
                 assert(noise.x >= 0.0f && noise.x < 1.0f && noise.y >= 0.0f && noise.y < 1.0f && noise.z >= 0.0f && noise.z < 1.0f);
 
-                // The sectors' offset is independent of both others: for a quarter of either, all its quarters.
                 if (noise.x < 0.25f) {
+                    ++inSliceQuarter;
+                    ++stepBySlice[std::min(static_cast<int>(noise.y * 4.0f), 3)];
                     ++sectorBySlice[std::min(static_cast<int>(noise.z * 4.0f), 3)];
                 }
 
@@ -344,35 +351,17 @@ namespace {
                     ++inStepQuarter;
                     ++sectorByStep[std::min(static_cast<int>(noise.z * 4.0f), 3)];
                 }
-
-                if (noise.x < 0.25f) {
-                    ++inQuarter;
-                    ++quarters[std::min(static_cast<int>(noise.y * 4.0f), 3)];
-                    const float shift = static_cast<float>(AO_NOISE_FRAME_SHIFT) * static_cast<float>(frame);
-                    const float tied = interleavedGradientNoise(pixel.x + shift + 23.0f, pixel.y + shift + 41.0f);
-                    ++tiedQuarters[std::min(static_cast<int>(tied * 4.0f), 3)];
-                }
             }
 
-            assert(inQuarter > 128);
-            int tiedEmpty = 0;
+            assert(inSliceQuarter > 200 && inStepQuarter > 200);
 
             for (int quarter = 0; quarter < 4; ++quarter) {
-                assert(quarters[quarter] > inQuarter / 8);
-                assert(sectorBySlice[quarter] > inQuarter / 8);
+                assert(stepBySlice[quarter] > inSliceQuarter / 8);
+                assert(sectorBySlice[quarter] > inSliceQuarter / 8);
                 assert(sectorByStep[quarter] > inStepQuarter / 8);
-                tiedEmpty += tiedQuarters[quarter] == 0 ? 1 : 0;
             }
-
-            assert(tiedEmpty >= 2);
         }
-
-        // The slices' turn is the noise moved along the screen each frame, as before.
-        assert(aoNoise(Vec2{10.5f, 20.5f}, 0).x == interleavedGradientNoise(10.5f, 20.5f));
     }
-
-    // The kernel adds up to 1, centre 36/256, corners 1/256; a tap on the plane weighs 1, the share of the depth off it
-    // 1/e, either side alike; alike normals 1, at right angles 0, in between the cosine to the 32nd.
     // Steps near the pixel read the picture itself, further ones ever blurrier levels, as wide as the steps' spacing:
     // the slope 2 (step + noise) radius / count^2, so level log2 of it, never below 0.
     void testSampleLevel() {
@@ -390,6 +379,8 @@ namespace {
 
         assert(last > 4.0f);
     }
+    // The kernel adds up to 1, centre 36/256, corners 1/256; a tap on the plane weighs 1, the share of the depth off it
+    // 1/e, either side alike; alike normals 1, at right angles 0, in between the cosine to the 32nd.
     void testDenoiseWeights() {
         assert(near(atrousKernelWeight(0, 0), 36.0f / 256.0f, 1e-7f));
         assert(near(atrousKernelWeight(2, -2), 1.0f / 256.0f, 1e-7f));

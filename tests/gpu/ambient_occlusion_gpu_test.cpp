@@ -142,9 +142,9 @@ namespace {
             report.check("accumulatedAo", arithmeticTolerance, Vec3{blended.x, blended.y, blended.z}, vec3From(out[2]));
             report.check("accumulatedAo", arithmeticTolerance, blended.w, out[2][3]);
 
-            // Noise multiplies its argument by 53 before its fraction: a few ulps in the argument move it by about 1e-4,
+            // The noise is a fraction of a few hundred steps: a few ulps in it move it by about 1e-4,
             // and a value near 1 may wrap to near 0.
-            const Vec3 noise = aoNoise(pixel, static_cast<int>(in[8][3] * 300.0f));
+            const Vec3 noise = aoNoise(Vec3{in[6][0], in[6][1], in[6][2]} * 0.12f, static_cast<int>(in[8][3] * 300.0f));
             const auto wrapped = [](float a, float b) { const float d = std::abs(a - b); return std::min(d, 1.0f - d); };
             report.check("aoNoise", FloatTolerance{.absolute = 1e-3f}, 0.0f, std::max({wrapped(noise.x, out[3][0]), wrapped(noise.y, out[3][1]), wrapped(noise.z, out[3][2])}));
 

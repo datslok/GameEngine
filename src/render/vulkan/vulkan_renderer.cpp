@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_renderer.h"
+#include "core/blue_noise.h"
 #include "scene/sky_object.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/camera_relative.h"
@@ -675,6 +676,25 @@ void VulkanRenderer::createFixedTextures() {
     noProbes.bytesPerTexel = 8;
     noProbes.surface = false;
     noProbesTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, black, noProbes);
+
+    // Ambient occlusion's noise: three blue noise tiles (core/blue_noise.h) as one texture's channels, exact floats.
+    const int noiseSize = AO_BLUE_NOISE_SIZE;
+    const std::array<std::vector<float>, 3> channels{makeBlueNoise(noiseSize, 1u), makeBlueNoise(noiseSize, 2u), makeBlueNoise(noiseSize, 3u)};
+    std::vector<float> noiseTexels(static_cast<std::size_t>(noiseSize * noiseSize * 4), 0.0f);
+
+    for (std::size_t texel = 0; texel < channels[0].size(); ++texel) {
+        for (std::size_t channel = 0; channel < channels.size(); ++channel) {
+            noiseTexels[texel * 4 + channel] = channels[channel][texel];
+        }
+    }
+
+    VulkanTextureDescription noise;
+    noise.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    noise.bytesPerTexel = 4 * sizeof(float);
+    noise.surface = false;
+    blueNoiseTexture = std::make_unique<VulkanTexture>(
+        device, uploads, noiseSize, noiseSize,
+        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(noiseTexels.data()), noiseTexels.size() * sizeof(float)}, noise);
     noProbeStates = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noProbeCascades = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeCascade), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
@@ -1445,7 +1465,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             gatherPicture = reflections->sampledColourPyramid();
         }
 
-        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture),
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
                                                            settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
                                   occlusionBlurred, previousCamera.known);
