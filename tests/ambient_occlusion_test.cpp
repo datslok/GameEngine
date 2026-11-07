@@ -9,12 +9,15 @@
 
 #include "test_levels.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <numbers>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -79,6 +82,18 @@ namespace {
         wrong.historyDepthShare = 0.0f;
         assert(rejects(wrong));
         wrong.historyDepthShare = std::numeric_limits<float>::quiet_NaN();
+        assert(rejects(wrong));
+
+        assert(defaults.denoisePasses == 4 && defaults.denoisePlaneShare == 0.02f);
+        wrong = {};
+        wrong.denoisePasses = -1;
+        assert(rejects(wrong));
+        wrong.denoisePasses = AO_DENOISE_MAX_PASSES + 1;
+        assert(rejects(wrong));
+        wrong = {};
+        wrong.denoisePasses = 0;
+        validateAmbientOcclusion(wrong);
+        wrong.denoisePlaneShare = 0.0f;
         assert(rejects(wrong));
     }
 
@@ -356,10 +371,33 @@ namespace {
         assert(aoNoise(Vec2{10.5f, 20.5f}, 0).x == interleavedGradientNoise(10.5f, 20.5f));
     }
 
-    void testBlurWeight() {
-        assert(aoBlurWeight(5.0f, 5.0f) == 1.0f);
-        assert(near(aoBlurWeight(5.0f, 5.25f), 0.5f, 1e-5f));
-        assert(aoBlurWeight(5.0f, 6.0f) == 0.0f);
+    // The kernel adds up to 1, centre 36/256, corners 1/256; a tap on the plane weighs 1, the share of the depth off it
+    // 1/e, either side alike; alike normals 1, at right angles 0, in between the cosine to the 32nd.
+    void testDenoiseWeights() {
+        assert(near(atrousKernelWeight(0, 0), 36.0f / 256.0f, 1e-7f));
+        assert(near(atrousKernelWeight(2, -2), 1.0f / 256.0f, 1e-7f));
+        assert(near(atrousKernelWeight(-1, 2), 4.0f / 256.0f, 1e-7f));
+        float sum = 0.0f;
+
+        for (int dy = -2; dy <= 2; ++dy) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                sum += atrousKernelWeight(dx, dy);
+            }
+        }
+
+        assert(near(sum, 1.0f, 1e-6f));
+
+        const Vec3 up{0.0f, 1.0f, 0.0f};
+        const Vec3 centre{0.0f, -1.5f, -4.0f};
+        assert(near(aoPlaneWeight(up, centre, Vec3{3.0f, -1.5f, -9.0f}, 4.0f, 0.02f), 1.0f, 1e-6f));
+        assert(near(aoPlaneWeight(up, centre, Vec3{0.0f, -1.5f + 0.08f, -4.0f}, 4.0f, 0.02f), std::exp(-1.0f), 1e-5f));
+        assert(near(aoPlaneWeight(up, centre, Vec3{1.0f, -1.5f - 0.08f, -4.0f}, 4.0f, 0.02f), std::exp(-1.0f), 1e-5f));
+        assert(aoPlaneWeight(up, centre, Vec3{0.0f, 0.5f, -4.0f}, 4.0f, 0.02f) < 1e-10f);
+
+        assert(near(aoNormalWeight(up, up), 1.0f, 1e-6f));
+        assert(aoNormalWeight(up, Vec3{0.0f, 0.0f, 1.0f}) == 0.0f);
+        assert(aoNormalWeight(up, Vec3{0.0f, -1.0f, 0.0f}) == 0.0f);
+        assert(near(aoNormalWeight(up, unit(Vec3{0.0f, 0.9f, std::sqrt(1.0f - 0.81f)})), std::pow(0.9f, 32.0f), 1e-6f));
     }
 
     // An eye 1.5 m above a floor looking down -z, tilted down at a wall 2 m high at z = -5, so the floor shows from about
@@ -879,6 +917,218 @@ namespace {
         assert(!aoHistoryUsable(AoHistoryKey{RenderSize{640, 360}, false}, key, true));
     }
 
+    // The denoiser's tests run on a small screen: four passes over every pixel.
+    constexpr RenderSize denoiseSize{160, 90};
+
+    // A plane of a test scene (world space), holding only where the test says.
+    struct TestPlane {
+        Vec3 point;
+        Vec3 normal;
+        std::function<bool(const Vec3&)> holds;
+    };
+
+    AoFrame denoiseFrame(const Vec3& eye, const Vec3& target) {
+        const Camera camera{eye, target, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, static_cast<float>(denoiseSize.width) / static_cast<float>(denoiseSize.height), 0.1f, 500.0f};
+        const Mat4 viewProjection = cameraRelativeViewProjection(camera);
+        return AoFrame{*inverse(viewProjection), denoiseSize, pixelFootprint(viewProjection, static_cast<float>(denoiseSize.height))};
+    }
+
+    // Each pixel's nearest plane: its normal and view depth (none for the sky), as the occlusion pass leaves them.
+    std::vector<AoGeometry> traceGeometry(const AoFrame& frame, const Vec3& eye, const std::vector<TestPlane>& planes) {
+        const Vec2 size{static_cast<float>(denoiseSize.width), static_cast<float>(denoiseSize.height)};
+        std::vector<AoGeometry> geometry(denoiseSize.width * denoiseSize.height);
+
+        for (std::uint32_t y = 0; y < denoiseSize.height; ++y) {
+            for (std::uint32_t x = 0; x < denoiseSize.width; ++x) {
+                const Vec3 ray = aoDepthRay(frame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, size);
+
+                for (const TestPlane& plane : planes) {
+                    const float along = plane.normal.dot(ray);
+
+                    if (std::abs(along) < 1e-6f) {
+                        continue;
+                    }
+
+                    const float depth = plane.normal.dot(plane.point - eye) / along;
+                    AoGeometry& here = geometry[y * denoiseSize.width + x];
+
+                    if (depth > 0.0f && plane.holds(eye + ray * depth) && (here.viewDepth == 0.0f || depth < here.viewDepth)) {
+                        here = AoGeometry{plane.normal, depth};
+                    }
+                }
+            }
+        }
+
+        return geometry;
+    }
+
+    std::vector<Vec4> runDenoise(const AoFrame& frame, const AmbientOcclusionSettings& settings, const std::vector<AoGeometry>& geometry, std::vector<Vec4> light) {
+        const AoGeometryImage geometryAt = [&](int x, int y) { return geometry[static_cast<std::size_t>(y) * denoiseSize.width + static_cast<std::size_t>(x)]; };
+
+        for (int pass = 0; pass < settings.denoisePasses; ++pass) {
+            const AoLightImage lightAt = [&](int x, int y) { return light[static_cast<std::size_t>(y) * denoiseSize.width + static_cast<std::size_t>(x)]; };
+            std::vector<Vec4> next(light.size());
+
+            for (std::uint32_t y = 0; y < denoiseSize.height; ++y) {
+                for (std::uint32_t x = 0; x < denoiseSize.width; ++x) {
+                    next[y * denoiseSize.width + x] = denoiseAoAt(static_cast<int>(x), static_cast<int>(y), pass, frame, settings, geometryAt, lightAt);
+                }
+            }
+
+            light = std::move(next);
+        }
+
+        return light;
+    }
+
+    // A fixed noise in 0..1 for a texel.
+    float texelNoise(std::uint32_t x, std::uint32_t y) {
+        std::uint32_t state = x * 73856093u ^ y * 19349663u;
+        state = state * 1664525u + 1013904223u;
+        state ^= state >> 13;
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / 16777216.0f;
+    }
+
+    // The spread of the light's red over a block of texels whose geometry passes the test.
+    template <typename Keep>
+    std::pair<double, double> meanAndSpread(const std::vector<Vec4>& light, Keep keep) {
+        double sum = 0.0;
+        double squares = 0.0;
+        int count = 0;
+
+        for (std::uint32_t y = 0; y < denoiseSize.height; ++y) {
+            for (std::uint32_t x = 0; x < denoiseSize.width; ++x) {
+                if (keep(x, y)) {
+                    const double value = light[y * denoiseSize.width + x].x;
+                    sum += value;
+                    squares += value * value;
+                    ++count;
+                }
+            }
+        }
+
+        const double mean = sum / count;
+        return {mean, std::sqrt(std::max(squares / count - mean * mean, 0.0))};
+    }
+
+    /*
+    * Noise on a wall facing the camera and on a floor seen at a slant: four passes leave a fraction of the spread and the
+    * same mean on both (the plane test keeps a sloping floor whole); the visibility is filtered by the first pass alone.
+    */
+    void testDenoiseSmoothsSurfaces() {
+        const Vec3 eye{0.0f, 1.5f, 0.0f};
+        const AoFrame frame = denoiseFrame(eye, Vec3{0.0f, 0.3f, -4.0f});
+        const std::vector<TestPlane> planes{
+            {Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, [](const Vec3&) { return true; }},
+            {Vec3{0.0f, 0.0f, -6.0f}, Vec3{0.0f, 0.0f, 1.0f}, [](const Vec3& p) { return p.y <= 3.0f; }},
+        };
+        const std::vector<AoGeometry> geometry = traceGeometry(frame, eye, planes);
+        std::vector<Vec4> light(geometry.size());
+
+        for (std::uint32_t y = 0; y < denoiseSize.height; ++y) {
+            for (std::uint32_t x = 0; x < denoiseSize.width; ++x) {
+                const float noise = texelNoise(x, y);
+                light[y * denoiseSize.width + x] = Vec4{0.1f + 0.8f * noise, 0.0f, 0.0f, 0.1f + 0.8f * texelNoise(y + 500u, x)};
+            }
+        }
+
+        AmbientOcclusionSettings settings;
+        const std::vector<Vec4> denoised = runDenoise(frame, settings, geometry, light);
+
+        // Away from the screen's edges and the corner between them.
+        for (const float normalY : {1.0f, 0.0f}) {
+            const auto keep = [&](std::uint32_t x, std::uint32_t y) {
+                const AoGeometry& here = geometry[y * denoiseSize.width + x];
+                const bool inner = x >= 30 && x < denoiseSize.width - 30 && y >= 20 && y < denoiseSize.height - 20;
+                return inner && here.viewDepth > 0.0f && here.normal.y == normalY && geometry[(y + 12) % denoiseSize.height * denoiseSize.width + x].normal.y == normalY &&
+                       geometry[(y + denoiseSize.height - 12) % denoiseSize.height * denoiseSize.width + x].normal.y == normalY;
+            };
+            const auto before = meanAndSpread(light, keep);
+            const auto after = meanAndSpread(denoised, keep);
+            assert(before.second > 0.2);
+            assert(after.second < before.second * 0.25);
+            assert(std::abs(after.first - before.first) < 0.03);
+        }
+
+        // The visibility: four passes leave it as one does.
+        settings.denoisePasses = 1;
+        const std::vector<Vec4> once = runDenoise(frame, settings, geometry, light);
+
+        for (std::size_t i = 0; i < light.size(); ++i) {
+            assert(denoised[i].w == once[i].w);
+        }
+
+        // No passes: as it was.
+        settings.denoisePasses = 0;
+        assert(runDenoise(frame, settings, geometry, light)[1234].x == light[1234].x);
+    }
+
+    // A lit wall standing on a dark floor, the sky above it: no light turns the corner either way, the sky is left alone.
+    void testDenoiseStopsAtCorners() {
+        const Vec3 eye{0.0f, 1.5f, 0.0f};
+        const AoFrame frame = denoiseFrame(eye, Vec3{0.0f, 0.3f, -4.0f});
+        const std::vector<TestPlane> planes{
+            {Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, [](const Vec3&) { return true; }},
+            {Vec3{0.0f, 0.0f, -5.0f}, Vec3{0.0f, 0.0f, 1.0f}, [](const Vec3& p) { return p.y <= 2.0f; }},
+        };
+        const std::vector<AoGeometry> geometry = traceGeometry(frame, eye, planes);
+        std::vector<Vec4> light(geometry.size());
+        int floors = 0;
+        int walls = 0;
+        int skies = 0;
+
+        for (std::size_t i = 0; i < geometry.size(); ++i) {
+            light[i] = geometry[i].viewDepth == 0.0f ? Vec4{0.7f, 0.0f, 0.0f, 0.3f} : geometry[i].normal.y == 1.0f ? Vec4{0.0f, 0.0f, 0.0f, 1.0f} : Vec4{1.0f, 1.0f, 1.0f, 1.0f};
+        }
+
+        const std::vector<Vec4> denoised = runDenoise(frame, AmbientOcclusionSettings{}, geometry, light);
+
+        for (std::size_t i = 0; i < geometry.size(); ++i) {
+            if (geometry[i].viewDepth == 0.0f) {
+                assert(denoised[i].x == 0.7f && denoised[i].w == 0.3f);
+                ++skies;
+            } else if (geometry[i].normal.y == 1.0f) {
+                assert(denoised[i].x < 1e-3f);
+                ++floors;
+            } else {
+                assert(denoised[i].x > 0.999f);
+                ++walls;
+            }
+        }
+
+        assert(floors > 1000 && walls > 1000 && skies > 100);
+    }
+
+    // A dark block standing in front of a lit wall, both facing the camera: no light crosses the jump in depth.
+    void testDenoiseStopsAtDepthJumps() {
+        const Vec3 eye{0.0f, 0.0f, 0.0f};
+        const AoFrame frame = denoiseFrame(eye, Vec3{0.0f, 0.0f, -1.0f});
+        const std::vector<TestPlane> planes{
+            {Vec3{0.0f, 0.0f, -3.0f}, Vec3{0.0f, 0.0f, 1.0f}, [](const Vec3& p) { return std::abs(p.x) < 0.5f; }},
+            {Vec3{0.0f, 0.0f, -5.0f}, Vec3{0.0f, 0.0f, 1.0f}, [](const Vec3&) { return true; }},
+        };
+        const std::vector<AoGeometry> geometry = traceGeometry(frame, eye, planes);
+        std::vector<Vec4> light(geometry.size());
+        int blocks = 0;
+
+        for (std::size_t i = 0; i < geometry.size(); ++i) {
+            light[i] = geometry[i].viewDepth < 4.0f ? Vec4{0.0f, 0.0f, 0.0f, 1.0f} : Vec4{1.0f, 1.0f, 1.0f, 1.0f};
+        }
+
+        const std::vector<Vec4> denoised = runDenoise(frame, AmbientOcclusionSettings{}, geometry, light);
+
+        for (std::size_t i = 0; i < geometry.size(); ++i) {
+            if (geometry[i].viewDepth < 4.0f) {
+                assert(denoised[i].x < 1e-3f);
+                ++blocks;
+            } else {
+                assert(denoised[i].x > 0.999f);
+            }
+        }
+
+        assert(blocks > 500);
+    }
     void testPackPass() {
         const Mat4 inverse = Mat4::translation(1.0f, 2.0f, 3.0f);
         const Mat4 viewProjection = cameraRelativeViewProjection(makeCamera());
@@ -896,6 +1146,7 @@ namespace {
         assert(pass.reprojection[12] == 4.0f && pass.lens[1] == 0.25f && pass.lens[2] == -0.5f);
         assert(pass.gather[0] == 0.25f && pass.gather[1] == 0.0f && pass.gather[2] == 8.0f);
         assert(pass.history[0] == 16.0f && pass.history[1] == 0.05f && pass.history[2] == 1.0f && pass.history[3] == 0.0f);
+        assert(pass.denoise[0] == 4.0f && pass.denoise[1] == 0.02f);
 
         // Gathering reaches further than occlusion alone.
         const GpuAmbientOcclusionPass gathering = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{}, RenderSize{200, 100}, settings, 7, true, false);
@@ -917,7 +1168,7 @@ void testAmbientOcclusion() {
     testMultipleBounces();
     testSpecularOcclusion();
     testSurfaceVisibility();
-    testBlurWeight();
+    testDenoiseWeights();
     testNoisesIndependent();
     testFloorAndWall();
     testThicknessLetsLightBehind();
@@ -931,5 +1182,8 @@ void testAmbientOcclusion() {
     testDisocclusionStartsAgain();
     testPartialHistory();
     testHistoryUsable();
+    testDenoiseSmoothsSurfaces();
+    testDenoiseStopsAtCorners();
+    testDenoiseStopsAtDepthJumps();
     testPackPass();
 }

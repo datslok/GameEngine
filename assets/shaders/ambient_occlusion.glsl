@@ -6,7 +6,7 @@
 #define AMBIENT_OCCLUSION_GLSL
 
 #include "render/gpu/ambient_occlusion_shared.h"
-#include "taa.glsl"
+#include "screen_reflections.glsl"
 #include "dither.glsl"
 
 // An occluder's weight at this distance: 1 up to the falloff's start, 0 at the radius.
@@ -168,10 +168,26 @@ float surfaceVisibility(float screenVisibility, float occlusionTexel, float occl
     return min(screenVisibility, 1.0 + occlusionStrength * (occlusionTexel - 1.0));
 }
 
-float aoBlurWeight(float centreDistance, float neighbourDistance) {
-    return max(1.0 - abs(neighbourDistance - centreDistance) / (float(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0);
+// The denoiser's B3-spline kernel at a tap (each offset -2..2).
+float atrousKernelWeight(int dx, int dy) {
+    const float spline[3] = float[3](6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0);
+    return spline[abs(dx)] * spline[abs(dy)];
 }
 
+// 1 on the centre's surface plane, 1/e a share of its view depth off it.
+float aoPlaneWeight(vec3 centreNormal, vec3 centrePoint, vec3 tapPoint, float centreDepth, float share) {
+    return exp(-abs(dot(centreNormal, tapPoint - centrePoint)) / (share * centreDepth));
+}
+
+// Alike normals 1, at right angles 0.
+float aoNormalWeight(vec3 centreNormal, vec3 tapNormal) {
+    return pow(max(dot(centreNormal, tapNormal), 0.0), float(AO_DENOISE_NORMAL_POWER));
+}
+
+// The point at view depth 1 along a pixel's ray.
+vec3 aoDepthRay(mat4 inverseViewProjection, vec2 pixel, vec2 size) {
+    return positionAtPixel(inverseViewProjection, pixel, 0.5, size) / viewDistanceAtPixel(inverseViewProjection, pixel, 0.5, size);
+}
 // Temporal accumulation: the age after one more frame, at most the cap.
 float aoHistoryAge(float previousAge, int historyFrames) {
     return min(previousAge + 1.0, float(historyFrames));

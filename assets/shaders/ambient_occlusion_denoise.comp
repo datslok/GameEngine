@@ -1,0 +1,82 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Ambient occlusion's denoiser (render/gpu/ambient_occlusion.h, denoiseAoAt mirrors it), one pass of an edge-aware
+* a-trous filter, run AO_DENOISE_MAX_PASSES times at most with the pass in a push constant: each pixel the 5 x 5 B3-spline
+* kernel's taps 2^pass pixels apart, each weighted by how near its point lies to the pixel's surface plane and how alike
+* their normals are, from the geometry the occlusion pass wrote. The light gathered is filtered by every pass, the
+* visibility by the first AO_DENOISE_VISIBILITY_PASSES; the sky and points left open keep theirs.
+*/
+#include "ambient_occlusion.glsl"
+
+layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
+
+// Must match GpuAmbientOcclusionPass.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 inverseViewProjection;
+    vec4 size;
+    vec4 lens;
+    vec4 options;
+    ivec4 frame;
+    mat4 reprojection;
+    vec4 gather;
+    vec4 history;
+    vec4 denoise; // x: the passes, y: the plane share
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D geometry;                  // xyz the normal, w the view depth, exact texels
+layout(set = 0, binding = 2) uniform sampler2D source;                    // the last pass's light, exact texels
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D filtered;
+
+layout(push_constant) uniform Step {
+    ivec4 step; // x: the pass
+};
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(pass.size.xy);
+
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    vec4 centreLight = texelFetch(source, texel, 0);
+    vec4 centre = texelFetch(geometry, texel, 0);
+
+    if (centre.w <= 0.0) {
+        imageStore(filtered, texel, centreLight);
+        return;
+    }
+
+    vec3 centrePoint = aoDepthRay(pass.inverseViewProjection, vec2(texel) + 0.5, pass.size.xy) * centre.w;
+    int stride = 1 << step.x;
+    vec4 sum = vec4(0.0);
+    float weights = 0.0;
+
+    for (int dy = -2; dy <= 2; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+            ivec2 at = texel + ivec2(dx, dy) * stride;
+
+            if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size))) {
+                continue;
+            }
+
+            vec4 tap = texelFetch(geometry, at, 0);
+
+            if (tap.w <= 0.0) {
+                continue;
+            }
+
+            vec3 tapPoint = aoDepthRay(pass.inverseViewProjection, vec2(at) + 0.5, pass.size.xy) * tap.w;
+            float weight = atrousKernelWeight(dx, dy) * aoPlaneWeight(centre.xyz, centrePoint, tapPoint, centre.w, pass.denoise.y) *
+                           aoNormalWeight(centre.xyz, tap.xyz);
+            sum += texelFetch(source, at, 0) * weight;
+            weights += weight;
+        }
+    }
+
+    // The centre always weighs something (on its own plane, its own normal), so weights is never 0.
+    vec4 result = sum / weights;
+    imageStore(filtered, texel, vec4(result.rgb, step.x < AO_DENOISE_VISIBILITY_PASSES ? result.a : centreLight.a));
+}

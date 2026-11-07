@@ -29,6 +29,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
 layout(set = 0, binding = 1) uniform sampler2D depth;                      // exact texels
 layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture
 layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D geometry;  // for the denoiser: xyz the normal, w the view depth (0 for the sky and points left open)
 
 // The point at a texel clamped onto the screen (measured from the camera); the sky counts as the fallback point.
 vec3 pointAt(ivec2 texel, vec3 fallback) {
@@ -65,6 +66,7 @@ void main() {
 
     if (screenRadius < float(AO_MIN_SAMPLE_PIXELS)) {
         imageStore(occlusion, texel, vec4(0.0, 0.0, 0.0, 1.0));
+        imageStore(geometry, texel, vec4(0.0));
         return;
     }
 
@@ -75,6 +77,7 @@ void main() {
                                  pointAt(texel + ivec2(0, 1), position), pointAt(texel + ivec2(0, 2), position));
     vec3 normal = depthNormal(position, across, downwards);
     vec3 toCamera = normalize(-position);
+    imageStore(geometry, texel, vec4(normal, viewDistance));
 
     vec3 noise = aoNoise(pixel, pass.frame.x);
     float sliceNoise = noise.x;

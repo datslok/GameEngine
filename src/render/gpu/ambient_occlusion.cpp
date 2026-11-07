@@ -26,6 +26,8 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Occlusion history", settings.temporal);
     visitor.field("Occlusion history frames", settings.historyFrames, {.min = 1, .max = AO_MAX_HISTORY_FRAMES});
     visitor.field("Occlusion history depth share", settings.historyDepthShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.005f, .sliderMax = 0.2f});
+    visitor.field("Occlusion denoise passes", settings.denoisePasses, {.min = 0, .max = AO_DENOISE_MAX_PASSES});
+    visitor.field("Occlusion denoise plane share", settings.denoisePlaneShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.002f, .sliderMax = 0.1f});
 }
 
 // Written so not a number fails too.
@@ -56,6 +58,14 @@ void validateAmbientOcclusion(const AmbientOcclusionSettings& settings) {
 
     if (settings.historyFrames < 1 || settings.historyFrames > AO_MAX_HISTORY_FRAMES) {
         throw std::invalid_argument("Ambient occlusion needs 1 to AO_MAX_HISTORY_FRAMES history frames");
+    }
+
+    if (settings.denoisePasses < 0 || settings.denoisePasses > AO_DENOISE_MAX_PASSES) {
+        throw std::invalid_argument("Ambient occlusion needs 0 to AO_DENOISE_MAX_PASSES denoise passes");
+    }
+
+    if (!(settings.denoisePlaneShare > 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs a denoise plane share above 0");
     }
 
     if (!(settings.historyDepthShare > 0.0f)) {
@@ -237,10 +247,71 @@ float surfaceVisibility(float screenVisibility, float occlusionTexel, float occl
     return std::min(screenVisibility, 1.0f + occlusionStrength * (occlusionTexel - 1.0f));
 }
 
-float aoBlurWeight(float centreDistance, float neighbourDistance) {
-    return std::max(1.0f - std::abs(neighbourDistance - centreDistance) / (static_cast<float>(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0f);
+float atrousKernelWeight(int dx, int dy) {
+    constexpr float spline[3] = {6.0f / 16.0f, 4.0f / 16.0f, 1.0f / 16.0f};
+    return spline[std::abs(dx)] * spline[std::abs(dy)];
 }
 
+float aoPlaneWeight(const Vec3& centreNormal, const Vec3& centrePoint, const Vec3& tapPoint, float centreDepth, float share) {
+    return std::exp(-std::abs(centreNormal.dot(tapPoint - centrePoint)) / (share * centreDepth));
+}
+
+float aoNormalWeight(const Vec3& centreNormal, const Vec3& tapNormal) {
+    return std::pow(std::max(centreNormal.dot(tapNormal), 0.0f), static_cast<float>(AO_DENOISE_NORMAL_POWER));
+}
+
+// Any point along the ray over its view depth: perspective scales the whole point with its depth.
+Vec3 aoDepthRay(const Mat4& inverseViewProjection, Vec2 pixel, Vec2 size) {
+    return positionAtPixel(inverseViewProjection, pixel, 0.5f, size) * (1.0f / viewDistanceAtPixel(inverseViewProjection, pixel, 0.5f, size));
+}
+
+/*
+* The taps' weights are normalised by their sum, which the centre's own (36/256, on its plane, its own normal) keeps above
+* zero. The sky and points left open keep their value, and no tap reads them.
+*/
+Vec4 denoiseAoAt(int x, int y, int pass, const AoFrame& frame, const AmbientOcclusionSettings& settings, const AoGeometryImage& geometry,
+                 const AoLightImage& light) {
+    const Vec4 centreLight = light(x, y);
+    const AoGeometry centre = geometry(x, y);
+
+    if (centre.viewDepth <= 0.0f) {
+        return centreLight;
+    }
+
+    const int width = static_cast<int>(frame.size.width);
+    const int height = static_cast<int>(frame.size.height);
+    const Vec2 size{static_cast<float>(width), static_cast<float>(height)};
+    const Vec3 centrePoint = aoDepthRay(frame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, size) * centre.viewDepth;
+    const int stride = 1 << pass;
+    Vec4 sum;
+    float weights = 0.0f;
+
+    for (int dy = -2; dy <= 2; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+            const int tx = x + dx * stride;
+            const int ty = y + dy * stride;
+
+            if (tx < 0 || ty < 0 || tx >= width || ty >= height) {
+                continue;
+            }
+
+            const AoGeometry tap = geometry(tx, ty);
+
+            if (tap.viewDepth <= 0.0f) {
+                continue;
+            }
+
+            const Vec3 tapPoint = aoDepthRay(frame.inverseViewProjection, Vec2{tx + 0.5f, ty + 0.5f}, size) * tap.viewDepth;
+            const float weight = atrousKernelWeight(dx, dy) * aoPlaneWeight(centre.normal, centrePoint, tapPoint, centre.viewDepth, settings.denoisePlaneShare) *
+                                 aoNormalWeight(centre.normal, tap.normal);
+            sum = sum + light(tx, ty) * weight;
+            weights += weight;
+        }
+    }
+
+    const Vec4 filtered = sum * (1.0f / weights);
+    return Vec4{filtered.x, filtered.y, filtered.z, pass < AO_DENOISE_VISIBILITY_PASSES ? filtered.w : centreLight.w};
+}
 AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
                            const AoDepthImage& depthAt, const AoPicture& picture, float sectorNoise) {
     const int width = static_cast<int>(frame.size.width);
@@ -489,5 +560,7 @@ GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjecti
     pass.history[0] = static_cast<float>(settings.historyFrames);
     pass.history[1] = settings.historyDepthShare;
     pass.history[2] = accumulates ? 1.0f : 0.0f;
+    pass.denoise[0] = static_cast<float>(settings.denoisePasses);
+    pass.denoise[1] = settings.denoisePlaneShare;
     return pass;
 }

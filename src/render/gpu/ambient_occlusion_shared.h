@@ -2,7 +2,7 @@
 #define RENDER_GPU_AMBIENT_OCCLUSION_SHARED_H
 
 // Ambient occlusion's numbers, shared by render/gpu/ambient_occlusion.h and the shaders (ambient_occlusion.glsl,
-// ambient_occlusion.comp, ambient_occlusion_blur.comp). Only #defines of plain numbers, since GLSL reads them too.
+// ambient_occlusion.comp, ambient_occlusion_temporal.comp, ambient_occlusion_denoise.comp). Only #defines of plain numbers, since GLSL reads them too.
 
 // The most slices a pixel takes each frame, and steps along each side of a slice: the settings' limits.
 #define AO_MAX_SLICES 8
@@ -27,10 +27,13 @@
 #define AO_BOUNCE_C_SLOPE 2.7552
 #define AO_BOUNCE_C_OFFSET 0.6903
 
-// The blur while there is no anti-aliasing to average the noise: this many texels each way, a neighbour counting less
-// the further its view distance is from the pixel's, nothing past this share of it.
-#define AO_BLUR_RADIUS 2
-#define AO_BLUR_DEPTH_SHARE 0.1
+// The denoiser (ambient_occlusion_denoise.comp, an edge-aware a-trous filter): the most passes (each twice as wide as
+// the last, a 5 x 5 B3-spline kernel), the power of the normals' cosine a tap is weighted by (corners stop it), and how
+// many first passes filter the visibility too (the light gathered takes them all: bounce light is soft, the darkening in
+// creases is detail).
+#define AO_DENOISE_MAX_PASSES 5
+#define AO_DENOISE_NORMAL_POWER 32.0
+#define AO_DENOISE_VISIBILITY_PASSES 1
 
 // The pass's noise (aoNoise): the slices' turn is interleaved gradient noise moved this many pixels along both axes a
 // frame (Jimenez's constant, which steps it evenly), and the steps' stagger starts from the noise at the pixel moved by

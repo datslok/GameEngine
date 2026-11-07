@@ -99,14 +99,20 @@ struct AmbientOcclusionSettings {
     // How far last frame's view depth at the reprojected texel may stray from the point's, as a share of it, before the
     // texel is taken for something else (a surface the point was hidden behind) and left out.
     float historyDepthShare = 0.05f;
+
+    // The denoiser while gathering or without anti-aliasing: passes of the edge-aware a-trous filter (each twice as wide,
+    // 4 reaching about 30 pixels each way; 0 off), and how far a tap may lie off the pixel's surface plane, as a share of
+    // its view depth, before it counts for little (a tap off by this much weighs 1/e).
+    int denoisePasses = 4;
+    float denoisePlaneShare = 0.02f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a radius, indirect radius, thickness, brightest sample or history depth share not
-// above 0, a falloff outside (0, 1], or slices, steps or history frames outside 1 up to AO_MAX_SLICES, AO_MAX_STEPS and
-// AO_MAX_HISTORY_FRAMES.
+// or denoise plane share not above 0, a falloff outside (0, 1], slices, steps or history frames outside 1 up to
+// AO_MAX_SLICES, AO_MAX_STEPS and AO_MAX_HISTORY_FRAMES, or denoise passes outside 0 up to AO_DENOISE_MAX_PASSES.
 void validateAmbientOcclusion(const AmbientOcclusionSettings& settings);
 
 // An occluder's weight at this distance from the point: 1 up to the falloff's start, fading linearly to 0 at the radius.
@@ -193,8 +199,38 @@ float specularOcclusion(float nDotV, float visibility, float roughness);
 // darken a crease both see twice.
 float surfaceVisibility(float screenVisibility, float occlusionTexel, float occlusionStrength);
 
-// A neighbour's weight in the blur: 1 at the pixel's own view distance, falling to 0 at AO_BLUR_DEPTH_SHARE of it away.
-float aoBlurWeight(float centreDistance, float neighbourDistance);
+/*
+* The denoiser: an edge-aware a-trous filter (Dammertz et al. 2010, as in SVGF). Each pass is the same 5 x 5 kernel with
+* its taps stride = 2^pass pixels apart, so four passes reach about 30 pixels each way for 100 reads a pixel. Each tap's
+* kernel weight is multiplied by two geometric checks against the centre: how far its point lies off the centre's
+* surface plane, against the centre's view depth (aoPlaneWeight, so a sloping floor counts whole and a pillar in front
+* or a wall behind does not), and how alike their normals are (aoNormalWeight, so nothing turns a corner). The light
+* gathered is filtered by every pass; the visibility by the first AO_DENOISE_VISIBILITY_PASSES only.
+*/
+
+// The B3-spline kernel's weight at a tap dx, dy (each -2..2): (1, 4, 6, 4, 1) / 16 along each axis.
+float atrousKernelWeight(int dx, int dy);
+
+// exp(-|n . (tap - centre)| / (share x the centre's view depth)): 1 on the centre's plane, 1/e that share of the depth
+// off it. Points are measured from the camera.
+float aoPlaneWeight(const Vec3& centreNormal, const Vec3& centrePoint, const Vec3& tapPoint, float centreDepth, float share);
+
+// max(0, a . b) to the power AO_DENOISE_NORMAL_POWER, for unit normals.
+float aoNormalWeight(const Vec3& centreNormal, const Vec3& tapNormal);
+
+// The point at view depth 1 along a pixel's ray (measured from the camera): the point at any view depth is this times it.
+Vec3 aoDepthRay(const Mat4& inverseViewProjection, Vec2 pixel, Vec2 size);
+
+// What the occlusion pass leaves for the denoiser at a pixel: its unit normal (from the depths) and its view depth, 0 for
+// the sky and for points left open (radius under a pixel), which the denoiser leaves as they are and no tap reads.
+struct AoGeometry {
+    Vec3 normal;
+    float viewDepth = 0.0f;
+};
+
+using AoGeometryImage = std::function<AoGeometry(int x, int y)>;
+using AoLightImage = std::function<Vec4(int x, int y)>;
+
 
 // The depth image as the pass reads it (reversed-Z), at a texel inside it.
 using AoDepthImage = std::function<float(int x, int y)>;
@@ -216,6 +252,10 @@ struct AoFrame {
     RenderSize size;
     float footprint = 0.0f;
 };
+
+// One pass of the denoiser at texel (x, y): rgb the light gathered, a the visibility, from the last pass's image (light).
+Vec4 denoiseAoAt(int x, int y, int pass, const AoFrame& frame, const AmbientOcclusionSettings& settings, const AoGeometryImage& geometry,
+                 const AoLightImage& light);
 
 /*
 * The pass's loop, as ambient_occlusion.comp runs it, at texel (x, y): open with nothing gathered for the sky and for
@@ -312,7 +352,7 @@ bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey
 // radius, falloff, slices and steps, the frame (turning the noise; 0 while there is no anti-aliasing, whose blur wants it
 // still), this frame's clip space (without the jitter) to last frame's, x the thickness, y 1 while gathering and z
 // the brightest sample, and the history: x its frames, y its depth share, z 1 while accumulating, w 1 when last
-// frame's history is usable (set by VulkanAmbientOcclusion, which knows).
+// frame's history is usable (set by VulkanAmbientOcclusion, which knows), and the denoiser: x its passes, y its plane share.
 struct GpuAmbientOcclusionPass {
     float inverseViewProjection[16];
     float size[4];
@@ -322,9 +362,10 @@ struct GpuAmbientOcclusionPass {
     float reprojection[16];
     float gather[4];
     float history[4];
+    float denoise[4];
 };
 
-static_assert(sizeof(GpuAmbientOcclusionPass) == 224, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
+static_assert(sizeof(GpuAmbientOcclusionPass) == 240, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
 
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
                                                  RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,

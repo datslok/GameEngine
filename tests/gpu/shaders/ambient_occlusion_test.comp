@@ -35,7 +35,7 @@ void main() {
 
         vec3 step = surfaceStep(centre.xyz, before.xyz, beforeNext.xyz, after.xyz, afterNext.xyz);
         testOutput(3, vec4(step, specularOcclusion(before.w, beforeNext.w, centre.w)));
-        testOutput(4, vec4(depthNormal(centre.xyz, step, offset.xyz), aoBlurWeight(afterNext.w, afterNext.w * 1.04)));
+        testOutput(4, vec4(depthNormal(centre.xyz, step, offset.xyz), aoNormalWeight(normal.xyz, toCamera.xyz)));
         testOutput(5, vec4(multiBounceOcclusion(beforeNext.w, albedo.rgb), surfaceVisibility(beforeNext.w, centre.w, toCamera.w)));
         testOutput(6, vec4(sectorShare(slice, albedo.w, 0), sectorShare(slice, last.x, 1), float(bitCount(sectorMask(before.w, beforeNext.w, offset.w))), 0.0));
         testOutput(7, vec4(gatheredSampleLight(albedo.rgb, beforeNext.w), 0.0));
@@ -55,6 +55,8 @@ void main() {
         testOutput(0, aoPreviousPlace(reprojection, point.xy, point.z, point.w, frame.xy));
         testOutput(1, vec4(age, aoCurrentShare(age), aoHistoryTapKept(tap.x, tap.y, tap.z) ? 1.0 : 0.0, aoTapWeight(fract(point.xy), int(tap.w))));
         testOutput(2, accumulatedAo(current, historyLight, age));
-        testOutput(3, vec4(aoNoise(point.xy, int(tap.w * 300.0)), 0.0));
+        vec3 planeNormal = normalize(historyLight.xyz + vec3(0.1));
+        testOutput(3, vec4(aoNoise(point.xy, int(tap.w * 300.0)), aoPlaneWeight(planeNormal, current.xyz, historyLight.xyz, tap.x, tap.z)));
+        testOutput(4, vec4(aoDepthRay(reprojection, point.xy, frame.xy), atrousKernelWeight(int(tap.w * 4.0) % 5 - 2, int(tap.w * 13.0) % 5 - 2)));
     }
 }

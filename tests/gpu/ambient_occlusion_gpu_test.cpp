@@ -68,7 +68,7 @@ namespace {
             report.check("surfaceStep", arithmeticTolerance, step, vec3From(out[3]));
             report.check("specularOcclusion", transcendentalTolerance, specularOcclusion(in[5][3], in[6][3], in[4][3]), out[3][3]);
             report.check("depthNormal", angleTolerance, depthNormal(centre, step, vec3From(in[3])), vec3From(out[4]));
-            report.check("aoBlurWeight", arithmeticTolerance, aoBlurWeight(in[8][3], in[8][3] * 1.04f), out[4][3]);
+            report.check("aoNormalWeight", transcendentalTolerance, aoNormalWeight(normal, toCamera), out[4][3]);
             report.check("multiBounceOcclusion", arithmeticTolerance, multiBounceOcclusion(in[6][3], vec3From(in[9])), vec3From(out[5]));
             report.check("surfaceVisibility", arithmeticTolerance, surfaceVisibility(in[6][3], in[4][3], in[1][3]), out[5][3]);
             report.check("sectorShare", angleTolerance, Vec3{sectorShare(slice, in[9][3], 0), sectorShare(slice, in[10][0], 1), 0.0f},
@@ -117,11 +117,11 @@ namespace {
             inputs.push_back(GpuVec4{expected, i % 5 == 0 ? 0.0f : expected * random.between(0.9f, 1.1f), random.between(0.01f, 0.1f), static_cast<float>(i % 4)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 4);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 5);
 
-        for (std::size_t i = 0; i < outputs.size() / 4; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 5; ++i) {
             const GpuVec4* in = &inputs[i * 9];
-            const GpuVec4* out = &outputs[i * 4];
+            const GpuVec4* out = &outputs[i * 5];
             const Vec2 pixel{in[4][0], in[4][1]};
             const Vec2 size{in[5][0], in[5][1]};
             const AoPreviousPlace place = aoPreviousPlace(reprojections[i], pixel, in[4][2], in[4][3], size);
@@ -146,6 +146,12 @@ namespace {
             const Vec3 noise = aoNoise(pixel, static_cast<int>(in[8][3] * 300.0f));
             const auto wrapped = [](float a, float b) { const float d = std::abs(a - b); return std::min(d, 1.0f - d); };
             report.check("aoNoise", FloatTolerance{.absolute = 1e-3f}, 0.0f, std::max({wrapped(noise.x, out[3][0]), wrapped(noise.y, out[3][1]), wrapped(noise.z, out[3][2])}));
+
+            const Vec3 historyLight{in[7][0], in[7][1], in[7][2]};
+            const Vec3 planeNormal = (historyLight + Vec3{0.1f, 0.1f, 0.1f}).normalized();
+            report.check("aoPlaneWeight", transcendentalTolerance, aoPlaneWeight(planeNormal, Vec3{in[6][0], in[6][1], in[6][2]}, historyLight, in[8][0], in[8][2]), out[3][3]);
+            report.check("aoDepthRay", FloatTolerance{.absolute = 1e-4f, .relative = 1e-3f}, aoDepthRay(reprojections[i], pixel, size), vec3From(out[4]));
+            report.check("atrousKernelWeight", exactTolerance, atrousKernelWeight(static_cast<int>(in[8][3] * 4.0f) % 5 - 2, static_cast<int>(in[8][3] * 13.0f) % 5 - 2), out[4][3]);
         }
     }
 }

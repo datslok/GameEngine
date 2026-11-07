@@ -1320,14 +1320,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         mirroredLights->ensureSize(sceneSize);
     }
 
-    // Ambient occlusion (render/gpu/ambient_occlusion.h) from the depth prepass's depths, blurred while there is no
+    // Ambient occlusion (render/gpu/ambient_occlusion.h) from the depth prepass's depths, denoised while there is no
     // anti-aliasing to average its noise or it gathers bounce light, whose noise is far stronger. It gathers from last
     // frame's finished picture, still what finishedScene points at, unless the light probes hold the bounce light already.
     // Its images are made the first time, as the mirrored lights' are.
     validateAmbientOcclusion(settings.ambientOcclusion);
     const bool occlusion = settings.ambientOcclusion.enabled && settings.depthPrepass && inverseViewProjection;
     const bool gathersLight = occlusion && settings.ambientOcclusion.indirect && previousPictureUsable && previousCamera.known && probes.empty();
-    const bool occlusionBlurred = occlusion && (!temporal || gathersLight);
+    const bool occlusionBlurred = occlusion && (!temporal || gathersLight) && settings.ambientOcclusion.denoisePasses > 0;
 
     // Its result averaged over the frames before while anti-aliasing turns its noise each frame (the accumulation); a
     // frame without it in between starts the average afresh.
