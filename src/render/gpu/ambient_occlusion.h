@@ -4,11 +4,13 @@
 #include "math/mat4.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
+#include "math/vec4.h"
 #include "render/gpu/ambient_occlusion_shared.h"
 #include "render/gpu/upscaling.h"
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 
 /*
 * Ambient occlusion: how much of the light from all around reaches a point past the small things next to it (a crease,
@@ -84,13 +86,27 @@ struct AmbientOcclusionSettings {
 
     // The reflection's stand-in dimmed in creases too (Lagarde 2014's fit).
     bool specularOcclusion = true;
+
+    // Each pixel's result averaged over the frames before it, reprojected, before the blur and the main pass read it, so
+    // the upscalers get steady light rather than noise to turn into grain and swirls. Needs anti-aliasing (whose frames
+    // turn the noise).
+    bool temporal = true;
+
+    // How many frames the average holds at most: the noise falls as one over the square root of about twice this, and
+    // a change in the light takes about this many frames to come through.
+    int historyFrames = 16;
+
+    // How far last frame's view depth at the reprojected texel may stray from the point's, as a share of it, before the
+    // texel is taken for something else (a surface the point was hidden behind) and left out.
+    float historyDepthShare = 0.05f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a radius, indirect radius, thickness or brightest sample not above 0, a falloff outside (0, 1], or
-// slices or steps outside 1 up to AO_MAX_SLICES and AO_MAX_STEPS.
+// Throws std::invalid_argument for a radius, indirect radius, thickness, brightest sample or history depth share not
+// above 0, a falloff outside (0, 1], or slices, steps or history frames outside 1 up to AO_MAX_SLICES, AO_MAX_STEPS and
+// AO_MAX_HISTORY_FRAMES.
 void validateAmbientOcclusion(const AmbientOcclusionSettings& settings);
 
 // An occluder's weight at this distance from the point: 1 up to the falloff's start, fading linearly to 0 at the radius.
@@ -198,11 +214,93 @@ struct AoFrame {
 AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
                            const AoDepthImage& depthAt, const AoPicture& picture = {});
 
+/*
+* Temporal accumulation (ambient_occlusion_temporal.comp): each pixel's result is blended into a running average of the
+* frames before it, found where the point was on last frame's screen. Each pixel keeps its average (the gathered light
+* and the visibility), its view depth (clip w: the distance along the view, not to the eye) and its age, how many frames
+* the average holds. A new frame weighs 1 / age, so while the age grows the average is the exact mean of every frame so
+* far, and once it reaches the cap an exponential average with about that memory.
+*/
+
+// The age after one more frame: one more than the history's, at most historyFrames (a history of age 0 gives 1: the
+// new frame alone).
+float aoHistoryAge(float previousAge, int historyFrames);
+
+// The new frame's share in the average at this age (at least 1).
+float aoCurrentShare(float age);
+
+// Whether a texel of last frame's history shows the point: its stored view depth (0 where it held the sky or nothing)
+// within share of the depth the point had then.
+bool aoHistoryTapKept(float expectedDepth, float storedDepth, float share);
+
+// Where a pixel's point was on last frame's screen and its view depth then, from its pixel (without the jitter), its
+// depth and its view depth now; not valid behind last frame's camera or off its screen.
+struct AoPreviousPlace {
+    Vec2 pixel;
+    float viewDepth = 0.0f;
+    bool valid = false;
+};
+
+AoPreviousPlace aoPreviousPlace(const Mat4& reprojection, Vec2 pixel, float depth, float viewDepth, Vec2 size);
+
+// A bilinear tap's weight (tap 0 to 3: bit 0 the texel to the right, bit 1 the one below), from the fraction past the
+// first texel's centre.
+float aoTapWeight(Vec2 fraction, int tap);
+
+// One texel of the history: the average (rgb the gathered light, a the visibility), the view depth (0 for the sky) and
+// the age.
+struct AoHistoryTexel {
+    Vec4 light;
+    float viewDepth = 0.0f;
+    float age = 0.0f;
+};
+
+using AoHistoryImage = std::function<AoHistoryTexel(int x, int y)>;
+
+// What last frame's history holds for a point: the light of the bilinear taps that show it, their weights made to add
+// up to 1, and the age, each tap's times its bilinear weight, so a point only partly seen last frame trusts it less.
+// Age 0 and no light where no tap shows it.
+struct AoHistory {
+    Vec4 light;
+    float age = 0.0f;
+};
+
+AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const AoPreviousPlace& place, float share);
+
+// The new frame blended into the history's light at the new age.
+Vec4 accumulatedAo(const Vec4& current, const Vec4& historyLight, float age);
+
+// The new frame (rgb the gathered light, a the visibility) blended into the history, at the point's view depth.
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames);
+
+/*
+* The temporal pass's loop, as ambient_occlusion_temporal.comp runs it, at texel (x, y): the sky holds open, nothing
+* gathered, no depth and no age; otherwise the pass's result there (current) blended with last frame's history where it
+* shows the point, or alone without a usable history.
+*
+* Each texel's result is taken for its whole footprint, wherever the jitter put its sample this frame: the jitter cycles,
+* so the average covers the footprint, as supersampling would. So the texel's centre is reprojected without taking the
+* jitter off, and a still camera reads exactly its own texel every frame; taking it off (and putting last frame's back
+* on) would read between texels each frame and blur the history a little more every time.
+*/
+AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
+                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable);
+
+// What last frame's history was made for: a history is only carried over to a frame of the same size gathering the
+// same way (the light means something else with and without gathering) with last frame's camera known.
+struct AoHistoryKey {
+    RenderSize size;
+    bool gathers = false;
+};
+
+bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey& now, bool previousCameraKnown);
+
 // The pass record (std430, a storage buffer): the camera-relative view-projection's inverse (jitter included), the
 // render size and its inverse, x the pixel footprint per metre and yz this frame's jitter in render pixels, then the
 // radius, falloff, slices and steps, the frame (turning the noise; 0 while there is no anti-aliasing, whose blur wants it
-// still), this frame's clip space (without the jitter) to last frame's, and x the thickness, y 1 while gathering and z
-// the brightest sample.
+// still), this frame's clip space (without the jitter) to last frame's, x the thickness, y 1 while gathering and z
+// the brightest sample, and the history: x its frames, y its depth share, z 1 while accumulating, w 1 when last
+// frame's history is usable (set by VulkanAmbientOcclusion, which knows).
 struct GpuAmbientOcclusionPass {
     float inverseViewProjection[16];
     float size[4];
@@ -211,9 +309,11 @@ struct GpuAmbientOcclusionPass {
     std::int32_t frame[4];
     float reprojection[16];
     float gather[4];
+    float history[4];
 };
 
-static_assert(sizeof(GpuAmbientOcclusionPass) == 208, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
+static_assert(sizeof(GpuAmbientOcclusionPass) == 224, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
 
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
-                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers);
+                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,
+                                                 bool accumulates);

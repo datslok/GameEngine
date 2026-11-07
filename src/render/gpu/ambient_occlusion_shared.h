@@ -38,6 +38,9 @@
 #define AO_FILL_BLUR_TAPS 12
 #define AO_FILL_BLUR_STRIDE 4
 
+// The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
+#define AO_MAX_HISTORY_FRAMES 64
+
 // The passes' workgroups: 8 x 8 pixels.
 #define AO_GROUP_SIDE 8
 

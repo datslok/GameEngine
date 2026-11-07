@@ -1,0 +1,93 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Ambient occlusion's temporal accumulation (render/gpu/ambient_occlusion.h, aoTemporalAt mirrors it), one invocation
+* per render pixel, after the occlusion pass and before the blur: the pass's result blended into a running average of
+* the frames before, read where the point was on last frame's screen from the four texels round it whose view depth
+* shows the same point. The new frame weighs one over the age, the frames the average holds, at most the history's
+* frames, so a newly seen point starts from this frame alone. Writes this frame's history (the average, and the view
+* depth and age), which the blur and the main pass read and the next frame reprojects.
+*/
+#include "screen_reflections.glsl"
+#include "ambient_occlusion.glsl"
+
+layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
+
+// Must match GpuAmbientOcclusionPass.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
+    vec4 size;                  // xy: the render size in pixels, zw: their inverses
+    vec4 lens;
+    vec4 options;
+    ivec4 frame;
+    mat4 reprojection;          // this frame's clip space (without the jitter) to last frame's
+    vec4 gather;
+    vec4 history;               // x: the history's frames, y: its depth share, z: 1 while accumulating, w: 1 when last frame's is usable
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D depth;                     // exact texels
+layout(set = 0, binding = 2) uniform sampler2D current;                   // the occlusion pass's result, exact texels
+layout(set = 0, binding = 3) uniform sampler2D previousLight;             // last frame's average
+layout(set = 0, binding = 4) uniform sampler2D previousDepthAge;          // last frame's view depth (0 for the sky) and age
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D light;    // this frame's average: rgb the light gathered, a the visibility
+layout(set = 0, binding = 6, rg32f) uniform writeonly image2D depthAge;   // this frame's view depth and age
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(pass.size.xy);
+
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    float pixelDepth = texelFetch(depth, texel, 0).r;
+
+    if (pixelDepth == float(GPU_FAR_DEPTH)) {
+        imageStore(light, texel, vec4(0.0, 0.0, 0.0, 1.0));
+        imageStore(depthAge, texel, vec4(0.0));
+        return;
+    }
+
+    vec2 pixel = vec2(texel) + 0.5;
+    float viewDepth = viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
+    vec4 historyLight = vec4(0.0);
+    float historyAge = 0.0;
+
+    // Each texel's result stands for its whole footprint, so its centre is reprojected as it is (aoTemporalAt).
+    if (pass.history.w > 0.5) {
+        vec4 place = aoPreviousPlace(pass.reprojection, pixel, pixelDepth, viewDepth, pass.size.xy);
+
+        if (place.w > 0.5) {
+            vec2 base = floor(place.xy - 0.5);
+            vec2 fraction = place.xy - 0.5 - base;
+            float weights = 0.0;
+
+            for (int tap = 0; tap < 4; ++tap) {
+                ivec2 at = ivec2(base) + ivec2(tap & 1, tap >> 1);
+                float weight = aoTapWeight(fraction, tap);
+
+                if (weight <= 0.0 || any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size))) {
+                    continue;
+                }
+
+                vec2 stored = texelFetch(previousDepthAge, at, 0).rg;
+
+                if (!aoHistoryTapKept(place.z, stored.r, pass.history.y)) {
+                    continue;
+                }
+
+                historyLight += texelFetch(previousLight, at, 0) * weight;
+                weights += weight;
+                historyAge += stored.g * weight;
+            }
+
+            historyLight = weights > 0.0 ? historyLight / weights : vec4(0.0);
+            historyAge = weights > 0.0 ? historyAge : 0.0;
+        }
+    }
+
+    float age = aoHistoryAge(historyAge, int(pass.history.x));
+    imageStore(light, texel, accumulatedAo(texelFetch(current, texel, 0), historyLight, age));
+    imageStore(depthAge, texel, vec4(viewDepth, age, 0.0, 0.0));
+}

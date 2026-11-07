@@ -486,13 +486,14 @@ private:
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
     // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
-    // blurred image when occlusionBlurred; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
+    // blurred image when occlusionBlurred, else the accumulated one when occlusionAccumulates; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
     // frameFog: the fog's record (off without fog).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred, bool gathersLight,
+                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
+                               bool occlusionAccumulates, bool gathersLight,
                                bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility);
 
     // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the

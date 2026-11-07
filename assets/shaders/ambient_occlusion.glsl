@@ -6,6 +6,7 @@
 #define AMBIENT_OCCLUSION_GLSL
 
 #include "render/gpu/ambient_occlusion_shared.h"
+#include "taa.glsl"
 
 // An occluder's weight at this distance: 1 up to the falloff's start, 0 at the radius.
 float occluderWeight(float distance, float radius, float falloff) {
@@ -159,6 +160,52 @@ float surfaceVisibility(float screenVisibility, float occlusionTexel, float occl
 
 float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return max(1.0 - abs(neighbourDistance - centreDistance) / (float(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0);
+}
+
+// Temporal accumulation: the age after one more frame, at most the cap.
+float aoHistoryAge(float previousAge, int historyFrames) {
+    return min(previousAge + 1.0, float(historyFrames));
+}
+
+// The new frame's share in the average at this age.
+float aoCurrentShare(float age) {
+    return 1.0 / max(age, 1.0);
+}
+
+// Whether a history texel shows the point: its view depth (0 for the sky) within share of the expected one.
+bool aoHistoryTapKept(float expectedDepth, float storedDepth, float share) {
+    return storedDepth > 0.0 && abs(storedDepth - expectedDepth) <= share * expectedDepth;
+}
+
+// Where the pixel's point was on last frame's screen: xy the pixel, z its view depth then, w 1 when it was in front of
+// last frame's camera and on its screen.
+vec4 aoPreviousPlace(mat4 reprojection, vec2 pixel, float depth, float viewDepth, vec2 size) {
+    vec2 ndc = pixelToNdc(pixel, size);
+    vec4 clip = reprojection * vec4(ndc, depth, 1.0);
+
+    if (!(clip.w > 0.0)) {
+        return vec4(0.0);
+    }
+
+    vec2 moved = clip.xy / clip.w - ndc;
+    vec2 previous = vec2(pixel.x + moved.x * 0.5 * size.x, pixel.y - moved.y * 0.5 * size.y);
+
+    if (any(lessThan(previous, vec2(0.0))) || any(greaterThan(previous, size))) {
+        return vec4(0.0);
+    }
+
+    return vec4(previous, clip.w * viewDepth, 1.0);
+}
+
+// A bilinear tap's weight (tap 0 to 3: bit 0 the texel to the right, bit 1 the one below), from the fraction past the
+// first texel's centre.
+float aoTapWeight(vec2 fraction, int tap) {
+    return ((tap & 1) == 1 ? fraction.x : 1.0 - fraction.x) * ((tap >> 1) == 1 ? fraction.y : 1.0 - fraction.y);
+}
+
+// The new frame blended into the history's light at the new age.
+vec4 accumulatedAo(vec4 current, vec4 historyLight, float age) {
+    return historyLight + (current - historyLight) * aoCurrentShare(age);
 }
 
 #endif

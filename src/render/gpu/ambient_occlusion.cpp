@@ -2,6 +2,7 @@
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/screen_reflections.h"
+#include "render/gpu/taa.h"
 
 #include <algorithm>
 #include <bit>
@@ -21,6 +22,9 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Bounce light brightest sample", settings.indirectBrightest, {.min = 0.01f, .max = 1000.0f, .sliderMin = 1.0f, .sliderMax = 32.0f});
     visitor.field("Occlusion bounces", settings.multipleBounces);
     visitor.field("Specular occlusion", settings.specularOcclusion);
+    visitor.field("Occlusion history", settings.temporal);
+    visitor.field("Occlusion history frames", settings.historyFrames, {.min = 1, .max = AO_MAX_HISTORY_FRAMES});
+    visitor.field("Occlusion history depth share", settings.historyDepthShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.005f, .sliderMax = 0.2f});
 }
 
 // Written so not a number fails too.
@@ -47,6 +51,14 @@ void validateAmbientOcclusion(const AmbientOcclusionSettings& settings) {
 
     if (settings.slices < 1 || settings.slices > AO_MAX_SLICES || settings.steps < 1 || settings.steps > AO_MAX_STEPS) {
         throw std::invalid_argument("Ambient occlusion needs 1 to AO_MAX_SLICES slices and 1 to AO_MAX_STEPS steps");
+    }
+
+    if (settings.historyFrames < 1 || settings.historyFrames > AO_MAX_HISTORY_FRAMES) {
+        throw std::invalid_argument("Ambient occlusion needs 1 to AO_MAX_HISTORY_FRAMES history frames");
+    }
+
+    if (!(settings.historyDepthShare > 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs a history depth share above 0");
     }
 }
 
@@ -337,8 +349,118 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
     return AoLight{gathered * (1.0f / slices), std::clamp(visibility / slices, 0.0f, 1.0f), fill};
 }
 
+float aoHistoryAge(float previousAge, int historyFrames) {
+    return std::min(previousAge + 1.0f, static_cast<float>(historyFrames));
+}
+
+float aoCurrentShare(float age) {
+    return 1.0f / std::max(age, 1.0f);
+}
+
+bool aoHistoryTapKept(float expectedDepth, float storedDepth, float share) {
+    return storedDepth > 0.0f && std::abs(storedDepth - expectedDepth) <= share * expectedDepth;
+}
+
+/*
+* The pixel's NDC and depth are a point of this frame's clip space with w = 1, that is the clip point over its w, 1 over
+* the view depth now; the reprojection takes it to last frame's clip point over the same w, so its w is the view depth
+* then over the view depth now. The pixel moves by the change in NDC (cameraMotion's form), so a still camera, whose
+* reprojection is exactly the identity, gives exactly the same pixel.
+*/
+AoPreviousPlace aoPreviousPlace(const Mat4& reprojection, Vec2 pixel, float depth, float viewDepth, Vec2 size) {
+    const Vec2 ndc = pixelToNdc(pixel, size);
+    const Vec4 clip = reprojection * Vec4{ndc.x, ndc.y, depth, 1.0f};
+
+    if (!(clip.w > 0.0f)) {
+        return AoPreviousPlace{};
+    }
+
+    const Vec2 moved{clip.x / clip.w - ndc.x, clip.y / clip.w - ndc.y};
+    const Vec2 previous{pixel.x + moved.x * 0.5f * size.x, pixel.y - moved.y * 0.5f * size.y};
+
+    if (previous.x < 0.0f || previous.y < 0.0f || previous.x > size.x || previous.y > size.y) {
+        return AoPreviousPlace{};
+    }
+
+    return AoPreviousPlace{previous, clip.w * viewDepth, true};
+}
+
+float aoTapWeight(Vec2 fraction, int tap) {
+    return ((tap & 1) == 1 ? fraction.x : 1.0f - fraction.x) * ((tap >> 1) == 1 ? fraction.y : 1.0f - fraction.y);
+}
+
+// The four texels round the place, by their bilinear weights (texel centres at half pixels).
+AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const AoPreviousPlace& place, float share) {
+    if (!place.valid) {
+        return AoHistory{};
+    }
+
+    const float baseX = std::floor(place.pixel.x - 0.5f);
+    const float baseY = std::floor(place.pixel.y - 0.5f);
+    const Vec2 fraction{place.pixel.x - 0.5f - baseX, place.pixel.y - 0.5f - baseY};
+    Vec4 light;
+    float weights = 0.0f;
+    float age = 0.0f;
+
+    for (int tap = 0; tap < 4; ++tap) {
+        const int x = static_cast<int>(baseX) + (tap & 1);
+        const int y = static_cast<int>(baseY) + (tap >> 1);
+        const float weight = aoTapWeight(fraction, tap);
+
+        if (weight <= 0.0f || x < 0 || y < 0 || x >= static_cast<int>(size.width) || y >= static_cast<int>(size.height)) {
+            continue;
+        }
+
+        const AoHistoryTexel texel = history(x, y);
+
+        if (!aoHistoryTapKept(place.viewDepth, texel.viewDepth, share)) {
+            continue;
+        }
+
+        light = light + texel.light * weight;
+        weights += weight;
+        age += texel.age * weight;
+    }
+
+    if (!(weights > 0.0f)) {
+        return AoHistory{};
+    }
+
+    return AoHistory{light * (1.0f / weights), age};
+}
+
+Vec4 accumulatedAo(const Vec4& current, const Vec4& historyLight, float age) {
+    return historyLight + (current - historyLight) * aoCurrentShare(age);
+}
+
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames) {
+    const float age = aoHistoryAge(history.age, historyFrames);
+    return AoHistoryTexel{accumulatedAo(current, history.light, age), viewDepth, age};
+}
+
+AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
+                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable) {
+    const float depth = depthAt(x, y);
+
+    if (depth == gpuFarDepth) {
+        return AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 1.0f}, 0.0f, 0.0f};
+    }
+
+    const Vec2 size{static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
+    const Vec2 pixel{static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f};
+    const float viewDepth = viewDistanceAtPixel(frame.inverseViewProjection, pixel, depth, size);
+    const AoHistory previous = historyUsable ? readAoHistory(history, frame.size, aoPreviousPlace(reprojection, pixel, depth, viewDepth, size), settings.historyDepthShare)
+                                             : AoHistory{};
+    return accumulateAo(current, viewDepth, previous, settings.historyFrames);
+}
+
+bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey& now, bool previousCameraKnown) {
+    return previousCameraKnown && last && last->size == now.size && last->gathers == now.gathers;
+}
+
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
-                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers) {
+                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,
+                                                 bool accumulates) {
     GpuAmbientOcclusionPass pass{};
     writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
     const float width = static_cast<float>(size.width);
@@ -359,5 +481,8 @@ GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjecti
     pass.gather[0] = settings.thickness;
     pass.gather[1] = gathers ? 1.0f : 0.0f;
     pass.gather[2] = settings.indirectBrightest;
+    pass.history[0] = static_cast<float>(settings.historyFrames);
+    pass.history[1] = settings.historyDepthShare;
+    pass.history[2] = accumulates ? 1.0f : 0.0f;
     return pass;
 }

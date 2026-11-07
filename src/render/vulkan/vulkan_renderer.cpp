@@ -1329,6 +1329,14 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool gathersLight = occlusion && settings.ambientOcclusion.indirect && previousPictureUsable && previousCamera.known && probes.empty();
     const bool occlusionBlurred = occlusion && (!temporal || gathersLight);
 
+    // Its result averaged over the frames before while anti-aliasing turns its noise each frame (the accumulation); a
+    // frame without it in between starts the average afresh.
+    const bool occlusionAccumulates = occlusion && temporal && settings.ambientOcclusion.temporal;
+
+    if (!occlusion) {
+        ambientOcclusion->forgetHistory();
+    }
+
     if (occlusion && !ambientOcclusion->hasImages()) {
         ambientOcclusion->ensureSize(sceneSize);
     }
@@ -1355,7 +1363,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
-                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, gathersLight, glassShadows, frameFog, readsSkyVisibility);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
+                                                readsSkyVisibility);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1428,8 +1437,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         const std::uint32_t noiseFrame = temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0;
         ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gathersLight ? finishedScene : nullptr, sampled(*noProbesTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
-                                                           settings.ambientOcclusion, noiseFrame, gathersLight),
-                                  occlusionBlurred);
+                                                           settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
+                                  occlusionBlurred, previousCamera.known);
         endGpuPass(frame, GpuPass::AmbientOcclusion);
     }
 
@@ -1698,7 +1707,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
-                                           bool occlusionBlurred, bool gathersLight, bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility) {
+                                           bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
+                                           bool readsSkyVisibility) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1787,7 +1797,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         description.lighting.atmosphere ? atmosphere->sampledSkyView() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledLight() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledDirection() : sampled(*noProbesTexture),
-        occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred) : sampled(*noProbesTexture),
+        occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred, occlusionAccumulates) : sampled(*noProbesTexture),
         fog->sampledVolume(),
         skyVisibility->sampled(),
         occlusion ? ambientOcclusion->sampledFill() : sampled(*noProbesTexture),
@@ -2351,6 +2361,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     const int framesBefore = std::max(tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0),
                                       temporalAntiAliasing(settings.upscaling) ? taaSettleFrames : 0);
     taa->forgetHistory();
+    ambientOcclusion->forgetHistory();
     fsrHistory = false;
     dlssHistory = false;
     previousCamera.known = false;
