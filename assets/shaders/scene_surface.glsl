@@ -64,6 +64,10 @@ const bool captureView = true;
 const bool captureView = false;
 #endif
 
+// How much of the sky each point sees (render/gpu/sky_visibility.h): the flat ambient light dimmed indoors without
+// probes, and the sun's stand-in shadow past its cascades.
+#include "scene_sky_visibility.glsl"
+
 #ifdef GLASS_SHADOW_RAYS
 /*
 * Tinted shadows (render/gpu/transparency.h), in the variants on GPUs with ray queries used while glass is in the world:
@@ -92,9 +96,12 @@ float sunBeyondCascades(vec3 normal, vec3 toLight) {
     return reachesLight(relativePosition + cameraOrigin.xyz + lift, toLight, float(PROBE_SHADOW_RAY_REACH)) ? 1.0 : 0.0;
 }
 #else
-// Past the cascades the sun counts as unshadowed, as beyond the shadow distance.
+// Past the cascades the sun counts as unshadowed, as beyond the shadow distance, except where the sky visibility grid
+// reaches: there the sky the point sees towards the sun stands in for its shadow (a closed room sees none of it). The
+// reflection probe's capture sees behind the camera, where the cascades do not reach, and without this lit the dark
+// rooms behind it in full sun; beyond the grid's reach the grid reads as open sky, so far ground stays sunlit.
 float sunBeyondCascades(vec3 normal, vec3 toLight) {
-    return 1.0;
+    return skyVisibilityRead() ? skySeenAlong(skyVisibilityAt(relativePosition, normal, normal), toLight) : 1.0;
 }
 #endif
 
@@ -122,9 +129,6 @@ layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 // visibility's blocked share.
 layout(set = 1, binding = 31) uniform sampler2D ambientFill;
 #include "ambient_occlusion.glsl"
-
-// How much of the sky each point sees (render/gpu/sky_visibility.h): the flat ambient light dimmed indoors without probes.
-#include "scene_sky_visibility.glsl"
 
 #ifdef TRANSPARENT
 /*

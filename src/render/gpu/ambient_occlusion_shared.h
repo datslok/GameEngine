@@ -35,8 +35,8 @@
 // The fill's blur (ambient_fill_blur.comp), always while gathering: the fill stands for the surroundings' brightness, a
 // smooth thing, but each pixel's comes from a few dozen samples, and a bright patch among them leaves noise the
 // upscalers turn into swirls. Two passes, across then down, this many taps each way this many pixels apart.
-#define AO_FILL_BLUR_TAPS 8
-#define AO_FILL_BLUR_STRIDE 3
+#define AO_FILL_BLUR_TAPS 12
+#define AO_FILL_BLUR_STRIDE 4
 
 // The passes' workgroups: 8 x 8 pixels.
 #define AO_GROUP_SIDE 8
