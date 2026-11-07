@@ -75,6 +75,7 @@ namespace {
                          Vec3{out[6][0], out[6][1], 0.0f});
             report.check("sectorMask", arithmeticTolerance, static_cast<float>(std::popcount(sectorMask(in[5][3], in[6][3], in[3][3]))), out[6][2]);
             report.check("gatheredSampleLight", arithmeticTolerance, gatheredSampleLight(vec3From(in[9]), in[6][3]), vec3From(out[7]));
+            report.check("aoSampleLevel", transcendentalTolerance, aoSampleLevel(static_cast<int>(in[10][2]), static_cast<int>(in[10][3]), in[3][3], in[10][1]), out[7][3]);
         }
     }
 

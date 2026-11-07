@@ -70,6 +70,18 @@ public:
     // The depth pyramid's levels at the current size (packReflectionPass needs them).
     std::uint32_t getPyramidLevels() const;
 
+    /*
+    * Build the colour pyramid from last frame's picture early in the frame (left readable by compute), so the ambient
+    * occlusion pass can gather from its levels; reflect then uses it as it is instead of building it again.
+    */
+    void prepareColourPyramid(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& previousPicture);
+
+    // A new frame: the pyramid prepared last frame (if reflect never ran to use it) is stale.
+    void forgetColourPyramid();
+
+    // The colour pyramid, every level, trilinear, after prepareColourPyramid.
+    SampledImage sampledColourPyramid() const;
+
 private:
     const VulkanDevice& device;
     VkSampler nearest;
@@ -89,6 +101,7 @@ private:
     VulkanImage standIns;
     VulkanImage depthPyramid;
     std::unique_ptr<VulkanColourPyramid> colourPyramid;
+    bool colourPyramidPrepared = false; // built this frame already, by prepareColourPyramid
 
     // A view of each depth pyramid level alone, for writing one level at a time.
     std::vector<OwnedHandle<VkImageView>> depthLevels;

@@ -188,6 +188,16 @@ Vec3 aoNoise(Vec2 pixel, int frame);
 // staggered by noise (0..1), never under AO_MIN_SAMPLE_PIXELS.
 float aoSampleDistance(int step, int count, float noise, float screenRadius);
 
+/*
+* The level of last frame's picture's pyramid (each level half the size, render size at 0) a gathered sample reads: its
+* footprint is the spacing of the steps round it, the distance's slope 2 (step + noise) radius / count^2 pixels, and the
+* level whose texels are that wide, log2 of it (0 below a pixel). A far sample then reads the mean of the stretch it
+* stands for instead of one texel: a thin bright face between two steps no longer comes back whole one frame in twenty
+* and not at all the rest (aliasing, sampling a picture finer than the steps), but a little every frame. The texture
+* read clamps it to the pyramid's top.
+*/
+float aoSampleLevel(int step, int count, float noise, float screenRadius);
+
 // The visibility seen by a matte surface of this albedo, light bouncing between the crease's walls (never darker).
 Vec3 multiBounceOcclusion(float visibility, const Vec3& albedo);
 
@@ -235,8 +245,9 @@ using AoLightImage = std::function<Vec4(int x, int y)>;
 // The depth image as the pass reads it (reversed-Z), at a texel inside it.
 using AoDepthImage = std::function<float(int x, int y)>;
 
-// Last frame's picture at the point a texel inside the render shows; empty when there is nothing to gather.
-using AoPicture = std::function<Vec3(int x, int y)>;
+// Last frame's picture at the point a texel inside the render shows, read at a level of its pyramid (aoSampleLevel);
+// empty when there is nothing to gather.
+using AoPicture = std::function<Vec3(int x, int y, float level)>;
 
 // What the pass finds at a pixel: the open share, and the light gathered from what fills the rest (nothing without a
 // picture).

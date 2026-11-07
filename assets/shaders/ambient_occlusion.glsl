@@ -145,6 +145,12 @@ vec3 aoNoise(vec2 pixel, int frame) {
                 fract(sectorStart + float(AO_SECTOR_NOISE_FRAME_STEP) * float(frame)));
 }
 
+// The pyramid level a gathered sample reads: log2 of the steps' spacing round it, never below 0.
+float aoSampleLevel(int index, int count, float noise, float screenRadius) {
+    float spacing = 2.0 * (float(index) + noise) * screenRadius / float(count * count);
+    return log2(max(spacing, 1.0));
+}
+
 float aoSampleDistance(int index, int count, float noise, float screenRadius) {
     float share = (float(index) + noise) / float(count);
     return max(share * share * screenRadius, float(AO_MIN_SAMPLE_PIXELS));

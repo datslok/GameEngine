@@ -227,6 +227,12 @@ float aoSampleDistance(int step, int count, float noise, float screenRadius) {
     return std::max(share * share * screenRadius, static_cast<float>(AO_MIN_SAMPLE_PIXELS));
 }
 
+// The distance is ((step + noise) / count)^2 radius: its slope in the step, the spacing round the sample.
+float aoSampleLevel(int step, int count, float noise, float screenRadius) {
+    const float spacing = 2.0f * (static_cast<float>(step) + noise) * screenRadius / static_cast<float>(count * count);
+    return std::log2(std::max(spacing, 1.0f));
+}
+
 // Jimenez et al. 2016, "Practical Real-Time Strategies for Accurate Indirect Occlusion", their equation 10.
 Vec3 multiBounceOcclusion(float visibility, const Vec3& albedo) {
     const auto channel = [visibility](float albedo) {
@@ -408,7 +414,7 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
                 const std::uint32_t fresh = mask & ~marked;
 
                 if (picture && fresh != 0u) {
-                    const Vec3 seen = gatheredSampleLight(picture(sx, sy), settings.indirectBrightest);
+                    const Vec3 seen = gatheredSampleLight(picture(sx, sy, aoSampleLevel(step, settings.steps, stepNoise, screenRadius)), settings.indirectBrightest);
                     sliceLight = sliceLight + seen * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
                 }
 

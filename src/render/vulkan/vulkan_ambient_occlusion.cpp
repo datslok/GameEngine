@@ -155,12 +155,12 @@ void VulkanAmbientOcclusion::denoiseInto(VkCommandBuffer commands, FrameDescript
 }
 /*
 * The barriers: the depth from being drawn into by the prepass to being read by compute (the main pass turns it back
-* into a depth target, keeping it); last frame's picture, sampled here before the reflections do; the images from being read by last frame's main pass (or nothing yet) to being
+* into a depth target, keeping it); last frame's picture's pyramid, built just before (VulkanReflections::prepareColourPyramid); the images from being read by last frame's main pass (or nothing yet) to being
 * written, their old contents discarded, every pixel being written. The accumulation then reads the pass's image (see
 * accumulate). With the denoiser, the accumulation's image (or the pass's) then goes through its passes (see denoiseInto); whichever the main pass reads ends readable by fragment shaders.
 */
 void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth,
-                                     VulkanImage* previousPicture, const SampledImage& standIn, const GpuAmbientOcclusionPass& pass, bool blur,
+                                     const SampledImage* gatherPicture, const SampledImage& standIn, const GpuAmbientOcclusionPass& pass, bool blur,
                                      bool previousCameraKnown) {
     // Whether last frame's history carries over is known here, where what it was made for is kept.
     const bool accumulates = pass.history[2] > 0.5f;
@@ -177,12 +177,8 @@ void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors&
     noisy.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
     geometry.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
-    if (previousPicture != nullptr) {
-        previousPicture->transition(commands, ImageState::ComputeRead);
-    }
-
-    // Nearest is plenty: each sample is one noisy guess of light the frames and the denoiser average.
-    const SampledImage picture = previousPicture != nullptr ? SampledImage{previousPicture->getView(), nearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL} : standIn;
+    // The picture's pyramid, read trilinear at each sample's level (aoSampleLevel), already readable by compute.
+    const SampledImage picture = gatherPicture != nullptr ? *gatherPicture : standIn;
     const SampledImage depthSample{depth.getView(), nearest, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
     const std::array<ComputeBinding, 5> occlusionBindings{
         storageBufferBinding(record.get()),

@@ -27,7 +27,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
 } pass;
 
 layout(set = 0, binding = 1) uniform sampler2D depth;                      // exact texels
-layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture
+layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture's pyramid, trilinear
 layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
 layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D geometry;  // for the denoiser: xyz the normal, w the view depth (0 for the sky and points left open)
 
@@ -38,8 +38,9 @@ vec3 pointAt(ivec2 texel, vec3 fallback) {
     return texelDepth == float(GPU_FAR_DEPTH) ? fallback : positionAtPixel(pass.inverseViewProjection, vec2(clamped) + 0.5, texelDepth, pass.size.xy);
 }
 
-// Last frame's picture where it showed the point at this texel (a 1), or nothing where it was off screen (a 0).
-vec4 pictureAt(ivec2 texel, float texelDepth) {
+// Last frame's picture where it showed the point at this texel (a 1), read at a level of its pyramid, or nothing where
+// it was off screen (a 0).
+vec4 pictureAt(ivec2 texel, float texelDepth, float level) {
     vec2 unjittered = vec2(texel) + 0.5 - pass.lens.yz;
     vec3 previous = reprojectPixel(pass.reprojection, unjittered, texelDepth, pass.size.xy);
 
@@ -47,7 +48,7 @@ vec4 pictureAt(ivec2 texel, float texelDepth) {
         return vec4(0.0);
     }
 
-    return vec4(gatheredSampleLight(textureLod(picture, previous.xy * pass.size.zw, 0.0).rgb, pass.gather.z), 1.0);
+    return vec4(gatheredSampleLight(textureLod(picture, previous.xy * pass.size.zw, level).rgb, pass.gather.z), 1.0);
 }
 
 void main() {
@@ -148,7 +149,7 @@ void main() {
                 uint fresh = mask & ~marked;
 
                 if (gathers && fresh != 0u) {
-                    sliceLight += pictureAt(at, atDepth).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
+                    sliceLight += pictureAt(at, atDepth, aoSampleLevel(index, steps, stepNoise, screenRadius)).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
                 }
 
                 marked |= mask;

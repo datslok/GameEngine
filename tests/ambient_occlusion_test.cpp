@@ -373,6 +373,23 @@ namespace {
 
     // The kernel adds up to 1, centre 36/256, corners 1/256; a tap on the plane weighs 1, the share of the depth off it
     // 1/e, either side alike; alike normals 1, at right angles 0, in between the cosine to the 32nd.
+    // Steps near the pixel read the picture itself, further ones ever blurrier levels, as wide as the steps' spacing:
+    // the slope 2 (step + noise) radius / count^2, so level log2 of it, never below 0.
+    void testSampleLevel() {
+        assert(aoSampleLevel(0, 6, 0.0f, 256.0f) == 0.0f);
+        assert(aoSampleLevel(0, 6, 0.05f, 256.0f) == 0.0f);
+        assert(near(aoSampleLevel(5, 6, 0.5f, 256.0f), std::log2(2.0f * 5.5f * 256.0f / 36.0f), 1e-5f));
+        assert(near(aoSampleLevel(2, 6, 0.25f, 64.0f), std::log2(2.0f * 2.25f * 64.0f / 36.0f), 1e-5f));
+        float last = -1.0f;
+
+        for (int step = 0; step < 6; ++step) {
+            const float level = aoSampleLevel(step, 6, 0.5f, 200.0f);
+            assert(level >= last);
+            last = level;
+        }
+
+        assert(last > 4.0f);
+    }
     void testDenoiseWeights() {
         assert(near(atrousKernelWeight(0, 0), 36.0f / 256.0f, 1e-7f));
         assert(near(atrousKernelWeight(2, -2), 1.0f / 256.0f, 1e-7f));
@@ -538,7 +555,7 @@ namespace {
         * (a white furnace) gives exactly the open light's missing share, and nothing is counted twice. It takes the
         * colour of what it sees, and open floor gathers nothing from itself.
         */
-        const AoPicture white = [](int, int) { return Vec3{1.0f, 1.0f, 1.0f}; };
+        const AoPicture white = [](int, int, float) { return Vec3{1.0f, 1.0f, 1.0f}; };
         const AoLight furnace = averagedLight(x, foot, frame, far, depthAt, white);
         assert(near(furnace.visibility + furnace.gathered.x, 1.0f, 0.02f));
         assert(furnace.gathered.x > 0.35f);
@@ -560,12 +577,75 @@ namespace {
             assert(near(static_cast<float>(total / (grid * grid * grid)), 1.0f, 0.02f));
         }
 
-        const AoPicture red = [](int, int) { return Vec3{0.8f, 0.0f, 0.0f}; };
+        const AoPicture red = [](int, int, float) { return Vec3{0.8f, 0.0f, 0.0f}; };
         const AoLight tinted = averagedLight(x, foot, frame, far, depthAt, red);
         assert(near(tinted.gathered.x, furnace.gathered.x * 0.8f, 1e-3f) && tinted.gathered.y == 0.0f && tinted.gathered.z == 0.0f);
 
-        const AoPicture blinding = [](int, int) { return Vec3{1000.0f, 1000.0f, 1000.0f}; };
+        const AoPicture blinding = [](int, int, float) { return Vec3{1000.0f, 1000.0f, 1000.0f}; };
         assert(averagedLight(x, foot, frame, far, depthAt, blinding).gathered.x <= furnace.gathered.x * far.indirectBrightest * 1.01f);
+
+        /*
+        * A one-pixel bright stripe up the wall, the rest dark: read a texel at a time, a floor pixel before the wall gets
+        * it whole in the few frames a step lands on it and none in the rest; read at each step's level (a box filter of
+        * the picture, as the pyramid's), a little every frame. The spread over the frames' noise falls to under half,
+        * and the mean stays near.
+        */
+        {
+            int stripeX = 0;
+            int stripeY = 0;
+            texelOf(viewProjection, Vec3{0.12f, 1.0f, wallZ} - eye, stripeX, stripeY);
+            const auto stripe = [&](int px, int py) {
+                const Vec3 point = positionAtPixel(inverseViewProjection, Vec2{px + 0.5f, py + 0.5f}, depthAt(px, py), size) + eye;
+                return std::abs(point.z - wallZ) < 1e-3f && px == stripeX ? 8.0f : 0.0f;
+            };
+            const AoPicture pointRead = [&](int px, int py, float) { return Vec3{stripe(px, py), 0.0f, 0.0f}; };
+            const AoPicture filteredRead = [&](int px, int py, float level) {
+                const int block = 1 << static_cast<int>(std::max(level, 0.0f));
+                const int x0 = px / block * block;
+                const int y0 = py / block * block;
+                float sum = 0.0f;
+                int count = 0;
+
+                for (int by = y0; by < std::min(y0 + block, static_cast<int>(screenSize.height)); ++by) {
+                    for (int bx = x0; bx < std::min(x0 + block, static_cast<int>(screenSize.width)); ++bx) {
+                        sum += depthAt(bx, by) == gpuFarDepth ? 0.0f : stripe(bx, by);
+                        ++count;
+                    }
+                }
+
+                return Vec3{sum / static_cast<float>(count), 0.0f, 0.0f};
+            };
+
+            int floorX = 0;
+            int floorY = 0;
+            texelOf(viewProjection, Vec3{0.0f, 0.0f, wallZ + 0.5f} - eye, floorX, floorY);
+            AmbientOcclusionSettings gathering;
+            gathering.radius = 2.0f;
+            const auto spread = [&](const AoPicture& picture, double& mean) {
+                const int grid = 12;
+                double sum = 0.0;
+                double squares = 0.0;
+
+                for (int i = 0; i < grid; ++i) {
+                    for (int j = 0; j < grid; ++j) {
+                        const double value = ambientOcclusionAt(floorX, floorY, frame, gathering, (i + 0.5f) / grid, (j + 0.5f) / grid, depthAt, picture).gathered.x;
+                        sum += value;
+                        squares += value * value;
+                    }
+                }
+
+                mean = sum / (grid * grid);
+                return std::sqrt(std::max(squares / (grid * grid) - mean * mean, 0.0));
+            };
+
+            double pointMean = 0.0;
+            double filteredMean = 0.0;
+            const double pointSpread = spread(pointRead, pointMean);
+            const double filteredSpread = spread(filteredRead, filteredMean);
+            assert(pointSpread > 0.0);
+            assert(filteredSpread < 0.5 * pointSpread);
+            assert(std::abs(filteredMean - pointMean) < 0.3 * pointMean);
+        }
 
         // Open floor gathers nothing from itself.
         texelOf(viewProjection, Vec3{0.0f, 0.0f, -2.5f} - eye, x, y);
@@ -1169,6 +1249,7 @@ void testAmbientOcclusion() {
     testSpecularOcclusion();
     testSurfaceVisibility();
     testDenoiseWeights();
+    testSampleLevel();
     testNoisesIndependent();
     testFloorAndWall();
     testThicknessLetsLightBehind();

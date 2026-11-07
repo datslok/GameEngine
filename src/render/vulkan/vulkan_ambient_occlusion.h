@@ -50,11 +50,12 @@ public:
 
     /*
     * Record the pass, the accumulation while the pass record says to accumulate (its history carried over when last
-    * frame's was made the same way and previousCameraKnown), and the denoiser when blur is true (with at least one pass): the depth (the prepass's,
-    * left readable by compute) and last frame's finished picture in, or standIn when there is none to gather from, the
-    * occlusion left readable by fragment shaders for the main pass.
+    * frame's was made the same way and previousCameraKnown), and the denoiser when blur is true (with at least one
+    * pass): the depth (the prepass's, left readable by compute) and last frame's finished picture's pyramid in (every
+    * level, readable by compute), or standIn when there is none to gather from, the occlusion left readable by fragment
+    * shaders for the main pass.
     */
-    void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, VulkanImage* previousPicture,
+    void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, const SampledImage* gatherPicture,
                  const SampledImage& standIn, const GpuAmbientOcclusionPass& pass, bool blur, bool previousCameraKnown);
 
 private:

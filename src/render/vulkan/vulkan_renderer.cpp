@@ -1432,10 +1432,20 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthPrepass);
     }
 
+    reflections->forgetColourPyramid();
+
     if (occlusion) {
         beginGpuPass(frame, GpuPass::AmbientOcclusion);
         const std::uint32_t noiseFrame = temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0;
-        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gathersLight ? finishedScene : nullptr, sampled(*noProbesTexture),
+        // Gathering reads last frame's picture's pyramid, built here for the reflections to use too (aoSampleLevel).
+        std::optional<SampledImage> gatherPicture;
+
+        if (gathersLight) {
+            reflections->prepareColourPyramid(frame.commands, frame.descriptors, *finishedScene);
+            gatherPicture = reflections->sampledColourPyramid();
+        }
+
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
                                                            settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
                                   occlusionBlurred, previousCamera.known);
