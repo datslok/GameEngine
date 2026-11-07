@@ -268,7 +268,7 @@ namespace {
     void testTheSettings() {
         const SkyVisibilitySettings defaults;
         assert(defaults.enabled && defaults.bounceShare == 0.25f && defaults.spacing == 0.5f && defaults.cascades == 2);
-        assert(defaults.rays == 64 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
+        assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
         assert(defaults.blockersLitFloor == 0.1f);
         validateSkyVisibility(defaults);
 

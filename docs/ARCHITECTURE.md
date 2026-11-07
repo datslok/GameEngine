@@ -2476,7 +2476,7 @@ How much of the sky each point round the camera sees, so the flat ambient light 
 
 **The bake** (on the CPU, on every core):
 
-- Each point casts `rays` (64) rays on a Fibonacci sphere, up to `rayLength` (30 m; a ray running that far counts as open), against the engine's own `StaticLevel` (`StaticGeometry`: every draw that is static, casts shadows and is not seen through, rebuilt when their fingerprint changes).
+- Each point casts `rays` (256; 64 until `ao-temporal`, whose neighbouring points' measurements differed by up to half and drew soft blobs the grid's size on floors) rays on a Fibonacci sphere, up to `rayLength` (30 m; a ray running that far counts as open), against the engine's own `StaticLevel` (`StaticGeometry`: every draw that is static, casts shadows and is not seen through, rebuilt when their fingerprint changes).
 - That level uses 1 m collision cells with only floor-sized triangles on the list every ray tests: 1.35 microseconds a ray on the light lab, against 3.1 with the default cells.
 - More than a quarter of a point's rays meeting the back of a triangle (`SKY_VISIBILITY_BURIED_SHARE`) make it buried. Then six short rays along the axes, each up to a spacing, give its reach.
 - Threads walk the level's grid with marks of their own (`GridMarks`, the uniform grid's mailbox made per thread).

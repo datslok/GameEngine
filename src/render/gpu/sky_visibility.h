@@ -58,8 +58,10 @@ struct SkyVisibilitySettings {
     // How many cascades (1 to maxSkyVisibilityCascades); past the last, the sky is taken as open, as today.
     int cascades = 2;
 
-    // Rays a point (on a Fibonacci sphere) and how far each looks (metres): a ray running that far counts as open.
-    int rays = 64;
+    // Rays a point (on a Fibonacci sphere) and how far each looks (metres): a ray running that far counts as open. 256:
+    // at 64, neighbouring points' measurements differed by up to half (9 rays through a window against 6), and the floor
+    // blending between them showed soft blobs the grid's size; the bake's frame budget keeps the frame rate as it was.
+    int rays = 256;
     float rayLength = 30.0f;
 
     // How far a surface's lookup is moved off it, as the probes' self-shadow bias (a share of their formula's offset).
