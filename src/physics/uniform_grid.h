@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // One cube of the grid, by its integer coordinates: the cell (i, j, k) covers [i s, (i + 1) s) on x, and so on.
@@ -29,6 +30,24 @@ struct GridRayWalk {
 };
 
 /*
+* Mailboxing for one thread's queries (Amanatides and Woo's trick): seenBy[item] is the number of the last query that met
+* the item, so an item listed in many cells is handed over once a query. A grid keeps its own for its const queries,
+* which therefore must not run on two threads at once; a thread querying alongside others brings its own.
+*/
+class GridMarks {
+public:
+    // A fresh query number over items numbered below itemCount, so earlier queries' marks no longer count.
+    std::uint32_t start(std::size_t itemCount);
+
+    // True the first time a query meets an item, false after; marks it as met.
+    bool firstMeeting(std::uint32_t item, std::uint32_t query);
+
+private:
+    std::vector<std::uint32_t> seenBy;
+    std::uint32_t queryNumber = 0;
+};
+
+/*
 * A broad phase: space cut into cubes of one size, each listing the items whose bounding box touches it, so a query only
 * looks at items in the cells it touches instead of at every item. Items are numbers (the caller keeps what they stand for)
 * with a box each. Only occupied cells are stored, in a hash map, so the world can be any size.
@@ -36,8 +55,9 @@ struct GridRayWalk {
 * Items whose box would cover more than largeItemCells cells (a whole floor) go on a separate list that every query checks
 * directly, rather than filling hundreds of cells.
 *
-* Queries mark each item they see with the query's number ("mailboxing"), so an item in many cells is reported once. Those
-* marks are changed by const queries, so one grid must not be queried from two threads at once.
+* Queries mark each item they see with the query's number ("mailboxing", GridMarks), so an item in many cells is reported
+* once. The grid's own marks are changed by const queries, so one grid must not be queried from two threads at once,
+* except by ray walks that each bring marks of their own.
 */
 class UniformGrid {
 public:
@@ -65,6 +85,10 @@ public:
     template <typename Visit>
     GridRayWalk walkRay(const Ray& ray, float reach, Visit&& visit) const;
 
+    // The same walk marking items in marks instead of the grid's own, so threads may walk the same grid at once.
+    template <typename Visit>
+    GridRayWalk walkRay(const Ray& ray, float reach, Visit&& visit, GridMarks& marks) const;
+
 private:
     // Spreads cell coordinates over the hash map's buckets: each multiplied by a large prime, then mixed with xor
     // (Teschner et al. 2003, "Optimized Spatial Hashing for Collision Detection of Deformable Objects").
@@ -85,15 +109,8 @@ private:
     GridCell lowestCell;
     GridCell highestCell;
 
-    // Mailboxing: seenBy[item] is the number of the last query that met the item.
-    mutable std::vector<std::uint32_t> seenBy;
-    mutable std::uint32_t queryNumber = 0;
-
-    // A fresh query number, so earlier queries' marks no longer count.
-    std::uint32_t startQuery() const;
-
-    // True the first time a query meets an item, false after; marks it as met.
-    bool firstMeeting(std::uint32_t item, std::uint32_t query) const;
+    // The marks of const queries that bring none of their own.
+    mutable GridMarks marks;
 
     const std::vector<std::uint32_t>* itemsIn(const GridCell& cell) const;
 };
@@ -109,11 +126,16 @@ private:
 */
 template <typename Visit>
 GridRayWalk UniformGrid::walkRay(const Ray& ray, float reach, Visit&& visit) const {
+    return walkRay(ray, reach, std::forward<Visit>(visit), marks);
+}
+
+template <typename Visit>
+GridRayWalk UniformGrid::walkRay(const Ray& ray, float reach, Visit&& visit, GridMarks& marks) const {
     GridRayWalk walk;
-    const std::uint32_t query = startQuery();
+    const std::uint32_t query = marks.start(itemBounds.size());
 
     const auto meet = [&](std::uint32_t item) {
-        if (firstMeeting(item, query)) {
+        if (marks.firstMeeting(item, query)) {
             ++walk.items;
             reach = visit(item, reach);
         }

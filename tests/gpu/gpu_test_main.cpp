@@ -31,6 +31,7 @@ int main() {
             gpuTestAmbientOcclusion(runner, report);
             gpuTestVolumetricFog(runner, report);
             gpuTestAlphaMask(runner, report);
+            gpuTestSkyVisibility(runner, report);
             gpuTestTransparency(runner, report);
             gpuTestDither(runner, report);
             gpuTestOverlay(runner, report);

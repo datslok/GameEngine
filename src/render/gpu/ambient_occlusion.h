@@ -171,10 +171,14 @@ using AoDepthImage = std::function<float(int x, int y)>;
 // Last frame's picture at the point a texel inside the render shows; empty when there is nothing to gather.
 using AoPicture = std::function<Vec3(int x, int y)>;
 
-// What the pass finds at a pixel: the open share, and the light gathered from what fills the rest.
+// What the pass finds at a pixel: the open share, the light gathered from what fills the rest, and the fill: the mean of
+// the picture over the first slice's samples within the reach, each by its weight (how bright the surroundings are,
+// which the sky visibility's blocked share takes, sky_visibility.h, skyLightWithFill), nothing without a picture. The
+// GPU blurs its fill (ambient_fill_blur.comp) before the main pass reads it.
 struct AoLight {
     Vec3 gathered;
     float visibility = 1.0f;
+    Vec3 fill;
 };
 
 // What the pass knows of the frame: the camera-relative view-projection's inverse, the render size, and a pixel's

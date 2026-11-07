@@ -1,0 +1,178 @@
+#include "render/gpu/sky_visibility_bake.h"
+
+#include "render/gpu/ddgi.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+    // A job takes this many points at once, so handing them out costs little beside their rays.
+    constexpr std::size_t pointsPerJob = 8;
+
+    // Whether a ray along direction meets this triangle from behind: its winding (counterclockwise seen from the front)
+    // gives its outward normal, and the ray runs along it.
+    bool hitsBackFace(const StaticLevel& level, std::uint32_t triangle, const Vec3& direction) {
+        const auto corners = level.getTriangle(triangle);
+        const Vec3 normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+        return normal.dot(direction) > 0.0f;
+    }
+}
+
+/*
+* The rays' directions and openings go into this thread's own scratch lists, so a point allocates nothing once the
+* first has grown them, and the bands come from skyVisibilityFromRays, as the tests' do.
+*/
+SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks) {
+    thread_local std::vector<Vec3> directions;
+    thread_local std::vector<float> openings;
+    directions.clear();
+    openings.clear();
+    int backFaces = 0;
+
+    for (int ray = 0; ray < rays; ++ray) {
+        const Vec3 direction = skyVisibilityRay(ray, rays);
+        const std::optional<LevelHit> hit = raycast(level, Ray{point, direction}, rayLength, marks);
+        directions.push_back(direction);
+        openings.push_back(hit ? 0.0f : 1.0f);
+
+        if (hit && hitsBackFace(level, hit->triangle, direction)) {
+            ++backFaces;
+        }
+    }
+
+    SkyCell cell;
+    cell.visibility = skyVisibilityFromRays(directions, openings);
+    cell.state = static_cast<float>(backFaces) > skyVisibilityBuriedShare * static_cast<float>(rays) ? SkyCellState::Buried : SkyCellState::Baked;
+
+    for (int direction = 0; direction < skyReachDirections; ++direction) {
+        const std::optional<LevelHit> hit = raycast(level, Ray{point, skyReachDirection(direction)}, spacing, marks);
+        cell.reach[static_cast<std::size_t>(direction)] = hit ? std::min(hit->hit.distance / spacing, 1.0f) : 1.0f;
+    }
+
+    return cell;
+}
+
+int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting) {
+    if (waiting <= 0 || !(budgetSeconds > 0.0)) {
+        return 0;
+    }
+
+    if (!(secondsPerCell > 0.0)) {
+        return waiting;
+    }
+
+    const double fit = std::round(budgetSeconds / secondsPerCell);
+    return fit >= static_cast<double>(waiting) ? waiting : std::max(1, static_cast<int>(fit));
+}
+
+/*
+* Afresh when nothing was placed yet, the level changed, or the settings shape another grid; otherwise each cascade's
+* window moves, and the slots whose lattice point changed (scrolledProbes) are cleared and wait.
+*/
+bool SkyVisibilityGrid::follow(const Vec3& centre, const SkyVisibilitySettings& settings, std::uint64_t level) {
+    const bool afresh = !started || level != levelVersion || !sameSkyVisibilityGrid(shape, settings);
+    std::vector<ProbeCascade> next = skyVisibilityCascades(centre, settings);
+    shape = settings;
+
+    if (afresh) {
+        started = true;
+        levelVersion = level;
+        cascades = std::move(next);
+        startAfresh();
+        return true;
+    }
+
+    bool changed = false;
+
+    for (std::size_t c = 0; c < cascades.size(); ++c) {
+        for (const int cell : scrolledProbes(cascades[c], next[c])) {
+            cells[static_cast<std::size_t>(cell)] = SkyCell{};
+            wait(cell);
+            changed = true;
+        }
+    }
+
+    cascades = std::move(next);
+
+    if (changed) {
+        ++version;
+    }
+
+    return false;
+}
+
+void SkyVisibilityGrid::startAfresh() {
+    const int count = skyVisibilityCellCount(shape);
+    cells.assign(static_cast<std::size_t>(count), SkyCell{});
+    isWaiting.assign(static_cast<std::size_t>(count), 0);
+    waiting.clear();
+    nextWaiting = 0;
+
+    for (int cell = 0; cell < count; ++cell) {
+        wait(cell);
+    }
+
+    ++version;
+}
+
+void SkyVisibilityGrid::wait(int cell) {
+    std::uint8_t& flag = isWaiting[static_cast<std::size_t>(cell)];
+
+    if (flag == 0) {
+        flag = 1;
+        waiting.push_back(cell);
+    }
+}
+
+/*
+* Each job bakes its points into their own entries, so the result is the same on any number of threads; each thread
+* walks the level's grid with marks of its own.
+*/
+int SkyVisibilityGrid::bake(const StaticLevel& level, JobSystem& jobs, int maxCells) {
+    const int count = std::min(maxCells, getWaiting());
+
+    if (count <= 0) {
+        return 0;
+    }
+
+    const std::span<const int> batch{waiting.data() + nextWaiting, static_cast<std::size_t>(count)};
+
+    jobs.parallelFor(batch.size(), pointsPerJob, [&](std::size_t index) {
+        thread_local GridMarks marks;
+        const int cell = batch[index];
+        const ProbeCascade& cascade = cascades[static_cast<std::size_t>(probeCascadeHolding(cascades, cell))];
+        const Vec3 position = probePosition(cascade.volume, cell - cascade.firstProbe);
+        cells[static_cast<std::size_t>(cell)] = bakeSkyCell(level, position, shape.rays, shape.rayLength, cascade.volume.spacing.x, marks);
+    });
+
+    for (const int cell : batch) {
+        isWaiting[static_cast<std::size_t>(cell)] = 0;
+    }
+
+    nextWaiting += batch.size();
+
+    // The list's done front is dropped once it is most of the list.
+    if (nextWaiting * 2 > waiting.size()) {
+        waiting.erase(waiting.begin(), waiting.begin() + static_cast<std::ptrdiff_t>(nextWaiting));
+        nextWaiting = 0;
+    }
+
+    ++version;
+    return count;
+}
+
+int SkyVisibilityGrid::getWaiting() const {
+    return static_cast<int>(waiting.size() - nextWaiting);
+}
+
+std::span<const ProbeCascade> SkyVisibilityGrid::getCascades() const {
+    return cascades;
+}
+
+std::span<const SkyCell> SkyVisibilityGrid::getCells() const {
+    return cells;
+}
+
+std::uint64_t SkyVisibilityGrid::getVersion() const {
+    return version;
+}

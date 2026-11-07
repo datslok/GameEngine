@@ -28,6 +28,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Ambient occlusion", [&] {
         visit(settings.ambientOcclusion, visitor);
     });
+    visitor.group("Sky visibility", [&] {
+        visit(settings.skyVisibility, visitor);
+    });
     visitor.group("Reflections", [&] {
         visit(settings.reflections, visitor);
         visit(settings.mirroredLights, visitor);

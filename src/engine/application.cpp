@@ -404,6 +404,13 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     // Spheres around each draw let the renderer skip what a view cannot see.
     attachBoundingSpheres(frame.draws, boundsByMesh);
     attachFlatFaces(frame.draws, flatFacesByMesh);
+
+    // The sky visibility grid's level, while its settings want it (each frame's check is a hash of the static draws).
+    if (settings.render.skyVisibility.enabled) {
+        staticGeometry.update(frame.draws, assets);
+        frame.staticLevel = staticGeometry.getLevel();
+        frame.staticLevelVersion = staticGeometry.getVersion();
+    }
     return frame;
 }
 

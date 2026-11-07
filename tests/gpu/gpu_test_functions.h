@@ -142,6 +142,11 @@
 // alpha_mask_test.comp
 #define GPU_TEST_ALPHA_MASK 0
 
+// sky_visibility_test.comp
+#define GPU_TEST_SKY_VISIBILITY_SHARES 0
+#define GPU_TEST_SKY_VISIBILITY_UNPACK 1
+#define GPU_TEST_SKY_CORNER_SEES 2
+
 // transparency_test.comp
 #define GPU_TEST_TRANSPARENT_BLEND 0
 #define GPU_TEST_REACTIVE_SHARE 1

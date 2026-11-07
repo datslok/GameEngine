@@ -48,6 +48,9 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the glass a ray towards a light may cross
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // the frame's fog
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the fog integrated through its grid
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the sky visibility grid's points (compute for the fog)
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // its cascades
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // ambient occlusion's fill (the mean of the picture round each pixel)
     }};
 }
 
@@ -138,7 +141,8 @@ SceneBuffers::SceneBuffers(VmaAllocator allocator):
     atmosphere(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     mirrorPairs(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
     glassBounds(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
-    fog(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    fog(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT),
+    skyVisibilityCascades(allocator, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
 {
 }
 
@@ -176,6 +180,9 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         buffers.glassBounds.describe(),
         buffers.fog.describe(),
         VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
+        buffers.skyVisibilityCascades.describe(),
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -191,6 +198,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[MirroredDirectionBinding] = imageInfo(images.mirroredDirection);
     imageInfos[AmbientOcclusionBinding] = imageInfo(images.ambientOcclusion);
     imageInfos[FogVolumeBinding] = imageInfo(images.fogVolume);
+    imageInfos[SkyVisibilityBinding] = imageInfo(images.skyVisibility);
+    imageInfos[AmbientFillBinding] = imageInfo(images.ambientFill);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

@@ -128,6 +128,9 @@ ifeq ($(BUILD),debug)
 $(OBJECT_DIR)/src/cloth/%.o: CXXFLAGS += -O2
 # So is building a body's distance field: the cloth lab's mannequin is about 6 million samples, built at every start.
 $(OBJECT_DIR)/src/physics/signed_distance_field.o: CXXFLAGS += -O2
+# And baking the sky visibility grid: about 7 million rays against the level at every start, a minute unoptimised. Its
+# rays walk the level's grid (a template in uniform_grid.h, compiled where it is used) and test its triangles.
+$(OBJECT_DIR)/src/render/gpu/sky_visibility_bake.o $(OBJECT_DIR)/src/physics/static_level.o $(OBJECT_DIR)/src/physics/raycast.o: CXXFLAGS += -O2
 endif
 
 # ImGui's Vulkan backend calls Vulkan through volk, which it includes as <volk.h>.

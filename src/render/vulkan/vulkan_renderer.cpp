@@ -119,6 +119,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
+    skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
     reactiveMask = std::make_unique<VulkanReactiveMask>(device, nearestSampler.get());
@@ -1027,6 +1028,7 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
         return false;
     }
 
+    bakeSkyVisibility(description, settings, false);
     FrameContext frame = beginFrame();
 
     try {
@@ -1342,10 +1344,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, memoryFrameNumber,
                                          camera.getFarPlane());
 
+    // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
+    // points copied up before the fog and the main pass read them.
+    const bool readsSkyVisibility = readsSkyGrid(description, settings);
+
+    if (readsSkyVisibility) {
+        skyVisibility->record(frame.commands, frame.frameIndex);
+    }
+
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
-                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, gathersLight, glassShadows, frameFog);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, gathersLight, glassShadows, frameFog, readsSkyVisibility);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1661,6 +1671,19 @@ void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Ca
     }
 }
 
+bool VulkanRenderer::readsSkyGrid(const FrameDescription& description, const RenderSettings& settings) const {
+    return settings.skyVisibility.enabled && description.staticLevel != nullptr && !tracesProbes(description, settings);
+}
+
+// The grid follows the camera's place in the world (the main pass measures from it too, cameraOrigin).
+void VulkanRenderer::bakeSkyVisibility(const FrameDescription& description, const RenderSettings& settings, bool everything) {
+    validateSkyVisibility(settings.skyVisibility);
+
+    if (readsSkyGrid(description, settings)) {
+        skyVisibility->bake(description, description.camera.getPosition(), settings.skyVisibility, jobs, everything);
+    }
+}
+
 /*
 * The frame's GPU scene, into its upload buffers: the frame's uniform block, one instance per draw in the frame (instance
 * i is draw i, whichever views draw it) with its material numbered in the frame's material table, the lights with their
@@ -1675,7 +1698,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
-                                           bool occlusionBlurred, bool gathersLight, bool glassShadows, const GpuFog& frameFog) {
+                                           bool occlusionBlurred, bool gathersLight, bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1730,6 +1753,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.ambientOcclusionOptions[0] = occlusion ? 1 : 0;
     frameData.ambientOcclusionOptions[1] = settings.ambientOcclusion.multipleBounces && !gathersLight ? 1 : 0;
     frameData.ambientOcclusionOptions[2] = settings.ambientOcclusion.specularOcclusion ? 1 : 0;
+    const std::span<const ProbeCascade> skyCascades = readsSkyVisibility ? skyVisibility->getCascades() : std::span<const ProbeCascade>{};
+    const GpuSkyVisibilityOptions skyOptions = packSkyVisibilityOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()));
+    std::copy(std::begin(skyOptions.values), std::end(skyOptions.values), std::begin(frameData.skyVisibilityOptions));
+    std::copy(std::begin(skyOptions.more), std::end(skyOptions.more), std::begin(frameData.skyVisibilityMore));
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1740,6 +1767,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     const GpuGlassBounds glassBounds = packGlassBounds(description.draws, glassShadows);
     buffers.glassBounds.write(&glassBounds, sizeof(glassBounds));
     buffers.fog.write(&frameFog, sizeof(frameFog));
+    buffers.skyVisibilityCascades.write(packProbeCascades(skyCascades, cameraOrigin));
     buffers.instances.write(instances);
     buffers.materials.write(materials.getEntries());
     buffers.directionalLights.write(lights.directional);
@@ -1761,6 +1789,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         mirrorLight ? mirroredLights->sampledDirection() : sampled(*noProbesTexture),
         occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred) : sampled(*noProbesTexture),
         fog->sampledVolume(),
+        skyVisibility->sampled(),
+        occlusion ? ambientOcclusion->sampledFill() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2332,6 +2362,8 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 
     // Every frame a capture draws snaps the eye to its target, so the picture does not depend on what came before.
     capturing = true;
+
+    bakeSkyVisibility(description, settings, true);
 
     if (framesBefore > 0) {
         drawFramesBeforeCapture(description, repeated, settings, framesBefore);

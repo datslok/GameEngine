@@ -75,7 +75,6 @@ void UniformGrid::insert(std::uint32_t item, const Aabb& bounds) {
 
     if (item >= itemBounds.size()) {
         itemBounds.resize(item + 1);
-        seenBy.resize(item + 1, 0);
     }
     itemBounds[item] = bounds;
     ++itemCount;
@@ -115,10 +114,10 @@ void UniformGrid::insert(std::uint32_t item, const Aabb& bounds) {
 */
 void UniformGrid::query(const Aabb& region, std::vector<std::uint32_t>& found) const {
     found.clear();
-    const std::uint32_t query = startQuery();
+    const std::uint32_t query = marks.start(itemBounds.size());
 
     for (const std::uint32_t item : largeItems) {
-        if (firstMeeting(item, query) && overlaps(itemBounds[item], region)) {
+        if (marks.firstMeeting(item, query) && overlaps(itemBounds[item], region)) {
             found.push_back(item);
         }
     }
@@ -140,7 +139,7 @@ void UniformGrid::query(const Aabb& region, std::vector<std::uint32_t>& found) c
                     continue;
                 }
                 for (const std::uint32_t item : *items) {
-                    if (firstMeeting(item, query) && overlaps(itemBounds[item], region)) {
+                    if (marks.firstMeeting(item, query) && overlaps(itemBounds[item], region)) {
                         found.push_back(item);
                     }
                 }
@@ -153,7 +152,11 @@ void UniformGrid::query(const Aabb& region, std::vector<std::uint32_t>& found) c
 * Numbers count up, so an item marked by an earlier query never looks "met" by this one. When the count wraps around
 * (after four billion queries) every mark is reset, so an old mark cannot be mistaken for a new one.
 */
-std::uint32_t UniformGrid::startQuery() const {
+std::uint32_t GridMarks::start(std::size_t itemCount) {
+    if (seenBy.size() < itemCount) {
+        seenBy.resize(itemCount, 0);
+    }
+
     ++queryNumber;
     if (queryNumber == 0) {
         std::fill(seenBy.begin(), seenBy.end(), 0);
@@ -162,7 +165,7 @@ std::uint32_t UniformGrid::startQuery() const {
     return queryNumber;
 }
 
-bool UniformGrid::firstMeeting(std::uint32_t item, std::uint32_t query) const {
+bool GridMarks::firstMeeting(std::uint32_t item, std::uint32_t query) {
     if (seenBy[item] == query) {
         return false;
     }
