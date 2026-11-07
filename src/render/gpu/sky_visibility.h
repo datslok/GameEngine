@@ -116,15 +116,6 @@ float skyVisibilityAlong(const SkyVisibility& visibility, const Vec3& direction,
 // The share for air, which scatters light from every way alike: the same with f = clamp(a, 0, 1).
 float skyVisibilityInAir(const SkyVisibility& visibility, float bounceShare, float blockersFloor = 0.0f);
 
-/*
-* The light from all around with the screen's fill (render/gpu/ambient_occlusion.h, AoLight::fill: the mean of what
-* the screen shows within the gathering reach, standing for how bright the blockers really are; zero without one): the
-* flat ambient for the sky seen, and for the rest the brighter of the bounce guess (beta g of the flat ambient) and the
-* fill. A room lit through its window then lights its own walls, so a flat wall and a crease, which gathers its
-* neighbours' light from the screen, agree. With no fill it is the flat ambient times the facing share.
-*/
-Vec3 skyLightWithFill(const Vec3& flatAmbient, float seen, float bounceGuess, const Vec3& fill);
-
 enum class SkyCellState : std::uint8_t {
     Unknown = SKY_VISIBILITY_UNKNOWN,
     Baked = SKY_VISIBILITY_BAKED,

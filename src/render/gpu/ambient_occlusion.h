@@ -178,11 +178,6 @@ float specularOcclusion(float nDotV, float visibility, float roughness);
 // darken a crease both see twice.
 float surfaceVisibility(float screenVisibility, float occlusionTexel, float occlusionStrength);
 
-// How much a sample at this offset from the point counts towards the fill, for the surface's unit normal: nothing on or
-// below the surface (within AO_FILL_MIN_COSINE of it), rising to 1 straight overhead. Light from the surface's own plane
-// cannot reach it, so a sunlit patch on a floor does not light the floor round it.
-float fillFacingWeight(const Vec3& normal, const Vec3& offset);
-
 // A neighbour's weight in the blur: 1 at the pixel's own view distance, falling to 0 at AO_BLUR_DEPTH_SHARE of it away.
 float aoBlurWeight(float centreDistance, float neighbourDistance);
 
@@ -192,24 +187,12 @@ using AoDepthImage = std::function<float(int x, int y)>;
 // Last frame's picture at the point a texel inside the render shows; empty when there is nothing to gather.
 using AoPicture = std::function<Vec3(int x, int y)>;
 
-/*
-* What the pass finds at a pixel: the open share, the light gathered from what fills the rest, and the fill's two parts
-* over the first slice's samples within the reach, each by its falloff weight w: the picture times each sample's facing
-* weight f (fillFacingWeight: only what lies above the surface), sum of w f L over sum of w, and the coverage, sum of
-* w f over sum of w. Both stay as small as the picture and the share of samples, with nothing divided by a sum that may
-* be tiny; the GPU averages them over frames and blurs them first, and the main pass divides only then (aoFillLight): a
-* ratio of averages, far steadier than the average of the ratios. Nothing without a picture.
-*/
+// What the pass finds at a pixel: the open share, and the light gathered from what fills the rest (nothing without a
+// picture).
 struct AoLight {
     Vec3 gathered;
     float visibility = 1.0f;
-    Vec3 fill;
-    float fillCoverage = 0.0f;
 };
-
-// The fill's light from its parts: how bright what the surface sees above it is (for the sky visibility's blocked share,
-// sky_visibility.h, skyLightWithFill), the light over the coverage, never over less than AO_FILL_MIN_COVERAGE.
-Vec3 aoFillLight(const Vec3& parts, float coverage);
 
 // What the pass knows of the frame: the camera-relative view-projection's inverse, the render size, and a pixel's
 // footprint per metre of view distance.
@@ -261,23 +244,21 @@ AoPreviousPlace aoPreviousPlace(const Mat4& reprojection, Vec2 pixel, float dept
 // first texel's centre.
 float aoTapWeight(Vec2 fraction, int tap);
 
-// One texel of the history: the average (rgb the gathered light, a the visibility), the fill's two parts' average (rgb
-// the light above the surface, a the coverage, AoLight), the view depth (0 for the sky) and the age.
+// One texel of the history: the average (rgb the gathered light, a the visibility), the view depth (0 for the sky) and
+// the age.
 struct AoHistoryTexel {
     Vec4 light;
-    Vec4 fill;
     float viewDepth = 0.0f;
     float age = 0.0f;
 };
 
 using AoHistoryImage = std::function<AoHistoryTexel(int x, int y)>;
 
-// What last frame's history holds for a point: the light and fill of the bilinear taps that show it, their weights made
-// to add up to 1, and the age, each tap's times its bilinear weight, so a point only partly seen last frame trusts it less.
+// What last frame's history holds for a point: the light of the bilinear taps that show it, their weights made to add
+// up to 1, and the age, each tap's times its bilinear weight, so a point only partly seen last frame trusts it less.
 // Age 0 and no light where no tap shows it.
 struct AoHistory {
     Vec4 light;
-    Vec4 fill;
     float age = 0.0f;
 };
 
@@ -286,14 +267,13 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
 // The new frame blended into the history's light at the new age.
 Vec4 accumulatedAo(const Vec4& current, const Vec4& historyLight, float age);
 
-// The new frame (rgb the gathered light, a the visibility) and its fill's parts blended into the history, at the point's
-// view depth.
-AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames, const Vec4& currentFill = Vec4{});
+// The new frame (rgb the gathered light, a the visibility) blended into the history, at the point's view depth.
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames);
 
 /*
 * The temporal pass's loop, as ambient_occlusion_temporal.comp runs it, at texel (x, y): the sky holds open, nothing
 * gathered, no depth and no age; otherwise the pass's result there (current) blended with last frame's history where it
-* shows the point, or alone without a usable history; the fill's parts (currentFill) likewise.
+* shows the point, or alone without a usable history.
 *
 * Each texel's result is taken for its whole footprint, wherever the jitter put its sample this frame: the jitter cycles,
 * so the average covers the footprint, as supersampling would. So the texel's centre is reprojected without taking the
@@ -301,8 +281,7 @@ AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistor
 * on) would read between texels each frame and blur the history a little more every time.
 */
 AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
-                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable,
-                            const Vec4& currentFill = Vec4{});
+                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable);
 
 // What last frame's history was made for: a history is only carried over to a frame of the same size gathering the
 // same way (the light means something else with and without gathering) with last frame's camera known.

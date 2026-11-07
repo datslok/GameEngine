@@ -58,8 +58,7 @@ enum SceneBinding : std::uint32_t {
     FogVolumeBinding = 28,
     SkyVisibilityBinding = 29,
     SkyVisibilityCascadesBinding = 30,
-    AmbientFillBinding = 31,
-    SceneBindingCount = 32
+    SceneBindingCount = 31
 };
 
 // Set 1's layout and the pipeline layout of both sets and the shadow view's push constant, shared by every scene pipeline,
@@ -160,7 +159,6 @@ struct SceneImages {
     SampledImage ambientOcclusion;  // the visibility in creases and corners (a stand-in without)
     SampledImage fogVolume;         // the fog integrated through its grid (a clear stand-in without)
     SampledImage skyVisibility;     // the sky visibility grid's points (all "not baked" until it is read)
-    SampledImage ambientFill;       // the mean of the picture round each pixel while ambient occlusion gathers (a stand-in without)
 };
 
 // The buffers set 1 points at that the frame does not write itself: the light probes' states, the flat ambient light

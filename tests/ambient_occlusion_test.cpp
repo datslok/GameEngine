@@ -281,30 +281,6 @@ namespace {
         assert(near(surfaceVisibility(0.7f, 0.5f, 1.0f), 0.5f, 1e-6f));
     }
 
-    // Straight overhead counts fully, the surface's own plane and below nothing, the threshold's cosine nothing, and in
-    // between a ramp; the offset's length does not matter.
-    void testFillFacingWeight() {
-        const Vec3 up{0.0f, 1.0f, 0.0f};
-        assert(near(fillFacingWeight(up, Vec3{0.0f, 3.0f, 0.0f}), 1.0f, 1e-6f));
-        assert(fillFacingWeight(up, Vec3{2.0f, 0.0f, 0.0f}) == 0.0f);
-        assert(fillFacingWeight(up, Vec3{2.0f, 0.001f, 1.0f}) == 0.0f);
-        assert(fillFacingWeight(up, Vec3{0.0f, -1.0f, 1.0f}) == 0.0f);
-        const float sine = static_cast<float>(AO_FILL_MIN_COSINE);
-        assert(near(fillFacingWeight(up, Vec3{std::sqrt(1.0f - sine * sine), sine, 0.0f}), 0.0f, 1e-5f));
-        const float halfway = 0.5f * (1.0f + sine);
-        assert(near(fillFacingWeight(up, Vec3{0.0f, halfway, std::sqrt(1.0f - halfway * halfway)} * 4.0f), 0.5f, 1e-5f));
-    }
-
-    // The fill's light is its parts over the coverage, never over less than the least coverage, so it fades out smoothly
-    // as less is seen above the surface.
-    void testFillLight() {
-        assert(near(aoFillLight(Vec3{0.4f, 0.2f, 0.0f}, 0.5f).x, 0.8f, 1e-6f));
-        assert(near(aoFillLight(Vec3{0.4f, 0.2f, 0.0f}, 0.5f).y, 0.4f, 1e-6f));
-        const float least = static_cast<float>(AO_FILL_MIN_COVERAGE);
-        assert(near(aoFillLight(Vec3{0.01f, 0.0f, 0.0f}, 0.01f).x, 0.01f / least, 1e-6f));
-        assert(aoFillLight(Vec3{}, 0.0f).x == 0.0f);
-    }
-
     void testBlurWeight() {
         assert(aoBlurWeight(5.0f, 5.0f) == 1.0f);
         assert(near(aoBlurWeight(5.0f, 5.25f), 0.5f, 1e-5f));
@@ -355,11 +331,6 @@ namespace {
         const Vec4 clip = viewProjection * Vec4{point.x, point.y, point.z, 1.0f};
         x = static_cast<int>((clip.x / clip.w * 0.5f + 0.5f) * screenSize.width);
         y = static_cast<int>((0.5f - clip.y / clip.w * 0.5f) * screenSize.height);
-    }
-
-    // The fill's light from what the pass found.
-    Vec3 fillOf(const AoLight& light) {
-        return aoFillLight(light.fill, light.fillCoverage);
     }
 
     // The pass's estimate averaged over a grid of the noise each frame draws, as temporal anti-aliasing averages frames.
@@ -466,36 +437,9 @@ namespace {
         const AoPicture blinding = [](int, int) { return Vec3{1000.0f, 1000.0f, 1000.0f}; };
         assert(averagedLight(x, foot, frame, far, depthAt, blinding).gathered.x <= furnace.gathered.x * far.indirectBrightest * 1.01f);
 
-        // The fill: the mean of what the samples above the surface saw, so an even picture fills the wall's foot with its
-        // own colour (the wall stands above it), a blinding one with the cap; without a picture, nothing.
-        const AoLight footFill = ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, red);
-        assert(footFill.fillCoverage > static_cast<float>(AO_FILL_MIN_COVERAGE) && footFill.fillCoverage < 1.0f);
-        assert(near(fillOf(footFill).x, 0.8f, 1e-5f) && fillOf(footFill).y == 0.0f && fillOf(footFill).z == 0.0f);
-        assert(near(footFill.fill.x, 0.8f * footFill.fillCoverage, 1e-5f));
-        assert(near(fillOf(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, blinding)).x, far.indirectBrightest, 1e-3f));
-        assert(fillOf(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt)).x == 0.0f);
-
-        /*
-        * A bright floor and a dim wall, as a sunlit patch before a wall: the floor at the wall's foot sees only the wall
-        * above it, never the floor round it in its own plane; the wall a little above the foot sees the floor below it,
-        * so it takes the floor's light.
-        */
-        const AoPicture sunlitFloor = [&](int px, int py) {
-            const float height = positionAtPixel(inverseViewProjection, Vec2{px + 0.5f, py + 0.5f}, depthAt(px, py), size).y + eye.y;
-            return std::abs(height) < 1e-3f ? Vec3{5.0f, 5.0f, 5.0f} : Vec3{0.1f, 0.1f, 0.1f};
-        };
-        assert(near(fillOf(ambientOcclusionAt(x, foot, frame, far, 0.5f, 0.5f, depthAt, sunlitFloor)).x, 0.1f, 1e-5f));
-
-        int wallRow = foot - 6;
-        const Vec3 wallPoint = positionAtPixel(inverseViewProjection, Vec2{x + 0.5f, wallRow + 0.5f}, depthAt(x, wallRow), size) + eye;
-        assert(near(wallPoint.z, wallZ, 1e-3f) && wallPoint.y > 0.01f);
-        assert(fillOf(ambientOcclusionAt(x, wallRow, frame, far, 0.5f, 0.5f, depthAt, sunlitFloor)).x > 1.0f);
-
-        // Open floor, nothing above it within the reach: no fill at all, whatever the floor shows.
+        // Open floor gathers nothing from itself.
         texelOf(viewProjection, Vec3{0.0f, 0.0f, -2.5f} - eye, x, y);
         assert(averagedLight(x, y, frame, settings, depthAt, white).gathered.x < 0.02f);
-        const AoLight openFloor = ambientOcclusionAt(x, y, frame, settings, 0.5f, 0.5f, depthAt, sunlitFloor);
-        assert(openFloor.fillCoverage == 0.0f && openFloor.fill.x == 0.0f && fillOf(openFloor).x == 0.0f);
     }
 
     /*
@@ -648,14 +592,10 @@ namespace {
         const AoHistoryTexel first = accumulateAo(Vec4{0.2f, 0.4f, 0.6f, 0.5f}, 5.0f, AoHistory{}, 16);
         assert(first.age == 1.0f && first.viewDepth == 5.0f && first.light.x == 0.2f && first.light.w == 0.5f);
 
-        const AoHistoryTexel second = accumulateAo(Vec4{0.4f, 0.0f, 0.0f, 1.0f}, 5.0f, AoHistory{first.light, first.fill, first.age}, 16);
+        const AoHistoryTexel second = accumulateAo(Vec4{0.4f, 0.0f, 0.0f, 1.0f}, 5.0f, AoHistory{first.light, first.age}, 16);
         assert(second.age == 2.0f && near(second.light.x, 0.3f, 1e-6f) && near(second.light.w, 0.75f, 1e-6f));
 
-        // The fill's parts average the same way, beside the light.
-        const AoHistoryTexel withFill = accumulateAo(Vec4{}, 5.0f, AoHistory{Vec4{}, Vec4{0.2f, 0.2f, 0.2f, 0.4f}, 1.0f}, 16, Vec4{0.6f, 0.0f, 0.0f, 0.2f});
-        assert(near(withFill.fill.x, 0.4f, 1e-6f) && near(withFill.fill.y, 0.1f, 1e-6f) && near(withFill.fill.w, 0.3f, 1e-6f));
-
-        const AoHistoryTexel full = accumulateAo(Vec4{1.0f, 1.0f, 1.0f, 1.0f}, 5.0f, AoHistory{Vec4{}, Vec4{}, 16.0f}, 16);
+        const AoHistoryTexel full = accumulateAo(Vec4{1.0f, 1.0f, 1.0f, 1.0f}, 5.0f, AoHistory{Vec4{}, 16.0f}, 16);
         assert(full.age == 16.0f && near(full.light.x, 1.0f / 16.0f, 1e-6f));
     }
 
@@ -685,13 +625,12 @@ namespace {
         for (int frameNumber = 0; frameNumber < 400; ++frameNumber) {
             const float value = noise();
             const AoHistoryTexel next = aoTemporalAt(x, y, frame, Mat4::identity(), settings, depthAt, Vec4{value, value, value, 1.0f}, historyImage(history),
-                                                     frameNumber > 0, Vec4{value, 0.0f, 0.0f, 0.5f});
+                                                     frameNumber > 0);
             sum += value;
 
             if (frameNumber < settings.historyFrames) {
                 assert(next.age == static_cast<float>(frameNumber + 1));
                 assert(near(next.light.x, static_cast<float>(sum / (frameNumber + 1)), 1e-5f));
-                assert(near(next.fill.x, next.light.x, 1e-6f) && near(next.fill.w, 0.5f, 1e-6f));
             } else {
                 assert(next.age == static_cast<float>(settings.historyFrames));
             }
@@ -722,7 +661,7 @@ namespace {
             for (std::uint32_t x = 0; x < screenSize.width; ++x) {
                 const float depth = previousDepths[y * screenSize.width + x];
                 history[y * screenSize.width + x] =
-                    AoHistoryTexel{Vec4{1.0f, 1.0f, 1.0f, 1.0f}, Vec4{}, viewDistanceAtPixel(previousFrame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depth, size), 16.0f};
+                    AoHistoryTexel{Vec4{1.0f, 1.0f, 1.0f, 1.0f}, viewDistanceAtPixel(previousFrame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depth, size), 16.0f};
             }
         }
 
@@ -761,7 +700,7 @@ namespace {
                 const float depth = previousDepths[y * screenSize.width + x];
                 const float worldX = positionAtPixel(previousFrame.inverseViewProjection, pixel, depth, size).x;
                 history[y * screenSize.width + x] =
-                    AoHistoryTexel{Vec4{worldX, 0.0f, 0.0f, 1.0f}, Vec4{}, viewDistanceAtPixel(previousFrame.inverseViewProjection, pixel, depth, size), 16.0f};
+                    AoHistoryTexel{Vec4{worldX, 0.0f, 0.0f, 1.0f}, viewDistanceAtPixel(previousFrame.inverseViewProjection, pixel, depth, size), 16.0f};
             }
         }
 
@@ -796,7 +735,7 @@ namespace {
             for (std::uint32_t x = 0; x < screenSize.width; ++x) {
                 const float depth = previousDepths[y * screenSize.width + x];
                 history[y * screenSize.width + x] =
-                    AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 0.2f}, Vec4{}, viewDistanceAtPixel(frame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depth, size), 16.0f};
+                    AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 0.2f}, viewDistanceAtPixel(frame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depth, size), 16.0f};
             }
         }
 
@@ -822,16 +761,16 @@ namespace {
     // Half the taps showing the point give half the age, the light theirs alone.
     void testPartialHistory() {
         HistoryTexels history(screenSize.width * screenSize.height);
-        history[10 * screenSize.width + 10] = AoHistoryTexel{Vec4{1.0f, 0.0f, 0.0f, 1.0f}, Vec4{}, 5.0f, 8.0f};
-        history[10 * screenSize.width + 11] = AoHistoryTexel{Vec4{1.0f, 0.0f, 0.0f, 1.0f}, Vec4{}, 5.0f, 8.0f};
-        history[11 * screenSize.width + 10] = AoHistoryTexel{Vec4{0.0f, 9.0f, 0.0f, 1.0f}, Vec4{}, 2.0f, 8.0f};
-        history[11 * screenSize.width + 11] = AoHistoryTexel{Vec4{0.0f, 9.0f, 0.0f, 1.0f}, Vec4{}, 2.0f, 8.0f};
+        history[10 * screenSize.width + 10] = AoHistoryTexel{Vec4{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f, 8.0f};
+        history[10 * screenSize.width + 11] = AoHistoryTexel{Vec4{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f, 8.0f};
+        history[11 * screenSize.width + 10] = AoHistoryTexel{Vec4{0.0f, 9.0f, 0.0f, 1.0f}, 2.0f, 8.0f};
+        history[11 * screenSize.width + 11] = AoHistoryTexel{Vec4{0.0f, 9.0f, 0.0f, 1.0f}, 2.0f, 8.0f};
         const AoPreviousPlace place{Vec2{11.0f, 11.0f}, 5.0f, true};
         const AoHistory read = readAoHistory(historyImage(history), screenSize, place, 0.05f);
         assert(near(read.age, 4.0f, 1e-5f) && near(read.light.x, 1.0f, 1e-6f) && read.light.y == 0.0f);
 
         // Taps off the screen do not count: the corner texel alone, a quarter of its age.
-        history[0] = AoHistoryTexel{Vec4{0.0f, 0.0f, 1.0f, 1.0f}, Vec4{}, 5.0f, 8.0f};
+        history[0] = AoHistoryTexel{Vec4{0.0f, 0.0f, 1.0f, 1.0f}, 5.0f, 8.0f};
         const AoHistory corner = readAoHistory(historyImage(history), screenSize, AoPreviousPlace{Vec2{0.0f, 0.0f}, 5.0f, true}, 0.05f);
         assert(near(corner.age, 2.0f, 1e-5f) && near(corner.light.z, 1.0f, 1e-6f));
 
@@ -887,8 +826,6 @@ void testAmbientOcclusion() {
     testSpecularOcclusion();
     testSurfaceVisibility();
     testBlurWeight();
-    testFillFacingWeight();
-    testFillLight();
     testFloorAndWall();
     testThicknessLetsLightBehind();
     testHistoryAge();

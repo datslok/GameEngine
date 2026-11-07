@@ -287,8 +287,8 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 **Items**
 
 - [x] Screen-space global illumination (`screen-space-gi`)
-  - [x] Its noise averaged over frames before the upscalers see it (`ao-temporal`)
-- [x] Sky visibility: rooms dark without probes, a CPU-baked grid of how much sky each point sees, with the screen's fill (`sky-visibility`)
+  - [x] Its noise averaged over frames before the upscalers see it, and the fill removed (`ao-temporal`)
+- [x] Sky visibility: rooms dark without probes, a CPU-baked grid of how much sky each point sees (`sky-visibility`; its screen fill removed in `ao-temporal`)
 - [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
   - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
 - [ ] Contact shadows: short screen-space rays, so small objects sit on what they touch

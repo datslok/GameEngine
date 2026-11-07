@@ -20,7 +20,7 @@ class VulkanDevice;
 * prepass and the main pass, the temporal accumulation (ambient_occlusion_temporal.comp) after it while anti-aliasing
 * turns the noise, the blur (ambient_occlusion_blur.comp) after that while there is no anti-aliasing or it gathers
 * light, and the render-size image the main pass reads (scene set 1, binding 25): the blur's while it runs, else the
-* accumulation's, else the pass's own; and the pass's fill (binding 31), the mean of last frame's picture round each pixel.
+* accumulation's, else the pass's own.
 *
 * The accumulation's history is two pairs of images taking turns: each frame reads last frame's pair and writes the
 * other, since a pixel reads its neighbours' history and cannot overwrite it in place.
@@ -47,10 +47,6 @@ public:
     // Start the accumulation afresh next frame: a capture, or a frame without ambient occlusion in between.
     void forgetHistory();
 
-    // The fill the pass writes beside it (the mean of the picture round each pixel; zero while not gathering), which
-    // the main pass samples (set 1, binding 31). Smooth already, so never blurred.
-    SampledImage sampledFill() const;
-
     /*
     * Record the pass, the accumulation while the pass record says to accumulate (its history carried over when last
     * frame's was made the same way and previousCameraKnown), and the blur when blur is true: the depth (the prepass's,
@@ -66,25 +62,19 @@ private:
     std::unique_ptr<ComputePipeline> occlusionPipeline;
     std::unique_ptr<ComputePipeline> temporalPipeline;
     std::unique_ptr<ComputePipeline> blurPipeline;
-    std::unique_ptr<ComputePipeline> fillBlurPipeline;
     std::vector<VulkanBuffer> passRecords;
 
     RenderSize size;
     VulkanImage noisy;
     VulkanImage blurred;
-    VulkanImage fill;
-    VulkanImage fillAcross; // the fill blurred across, before the pass down
 
-    // The accumulation's averages (the occlusion's and the fill's) and their view depths and ages, two of each taking turns; latest is the pair last
+    // The accumulation's averages and their view depths and ages, two of each taking turns; latest is the pair last
     // written, and what it was made for (none while there is no history to carry over).
     std::array<VulkanImage, 2> historyLight;
     std::array<VulkanImage, 2> historyDepthAge;
-    std::array<VulkanImage, 2> historyFill;
     int latest = 0;
     std::optional<AoHistoryKey> lastHistory;
 
     void accumulate(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, const SampledImage& depthSample, bool usable,
                     std::uint32_t groupsAcross, std::uint32_t groupsDown);
-    void blurFill(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, const SampledImage& depthSample, VulkanImage& source,
-                  std::uint32_t groupsAcross, std::uint32_t groupsDown);
 };

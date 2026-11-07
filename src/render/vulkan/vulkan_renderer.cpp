@@ -1800,7 +1800,6 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred, occlusionAccumulates) : sampled(*noProbesTexture),
         fog->sampledVolume(),
         skyVisibility->sampled(),
-        occlusion ? ambientOcclusion->sampledFill() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;

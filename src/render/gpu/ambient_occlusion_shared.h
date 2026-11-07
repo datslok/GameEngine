@@ -32,23 +32,6 @@
 #define AO_BLUR_RADIUS 2
 #define AO_BLUR_DEPTH_SHARE 0.1
 
-// The fill's blur (ambient_fill_blur.comp), always while gathering: what is left of the fill's noise after the
-// temporal accumulation. Two passes, across then down, this many taps each way this many pixels apart. Before the
-// accumulation took the fill it was 12 taps 4 apart, which spread a sunlit patch's light into round blobs.
-#define AO_FILL_BLUR_TAPS 4
-#define AO_FILL_BLUR_STRIDE 2
-
-// The fill is the light above the surface over the share of samples above it (its coverage), each averaged first;
-// below this coverage it is divided by this instead, so a pixel with one faint sample above it does not take that
-// sample's whole brightness, and the fill fades out smoothly as nothing is seen above the surface. Low, since a wall's
-// foot seen along a flat line of samples has a coverage of only 0.04 and its fill must stand (the GPU divides averages).
-#define AO_FILL_MIN_COVERAGE 0.02
-
-// The fill counts only what lies above the surface: a sample's weight rises from 0 at this cosine between the normal and
-// the way to it (about 6 degrees above the surface, so depth rounding on the surface's own plane counts nothing) to 1
-// straight overhead.
-#define AO_FILL_MIN_COSINE 0.1
-
 // The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
 #define AO_MAX_HISTORY_FRAMES 64
 

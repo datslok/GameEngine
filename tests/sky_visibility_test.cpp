@@ -100,23 +100,8 @@ namespace {
         assert(near(skyVisibilityInAir(ringing, 0.5f), 0.2f + 0.5f * blockersLit * 0.8f, 1e-5f));
     }
 
-    /*
-    * The light from all around with the screen's fill: with none, the flat ambient times the facing share; a fill
-    * brighter than the bounce guess stands in for the blocked share, a dimmer one leaves the guess. A room whose walls
-    * are as bright as its open sky's light gets that light from every way.
-    */
-    void testTheFillLightsTheBlockedShare() {
-        const Vec3 flat{0.4f, 0.5f, 0.6f};
-        const float seen = 0.2f;
-        const float guess = 0.25f * 0.1f;
-        const Vec3 none = skyLightWithFill(flat, seen, guess, Vec3{0.0f, 0.0f, 0.0f});
-        assert(near(none.y, 0.5f * (seen + guess * (1.0f - seen)), 1e-6f));
-
-        const Vec3 lit = skyLightWithFill(flat, seen, guess, Vec3{0.3f, 0.3f, 0.0f});
-        assert(near(lit.x, 0.4f * seen + 0.3f * 0.8f, 1e-6f) && near(lit.z, 0.6f * (seen + guess * 0.8f), 1e-6f));
-
-        const Vec3 even = skyLightWithFill(flat, seen, guess, flat);
-        assert(near(even.x, flat.x, 1e-6f) && near(even.y, flat.y, 1e-6f) && near(even.z, flat.z, 1e-6f));
+    // A point whose open side leans up sees the sky facing up, and none looking straight down.
+    void testSeenFacingAndAlong() {
         assert(near(skySeenFacing(SkyVisibility{0.2f, Vec3{0.0f, 0.9f, 0.0f}}, up), 0.8f, 1e-6f));
         assert(skySeenAlong(SkyVisibility{0.2f, Vec3{0.0f, 0.9f, 0.0f}}, down) == 0.0f);
     }
@@ -504,7 +489,7 @@ void testSkyVisibility() {
     testAnOpenFieldLightsTheFloorFully();
     testAClosedBoxIsDark();
     testTheShareStaysWithinItsRange();
-    testTheFillLightsTheBlockedShare();
+    testSeenFacingAndAlong();
     testACornerSeesWithinItsReach();
     testAPointPacksForTheShaders();
     testTheCascadesNestRoundTheCamera();

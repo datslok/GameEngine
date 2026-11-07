@@ -220,21 +220,6 @@ float surfaceVisibility(float screenVisibility, float occlusionTexel, float occl
     return std::min(screenVisibility, 1.0f + occlusionStrength * (occlusionTexel - 1.0f));
 }
 
-float fillFacingWeight(const Vec3& normal, const Vec3& offset) {
-    const float length = offset.length();
-
-    if (!(length > 0.0f)) {
-        return 0.0f;
-    }
-
-    const float lowest = static_cast<float>(AO_FILL_MIN_COSINE);
-    return std::clamp((normal.dot(offset) / length - lowest) / (1.0f - lowest), 0.0f, 1.0f);
-}
-
-Vec3 aoFillLight(const Vec3& parts, float coverage) {
-    return parts * (1.0f / std::max(coverage, static_cast<float>(AO_FILL_MIN_COVERAGE)));
-}
-
 float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return std::max(1.0f - std::abs(neighbourDistance - centreDistance) / (static_cast<float>(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0f);
 }
@@ -273,9 +258,6 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
 
     float visibility = 0.0f;
     Vec3 gathered;
-    Vec3 surroundings;
-    float seenWeights = 0.0f; // each sample's weight fades to nothing at the reach, so a bright patch leaving it fades
-    float allWeights = 0.0f;  // every sample's, above the surface or not: the fill's parts are shares of it
 
     for (int slice = 0; slice < settings.slices; ++slice) {
         const float angle = std::numbers::pi_v<float> * (static_cast<float>(slice) + sliceNoise) / static_cast<float>(settings.slices);
@@ -337,20 +319,9 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
                 const std::uint32_t mask = sectorMask(start, end);
                 const std::uint32_t fresh = mask & ~marked;
 
-                // The fill takes the first slice's samples alone: its blur smooths it anyway, and each read costs a reprojection.
-                if (picture) {
+                if (picture && fresh != 0u) {
                     const Vec3 seen = gatheredSampleLight(picture(sx, sy), settings.indirectBrightest);
-
-                    if (slice == 0) {
-                        const float counted = weight * fillFacingWeight(normal, offset);
-                        surroundings = surroundings + seen * counted;
-                        seenWeights += counted;
-                        allWeights += weight;
-                    }
-
-                    if (fresh != 0u) {
-                        sliceLight = sliceLight + seen * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
-                    }
+                    sliceLight = sliceLight + seen * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
                 }
 
                 marked |= mask;
@@ -363,8 +334,7 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
     }
 
     const float slices = static_cast<float>(settings.slices);
-    const float share = allWeights > 0.0f ? 1.0f / allWeights : 0.0f;
-    return AoLight{gathered * (1.0f / slices), std::clamp(visibility / slices, 0.0f, 1.0f), surroundings * share, seenWeights * share};
+    return AoLight{gathered * (1.0f / slices), std::clamp(visibility / slices, 0.0f, 1.0f)};
 }
 
 float aoHistoryAge(float previousAge, int historyFrames) {
@@ -417,7 +387,6 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
     const float baseY = std::floor(place.pixel.y - 0.5f);
     const Vec2 fraction{place.pixel.x - 0.5f - baseX, place.pixel.y - 0.5f - baseY};
     Vec4 light;
-    Vec4 fill;
     float weights = 0.0f;
     float age = 0.0f;
 
@@ -437,7 +406,6 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
         }
 
         light = light + texel.light * weight;
-        fill = fill + texel.fill * weight;
         weights += weight;
         age += texel.age * weight;
     }
@@ -446,25 +414,24 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
         return AoHistory{};
     }
 
-    return AoHistory{light * (1.0f / weights), fill * (1.0f / weights), age};
+    return AoHistory{light * (1.0f / weights), age};
 }
 
 Vec4 accumulatedAo(const Vec4& current, const Vec4& historyLight, float age) {
     return historyLight + (current - historyLight) * aoCurrentShare(age);
 }
 
-AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames, const Vec4& currentFill) {
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames) {
     const float age = aoHistoryAge(history.age, historyFrames);
-    return AoHistoryTexel{accumulatedAo(current, history.light, age), accumulatedAo(currentFill, history.fill, age), viewDepth, age};
+    return AoHistoryTexel{accumulatedAo(current, history.light, age), viewDepth, age};
 }
 
 AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
-                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable,
-                            const Vec4& currentFill) {
+                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable) {
     const float depth = depthAt(x, y);
 
     if (depth == gpuFarDepth) {
-        return AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 1.0f}, Vec4{}, 0.0f, 0.0f};
+        return AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 1.0f}, 0.0f, 0.0f};
     }
 
     const Vec2 size{static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
@@ -472,7 +439,7 @@ AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& repr
     const float viewDepth = viewDistanceAtPixel(frame.inverseViewProjection, pixel, depth, size);
     const AoHistory previous = historyUsable ? readAoHistory(history, frame.size, aoPreviousPlace(reprojection, pixel, depth, viewDepth, size), settings.historyDepthShare)
                                              : AoHistory{};
-    return accumulateAo(current, viewDepth, previous, settings.historyFrames, currentFill);
+    return accumulateAo(current, viewDepth, previous, settings.historyFrames);
 }
 
 bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey& now, bool previousCameraKnown) {

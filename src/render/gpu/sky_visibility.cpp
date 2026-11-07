@@ -165,12 +165,6 @@ float skyVisibilityInAir(const SkyVisibility& visibility, float bounceShare, flo
     return withBounce(std::clamp(visibility.open, 0.0f, 1.0f), skyBlockersLit(visibility, blockersFloor), bounceShare);
 }
 
-Vec3 skyLightWithFill(const Vec3& flatAmbient, float seen, float bounceGuess, const Vec3& fill) {
-    const Vec3 guess = flatAmbient * bounceGuess;
-    const Vec3 blocked{std::max(guess.x, fill.x), std::max(guess.y, fill.y), std::max(guess.z, fill.z)};
-    return flatAmbient * seen + blocked * (1.0f - seen);
-}
-
 Vec3 skyReachDirection(int direction) {
     const float sign = (direction & 1) != 0 ? -1.0f : 1.0f;
 

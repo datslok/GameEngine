@@ -74,7 +74,6 @@ namespace {
                          Vec3{out[6][0], out[6][1], 0.0f});
             report.check("sectorMask", arithmeticTolerance, static_cast<float>(std::popcount(sectorMask(in[5][3], in[6][3]))), out[6][2]);
             report.check("gatheredSampleLight", arithmeticTolerance, gatheredSampleLight(vec3From(in[9]), in[6][3]), vec3From(out[7]));
-            report.check("fillFacingWeight", arithmeticTolerance, fillFacingWeight(normal, vec3From(in[3])), out[7][3]);
         }
     }
 
@@ -117,11 +116,11 @@ namespace {
             inputs.push_back(GpuVec4{expected, i % 5 == 0 ? 0.0f : expected * random.between(0.9f, 1.1f), random.between(0.01f, 0.1f), static_cast<float>(i % 4)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 4);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 3);
 
-        for (std::size_t i = 0; i < outputs.size() / 4; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
             const GpuVec4* in = &inputs[i * 9];
-            const GpuVec4* out = &outputs[i * 4];
+            const GpuVec4* out = &outputs[i * 3];
             const Vec2 pixel{in[4][0], in[4][1]};
             const Vec2 size{in[5][0], in[5][1]};
             const AoPreviousPlace place = aoPreviousPlace(reprojections[i], pixel, in[4][2], in[4][3], size);

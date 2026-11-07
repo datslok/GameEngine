@@ -2424,7 +2424,7 @@ How much of the light from all around reaches a point past the small things next
 - **Many bounces.** The picture holds last frame's bounce, so each frame adds one, a geometric series in the albedo, which converges.
 - **The image.** RGBA16F: rgb the gathered light, alpha the visibility. The main pass adds rgb to the diffuse light from all around, after dimming that by the visibility, and turns the Jimenez fit off (`ambientOcclusionOptions.y`), which would count the same bounce twice.
 - **When it gathers** (`gathersLight`): `indirect` on, last frame's picture usable (anti-aliasing on, not the first frame), and no probes in the frame. It then uses `indirectRadius` and always runs the blur, since its noise is far stronger.
-- **The fill** (`sky-visibility`, reworked in `ao-temporal`): how bright what the surface sees above it is, for the sky visibility's blocked share. While gathering, the pass weighs its first slice's samples by their falloff weight w (so a bright patch leaving the reach fades rather than steps) and their facing weight f (`fillFacingWeight`: 0 within `AO_FILL_MIN_COSINE` 0.1 of the surface's plane or below it, 1 straight overhead), and writes two parts into a second RGBA16F image: rgb the sum of w f L over the sum of w, alpha the coverage, the sum of w f over the sum of w (`AoLight::fill`, `fillCoverage`). Both are averaged over frames by the temporal accumulation and blurred (`ambient_fill_blur.comp`, two passes, across then down, `AO_FILL_BLUR_TAPS` 4 taps each way `AO_FILL_BLUR_STRIDE` 2 pixels apart, weighted by `aoBlurWeight` from the depth's view distances), and only the main pass divides them (`aoFillLight`: the light over the coverage, never over less than `AO_FILL_MIN_COVERAGE` 0.02): a ratio of averages, steady where the average of each frame's ratio was not. History: the first fill was the plain mean of the picture round each pixel with a 12-tap blur 4 pixels apart, which spread a sunlit patch over its own floor and the walls beside it like bloom; counting only samples above the surface but dividing each frame left blotches and streaks, since one line of samples a frame decides whether anything above is seen at all. Main pass: set 1 binding 31 (`AmbientFillBinding`), fragment only. Only the first slice, since each read costs a reprojection.
+- **No fill any more** (`ao-temporal`): from `sky-visibility` until then the pass also averaged the picture round each pixel within the reach (the "fill") to light the sky visibility's blocked share. As a plain mean it spread a sunlit patch over its own floor and the walls beside it like bloom; counting only what lies above the surface showed the real limit: a wall's middle sees nothing within 2 m, so only surfaces near corners got light, in bands at the reach. The light from all around a room is a whole-room quantity a screen search cannot see; the sky visibility grid is to carry it (planned: its points lit by their rays' hits).
 
 **Temporal accumulation** (`ao-temporal`, `ambient_occlusion_temporal.comp`, mirrored by `aoTemporalAt`). The gather's few dozen samples a pixel turn with the frame, and the upscalers took the noise left after the blur for detail, drawing grain and swirls. So, while anti-aliasing is on and `temporal` is set, each pixel's result is blended into a running average before the blur and the main pass read it:
 
@@ -2433,10 +2433,10 @@ How much of the light from all around reaches a point past the small things next
 - **Rejecting.** Of the four bilinear taps round that place, only those whose stored depth is within `historyDepthShare` of the expected one count (`aoHistoryTapKept`; the sky stores 0 and never counts); their light is renormalised, and the age is each kept tap's times its bilinear weight, so a point only partly seen last frame trusts it less (`readAoHistory`). With none kept, or the place behind last frame's camera or off its screen, the age starts again at 1: the new frame alone.
 - **Objects' own motion** is not known yet (the velocity pass comes after the main pass), so a moving object's pixels reproject as if still, fail the depth test where it moved and start again: noisier while moving, which the blur covers.
 - **Carried over** only to a frame of the same size gathering the same way, with last frame's camera known and ambient occlusion run in between (`aoHistoryUsable`, `AoHistoryKey`); a capture starts afresh (`VulkanAmbientOcclusion::forgetHistory`).
-- **The fill's parts** are accumulated beside the light in a third pair (RGBA16F), the same taps and weights, then blurred into the image the main pass reads.
-- **The images:** two pairs taking turns, each frame reading last frame's and writing the other (a pixel reads its neighbours' history, so it cannot write in place): RGBA16F for the average, RG32F for the depth and age (RG16F would need the extended storage formats) and RGBA16F for the fill's parts. About 100 MB at 1080p. The main pass reads the blur's image while it runs (gathering, or no anti-aliasing), else the average itself. The pass record's `history`: x the frames, y the depth share, z 1 while accumulating, w 1 when last frame's history is usable (set by `VulkanAmbientOcclusion::occlude`, which keeps what it was made for).
 
-**Known limits:** only what is on screen bounces, so light goes when its source leaves the view (the sky visibility grid now dims a closed room's flat ambient, and the fill lights it from what the screen shows round each point). Specular highlights in the picture bounce as if they were diffuse. Moving objects' bounce trails a frame behind.
+- **The images:** two pairs taking turns, each frame reading last frame's and writing the other (a pixel reads its neighbours' history, so it cannot write in place): RGBA16F for the average and RG32F for the depth and age (RG16F would need the extended storage formats). About 66 MB at 1080p. The main pass reads the blur's image while it runs (gathering, or no anti-aliasing), else the average itself. The pass record's `history`: x the frames, y the depth share, z 1 while accumulating, w 1 when last frame's history is usable (set by `VulkanAmbientOcclusion::occlude`, which keeps what it was made for).
+
+**Known limits:** only what is on screen bounces, so light goes when its source leaves the view (the sky visibility grid dims a closed room's flat ambient). Specular highlights in the picture bounce as if they were diffuse. Moving objects' bounce trails a frame behind. The accumulation lags a real change in the light by its frames, more inside the loop through last frame's picture (an anti-lag check is planned).
 
 **The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility at its pixel, takes the more closed of it and the material's baked occlusion where it has one (`surfaceVisibility`: min(screen, 1 + strength (texel − 1)), glTF's formula; the minimum, not the product, since both estimate the same open share and a crease both see would darken twice; the baked one also in the reflection probe's capture, being the surface's own) as v, and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
 
@@ -2463,7 +2463,7 @@ How much of the sky each point round the camera sees, so the flat ambient light 
 
 **The blocked share.** A blocked way brings back the bounce share beta (`bounceShare`, 0.25) of how lit its blocker is, guessed from the point's own open share: g = clamp(2a, 0, 1), at least `blockersLitFloor` (0.1) (`skyBlockersLit`; under an open sky a point sees half the sphere and its ground sees all of it). The share a surface gets is f + beta g (1 - f) (`skyVisibilityFacing`, `skyVisibilityAlong`, `skyVisibilityInAir`): unchanged outdoors, while a closed room, whose walls see no sky either, keeps only the floor's share. A constant beta (the first try) left every room at a quarter of the sky's light at least, and eye adaptation brightened it back up.
 
-**The fill.** Where ambient occlusion gathers, its fill (see Ambient occlusion: the mean of the picture within 2 m of each pixel, blurred) says how bright the surroundings really are. The main pass's diffuse light from all around is `skyLightWithFill(flat, f, beta g, fill)`: the flat ambient for the sky seen, and for the rest the brighter of the guess and the fill. A room lit through its window then lights its own walls. Without it a crease, which gathers its neighbours' light from the screen, glowed brighter than the flat wall beside it, which got only the dim sky term (seen in the light lab as lines along every seam). The reflection's stand-in keeps the guess alone: the fill is what lies round the point, not what a mirror shows, and a bright patch near a mirror drew a disc on it.
+**No fill.** The blocked share takes the guess alone: the main pass's diffuse light from all around is the flat ambient times `skyVisibilityFacing`. Ambient occlusion's fill lit it from the screen until `ao-temporal` and was removed (see Ambient occlusion). Expect creases, which gather their neighbours' light from the screen, to be brighter than the flat walls beside them until the grid carries bounce light.
 
 **The grid.** Cascades round the camera, reusing the probes' code (`probeWindow`, `scrolledProbes`, `probeCascadeWeight`, `GpuProbeCascade`):
 
@@ -2503,20 +2503,20 @@ Unbaked and buried points are left out; a cascade with none left adds nothing.
 
 - `sky_visibility_test`:
   - the bands for an open field, a closed box and an all-open sphere;
-  - the shares and their clamp, the floor, the fill;
+  - the shares and their clamp, the floor;
   - the reach test, packing, the cascades;
   - reading with nothing baked, with every point alike, with buried and walled points left out, and a floor reading what is above it;
   - the settings and their keys, the presets;
   - baking over a floor, with a roof beyond the ray length, and in a room with a door (dark, brighter towards the door, buried in its wall, the reach to the wall);
   - the budget; the grid following the camera a plane at a time, and starting afresh for a new level or shape; the same bake on four threads as on one.
-- `static_geometry_test`; `uniform_grid_test` (walks with their own marks); `half_float_test` (`floatToHalf`); `ambient_occlusion_test` (the fill).
+- `static_geometry_test`; `uniform_grid_test` (walks with their own marks); `half_float_test` (`floatToHalf`).
 - GPU tests in `sky_visibility_gpu_test` (written and built, not run).
 
 **Limits:**
 
 - Only the static level counts: a door opening or a crate moving changes nothing.
-- The bounce it brings is a guess wherever the screen has no fill.
-- Faint warm glows appear round bright things mirrors show, from the fill.
+- The bounce it brings is a guess.
+
 - The golden images differ.
 
 ## Volumetric fog

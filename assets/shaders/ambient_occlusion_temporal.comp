@@ -6,8 +6,8 @@
 * per render pixel, after the occlusion pass and before the blur: the pass's result blended into a running average of
 * the frames before, read where the point was on last frame's screen from the four texels round it whose view depth
 * shows the same point. The new frame weighs one over the age, the frames the average holds, at most the history's
-* frames, so a newly seen point starts from this frame alone. The fill's two parts (AoLight) are averaged the same way.
-* Writes this frame's history (the averages, and the view depth and age), which the blurs and the main pass read and the
+* frames, so a newly seen point starts from this frame alone.
+* Writes this frame's history (the average, and the view depth and age), which the blur and the main pass read and the
 * next frame reprojects.
 */
 #include "screen_reflections.glsl"
@@ -31,11 +31,8 @@ layout(set = 0, binding = 1) uniform sampler2D depth;                     // exa
 layout(set = 0, binding = 2) uniform sampler2D current;                   // the occlusion pass's result, exact texels
 layout(set = 0, binding = 3) uniform sampler2D previousLight;             // last frame's average
 layout(set = 0, binding = 4) uniform sampler2D previousDepthAge;          // last frame's view depth (0 for the sky) and age
-layout(set = 0, binding = 5) uniform sampler2D currentFill;               // the occlusion pass's fill parts, exact texels
-layout(set = 0, binding = 6) uniform sampler2D previousFill;              // last frame's average of them
-layout(set = 0, binding = 7, rgba16f) uniform writeonly image2D light;    // this frame's average: rgb the light gathered, a the visibility
-layout(set = 0, binding = 8, rg32f) uniform writeonly image2D depthAge;   // this frame's view depth and age
-layout(set = 0, binding = 9, rgba16f) uniform writeonly image2D fill;     // this frame's average of the fill's parts
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D light;    // this frame's average: rgb the light gathered, a the visibility
+layout(set = 0, binding = 6, rg32f) uniform writeonly image2D depthAge;   // this frame's view depth and age
 
 void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -50,14 +47,12 @@ void main() {
     if (pixelDepth == float(GPU_FAR_DEPTH)) {
         imageStore(light, texel, vec4(0.0, 0.0, 0.0, 1.0));
         imageStore(depthAge, texel, vec4(0.0));
-        imageStore(fill, texel, vec4(0.0));
         return;
     }
 
     vec2 pixel = vec2(texel) + 0.5;
     float viewDepth = viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
     vec4 historyLight = vec4(0.0);
-    vec4 historyFill = vec4(0.0);
     float historyAge = 0.0;
 
     // Each texel's result stands for its whole footprint, so its centre is reprojected as it is (aoTemporalAt).
@@ -84,13 +79,11 @@ void main() {
                 }
 
                 historyLight += texelFetch(previousLight, at, 0) * weight;
-                historyFill += texelFetch(previousFill, at, 0) * weight;
                 weights += weight;
                 historyAge += stored.g * weight;
             }
 
             historyLight = weights > 0.0 ? historyLight / weights : vec4(0.0);
-            historyFill = weights > 0.0 ? historyFill / weights : vec4(0.0);
             historyAge = weights > 0.0 ? historyAge : 0.0;
         }
     }
@@ -98,5 +91,4 @@ void main() {
     float age = aoHistoryAge(historyAge, int(pass.history.x));
     imageStore(light, texel, accumulatedAo(texelFetch(current, texel, 0), historyLight, age));
     imageStore(depthAge, texel, vec4(viewDepth, age, 0.0, 0.0));
-    imageStore(fill, texel, accumulatedAo(texelFetch(currentFill, texel, 0), historyFill, age));
 }

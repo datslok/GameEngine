@@ -6,8 +6,7 @@
 * main pass: the loop ambientOcclusionAt mirrors. The pixel's point and normal from the depths (the normal from the
 * neighbours that carry on in line), then slices round the way to the camera, each walked both ways through the depth
 * image marking the sectors its samples block, gathering last frame's picture for each sector newly marked, and the open
-* share and the gathered light averaged; while gathering, also the mean of the picture over the first slice's samples (the
-* fill, how bright the surroundings are, into a second image for the sky visibility's blocked share). Its noise turns
+* share and the gathered light averaged. Its noise turns
 * with the frame for temporal anti-aliasing to average (still without it, for the blur).
 */
 #include "screen_reflections.glsl"
@@ -30,7 +29,6 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
 layout(set = 0, binding = 1) uniform sampler2D depth;                      // exact texels
 layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture
 layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
-layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D fill;      // the fill's parts (AoLight): rgb the light above the surface, a the coverage, each a share of every sample's weight
 
 // The point at a texel clamped onto the screen (measured from the camera); the sky counts as the fallback point.
 vec3 pointAt(ivec2 texel, vec3 fallback) {
@@ -67,7 +65,6 @@ void main() {
 
     if (screenRadius < float(AO_MIN_SAMPLE_PIXELS)) {
         imageStore(occlusion, texel, vec4(0.0, 0.0, 0.0, 1.0));
-        imageStore(fill, texel, vec4(0.0));
         return;
     }
 
@@ -88,9 +85,6 @@ void main() {
     bool gathers = pass.gather.y > 0.5;
     float visibility = 0.0;
     vec3 gathered = vec3(0.0);
-    vec4 surroundings = vec4(0.0); // the picture summed over the samples above the surface seen last frame and their
-                                   // weights, each fading to nothing at the reach, so a bright patch leaving it fades
-    float allWeights = 0.0;        // every sample's weight seen last frame, above the surface or not
 
     for (int slice = 0; slice < slices; ++slice) {
         float angle = 3.14159265 * (float(slice) + sliceNoise) / float(slices);
@@ -150,19 +144,8 @@ void main() {
                 uint mask = sectorMask(start, end);
                 uint fresh = mask & ~marked;
 
-                // The fill takes the first slice's samples alone: its blur smooths it anyway, and each read costs a reprojection.
-                if (gathers && (fresh != 0u || slice == 0)) {
-                    vec4 seen = pictureAt(at, atDepth);
-
-                    // Only what lies above the surface lights it (fillFacingWeight).
-                    if (slice == 0) {
-                        surroundings += seen * (weight * fillFacingWeight(normal, offset));
-                        allWeights += weight * seen.a;
-                    }
-
-                    if (fresh != 0u) {
-                        sliceLight += seen.rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
-                    }
+                if (gathers && fresh != 0u) {
+                    sliceLight += pictureAt(at, atDepth).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
                 }
 
                 marked |= mask;
@@ -175,5 +158,4 @@ void main() {
     }
 
     imageStore(occlusion, texel, vec4(gathered / float(slices), clamp(visibility / float(slices), 0.0, 1.0)));
-    imageStore(fill, texel, allWeights > 0.0 ? surroundings / allWeights : vec4(0.0));
 }
