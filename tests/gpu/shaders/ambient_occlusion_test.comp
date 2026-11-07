@@ -55,5 +55,6 @@ void main() {
         testOutput(0, aoPreviousPlace(reprojection, point.xy, point.z, point.w, frame.xy));
         testOutput(1, vec4(age, aoCurrentShare(age), aoHistoryTapKept(tap.x, tap.y, tap.z) ? 1.0 : 0.0, aoTapWeight(fract(point.xy), int(tap.w))));
         testOutput(2, accumulatedAo(current, historyLight, age));
+        testOutput(3, vec4(aoFillLight(current.rgb, historyLight.w * 0.2), 0.0));
     }
 }

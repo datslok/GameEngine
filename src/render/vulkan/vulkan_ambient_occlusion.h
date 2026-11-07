@@ -75,14 +75,16 @@ private:
     VulkanImage fill;
     VulkanImage fillAcross; // the fill blurred across, before the pass down
 
-    // The accumulation's averages and their view depths and ages, two of each taking turns; latest is the pair last
+    // The accumulation's averages (the occlusion's and the fill's) and their view depths and ages, two of each taking turns; latest is the pair last
     // written, and what it was made for (none while there is no history to carry over).
     std::array<VulkanImage, 2> historyLight;
     std::array<VulkanImage, 2> historyDepthAge;
+    std::array<VulkanImage, 2> historyFill;
     int latest = 0;
     std::optional<AoHistoryKey> lastHistory;
 
     void accumulate(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, const SampledImage& depthSample, bool usable,
                     std::uint32_t groupsAcross, std::uint32_t groupsDown);
-    void blurFill(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, std::uint32_t groupsAcross, std::uint32_t groupsDown);
+    void blurFill(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, const SampledImage& depthSample, VulkanImage& source,
+                  std::uint32_t groupsAcross, std::uint32_t groupsDown);
 };

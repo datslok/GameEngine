@@ -29,8 +29,8 @@ VulkanAmbientOcclusion::VulkanAmbientOcclusion(const VulkanDevice& device, VkSam
     ComputePipelineDescription temporal;
     temporal.shader = "assets/shaders/ambient_occlusion_temporal.comp.spv";
     temporal.storageBuffers = 1;
-    temporal.sampledImages = 4;
-    temporal.storageImages = 2;
+    temporal.sampledImages = 6;
+    temporal.storageImages = 3;
     temporalPipeline = std::make_unique<ComputePipeline>(device, temporal);
 
     ComputePipelineDescription blur;
@@ -42,7 +42,7 @@ VulkanAmbientOcclusion::VulkanAmbientOcclusion(const VulkanDevice& device, VkSam
 
     ComputePipelineDescription fillBlur = blur;
     fillBlur.shader = "assets/shaders/ambient_fill_blur.comp.spv";
-    fillBlur.sampledImages = 1;
+    fillBlur.sampledImages = 2;
     fillBlur.pushConstantBytes = sizeof(std::int32_t) * 4;
     fillBlurPipeline = std::make_unique<ComputePipeline>(device, fillBlur);
 
@@ -78,6 +78,7 @@ void VulkanAmbientOcclusion::ensureSize(RenderSize render) {
     fillAcross = image("Ambient occlusion fill, blurred across");
     historyLight = {image("Ambient occlusion history 0"), image("Ambient occlusion history 1")};
     historyDepthAge = {image("Ambient occlusion history depth and age 0", depthAgeFormat), image("Ambient occlusion history depth and age 1", depthAgeFormat)};
+    historyFill = {image("Ambient occlusion fill history 0"), image("Ambient occlusion fill history 1")};
     lastHistory.reset();
     size = render;
 }
@@ -110,17 +111,23 @@ void VulkanAmbientOcclusion::accumulate(VkCommandBuffer commands, FrameDescripto
     noisy.transition(commands, ImageState::ComputeRead);
     historyLight[previous].transition(commands, ImageState::ComputeRead, keep);
     historyDepthAge[previous].transition(commands, ImageState::ComputeRead, keep);
+    historyFill[previous].transition(commands, ImageState::ComputeRead, keep);
+    fill.transition(commands, ImageState::ComputeRead);
     historyLight[next].transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
     historyDepthAge[next].transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
+    historyFill[next].transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
-    const std::array<ComputeBinding, 7> bindings{
+    const std::array<ComputeBinding, 10> bindings{
         storageBufferBinding(record.get()),
         sampledBinding(depthSample.sampler, depthSample.view, depthSample.layout),
         sampledBinding(nearest, noisy.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
         sampledBinding(nearest, historyLight[previous].getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
         sampledBinding(nearest, historyDepthAge[previous].getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+        sampledBinding(nearest, fill.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+        sampledBinding(nearest, historyFill[previous].getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
         storageImageBinding(historyLight[next].getView()),
         storageImageBinding(historyDepthAge[next].getView()),
+        storageImageBinding(historyFill[next].getView()),
     };
 
     bindComputeSet(commands, device.getDevice(), descriptors, *temporalPipeline, bindings);
@@ -129,16 +136,18 @@ void VulkanAmbientOcclusion::accumulate(VkCommandBuffer commands, FrameDescripto
 }
 
 /*
-* The fill blurred across into fillAcross, then down back into the fill (whose noisy contents the first pass has read
-* by then; the view distances it weighs by ride in its alpha), each read by compute after being written, the fill left readable by fragment shaders for the main pass.
+* The fill's parts blurred across from source (the fill's average, or the pass's own fill) into fillAcross, then down
+* into the fill (whose own contents the accumulation or the first pass has read by then), each read by compute after being
+* written, the fill left readable by fragment shaders for the main pass. The view distances come from the depth.
 */
-void VulkanAmbientOcclusion::blurFill(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, std::uint32_t groupsAcross,
-                                      std::uint32_t groupsDown) {
+void VulkanAmbientOcclusion::blurFill(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, const SampledImage& depthSample,
+                                      VulkanImage& source, std::uint32_t groupsAcross, std::uint32_t groupsDown) {
     const auto pass = [&](VulkanImage& from, VulkanImage& to, std::int32_t x, std::int32_t y) {
         from.transition(commands, ImageState::ComputeRead);
         to.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
-        const std::array<ComputeBinding, 3> bindings{
+        const std::array<ComputeBinding, 4> bindings{
             storageBufferBinding(record.get()),
+            sampledBinding(depthSample.sampler, depthSample.view, depthSample.layout),
             sampledBinding(nearest, from.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
             storageImageBinding(to.getView()),
         };
@@ -148,7 +157,7 @@ void VulkanAmbientOcclusion::blurFill(VkCommandBuffer commands, FrameDescriptors
         vkCmdDispatch(commands, groupsAcross, groupsDown, 1);
     };
 
-    pass(fill, fillAcross, 1, 0);
+    pass(source, fillAcross, 1, 0);
     pass(fillAcross, fill, 0, 1);
     fill.transition(commands, ImageState::FragmentRead);
 }
@@ -202,13 +211,6 @@ void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors&
     const std::uint32_t groupsDown = workgroupCount(size.height, AO_GROUP_SIDE);
     vkCmdDispatch(commands, groupsAcross, groupsDown, 1);
 
-    // The fill is empty while nothing is gathered: nothing to blur.
-    if (pass.gather[1] > 0.5f) {
-        blurFill(commands, descriptors, record, groupsAcross, groupsDown);
-    } else {
-        fill.transition(commands, ImageState::FragmentRead);
-    }
-
     // The image the blur or the main pass reads: the accumulation's average while it runs, else the pass's own.
     VulkanImage* result = &noisy;
 
@@ -218,6 +220,14 @@ void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors&
         result = &historyLight[static_cast<std::size_t>(latest)];
     } else {
         lastHistory.reset();
+    }
+
+    // The fill (its average while accumulating) blurred into the image the main pass reads; empty while nothing is
+    // gathered: nothing to blur.
+    if (pass.gather[1] > 0.5f) {
+        blurFill(commands, descriptors, record, depthSample, accumulates ? historyFill[static_cast<std::size_t>(latest)] : fill, groupsAcross, groupsDown);
+    } else {
+        fill.transition(commands, ImageState::FragmentRead);
     }
 
     if (!blur) {

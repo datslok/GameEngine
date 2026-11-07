@@ -170,6 +170,11 @@ float fillFacingWeight(vec3 normal, vec3 offset) {
     return clamp((dot(normal, offset) / offsetLength - lowest) / (1.0 - lowest), 0.0, 1.0);
 }
 
+// The fill's light from its parts: the light above the surface over the coverage, never over less than the least.
+vec3 aoFillLight(vec3 parts, float coverage) {
+    return parts / max(coverage, float(AO_FILL_MIN_COVERAGE));
+}
+
 float aoBlurWeight(float centreDistance, float neighbourDistance) {
     return max(1.0 - abs(neighbourDistance - centreDistance) / (float(AO_BLUR_DEPTH_SHARE) * centreDistance), 0.0);
 }

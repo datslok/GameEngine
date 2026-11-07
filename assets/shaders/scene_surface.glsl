@@ -736,7 +736,8 @@ void main() {
     if (!probesOn && skyVisibilityRead()) {
         SkyVisibility sky = skyVisibilityAt(relativePosition, geometricNormal, toCamera);
         bool filled = ambientOcclusionOptions.x != 0 && !captureView && !transparentView;
-        vec3 fill = filled ? texelFetch(ambientFill, ivec2(gl_FragCoord.xy), 0).rgb : vec3(0.0);
+        vec4 fillParts = filled ? texelFetch(ambientFill, ivec2(gl_FragCoord.xy), 0) : vec4(0.0);
+        vec3 fill = aoFillLight(fillParts.rgb, fillParts.a);
         float bounceGuess = skyVisibilityOptions.y * skyBlockersLit(sky, skyVisibilityMore.x);
         float seen = skySeenFacing(sky, shadingNormal);
         skyShare = skyWithBounce(seen, skyBlockersLit(sky, skyVisibilityMore.x), skyVisibilityOptions.y);
