@@ -212,6 +212,26 @@ namespace {
         assert(sectorMask(0.5f, 0.505f) == 0u);
         assert(sectorMask(1.0f, 1.0f) == 0u);
         assert(sectorMask(0.5f, 0.53125f) == 0x00010000u);
+
+        // The offset is where an end rounds: 0.5 as before; near 1 even a sliver marks its sector, near 0 hardly any.
+        assert(sectorMask(0.5f, 0.505f, 0.5f) == sectorMask(0.5f, 0.505f));
+        assert(sectorMask(0.0f, 0.01f, 0.99f) == 0x00000001u);
+        assert(sectorMask(0.0f, 0.01f, 0.01f) == 0u);
+        assert(sectorMask(0.0f, 1.0f, 0.3f) == 0xFFFFFFFFu);
+
+        // Averaged over the offset the bits count the arc exactly, slivers and whole sectors alike, wherever it lies.
+        for (const float start : {0.0f, 0.1f, 0.47f, 0.85f}) {
+            for (const float length : {0.003f, 0.01f, 0.03f, 0.11f}) {
+                const int offsets = 4096;
+                double bits = 0.0;
+
+                for (int i = 0; i < offsets; ++i) {
+                    bits += std::popcount(sectorMask(start, start + length, (i + 0.5f) / offsets));
+                }
+
+                assert(near(static_cast<float>(bits / offsets), length * AO_SECTORS, 2e-3f));
+            }
+        }
     }
 
     /*
@@ -292,10 +312,23 @@ namespace {
             int quarters[4] = {0, 0, 0, 0};
             int tiedQuarters[4] = {0, 0, 0, 0};
             int inQuarter = 0;
+            int sectorBySlice[4] = {0, 0, 0, 0};
+            int sectorByStep[4] = {0, 0, 0, 0};
+            int inStepQuarter = 0;
 
             for (int frame = 0; frame < 1024; ++frame) {
-                const Vec2 noise = aoNoise(pixel, frame);
-                assert(noise.x >= 0.0f && noise.x < 1.0f && noise.y >= 0.0f && noise.y < 1.0f);
+                const Vec3 noise = aoNoise(pixel, frame);
+                assert(noise.x >= 0.0f && noise.x < 1.0f && noise.y >= 0.0f && noise.y < 1.0f && noise.z >= 0.0f && noise.z < 1.0f);
+
+                // The sectors' offset is independent of both others: for a quarter of either, all its quarters.
+                if (noise.x < 0.25f) {
+                    ++sectorBySlice[std::min(static_cast<int>(noise.z * 4.0f), 3)];
+                }
+
+                if (noise.y < 0.25f) {
+                    ++inStepQuarter;
+                    ++sectorByStep[std::min(static_cast<int>(noise.z * 4.0f), 3)];
+                }
 
                 if (noise.x < 0.25f) {
                     ++inQuarter;
@@ -311,6 +344,8 @@ namespace {
 
             for (int quarter = 0; quarter < 4; ++quarter) {
                 assert(quarters[quarter] > inQuarter / 8);
+                assert(sectorBySlice[quarter] > inQuarter / 8);
+                assert(sectorByStep[quarter] > inStepQuarter / 8);
                 tiedEmpty += tiedQuarters[quarter] == 0 ? 1 : 0;
             }
 
@@ -469,6 +504,23 @@ namespace {
         const AoLight furnace = averagedLight(x, foot, frame, far, depthAt, white);
         assert(near(furnace.visibility + furnace.gathered.x, 1.0f, 0.02f));
         assert(furnace.gathered.x > 0.35f);
+
+        // The same averaged over the sectors' rounding offset too: still exactly the missing light.
+        {
+            const int grid = 6;
+            double total = 0.0;
+
+            for (int i = 0; i < grid; ++i) {
+                for (int j = 0; j < grid; ++j) {
+                    for (int k = 0; k < grid; ++k) {
+                        const AoLight light = ambientOcclusionAt(x, foot, frame, far, (i + 0.5f) / grid, (j + 0.5f) / grid, depthAt, white, (k + 0.5f) / grid);
+                        total += light.visibility + light.gathered.x;
+                    }
+                }
+            }
+
+            assert(near(static_cast<float>(total / (grid * grid * grid)), 1.0f, 0.02f));
+        }
 
         const AoPicture red = [](int, int) { return Vec3{0.8f, 0.0f, 0.0f}; };
         const AoLight tinted = averagedLight(x, foot, frame, far, depthAt, red);

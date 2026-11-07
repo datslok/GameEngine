@@ -143,11 +143,12 @@ float sectorShare(const AoSlice& slice, float directionCosine, int side) {
     return std::clamp(((signedAngle < 0.0f ? -arc : arc) + arcLow) / (arcLow + arcHigh), 0.0f, 1.0f);
 }
 
-// Rounding each end covers a sector when at least half of it is covered (a surface's own samples mark nothing).
-std::uint32_t sectorMask(float share0, float share1) {
+// Both ends rounded at the same offset; the bits between them are the arc's sectors (a surface's own samples, an arc of
+// nothing, mark nothing).
+std::uint32_t sectorMask(float share0, float share1, float offset) {
     const int sectors = AO_SECTORS;
-    const int first = static_cast<int>(std::floor(std::min(share0, share1) * sectors + 0.5f));
-    const int last = static_cast<int>(std::floor(std::max(share0, share1) * sectors + 0.5f));
+    const int first = static_cast<int>(std::floor(std::min(share0, share1) * sectors + offset));
+    const int last = static_cast<int>(std::floor(std::max(share0, share1) * sectors + offset));
     const int count = last - first;
 
     if (count <= 0) {
@@ -201,12 +202,14 @@ float aoScreenRadius(float radius, float footprint, float viewDistance) {
 * shifted pixel is a fixed function of the unshifted one; the stagger therefore starts there but steps on by the golden
 * ratio's fraction a frame (an even, low-discrepancy sequence), which the slices' sequence does not follow.
 */
-Vec2 aoNoise(Vec2 pixel, int frame) {
+Vec3 aoNoise(Vec2 pixel, int frame) {
     const float shift = static_cast<float>(AO_NOISE_FRAME_SHIFT) * static_cast<float>(frame);
     const float slice = interleavedGradientNoise(pixel.x + shift, pixel.y + shift);
     const float start = interleavedGradientNoise(pixel.x + static_cast<float>(AO_STEP_NOISE_OFFSET_X), pixel.y + static_cast<float>(AO_STEP_NOISE_OFFSET_Y));
     const float stagger = start + static_cast<float>(AO_STEP_NOISE_FRAME_STEP) * static_cast<float>(frame);
-    return Vec2{slice, stagger - std::floor(stagger)};
+    const float sectorStart = interleavedGradientNoise(pixel.x + static_cast<float>(AO_SECTOR_NOISE_OFFSET_X), pixel.y + static_cast<float>(AO_SECTOR_NOISE_OFFSET_Y));
+    const float sector = sectorStart + static_cast<float>(AO_SECTOR_NOISE_FRAME_STEP) * static_cast<float>(frame);
+    return Vec3{slice, stagger - std::floor(stagger), sector - std::floor(sector)};
 }
 
 float aoSampleDistance(int step, int count, float noise, float screenRadius) {
@@ -239,7 +242,7 @@ float aoBlurWeight(float centreDistance, float neighbourDistance) {
 }
 
 AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
-                           const AoDepthImage& depthAt, const AoPicture& picture) {
+                           const AoDepthImage& depthAt, const AoPicture& picture, float sectorNoise) {
     const int width = static_cast<int>(frame.size.width);
     const int height = static_cast<int>(frame.size.height);
     const Vec2 size{static_cast<float>(width), static_cast<float>(height)};
@@ -330,7 +333,7 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
                 runsOn[side] = true;
                 lastShare[side] = front;
                 lastDepth[side] = behind;
-                const std::uint32_t mask = sectorMask(start, end);
+                const std::uint32_t mask = sectorMask(start, end, sectorNoise);
                 const std::uint32_t fresh = mask & ~marked;
 
                 if (picture && fresh != 0u) {

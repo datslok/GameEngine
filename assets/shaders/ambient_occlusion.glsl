@@ -85,9 +85,9 @@ float sectorShare(AoSlice slice, float directionCosine, int side) {
 }
 
 // The sectors an arc between two shares covers at least half of, the shares either way round.
-uint sectorMask(float share0, float share1) {
-    int first = int(floor(min(share0, share1) * float(AO_SECTORS) + 0.5));
-    int last = int(floor(max(share0, share1) * float(AO_SECTORS) + 0.5));
+uint sectorMask(float share0, float share1, float offset) {
+    int first = int(floor(min(share0, share1) * float(AO_SECTORS) + offset));
+    int last = int(floor(max(share0, share1) * float(AO_SECTORS) + offset));
     int count = last - first;
 
     if (count <= 0) {
@@ -136,11 +136,13 @@ float aoScreenRadius(float radius, float footprint, float viewDistance) {
     return min(radius / (footprint * viewDistance), float(AO_MAX_SCREEN_RADIUS));
 }
 
-// The pass's two noises (x the slices' turn, y the steps' stagger), independent over the frames.
-vec2 aoNoise(vec2 pixel, int frame) {
+// The pass's three noises (x the slices' turn, y the steps' stagger, z the sectors' rounding), independent over the frames.
+vec3 aoNoise(vec2 pixel, int frame) {
     float shift = float(AO_NOISE_FRAME_SHIFT) * float(frame);
     float start = interleavedGradientNoise(pixel + vec2(float(AO_STEP_NOISE_OFFSET_X), float(AO_STEP_NOISE_OFFSET_Y)));
-    return vec2(interleavedGradientNoise(pixel + shift), fract(start + float(AO_STEP_NOISE_FRAME_STEP) * float(frame)));
+    float sectorStart = interleavedGradientNoise(pixel + vec2(float(AO_SECTOR_NOISE_OFFSET_X), float(AO_SECTOR_NOISE_OFFSET_Y)));
+    return vec3(interleavedGradientNoise(pixel + shift), fract(start + float(AO_STEP_NOISE_FRAME_STEP) * float(frame)),
+                fract(sectorStart + float(AO_SECTOR_NOISE_FRAME_STEP) * float(frame)));
 }
 
 float aoSampleDistance(int index, int count, float noise, float screenRadius) {

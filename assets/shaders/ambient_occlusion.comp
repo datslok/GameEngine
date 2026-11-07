@@ -76,7 +76,7 @@ void main() {
     vec3 normal = depthNormal(position, across, downwards);
     vec3 toCamera = normalize(-position);
 
-    vec2 noise = aoNoise(pixel, pass.frame.x);
+    vec3 noise = aoNoise(pixel, pass.frame.x);
     float sliceNoise = noise.x;
     float stepNoise = noise.y;
     int slices = int(pass.options.z);
@@ -141,7 +141,7 @@ void main() {
                 runsOn[side] = true;
                 lastShare[side] = front;
                 lastDepth[side] = behind;
-                uint mask = sectorMask(start, end);
+                uint mask = sectorMask(start, end, noise.z);
                 uint fresh = mask & ~marked;
 
                 if (gathers && fresh != 0u) {

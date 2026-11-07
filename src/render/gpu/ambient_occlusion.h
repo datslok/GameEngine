@@ -143,8 +143,15 @@ Vec3 gatheredSampleLight(const Vec3& light, float brightest);
 // the direction's horizon cosine, on this side of the way to the camera. Directions below the surface count as the horizon.
 float sectorShare(const AoSlice& slice, float directionCosine, int side);
 
-// The bits of the sectors an arc between two shares covers at least half of, the shares either way round.
-std::uint32_t sectorMask(float share0, float share1);
+/*
+* The bits of the sectors an arc between two shares covers, the shares either way round: each end rounded to a sector's
+* edge at offset (0..1) past it, floor(share x AO_SECTORS + offset). At 0.5 a sector counts when at least half covered;
+* with the offset random each frame, a sector counts as often as the share of it the arc covers, so the bits average to
+* the arc exactly. Rounding at 0.5 alone made a sliver of a bright surface just above the horizon (a sunlit floor in the
+* plane of the one gathering) mark a whole sector near the horizon, which is wide there, at some slice angles and not at
+* others: rays of light no averaging removed.
+*/
+std::uint32_t sectorMask(float share0, float share1, float offset = 0.5f);
 
 /*
 * The step along a surface one pixel each way across the screen, from the pixel's point and its two neighbours on each
@@ -164,12 +171,12 @@ Vec3 depthNormal(const Vec3& centre, const Vec3& across, const Vec3& downwards);
 float aoScreenRadius(float radius, float footprint, float viewDistance);
 
 /*
-* The pass's two noises at a pixel centre and frame (0..1 each): x turns the slices, y staggers the steps. They must be
-* independent over the frames: a pixel sees a small bright thing only when its slice points at it, and if the stagger
+* The pass's three noises at a pixel centre and frame (0..1 each): x turns the slices, y staggers the steps, z offsets the
+* sectors' rounding (sectorMask). They must be independent over the frames: a pixel sees a small bright thing only when its slice points at it, and if the stagger
 * were a fixed function of the angle (as the same noise at a shifted pixel is), its samples would land at the same
 * distances from it every frame, drawing rings round it that no averaging removes.
 */
-Vec2 aoNoise(Vec2 pixel, int frame);
+Vec3 aoNoise(Vec2 pixel, int frame);
 
 // Step index of count's distance along a slice (pixels): spread quadratically (dense near the point, where creases are),
 // staggered by noise (0..1), never under AO_MIN_SAMPLE_PIXELS.
@@ -212,12 +219,12 @@ struct AoFrame {
 
 /*
 * The pass's loop, as ambient_occlusion.comp runs it, at texel (x, y): open with nothing gathered for the sky and for
-* points whose radius is under AO_MIN_SAMPLE_PIXELS on screen. sliceNoise turns the slices, stepNoise staggers the steps
-* (0..1). Samples off screen or on the sky count as open. The reach is settings.radius; the pass record swaps in
+* points whose radius is under AO_MIN_SAMPLE_PIXELS on screen. sliceNoise turns the slices, stepNoise staggers the steps,
+* sectorNoise offsets the sectors' rounding (0..1). Samples off screen or on the sky count as open. The reach is settings.radius; the pass record swaps in
 * settings.indirectRadius while gathering, so give the mirror that radius to compare them.
 */
 AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOcclusionSettings& settings, float sliceNoise, float stepNoise,
-                           const AoDepthImage& depthAt, const AoPicture& picture = {});
+                           const AoDepthImage& depthAt, const AoPicture& picture = {}, float sectorNoise = 0.5f);
 
 /*
 * Temporal accumulation (ambient_occlusion_temporal.comp): each pixel's result is blended into a running average of the

@@ -3,6 +3,7 @@
 
 #include "render/gpu/ambient_occlusion.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <string>
@@ -72,7 +73,7 @@ namespace {
             report.check("surfaceVisibility", arithmeticTolerance, surfaceVisibility(in[6][3], in[4][3], in[1][3]), out[5][3]);
             report.check("sectorShare", angleTolerance, Vec3{sectorShare(slice, in[9][3], 0), sectorShare(slice, in[10][0], 1), 0.0f},
                          Vec3{out[6][0], out[6][1], 0.0f});
-            report.check("sectorMask", arithmeticTolerance, static_cast<float>(std::popcount(sectorMask(in[5][3], in[6][3]))), out[6][2]);
+            report.check("sectorMask", arithmeticTolerance, static_cast<float>(std::popcount(sectorMask(in[5][3], in[6][3], in[3][3]))), out[6][2]);
             report.check("gatheredSampleLight", arithmeticTolerance, gatheredSampleLight(vec3From(in[9]), in[6][3]), vec3From(out[7]));
         }
     }
@@ -142,9 +143,9 @@ namespace {
 
             // Noise multiplies its argument by 53 before its fraction: a few ulps in the argument move it by about 1e-4,
             // and a value near 1 may wrap to near 0.
-            const Vec2 noise = aoNoise(pixel, static_cast<int>(in[8][3] * 300.0f));
+            const Vec3 noise = aoNoise(pixel, static_cast<int>(in[8][3] * 300.0f));
             const auto wrapped = [](float a, float b) { const float d = std::abs(a - b); return std::min(d, 1.0f - d); };
-            report.check("aoNoise", FloatTolerance{.absolute = 1e-3f}, 0.0f, std::max(wrapped(noise.x, out[3][0]), wrapped(noise.y, out[3][1])));
+            report.check("aoNoise", FloatTolerance{.absolute = 1e-3f}, 0.0f, std::max({wrapped(noise.x, out[3][0]), wrapped(noise.y, out[3][1]), wrapped(noise.z, out[3][2])}));
         }
     }
 }

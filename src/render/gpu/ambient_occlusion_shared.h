@@ -41,6 +41,12 @@
 #define AO_STEP_NOISE_OFFSET_Y 41.0
 #define AO_STEP_NOISE_FRAME_STEP 0.6180339887
 
+// The sectors' rounding offset (aoNoise's z): the noise at the pixel moved by this offset, going on by sqrt(2) - 1 a
+// frame, an irrational independent of the golden ratio's, so the steps' and the sectors' sequences never fall into step.
+#define AO_SECTOR_NOISE_OFFSET_X 47.0
+#define AO_SECTOR_NOISE_OFFSET_Y 17.0
+#define AO_SECTOR_NOISE_FRAME_STEP 0.4142135624
+
 // The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
 #define AO_MAX_HISTORY_FRAMES 64
 
