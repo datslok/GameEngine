@@ -465,7 +465,10 @@ namespace {
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, 0.6f}});
         lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true));
         const Camera camera = mirrorTestCamera();
-        const ShadowSettings settings;
+        // The mirror's tiles at 2048, which fit beside the sun's 4096 cascades and the spot's (at 4096, the default, they
+        // shrink to what is left, as testMirrorCascadesShrinkFirst shows).
+        ShadowSettings settings;
+        settings.mirrorCascadeResolution = CascadeResolution::Pixels2048;
         const float fitted = 9.3f;
 
         const ShadowPlan without = planShadows(lighting, camera, settings, fitted);
