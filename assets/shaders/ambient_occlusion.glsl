@@ -57,6 +57,48 @@ float sliceVisibility(AoSlice slice, float horizonCosine0, float horizonCosine1)
     return slice.projectedLength * (arc0 + arc1);
 }
 
+// A gathered sample's light, brought down to the brightest it may be in its largest channel, keeping its colour.
+vec3 gatheredSampleLight(vec3 light, float brightest) {
+    float largest = max(max(light.r, light.g), light.b);
+    return largest > brightest ? light * (brightest / largest) : light;
+}
+
+// The weight of the slice from the way to the camera out to angle h, either side.
+float sliceArc(float normalAngle, float h) {
+    return (cos(normalAngle) + 2.0 * h * sin(normalAngle) - cos(2.0 * h - normalAngle)) * 0.25;
+}
+
+// Where a direction lies in the slice as a share of its cosine-weighted light, 0 at side 1's horizon to 1 at side 0's.
+float sectorShare(AoSlice slice, float directionCosine, int side) {
+    const float halfTurn = 1.5707963;
+    float n = slice.normalAngle;
+    float low = n - halfTurn;
+    float high = n + halfTurn;
+    float angle = acos(clamp(directionCosine, -1.0, 1.0));
+    float signedAngle = clamp(side == 0 ? angle : -angle, low, high);
+    float arcLow = sliceArc(n, low);
+    float arcHigh = sliceArc(n, high);
+    float arc = sliceArc(n, signedAngle);
+    return clamp(((signedAngle < 0.0 ? -arc : arc) + arcLow) / (arcLow + arcHigh), 0.0, 1.0);
+}
+
+// The sectors an arc between two shares covers at least half of, the shares either way round.
+uint sectorMask(float share0, float share1) {
+    int first = int(floor(min(share0, share1) * float(AO_SECTORS) + 0.5));
+    int last = int(floor(max(share0, share1) * float(AO_SECTORS) + 0.5));
+    int count = last - first;
+
+    if (count <= 0) {
+        return 0u;
+    }
+
+    if (count >= AO_SECTORS) {
+        return 0xFFFFFFFFu;
+    }
+
+    return ((1u << count) - 1u) << first;
+}
+
 // The step along the surface each way across the screen: the side whose next neighbour carries on in line with it.
 vec3 surfaceStep(vec3 centre, vec3 before, vec3 beforeNext, vec3 after, vec3 afterNext) {
     vec3 fromBefore = centre - before;

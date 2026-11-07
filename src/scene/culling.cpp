@@ -30,6 +30,14 @@ void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>
     }
 }
 
+void attachFlatFaces(std::vector<DrawItem>& draws, const std::vector<std::vector<FlatFace>>& facesByMesh) {
+    for (DrawItem& draw : draws) {
+        if (draw.mesh.isValid() && draw.mesh.index < facesByMesh.size()) {
+            draw.flatFaces = facesByMesh[draw.mesh.index];
+        }
+    }
+}
+
 namespace {
     // Unknown sizes are always kept: drawing something unneeded is cheap, missing something is a bug.
     bool mightBeSeen(const DrawItem& draw, const Frustum& frustum) {

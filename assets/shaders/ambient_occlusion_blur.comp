@@ -2,8 +2,8 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* Ambient occlusion's blur (render/gpu/ambient_occlusion.h), while there is no anti-aliasing to average its noise: each
-* pixel the mean of the texels within AO_BLUR_RADIUS each way, each weighted by how near its view distance is to the
+* Ambient occlusion's blur (render/gpu/ambient_occlusion.h), while there is no anti-aliasing to average its noise or
+* while it gathers light, whose noise is far stronger than the occlusion's: each pixel the mean of the texels within AO_BLUR_RADIUS each way, each weighted by how near its view distance is to the
 * pixel's (aoBlurWeight), so the occlusion does not bleed across edges onto surfaces in front or behind.
 */
 #include "screen_reflections.glsl"
@@ -22,7 +22,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
 
 layout(set = 0, binding = 1) uniform sampler2D depth;                 // exact texels
 layout(set = 0, binding = 2) uniform sampler2D noisy;                 // the occlusion pass's result, exact texels
-layout(set = 0, binding = 3, r8) uniform writeonly image2D occlusion;
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D occlusion;
 
 void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -35,12 +35,12 @@ void main() {
     float pixelDepth = texelFetch(depth, texel, 0).r;
 
     if (pixelDepth == float(GPU_FAR_DEPTH)) {
-        imageStore(occlusion, texel, vec4(1.0));
+        imageStore(occlusion, texel, vec4(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
     float centre = viewDistanceAtPixel(pass.inverseViewProjection, vec2(texel) + 0.5, pixelDepth, pass.size.xy);
-    float sum = 0.0;
+    vec4 sum = vec4(0.0);
     float weights = 0.0;
 
     for (int y = -AO_BLUR_RADIUS; y <= AO_BLUR_RADIUS; ++y) {
@@ -58,11 +58,11 @@ void main() {
             }
 
             float weight = aoBlurWeight(centre, viewDistanceAtPixel(pass.inverseViewProjection, vec2(at) + 0.5, atDepth, pass.size.xy));
-            sum += texelFetch(noisy, at, 0).r * weight;
+            sum += texelFetch(noisy, at, 0) * weight;
             weights += weight;
         }
     }
 
     // The pixel itself always weighs 1, so weights is never 0.
-    imageStore(occlusion, texel, vec4(sum / weights));
+    imageStore(occlusion, texel, sum / weights);
 }

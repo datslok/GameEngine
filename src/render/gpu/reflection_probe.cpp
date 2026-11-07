@@ -409,6 +409,11 @@ Vec3 prefilterTexel(const Vec3& direction, float roughness, std::uint32_t sample
     return weight > 0.0f ? sum * (1.0f / weight) : Vec3{};
 }
 
+Vec3 probeGuessedLight(const Vec3& alongRay, const Vec3& found, float confidence, float rough) {
+    const float trust = rough > 0.0f ? std::clamp(confidence / rough, 0.0f, 1.0f) : 0.0f;
+    return alongRay + (found - alongRay) * trust;
+}
+
 Vec3 blendedStandIn(const Vec3& standIn, const Vec3& specularAlbedo, const Vec3& light, float confidence) {
     return standIn + (specularAlbedo * light - standIn) * confidence;
 }

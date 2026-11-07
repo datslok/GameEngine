@@ -115,7 +115,9 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     debugLines = std::make_unique<VulkanDebugLines>(device, layouts, framesInFlight);
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
+    mirrorDepthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
+    planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     eyeAdaptation = std::make_unique<VulkanEyeAdaptation>(device, nearestSampler.get(), framesInFlight);
     taa = std::make_unique<VulkanTaa>(device, nearestSampler.get(), linearSampler.get());
@@ -338,14 +340,14 @@ namespace {
     }
 
     /*
-    * triangle.vert reads its push constants (a face's view-projection) only in the reflection probe's capture
+    * triangle.vert reads its push constants (a capture's view-projection and clip plane) only in the captures
     * (PROBE_CAPTURE_VERTEX_CONSTANT), but Vulkan wants push constants a shader names set before it draws. The depth
     * prepass and the main pass have none of their own, so they push a blank view, which the shader then ignores.
     * Before, some earlier pass on a compatible layout (the light probes', a shadow tile's) had always pushed one, so the
     * validation layers said nothing until a frame ran without them.
     */
     void pushUnusedView(VkCommandBuffer commands, VkPipelineLayout layout) {
-        const GpuShadowView unused{};
+        const GpuCaptureView unused = packCaptureView(Mat4::identity(), noClipPlane());
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(unused), &unused);
     }
 }
@@ -551,7 +553,7 @@ void VulkanRenderer::createRayTracing() {
     // The reflection probe's capture tracing the sun's shadow past its cascades, and the main pass tinting shadowed
     // lights through glass: the scene's sets and the ray tracing set, and the scene's push constants (each face's
     // view-projection; the main pass pushes none).
-    const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuShadowView)};
+    const VkPushConstantRange faceView{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuCaptureView)};
     VkPipelineLayoutCreateInfo raysLayoutInfo = layoutInfo;
     raysLayoutInfo.pPushConstantRanges = &faceView;
     VkPipelineLayout createdRays = VK_NULL_HANDLE;
@@ -835,6 +837,10 @@ FrameContext VulkanRenderer::beginFrame() {
     // The surfaces this frame's last use measured, for fitting the next shadows (kept until used).
     if (const std::optional<ScreenDepthRange> measured = depthRange->collect(frameIndex)) {
         unusedDepthRange = measured;
+    }
+
+    if (const std::optional<ScreenDepthRange> measured = mirrorDepthRange->collect(frameIndex)) {
+        unusedMirrorDepthRange = measured;
     }
 
     if (const std::optional<GpuEyeAdaptation> adapted = eyeAdaptation->collect(frameIndex)) {
@@ -1121,6 +1127,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const Mat4 previousViewProjection = previousCamera.known
                                             ? previousRelativeViewProjection(previousCamera.viewProjection, previousCamera.origin, cameraOrigin)
                                             : motionViewProjection;
+
+    // From this frame's clip space (without the jitter) to last frame's, for bounce light, reflections and anti-aliasing.
+    const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
     clusterGrid = makeClusterGrid(camera, static_cast<int>(sceneSize.width), static_cast<int>(sceneSize.height));
     const Frustum cameraFrustum = Frustum::fromClipMatrix(viewProjection, ClipDepth::OneToZero);
 
@@ -1150,11 +1159,34 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         prioritized.lighting.pointLights.begin(), prioritized.lighting.pointLights.end(),
         [](const PlacedPointLight& placed) { return placed.light.castsShadows; }));
 
+    // What the camera sees, settled first: the mirror is chosen from it, and the shadows need the mirror.
+    // Glass and blended surfaces are left out of every opaque view and drawn last, sorted (render/gpu/transparency.h).
+    const std::vector<std::size_t> seen = visibleDraws(description.draws, cameraFrustum);
+    const std::vector<std::size_t> visible = opaqueDraws(description.draws, seen);
+    stats.drawn = seen.size();
+    stats.culled = description.draws.size() - seen.size();
+
+    // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
+    // surfaces, so they need the anti-aliasing on. A flat mirror's picture (render/gpu/planar_reflection.h) goes with
+    // them; ray-traced reflections are exact anyway.
+    validateReflections(settings.reflections);
+    const bool screenReflections = temporal && settings.reflections.enabled;
+    const bool rayReflections = tracesRays(settings, rayTracing != nullptr) && settings.reflections.rayTraced && reflections->tracesRays();
+    lastMirror = screenReflections && !rayReflections && settings.reflections.planarMirrors > 0
+                     ? choosePlanarMirror(description.draws, visible, cameraOrigin, settings.reflections.planarMaxRoughness, lastMirror)
+                     : std::nullopt;
+    const std::optional<MirrorPlane> mirror = lastMirror;
+
     GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
     ensureShadowAtlas(shadowAtlasSizeFor(settings.shadows));
     updateSunShadowFit(settings.shadows, camera);
     const float fittedSunDistance = fittedShadowDistance(sunShadowFit);
-    const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows, fittedSunDistance);
+    // The mirror's own sun cascades (render/gpu/shadow_map.h, MirrorShadowView), for what it shows behind the camera.
+    const std::optional<MirrorShadowView> mirrorShadows = mirror ? std::optional<MirrorShadowView>{MirrorShadowView{
+                                                                       mirroredCamera(camera, *mirror), mirrorCascadesStart(camera, *mirror),
+                                                                       fittedShadowDistance(mirrorShadowFit)}}
+                                                                 : std::nullopt;
+    const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows, fittedSunDistance, mirrorShadows);
     attachShadows(lights, shadows);
 
     if (!shadows.directional.empty() && shadows.directional[0].cascades > 0) {
@@ -1163,12 +1195,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // What every view draws is settled before anything is recorded: the camera's visible draws and each changed shadow
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
-    // Glass and blended surfaces are left out of every opaque view and drawn last, sorted (render/gpu/transparency.h).
-    const std::vector<std::size_t> seen = visibleDraws(description.draws, cameraFrustum);
-    const std::vector<std::size_t> visible = opaqueDraws(description.draws, seen);
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
-    stats.drawn = seen.size();
-    stats.culled = description.draws.size() - seen.size();
 
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
 
@@ -1189,14 +1216,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()));
 
-    // Reflections (render/gpu/screen_reflections.h) reflect last frame's smoothed picture and read the main pass's
-    // surfaces, so they need the anti-aliasing on; the probe round the camera is captured every frame they run. Each of
-    // its faces draws what its own view holds, those entries following the velocity pass's in the draw list.
-    validateReflections(settings.reflections);
-    const bool screenReflections = temporal && settings.reflections.enabled;
+    // The probe round the camera is captured every frame reflections run. Each of its faces draws what its own view
+    // holds, those entries following the velocity pass's in the draw list.
     const bool captureProbe = screenReflections && settings.reflections.probe;
     const float probeFar = settings.reflections.probeFar;
-    std::array<BatchedDraws, cubeFaceCount> captureDraws;
+    // The probe's six faces, then the flat mirror's view, which draws the same way.
+    std::array<BatchedDraws, cubeFaceCount + 1> captureDraws;
+    std::uint32_t firstCaptureEntry = static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size() + motionDraws.order.size());
 
     // The probe's images are bound by the reflection pass even with the probe off, so they exist whenever it runs.
     if (screenReflections && reflectionProbe->getSize() == 0) {
@@ -1209,15 +1235,30 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             reflectionProbe->ensureSize(static_cast<std::uint32_t>(settings.reflections.probeSize));
         }
 
-        std::uint32_t firstEntry = static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size() + motionDraws.order.size());
-
         for (int face = 0; face < cubeFaceCount; ++face) {
             const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), probeFar) *
                                    Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
             const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero)));
-            captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstEntry);
-            firstEntry += static_cast<std::uint32_t>(inView.size());
+            captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry);
+            firstCaptureEntry += static_cast<std::uint32_t>(inView.size());
         }
+    }
+
+    // The flat mirror's picture, its image bound by the reflection pass whenever that runs. Culled by its own view with
+    // the mirror for its near side, so what is behind the mirror is not drawn at all.
+    const RenderSize mirrorSize = planarRenderSize(sceneSize, settings.reflections.planarScale);
+
+    if (screenReflections && !(planarReflection->getSize() == mirrorSize)) {
+        device.waitIdle();
+        planarReflection->ensureSize(mirrorSize);
+    }
+
+    const Mat4 mirrorViewProjection = mirror ? planarViewProjection(motionViewProjection, planeRelativeTo(*mirror, cameraOrigin)) : Mat4::identity();
+
+    if (mirror) {
+        const Mat4 worldView = mirrorViewProjection * Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
+        const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, planarFrustum(worldView, *mirror)));
+        captureDraws[cubeFaceCount] = batchByMesh(description.draws, inView, firstCaptureEntry);
     }
 
     // The transparent draws the camera sees, far to near, their entries last in the draw list.
@@ -1278,10 +1319,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     }
 
     // Ambient occlusion (render/gpu/ambient_occlusion.h) from the depth prepass's depths, blurred while there is no
-    // anti-aliasing to average its noise. Its images are made the first time, as the mirrored lights' are.
+    // anti-aliasing to average its noise or it gathers bounce light, whose noise is far stronger. It gathers from last
+    // frame's finished picture, still what finishedScene points at, unless the light probes hold the bounce light already.
+    // Its images are made the first time, as the mirrored lights' are.
     validateAmbientOcclusion(settings.ambientOcclusion);
     const bool occlusion = settings.ambientOcclusion.enabled && settings.depthPrepass && inverseViewProjection;
-    const bool occlusionBlurred = occlusion && !temporal;
+    const bool gathersLight = occlusion && settings.ambientOcclusion.indirect && previousPictureUsable && previousCamera.known && probes.empty();
+    const bool occlusionBlurred = occlusion && (!temporal || gathersLight);
 
     if (occlusion && !ambientOcclusion->hasImages()) {
         ambientOcclusion->ensureSize(sceneSize);
@@ -1301,7 +1345,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
-                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, glassShadows, frameFog);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, gathersLight, glassShadows, frameFog);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1372,8 +1416,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (occlusion) {
         beginGpuPass(frame, GpuPass::AmbientOcclusion);
         const std::uint32_t noiseFrame = temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0;
-        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth,
-                                  packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, sceneSize, settings.ambientOcclusion, noiseFrame),
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gathersLight ? finishedScene : nullptr, sampled(*noProbesTexture),
+                                  packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
+                                                           settings.ambientOcclusion, noiseFrame, gathersLight),
                                   occlusionBlurred);
         endGpuPass(frame, GpuPass::AmbientOcclusion);
     }
@@ -1422,14 +1467,27 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthRange);
     }
 
-    // From this frame's clip space (without the jitter) to last frame's, for the reflections and the anti-aliasing.
-    const Mat4 reprojection = taaReprojection(motionViewProjection, previousViewProjection);
-
     // The reflection probe, captured where the camera is this frame.
     if (captureProbe) {
         beginGpuPass(frame, GpuPass::ReflectionProbe);
         drawProbeCapture(frame, captureDraws, sceneSet, traceProbes, captureTracesRays, probeFar, description.lighting.background, air.has_value());
         endGpuPass(frame, GpuPass::ReflectionProbe);
+    }
+
+    // A flat mirror's picture, drawn where the probe is.
+    if (mirror) {
+        beginGpuPass(frame, GpuPass::PlanarReflection);
+        const RenderSize size = planarReflection->getSize();
+        drawPlanarReflection(frame, captureDraws[cubeFaceCount], sceneSet, traceProbes, captureTracesRays, mirrorViewProjection,
+                             planarClipPlane(planeRelativeTo(*mirror, cameraOrigin)),
+                             mirroredRays(packRayDebugView(camera, RayDebugView::Off, size.width, size.height), *mirror), description.lighting.background, air.has_value());
+
+        // How far the mirror shows, for fitting a later frame's mirror cascades, as the screen's depths are measured.
+        if (measureDepths) {
+            mirrorDepthRange->measure(frame.commands, frame.descriptors, frame.frameIndex, planarReflection->getDepth());
+        }
+
+        endGpuPass(frame, GpuPass::PlanarReflection);
     }
 
     // The reflections, into the scene image before it is smoothed: the probe's, and the screen's from last frame's
@@ -1438,18 +1496,28 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     const bool screenSpace = settings.reflections.screenSpace && previousPictureUsable && previousCamera.known;
     const bool probeReady = captureProbe && reflectionProbe->hasCapture();
 
-    if (screenReflections && (screenSpace || probeReady || reflectionsTraceRays) && inverseViewProjection) {
+    if (screenReflections && (screenSpace || probeReady || reflectionsTraceRays || mirror) && inverseViewProjection) {
         beginGpuPass(frame, GpuPass::Reflections);
-        const ReflectionPassFrame passFrame{reflections->getPyramidLevels(), screenSpace, probeReady ? reflectionProbe->getLevels() : 0u,
-                                            probeReady ? reflectionProbe->getOrigin() - cameraOrigin : Vec3{}, reflectionProbe->getSize(),
-                                            reflectionProbe->getDistanceLevels(), description.lighting.background};
+        ReflectionPassFrame passFrame{reflections->getPyramidLevels(), screenSpace, probeReady ? reflectionProbe->getLevels() : 0u,
+                                      probeReady ? reflectionProbe->getOrigin() - cameraOrigin : Vec3{}, reflectionProbe->getSize(),
+                                      reflectionProbe->getDistanceLevels(), description.lighting.background};
+
+        if (mirror) {
+            const MirrorPlane fromCamera = planeRelativeTo(*mirror, cameraOrigin);
+            passFrame.planar = true;
+            passFrame.planarNormal = fromCamera.normal;
+            passFrame.planarOffset = fromCamera.offset;
+            passFrame.planarLevels = planarReflection->getLevels();
+        }
+
         const GpuReflectionPass pass = packReflectionPass(relativeViewProjection, *inverseViewProjection, reprojection, sceneSize, jitter,
                                                           settings.reflections, passFrame);
         const ReflectionRaySets raySets = reflectionsTraceRays
                                               ? ReflectionRaySets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)}
                                               : ReflectionRaySets{};
         reflections->reflect(frame.commands, frame.descriptors, frame.frameIndex, sceneColour, depth, taa->getVelocity(),
-                             screenSpace ? finishedScene : nullptr, *reflectionProbe, pass, reflectionsTraceRays ? &raySets : nullptr);
+                             screenSpace ? finishedScene : nullptr, *reflectionProbe, planarReflection->getPicture(), mirror.has_value(), pass,
+                             reflectionsTraceRays ? &raySets : nullptr);
         endGpuPass(frame, GpuPass::Reflections);
     }
 
@@ -1570,17 +1638,26 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 * Where the sun's cascades end (cascades.h): moved along its ladder whenever a new measurement of the screen's depths has
 * come back, and otherwise left where it was. The depths are turned into distances with this frame's lens, the same as
 * the measured frame's unless the near or far plane changed in between. With fitting off, nothing is fitted and stale
-* measurements are dropped, so turning it on starts from the full shadow distance.
+* measurements are dropped, so turning it on starts from the full shadow distance. A flat mirror's cascades follow its
+* picture's depths the same way: the picture is drawn with the camera's lens, reflected, so its depths turn into
+* distances along the mirrored camera's view with the same planes. Its fit stays while no mirror is drawn, ready for the
+* next.
 */
 void VulkanRenderer::updateSunShadowFit(const ShadowSettings& settings, const Camera& camera) {
     if (!settings.fitCascadesToDepth) {
         sunShadowFit = ShadowDistanceFit{};
+        mirrorShadowFit = ShadowDistanceFit{};
         unusedDepthRange.reset();
+        unusedMirrorDepthRange.reset();
         return;
     }
 
     if (const std::optional<ScreenDepthRange> measured = std::exchange(unusedDepthRange, std::nullopt)) {
         sunShadowFit = fitShadowDistance(sunShadowFit, farthestSurfaceDistance(*measured, camera.getNearPlane(), camera.getFarPlane()));
+    }
+
+    if (const std::optional<ScreenDepthRange> measured = std::exchange(unusedMirrorDepthRange, std::nullopt)) {
+        mirrorShadowFit = fitShadowDistance(mirrorShadowFit, farthestSurfaceDistance(*measured, camera.getNearPlane(), camera.getFarPlane()));
     }
 }
 
@@ -1598,7 +1675,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
-                                           bool occlusionBlurred, bool glassShadows, const GpuFog& frameFog) {
+                                           bool occlusionBlurred, bool gathersLight, bool glassShadows, const GpuFog& frameFog) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1651,7 +1728,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     // (kept small: the shaders turn it into a float offset of the noise).
     frameData.mirroredLightOptions[1] = static_cast<std::int32_t>(taaFrame % noiseCycleFrames);
     frameData.ambientOcclusionOptions[0] = occlusion ? 1 : 0;
-    frameData.ambientOcclusionOptions[1] = settings.ambientOcclusion.multipleBounces ? 1 : 0;
+    frameData.ambientOcclusionOptions[1] = settings.ambientOcclusion.multipleBounces && !gathersLight ? 1 : 0;
     frameData.ambientOcclusionOptions[2] = settings.ambientOcclusion.specularOcclusion ? 1 : 0;
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
@@ -2096,14 +2173,8 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
         beginRendering(commands, {size, size}, &colour, &faceDepth);
         renderingOpen = true;
 
-        if (traceRays) {
-            const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
-            vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0, nullptr);
-        } else {
-            bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
-        }
-
-        const GpuShadowView view = packShadowView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane));
+        bindCaptureScene(frame, layout, sceneSet, traceRays);
+        const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane), noClipPlane());
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
         stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches, capturing);
 
@@ -2117,6 +2188,47 @@ void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const Batch
     }
 
     reflectionProbe->finishCapture(commands, frame.descriptors, static_cast<float>(PROBE_NEAR), farPlane, cameraOrigin);
+}
+
+void VulkanRenderer::bindCaptureScene(FrameContext& frame, VkPipelineLayout layout, VkDescriptorSet sceneSet, bool traceRays) {
+    if (traceRays) {
+        const std::array<VkDescriptorSet, 3> sets{bindlessTextures->getSet(), sceneSet, rayTracing->getSceneSet(frame.frameIndex)};
+        vkCmdBindDescriptorSets(frame.commands, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0, nullptr);
+    } else {
+        bindScene(frame.commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+    }
+}
+
+/*
+* A flat mirror's picture: the capture's pipelines (a mirrored view turns triangles round just as a cube face does), the
+* scene's draws in the mirror's own view, the sky over the background through the camera's rays mirrored, then the
+* picture's blurrier levels (finishDraw).
+*/
+void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
+                                          const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky) {
+    const VkCommandBuffer commands = frame.commands;
+    const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false, traceRays)];
+    const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true, traceRays)]->get(), VK_CULL_MODE_FRONT_BIT};
+    const VkPipelineLayout layout = pipeline.getLayout();
+    const RenderSize size = planarReflection->getSize();
+
+    planarReflection->beginDraw(commands);
+    const ColourAttachment colour = planarReflection->colourTarget(background);
+    const DepthAttachment depthTarget = planarReflection->depthTarget();
+    beginRendering(commands, {size.width, size.height}, &colour, &depthTarget);
+    renderingOpen = true;
+    bindCaptureScene(frame, layout, sceneSet, traceRays);
+    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane);
+    vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
+    stats.drawCalls += drawBatches(commands, draws.batches, capturing);
+
+    if (sky) {
+        atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(), skyRays);
+    }
+
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+    planarReflection->finishDraw(commands, frame.descriptors);
 }
 
 /*
@@ -2331,6 +2443,10 @@ void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description
 
     if (const std::optional<ScreenDepthRange> measured = depthRange->collect(lastFrame)) {
         unusedDepthRange = measured;
+    }
+
+    if (const std::optional<ScreenDepthRange> measured = mirrorDepthRange->collect(lastFrame)) {
+        unusedMirrorDepthRange = measured;
     }
 }
 
@@ -2652,6 +2768,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     }
     debugLines->setFramesInFlight(count);
     depthRange->setFramesInFlight(count);
+    mirrorDepthRange->setFramesInFlight(count);
     reflections->setFramesInFlight(count);
     eyeAdaptation->setFramesInFlight(count);
 

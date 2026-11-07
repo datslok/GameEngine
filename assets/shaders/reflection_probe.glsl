@@ -137,6 +137,12 @@ float prefilterSourceLevel(float pdf, float samples, float size) {
     return max(0.5 * log2(sampleAngle / texelAngle) + 1.0, 0.0);
 }
 
+// The search's find as far as it trusted it, else the probe's picture along the ray.
+vec3 probeGuessedLight(vec3 alongRay, vec3 found, float confidence, float rough) {
+    float trust = rough > 0.0 ? clamp(confidence / rough, 0.0, 1.0) : 0.0;
+    return alongRay + (found - alongRay) * trust;
+}
+
 vec3 blendedStandIn(vec3 standIn, vec3 specularAlbedo, vec3 light, float confidence) {
     return standIn + (specularAlbedo * light - standIn) * confidence;
 }

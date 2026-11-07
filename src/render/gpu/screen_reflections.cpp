@@ -1,4 +1,5 @@
 #include "render/gpu/screen_reflections.h"
+#include "render/gpu/planar_reflection_shared.h"
 #include "math/smooth_step.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
@@ -26,6 +27,9 @@ void visit(ReflectionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Edge fade", settings.edgeFade, {.min = 0.01f, .max = 1.0f});
     visitor.field("Probe size", settings.probeSize, {.min = 16, .max = 1024, .sliderMin = 64, .sliderMax = 512, .unit = "texels"});
     visitor.field("Probe far", settings.probeFar, {.min = 1.0f, .max = 5000.0f, .sliderMax = 1000.0f, .unit = "m"});
+    visitor.field("Planar mirrors", settings.planarMirrors, {.min = 0, .max = PLANAR_MAX_MIRRORS});
+    visitor.field("Planar max roughness", settings.planarMaxRoughness, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Planar scale", settings.planarScale, {.min = 0.1f, .max = 1.0f});
     visitor.field("Ray-traced", settings.rayTraced);
     visitor.field("Show confidence", settings.showConfidence);
 }
@@ -46,6 +50,10 @@ void validateReflections(const ReflectionSettings& settings) {
 
     if (settings.maxSteps < 1) {
         throw std::invalid_argument("Screen-space reflections need at least one step");
+    }
+
+    if (settings.planarMirrors < 0 || settings.planarMirrors > PLANAR_MAX_MIRRORS || !(settings.planarScale > 0.0f && settings.planarScale <= 1.0f)) {
+        throw std::invalid_argument("Planar reflections need 0 to PLANAR_MAX_MIRRORS mirrors and a scale above 0 and at most 1");
     }
 
     if (!(settings.edgeFade > 0.0f && settings.edgeFade <= 1.0f)) {
@@ -343,6 +351,13 @@ GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inv
     pass.limits[1] = static_cast<float>(frame.pyramidLevels - 1);
     pass.limits[2] = settings.edgeFade;
     pass.limits[3] = settings.showConfidence ? 1.0f : 0.0f;
+
+    pass.planarPlane[0] = frame.planarNormal.x;
+    pass.planarPlane[1] = frame.planarNormal.y;
+    pass.planarPlane[2] = frame.planarNormal.z;
+    pass.planarPlane[3] = frame.planarOffset;
+    pass.planar[0] = frame.planar ? 1.0f : 0.0f;
+    pass.planar[1] = static_cast<float>(frame.planarLevels);
 
     pass.lens[0] = pixelFootprint(viewProjection, height);
     pass.lens[1] = jitter.x;

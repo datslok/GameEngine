@@ -46,7 +46,9 @@
 #include "render/vulkan/vulkan_pipeline.h"
 #include "render/vulkan/vulkan_ray_tracing.h"
 #include "render/vulkan/vulkan_mirrored_light.h"
+#include "render/gpu/planar_reflection.h"
 #include "render/vulkan/vulkan_ambient_occlusion.h"
+#include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_reflections.h"
 #include "render/vulkan/vulkan_swapchain.h"
@@ -283,6 +285,10 @@ private:
     // tracing the sun's shadow past its cascades (probe_capture_rays.frag), for frames with ray tracing on, in a layout
     // with the ray tracing set as set 2, which the main pass's glass ray pipelines share.
     std::unique_ptr<VulkanReflectionProbe> reflectionProbe;
+
+    // A flat mirror's picture (render/gpu/planar_reflection.h), and last frame's mirror, kept until another is clearly better.
+    std::unique_ptr<VulkanPlanarReflection> planarReflection;
+    std::optional<MirrorPlane> lastMirror;
     std::array<std::unique_ptr<VulkanPipeline>, 8> capturePipelines;
     OwnedHandle<VkPipelineLayout> sceneRaysLayout;
 
@@ -298,6 +304,8 @@ private:
     // Fitting the sun's cascades to the screen (cascades.h): the depth measurement read back but not yet used (from a
     // frame or two ago), and where the cascades end now.
     std::unique_ptr<VulkanDepthRange> depthRange;
+    // The same for a flat mirror's own cascades (shadow_map.h, MirrorShadowView), from its picture's depths.
+    std::unique_ptr<VulkanDepthRange> mirrorDepthRange;
 
     // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
     // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.
@@ -350,6 +358,8 @@ private:
     UpscalerSupport upscalerSupport() const;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
+    std::optional<ScreenDepthRange> unusedMirrorDepthRange;
+    ShadowDistanceFit mirrorShadowFit;
 
     // Hardware ray tracing (null on a GPU without ray queries): every mesh's acceleration structure and each frame's
     // scene, and the debug view drawn from them (the scene's two sets plus the ray tracing set, and its camera as push
@@ -471,13 +481,13 @@ private:
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
     // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
-    // blurred image when occlusionBlurred. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
+    // blurred image when occlusionBlurred; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
     // frameFog: the fog's record (off without fog).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
+                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred, bool gathersLight,
                                bool glassShadows, const GpuFog& frameFog);
 
     // Whether this frame traces (and samples) light probes: ray tracing (the GPU's and the setting), global illumination
@@ -512,6 +522,14 @@ private:
     // The reflection probe's six faces from the camera, each with its draws, then its sky (none: the background alone)
     // over them, and the probe's distances and prefiltered light made from them. traceRays: the sun's shadow traced past
     // its cascades.
+    // The scene's sets for a capture's draws, with the ray tracing set when it traces rays.
+    void bindCaptureScene(FrameContext& frame, VkPipelineLayout layout, VkDescriptorSet sceneSet, bool traceRays);
+
+    // The scene drawn through a flat mirror into its picture, as a capture face is, the sky in it when there is one.
+    // Everything behind clipPlane (planarClipPlane) is cut away.
+    void drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
+                              const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky);
+
     void drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
                           bool traceRays, float farPlane, const Vec3& background, bool sky);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without

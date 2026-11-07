@@ -63,6 +63,14 @@ struct ReflectionSettings {
     // How far the probe's capture sees (metres); beyond it the sky.
     float probeFar = 300.0f;
 
+    // Flat mirrors drawn for real (render/gpu/planar_reflection.h): how many planes a frame draws, each a second draw of
+    // the scene, chosen by themselves; 0 leaves them to the probe. Without ray-traced reflections, which are exact anyway.
+    int planarMirrors = 1;
+
+    // The roughest surface planar reflections take on, and their picture's size as a share of the render size.
+    float planarMaxRoughness = 0.4f;
+    float planarScale = 0.5f;
+
     // On GPUs with ray queries: each glossy pixel's mirror ray traced through the scene, so what it hits is exact,
     // lit with the probe's picture where the probe saw it and as the light probes' rays light their hits elsewhere
     // (matte), in place of the probe's search. On by default (the Ultra preset's, the user's choice on Oct 23 2026; off
@@ -205,6 +213,10 @@ struct ReflectionPassFrame {
     std::uint32_t probeSize = 0;
     std::uint32_t probeDistanceLevels = 0;
     Vec3 background; // the light behind everything, for ray-traced reflections that escape to the sky
+    bool planar = false;              // whether a mirror's picture was drawn this frame
+    Vec3 planarNormal{};              // its plane, measured from the camera
+    float planarOffset = 0.0f;
+    std::uint32_t planarLevels = 0;   // the picture's blurrier levels
 };
 
 /*
@@ -224,9 +236,11 @@ struct GpuReflectionPass {
     float probeOrigin[4]; // xyz: where the probe was taken, measured from the camera
     float probeCube[4];   // x: the probe's faces in texels, y: its distance pyramid's levels
     float background[4];  // rgb: the light behind everything (ray-traced reflections that escape)
+    float planarPlane[4]; // xyz: the mirror's normal, w: its offset, measured from the camera
+    float planar[4];      // x: 1 when a mirror's picture was drawn, y: its levels
 };
 
-static_assert(sizeof(GpuReflectionPass) == 320, "GpuReflectionPass must match reflections.comp's buffer");
+static_assert(sizeof(GpuReflectionPass) == 352, "GpuReflectionPass must match reflections.comp's buffer");
 
 GpuReflectionPass packReflectionPass(const Mat4& viewProjection, const Mat4& inverseViewProjection, const Mat4& reprojection,
                                      RenderSize render, Vec2 jitter, const ReflectionSettings& settings, const ReflectionPassFrame& frame);

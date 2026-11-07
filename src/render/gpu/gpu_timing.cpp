@@ -38,6 +38,8 @@ const char* gpuPassName(GpuPass pass) {
         return "DEPTHS";
     case GpuPass::ReflectionProbe:
         return "CUBE";
+    case GpuPass::PlanarReflection:
+        return "PLANAR";
     case GpuPass::Reflections:
         return "SSR";
     case GpuPass::FogApply:

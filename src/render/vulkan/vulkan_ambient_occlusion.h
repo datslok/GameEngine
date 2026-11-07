@@ -15,8 +15,9 @@ class VulkanDevice;
 
 /*
 * Ambient occlusion on the GPU (render/gpu/ambient_occlusion.h): the pass (ambient_occlusion.comp) between the depth
-* prepass and the main pass, the blur (ambient_occlusion_blur.comp) after it while there is no anti-aliasing, and the
-* render-size image the main pass reads (scene set 1, binding 25): the blur's while it runs, else the pass's own.
+* prepass and the main pass, the blur (ambient_occlusion_blur.comp) after it while there is no anti-aliasing or it gathers
+* light, and the render-size image the main pass reads (scene set 1, binding 25): the blur's while it runs, else the
+* pass's own.
 */
 class VulkanAmbientOcclusion {
 public:
@@ -36,11 +37,12 @@ public:
     SampledImage sampledOcclusion(bool blurred) const;
 
     /*
-    * Record the pass, and the blur when blur is true: the depth (the prepass's, left readable by compute) in, the
-    * occlusion left readable by fragment shaders for the main pass.
+    * Record the pass, and the blur when blur is true: the depth (the prepass's, left readable by compute) and last
+    * frame's finished picture in, or standIn when there is none to gather from, the occlusion left readable by fragment
+    * shaders for the main pass.
     */
-    void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth,
-                 const GpuAmbientOcclusionPass& pass, bool blur);
+    void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, VulkanImage* previousPicture,
+                 const SampledImage& standIn, const GpuAmbientOcclusionPass& pass, bool blur);
 
 private:
     const VulkanDevice& device;

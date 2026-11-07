@@ -3,15 +3,23 @@
 
 #include "frame_data.glsl"
 #include "instances.glsl"
+#include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
 
-// Whether this pipeline draws the reflection probe's capture: each cube face's view-projection comes as push constants
-// (render/gpu/reflection_probe.h, cubeFaceViewProjection), the frame's being the camera's.
+// Whether this pipeline draws a capture (a reflection probe's cube face, or a flat mirror's picture): its
+// view-projection comes as push constants (render/gpu/reflection_probe.h, cubeFaceViewProjection;
+// render/gpu/planar_reflection.h, planarViewProjection), the frame's being the camera's.
 layout(constant_id = PROBE_CAPTURE_VERTEX_CONSTANT) const bool captureView = false;
 
+// Must match GpuCaptureView.
 layout(push_constant) uniform CaptureView {
     mat4 captureViewProjection;
+    vec4 captureClipPlane; // what is behind it is cut away: a mirror's plane (planarClipPlane), or one nothing is behind
 };
+
+// Every pipeline clamps depth rather than clip at the near plane, so a mirror's picture cuts what is behind the mirror
+// here: a negative distance clips (render/gpu/planar_reflection.h).
+out float gl_ClipDistance[1];
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
@@ -48,6 +56,7 @@ void main() {
     model[3].xyz -= cameraOrigin.xyz;
     relativePosition = (model * vec4(position, 1.0)).xyz;
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
+    gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;

@@ -5,8 +5,9 @@
 * Ambient occlusion (render/gpu/ambient_occlusion.h), one invocation per render pixel, between the depth prepass and the
 * main pass: the loop ambientOcclusionAt mirrors. The pixel's point and normal from the depths (the normal from the
 * neighbours that carry on in line), then slices round the way to the camera, each walked both ways through the depth
-* image for its horizons, and the open arcs between them averaged. Its noise turns with the frame for temporal
-* anti-aliasing to average (still without it, for the blur).
+* image marking the sectors its samples block, gathering last frame's picture for each sector newly marked, and the open
+* share and the gathered light averaged. Its noise turns with the frame for temporal anti-aliasing to average (still
+* without it, for the blur).
 */
 #include "screen_reflections.glsl"
 #include "ambient_occlusion.glsl"
@@ -21,16 +22,31 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     vec4 lens;                  // x: a pixel's footprint per metre of view distance
     vec4 options;               // x: radius, y: falloff, z: slices, w: steps
     ivec4 frame;                // x: the frame, turning the noise
+    mat4 reprojection;          // this frame's clip space (without the jitter) to last frame's
+    vec4 gather;                // x: thickness, y: 1 while gathering, z: the brightest sample
 } pass;
 
-layout(set = 0, binding = 1) uniform sampler2D depth;                 // exact texels
-layout(set = 0, binding = 2, r8) uniform writeonly image2D occlusion; // the visibility, 0 buried to 1 open
+layout(set = 0, binding = 1) uniform sampler2D depth;                      // exact texels
+layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
 
 // The point at a texel clamped onto the screen (measured from the camera); the sky counts as the fallback point.
 vec3 pointAt(ivec2 texel, vec3 fallback) {
     ivec2 clamped = clamp(texel, ivec2(0), ivec2(pass.size.xy) - 1);
     float texelDepth = texelFetch(depth, clamped, 0).r;
     return texelDepth == float(GPU_FAR_DEPTH) ? fallback : positionAtPixel(pass.inverseViewProjection, vec2(clamped) + 0.5, texelDepth, pass.size.xy);
+}
+
+// Last frame's picture where it showed the point at this texel; nothing where it was off screen.
+vec3 pictureAt(ivec2 texel, float texelDepth) {
+    vec2 unjittered = vec2(texel) + 0.5 - pass.lens.yz;
+    vec3 previous = reprojectPixel(pass.reprojection, unjittered, texelDepth, pass.size.xy);
+
+    if (previous.z < 0.5 || any(lessThan(previous.xy, vec2(0.0))) || any(greaterThan(previous.xy, pass.size.xy))) {
+        return vec3(0.0);
+    }
+
+    return gatheredSampleLight(textureLod(picture, previous.xy * pass.size.zw, 0.0).rgb, pass.gather.z);
 }
 
 void main() {
@@ -49,7 +65,7 @@ void main() {
                              : aoScreenRadius(radius, pass.lens.x, viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy));
 
     if (screenRadius < float(AO_MIN_SAMPLE_PIXELS)) {
-        imageStore(occlusion, texel, vec4(1.0));
+        imageStore(occlusion, texel, vec4(0.0, 0.0, 0.0, 1.0));
         return;
     }
 
@@ -66,14 +82,24 @@ void main() {
     float stepNoise = interleavedGradientNoise(framePixel + vec2(23.0, 41.0));
     int slices = int(pass.options.z);
     int steps = int(pass.options.w);
+    float thickness = pass.gather.x;
+    bool gathers = pass.gather.y > 0.5;
     float visibility = 0.0;
+    vec3 gathered = vec3(0.0);
 
     for (int slice = 0; slice < slices; ++slice) {
         float angle = 3.14159265 * (float(slice) + sliceNoise) / float(slices);
         vec2 onScreen = vec2(cos(angle), sin(angle));
         vec3 direction = positionAtPixel(pass.inverseViewProjection, pixel + onScreen, pixelDepth, pass.size.xy) - position;
         AoSlice plane = aoSlice(normal, toCamera, direction);
-        float horizons[2] = float[2](lowHorizonCosine(plane, 0), lowHorizonCosine(plane, 1));
+        float lows[2] = float[2](lowHorizonCosine(plane, 0), lowHorizonCosine(plane, 1));
+        uint marked = 0u;
+        vec3 sliceLight = vec3(0.0);
+
+        // Each side remembers its last sample while the surface runs on, to fill the gap to the next.
+        bool runsOn[2] = bool[2](false, false);
+        float lastShare[2] = float[2](0.0, 0.0);
+        float lastDepth[2] = float[2](0.0, 0.0);
 
         for (int index = 0; index < steps; ++index) {
             float distance = aoSampleDistance(index, steps, stepNoise, screenRadius);
@@ -82,24 +108,55 @@ void main() {
                 ivec2 at = ivec2(floor(pixel + onScreen * (side == 0 ? distance : -distance)));
 
                 if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size))) {
+                    runsOn[side] = false;
                     continue;
                 }
 
                 float atDepth = texelFetch(depth, at, 0).r;
 
                 if (atDepth == float(GPU_FAR_DEPTH)) {
+                    runsOn[side] = false;
                     continue;
                 }
 
                 vec3 offset = positionAtPixel(pass.inverseViewProjection, vec2(at) + 0.5, atDepth, pass.size.xy) - position;
                 float weight = occluderWeight(length(offset), radius, pass.options.y);
-                float low = lowHorizonCosine(plane, side);
-                horizons[side] = max(horizons[side], low + (horizonCosine(offset, toCamera) - low) * weight);
+
+                if (weight <= 0.0) {
+                    runsOn[side] = false;
+                    continue;
+                }
+
+                float low = lows[side];
+                float front = sectorShare(plane, low + (horizonCosine(offset, toCamera) - low) * weight, side);
+                float back = sectorShare(plane, low + (horizonCosine(offset - toCamera * thickness, toCamera) - low) * weight, side);
+                float behind = -dot(offset, toCamera);
+                float start = min(front, back);
+                float end = max(front, back);
+
+                if (runsOn[side] && abs(behind - lastDepth[side]) < thickness) {
+                    start = min(start, lastShare[side]);
+                    end = max(end, lastShare[side]);
+                }
+
+                runsOn[side] = true;
+                lastShare[side] = front;
+                lastDepth[side] = behind;
+                uint mask = sectorMask(start, end);
+                uint fresh = mask & ~marked;
+
+                if (fresh != 0u && gathers) {
+                    sliceLight += pictureAt(at, atDepth) * (float(bitCount(fresh)) / float(AO_SECTORS));
+                }
+
+                marked |= mask;
             }
         }
 
-        visibility += sliceVisibility(plane, horizons[0], horizons[1]);
+        float sliceWeight = sliceVisibility(plane, lows[0], lows[1]);
+        visibility += sliceWeight * (1.0 - float(bitCount(marked)) / float(AO_SECTORS));
+        gathered += sliceLight * sliceWeight;
     }
 
-    imageStore(occlusion, texel, vec4(clamp(visibility / float(slices), 0.0, 1.0)));
+    imageStore(occlusion, texel, vec4(gathered / float(slices), clamp(visibility / float(slices), 0.0, 1.0)));
 }

@@ -15,6 +15,9 @@ BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model);
 // a negative radius, which means "unknown, never cull".
 void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>& boundsByMesh);
 
+// Give each draw its mesh's flat faces, from lists indexed like MeshHandle, which must outlive the frame.
+void attachFlatFaces(std::vector<DrawItem>& draws, const std::vector<std::vector<FlatFace>>& facesByMesh);
+
 // The draws the camera can see (by index, in order).
 std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const Frustum& cameraFrustum);
 

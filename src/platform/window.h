@@ -4,13 +4,20 @@
 
 #include <SDL3/SDL.h>
 
+// Whether the window shows: hidden for scripts and AIs driving the game through commands (--hidden), whose screenshots
+// come from the finished picture, not the screen.
+enum class WindowVisibility {
+    Shown,
+    Hidden,
+};
+
 /*
 * The operating system window: creation, events, fullscreen, focus and how the mouse is held.
 * It reports raw facts into Input (keys, buttons, motion, cursor position, window size). What those facts mean for the game is decided by game code.
 */
 class Window {
 public:
-    Window(const char* title, int width, int height);
+    Window(const char* title, int width, int height, WindowVisibility visibility = WindowVisibility::Shown);
     ~Window();
 
     // The window has a single owner.

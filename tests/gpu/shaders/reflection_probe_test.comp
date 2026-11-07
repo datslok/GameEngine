@@ -4,6 +4,7 @@
 // Runs reflection_probe.glsl's functions on the cases reflection_probe_gpu_test.cpp sends.
 #include "gpu_test.glsl"
 #include "reflection_probe.glsl"
+#include "planar_reflection.glsl"
 
 void main() {
     if (outsideTheCases()) {
@@ -34,7 +35,10 @@ void main() {
         // Inputs: (roughness, levels, pdf, samples), (size, confidence, 0, 0), (stand-in), (specular albedo), (light).
         vec4 levels = testInput(0);
         vec4 blend = testInput(1);
-        testOutput(0, vec4(probeRoughnessLevel(levels.x, levels.y), prefilterSourceLevel(levels.z, levels.w, blend.x), 0.0, 0.0));
+        testOutput(0, vec4(probeRoughnessLevel(levels.x, levels.y), prefilterSourceLevel(levels.z, levels.w, blend.x),
+                           planarClipDistance(vec4(testInput(3).rgb, testInput(2).g), testInput(2).rgb), 0.0));
         testOutput(1, vec4(blendedStandIn(testInput(2).rgb, testInput(3).rgb, testInput(4).rgb, blend.y), 0.0));
+        testOutput(2, vec4(probeGuessedLight(testInput(2).rgb, testInput(3).rgb, blend.y, levels.x),
+                           isOnPlanarMirror(testInput(2).rgb, testInput(3).rgb, testInput(3).rgb, testInput(2).g)));
     }
 }

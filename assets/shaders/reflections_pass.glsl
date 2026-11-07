@@ -10,10 +10,12 @@
 * 2. Screen-space reflections: the mirror ray followed through the depth pyramid (the loop traceScreenRay mirrors);
 *    where it hits, the hit's surface in last frame's picture (by its motion if it moved, else through the two cameras),
 *    read from the colour pyramid's level as wide as the reflected cone.
-* Where neither is trusted at all, the pixel is left exactly as the main pass drew it.
+* Where neither is trusted at all, the pixel is left exactly as the main pass drew it. A flat mirror's pixels take neither:
+* the mirrored scene was drawn for real (render/gpu/planar_reflection.h), and is read at the pixel's own place on screen.
 */
 #include "screen_reflections.glsl"
 #include "reflection_probe.glsl"
+#include "planar_reflection.glsl"
 
 // octahedralDecode, for the normals the main pass folded onto a square.
 #include "ddgi.glsl"
@@ -49,6 +51,8 @@ layout(std430, set = REFLECTION_SET, binding = 0) readonly buffer Pass {
     vec4 probeOrigin;           // xyz: where the probe was taken, measured from the camera
     vec4 probeCube;             // x: the probe's faces in texels, y: its distance pyramid's levels
     vec4 background;            // rgb: the light behind everything (traced rays that escape)
+    vec4 planarPlane;           // xyz: the mirror's normal, w: its offset, measured from the camera
+    vec4 planar;                // x: 1 when a mirror's picture was drawn, y: its levels
 } pass;
 
 layout(set = REFLECTION_SET, binding = 1) uniform sampler2D depthPyramid;      // exact texels, every level
@@ -60,7 +64,8 @@ layout(set = REFLECTION_SET, binding = 6) uniform sampler2D velocity;          /
 layout(set = REFLECTION_SET, binding = 7) uniform samplerCube probeLight;      // the probe's prefiltered light, trilinear, every level
 layout(set = REFLECTION_SET, binding = 8) uniform samplerCube probeDistance;   // how far the probe saw, and its pyramid: nearest texel, every level
 layout(set = REFLECTION_SET, binding = 9) uniform samplerCube probeDistanceBlend; // the same, blended between texels (level 0 read)
-layout(set = REFLECTION_SET, binding = 10, rgba16f) uniform image2D scene;
+layout(set = REFLECTION_SET, binding = 10) uniform sampler2D planarPicture;    // the mirror's picture and its levels, trilinear
+layout(set = REFLECTION_SET, binding = 11, rgba16f) uniform image2D scene;
 
 // What one source of reflection found: how far it is trusted, and the light it reflects.
 struct Reflection {
@@ -351,10 +356,25 @@ void main() {
 #else
     if (glossyEnough && pass.probe.x > 0.5) {
         probed = reflectFromProbe(glossy);
+
+        // Where the search gave up, the probe's picture along the ray in place of the flat stand-in.
+        float rough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
+        vec3 alongRay = textureLod(probeLight, glossy.direction, probeRoughnessLevel(glossy.roughness, pass.probe.y)).rgb;
+        probed.light = probeGuessedLight(alongRay, probed.light, probed.confidence, rough);
+        probed.confidence = rough;
     }
 #endif
 
-    if (glossyEnough && pass.probe.z > 0.5) {
+    // On the mirror, the picture drawn through it, with no search: the same pixel, without this frame's jitter.
+    bool onMirror = glossyEnough && pass.planar.x > 0.5 && isOnPlanarMirror(glossy.position, glossy.normal, pass.planarPlane.xyz, pass.planarPlane.w) > 0.5;
+
+    if (onMirror) {
+        vec2 mirrorPixel = (glossy.pixel - pass.lens.yz) * pass.size.zw;
+        float mirrorRough = 1.0 - smoothstep(pass.options.x, pass.options.y, glossy.roughness);
+        probed = Reflection(mirrorRough, textureLod(planarPicture, mirrorPixel, probeRoughnessLevel(glossy.roughness, pass.planar.y)).rgb);
+    }
+
+    if (glossyEnough && !onMirror && pass.probe.z > 0.5) {
         screen = reflectFromScreen(glossy);
     }
 

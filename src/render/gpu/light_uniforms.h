@@ -35,7 +35,9 @@ struct GpuDirectionalLight {
     std::int32_t shadowTile = -1; // the first of its cascades' tiles
     std::int32_t cascadeCount = 0;
     float tanAngularRadius = 0.0f; // its size as seen from the ground, for soft shadows
-    float unused = 0.0f;
+    std::int32_t mirrorShadowTile = -1; // the first of its cascades for a flat mirror's picture (shadow_map.h, MirrorShadowView)
+    std::int32_t mirrorCascadeCount = 0;
+    float unused[3]{};
 };
 
 struct GpuPointLight {
@@ -57,7 +59,7 @@ struct GpuSpotLight {
     float emitterRadius = 0.0f;
 };
 
-static_assert(sizeof(GpuDirectionalLight) == 48, "GpuDirectionalLight must match the shader's DirectionalLightData");
+static_assert(sizeof(GpuDirectionalLight) == 64, "GpuDirectionalLight must match the shader's DirectionalLightData");
 static_assert(sizeof(GpuPointLight) == 48, "GpuPointLight must match the shader's PointLightData");
 static_assert(sizeof(GpuSpotLight) == 64, "GpuSpotLight must match the shader's SpotLightData");
 

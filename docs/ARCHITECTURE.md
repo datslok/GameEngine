@@ -178,6 +178,7 @@ The engine's text interface (`command-line-control`, Oct 29 2026): tools, script
 - `--set key=value` (any number; split at the first "=", both sides trimmed): applied over `settings.cfg` before anything reads them, start-up fields too; an unknown key or bad value stops the start (`Application`'s constructor throws).
 - `--run <file>`: the script's lines are queued for the first frame (blank lines and `#` comments skipped).
 - `--port <port>`: the game's port (added as `engine.commandPort`) and `--send`'s.
+- `--hidden`: the game plays in a window that never shows (`WindowVisibility::Hidden`, `SDL_WINDOW_HIDDEN`), for scripts and AIs driving it with commands; screenshots come from the finished picture, so they work as usual. A launch option rather than a setting, so a saved `settings.cfg` can never start a player's game invisible. Not with `--send`, the golden images or the yardstick. Started from PowerShell, add `-WindowStyle Hidden` to `Start-Process`, or the console window still shows.
 - `--send <words...>`: everything after it is one command (`joinCommandWords`), sent to the game at `--port`, else `settings.cfg`'s `engine.commandPort`, else the default. It prints the reply (errors to the standard error) and exits with 0 or 1, without opening a window. Only `--port` may come before it; `--set` and `--run` do not go with the golden images or the yardstick.
 
 ## Golden images
@@ -528,9 +529,10 @@ A caster wholly beyond a light's range cannot block it where it shines. Only a s
 
 ### How many lights get shadows
 
-- Up to 1 sun, 8 spot and 64 point lights (`maxShadowTiles` = 396). Lights past that still light, unshadowed.
-  - With the cascades at 1024: at most 4 x 16 + 8 + 64 x 6 = 456 of the 512 smallest-tile places, so everything fits at the smallest size.
-  - With 4096 cascades: 4 x 256 + 392 of the grown atlas's 1536, so the cascades keep their size.
+- Up to 1 sun, 8 spot and 64 point lights, and a flat mirror's cascades (`maxShadowTiles` = 400). Lights past that still light, unshadowed.
+  - With the cascades at 1024: at most 4 x 16 + 8 + 64 x 6 + 4 = 460 of the 512 smallest-tile places, so everything fits at the smallest size.
+  - With 4096 cascades: 4 x 256 + 392 + 4 of the grown atlas's 1536, so the cascades keep their size.
+  - The mirror's cascades are the least important, so `shrinkToFit` halves them first.
 
 ### Tile size
 
@@ -843,6 +845,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 | `ProbeBalls` | the probes' debug balls |
 | `RayDebug` | the ray tracing debug view |
 | `DepthRange` | the screen's depths measured for the sun's cascades, a compute pass |
+| `PlanarReflection` | PLANAR: a flat mirror's picture, its blurrier levels and its depths measured, only while a mirror is chosen (see Planar reflections) |
 | `FogApply` | FOGMIX: the picture before the glass seen through the fog, only with fog (after the reflections) |
 | `EyeAdaptation` | EYE: the scene's brightness and the adapted exposure, two compute passes, while it adapts |
 | `Bloom`, `ToneMap`, `DebugLines` | |
@@ -897,7 +900,7 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
   - One per `DrawItem` of the frame, instance i being draw i, the same for every view (ray tracing instances and GPU culling can read the same records later).
 - `GpuMaterial` (112 bytes, see Assets and materials), deduplicated per frame by `MaterialTable::add` (an FNV-1a hash of the packed bytes, then a full comparison; packing has no padding).
 - Lights, in `GpuLights` from `packLighting` with `ambient` and `counts`, shadows filled in by `attachShadows`:
-  - `GpuDirectionalLight` (48: direction towards the light, radiance, `shadowTile` (its first cascade), `cascadeCount`, `tanAngularRadius`);
+  - `GpuDirectionalLight` (64: direction towards the light, radiance, `shadowTile` (its first cascade), `cascadeCount`, `tanAngularRadius`, `mirrorShadowTile` and `mirrorCascadeCount` (a flat mirror's cascades, see Cascaded sun shadows));
   - `GpuPointLight` (48: position and range, radiance and source radius, `firstShadowTile`, `shadowStrength`, `emitterRadius`);
   - `GpuSpotLight` (64).
   - The buffers hold `maxPointLights` (1024) point, `maxSpotLights` (256) spot and `maxDirectionalLights` (4) directional lights, all seated by default since clustered shading (each pixel loops only over its cluster's lights).
@@ -1111,7 +1114,7 @@ Splits: `cascadeSplits(near, far, count, lambda)` from the camera's near plane t
 
 ### Lookup
 
-Lookup (`sunShadow` in `triangle.frag`), for each cascade, finest first:
+Lookup (`sunShadow` in `scene_surface.glsl`, through `sunCascadeRow`), for each cascade, finest first:
 
 1. The point is moved towards the sun by `sunShadowBias(offset.y, n·l)` = base × (1 + min(tan θ, `MAX_SUN_BIAS_SLOPE` = 10), in `shader_shared.h`).
 2. Then `cascadeEdgeDistance(projected, depthRange / radius)`: 1 at the centre, 0 at any face of the box, in radii (across, and from the far and near sides).
@@ -1122,6 +1125,19 @@ Blending between cascades:
 - `cascadeBlendWeight(edge, band)` (`cascadeBlendBand` 0.1 of the radius; 0 switches at once) mixes in the next cascade near the edge, or full light past the last one. A point the next box misses stays with this one.
 - `CascadeTransition::Dither` instead keeps one cascade per pixel (`cascadeDitherKeeps(weight, interleaved gradient noise)`), one lookup instead of two.
 - Blend band and transition reach the shader as `GpuFrameData::cascadeOptions`.
+- `sunCascadeRow` gives its row's own shadow and how much of the answer it is (`ownShare`); `sunShadow` mixes in what lies past the row: a flat mirror's row when there is one, else plain light (`sunRowOrLit`, the same `mix` as before rows existed, so frames without a mirror shade exactly as they did).
+
+### A mirror's cascades
+
+A flat mirror's picture (see Planar reflections) shows mostly what is behind the camera, which the camera's cascades never hold, so everything in it stood in full sun. The sun gets a second row of cascades for the mirror's view (`MirrorShadowView`, the last argument of `planShadows`):
+
+- **The view:** `mirroredCamera(camera, plane)`, the camera as far behind the glass as it is in front, looking the mirrored way, with the same lens. Its slices' spheres and boxes are built as the camera's are (`addSunCascades`, shared by both rows).
+- **Where they start:** `mirrorCascadesStart`: the mirrored camera's distance to the glass times the cosine of the view's corner angle, the nearest anything past the glass can be along its view, rounded down to the ladder (`shadowLadderStepBelow`) so it does not change the boxes as the camera creeps; never before the near plane.
+- **Where they end:** the farthest surface in the mirror's picture, measured as the screen's is: a second `VulkanDepthRange` reads the picture's depth after it is drawn, and `mirrorShadowFit` climbs and falls the same ladder (`updateSunShadowFit`). The picture's projection is the camera's own reflected, so its depths turn into distances with the camera's planes. Never past the shadow distance or the far plane.
+- **Settings:** `ShadowSettings::mirrorCascadeCount` (2, 0 to 4; 0 leaves the mirror in full sun) and `mirrorCascadeResolution` (2048, never past the atlas's largest square).
+- **Tiles:** after every other tile, named by their own `ShadowKind::Mirror`, so they keep their squares and caching like any other; the least important, shrunk first when the atlas is full. `LightShadow::mirrorFirstTile` and `mirrorCascades` reach the shader in `GpuDirectionalLight`.
+- **Lookup:** a point is shaded by the camera's row first; where none of its boxes holds it, or in its last cascade's band, the mirror's row takes over, so the camera's last cascade fades into the mirror's rather than into a band of sunlight (a thin lit stripe on the mirrored floor showed it).
+- **Tests:** `shadow_map_test` (the mirror's row after every other tile, the camera's boxes unchanged, a point far behind the camera held only by the mirror's, none without a mirror or with the count 0, shrunk first, the worst case still fitting the atlas), `planar_reflection_test` (the mirrored camera, the start never past anything visible and on the ladder), `cascades_test` (rounding down the ladder).
 
 **Why the bias moves along the light:** an offset along the normal moves the point sideways as the sun sees it, by an amount that grows with the texel, so cascades of different texel sizes found a shadow's edge in different places (a visible step at the seam under a low sun). Moving along the rays changes only the depth in every cascade (`testMovingTowardsTheSunKeepsThePlaceInEveryCascade`). It also removed the stair-stepped edge of the sunlit room's window patch.
 
@@ -1662,7 +1678,7 @@ Tested: turns (repeatable, different, orthonormal, identity exact), visibility, 
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `enabled` | true | |
+| `enabled` | false | off since Nov 6 2026 (on hold, ROADMAP phase 16); needs `RenderSettings::rayTracing` on too |
 | `probeCascades` | 6 | 4 before `ddgi-far-cascades` |
 | `probeSpacing` | 0.5 m | the densest's |
 | `densestProbesAcross` | 31 | |
@@ -2242,7 +2258,7 @@ Six faces in Vulkan's cube order and addressing (+X, -X, +Y, -Y, +Z, -Z; `cubeFa
 `drawProbeCapture`, timed as CUBE (`GpuPass::ReflectionProbe`), after the depth measurement:
 
 1. Each face's draws are culled against its own frustum and listed after the velocity pass's in the frame's draw list.
-2. Each face is drawn with the main pass's shading: `triangle.vert` takes the face's view-projection from push constants (specialization constant `PROBE_CAPTURE_VERTEX_CONSTANT`), and `probe_capture.frag` (`scene_surface.glsl` with `PROBE_CAPTURE`) shades every light rather than the clusters' lists (those are the camera's) with no heatmap. The sky is drawn over each face's background (`packCubeFaceRays`); the stars are not.
+2. Each face is drawn with the main pass's shading: `triangle.vert` takes the face's view-projection from push constants (`GpuCaptureView`, with a clip plane that cuts nothing here; specialization constant `PROBE_CAPTURE_VERTEX_CONSTANT`), and `probe_capture.frag` (`scene_surface.glsl` with `PROBE_CAPTURE`) shades every light rather than the clusters' lists (those are the camera's) with no heatmap. The sky is drawn over each face's background (`packCubeFaceRays`); the stars are not.
 3. The sun's cascades are fitted to the camera's view, so the capture sees surfaces they do not cover, which would be lit through walls and roofs. While ray tracing is on (see Ray tracing) `probe_capture_rays.frag` traces the sun's shadow there instead (`sunBeyondCascades`, `reachesLight`, shared with the light probes' trace; the ray tracing scene is built for it), in a layout with the ray tracing set; without them it counts as lit, as beyond the shadow distance.
 4. `finishCapture`: the capture's mips (`generateMipmaps`, shared with texture uploads), the distances (`probe_distance.comp`), and the prefiltered levels (`probe_prefilter.comp`, `prefilterTexel`): each texel averages 64 GGX samples round its direction for its level's roughness (Karis's split sum: normal and view along the direction), each read from the capture's level as wide as its share of the lobe (`prefilterSourceLevel`, filtered importance sampling), weighted by n.l. The GGX samples (`ggxSampleHalfway`, `radicalInverse`, `alongNormal`) are the BRDF table's.
 
@@ -2257,6 +2273,7 @@ A picture from one point is wrong seen from another. For a pixel at P (measured 
 - **Early stop:** once the probe's line of sight to the ray is within a texel of the ray's own direction (it turns towards it as the ray goes on), the probe sees what the rest of the ray sees, and the light is read along the ray. A ray past the far plane has escaped the same way.
 - **Halving:** `PROBE_REFINE_STEPS` (8) halvings of the texel's stretch of the ray where it went behind, 256 times narrower, on the blended distances.
 - **Confidence:** the larger of two. `parallaxConfidence` (the blended distances either side of the crossing agree: fully within 3%, not at all past 15%) times `probeEdgeConfidence` (the four texels blended there spread less than 20% to 40%: one surface, not an edge between two). Or `probeViewConfidence`: the probe's direction to the found point within one texel of the ray's own (fully) to two (not at all), where the probe sees what the ray sees, edges or not; far things seen from near the probe are trusted this way across their silhouettes.
+- **Where it gives up** (without ray tracing): the probe's picture along the mirror ray stands in for the share the search did not trust (`probeGuessedLight`, mirrored), taking the confidence the surface's roughness allows, rather than leaving the flat ambient stand-in, which drew bright outlines round the reflected doorway.
 - **Why not solve the equation directly:** |P + R t| = D has other roots further along the ray, through doorways and behind walls. The first version iterated towards a root and could settle on one of those: the light lab's mirror showed the back room through the wall beside the doorway, the doorway pinched towards the floor, and curved cuts followed the sphere |P + R t| = D round the probe. Tested now with a doorway the ray passes beside, through and across the edge of (`reflection_probe_test`). A march of fixed geometric steps then still stepped over a wall the probe saw edge-on from a doorway (a sliver on the cube), finding the room beyond: hence the pyramid, tested on a 256-texel cube of a doorway scene.
 
 ### Ray-traced reflections
@@ -2333,6 +2350,39 @@ Light that reaches a surface by way of one reflection off a shiny one: a flashli
 
 The bounce scales with the fast rays a probe traces (measured at 1024; 256 by default since `ultra-rt-defaults`, about a quarter of the cost). **Not yet**: the image light for flat mirrors without ray tracing.
 
+## Planar reflections
+
+A flat mirror's picture drawn for real: the scene drawn a second time through the mirror (`render/gpu/planar_reflection`, `planar_reflection.glsl`, mirrored; `VulkanPlanarReflection`). The reflection probe sees the world from one point, so a head-on mirror in a room, which shows things the probe never saw (past a door frame) at full size, looked jagged at any probe size.
+
+**Settings** (`ReflectionSettings`, F5 Reflections):
+
+| Setting | Default | |
+|---|---|---|
+| `planarMirrors` | 1 | how many planes a frame draws (0 or 1, `PLANAR_MAX_MIRRORS`) |
+| `planarMaxRoughness` | 0.4 | the roughest surface that takes it: its blur is the same everywhere, where true blur grows with the distance from the mirror |
+| `planarScale` | 0.5 | the picture's size as a share of the render size |
+
+The mirror's sun cascades have settings of their own (see Cascaded sun shadows, A mirror's cascades).
+
+**Choosing the mirror** (`choosePlanarMirror`), each frame from the camera's visible draws, nothing marked by hand: a metal (metallic at least 0.5), smooth enough, not transparent surface's flat faces (`DrawItem::flatFaces`, found at load by `scene/flat_faces`), turned towards the camera, scored by the angle each fills; last frame's plane keeps its place unless another scores half as much again, or mirrors would pop as the camera moves. Everything on the chosen plane is the mirror, so the lab's mirror and steel panel side by side share one picture. Only while screen-space reflections run, and not with ray-traced reflections, which are exact anyway.
+
+**The view:**
+
+- `planarViewProjection`: the camera's view-projection (without the jitter) times the reflection across the plane (`planeReflection`; x goes to x - 2 (n.x - d) n). What stands in front of the mirror lands on the very pixel where the eye sees it in the mirror, so the picture is read at the mirror's own pixel, with no search. Its depths are the camera's own, reflected, so the depth measurement reads them as it reads the main pass's.
+- **Culled** by `planarFrustum`: the view with the mirror's plane for its near side, so nothing behind the glass is drawn.
+- **Clipped** at the glass: every pipeline clamps depth rather than clip at the near plane, so the usual oblique near plane (Lengyel 2005), the first version, never cut anything, and the wall behind the mirror, flattened onto the near plane, covered the whole picture. `triangle.vert` writes `gl_ClipDistance[0]` (the device's `shaderClipDistance`): `planarClipDistance` from the plane in `GpuCaptureView`'s `clipPlane` (`planarClipPlane`, lifted `PLANAR_CLIP_LIFT`, 2 mm, towards the camera so the mirror's own face does not flicker in and out of its picture; `noClipPlane` everywhere else, so other views keep every triangle).
+- **Drawn** by the reflection probe's capture pipelines (a reflection turns triangles round, as the cube's faces do, so front faces are culled), its draws listed after the probe's faces in the draw list (`captureDraws[cubeFaceCount]`), then the sky over its background through the camera's rays mirrored (`mirroredRays`).
+
+**The picture** (`drawPlanarReflection`, timed as PLANAR, `GpuPass::PlanarReflection`, after the probe's capture): an image of the scene's format at `planarRenderSize`, its depth (kept, and measured for the mirror's cascades), and a colour pyramid of ever blurrier levels for rough mirrors (`VulkanColourPyramid`, as the screen's reflections use).
+
+**Reading it** (the reflection pass, `reflections_pass.glsl`): a glossy pixel is on the mirror when it lies on the plane within `PLANAR_PLANE_TOLERANCE` (1 cm) plus `PLANAR_PLANE_TOLERANCE_PER_METRE` (5 mm a metre, for depth's rounding) and its normal is within `PLANAR_NORMAL_COSINE` (0.98) of the plane's (`isOnPlanarMirror`). There the picture, at the pixel's place without this frame's jitter and at the level its roughness asks for (`probeRoughnessLevel`), replaces the probe's light, and screen-space reflections are skipped.
+
+**Measured** (RTX 5080, 1920 x 1080, the light lab's back room): 0.29 ms including the depth measurement; the mirror's shadow tiles cost nothing while they stay cached.
+
+**Known limits:** the mirror's surfaces have no ambient occlusion or bounce light (both are worked out from the screen); they are shaded with the camera's view, so their matte light is right and their highlights a little off; a mirror seen in the mirror shows only its stand-in.
+
+**Tests:** `planar_reflection_test` (flat faces, the reflection, the view landing on the mirror's pixel with ordinary depths, the mirrored camera and where its cascades start, the culling, the clip plane, choosing a mirror and keeping it, the on-mirror test, the mirrored sky rays, the picture's size), `gpu_scene_test` (the capture view's push constants), and `isOnPlanarMirror` and `planarClipDistance` in `reflection_probe_gpu_test`.
+
 ## Ambient occlusion
 
 How much of the light from all around reaches a point past the small things next to it: creases, the foot of a wall, the gap under a block. The light probes give the light from all around and their visibility catches walls and rooms, but they sit 0.5 m apart at best; ambient occlusion supplies the visibility below that. `render/gpu/ambient_occlusion` (mirrored by `ambient_occlusion.glsl`, numbers in `ambient_occlusion_shared.h`), `render/vulkan/vulkan_ambient_occlusion`, `ambient_occlusion.comp` and `ambient_occlusion_blur.comp`.
@@ -2345,7 +2395,11 @@ How much of the light from all around reaches a point past the small things next
 | `radius` | 0.5 m | how far occluders count: about the densest probes' spacing, which handle what is bigger |
 | `falloff` | 0.6 | the outer share of the radius over which an occluder's weight fades to nothing (`occluderWeight`), so the reach has no hard border |
 | `slices`, `steps` | 3, 6 | slices a pixel each frame, steps along each side (presets: High 2 and 4, Medium 2 and 3; at most `AO_MAX_SLICES` 8 and `AO_MAX_STEPS` 16) |
-| `multipleBounces` | on | a crease's walls bounce light back in (`multiBounceOcclusion`) |
+| `thickness` | 0.25 m | how deep each sample is taken to be along the view: light passes behind it |
+| `indirect` | on | bounce light gathered from last frame's picture; needs anti-aliasing, and stands aside while the light probes run |
+| `indirectRadius` | 2 m | the samples' reach while gathering, in place of `radius` |
+| `indirectBrightest` | 8 | the brightest a gathered sample counts for in its largest channel (`gatheredSampleLight`), so the sun's glint off metal does not speckle what it lights |
+| `multipleBounces` | on | a crease's walls bounce light back in (`multiBounceOcclusion`), while nothing is gathered |
 | `specularOcclusion` | on | the reflection dims in creases too (`specularOcclusion`) |
 
 **The method** (ground-truth ambient occlusion, Jimenez, Wu, Pesce and Jarabo 2016), per pixel of the render size, from the prepass's depth alone:
@@ -2355,6 +2409,19 @@ How much of the light from all around reaches a point past the small things next
 - **Horizons.** Each side walks `steps` texels along the line (`aoSampleDistance`: quadratic in the step, dense near the pixel, staggered by noise, never under `AO_MIN_SAMPLE_PIXELS` 1.5), out to the radius on screen (`aoScreenRadius`, from the pixel footprint per metre and the view distance, at most `AO_MAX_SCREEN_RADIUS` 256). Each sample's point gives the cosine of its angle from the way to the camera (`horizonCosine`), pulled towards the surface's own horizon (`lowHorizonCosine`: the normal's angle plus or minus a right angle) by its falloff weight; each side keeps the highest. Samples off screen or on the sky count as open.
 - **The open arc.** With the normal projected into the slice (`aoSlice`: angle n from the way to the camera, length l), the cosine-weighted open share between the horizons h0 and h1 is l times the integral of cos(θ − n) |sin θ| from h0 to h1, each side (cos n + 2h sin n − cos(2h − n)) / 4, the horizons kept within a right angle of the normal (`sliceVisibility`). Averaged over slices round the way to the camera this is the cosine-weighted visibility exactly, 1 for an open surface whatever its tilt (tested over 2000 slices).
 - **The blur** (`ambient_occlusion_blur.comp`, only without anti-aliasing): the mean over 5 x 5 texels (`AO_BLUR_RADIUS` 2), each weighted by how near its view distance is to the pixel's (`aoBlurWeight`, nothing past `AO_BLUR_DEPTH_SHARE` 10%), so it does not bleed across edges.
+
+**The visibility bitmask and bounce light** (Therrien, Levesque and Gilet 2023, "Screen Space Indirect Lighting with Visibility Bitmask"; `screen-space-gi`). The walk above no longer keeps one horizon a side:
+
+- **Sectors.** A slice's half circle is cut into `AO_SECTORS` (32) sectors, a bit each of one `uint`. Unlike the paper's even angles, each sector is an equal share of the slice's cosine-weighted light (`sectorShare`, built from the closed form), so every bit weighs the same, the paper's cosine term is already in the count, and a solid horizon gives Jimenez's answer to within a sector.
+- **Marking.** A sample marks the arc from its front to its back, `thickness` further along the view (`sectorMask`, covering a sector at least half covered, so a surface's own samples mark nothing). The falloff shrinks both ends towards the surface's horizon, as it did the horizon.
+- **Running on.** A sample within `thickness` of its side's last one in depth also fills the gap to it, so a wall between two far-apart samples is not left full of holes. This is not in the paper.
+- **Gathering.** While gathering, each sample adds last frame's finished picture at its point, reprojected as the reflections do (`reprojectPixel`, nearest texel, nothing if it was off screen), times the share its newly marked sectors hold (`bitCount(fresh) / 32`). The result is scaled by the slice's whole weight; open sectors keep the light from all around. So a picture of 1 everywhere adds up to exactly the missing light (the test's white furnace).
+- **No emitter cosine.** The paper's `n_j · -l_j` is left out: sectors already measure solid angle, and the picture is the light leaving the sample. So a sample seen from behind gives its visible face's colour: expected as a slight leak. It needs a normal for every sample, if it ever shows.
+- **Many bounces.** The picture holds last frame's bounce, so each frame adds one, a geometric series in the albedo, which converges.
+- **The image.** RGBA16F: rgb the gathered light, alpha the visibility. The main pass adds rgb to the diffuse light from all around, after dimming that by the visibility, and turns the Jimenez fit off (`ambientOcclusionOptions.y`), which would count the same bounce twice.
+- **When it gathers** (`gathersLight`): `indirect` on, last frame's picture usable (anti-aliasing on, not the first frame), and no probes in the frame. It then uses `indirectRadius` and always runs the blur, since its noise is far stronger.
+
+**Known limits:** only what is on screen bounces, so light goes when its source leaves the view, and a closed room keeps the flat ambient. Specular highlights in the picture bounce as if they were diffuse. Moving objects' bounce trails a frame behind.
 
 **The main pass** (set 1 binding 25, `AmbientOcclusionBinding`, while `ambientOcclusionOptions.x` is 1; not in the reflection probe's capture) reads the visibility at its pixel, takes the more closed of it and the material's baked occlusion where it has one (`surfaceVisibility`: min(screen, 1 + strength (texel − 1)), glTF's formula; the minimum, not the product, since both estimate the same open share and a crease both see would darken twice; the baked one also in the reflection probe's capture, being the surface's own) as v, and dims only the light from all around (the probes' or the flat ambient's), not the direct light, which has its shadows:
 
@@ -2367,7 +2434,7 @@ With it off and no baked occlusion every factor is exactly 1 and the picture is 
 
 **Tests**: `ambient_occlusion_test` (the closed form against quadrature; an open surface averages exactly 1 tilted or not; half the sky blocked gives a half; the normal at a wall's foot keeps the floor's slope; the screen radius, steps, falloff, bounces, specular occlusion, the baked occlusion's minimum and blur weight; and the pass's loop through a drawn depth image of a floor and a 2 m wall: open floor 1, a metre from the wall over 0.98, the foot under 0.85 with the default radius and 0.506 against 0.5 with a long one, the sky open), `quality_preset_test`, `gpu_timing_test`; GPU tests in `ambient_occlusion_gpu_test` (written and built, not run).
 
-**Not measured yet**: its cost and its look in the game. **Not yet**: half resolution, if the cost calls for it.
+**Not measured yet**: its cost and its look in the game, with bounce light too. **Not yet**: half resolution, if the cost calls for it.
 
 ## Volumetric fog
 

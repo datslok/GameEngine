@@ -168,6 +168,17 @@ namespace {
         assert(sameFloats(packShadowView(tile).matrix, expected, 16));
     }
 
+    // A capture's view (a cube face's or a mirror's) is pushed the same way, followed by the plane it clips at.
+    void testCaptureViewCarriesItsClipPlane() {
+        const Mat4 view = pointShadowFaceMatrix(Vec3{1.0f, 2.0f, 3.0f}, 4, 50.0f);
+
+        float expected[16]{};
+        writeColumnMajor(view, expected);
+        const GpuCaptureView packed = packCaptureView(view, Vec4{0.0f, 0.6f, 0.8f, -2.5f});
+        assert(sameFloats(packed.viewProjection, expected, 16));
+        assert(packed.clipPlane[0] == 0.0f && packed.clipPlane[1] == 0.6f && packed.clipPlane[2] == 0.8f && packed.clipPlane[3] == -2.5f);
+    }
+
     // The vertex shader makes the model matrix camera-relative by subtracting the camera from its translation column,
     // before any multiplication (render/gpu/camera_relative.h): for a model matrix (last row 0 0 0 1) that is exactly
     // what relativeTo does, so the small numbers stay as precise as on the CPU.
@@ -311,6 +322,7 @@ void testGpuScene() {
     testInstanceCarriesItsScale();
     testShaderSubtractionMatchesRelativeTo();
     testShadowViewIsColumnMajor();
+    testCaptureViewCarriesItsClipPlane();
     testIdenticalMaterialsShareAnEntry();
     testTexturesTellMaterialsApart();
     testFrameDataCarriesCameraLightsAndAtlasTexel();
