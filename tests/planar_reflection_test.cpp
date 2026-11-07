@@ -1,4 +1,6 @@
 #include "render/gpu/camera_relative.h"
+#include "render/gpu/cascades.h"
+#include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/planar_reflection.h"
 #include "scene/camera.h"
 #include "scene/flat_faces.h"
@@ -6,6 +8,7 @@
 
 #include "test_levels.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <optional>
@@ -58,7 +61,9 @@ namespace {
     /*
     * The camera 5 m from a wall mirror, measured from the camera as the capture is. What stands in front of the mirror
     * lands on the pixel where the eye sees it in the mirror, so the reflection pass reads the image at the mirror's own
-    * pixel. What is behind the mirror is cut away, nearer means nearer, and everything kept is inside the depth range.
+    * pixel. The view is the camera's own reflected, with its ordinary depths: a point's depth is that of its reflection,
+    * so the depth image measures as the main one does (the mirror's cascades are fitted to it), and nearer means nearer.
+    * What is behind the mirror is cut by the clip plane, not the depth range (testClipPlane).
     */
     void testPlanarView() {
         const Camera camera = makeCamera();
@@ -71,21 +76,71 @@ namespace {
         const Vec4 drawn = clipOf(mirrored, inRoom);
         assert(drawn.w > 0.0f);
         assert(near(drawn.x / drawn.w, seen.x / seen.w, 1e-4f) && near(drawn.y / drawn.w, seen.y / seen.w, 1e-4f));
-
-        // Depth: 0 <= z <= w for what is kept; past the mirror z > w, which the GPU clips.
+        assert(near(drawn.z / drawn.w, seen.z / seen.w, 1e-5f));
         assert(drawn.z >= 0.0f && drawn.z <= drawn.w);
-        const Vec4 behind = clipOf(mirrored, Vec3{0.5f, -0.3f, -6.0f});
-        assert(behind.z > behind.w);
 
         // Reversed-Z, as everywhere: further along the mirrored ray (nearer the camera's side) has the smaller depth.
         const Vec4 nearMirror = clipOf(mirrored, Vec3{0.2f, 0.0f, -4.5f});
         const Vec4 farFromMirror = clipOf(mirrored, Vec3{0.2f, 0.0f, 20.0f});
         assert(nearMirror.z / nearMirror.w > farFromMirror.z / farFromMirror.w);
         assert(farFromMirror.z >= 0.0f);
+    }
 
-        // On the mirror itself (just off it, past the lift) it is the nearest thing there is.
-        const Vec4 onMirror = clipOf(mirrored, Vec3{0.2f, 0.0f, -5.0f + 2.0f * static_cast<float>(PLANAR_CLIP_LIFT)});
-        assert(onMirror.z / onMirror.w > 0.95f && onMirror.z <= onMirror.w);
+    // The camera seen in the mirror stands behind the glass as far as the camera is in front, looking the mirrored way.
+    void testMirroredCamera() {
+        const Camera camera = makeCamera();
+        const MirrorPlane plane{Vec3{0.0f, 0.0f, 1.0f}, -5.0f};
+        const Camera seen = mirroredCamera(camera, plane);
+
+        assert(nearVec(seen.getPosition(), Vec3{0.0f, 1.6f, -10.0f}, 1e-5f));
+        assert(nearVec(seen.getForward(), Vec3{0.0f, 0.0f, 1.0f}, 1e-5f));
+        assert(near(seen.getVerticalFov(), camera.getVerticalFov(), 0.0f) && near(seen.getAspectRatio(), camera.getAspectRatio(), 0.0f));
+        assert(near(seen.getNearPlane(), camera.getNearPlane(), 0.0f) && near(seen.getFarPlane(), camera.getFarPlane(), 0.0f));
+
+        // A mirror on a side wall, seen at an angle.
+        const MirrorPlane side{Vec3{1.0f, 0.0f, 0.0f}, -3.0f};
+        const Camera angled = mirroredCamera(Camera{Vec3{0.0f, 1.0f, 0.0f}, Vec3{-1.0f, 1.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f, 1.5f, 0.1f, 100.0f}, side);
+        assert(nearVec(angled.getPosition(), Vec3{-6.0f, 1.0f, 0.0f}, 1e-5f));
+        assert(nearVec(angled.getForward(), Vec3{1.0f, 0.0f, -1.0f}.normalized(), 1e-5f));
+    }
+
+    /*
+    * The mirror's cascades start where its picture can start: nothing nearer than the glass is drawn, and no point the
+    * mirrored camera sees past the glass is nearer along its view than this. It sits on the cascades' ladder, so it does
+    * not change the cascades' size as the camera creeps, and never before the camera's near plane.
+    */
+    void testMirrorCascadesStartAtTheGlass() {
+        const MirrorPlane plane{Vec3{0.0f, 0.0f, 1.0f}, -5.0f};
+
+        for (const Vec3& position : {Vec3{0.0f, 1.6f, 0.0f}, Vec3{1.5f, 1.2f, -3.0f}, Vec3{-0.5f, 1.6f, -4.95f}}) {
+            const Camera camera{position, position + Vec3{0.3f, -0.1f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, 500.0f};
+            const Camera seen = mirroredCamera(camera, plane);
+            const float start = mirrorCascadesStart(camera, plane);
+
+            assert(start >= camera.getNearPlane());
+            assert(start <= std::max(plane.normal.dot(position) - plane.offset, camera.getNearPlane()));
+            const float steps = std::log(start) / std::log(shadowDistanceStep);
+            assert(start == camera.getNearPlane() || near(steps, std::round(steps), 1e-3f));
+
+            // Points past the glass across the mirrored camera's view: none nearer along it than the start.
+            const float halfHeight = std::tan(seen.getVerticalFov() * 0.5f);
+            const float halfWidth = halfHeight * seen.getAspectRatio();
+            const Vec3 up = seen.getRight().cross(seen.getForward());
+
+            for (float x = -1.0f; x <= 1.0f; x += 0.25f) {
+                for (float y = -1.0f; y <= 1.0f; y += 0.25f) {
+                    const Vec3 ray = (seen.getForward() + seen.getRight() * (x * halfWidth) + up * (y * halfHeight)).normalized();
+                    const float towards = -plane.normal.dot(ray);
+
+                    // The ray from behind the glass reaches it at this distance, then goes on into the room.
+                    if (towards > 1e-4f) {
+                        const float toGlass = (plane.normal.dot(seen.getPosition()) - plane.offset) / -towards;
+                        const Vec3 pastGlass = seen.getPosition() + ray * std::max(toGlass, 0.0f);
+                        assert((pastGlass - seen.getPosition()).dot(seen.getForward()) >= start - 1e-4f);
+                    }
+                }
+            }
+        }
     }
 
     DrawItem glossyPanel(const Mat4& model, const std::vector<FlatFace>& faces, float roughness = 0.0f, float metallic = 1.0f) {
@@ -155,6 +210,47 @@ namespace {
         assert(near(mirrored.originAndView[2], -7.0f, 1e-5f) && mirrored.screen[0] == 960.0f);
     }
 
+    /*
+    * The capture clips at the mirror itself (gl_ClipDistance): its pipelines clamp depth, so no near plane could. What
+    * is in front of the mirror is kept and what is behind it cut, even the wall it hangs on 2 cm behind (the light
+    * lab's), and the glass itself, a little in front of which the plane is lifted so it does not flicker in and out of
+    * its own picture. The plane every other view uses never cuts anything.
+    */
+    void testClipPlane() {
+        const MirrorPlane plane{Vec3{0.0f, 0.0f, 1.0f}, -5.0f};
+        const Vec4 clip = planarClipPlane(plane);
+        const float lift = static_cast<float>(PLANAR_CLIP_LIFT);
+
+        assert(planarClipDistance(clip, Vec3{0.5f, -0.3f, -2.0f}) > 0.0f);
+        assert(planarClipDistance(clip, Vec3{0.5f, -0.3f, -5.02f}) < 0.0f);
+        assert(planarClipDistance(clip, Vec3{0.0f, 0.0f, -5.0f}) < 0.0f);
+        assert(near(planarClipDistance(clip, Vec3{3.0f, 1.0f, -2.0f}), 3.0f - lift, 1e-5f));
+
+        for (const Vec3& anywhere : {Vec3{0.0f, 0.0f, 0.0f}, Vec3{-1000.0f, 50.0f, 1000.0f}}) {
+            assert(planarClipDistance(noClipPlane(), anywhere) > 0.0f);
+        }
+    }
+
+    /*
+    * What the mirror's picture draws is culled by its view with the mirror for the near side: things in front of the glass
+    * that the mirror shows are drawn, and things behind it, which the clip plane would cut away anyway, are not drawn at
+    * all, however close to the mirrored camera they are.
+    */
+    void testMirrorFrustum() {
+        const Camera camera = makeCamera();
+        const MirrorPlane plane{Vec3{0.0f, 0.0f, 1.0f}, -5.0f};
+        const Mat4 worldView = planarViewProjection(toGpuDepthRange(camera.getProjectionMatrix()) * camera.getViewMatrix(), plane);
+        const Frustum frustum = planarFrustum(worldView, plane);
+
+        assert(frustum.intersectsSphere(Vec3{0.0f, 1.6f, -2.0f}, 0.2f));
+        assert(frustum.intersectsSphere(Vec3{0.5f, 1.0f, 3.0f}, 0.2f));
+        assert(!frustum.intersectsSphere(Vec3{0.0f, 1.6f, -6.0f}, 0.2f));
+        assert(!frustum.intersectsSphere(Vec3{0.0f, 1.6f, -9.0f}, 0.5f));
+
+        // The view alone would draw it: behind the glass is in front of the mirrored camera.
+        assert(Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero).intersectsSphere(Vec3{0.0f, 1.6f, -9.0f}, 0.5f));
+    }
+
     void testRenderSize() {
         assert((planarRenderSize(RenderSize{1920, 1080}, 0.5f) == RenderSize{960, 540}));
         assert((planarRenderSize(RenderSize{3, 1}, 0.25f) == RenderSize{1, 1}));
@@ -165,8 +261,12 @@ void testPlanarReflection() {
     testFlatFaces();
     testReflection();
     testPlanarView();
+    testMirroredCamera();
+    testMirrorCascadesStartAtTheGlass();
     testChoosingAMirror();
     testOnTheMirror();
     testMirroredRays();
+    testClipPlane();
+    testMirrorFrustum();
     testRenderSize();
 }

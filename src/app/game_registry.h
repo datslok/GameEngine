@@ -50,6 +50,8 @@ enum class YardstickRun {
 * anything reads them, start-up ones too; --run <file> runs a script of commands, one a line, at the first frame; --port
 * is the port --send uses (engine.commandPort's default without it). --send takes every word after it as one command
 * for a game already running, prints its reply and exits, so it takes nothing but --port before it.
+* --hidden plays the game in a window that never shows, for scripts and AIs driving it through commands (screenshots
+* come from the finished picture, not the screen).
 */
 struct LaunchOptions {
     const GameEntry* game = nullptr;
@@ -59,5 +61,6 @@ struct LaunchOptions {
     std::optional<std::string> script;
     std::optional<std::uint16_t> port;
     std::optional<std::vector<std::string>> send;
+    bool hidden = false;
 };
 LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments);

@@ -350,14 +350,16 @@ float sunCascadeEdge(int tile, vec3 position) {
 }
 
 /*
-* The sun's shadow from its cascades (render/gpu/cascades.h), tiles in a row from firstTile, finest first. The point is
-* shadowed by the finest cascade whose box holds it, each moving the point towards the sun by its own bias (sunShadowBias:
-* along the rays, so every cascade still finds the shadow's edges in the same place). Within
-* the blend band near that box's edge, the next cascade takes over gradually: both are looked up and mixed, or with the
-* dithered switch each pixel takes one of them, the next more often nearer the edge. Past the last cascade's edge the
-* shadow fades to lit, and a point no box holds is lit.
+* The sun's shadow from one row of cascades (render/gpu/cascades.h), tiles in a row from firstTile, finest first. The
+* point is shadowed by the finest cascade whose box holds it, each moving the point towards the sun by its own bias
+* (sunShadowBias: along the rays, so every cascade still finds the shadow's edges in the same place). Within the blend
+* band near that box's edge, the next cascade takes over gradually: both are looked up and mixed, or with the dithered
+* switch each pixel takes one of them, the next more often nearer the edge. What lies past the row (past the last
+* cascade's edge, or held by no box) is left to the caller: the row gives its own shadow, and how much of the answer
+* that is (ownShare); the rest comes from beyond the row.
 */
-float sunShadow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius) {
+float sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius, out float ownShare) {
+    ownShare = 1.0;
     float band = cascadeOptions.x;
     bool dither = cascadeOptions.y != 0.0;
     float nDotL = dot(normal, toLight);
@@ -377,8 +379,8 @@ float sunShadow(int firstTile, int cascades, vec3 normal, vec3 toLight, float ta
             return softShadowFromTile(tile, position, tanAngularRadius);
         }
 
-        // In the band: the next cascade's share comes from it, or past the last one from plain light. A point the next
-        // box misses (only at its corners) stays wholly with this one.
+        // In the band: the next cascade's share comes from it, or past the last one from beyond the row. A point the
+        // next box misses (only at its corners) stays wholly with this one.
         bool last = cascade + 1 == cascades;
         int nextTile = tile + 1;
         vec3 nextPosition = position;
@@ -397,14 +399,44 @@ float sunShadow(int firstTile, int cascades, vec3 normal, vec3 toLight, float ta
                 return softShadowFromTile(tile, position, tanAngularRadius);
             }
 
-            return last ? sunBeyondCascades(normal, toLight) : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
+            ownShare = last ? 0.0 : 1.0;
+            return last ? 0.0 : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
         }
 
-        float beyond = last ? sunBeyondCascades(normal, toLight) : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
-        return mix(beyond, softShadowFromTile(tile, position, tanAngularRadius), weight);
+        if (last) {
+            ownShare = weight;
+            return softShadowFromTile(tile, position, tanAngularRadius);
+        }
+
+        return mix(softShadowFromTile(nextTile, nextPosition, tanAngularRadius), softShadowFromTile(tile, position, tanAngularRadius), weight);
     }
 
-    return sunBeyondCascades(normal, toLight);
+    ownShare = 0.0;
+    return 0.0;
+}
+
+// A row's shadow with plain sunlight past it, as mix(beyond, own, share) always gave it.
+float sunRowOrLit(float own, float ownShare, vec3 normal, vec3 toLight) {
+    return ownShare >= 1.0 ? own : mix(sunBeyondCascades(normal, toLight), own, ownShare);
+}
+
+/*
+* The sun's shadow: from its own cascades, which hold what the camera sees, and past them from its cascades for a flat
+* mirror's picture (render/gpu/planar_reflection.h), which hold what the mirror shows behind the camera, so the camera's
+* last cascade fades into the mirror's rather than into a band of sunlight. Without a mirror, plain sunlight lies past
+* the camera's, as always.
+*/
+float sunShadow(int firstTile, int cascades, int mirrorFirstTile, int mirrorCascades, vec3 normal, vec3 toLight, float tanAngularRadius) {
+    float ownShare;
+    float own = sunCascadeRow(firstTile, cascades, normal, toLight, tanAngularRadius, ownShare);
+
+    if (ownShare >= 1.0 || mirrorCascades <= 0) {
+        return sunRowOrLit(own, ownShare, normal, toLight);
+    }
+
+    float mirrorShare;
+    float mirrored = sunCascadeRow(mirrorFirstTile, mirrorCascades, normal, toLight, tanAngularRadius, mirrorShare);
+    return mix(sunRowOrLit(mirrored, mirrorShare, normal, toLight), own, ownShare);
 }
 
 // A point light has six tiles in a row, one per cube face; the face is picked from the direction to the point.
@@ -596,7 +628,8 @@ void main() {
             int tile = directional[i].shadowTile;
 
             if (tile >= 0) {
-                radiance *= sunShadow(tile, directional[i].cascadeCount, geometricNormal, directional[i].toLight.xyz, directional[i].tanAngularRadius);
+                radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount, geometricNormal,
+                                      directional[i].toLight.xyz, directional[i].tanAngularRadius);
 #ifdef GLASS_SHADOW_RAYS
                 if (any(greaterThan(radiance, vec3(0.0)))) {
                     radiance *= glassShadow(directional[i].toLight.xyz, float(PROBE_SHADOW_RAY_REACH));

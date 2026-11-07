@@ -57,8 +57,9 @@ namespace {
 * --game <name> picks a game (app/game_registry.h; the light lab without it). --golden-save captures the golden images as
 * references, --golden-check compares with them (engine/golden.h), for the named game or else for every game; both exit
 * with 0 on success. --cloth-yardstick (or --cloth-yardstick-quick, or --cloth-yardstick-dress) measures the cloth solver (app/cloth_yardstick_run.h) instead of playing.
-* --set, --run and --port start the game with settings, a script and a port of its own; --send sends a command to a
-* game already running, prints its reply and exits with 0 when it worked, 1 when not.
+* --set, --run and --port start the game with settings, a script and a port of its own; --hidden plays it in a window
+* that never shows; --send sends a command to a game already running, prints its reply and exits with 0 when it worked,
+* 1 when not.
 */
 int main(int argc, char* argv[]) {
     try {
@@ -96,7 +97,8 @@ int main(int argc, char* argv[]) {
         }
 
         const std::vector<std::string> script = options.script ? readScript(*options.script) : std::vector<std::string>{};
-        Application application{title.c_str(), 1920, 1080, *game, EngineSettings{}, SavedSettings::Load, launchSettings};
+        Application application{title.c_str(), 1920, 1080, *game, EngineSettings{}, SavedSettings::Load, launchSettings,
+                                options.hidden ? WindowVisibility::Hidden : WindowVisibility::Shown};
         application.queueCommands(script);
         application.run();
     }

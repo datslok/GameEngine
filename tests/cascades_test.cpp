@@ -278,6 +278,25 @@ namespace {
         assert(nearlyEqual(fittedShadowDistance(fitFrom(0.01f)), 1.0f));
     }
 
+    /*
+    * Rounding down to the ladder, for where a mirror's cascades may start (render/gpu/planar_reflection.h): the highest
+    * step at or below the distance, below a metre too, so the start never passes the distance and moves only by steps.
+    */
+    void testTheLadderRoundsDown() {
+        for (float distance : {0.05f, 0.3f, 0.8f, 1.0f, 1.25f, 2.2f, 7.0f, 38.0f}) {
+            const float step = shadowLadderStepBelow(distance);
+            assert(step <= distance * 1.0001f);
+            assert(step * shadowDistanceStep > distance);
+
+            const float steps = std::log(step) / std::log(shadowDistanceStep);
+            assert(nearlyEqual(steps, std::round(steps), 0.001f));
+        }
+
+        assert(nearlyEqual(shadowLadderStepBelow(1.0f), 1.0f));
+        assert(nearlyEqual(shadowLadderStepBelow(1.3f), 1.25f));
+        assert(shadowLadderStepBelow(1.3f) == shadowLadderStepBelow(1.5f));
+    }
+
     // Small changes in the farthest surface stay on one step, so the cascades keep their size and stay cached.
     void testSmallChangesKeepTheStep() {
         const ShadowDistanceFit fit = fitFrom(7.0f);
@@ -310,6 +329,7 @@ namespace {
 void testCascades() {
     testNothingMeasuredIsNotFitted();
     testTheFitRoundsUpToTheLadder();
+    testTheLadderRoundsDown();
     testSmallChangesKeepTheStep();
     testTheFitGrowsAtOnceAndShrinksLate();
     testMovingTowardsTheSunKeepsThePlaceInEveryCascade();

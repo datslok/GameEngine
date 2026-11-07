@@ -20,7 +20,7 @@ namespace {
     }
 }
 
-Window::Window(const char* title, int width, int height) {
+Window::Window(const char* title, int width, int height, WindowVisibility visibility) {
     if (width <= 0 || height <= 0) {
         throw std::invalid_argument(
             "Window dimensions must be positive"
@@ -34,7 +34,7 @@ Window::Window(const char* title, int width, int height) {
 
         videoInitialized = true;
 
-        window = SDL_CreateWindow(title, width, height, 0);
+        window = SDL_CreateWindow(title, width, height, visibility == WindowVisibility::Hidden ? SDL_WINDOW_HIDDEN : 0);
 
         if (window == nullptr) {
             throw platformError("Window creation failed");

@@ -12,4 +12,9 @@ float isOnPlanarMirror(vec3 position, vec3 normal, vec3 planeNormal, float plane
     return abs(dot(planeNormal, position) - planeOffset) <= tolerance && dot(normal, planeNormal) >= float(PLANAR_NORMAL_COSINE) ? 1.0 : 0.0;
 }
 
+// A point's (from the camera) signed distance from a clip plane: xyz its normal, w its offset negated.
+float planarClipDistance(vec4 plane, vec3 position) {
+    return dot(plane.xyz, position) + plane.w;
+}
+
 #endif

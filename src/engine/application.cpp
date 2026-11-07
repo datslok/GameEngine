@@ -14,12 +14,12 @@
 #include <vector>
 
 Application::Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings,
-                         SavedSettings saved, const std::vector<SettingEntry>& launchSettings):
+                         SavedSettings saved, const std::vector<SettingEntry>& launchSettings, WindowVisibility visibility):
     game(game),
     settings(initialSettings),
     defaultSettings(captureDefaultsAndLoad(settings, game, saved, launchSettings)),
     jobs(workerThreadCount(settings)),
-    window(title, width, height),
+    window(title, width, height, visibility),
     renderer(window.getSdlWindow(), jobs, settings.gpuValidation, settings.framesInFlight),
     debugUi(window, renderer),
     timestep(settings.ticksPerSecond, settings.maxFrameSeconds)

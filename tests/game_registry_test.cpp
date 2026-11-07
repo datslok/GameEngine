@@ -100,6 +100,24 @@ namespace {
         assert(send.port == 5001);
         assert(send.send);
         assert((*send.send == std::vector<std::string>{"screenshot", "C:/my shots/a.png", "--game"}));
+        assert(!send.hidden);
+    }
+
+    // --hidden plays a game in a window that never shows, for scripts and AIs driving it through commands.
+    void testHiddenOption() {
+        assert(!parseLaunchOptions({}).hidden);
+        assert(!parseLaunchOptions({"--game", "lightlab"}).hidden);
+
+        const LaunchOptions hidden = parseLaunchOptions({"--game", "lightlab", "--hidden", "--port", "47620"});
+        assert(hidden.hidden);
+        assert(hidden.game == findGame("lightlab") && hidden.port == 47620);
+        assert(parseLaunchOptions({"--hidden", "--set", "engine.targetFPS=60"}).hidden);
+
+        // Once, and only for playing: a sent command shows nothing, and the golden images and the yardstick keep their own.
+        assert(throwsInvalidArgument({"--hidden", "--hidden"}));
+        assert(throwsInvalidArgument({"--hidden", "--send", "help"}));
+        assert(throwsInvalidArgument({"--golden-check", "--hidden"}));
+        assert(throwsInvalidArgument({"--cloth-yardstick", "--hidden"}));
     }
 
     // Mistakes are reported, not guessed at.
@@ -138,5 +156,6 @@ void testGameRegistry() {
     testEveryGameIsUsable();
     testLaunchOptions();
     testCommandOptions();
+    testHiddenOption();
     testLaunchMistakes();
 }

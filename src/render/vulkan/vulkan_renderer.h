@@ -304,6 +304,8 @@ private:
     // Fitting the sun's cascades to the screen (cascades.h): the depth measurement read back but not yet used (from a
     // frame or two ago), and where the cascades end now.
     std::unique_ptr<VulkanDepthRange> depthRange;
+    // The same for a flat mirror's own cascades (shadow_map.h, MirrorShadowView), from its picture's depths.
+    std::unique_ptr<VulkanDepthRange> mirrorDepthRange;
 
     // The eye's adaptation (render/gpu/eye_adaptation.h): its passes and the last reading, for the readout. It snaps
     // to its target when it starts afresh (the first frame, or switched on again) and on every frame a capture draws.
@@ -356,6 +358,8 @@ private:
     UpscalerSupport upscalerSupport() const;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
+    std::optional<ScreenDepthRange> unusedMirrorDepthRange;
+    ShadowDistanceFit mirrorShadowFit;
 
     // Hardware ray tracing (null on a GPU without ray queries): every mesh's acceleration structure and each frame's
     // scene, and the debug view drawn from them (the scene's two sets plus the ray tracing set, and its camera as push
@@ -522,8 +526,9 @@ private:
     void bindCaptureScene(FrameContext& frame, VkPipelineLayout layout, VkDescriptorSet sceneSet, bool traceRays);
 
     // The scene drawn through a flat mirror into its picture, as a capture face is, the sky in it when there is one.
+    // Everything behind clipPlane (planarClipPlane) is cut away.
     void drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
-                              const Mat4& viewProjection, const GpuRayDebugView& skyRays, const Vec3& background, bool sky);
+                              const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky);
 
     void drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
                           bool traceRays, float farPlane, const Vec3& background, bool sky);

@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -424,6 +426,123 @@ namespace {
         }
     }
 
+    // Whether some tile's box holds a world point.
+    bool anyTileHolds(const std::vector<ShadowTile>& tiles, std::size_t first, std::size_t count, const Vec3& point) {
+        for (std::size_t tile = first; tile < first + count; ++tile) {
+            const Vec3 projected = project(tiles[tile].matrix, point);
+
+            if (std::abs(projected.x) <= 1.0f && std::abs(projected.y) <= 1.0f && projected.z > 0.0f && projected.z < 1.0f) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A camera 5 m from a wall mirror (the plane z = -5, facing it), and that mirror's view: the camera seen in it, its
+    // cascades from 4 m (short of the glass) to 25 m along it.
+    Camera mirrorTestCamera() {
+        return Camera{Vec3{0.0f, 1.6f, 0.0f}, Vec3{0.0f, 1.5f, -5.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, 500.0f};
+    }
+
+    MirrorShadowView mirrorTestView() {
+        const Camera camera = mirrorTestCamera();
+        const Vec3 seenFrom{0.0f, 1.6f, -10.0f};
+        return MirrorShadowView{Camera{seenFrom, Vec3{0.0f, 1.5f, -5.0f}, Vec3{0.0f, 1.0f, 0.0f}, camera.getVerticalFov(),
+                                       camera.getAspectRatio(), camera.getNearPlane(), camera.getFarPlane()},
+                                4.0f, 25.0f};
+    }
+
+    /*
+    * A flat mirror's picture shows what is behind the camera, which the camera's cascades never hold, so the sun gets a
+    * second chain of cascades for it (MirrorShadowView): after every other tile, each of the mirror's resolution, its
+    * first and count beside the camera's in the sun's shadow. They hold what the mirror shows behind the camera, and
+    * the camera's own cascades come out exactly as without a mirror. Without a mirror view, or with none asked for in
+    * the settings, there is no second chain.
+    */
+    void testMirrorGetsCascadesOfItsOwn() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, 0.6f}});
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true));
+        const Camera camera = mirrorTestCamera();
+        const ShadowSettings settings;
+        const float fitted = 9.3f;
+
+        const ShadowPlan without = planShadows(lighting, camera, settings, fitted);
+        assert(without.directional[0].mirrorFirstTile == -1 && without.directional[0].mirrorCascades == 0);
+
+        const ShadowPlan with = planShadows(lighting, camera, settings, fitted, mirrorTestView());
+        const LightShadow& sun = with.directional[0];
+        assert(settings.mirrorCascadeCount == 2);
+        assert(sun.firstTile == 0 && sun.cascades == settings.cascadeCount);
+        assert(sun.mirrorFirstTile == static_cast<std::int32_t>(without.tiles.size()));
+        assert(sun.mirrorCascades == settings.mirrorCascadeCount);
+        assert(with.tiles.size() == without.tiles.size() + 2);
+        assert(with.spots[0].firstTile == without.spots[0].firstTile);
+
+        const std::size_t mirrorFirst = static_cast<std::size_t>(sun.mirrorFirstTile);
+
+        for (std::size_t tile = 0; tile < without.tiles.size(); ++tile) {
+            for (int value = 0; value < 16; ++value) {
+                assert(with.tileData[tile].matrix[value] == without.tileData[tile].matrix[value]);
+            }
+        }
+
+        for (std::size_t tile = mirrorFirst; tile < with.tiles.size(); ++tile) {
+            assert(with.tiles[tile].size == cascadeTilePixels(settings.mirrorCascadeResolution));
+            assert(with.tileData[tile].lens[0] == 0.0f);
+
+            if (tile > mirrorFirst) {
+                assert(with.tileData[tile].lens[2] > with.tileData[tile - 1].lens[2]);
+            }
+        }
+
+        // Behind the camera, 3 to 12 m: in the mirror (5 m away) 13 to 22 m along its view, which its cascades hold.
+        for (float z : {3.0f, 7.0f, 12.0f}) {
+            assert(anyTileHolds(with.tiles, mirrorFirst, static_cast<std::size_t>(sun.mirrorCascades), Vec3{0.3f, 1.0f, z}));
+        }
+
+        // The camera's own boxes reach towards the sun, which is ahead, so far enough behind the camera only the mirror's do.
+        assert(!anyTileHolds(with.tiles, 0, static_cast<std::size_t>(sun.cascades), Vec3{0.3f, 1.0f, 12.0f}));
+
+        ShadowSettings none = settings;
+        none.mirrorCascadeCount = 0;
+        const ShadowPlan off = planShadows(lighting, camera, none, fitted, mirrorTestView());
+        assert(off.directional[0].mirrorCascades == 0 && off.directional[0].mirrorFirstTile == -1);
+        assert(off.tiles.size() == without.tiles.size());
+
+        // No sun shadow, no mirror cascades either.
+        FrameLighting shadowless;
+        shadowless.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+        shadowless.directionalLights[0].castsShadows = false;
+        assert(planShadows(shadowless, camera, settings, fitted, mirrorTestView()).tiles.empty());
+    }
+
+    // The mirror's cascades are the least important shadows: when the atlas is full they shrink before any light's.
+    // In the usual atlas (32 squares of 1024), the sun's four 2048 cascades, the mirror's two and two point lights' twelve
+    // 1024 faces are 36: the mirror's alone give way, and the lights keep their full size.
+    void testMirrorCascadesShrinkFirst() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, -0.6f}});
+
+        for (int i = 0; i < 2; ++i) {
+            lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
+        }
+
+        ShadowSettings high;
+        high.cascadeResolution = CascadeResolution::Pixels2048;
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera(), high, std::numeric_limits<float>::infinity(), mirrorTestView());
+        assertTilesFitTheAtlas(plan, shadowAtlasSizeFor(high));
+
+        const std::size_t mirrorFirst = static_cast<std::size_t>(plan.directional[0].mirrorFirstTile);
+        assert(plan.tiles[mirrorFirst].size < cascadeTilePixels(high.mirrorCascadeResolution));
+        assert(plan.tiles[static_cast<std::size_t>(plan.directional[0].firstTile)].size == largestShadowTileSize);
+
+        for (std::size_t slot = 0; slot < plan.points.size(); ++slot) {
+            assert(plan.tiles[static_cast<std::size_t>(plan.points[slot].firstTile)].size == standardShadowTileSize);
+        }
+    }
+
     // When the atlas is full, spotlights only give up their large tiles once every point light is down to the smallest
     // size, least important spotlight first; the most important keeps its 2048 tile.
     void testSpotTilesShrinkAfterPointLights() {
@@ -602,10 +721,11 @@ namespace {
     }
 
     void testEveryShadowFits() {
-        // In the usual atlas (High's 2048 cascades), where the cascades must give way last.
+        // In the usual atlas (High's 2048 cascades), where the cascades must give way last, with a mirror's every cascade.
         ShadowSettings high;
         high.cascadeResolution = CascadeResolution::Pixels2048;
-        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), high);
+        high.mirrorCascadeCount = maxShadowCascades;
+        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), high, std::numeric_limits<float>::infinity(), mirrorTestView());
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
         assertTilesFitTheAtlas(plan, shadowAtlasSizeFor(high));
@@ -659,8 +779,9 @@ namespace {
     void testEveryShadowFitsOnUltra() {
         ShadowSettings settings;
         settings.cascadeResolution = CascadeResolution::Pixels4096;
+        settings.mirrorCascadeCount = maxShadowCascades;
         ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
-        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), layout, settings);
+        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), layout, settings, std::numeric_limits<float>::infinity(), mirrorTestView());
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
         assertTilesFitTheAtlas(plan, layout.size());
@@ -831,6 +952,14 @@ namespace {
         assert(lights.points[0].firstShadowTile == maxShadowCascades + 1);
         assert(nearlyEqual(lights.points[0].shadowStrength, 0.3f) && nearlyEqual(lights.points[0].emitterRadius, 0.2f));
         assert(lights.points[1].firstShadowTile == -1 && lights.points[1].shadowStrength == 0.0f);
+        assert(lights.directional[0].mirrorShadowTile == -1 && lights.directional[0].mirrorCascadeCount == 0);
+
+        // A mirror's cascades come last of all, and the sun's record names them beside its own.
+        const ShadowPlan mirrored = planShadows(lighting, camera, ShadowSettings{}, std::numeric_limits<float>::infinity(), mirrorTestView());
+        GpuLights withMirror = packLighting(lighting, camera.getPosition());
+        attachShadows(withMirror, mirrored);
+        assert(withMirror.directional[0].mirrorShadowTile == maxShadowCascades + 1 + 6);
+        assert(withMirror.directional[0].mirrorCascadeCount == ShadowSettings{}.mirrorCascadeCount);
     }
 
     // Each tile knows how far its light reaches (a sphere round the light, the range as radius), so the shadow pass can
@@ -942,6 +1071,8 @@ void testShadowMap() {
     testNearShadowsAreFine();
     testCascadesCoverTheViewToTheShadowDistance();
     testFittedCascadesEndAtTheFittedDistance();
+    testMirrorGetsCascadesOfItsOwn();
+    testMirrorCascadesShrinkFirst();
     testOnlyTheFirstDirectionalLightCastsShadows();
     testCascadesMoveInWholeTexels();
     testLightsCastShadowsByDefault();

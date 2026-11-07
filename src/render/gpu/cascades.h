@@ -72,6 +72,10 @@ ShadowDistanceFit fitShadowDistance(const ShadowDistanceFit& previous, std::opti
 // Where the fitted cascades end: infinity when not fitted, so the shadow distance applies.
 float fittedShadowDistance(const ShadowDistanceFit& fit);
 
+// The highest step of the ladder at or below a distance (steps below 1 m too), for where a mirror's cascades may start
+// (render/gpu/planar_reflection.h, mirrorCascadesStart): never past the distance, and moving only a step at a time.
+float shadowLadderStepBelow(float distance);
+
 // Any up direction works for a shadow view, as long as it is not parallel to the way the view looks.
 Vec3 shadowViewUp(const Vec3& forward);
 

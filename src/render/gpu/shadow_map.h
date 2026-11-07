@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <vector>
 
 /*
@@ -84,6 +85,12 @@ struct ShadowSettings {
     // it changes, and every shadow redrawn.
     CascadeResolution cascadeResolution = CascadeResolution::Pixels4096;
 
+    // A flat mirror's own cascades (render/gpu/planar_reflection.h): the sun's shadows for what the mirror shows, which
+    // is mostly behind the camera, where its own cascades never reach. 0 leaves the mirror in full sun. They are the
+    // least important shadows, so a full atlas shrinks them first, and no larger than the atlas's largest square.
+    int mirrorCascadeCount = 2;
+    CascadeResolution mirrorCascadeResolution = CascadeResolution::Pixels2048;
+
     // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
     // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
     // light grazes. Measured in texels, it shrinks and grows with each tile's size. For the sun it is how far points move
@@ -101,7 +108,7 @@ ShadowAtlasSize shadowAtlasSizeFor(const ShadowSettings& settings);
 inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; cached tiles cost little, but each shadowed pixel pays 32 samples per light
 inline constexpr int maxShadowedSpotLights = 8;        // 1 tile each
 inline constexpr int maxShadowedDirectionalLights = 1; // the sun: up to maxShadowCascades tiles of cascadeTileSize
-inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights * maxShadowCascades;
+inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights * maxShadowCascades * 2; // a mirror's cascades too
 
 // Tile edge length in pixels for a square view of the given half-width (tan of its half-angle) reaching range: enough
 // for one texel to cover texelTarget across the far end of the view, as a power of two from the smallest tile size up
@@ -126,14 +133,28 @@ Mat4 spotShadowMatrix(const Vec3& lightPosition, const Vec3& direction, float ou
 /*
 * One light's shadow as the plan hands it out: its first tile (-1 for none; a point light's six faces are six tiles in a
 * row from it, and so are a sun's cascades, cascades of them), how strong it is while shadows fade between lights (0..1),
-* and the glowing size that softens it (for a sun, tan of its angular radius). attachShadows copies these into the light
-* records the shader reads.
+* and the glowing size that softens it (for a sun, tan of its angular radius). A sun seen in a flat mirror has a second
+* row of cascades for the mirror's picture (MirrorShadowView), after every other tile. attachShadows copies these into
+* the light records the shader reads.
 */
 struct LightShadow {
     std::int32_t firstTile = -1;
     float strength = 0.0f;
     float emitterRadius = 0.0f;
     std::int32_t cascades = 0;
+    std::int32_t mirrorFirstTile = -1;
+    std::int32_t mirrorCascades = 0;
+};
+
+/*
+* What a flat mirror's picture shows, for the sun's cascades of its own (render/gpu/planar_reflection.h): the camera seen
+* in the mirror (mirroredCamera), and the stretch of its view they cover, from where the glass can start
+* (mirrorCascadesStart) to the farthest surface the picture holds.
+*/
+struct MirrorShadowView {
+    Camera camera;
+    float nearDistance = 0.0f;
+    float farDistance = 0.0f;
 };
 
 /*
@@ -183,13 +204,16 @@ struct ShadowPlan {
 // to frame, so lights keep their squares of the atlas and what was drawn into them can be kept. The layout must be for the
 // atlas the settings need (shadowAtlasSizeFor), or this throws std::invalid_argument. The sun's cascades end at the
 // shadow distance, the camera's far plane or fittedSunDistance (fitted to the screen's depths, fittedShadowDistance in
-// cascades.h), whichever is nearest.
+// cascades.h), whichever is nearest. With a mirror, the sun also gets settings.mirrorCascadeCount cascades for its view,
+// numbered after every other tile.
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, ShadowAtlasLayout& layout,
-                       const ShadowSettings& settings = {}, float fittedSunDistance = std::numeric_limits<float>::infinity());
+                       const ShadowSettings& settings = {}, float fittedSunDistance = std::numeric_limits<float>::infinity(),
+                       const std::optional<MirrorShadowView>& mirror = std::nullopt);
 
 // The same, packed into an empty atlas (for one-off plans and tests).
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings = {},
-                       float fittedSunDistance = std::numeric_limits<float>::infinity());
+                       float fittedSunDistance = std::numeric_limits<float>::infinity(),
+                       const std::optional<MirrorShadowView>& mirror = std::nullopt);
 
 // Give each light record the shadow the plan handed out for its slot (the plan and the lights from the same frame's lights).
 void attachShadows(GpuLights& lights, const ShadowPlan& plan);

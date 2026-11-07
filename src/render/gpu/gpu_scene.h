@@ -2,6 +2,7 @@
 
 #include "math/mat4.h"
 #include "math/vec3.h"
+#include "math/vec4.h"
 #include "render/gpu/clusters.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
@@ -47,6 +48,18 @@ struct GpuShadowView {
 static_assert(sizeof(GpuShadowView) == 64, "GpuShadowView must match shadow.vert's push constants");
 
 /*
+* A capture's view (a reflection probe cube face's, or a flat mirror's), pushed before its draws: the view-projection
+* (column-major, camera-relative) and the plane triangle.vert clips at (render/gpu/planar_reflection.h, planarClipPlane;
+* noClipPlane for the cube and for the passes that push it only because the shader names it).
+*/
+struct GpuCaptureView {
+    float viewProjection[16];
+    float clipPlane[4];
+};
+
+static_assert(sizeof(GpuCaptureView) == 80, "GpuCaptureView must match triangle.vert's push constants");
+
+/*
 * The frame's small uniform block (std140): for the vertex shader the camera's view-projection measured from the camera
 * and the camera's position, which make each instance camera-relative (render/gpu/camera_relative.h); for every pixel
 * the ambient light, how many lights of each kind the light buffers hold this frame, and the size of one shadow atlas texel;
@@ -81,6 +94,8 @@ static_assert(sizeof(GpuFrameData) == 352, "GpuFrameData must match the shader's
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
 GpuShadowView packShadowView(const Mat4& tileMatrix);
+
+GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane);
 
 GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
                            const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap, const ShadowSettings& shadows = {});

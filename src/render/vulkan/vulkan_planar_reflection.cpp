@@ -29,7 +29,8 @@ void VulkanPlanarReflection::ensureSize(RenderSize render) {
     depthDescription.format = depthFormat;
     depthDescription.width = render.width;
     depthDescription.height = render.height;
-    depthDescription.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depthDescription.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depthDescription.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     depthDescription.name = "Planar reflection depth";
     depth = VulkanImage{device, depthDescription};
 
@@ -51,7 +52,7 @@ ColourAttachment VulkanPlanarReflection::colourTarget(const Vec3& background) co
 }
 
 DepthAttachment VulkanPlanarReflection::depthTarget() const {
-    return DepthAttachment{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE, gpuFarDepth};
+    return DepthAttachment{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
 }
 
 /*
@@ -69,4 +70,8 @@ VulkanImage& VulkanPlanarReflection::getPicture() {
 
 std::uint32_t VulkanPlanarReflection::getLevels() const {
     return pyramid.getLevels();
+}
+
+VulkanImage& VulkanPlanarReflection::getDepth() {
+    return depth;
 }

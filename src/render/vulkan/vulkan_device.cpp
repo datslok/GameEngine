@@ -148,6 +148,8 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
     features.depthClamp = VK_TRUE;
+    // triangle.vert's gl_ClipDistance: a mirror's picture cuts what is behind the mirror (render/gpu/planar_reflection.h).
+    features.shaderClipDistance = VK_TRUE;
     features.shaderStorageImageExtendedFormats = VK_TRUE;
 
     VkPhysicalDeviceVulkan13Features features13{};

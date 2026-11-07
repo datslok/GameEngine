@@ -101,6 +101,21 @@ float fittedShadowDistance(const ShadowDistanceFit& fit) {
     return fit.step ? ladderDistance(*fit.step) : std::numeric_limits<float>::infinity();
 }
 
+// Corrected by a step either way after the logarithm, as stepReaching is, so rounding never lands a step past the distance.
+float shadowLadderStepBelow(float distance) {
+    int step = static_cast<int>(std::floor(std::log(distance) / std::log(shadowDistanceStep)));
+
+    while (ladderDistance(step) > distance) {
+        --step;
+    }
+
+    while (ladderDistance(step + 1) <= distance) {
+        ++step;
+    }
+
+    return ladderDistance(step);
+}
+
 Vec3 shadowViewUp(const Vec3& forward) {
     return std::abs(forward.normalized().y) > 0.99f ? Vec3{0.0f, 0.0f, -1.0f} : Vec3{0.0f, 1.0f, 0.0f};
 }

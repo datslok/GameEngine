@@ -29,6 +29,16 @@ GpuShadowView packShadowView(const Mat4& tileMatrix) {
     return view;
 }
 
+GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane) {
+    GpuCaptureView view{};
+    writeColumnMajor(viewProjection, view.viewProjection);
+    view.clipPlane[0] = clipPlane.x;
+    view.clipPlane[1] = clipPlane.y;
+    view.clipPlane[2] = clipPlane.z;
+    view.clipPlane[3] = clipPlane.w;
+    return view;
+}
+
 // The atlas never changes size, so its texel is a constant; it rides along here because the shader wants it per pixel.
 namespace {
     void writeAxis(const Vec3& axis, float destination[4]) {

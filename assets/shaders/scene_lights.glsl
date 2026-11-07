@@ -11,6 +11,8 @@ struct DirectionalLightData {
     int shadowTile;         // the first of its cascades' tiles
     int cascadeCount;
     float tanAngularRadius; // its size as seen from the ground, for soft shadows
+    int mirrorShadowTile;   // the first of its cascades for a flat mirror's picture, tried where none of its own holds a point
+    int mirrorCascadeCount;
 };
 
 struct PointLightData {

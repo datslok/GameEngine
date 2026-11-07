@@ -1,4 +1,5 @@
 #include "render/gpu/planar_reflection.h"
+#include "render/gpu/cascades.h"
 #include "render/gpu/transparency.h"
 
 #include <algorithm>
@@ -49,44 +50,37 @@ Mat4 planeReflection(const MirrorPlane& plane) {
     return reflection;
 }
 
-/*
-* The plane's signed distance pi(x) = n.x - d is a row like the matrix's own. Where it is above 0, x is in front of the
-* mirror. With z = w - k pi, the GPU's z <= w is pi >= 0, the mirror for a near plane; its z >= 0 is k pi <= w, so k is
-* what brings the largest pi / w over the view's far corners down to 1 (a ratio of homogeneous values, so no divide by the
-* corners' own w is needed).
-*/
 Mat4 planarViewProjection(const Mat4& viewProjection, const MirrorPlane& plane) {
-    Mat4 mirrored = viewProjection * planeReflection(plane);
-    const std::array<float, 4> distance{plane.normal.x, plane.normal.y, plane.normal.z, -(plane.offset + static_cast<float>(PLANAR_CLIP_LIFT))};
-    float largest = 0.0f;
+    return viewProjection * planeReflection(plane);
+}
 
-    if (const std::optional<Mat4> corners = inverse(mirrored)) {
-        for (const float x : {-1.0f, 1.0f}) {
-            for (const float y : {-1.0f, 1.0f}) {
-                const Vec4 corner = *corners * Vec4{x, y, 0.0f, 1.0f};
-                const std::array<float, 4> point{corner.x, corner.y, corner.z, corner.w};
-                float pi = 0.0f;
-                float w = 0.0f;
+// The near side is the fifth plane (Frustum::fromClipMatrix); the clip plane's row is already a plane's normal and distance.
+Frustum planarFrustum(const Mat4& worldViewProjection, const MirrorPlane& plane) {
+    Frustum frustum = Frustum::fromClipMatrix(worldViewProjection, ClipDepth::OneToZero);
+    const Vec4 clip = planarClipPlane(plane);
+    frustum.planes[4] = Plane{Vec3{clip.x, clip.y, clip.z}, clip.w};
+    return frustum;
+}
 
-                for (std::size_t column = 0; column < point.size(); ++column) {
-                    pi += distance[column] * point[column];
-                    w += mirrored.values[3][column] * point[column];
-                }
+Camera mirroredCamera(const Camera& camera, const MirrorPlane& plane) {
+    const Vec3 position = reflectAcrossPlane(camera.getPosition(), plane);
+    const Vec3 target = reflectAcrossPlane(camera.getPosition() + camera.getForward(), plane);
+    const Vec3 up = camera.getUp() - plane.normal * (2.0f * plane.normal.dot(camera.getUp()));
+    return Camera{position, target, up, camera.getVerticalFov(), camera.getAspectRatio(), camera.getNearPlane(), camera.getFarPlane()};
+}
 
-                if (w != 0.0f) {
-                    largest = std::max(largest, pi / w);
-                }
-            }
-        }
-    }
-
-    const float scale = largest > 0.0f ? 1.0f / largest : 1.0f;
-
-    for (std::size_t column = 0; column < distance.size(); ++column) {
-        mirrored.values[2][column] = mirrored.values[3][column] - scale * distance[column];
-    }
-
-    return mirrored;
+/*
+* The mirrored camera is as far behind the glass as the camera is in front, so whatever it sees past the glass is at
+* least that far from it, and a point that far from it along a ray at an angle a from its forward axis is that times
+* cos a along the axis. The widest angle is the view's corner's, whose cosine is 1 / sqrt(1 + tan^2 of the half-height
+* + tan^2 of the half-width). Rounded down to the ladder, so it does not change the cascades as the camera creeps.
+*/
+float mirrorCascadesStart(const Camera& camera, const MirrorPlane& plane) {
+    const float behindGlass = std::abs(plane.normal.dot(camera.getPosition()) - plane.offset);
+    const float halfHeight = std::tan(camera.getVerticalFov() * 0.5f);
+    const float halfWidth = halfHeight * camera.getAspectRatio();
+    const float alongAxis = behindGlass / std::sqrt(1.0f + halfHeight * halfHeight + halfWidth * halfWidth);
+    return alongAxis > camera.getNearPlane() ? std::max(shadowLadderStepBelow(alongAxis), camera.getNearPlane()) : camera.getNearPlane();
 }
 
 std::optional<MirrorPlane> choosePlanarMirror(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& visible, const Vec3& cameraPosition,
@@ -123,6 +117,18 @@ std::optional<MirrorPlane> choosePlanarMirror(const std::vector<DrawItem>& draws
     }
 
     return best;
+}
+
+Vec4 planarClipPlane(const MirrorPlane& relativePlane) {
+    return Vec4{relativePlane.normal.x, relativePlane.normal.y, relativePlane.normal.z, -(relativePlane.offset + static_cast<float>(PLANAR_CLIP_LIFT))};
+}
+
+Vec4 noClipPlane() {
+    return Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+}
+
+float planarClipDistance(const Vec4& plane, const Vec3& position) {
+    return plane.x * position.x + plane.y * position.y + plane.z * position.z + plane.w;
 }
 
 float isOnPlanarMirror(const Vec3& position, const Vec3& normal, const Vec3& planeNormal, float planeOffset) {

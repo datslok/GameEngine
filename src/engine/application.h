@@ -47,7 +47,8 @@ enum class SavedSettings {
 class Application {
 public:
     Application(const char* title, int width, int height, Game& game, const EngineSettings& initialSettings = {},
-                SavedSettings saved = SavedSettings::Load, const std::vector<SettingEntry>& launchSettings = {});
+                SavedSettings saved = SavedSettings::Load, const std::vector<SettingEntry>& launchSettings = {},
+                WindowVisibility visibility = WindowVisibility::Shown);
 
     void run();
 

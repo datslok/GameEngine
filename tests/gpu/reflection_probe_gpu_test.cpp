@@ -114,7 +114,9 @@ namespace {
             report.check("blendedStandIn", arithmeticTolerance, blendedStandIn(vec3From(in[2]), vec3From(in[3]), vec3From(in[4]), in[1][1]),
                          vec3From(out[1]));
             report.check("probeGuessedLight", arithmeticTolerance, probeGuessedLight(vec3From(in[2]), vec3From(in[3]), in[1][1], in[0][0]), vec3From(out[2]));
-            report.check("isOnPlanarMirror", arithmeticTolerance, isOnPlanarMirror(vec3From(in[2]), vec3From(in[3]), vec3From(in[3]), in[2][1]), out[2][3]);
+            report.check("planarClipDistance", arithmeticTolerance, planarClipDistance(Vec4{in[3][0], in[3][1], in[3][2], in[2][1]}, vec3From(in[2])),
+                         out[0][2]);
+            report.check("isOnPlanarMirror",arithmeticTolerance, isOnPlanarMirror(vec3From(in[2]), vec3From(in[3]), vec3From(in[3]), in[2][1]), out[2][3]);
         }
     }
 }

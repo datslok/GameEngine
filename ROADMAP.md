@@ -286,12 +286,10 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 
 **Items**
 
-- [ ] Screen-space global illumination: GTAO grown to gather the colour its horizons block, on by default, off on Low
-  - **Chosen over** the software tracer (kept on hold in phase 14) and baked lighting (Nov 6 2026, the user's choice): cheap, automatic and built on passes that exist.
-  - **Known limit, accepted:** it sees only what is on screen, so a closed room is still lit by the flat ambient and bounce light goes when its source leaves the view.
-- [ ] Planar reflections: flat mirrors drawn for real, a second draw of the scene through the mirror, chosen automatically, one plane a frame; built on `screen-space-gi`, not yet seen on a GPU
-  - Why: a single probe at the camera cannot show what a flat mirror sees past a door frame, and head-on mirrors in rooms looked jagged, at any probe size.
-  - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low.
+- [x] Screen-space global illumination (`screen-space-gi`)
+- [ ] Sky visibility: a grid round the camera saying how much sky each point sees, from the static level by rays on the CPU, dimming the flat ambient so rooms go dark without probes
+- [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
+  - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
 - [ ] Contact shadows: short screen-space rays, so small objects sit on what they touch
 - [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
   - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.

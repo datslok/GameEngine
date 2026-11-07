@@ -35,6 +35,10 @@ public:
     VulkanImage& getPicture();
     std::uint32_t getLevels() const;
 
+    // Its depths, kept after drawing, for measuring how far the mirror shows (the mirror's sun cascades are fitted to
+    // them, render/gpu/shadow_map.h, MirrorShadowView).
+    VulkanImage& getDepth();
+
 private:
     const VulkanDevice& device;
     VkFormat colourFormat;
