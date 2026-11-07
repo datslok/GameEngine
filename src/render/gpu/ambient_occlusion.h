@@ -163,6 +163,14 @@ Vec3 depthNormal(const Vec3& centre, const Vec3& across, const Vec3& downwards);
 // pixelFootprint), at most AO_MAX_SCREEN_RADIUS.
 float aoScreenRadius(float radius, float footprint, float viewDistance);
 
+/*
+* The pass's two noises at a pixel centre and frame (0..1 each): x turns the slices, y staggers the steps. They must be
+* independent over the frames: a pixel sees a small bright thing only when its slice points at it, and if the stagger
+* were a fixed function of the angle (as the same noise at a shifted pixel is), its samples would land at the same
+* distances from it every frame, drawing rings round it that no averaging removes.
+*/
+Vec2 aoNoise(Vec2 pixel, int frame);
+
 // Step index of count's distance along a slice (pixels): spread quadratically (dense near the point, where creases are),
 // staggered by noise (0..1), never under AO_MIN_SAMPLE_PIXELS.
 float aoSampleDistance(int step, int count, float noise, float screenRadius);

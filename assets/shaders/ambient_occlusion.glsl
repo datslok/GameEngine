@@ -7,6 +7,7 @@
 
 #include "render/gpu/ambient_occlusion_shared.h"
 #include "taa.glsl"
+#include "dither.glsl"
 
 // An occluder's weight at this distance: 1 up to the falloff's start, 0 at the radius.
 float occluderWeight(float distance, float radius, float falloff) {
@@ -133,6 +134,13 @@ vec3 depthNormal(vec3 centre, vec3 across, vec3 downwards) {
 
 float aoScreenRadius(float radius, float footprint, float viewDistance) {
     return min(radius / (footprint * viewDistance), float(AO_MAX_SCREEN_RADIUS));
+}
+
+// The pass's two noises (x the slices' turn, y the steps' stagger), independent over the frames.
+vec2 aoNoise(vec2 pixel, int frame) {
+    float shift = float(AO_NOISE_FRAME_SHIFT) * float(frame);
+    float start = interleavedGradientNoise(pixel + vec2(float(AO_STEP_NOISE_OFFSET_X), float(AO_STEP_NOISE_OFFSET_Y)));
+    return vec2(interleavedGradientNoise(pixel + shift), fract(start + float(AO_STEP_NOISE_FRAME_STEP) * float(frame)));
 }
 
 float aoSampleDistance(int index, int count, float noise, float screenRadius) {

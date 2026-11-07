@@ -1,4 +1,5 @@
 #include "render/gpu/ambient_occlusion.h"
+#include "core/dither.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/screen_reflections.h"
@@ -193,6 +194,19 @@ Vec3 depthNormal(const Vec3& centre, const Vec3& across, const Vec3& downwards) 
 
 float aoScreenRadius(float radius, float footprint, float viewDistance) {
     return std::min(radius / (footprint * viewDistance), static_cast<float>(AO_MAX_SCREEN_RADIUS));
+}
+
+/*
+* Interleaved gradient noise moved by the same amount along both axes adds a constant inside it, so the same noise at a
+* shifted pixel is a fixed function of the unshifted one; the stagger therefore starts there but steps on by the golden
+* ratio's fraction a frame (an even, low-discrepancy sequence), which the slices' sequence does not follow.
+*/
+Vec2 aoNoise(Vec2 pixel, int frame) {
+    const float shift = static_cast<float>(AO_NOISE_FRAME_SHIFT) * static_cast<float>(frame);
+    const float slice = interleavedGradientNoise(pixel.x + shift, pixel.y + shift);
+    const float start = interleavedGradientNoise(pixel.x + static_cast<float>(AO_STEP_NOISE_OFFSET_X), pixel.y + static_cast<float>(AO_STEP_NOISE_OFFSET_Y));
+    const float stagger = start + static_cast<float>(AO_STEP_NOISE_FRAME_STEP) * static_cast<float>(frame);
+    return Vec2{slice, stagger - std::floor(stagger)};
 }
 
 float aoSampleDistance(int step, int count, float noise, float screenRadius) {

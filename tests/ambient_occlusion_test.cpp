@@ -1,4 +1,5 @@
 #include "math/mat4.h"
+#include "core/dither.h"
 #include "render/gpu/ambient_occlusion.h"
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/gpu_depth_range.h"
@@ -279,6 +280,45 @@ namespace {
         assert(near(surfaceVisibility(1.0f, 0.2f, 0.5f), 0.6f, 1e-6f));
         assert(near(surfaceVisibility(0.4f, 0.2f, 0.5f), 0.4f, 1e-6f));
         assert(near(surfaceVisibility(0.7f, 0.5f, 1.0f), 0.5f, 1e-6f));
+    }
+
+    /*
+    * Over the frames a pixel's slice angles must meet every step stagger: the frames whose slice noise falls in one
+    * quarter have step noises in all four quarters. Taking the stagger from the same noise at a shifted pixel (the first
+    * way) ties it to the angle, and the same quarter of angles gets one narrow band of staggers.
+    */
+    void testNoisesIndependent() {
+        for (const Vec2 pixel : {Vec2{100.5f, 70.5f}, Vec2{3.5f, 251.5f}, Vec2{611.5f, 12.5f}}) {
+            int quarters[4] = {0, 0, 0, 0};
+            int tiedQuarters[4] = {0, 0, 0, 0};
+            int inQuarter = 0;
+
+            for (int frame = 0; frame < 1024; ++frame) {
+                const Vec2 noise = aoNoise(pixel, frame);
+                assert(noise.x >= 0.0f && noise.x < 1.0f && noise.y >= 0.0f && noise.y < 1.0f);
+
+                if (noise.x < 0.25f) {
+                    ++inQuarter;
+                    ++quarters[std::min(static_cast<int>(noise.y * 4.0f), 3)];
+                    const float shift = static_cast<float>(AO_NOISE_FRAME_SHIFT) * static_cast<float>(frame);
+                    const float tied = interleavedGradientNoise(pixel.x + shift + 23.0f, pixel.y + shift + 41.0f);
+                    ++tiedQuarters[std::min(static_cast<int>(tied * 4.0f), 3)];
+                }
+            }
+
+            assert(inQuarter > 128);
+            int tiedEmpty = 0;
+
+            for (int quarter = 0; quarter < 4; ++quarter) {
+                assert(quarters[quarter] > inQuarter / 8);
+                tiedEmpty += tiedQuarters[quarter] == 0 ? 1 : 0;
+            }
+
+            assert(tiedEmpty >= 2);
+        }
+
+        // The slices' turn is the noise moved along the screen each frame, as before.
+        assert(aoNoise(Vec2{10.5f, 20.5f}, 0).x == interleavedGradientNoise(10.5f, 20.5f));
     }
 
     void testBlurWeight() {
@@ -826,6 +866,7 @@ void testAmbientOcclusion() {
     testSpecularOcclusion();
     testSurfaceVisibility();
     testBlurWeight();
+    testNoisesIndependent();
     testFloorAndWall();
     testThicknessLetsLightBehind();
     testHistoryAge();

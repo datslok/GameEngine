@@ -76,9 +76,9 @@ void main() {
     vec3 normal = depthNormal(position, across, downwards);
     vec3 toCamera = normalize(-position);
 
-    vec2 framePixel = pixel + 5.588238 * float(pass.frame.x);
-    float sliceNoise = interleavedGradientNoise(framePixel);
-    float stepNoise = interleavedGradientNoise(framePixel + vec2(23.0, 41.0));
+    vec2 noise = aoNoise(pixel, pass.frame.x);
+    float sliceNoise = noise.x;
+    float stepNoise = noise.y;
     int slices = int(pass.options.z);
     int steps = int(pass.options.w);
     float thickness = pass.gather.x;

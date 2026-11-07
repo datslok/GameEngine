@@ -32,6 +32,15 @@
 #define AO_BLUR_RADIUS 2
 #define AO_BLUR_DEPTH_SHARE 0.1
 
+// The pass's noise (aoNoise): the slices' turn is interleaved gradient noise moved this many pixels along both axes a
+// frame (Jimenez's constant, which steps it evenly), and the steps' stagger starts from the noise at the pixel moved by
+// this offset and goes on by the golden ratio's fraction a frame, a sequence of its own, so that over the frames every
+// slice angle meets every step stagger.
+#define AO_NOISE_FRAME_SHIFT 5.588238
+#define AO_STEP_NOISE_OFFSET_X 23.0
+#define AO_STEP_NOISE_OFFSET_Y 41.0
+#define AO_STEP_NOISE_FRAME_STEP 0.6180339887
+
 // The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
 #define AO_MAX_HISTORY_FRAMES 64
 

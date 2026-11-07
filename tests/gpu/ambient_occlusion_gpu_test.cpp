@@ -116,11 +116,11 @@ namespace {
             inputs.push_back(GpuVec4{expected, i % 5 == 0 ? 0.0f : expected * random.between(0.9f, 1.1f), random.between(0.01f, 0.1f), static_cast<float>(i % 4)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 3);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 4);
 
-        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 4; ++i) {
             const GpuVec4* in = &inputs[i * 9];
-            const GpuVec4* out = &outputs[i * 3];
+            const GpuVec4* out = &outputs[i * 4];
             const Vec2 pixel{in[4][0], in[4][1]};
             const Vec2 size{in[5][0], in[5][1]};
             const AoPreviousPlace place = aoPreviousPlace(reprojections[i], pixel, in[4][2], in[4][3], size);
@@ -139,6 +139,12 @@ namespace {
             const Vec4 blended = accumulatedAo(Vec4{in[6][0], in[6][1], in[6][2], in[6][3]}, Vec4{in[7][0], in[7][1], in[7][2], in[7][3]}, age);
             report.check("accumulatedAo", arithmeticTolerance, Vec3{blended.x, blended.y, blended.z}, vec3From(out[2]));
             report.check("accumulatedAo", arithmeticTolerance, blended.w, out[2][3]);
+
+            // Noise multiplies its argument by 53 before its fraction: a few ulps in the argument move it by about 1e-4,
+            // and a value near 1 may wrap to near 0.
+            const Vec2 noise = aoNoise(pixel, static_cast<int>(in[8][3] * 300.0f));
+            const auto wrapped = [](float a, float b) { const float d = std::abs(a - b); return std::min(d, 1.0f - d); };
+            report.check("aoNoise", FloatTolerance{.absolute = 1e-3f}, 0.0f, std::max(wrapped(noise.x, out[3][0]), wrapped(noise.y, out[3][1])));
         }
     }
 }
