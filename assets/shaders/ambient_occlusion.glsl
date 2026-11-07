@@ -231,6 +231,20 @@ float aoTapWeight(vec2 fraction, int tap) {
     return ((tap & 1) == 1 ? fraction.x : 1.0 - fraction.x) * ((tap >> 1) == 1 ? fraction.y : 1.0 - fraction.y);
 }
 
+// The gathered light's luminance, the one number anti-lag watches.
+float aoLuminance(vec3 light) {
+    return dot(light, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Anti-lag's test: the fast mean strays from the slow one past deviations of its own spread, or the floor.
+bool aoLightChanged(float fastMean, float slowMean, float secondMoment, float deviations) {
+    float share = float(AO_ANTILAG_FAST_SHARE);
+    float variance = max(secondMoment - slowMean * slowMean, 0.0);
+    float fastSpread = sqrt(variance * share / (2.0 - share));
+    float floorShare = float(AO_ANTILAG_RELATIVE_FLOOR) * slowMean + float(AO_ANTILAG_ABSOLUTE_FLOOR);
+    return abs(fastMean - slowMean) > max(deviations * fastSpread, floorShare);
+}
+
 // The new frame blended into the history's light at the new age.
 vec4 accumulatedAo(vec4 current, vec4 historyLight, float age) {
     return historyLight + (current - historyLight) * aoCurrentShare(age);

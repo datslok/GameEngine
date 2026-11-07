@@ -25,6 +25,8 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Occlusion history", settings.temporal);
     visitor.field("Occlusion history frames", settings.historyFrames, {.min = 1, .max = AO_MAX_HISTORY_FRAMES});
     visitor.field("Occlusion history depth share", settings.historyDepthShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.005f, .sliderMax = 0.2f});
+    visitor.field("Occlusion anti-lag", settings.antiLag);
+    visitor.field("Occlusion anti-lag deviations", settings.antiLagDeviations, {.min = 0.1f, .max = 20.0f, .sliderMin = 1.0f, .sliderMax = 6.0f});
     visitor.field("Occlusion denoise passes", settings.denoisePasses, {.min = 0, .max = AO_DENOISE_MAX_PASSES});
     visitor.field("Occlusion denoise plane share", settings.denoisePlaneShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.002f, .sliderMax = 0.1f});
 }
@@ -61,6 +63,10 @@ void validateAmbientOcclusion(const AmbientOcclusionSettings& settings) {
 
     if (settings.denoisePasses < 0 || settings.denoisePasses > AO_DENOISE_MAX_PASSES) {
         throw std::invalid_argument("Ambient occlusion needs 0 to AO_DENOISE_MAX_PASSES denoise passes");
+    }
+
+    if (!(settings.antiLagDeviations > 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs anti-lag deviations above 0");
     }
 
     if (!(settings.denoisePlaneShare > 0.0f)) {
@@ -474,6 +480,8 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
     const float baseY = std::floor(place.pixel.y - 0.5f);
     const Vec2 fraction{place.pixel.x - 0.5f - baseX, place.pixel.y - 0.5f - baseY};
     Vec4 light;
+    float fastMean = 0.0f;
+    float secondMoment = 0.0f;
     float weights = 0.0f;
     float age = 0.0f;
 
@@ -493,6 +501,8 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
         }
 
         light = light + texel.light * weight;
+        fastMean += texel.fastMean * weight;
+        secondMoment += texel.secondMoment * weight;
         weights += weight;
         age += texel.age * weight;
     }
@@ -501,24 +511,52 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
         return AoHistory{};
     }
 
-    return AoHistory{light * (1.0f / weights), age};
+    return AoHistory{light * (1.0f / weights), age, fastMean / weights, secondMoment / weights};
 }
 
 Vec4 accumulatedAo(const Vec4& current, const Vec4& historyLight, float age) {
     return historyLight + (current - historyLight) * aoCurrentShare(age);
 }
 
-AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames) {
-    const float age = aoHistoryAge(history.age, historyFrames);
-    return AoHistoryTexel{accumulatedAo(current, history.light, age), viewDepth, age};
+float aoLuminance(const Vec3& light) {
+    return 0.2126f * light.x + 0.7152f * light.y + 0.0722f * light.z;
 }
 
+bool aoLightChanged(float fastMean, float slowMean, float secondMoment, float deviations) {
+    const float share = static_cast<float>(AO_ANTILAG_FAST_SHARE);
+    const float variance = std::max(secondMoment - slowMean * slowMean, 0.0f);
+    const float fastSpread = std::sqrt(variance * share / (2.0f - share));
+    const float floor = static_cast<float>(AO_ANTILAG_RELATIVE_FLOOR) * slowMean + static_cast<float>(AO_ANTILAG_ABSOLUTE_FLOOR);
+    return std::abs(fastMean - slowMean) > std::max(deviations * fastSpread, floor);
+}
+
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, const AmbientOcclusionSettings& settings) {
+    const float luminance = aoLuminance(Vec3{current.x, current.y, current.z});
+
+    // Nothing to carry on: the frame alone, its noise estimate starting from it.
+    if (!(history.age > 0.0f)) {
+        return AoHistoryTexel{current, viewDepth, 1.0f, luminance, luminance * luminance};
+    }
+
+    const float fastMean = history.fastMean + (luminance - history.fastMean) * static_cast<float>(AO_ANTILAG_FAST_SHARE);
+    const float slowMean = aoLuminance(Vec3{history.light.x, history.light.y, history.light.z});
+
+    if (settings.antiLag && history.age >= static_cast<float>(AO_ANTILAG_LEAST_AGE) &&
+        aoLightChanged(fastMean, slowMean, history.secondMoment, settings.antiLagDeviations)) {
+        return AoHistoryTexel{current, viewDepth, 1.0f, luminance, luminance * luminance};
+    }
+
+    const float age = aoHistoryAge(history.age, settings.historyFrames);
+    const float share = aoCurrentShare(age);
+    return AoHistoryTexel{accumulatedAo(current, history.light, age), viewDepth, age, fastMean,
+                          history.secondMoment + (luminance * luminance - history.secondMoment) * share};
+}
 AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
                             const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable) {
     const float depth = depthAt(x, y);
 
     if (depth == gpuFarDepth) {
-        return AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 1.0f}, 0.0f, 0.0f};
+        return AoHistoryTexel{Vec4{0.0f, 0.0f, 0.0f, 1.0f}, 0.0f, 0.0f, 0.0f, 0.0f};
     }
 
     const Vec2 size{static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
@@ -526,7 +564,7 @@ AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& repr
     const float viewDepth = viewDistanceAtPixel(frame.inverseViewProjection, pixel, depth, size);
     const AoHistory previous = historyUsable ? readAoHistory(history, frame.size, aoPreviousPlace(reprojection, pixel, depth, viewDepth, size), settings.historyDepthShare)
                                              : AoHistory{};
-    return accumulateAo(current, viewDepth, previous, settings.historyFrames);
+    return accumulateAo(current, viewDepth, previous, settings);
 }
 
 bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey& now, bool previousCameraKnown) {
@@ -561,5 +599,7 @@ GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjecti
     pass.history[2] = accumulates ? 1.0f : 0.0f;
     pass.denoise[0] = static_cast<float>(settings.denoisePasses);
     pass.denoise[1] = settings.denoisePlaneShare;
+    pass.antiLag[0] = settings.antiLag ? 1.0f : 0.0f;
+    pass.antiLag[1] = settings.antiLagDeviations;
     return pass;
 }

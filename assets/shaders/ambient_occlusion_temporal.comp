@@ -3,11 +3,12 @@
 
 /*
 * Ambient occlusion's temporal accumulation (render/gpu/ambient_occlusion.h, aoTemporalAt mirrors it), one invocation
-* per render pixel, after the occlusion pass and before the blur: the pass's result blended into a running average of
+* per render pixel, after the occlusion pass and before the denoiser: the pass's result blended into a running average of
 * the frames before, read where the point was on last frame's screen from the four texels round it whose view depth
 * shows the same point. The new frame weighs one over the age, the frames the average holds, at most the history's
-* frames, so a newly seen point starts from this frame alone.
-* Writes this frame's history (the average, and the view depth and age), which the blur and the main pass read and the
+* frames, so a newly seen point starts from this frame alone; with anti-lag, a history whose 3-frame average strays from
+* its long one past its own noise restarts too (accumulateAo).
+* Writes this frame's history (the average, and the view depth, age, fast mean and second moment), which the denoiser and the main pass read and the
 * next frame reprojects.
 */
 #include "screen_reflections.glsl"
@@ -25,14 +26,16 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     mat4 reprojection;          // this frame's clip space (without the jitter) to last frame's
     vec4 gather;
     vec4 history;               // x: the history's frames, y: its depth share, z: 1 while accumulating, w: 1 when last frame's is usable
+    vec4 denoise;
+    vec4 antiLag;               // x: 1 while on, y: its deviations
 } pass;
 
 layout(set = 0, binding = 1) uniform sampler2D depth;                     // exact texels
 layout(set = 0, binding = 2) uniform sampler2D current;                   // the occlusion pass's result, exact texels
 layout(set = 0, binding = 3) uniform sampler2D previousLight;             // last frame's average
-layout(set = 0, binding = 4) uniform sampler2D previousDepthAge;          // last frame's view depth (0 for the sky) and age
+layout(set = 0, binding = 4) uniform sampler2D previousDepthAge;          // last frame's view depth (0 for the sky), age, fast mean, second moment
 layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D light;    // this frame's average: rgb the light gathered, a the visibility
-layout(set = 0, binding = 6, rg32f) uniform writeonly image2D depthAge;   // this frame's view depth and age
+layout(set = 0, binding = 6, rgba32f) uniform writeonly image2D depthAge; // this frame's view depth, age, fast mean and second moment
 
 void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -54,6 +57,7 @@ void main() {
     float viewDepth = viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
     vec4 historyLight = vec4(0.0);
     float historyAge = 0.0;
+    vec2 historyMoments = vec2(0.0); // the fast mean and the second moment
 
     // Each texel's result stands for its whole footprint, so its centre is reprojected as it is (aoTemporalAt).
     if (pass.history.w > 0.5) {
@@ -72,7 +76,7 @@ void main() {
                     continue;
                 }
 
-                vec2 stored = texelFetch(previousDepthAge, at, 0).rg;
+                vec4 stored = texelFetch(previousDepthAge, at, 0);
 
                 if (!aoHistoryTapKept(place.z, stored.r, pass.history.y)) {
                     continue;
@@ -81,14 +85,31 @@ void main() {
                 historyLight += texelFetch(previousLight, at, 0) * weight;
                 weights += weight;
                 historyAge += stored.g * weight;
+                historyMoments += stored.ba * weight;
             }
 
             historyLight = weights > 0.0 ? historyLight / weights : vec4(0.0);
             historyAge = weights > 0.0 ? historyAge : 0.0;
+            historyMoments = weights > 0.0 ? historyMoments / weights : vec2(0.0);
         }
     }
 
+    // As accumulateAo: nothing to carry on, or a changed light under anti-lag, and the frame stands alone.
+    vec4 now = texelFetch(current, texel, 0);
+    float luminance = aoLuminance(now.rgb);
+    float fastMean = historyMoments.x + (luminance - historyMoments.x) * float(AO_ANTILAG_FAST_SHARE);
+    bool restart = !(historyAge > 0.0) ||
+                   (pass.antiLag.x > 0.5 && historyAge >= float(AO_ANTILAG_LEAST_AGE) &&
+                    aoLightChanged(fastMean, aoLuminance(historyLight.rgb), historyMoments.y, pass.antiLag.y));
+
+    if (restart) {
+        imageStore(light, texel, now);
+        imageStore(depthAge, texel, vec4(viewDepth, 1.0, luminance, luminance * luminance));
+        return;
+    }
+
     float age = aoHistoryAge(historyAge, int(pass.history.x));
-    imageStore(light, texel, accumulatedAo(texelFetch(current, texel, 0), historyLight, age));
-    imageStore(depthAge, texel, vec4(viewDepth, age, 0.0, 0.0));
+    float moment = historyMoments.y + (luminance * luminance - historyMoments.y) * aoCurrentShare(age);
+    imageStore(light, texel, accumulatedAo(now, historyLight, age));
+    imageStore(depthAge, texel, vec4(viewDepth, age, fastMean, moment));
 }

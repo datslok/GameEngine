@@ -17,6 +17,7 @@
 #include <numbers>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -85,6 +86,10 @@ namespace {
         assert(rejects(wrong));
 
         assert(defaults.denoisePasses == 4 && defaults.denoisePlaneShare == 0.02f);
+        assert(defaults.antiLag && defaults.antiLagDeviations == 3.0f);
+        wrong = {};
+        wrong.antiLagDeviations = 0.0f;
+        assert(rejects(wrong));
         wrong = {};
         wrong.denoisePasses = -1;
         assert(rejects(wrong));
@@ -789,14 +794,111 @@ namespace {
 
     // The new frame alone without history; then each frame's share one over the age, so the first frames give exactly
     // their mean, and with the history full a fixed share.
+    // The history a texel leaves for the next frame at the same place (a still camera).
+    AoHistory historyOf(const AoHistoryTexel& texel) {
+        return AoHistory{texel.light, texel.age, texel.fastMean, texel.secondMoment};
+    }
+
+    // Luminance by Rec. 709's weights; a change is a stray of the fast mean past the deviations of its own spread, or the
+    // floor where there is no noise to measure.
+    void testLightChanged() {
+        assert(near(aoLuminance(Vec3{1.0f, 1.0f, 1.0f}), 1.0f, 1e-6f));
+        assert(near(aoLuminance(Vec3{0.0f, 1.0f, 0.0f}), 0.7152f, 1e-6f));
+
+        // Noise of deviation 0.2 about 0.5: the fast mean wobbles by 0.2 / sqrt(5), 0.089, so 3 of them is 0.27.
+        const float moment = 0.5f * 0.5f + 0.2f * 0.2f;
+        assert(!aoLightChanged(0.75f, 0.5f, moment, 3.0f));
+        assert(aoLightChanged(0.78f, 0.5f, moment, 3.0f));
+        assert(aoLightChanged(0.22f, 0.5f, moment, 3.0f));
+
+        // No noise at all: the floor, 5% of the mean and a thousandth.
+        assert(!aoLightChanged(0.104f, 0.1f, 0.01f, 3.0f));
+        assert(aoLightChanged(0.107f, 0.1f, 0.01f, 3.0f));
+        assert(!aoLightChanged(0.0009f, 0.0f, 0.0f, 3.0f));
+    }
+
+    // A fixed noise sequence, uniform about a mean.
+    struct NoiseSequence {
+        std::uint32_t state = 2024u;
+
+        float next(float mean, float halfWidth) {
+            state = state * 1664525u + 1013904223u;
+            return mean + halfWidth * (2.0f * static_cast<float>(state >> 8) / 16777216.0f - 1.0f);
+        }
+    };
+
+    // Steady noise almost never restarts the history, so the average keeps its smoothness; a near-black pixel never does.
+    void testAntiLagIgnoresNoise() {
+        const AmbientOcclusionSettings settings;
+
+        for (const auto& [mean, halfWidth, allowed] : {std::tuple{0.5f, 0.5f, 8}, std::tuple{0.0005f, 0.0001f, 0}}) {
+            NoiseSequence noise;
+            AoHistoryTexel texel = accumulateAo(Vec4{mean, mean, mean, 1.0f}, 5.0f, AoHistory{}, settings);
+            int restarts = 0;
+
+            for (int frame = 0; frame < 400; ++frame) {
+                const float value = noise.next(mean, halfWidth);
+                const AoHistoryTexel next = accumulateAo(Vec4{value, value, value, 1.0f}, 5.0f, historyOf(texel), settings);
+                restarts += next.age < texel.age ? 1 : 0;
+                texel = next;
+            }
+
+            assert(restarts <= allowed);
+        }
+    }
+
+    /*
+    * The light trebles: with anti-lag the history restarts within a frame and 3 frames on the average is near the new
+    * light, its noise estimate started afresh; without, 10 frames on it is still well short of it.
+    */
+    void testAntiLagFollowsChanges() {
+        for (const bool antiLag : {true, false}) {
+            AmbientOcclusionSettings settings;
+            settings.antiLag = antiLag;
+            NoiseSequence noise;
+            AoHistoryTexel texel = accumulateAo(Vec4{0.2f, 0.2f, 0.2f, 1.0f}, 5.0f, AoHistory{}, settings);
+
+            for (int frame = 0; frame < 200; ++frame) {
+                const float value = noise.next(0.2f, 0.05f);
+                texel = accumulateAo(Vec4{value, value, value, 1.0f}, 5.0f, historyOf(texel), settings);
+            }
+
+            assert(texel.age == 16.0f);
+            bool restarted = false;
+
+            for (int frame = 1; frame <= 10; ++frame) {
+                const float value = noise.next(0.6f, 0.05f);
+                const AoHistoryTexel next = accumulateAo(Vec4{value, value, value, 1.0f}, 5.0f, historyOf(texel), settings);
+
+                if (next.age == 1.0f && !restarted) {
+                    restarted = true;
+                    assert(near(next.secondMoment, value * value, 1e-6f) && near(next.fastMean, value, 1e-6f));
+                }
+
+                texel = next;
+
+                if (antiLag && frame == 3) {
+                    assert(std::abs(texel.light.x - 0.6f) < 0.12f);
+                }
+            }
+
+            assert(restarted == antiLag);
+
+            if (!antiLag) {
+                assert(texel.light.x < 0.45f);
+            }
+        }
+    }
     void testAccumulateAo() {
-        const AoHistoryTexel first = accumulateAo(Vec4{0.2f, 0.4f, 0.6f, 0.5f}, 5.0f, AoHistory{}, 16);
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false;
+        const AoHistoryTexel first = accumulateAo(Vec4{0.2f, 0.4f, 0.6f, 0.5f}, 5.0f, AoHistory{}, settings);
         assert(first.age == 1.0f && first.viewDepth == 5.0f && first.light.x == 0.2f && first.light.w == 0.5f);
 
-        const AoHistoryTexel second = accumulateAo(Vec4{0.4f, 0.0f, 0.0f, 1.0f}, 5.0f, AoHistory{first.light, first.age}, 16);
+        const AoHistoryTexel second = accumulateAo(Vec4{0.4f, 0.0f, 0.0f, 1.0f}, 5.0f, AoHistory{first.light, first.age}, settings);
         assert(second.age == 2.0f && near(second.light.x, 0.3f, 1e-6f) && near(second.light.w, 0.75f, 1e-6f));
 
-        const AoHistoryTexel full = accumulateAo(Vec4{1.0f, 1.0f, 1.0f, 1.0f}, 5.0f, AoHistory{Vec4{}, 16.0f}, 16);
+        const AoHistoryTexel full = accumulateAo(Vec4{1.0f, 1.0f, 1.0f, 1.0f}, 5.0f, AoHistory{Vec4{}, 16.0f}, settings);
         assert(full.age == 16.0f && near(full.light.x, 1.0f / 16.0f, 1e-6f));
     }
 
@@ -807,7 +909,8 @@ namespace {
         const std::vector<float> depths = wallDepths(camera);
         const AoDepthImage depthAt = depthImage(depths);
         const AoFrame frame = wallFrame(camera);
-        const AmbientOcclusionSettings settings;
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false; // hand-made histories carry no noise estimate
         const int x = 100;
         const int y = 70;
         HistoryTexels history(screenSize.width * screenSize.height);
@@ -866,7 +969,8 @@ namespace {
             }
         }
 
-        const AmbientOcclusionSettings settings;
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false; // hand-made histories carry no noise estimate
         const Vec4 white{1.0f, 1.0f, 1.0f, 1.0f};
         const Mat4 reprojection = reprojectionBetween(previous, current);
         const AoFrame frame = wallFrame(current);
@@ -905,7 +1009,8 @@ namespace {
             }
         }
 
-        const AmbientOcclusionSettings settings;
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false; // hand-made histories carry no noise estimate
         const Mat4 reprojection = reprojectionBetween(previous, current);
 
         for (const Vec2 pixel : {Vec2{320.0f, 180.0f}, Vec2{100.0f, 50.0f}, Vec2{500.0f, 300.0f}}) {
@@ -940,7 +1045,8 @@ namespace {
             }
         }
 
-        const AmbientOcclusionSettings settings;
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false; // hand-made histories carry no noise estimate
         const Vec4 current{0.5f, 0.5f, 0.5f, 1.0f};
         const AoHistoryTexel revealed = aoTemporalAt(320, 180, frame, Mat4::identity(), settings, depthImage(depths), current, historyImage(history), true);
         assert(revealed.age == 1.0f && revealed.light.x == 0.5f && revealed.light.w == 1.0f);
@@ -1218,6 +1324,7 @@ namespace {
         assert(pass.gather[0] == 0.25f && pass.gather[1] == 0.0f && pass.gather[2] == 8.0f);
         assert(pass.history[0] == 16.0f && pass.history[1] == 0.05f && pass.history[2] == 1.0f && pass.history[3] == 0.0f);
         assert(pass.denoise[0] == 4.0f && pass.denoise[1] == 0.02f);
+        assert(pass.antiLag[0] == 1.0f && pass.antiLag[1] == 3.0f);
 
         // Gathering reaches further than occlusion alone.
         const GpuAmbientOcclusionPass gathering = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{}, RenderSize{200, 100}, settings, 7, true, false);
@@ -1247,6 +1354,9 @@ void testAmbientOcclusion() {
     testHistoryAge();
     testHistoryTapKept();
     testPreviousPlace();
+    testLightChanged();
+    testAntiLagIgnoresNoise();
+    testAntiLagFollowsChanges();
     testAccumulateAo();
     testStillCameraConverges();
     testFurnaceAndNoHistory();

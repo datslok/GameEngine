@@ -105,13 +105,19 @@ struct AmbientOcclusionSettings {
     // its view depth, before it counts for little (a tap off by this much weighs 1/e).
     int denoisePasses = 4;
     float denoisePlaneShare = 0.02f;
+
+    // Anti-lag: a pixel's history restarts when its fast average (3 frames) strays from its slow one by more than this
+    // many of its own noise's deviations (a real change in the light, not noise), so a switched light's bounce follows
+    // in a few frames instead of the history's.
+    bool antiLag = true;
+    float antiLagDeviations = 3.0f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a radius, indirect radius, thickness, brightest sample or history depth share not
-// or denoise plane share not above 0, a falloff outside (0, 1], slices, steps or history frames outside 1 up to
+// denoise plane share or anti-lag deviations not above 0, a falloff outside (0, 1], slices, steps or history frames outside 1 up to
 // AO_MAX_SLICES, AO_MAX_STEPS and AO_MAX_HISTORY_FRAMES, or denoise passes outside 0 up to AO_DENOISE_MAX_PASSES.
 void validateAmbientOcclusion(const AmbientOcclusionSettings& settings);
 
@@ -318,6 +324,8 @@ struct AoHistoryTexel {
     Vec4 light;
     float viewDepth = 0.0f;
     float age = 0.0f;
+    float fastMean = 0.0f;     // anti-lag: the gathered light's luminance over about the last 3 frames
+    float secondMoment = 0.0f; // and its square's average over the history, for the history's own noise
 };
 
 using AoHistoryImage = std::function<AoHistoryTexel(int x, int y)>;
@@ -328,6 +336,8 @@ using AoHistoryImage = std::function<AoHistoryTexel(int x, int y)>;
 struct AoHistory {
     Vec4 light;
     float age = 0.0f;
+    float fastMean = 0.0f;
+    float secondMoment = 0.0f;
 };
 
 AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const AoPreviousPlace& place, float share);
@@ -335,8 +345,25 @@ AoHistory readAoHistory(const AoHistoryImage& history, RenderSize size, const Ao
 // The new frame blended into the history's light at the new age.
 Vec4 accumulatedAo(const Vec4& current, const Vec4& historyLight, float age);
 
-// The new frame (rgb the gathered light, a the visibility) blended into the history, at the point's view depth.
-AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, int historyFrames);
+// The gathered light's luminance (Rec. 709 weights), the one number anti-lag watches.
+float aoLuminance(const Vec3& light);
+
+/*
+* Anti-lag's test: the fast average (each frame weighing AO_ANTILAG_FAST_SHARE) strays from the slow one by more than
+* deviations of its own spread. The history's noise is sigma^2 = secondMoment - slowMean^2, and an exponential average
+* weighing each frame a wobbles by sigma sqrt(a / (2 - a)). The threshold is never below AO_ANTILAG_RELATIVE_FLOOR of the
+* slow mean plus AO_ANTILAG_ABSOLUTE_FLOOR, so a near-black pixel, with no noise to measure, does not restart on rounding.
+*/
+bool aoLightChanged(float fastMean, float slowMean, float secondMoment, float deviations);
+
+/*
+* The new frame (rgb the gathered light, a the visibility) blended into the history, at the point's view depth, with the
+* fast mean and second moment carried on. With anti-lag, a history at least AO_ANTILAG_LEAST_AGE frames old whose light
+* has changed (aoLightChanged: the fast mean with this frame against the history's slow mean and noise before it, since
+* the jump itself would swell the noise and hide it) restarts from the new frame alone, its noise estimate with it; a
+* younger one follows quickly anyway.
+*/
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, const AmbientOcclusionSettings& settings);
 
 /*
 * The temporal pass's loop, as ambient_occlusion_temporal.comp runs it, at texel (x, y): the sky holds open, nothing
@@ -365,7 +392,7 @@ bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey
 // radius, falloff, slices and steps, the frame (turning the noise; 0 while there is no anti-aliasing, whose blur wants it
 // still), this frame's clip space (without the jitter) to last frame's, x the thickness, y 1 while gathering and z
 // the brightest sample, and the history: x its frames, y its depth share, z 1 while accumulating, w 1 when last
-// frame's history is usable (set by VulkanAmbientOcclusion, which knows), and the denoiser: x its passes, y its plane share.
+// frame's history is usable (set by VulkanAmbientOcclusion, which knows), the denoiser: x its passes, y its plane share, and anti-lag: x 1 while on, y its deviations.
 struct GpuAmbientOcclusionPass {
     float inverseViewProjection[16];
     float size[4];
@@ -376,9 +403,10 @@ struct GpuAmbientOcclusionPass {
     float gather[4];
     float history[4];
     float denoise[4];
+    float antiLag[4];
 };
 
-static_assert(sizeof(GpuAmbientOcclusionPass) == 240, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
+static_assert(sizeof(GpuAmbientOcclusionPass) == 256, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
 
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
                                                  RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,

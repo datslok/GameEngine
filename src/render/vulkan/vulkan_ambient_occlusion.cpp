@@ -10,9 +10,9 @@ namespace {
     // The light gathered, which is as bright as the picture it came from, and the visibility beside it.
     constexpr VkFormat occlusionFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-    // The history's view depth and age: two 32-bit floats, a format every Vulkan GPU writes as a storage image (two
-    // halves would need the extended storage formats).
-    constexpr VkFormat depthAgeFormat = VK_FORMAT_R32G32_SFLOAT;
+    // The history's view depth, age and anti-lag's fast mean and second moment: four 32-bit floats, a format every
+    // Vulkan GPU writes as a storage image (halves would need the extended storage formats, and the moment their range).
+    constexpr VkFormat depthAgeFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 }
 
 VulkanAmbientOcclusion::VulkanAmbientOcclusion(const VulkanDevice& device, VkSampler nearest, std::uint32_t framesInFlight):

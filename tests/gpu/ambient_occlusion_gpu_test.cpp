@@ -118,11 +118,11 @@ namespace {
             inputs.push_back(GpuVec4{expected, i % 5 == 0 ? 0.0f : expected * random.between(0.9f, 1.1f), random.between(0.01f, 0.1f), static_cast<float>(i % 4)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 5);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 6);
 
-        for (std::size_t i = 0; i < outputs.size() / 5; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 6; ++i) {
             const GpuVec4* in = &inputs[i * 9];
-            const GpuVec4* out = &outputs[i * 5];
+            const GpuVec4* out = &outputs[i * 6];
             const Vec2 pixel{in[4][0], in[4][1]};
             const Vec2 size{in[5][0], in[5][1]};
             const AoPreviousPlace place = aoPreviousPlace(reprojections[i], pixel, in[4][2], in[4][3], size);
@@ -153,6 +153,14 @@ namespace {
             report.check("aoPlaneWeight", transcendentalTolerance, aoPlaneWeight(planeNormal, Vec3{in[6][0], in[6][1], in[6][2]}, historyLight, in[8][0], in[8][2]), out[3][3]);
             report.check("aoDepthRay", FloatTolerance{.absolute = 1e-4f, .relative = 1e-3f}, aoDepthRay(reprojections[i], pixel, size), vec3From(out[4]));
             report.check("atrousKernelWeight", exactTolerance, atrousKernelWeight(static_cast<int>(in[8][3] * 4.0f) % 5 - 2, static_cast<int>(in[8][3] * 13.0f) % 5 - 2), out[4][3]);
+            report.check("aoLuminance", arithmeticTolerance, aoLuminance(Vec3{in[6][0], in[6][1], in[6][2]}), out[5][0]);
+            // A comparison near its threshold may round either way: only compare where the margin is clear.
+            const float fast = in[6][0];
+            const float slow = in[7][0];
+            const float moment = slow * slow + in[6][3] * 0.01f;
+            if (aoLightChanged(fast * 1.001f + 1e-5f, slow, moment, 3.0f) == aoLightChanged(fast * 0.999f - 1e-5f, slow, moment, 3.0f)) {
+                report.check("aoLightChanged", exactTolerance, aoLightChanged(fast, slow, moment, 3.0f) ? 1.0f : 0.0f, out[5][1]);
+            }
         }
     }
 }

@@ -47,6 +47,14 @@
 // The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
 #define AO_MAX_HISTORY_FRAMES 64
 
+// Anti-lag (aoLightChanged): the fast average's share of each frame (about 3 frames), the least threshold as a share of
+// the slow mean plus a floor (in the picture's linear light), and the least age a history must have before it is tested
+// (a younger one follows quickly anyway, and its noise estimate is still too young to trust).
+#define AO_ANTILAG_FAST_SHARE 0.3333333
+#define AO_ANTILAG_RELATIVE_FLOOR 0.05
+#define AO_ANTILAG_ABSOLUTE_FLOOR 0.001
+#define AO_ANTILAG_LEAST_AGE 4.0
+
 // The passes' workgroups: 8 x 8 pixels.
 #define AO_GROUP_SIDE 8
 

@@ -58,5 +58,6 @@ void main() {
         vec3 planeNormal = normalize(historyLight.xyz + vec3(0.1));
         testOutput(3, vec4(aoNoise(current.xyz * 0.12, int(tap.w * 300.0)), aoPlaneWeight(planeNormal, current.xyz, historyLight.xyz, tap.x, tap.z)));
         testOutput(4, vec4(aoDepthRay(reprojection, point.xy, frame.xy), atrousKernelWeight(int(tap.w * 4.0) % 5 - 2, int(tap.w * 13.0) % 5 - 2)));
+        testOutput(5, vec4(aoLuminance(current.rgb), aoLightChanged(current.x, historyLight.x, historyLight.x * historyLight.x + current.w * 0.01, 3.0) ? 1.0 : 0.0, 0.0, 0.0));
     }
 }
