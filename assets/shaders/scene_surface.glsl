@@ -107,7 +107,7 @@ float sunBeyondCascades(vec3 normal, vec3 toLight) {
 // reflection probe's capture sees behind the camera, where the cascades do not reach, and without this lit the dark
 // rooms behind it in full sun; beyond the grid's reach the grid reads as open sky, so far ground stays sunlit.
 float sunBeyondCascades(vec3 normal, vec3 toLight) {
-    return skyVisibilityRead() ? skySeenAlong(skyVisibilityAt(relativePosition, normal, normal), toLight) : 1.0;
+    return skyVisibilityRead() ? skySeenAlong(skyVisibilityAt(relativePosition, normal, normal).visibility, toLight) : 1.0;
 }
 #endif
 
@@ -736,15 +736,16 @@ void main() {
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
     }
 
-    // Without probes, the flat ambient for the sky the point sees (the grid round the camera, facing the shading normal),
-    // and for the rest the bounce guess (skyWithBounce); the reflection's stand-in the share along the mirror direction.
-    float skyShare = 1.0;
+    // Without probes, the flat ambient for the sky the point sees and the light the surfaces round it bounce back (the
+    // grid round the camera, facing the shading normal, per colour channel, at least the floor); the reflection's
+    // stand-in the same along the mirror direction.
+    vec3 skyShare = vec3(1.0);
 
     if (!probesOn && skyVisibilityRead()) {
-        SkyVisibility sky = skyVisibilityAt(relativePosition, geometricNormal, toCamera);
-        skyShare = skyVisibilityFacing(sky, shadingNormal, skyVisibilityOptions.y, skyVisibilityMore.x);
+        SkySample sky = skyVisibilityAt(relativePosition, geometricNormal, toCamera);
+        skyShare = skyLightFacing(sky.visibility, sky.bounce, shadingNormal, skyVisibilityOptions.y);
         diffuseLight = flatAmbient() * skyShare;
-        mirrorLight = flatAmbient() * skyVisibilityAlong(sky, reflect(-toCamera, shadingNormal), skyVisibilityOptions.y, skyVisibilityMore.x);
+        mirrorLight = flatAmbient() * skyLightAlong(sky.visibility, sky.bounce, reflect(-toCamera, shadingNormal), skyVisibilityOptions.y);
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
     }
 
@@ -826,8 +827,8 @@ void main() {
         outputColour.rgb = mix(outputColour.rgb, clusterHeatColour(clusterLightCount()), 0.75);
     }
 
-    // The sky visibility debug view: the share of the sky's light each surface gets, as grey.
+    // The sky visibility debug view: the share of the sky's light each surface gets from all around, sky and bounce, per channel.
     if (skyVisibilityOptions.w > 0.5 && !captureView) {
-        outputColour.rgb = vec3(skyShare);
+        outputColour.rgb = skyShare;
     }
 }

@@ -23,10 +23,11 @@
 *   f(n) = (1 / pi) integral of V(w) max(0, n . w) dw = a + (2 / 3) b . n,
 *
 * exactly 1 for a floor under an open sky, 1/2 for a wall in an open field, 0 in a closed box. A blocked way is not
-* black when what blocks it is lit: it brings back the bounce share beta of the sky's light times how lit the blockers
-* are, guessed from the point's own open share (g = clamp(2a, 0, 1): under an open sky a point sees half the sphere and
-* its ground sees all of it). The share a surface gets is f + beta g (1 - f): unchanged outdoors (g = 1), and a closed
-* room, whose walls see no sky either, gets nothing back, so it goes dark.
+* black when what blocks it is lit: each ray that meets a surface also brings back the light that surface sends, its
+* albedo rho times the light falling on it (the sky it sees there, and the bounce there, read from the grid itself), per
+* unit of the open sky's light. Those values, per colour channel, are kept as the same two bands (SkyBounce), so a
+* surface gets f + the bounce's own a + 2/3 b . n: the light from all around as a share of the flat ambient, which the
+* shaders multiply by it live. Kept per unit, it needs no re-bake when the sky's light changes with the time of day.
 *
 * The points sit in cascades round the camera, as the light probes' do (render/gpu/probe_cascades.h, whose windows,
 * scrolling and weights this reuses): each a window on a lattice fixed in the world, a circular buffer, so a move
@@ -44,13 +45,9 @@ struct SkyVisibilitySettings {
     // On every preset but Low; read only without light probes, which know the sky's reach themselves.
     bool enabled = true;
 
-    // The light a blocked way still brings when what blocks it stands under open sky, as a share of the open sky's:
-    // what blocks it reflects some (an average surface's albedo). Read live; changing it bakes nothing.
-    float bounceShare = 0.25f;
-
-    // The least a blocker counts as lit, as a share of the open sky's light (the guess is twice the point's open share):
-    // a room seen only through a sliver of sky reads dim, not black. Read live.
-    float blockersLitFloor = 0.1f;
+    // The least light from all around any surface gets, as a share of the open sky's: a room seen only through a sliver
+    // of sky reads dim, not black (0.025, what the earlier guess's floor gave). Read live; changing it bakes nothing.
+    float ambientFloor = 0.025f;
 
     // The densest cascade's spacing (metres); each further one's is twice the last's.
     float spacing = 0.5f;
@@ -89,12 +86,12 @@ struct SkyVisibilitySettings {
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a bounce share or blockers' floor outside 0..1, a spacing or ray length not above 0, a negative bake
+// Throws std::invalid_argument for an ambient floor outside 0..1, a spacing or ray length not above 0, a negative bake
 // time, lookup bias or store, cascades outside 1..maxSkyVisibilityCascades, or rays or quick rays below 1.
 void validateSkyVisibility(const SkyVisibilitySettings& settings);
 
-// Whether two settings bake the same grid: everything but the bounce share and floor, the lookup bias, the budget, the quick
-// rays, the store and the view.
+// Whether two settings bake the same grid: everything but the ambient floor, the lookup bias, the budget, the quick rays,
+// the store and the view.
 bool sameSkyVisibilityGrid(const SkyVisibilitySettings& a, const SkyVisibilitySettings& b);
 
 // The open sphere's two harmonic bands: a (the share open) and b (towards the open side). The default is all open.
@@ -118,17 +115,26 @@ SkyVisibility skyVisibilityFromRays(std::span<const Vec3> directions, std::span<
 float skySeenFacing(const SkyVisibility& visibility, const Vec3& normal);
 float skySeenAlong(const SkyVisibility& visibility, const Vec3& direction);
 
-// How lit what blocks the sky is guessed to be, as a share of the open sky's light: g = clamp(2a, 0, 1), at least floor.
-float skyBlockersLit(const SkyVisibility& visibility, float floor);
+/*
+* The light bounced back to a point from the surfaces round it, per unit of the open sky's light: for each colour
+* channel (red, green, blue) the two bands of what its rays brought back (open the mean, lean towards where it came
+* from), read as skySeenFacing and skySeenAlong read the sky's. None by default.
+*/
+using SkyBounce = std::array<SkyVisibility, 3>;
+inline const SkyBounce noSkyBounce{SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}, SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}},
+                                       SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}};
 
-// The share of the open sky's light a surface with this unit normal gets: f + beta g (1 - f).
-float skyVisibilityFacing(const SkyVisibility& visibility, const Vec3& normal, float bounceShare, float blockersFloor = 0.0f);
+/*
+* The light from all around a surface with this unit normal gets, per colour channel, as a share of the open sky's: the
+* sky it sees plus each channel's bounce facing it (each kept within 0..1), at least floor.
+*/
+Vec3 skyLightFacing(const SkyVisibility& visibility, const SkyBounce& bounce, const Vec3& normal, float floor);
 
-// The share along one unit direction (the reflection's stand-in): the same with the sky seen along it.
-float skyVisibilityAlong(const SkyVisibility& visibility, const Vec3& direction, float bounceShare, float blockersFloor = 0.0f);
+// The same along one unit direction (the reflection's stand-in): the sky and the bounce seen along it.
+Vec3 skyLightAlong(const SkyVisibility& visibility, const SkyBounce& bounce, const Vec3& direction, float floor);
 
-// The share for air, which scatters light from every way alike: the same with f = clamp(a, 0, 1).
-float skyVisibilityInAir(const SkyVisibility& visibility, float bounceShare, float blockersFloor = 0.0f);
+// The same for air, which scatters light from every way alike: the sky's open share and each channel's mean.
+Vec3 skyLightInAir(const SkyVisibility& visibility, const SkyBounce& bounce, float floor);
 
 enum class SkyCellState : std::uint8_t {
     Unknown = SKY_VISIBILITY_UNKNOWN,
@@ -141,13 +147,18 @@ inline constexpr int skyReachDirections = 6;
 Vec3 skyReachDirection(int direction);
 
 /*
-* One grid point: its bands, how far it sees along each axis direction as a share of its cascade's spacing (at most 1),
-* and its state. Not baked yet by default.
+* One grid point: its bands, the bounce light round it, how far it sees along each axis direction as a share of its
+* cascade's spacing (at most 1), and its state. Not baked yet by default.
 */
 struct SkyCell {
     SkyVisibility visibility;
+    SkyBounce bounce = noSkyBounce;
     std::array<float, skyReachDirections> reach{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     SkyCellState state = SkyCellState::Unknown;
+
+    // The bake's own note, not packed for the shaders: the share of its rays' front hits whose light was guessed
+    // because the grid round them was not baked yet, which baking it again later would improve.
+    float unsureShare = 0.0f;
 };
 
 /*
@@ -158,14 +169,19 @@ struct SkyCell {
 bool skyCornerSees(const std::array<float, skyReachDirections>& reach, const Vec3& fromCorner, float spacing);
 
 /*
-* A grid point as the shaders read it (sky_visibility.glsl, unpackSkyCell): a and b's x as two halves, b's y and z as
-* two halves, the reaches along +x, -x, +y, -y in 8 bits each, and those along +z and -z and the state in the last.
+* A grid point as the shaders read it (sky_visibility.glsl, unpackSkyCell), three texels of four words: a and b's x as
+* two halves, b's y and z as two halves, the reaches along +x, -x, +y, -y in 8 bits each, and those along +z and -z and
+* the state in the last; then each bounce channel's a and b's x, b's y and z, as halves, red, green and blue (two words
+* each); the last two words unused.
 */
 struct GpuSkyCell {
-    std::uint32_t words[4];
+    std::uint32_t words[12];
 };
 
-static_assert(sizeof(GpuSkyCell) == 16, "GpuSkyCell must match sky_visibility.glsl's packed cell");
+static_assert(sizeof(GpuSkyCell) == 48, "GpuSkyCell must match sky_visibility.glsl's packed cell");
+
+// The texels each grid point takes in the shaders' image, along x.
+inline constexpr int skyCellTexels = SKY_CELL_TEXELS;
 
 GpuSkyCell packSkyCell(const SkyCell& cell);
 SkyCell unpackSkyCell(const GpuSkyCell& packed);
@@ -189,19 +205,28 @@ int skyVisibilityCellCount(const SkyVisibilitySettings& settings);
 * left, as the probes' cascades do (sampleProbeCascades). Within a cascade the eight points round the lookup point
 * (moved off the surface as the probes' self-shadow bias moves it) are blended by nearness, by side (probeBackFaceWeight,
 * crushed as the probes' weights are) and only where skyCornerSees; a cascade with no such point adds nothing and leaves
-* its share to the next. What is left past the last is the open sky. cells holds every cascade's points by number.
+* its share to the next. What is left past the last is the open sky, with no bounce. cells holds every cascade's points
+* by number. Also how much of it the cascades knew (known, 0..1): what the bake falls back on a guess for where little is;
+* and how much a cascade reached but had no point to read (missing: not baked yet, or all buried or behind walls), as
+* against what lies past the grid, which waiting will not change.
 */
-SkyVisibility sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
-                                  const Vec3& normal, const Vec3& toViewer);
+struct SkySample {
+    SkyVisibility visibility;
+    SkyBounce bounce = noSkyBounce;
+    float known = 0.0f;
+    float missing = 0.0f;
+};
+
+SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
+                              const Vec3& normal, const Vec3& toViewer);
 
 /*
 * The settings the shaders read (sky_visibility.glsl), in the frame's uniform block: x how many cascades the frame's
-* records hold (0 when the grid is not read), y the bounce share, z the lookup bias, w 1 for the debug view; then x the
-* blockers' floor. All zero when it is not read.
+* records hold (0 when the grid is not read), y the ambient floor, z the lookup bias, w 1 for the debug view. All zero
+* when it is not read.
 */
 struct GpuSkyVisibilityOptions {
     float values[4];
-    float more[4];
 };
 
 GpuSkyVisibilityOptions packSkyVisibilityOptions(const SkyVisibilitySettings& settings, int cascadesRead);

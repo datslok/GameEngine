@@ -106,6 +106,62 @@ namespace {
 
         const CollisionSettings collision = skyRayCollision();
         assert(collision.gridCellSize == 1.0f && collision.largeItemCells > 64);
+
+        // What colours the bounce light changes it too.
+        std::vector<DrawItem> recoloured = one;
+        recoloured[0].material.colour = Pixel{10, 20, 30};
+        assert(skyBlockersFingerprint(one) != skyBlockersFingerprint(recoloured));
+        std::vector<DrawItem> metal = one;
+        metal[0].material.metallic = 1.0f;
+        assert(skyBlockersFingerprint(one) != skyBlockersFingerprint(metal));
+        std::vector<DrawItem> textured = one;
+        textured[0].material.texture = TextureHandle{3};
+        assert(skyBlockersFingerprint(one) != skyBlockersFingerprint(textured));
+    }
+
+    bool nearColour(const Vec3& a, const Vec3& b, float tolerance) {
+        return std::abs(a.x - b.x) <= tolerance && std::abs(a.y - b.y) <= tolerance && std::abs(a.z - b.z) <= tolerance;
+    }
+
+    /*
+    * Each triangle's diffuse albedo, in linear light, beside the level: the material's sRGB colour decoded, times its
+    * texture's mean (decoded texel by texel), times one less the metallic share (metals scatter nothing diffusely).
+    */
+    void testEachTriangleHasItsAlbedo() {
+        AssetManager assets;
+        const MeshHandle cube = assets.addMesh(Mesh::cube());
+
+        // A 2 x 1 texture, one white and one black texel: a mean of half in linear light.
+        ImageData halfGrey;
+        halfGrey.width = 2;
+        halfGrey.height = 1;
+        halfGrey.pixels = {255, 255, 255, 255, 0, 0, 0, 255};
+        const TextureHandle texture = assets.addTexture(halfGrey);
+
+        DrawItem red = staticDraw(cube, Mat4::identity());
+        red.material.colour = Pixel{255, 0, 0};
+        DrawItem metal = staticDraw(cube, Mat4::translation(5.0f, 0.0f, 0.0f));
+        metal.material.metallic = 1.0f;
+        DrawItem grey = staticDraw(cube, Mat4::translation(10.0f, 0.0f, 0.0f));
+        grey.material.texture = texture;
+        DrawItem halfMetal = staticDraw(cube, Mat4::translation(15.0f, 0.0f, 0.0f));
+        halfMetal.material.metallic = 0.25f;
+
+        StaticGeometry geometry;
+        geometry.update(std::vector<DrawItem>{red, metal, grey, halfMetal}, assets);
+        const std::shared_ptr<const std::vector<Vec3>> albedo = geometry.getAlbedo();
+        assert(albedo != nullptr && albedo->size() == geometry.getLevel()->getTriangleCount() && albedo->size() == 48);
+
+        for (std::size_t triangle = 0; triangle < 12; ++triangle) {
+            assert(nearColour((*albedo)[triangle], Vec3{1.0f, 0.0f, 0.0f}, 1e-6f));
+            assert(nearColour((*albedo)[12 + triangle], Vec3{0.0f, 0.0f, 0.0f}, 1e-6f));
+            assert(nearColour((*albedo)[24 + triangle], Vec3{0.5f, 0.5f, 0.5f}, 1e-6f));
+            assert(nearColour((*albedo)[36 + triangle], Vec3{0.75f, 0.75f, 0.75f}, 1e-6f));
+        }
+
+        // Nothing blocking: no albedo either.
+        geometry.update(std::vector<DrawItem>{}, assets);
+        assert(geometry.getAlbedo() == nullptr);
     }
 }
 
@@ -113,4 +169,5 @@ void testStaticGeometry() {
     testWhatBlocksTheSky();
     testTheLevelFollowsTheDraws();
     testTheFingerprint();
+    testEachTriangleHasItsAlbedo();
 }

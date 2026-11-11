@@ -1796,7 +1796,6 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     const std::span<const ProbeCascade> skyCascades = readsSkyVisibility ? skyVisibility->getCascades() : std::span<const ProbeCascade>{};
     const GpuSkyVisibilityOptions skyOptions = packSkyVisibilityOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()));
     std::copy(std::begin(skyOptions.values), std::end(skyOptions.values), std::begin(frameData.skyVisibilityOptions));
-    std::copy(std::begin(skyOptions.more), std::end(skyOptions.more), std::begin(frameData.skyVisibilityMore));
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};

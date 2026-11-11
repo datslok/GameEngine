@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <optional>
 #include <span>
@@ -18,13 +19,37 @@
 * compute shader is phase 14's software tracer; StaticLevel's raycast already exists and is tested.
 */
 
+// What the grid says round a ray's hit: the point, its unit normal and the unit way back to the ray's start.
+using SkyHitSampler = std::function<SkySample(const Vec3& point, const Vec3& normal, const Vec3& toViewer)>;
+
+// Below this share of the grid known round a hit, the bake guesses the light on it instead.
+inline constexpr float skyHitKnownShare = 0.5f;
+
+// A point more than this share of whose front hits were guessed because the grid round them was not baked yet
+// (SkyCell::unsureShare) is baked again once, as a quick one is.
+inline constexpr float skyUnsureRefineShare = 0.1f;
+
+/*
+* The light falling on a hit, per unit of the open sky's light and per colour channel: the sky it sees facing its
+* normal plus the bounce there (so light keeps bouncing as the grid fills), from the grid round it; where the grid
+* knows less than skyHitKnownShare of it, fallback grey instead.
+*/
+Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback);
+
 /*
 * One point: rays rays of rayLength (skyVisibilityRay), each open if it meets nothing; a ray meeting the back of a
 * triangle (the side its winding faces away from) counts as blocked and as a vote that the point is inside a wall, which
 * it is when more than skyVisibilityBuriedShare of them do. Then its reach along each axis direction: the nearest hit
 * within a spacing, as a share of it (1 for none). marks is this thread's own mailbox (many threads bake at once).
+*
+* With each triangle's albedo (in the level's triangle order) and the grid round the hits (hitSampler), each ray that
+* meets the front of a triangle also brings back that triangle's albedo times the light on its hit (skyHitLight, its
+* fallback the point's own guess, twice its open share within 0..1: under an open sky a point sees half the sphere and
+* its ground all of it), each colour channel's values made into bands as the sky's are: the cell's bounce. Without
+* them, no bounce.
 */
-SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks);
+SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks,
+                    std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {});
 
 // How many points fit a budget, from the time one took last: at least one, at most what is waiting.
 int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting);
@@ -47,14 +72,14 @@ struct SkyBakePlan {
 SkyBakePlan planSkyBake(int waiting, int refining, bool afresh, bool everything, int budgetCells, int quickBudgetCells, bool quickFewer);
 
 // A point the store kept: as the GPU reads it (packed and unpacked again, so it packs to the very same words), and
-// whether it was baked at the quick rays.
+// whether it is still to be baked again (baked at the quick rays, or before the grid round its hits was).
 struct StoredSkyCell {
     SkyCell cell;
-    bool quick = false;
+    bool unfinished = false;
 };
 
 // About what one kept point costs: its key, its packed point and flag, and the list and map round them.
-inline constexpr std::size_t skyStoreBytesPerPoint = 96;
+inline constexpr std::size_t skyStoreBytesPerPoint = 128;
 
 // The points the settings' store holds at most (storeMegabytes over skyStoreBytesPerPoint).
 std::size_t skyStoreCapacity(const SkyVisibilitySettings& settings);
@@ -71,7 +96,7 @@ public:
     void clear();
 
     // Keeps (or replaces) the point at a place, as used now.
-    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, bool quick);
+    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, bool unfinished);
 
     // The point kept at a place, marked used now; none when not kept.
     std::optional<StoredSkyCell> find(int cascade, const ProbeGridCoord& place);
@@ -85,7 +110,7 @@ private:
     struct Entry {
         std::uint64_t key = 0;
         GpuSkyCell packed{};
-        bool quick = false;
+        bool unfinished = false;
     };
 
     // The most recently used at the front.
@@ -116,11 +141,15 @@ public:
     * denser does, so falling behind costs least there, and a missing dense point reads the coarser one); within a
     * cascade, the points ahead (in front of the camera, along forward, or ahead of the last move, either one; all of
     * them when neither is known), then the rest, nearest the camera first in each.
+    *
+    * albedo (each of the level's triangles', in its order) gives the points their bounce, its hits lit from the grid as
+    * it stood before this bake (bakeSkyCell); none without it.
     */
-    int bake(const StaticLevel& level, JobSystem& jobs, int maxCells, bool quick = false, const Vec3& forward = Vec3{});
+    int bake(const StaticLevel& level, JobSystem& jobs, int maxCells, bool quick = false, const Vec3& forward = Vec3{}, std::span<const Vec3> albedo = {});
 
-    // Bakes up to maxCells quickly baked points again at the full rays, in the order they were baked. Returns how many.
-    int refine(const StaticLevel& level, JobSystem& jobs, int maxCells);
+    // Bakes up to maxCells quickly baked points again at the full rays, in the order they were baked, with their bounce
+    // from albedo as bake gives it. Returns how many.
+    int refine(const StaticLevel& level, JobSystem& jobs, int maxCells, std::span<const Vec3> albedo = {});
 
     int getWaiting() const;
 
@@ -138,20 +167,23 @@ private:
     void startAfresh();
     void wait(int cell);
 
-    // Bakes these points at rays rays, each into its own entry.
-    void bakeCells(const StaticLevel& level, JobSystem& jobs, std::span<const int> batch, int rays);
+    // Bakes these points at rays rays, each into its own entry, their hits lit from the grid as it stood before.
+    void bakeCells(const StaticLevel& level, JobSystem& jobs, std::span<const int> batch, int rays, std::span<const Vec3> albedo);
+
+    // The batch's results, written while the rest of the grid is read, then put in place.
+    std::vector<SkyCell> baked;
 
     // Moves up to count of cascade's waiting points into batch, the first by bake's order.
     void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);
 
-    // A point a move brought into its slot: the store's, if it kept that place (back to refinement if quick), else waiting.
+    // A point a move brought into its slot: the store's, if it kept that place (back to refinement if unfinished), else waiting.
     void arrive(std::size_t cascade, int cell, const ProbeCascade& now);
 
     // Queues a point for refinement.
     void queueRefine(int cell);
 
     // Keeps these just-baked points in the store, at their places in the cascades as they stand.
-    void keepBaked(std::span<const int> batch, bool quick);
+    void keepBaked(int cell, bool unfinished);
 
     SkyCellStore store;
 

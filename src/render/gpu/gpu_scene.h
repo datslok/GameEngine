@@ -91,11 +91,10 @@ struct GpuFrameData {
     float textureOptions[4];        // x: the surface textures' mip bias (render/gpu/upscaling.h, textureLodBias), y: 1 filters normal maps (Toksvig)
     std::int32_t mirroredLightOptions[4]; // x: 1 when the main pass adds the light mirrors reflect (render/gpu/mirrored_light.h), y: the frame, turning rough mirrors' samples
     std::int32_t ambientOcclusionOptions[4]; // x: 1 when the main pass reads ambient occlusion (render/gpu/ambient_occlusion.h), y: 1 with multiple bounces, z: 1 with specular occlusion
-    float skyVisibilityOptions[4]; // the sky visibility grid (render/gpu/sky_visibility.h, packSkyVisibilityOptions): x its cascades read (0: not read), y the bounce share, z the lookup bias, w 1 for its debug view
-    float skyVisibilityMore[4];    // x: the blockers' floor (packSkyVisibilityOptions' second half)
+    float skyVisibilityOptions[4]; // the sky visibility grid (render/gpu/sky_visibility.h, packSkyVisibilityOptions): x its cascades read (0: not read), y the ambient floor, z the lookup bias, w 1 for its debug view
 };
 
-static_assert(sizeof(GpuFrameData) == 384, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 368, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

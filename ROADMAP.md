@@ -289,6 +289,10 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [x] Screen-space global illumination (`screen-space-gi`)
   - [x] Its noise averaged over frames and denoised before the upscalers see it, and the fill removed (`ao-temporal`)
 - [x] Sky visibility: rooms dark without probes, a CPU-baked grid of how much sky each point sees (`sky-visibility`; its screen fill removed in `ao-temporal`)
+- [ ] The sky visibility grid as CPU light probes: its rays' hits lit, so the grid carries bounce light (designed Nov 11 2026)
+  - [x] Stage 1: the sky's bounce, per unit of the flat ambient, from each triangle's albedo, in place of the guess (`sky-bounce`)
+  - [ ] Stage 2: the sun's bounce, per unit of the sun's light, re-baked on a rolling budget as the sun moves
+  - [ ] Stage 3 (optional): lamps, each point keeping its brightest few with shadow rays, refreshed in a region when one switches
 - [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
   - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
 - [ ] Contact shadows: short screen-space rays, so small objects sit on what they touch

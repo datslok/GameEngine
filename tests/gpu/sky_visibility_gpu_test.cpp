@@ -19,35 +19,47 @@ namespace {
         return length > 1e-3f ? direction * (1.0f / length) : Vec3{0.0f, 1.0f, 0.0f};
     }
 
+    // Bands across their range, some overshooting either way (so the clamp is met).
+    GpuVec4 randomBands(CaseRandom& random, float most) {
+        return gpuVec4(random.between(-0.2f * most, 1.2f * most), random.between(-most, most), random.between(-most, most), random.between(-most, most));
+    }
+
+    SkyVisibility bandsFrom(const GpuVec4& bands) {
+        return SkyVisibility{bands[0], Vec3{bands[1], bands[2], bands[3]}};
+    }
+
     /*
-    * Bands across their range, some overshooting either way (so the clamp is met), unit normals and directions, bounce
-    * shares and blockers' floors from 0 to 1. Inputs per case: (a, b), (normal, bounce share), (direction, floor).
-    * Output: (facing, along, in air, blockers lit).
+    * The sky's bands and three bounce channels' (smaller, as a bounce is) across their range, unit normals and
+    * directions, floors from 0 to 0.2. Inputs per case: (a, b), (normal, floor), (direction, unused), the red, green and
+    * blue bounce bands. Outputs: facing, along and in the air, each per channel.
     */
     void checkShares(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{307};
         std::vector<GpuVec4> inputs;
 
         for (int i = 0; i < 256; ++i) {
-            inputs.push_back(gpuVec4(random.between(-0.2f, 1.2f), random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f), random.between(-1.0f, 1.0f)));
-            inputs.push_back(gpuVec4(randomUnit(random), i % 4 == 0 ? 0.0f : random.between(0.0f, 1.0f)));
-            inputs.push_back(gpuVec4(randomUnit(random), i % 3 == 0 ? 0.0f : random.between(0.0f, 1.0f)));
+            inputs.push_back(randomBands(random, 1.0f));
+            inputs.push_back(gpuVec4(randomUnit(random), i % 4 == 0 ? 0.0f : random.between(0.0f, 0.2f)));
+            inputs.push_back(gpuVec4(randomUnit(random), 0.0f));
+
+            for (int channel = 0; channel < 3; ++channel) {
+                inputs.push_back(i % 5 == 0 ? gpuVec4(0.0f, 0.0f, 0.0f, 0.0f) : randomBands(random, 0.6f));
+            }
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SKY_VISIBILITY_SHARES, inputs, 3, 1);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SKY_VISIBILITY_SHARES, inputs, 6, 3);
 
-        for (std::size_t i = 0; i < inputs.size() / 3; ++i) {
-            const GpuVec4& bands = inputs[3 * i];
-            const SkyVisibility visibility{bands[0], Vec3{bands[1], bands[2], bands[3]}};
-            const Vec3 normal = vec3From(inputs[3 * i + 1]);
-            const float bounce = inputs[3 * i + 1][3];
-            const Vec3 direction = vec3From(inputs[3 * i + 2]);
-            const float floor = inputs[3 * i + 2][3];
-            const GpuVec4& shares = outputs[i];
-            report.check("skyVisibilityFacing", arithmeticTolerance, skyVisibilityFacing(visibility, normal, bounce, floor), shares[0]);
-            report.check("skyVisibilityAlong", arithmeticTolerance, skyVisibilityAlong(visibility, direction, bounce, floor), shares[1]);
-            report.check("skyVisibilityInAir", arithmeticTolerance, skyVisibilityInAir(visibility, bounce, floor), shares[2]);
-            report.check("skyBlockersLit", arithmeticTolerance, skyBlockersLit(visibility, floor), shares[3]);
+        for (std::size_t i = 0; i < inputs.size() / 6; ++i) {
+            const GpuVec4* in = &inputs[6 * i];
+            const SkyVisibility visibility = bandsFrom(in[0]);
+            const Vec3 normal = vec3From(in[1]);
+            const float floor = in[1][3];
+            const Vec3 direction = vec3From(in[2]);
+            const SkyBounce bounce{bandsFrom(in[3]), bandsFrom(in[4]), bandsFrom(in[5])};
+            const GpuVec4* out = &outputs[3 * i];
+            report.check("skyLightFacing", arithmeticTolerance, skyLightFacing(visibility, bounce, normal, floor), vec3From(out[0]));
+            report.check("skyLightAlong", arithmeticTolerance, skyLightAlong(visibility, bounce, direction, floor), vec3From(out[1]));
+            report.check("skyLightInAir", arithmeticTolerance, skyLightInAir(visibility, bounce, floor), vec3From(out[2]));
         }
     }
 
@@ -57,8 +69,9 @@ namespace {
     }
 
     /*
-    * Points packed by packSkyCell, read back by the shader. Inputs per case: the four words. Outputs: (a, b), (reaches
-    * along +x +y +z, state), (reaches along -x -y -z). Halves and bytes come back exactly.
+    * Points packed by packSkyCell, read back by the shader. Inputs per case: the twelve words. Outputs: (a, b), (reaches
+    * along +x +y +z, state), (reaches along -x -y -z), the red, green and blue bounce bands. Halves and bytes come back
+    * exactly.
     */
     void checkUnpack(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{311};
@@ -72,20 +85,36 @@ namespace {
                 reach = i % 5 == 0 ? 1.0f : random.between(0.0f, 1.0f);
             }
             cell.state = static_cast<SkyCellState>(i % 3);
+
+            for (SkyVisibility& channel : cell.bounce) {
+                channel = bandsFrom(randomBands(random, 0.8f));
+            }
+
             const GpuSkyCell packed = packSkyCell(cell);
             cells.push_back(unpackSkyCell(packed));
-            inputs.push_back(GpuVec4{wordAsFloat(packed.words[0]), wordAsFloat(packed.words[1]), wordAsFloat(packed.words[2]), wordAsFloat(packed.words[3])});
+
+            for (std::size_t texel = 0; texel < 3; ++texel) {
+                inputs.push_back(GpuVec4{wordAsFloat(packed.words[4 * texel]), wordAsFloat(packed.words[4 * texel + 1]), wordAsFloat(packed.words[4 * texel + 2]),
+                                         wordAsFloat(packed.words[4 * texel + 3])});
+            }
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SKY_VISIBILITY_UNPACK, inputs, 1, 3);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SKY_VISIBILITY_UNPACK, inputs, 3, 6);
 
         for (std::size_t i = 0; i < cells.size(); ++i) {
             const SkyCell& cell = cells[i];
-            report.check("unpackSkyCell bands", exactTolerance, cell.visibility.open, outputs[3 * i][0]);
-            report.check("unpackSkyCell bands", exactTolerance, cell.visibility.lean, Vec3{outputs[3 * i][1], outputs[3 * i][2], outputs[3 * i][3]});
-            report.check("unpackSkyCell reaches", arithmeticTolerance, Vec3{cell.reach[0], cell.reach[2], cell.reach[4]}, vec3From(outputs[3 * i + 1]));
-            report.check("unpackSkyCell reaches", arithmeticTolerance, Vec3{cell.reach[1], cell.reach[3], cell.reach[5]}, vec3From(outputs[3 * i + 2]));
-            report.check("unpackSkyCell state", exactTolerance, static_cast<float>(cell.state), outputs[3 * i + 1][3]);
+            const GpuVec4* out = &outputs[6 * i];
+            report.check("unpackSkyCell bands", exactTolerance, cell.visibility.open, out[0][0]);
+            report.check("unpackSkyCell bands", exactTolerance, cell.visibility.lean, Vec3{out[0][1], out[0][2], out[0][3]});
+            report.check("unpackSkyCell reaches", arithmeticTolerance, Vec3{cell.reach[0], cell.reach[2], cell.reach[4]}, vec3From(out[1]));
+            report.check("unpackSkyCell reaches", arithmeticTolerance, Vec3{cell.reach[1], cell.reach[3], cell.reach[5]}, vec3From(out[2]));
+            report.check("unpackSkyCell state", exactTolerance, static_cast<float>(cell.state), out[1][3]);
+
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                const GpuVec4& bands = out[3 + channel];
+                report.check("unpackSkyCell bounce", exactTolerance, cell.bounce[channel].open, bands[0]);
+                report.check("unpackSkyCell bounce", exactTolerance, cell.bounce[channel].lean, Vec3{bands[1], bands[2], bands[3]});
+            }
         }
     }
 

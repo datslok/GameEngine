@@ -29,7 +29,7 @@ std::size_t MotionHistory::KeyHash::operator()(const Key& key) const {
 * placed by the entity's interpolated transform times the part's local transform.
 */
 FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history) {
-    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}, {}, 0};
+    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}, {}, 0, {}};
 
     world.each<ModelRenderer, Transform>([&](Entity entity, ModelRenderer& modelRenderer, Transform&) {
         if (!modelRenderer.visible) {
