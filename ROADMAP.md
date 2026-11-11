@@ -1,6 +1,6 @@
 # Roadmap
 
-A from-scratch C++20 engine that can host both an **FPS** and a **MOBA**. Eventually it should also host a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic), a **solar system** simulated at real scale, and a **superhero game**: flying fast enough to feel it and bringing down buildings by real physics.
+A from-scratch C++23 engine that can host both an **FPS** and a **MOBA**. Eventually it should also host a **dressmaking game** with real cloth physics (like Dressmaker, but more realistic), a **solar system** simulated at real scale, and a **superhero game**: flying fast enough to feel it and bringing down buildings by real physics.
 
 The core stays genre-agnostic. Genre code (camera styles, weapons, abilities, netcode tuning, cloth and sewing, orbital mechanics) lives in modules on top.
 
