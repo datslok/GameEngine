@@ -601,7 +601,9 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
 - [ ] Open-world scale: streaming textures and meshes in and out by distance, impostors for far objects, and a render graph that orders passes and places barriers from what each pass reads and writes, once the hand-placed barriers of phase 6b no longer keep up
 - [ ] Sky visibility baked offline and streamed, for big worlds (added Nov 11 2026)
   - The grid only bakes against the static level, which does not change, so a level can be baked once, automatically (no hand-placed volumes), saved, and streamed in tiles by distance with the world, as open-world games do with their probe grids and sky occlusion.
-  - Sparse storage: dense points only near geometry, coarse ones in open air (a uniform 0.5 m grid over kilometres would not fit), coarse tiles loaded first, read ahead along the camera's velocity.
+  - Bake geometry, not light: what is baked (how much sky each place sees) is combined with the sun and sky at run time, so the time of day stays free.
+  - Sparse, adaptive storage, following surfaces rather than volume: fine points (0.5-1 m) near walls, streets and interiors, coarse ones (several metres) over open ground and air, none inside solid buildings (bricks allocated only near geometry, or an octree subdividing only where the value changes; a uniform 0.5 m grid over the light lab's 800 x 800 m would be about 2.4 GB). Coarse tiles loaded first, read ahead along the camera's velocity.
+  - The runtime store (`SkyCellStore`, `ao-temporal`) is its first half: points kept by their place in the world; this writes that store to disk.
   - The runtime bake stays for what changes (phase 15's falling buildings, re-baked locally within the frame budget).
 
 ### Tools and the rest

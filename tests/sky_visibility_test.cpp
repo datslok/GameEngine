@@ -269,7 +269,7 @@ namespace {
         const SkyVisibilitySettings defaults;
         assert(defaults.enabled && defaults.bounceShare == 0.25f && defaults.spacing == 0.5f && defaults.cascades == 2);
         assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
-        assert(defaults.blockersLitFloor == 0.1f && defaults.quickRays == 64);
+        assert(defaults.blockersLitFloor == 0.1f && defaults.quickRays == 64 && defaults.storeMegabytes == 256.0f);
         validateSkyVisibility(defaults);
 
         SkyVisibilitySettings bad;
@@ -291,6 +291,11 @@ namespace {
         bad.quickRays = 0;
         assert(rejects(bad));
         bad = {};
+        bad.storeMegabytes = -1.0f;
+        assert(rejects(bad));
+        bad.storeMegabytes = 0.0f;
+        assert(!rejects(bad));
+        bad = {};
         bad.rayLength = -1.0f;
         assert(rejects(bad));
         bad = {};
@@ -307,7 +312,8 @@ namespace {
         other.bakeMilliseconds = 3.0f;
         other.debugView = true;
         other.blockersLitFloor = 0.3f;
-        other.quickRays = 16; // only how a refill gets there, not what it ends as
+        other.quickRays = 16;         // only how a refill gets there, not what it ends as
+        other.storeMegabytes = 32.0f; // only what is kept, not what is baked
         assert(sameSkyVisibilityGrid(defaults, other));
         other.rays = 32;
         assert(!sameSkyVisibilityGrid(defaults, other));
@@ -475,9 +481,9 @@ namespace {
         }
         assert(unknown == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
 
-        // Moving back before it is baked brings in the other plane, each point waiting once.
+        // Moving back before it is baked brings back the plane it left, which the store kept: nothing waits.
         assert(!grid.follow(centre, settings, 1));
-        assert(grid.getWaiting() == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
+        assert(grid.getWaiting() == 0);
 
         SkyVisibilitySettings looks = settings;
         looks.bounceShare = 0.6f;
@@ -632,6 +638,127 @@ namespace {
         assert(northBaked > 0);
     }
 
+    bool sameWords(const SkyCell& a, const SkyCell& b) {
+        const GpuSkyCell packedA = packSkyCell(a);
+        const GpuSkyCell packedB = packSkyCell(b);
+        return packedA.words[0] == packedB.words[0] && packedA.words[1] == packedB.words[1] && packedA.words[2] == packedB.words[2] &&
+               packedA.words[3] == packedB.words[3];
+    }
+
+    /*
+    * The store keeps points by cascade and lattice place, as the GPU reads them (so a kept point packs to exactly the
+    * words it would have), with whether they were quick; past its capacity the one used longest ago goes first; places
+    * past its coordinates' range are not kept; its capacity follows the megabytes.
+    */
+    void testTheStoreKeepsBakedPoints() {
+        const StaticLevel level = roomWithADoor();
+        GridMarks marks;
+        const SkyCell inside = bakeSkyCell(level, Vec3{1.5f, 1.0f, 0.1f}, 16, 30.0f, 0.5f, marks);
+        const SkyCell outside = bakeSkyCell(level, Vec3{8.0f, 1.0f, 0.1f}, 16, 30.0f, 0.5f, marks);
+
+        SkyCellStore store;
+        store.setCapacity(3);
+        const ProbeGridCoord a{3, 2, 1};
+        const ProbeGridCoord b{-4, 0, 7};
+        const ProbeGridCoord c{100, 5, -9};
+        store.keep(0, a, inside, false);
+        store.keep(0, b, outside, true);
+        store.keep(1, a, outside, false);
+        assert(store.size() == 3);
+
+        const std::optional<StoredSkyCell> foundA = store.find(0, a);
+        assert(foundA && !foundA->quick && sameWords(foundA->cell, inside));
+        const std::optional<StoredSkyCell> foundB = store.find(0, b);
+        assert(foundB && foundB->quick && sameWords(foundB->cell, outside));
+        assert(store.find(1, a) && sameWords(store.find(1, a)->cell, outside));
+        assert(!store.find(0, c) && !store.find(2, a));
+
+        // Finding is using: oldest (0, a), then (0, b), then (1, a). Touching (0, a) makes (0, b) the oldest.
+        store.touch(0, a);
+        store.keep(0, c, inside, false);
+        assert(store.size() == 3 && !store.find(0, b) && store.find(0, a) && store.find(0, c) && store.find(1, a));
+
+        // Keeping a place again replaces it (a refined point).
+        store.keep(0, c, outside, false);
+        assert(store.size() == 3 && sameWords(store.find(0, c)->cell, outside));
+
+        // Out of the coordinates' range: not kept.
+        store.keep(0, ProbeGridCoord{1 << 21, 0, 0}, inside, false);
+        assert(!store.find(0, ProbeGridCoord{1 << 21, 0, 0}) && store.size() == 3);
+
+        store.clear();
+        assert(store.size() == 0 && !store.find(0, a));
+        store.setCapacity(0);
+        store.keep(0, a, inside, false);
+        assert(store.size() == 0);
+
+        SkyVisibilitySettings settings;
+        assert(skyStoreCapacity(settings) == static_cast<std::size_t>(256.0 * 1024.0 * 1024.0 / skyStoreBytesPerPoint));
+        settings.storeMegabytes = 0.0f;
+        assert(skyStoreCapacity(settings) == 0);
+    }
+
+    /*
+    * Coming back: points baked before a long move are found in the store when their places come back into the grid,
+    * so nothing waits; quick ones go back to refinement. With the store off, or after a new level (which empties it),
+    * they wait again.
+    */
+    void testComingBackFindsWhatWasBaked() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        settings.quickRays = 2;
+        const int count = skyVisibilityCellCount(settings);
+        const Vec3 home{0.37f, 1.61f, -0.22f};
+        const Vec3 away = home + Vec3{200.0f, 0.0f, 0.0f};
+
+        SkyVisibilityGrid grid;
+        grid.follow(home, settings, 1);
+        grid.bake(level, serialJobs(), count);
+        const std::vector<SkyCell> baked(grid.getCells().begin(), grid.getCells().end());
+
+        assert(!grid.follow(away, settings, 1) && grid.getWaiting() == count);
+        const std::uint64_t before = grid.getVersion();
+        assert(!grid.follow(home, settings, 1));
+        assert(grid.getWaiting() == 0 && grid.getRefining() == 0 && grid.getVersion() != before);
+
+        for (int cell = 0; cell < count; ++cell) {
+            assert(sameWords(grid.getCells()[static_cast<std::size_t>(cell)], baked[static_cast<std::size_t>(cell)]));
+        }
+
+        // Halfway back after a partial bake away: only the places never baked wait.
+        grid.follow(away, settings, 1);
+        assert(grid.bake(level, serialJobs(), 100) == 100);
+        grid.follow(home, settings, 1);
+        assert(grid.getWaiting() == 0);
+        grid.follow(away, settings, 1);
+        assert(grid.getWaiting() == count - 100);
+
+        // Quick points come back still to be refined.
+        SkyVisibilityGrid quick;
+        quick.follow(home, settings, 1);
+        quick.bake(level, serialJobs(), count, true);
+        quick.follow(away, settings, 1);
+        assert(quick.getRefining() == 0);
+        quick.follow(home, settings, 1);
+        assert(quick.getWaiting() == 0 && quick.getRefining() == count);
+
+        // A new level empties the store.
+        assert(grid.follow(home, settings, 2) && grid.getWaiting() == count);
+        grid.follow(away, settings, 2);
+        grid.follow(home, settings, 2);
+        assert(grid.getWaiting() == count);
+
+        // The store off: nothing comes back.
+        settings.storeMegabytes = 0.0f;
+        SkyVisibilityGrid forgetful;
+        forgetful.follow(home, settings, 1);
+        forgetful.bake(level, serialJobs(), count);
+        forgetful.follow(away, settings, 1);
+        forgetful.follow(home, settings, 1);
+        assert(forgetful.getWaiting() == count);
+    }
+
     // Many threads bake exactly what one does.
     void testBakingIsTheSameOnEveryCore() {
         const StaticLevel level = roomWithADoor();
@@ -678,5 +805,7 @@ void testSkyVisibility() {
     testTheGridFollowsTheCamera();
     testQuickBakesAreRefined();
     testFallingBehindBakesWhatMattersFirst();
+    testTheStoreKeepsBakedPoints();
+    testComingBackFindsWhatWasBaked();
     testBakingIsTheSameOnEveryCore();
 }

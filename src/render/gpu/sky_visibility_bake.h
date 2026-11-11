@@ -4,8 +4,12 @@
 #include "physics/static_level.h"
 #include "render/gpu/sky_visibility.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <list>
+#include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 /*
@@ -41,6 +45,54 @@ struct SkyBakePlan {
 * when quickFewer (budgetCells at full rays when not). Points behind read the coarser cascade, or the open sky.
 */
 SkyBakePlan planSkyBake(int waiting, int refining, bool afresh, bool everything, int budgetCells, int quickBudgetCells, bool quickFewer);
+
+// A point the store kept: as the GPU reads it (packed and unpacked again, so it packs to the very same words), and
+// whether it was baked at the quick rays.
+struct StoredSkyCell {
+    SkyCell cell;
+    bool quick = false;
+};
+
+// About what one kept point costs: its key, its packed point and flag, and the list and map round them.
+inline constexpr std::size_t skyStoreBytesPerPoint = 96;
+
+// The points the settings' store holds at most (storeMegabytes over skyStoreBytesPerPoint).
+std::size_t skyStoreCapacity(const SkyVisibilitySettings& settings);
+
+/*
+* Baked points kept by their place in the world, a cascade and its lattice coordinate, so coming back to a place finds
+* them instead of baking them again: a point depends only on the level and its place, so a kept one is exact. Past
+* its capacity the point used longest ago goes first (a list in order of use, a map to its entries; each step O(1)).
+* Places past +-2^19 lattice steps on any axis (about 260 km at 0.5 m) are not kept.
+*/
+class SkyCellStore {
+public:
+    void setCapacity(std::size_t points);
+    void clear();
+
+    // Keeps (or replaces) the point at a place, as used now.
+    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, bool quick);
+
+    // The point kept at a place, marked used now; none when not kept.
+    std::optional<StoredSkyCell> find(int cascade, const ProbeGridCoord& place);
+
+    // Marks the point at a place, if kept, used now.
+    void touch(int cascade, const ProbeGridCoord& place);
+
+    std::size_t size() const;
+
+private:
+    struct Entry {
+        std::uint64_t key = 0;
+        GpuSkyCell packed{};
+        bool quick = false;
+    };
+
+    // The most recently used at the front.
+    std::list<Entry> used;
+    std::unordered_map<std::uint64_t, std::list<Entry>::iterator> places;
+    std::size_t capacity = 0;
+};
 
 /*
 * The grid round the camera and its baking. follow moves the cascades with the camera; points a move brings in, or
@@ -92,6 +144,17 @@ private:
     // Moves up to count of cascade's waiting points into batch, the first by bake's order.
     void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);
 
+    // A point a move brought into its slot: the store's, if it kept that place (back to refinement if quick), else waiting.
+    void arrive(std::size_t cascade, int cell, const ProbeCascade& now);
+
+    // Queues a point for refinement.
+    void queueRefine(int cell);
+
+    // Keeps these just-baked points in the store, at their places in the cascades as they stand.
+    void keepBaked(std::span<const int> batch, bool quick);
+
+    SkyCellStore store;
+
     SkyVisibilitySettings shape;
     std::uint64_t levelVersion = 0;
     bool started = false;
@@ -102,7 +165,9 @@ private:
     Vec3 centre;
     Vec3 motion;
 
-    // Each cascade's waiting points, and which points wait.
+    // Each cascade's waiting points, and each point's state in them: not listed, waiting, or listed but found in the
+    // store meanwhile (dropped from the list when it is next walked).
+    enum WaitState : std::uint8_t { NotListed = 0, Waiting = 1, Found = 2 };
     std::vector<std::vector<int>> waiting;
     std::vector<std::uint8_t> isWaiting;
     int waitingCount = 0;
