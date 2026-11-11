@@ -608,7 +608,8 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - Bake geometry, not light: what is baked (how much sky each place sees) is combined with the sun and sky at run time, so the time of day stays free.
   - Sparse, adaptive storage, following surfaces rather than volume: fine points (0.5-1 m) near walls, streets and interiors, coarse ones (several metres) over open ground and air, none inside solid buildings (bricks allocated only near geometry, or an octree subdividing only where the value changes; a uniform 0.5 m grid over the light lab's 800 x 800 m would be about 2.4 GB). Coarse tiles loaded first, read ahead along the camera's velocity.
   - The runtime store (`SkyCellStore`, `ao-temporal`) is its first half: points kept by their place in the world; this writes that store to disk.
-  - The runtime bake stays for what changes (phase 15's falling buildings, re-baked locally within the frame budget).
+  - The runtime bake stays for what changes (phase 15's falling buildings, re-baked locally by the background bake).
+  - Agreed Nov 11 2026 (option C: the background bake first, `ao-bounce-unfog`, then this as its own project): what it stores is geometry and albedo (the sky's reach and the bounce per unit of sky light), so it is baked once per level; the sun's bounce (phase 16 stage 2) depends on the sun's place and stays a runtime layer on top. Plan it with a research write-up first (formats, sparse layouts, streaming, what shipped engines store), as for the other big systems.
 
 ### Tools and the rest
 

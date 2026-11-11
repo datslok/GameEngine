@@ -30,14 +30,20 @@ JobSystem& serialJobs() {
     return serial;
 }
 
-JobSystem::JobSystem(unsigned workerCount) {
+JobSystem::JobSystem(unsigned workerCount, std::function<void()> workerStart) {
     for (unsigned pile = 0; pile <= workerCount; ++pile) {
         piles.push_back(std::make_unique<Pile>());
     }
 
     try {
         for (unsigned worker = 0; worker < workerCount; ++worker) {
-            workers.emplace_back([this, worker] { workerLoop(worker + 1); });
+            workers.emplace_back([this, worker, workerStart] {
+                if (workerStart) {
+                    workerStart();
+                }
+
+                workerLoop(worker + 1);
+            });
         }
     } catch (...) {
         stopWorkers();

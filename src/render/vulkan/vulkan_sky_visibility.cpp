@@ -4,8 +4,10 @@
 #include "render/vulkan/image_state.h"
 #include "render/vulkan/immediate_commands.h"
 
+#include <SDL3/SDL_thread.h>
 #include <algorithm>
 #include <cstring>
+#include <thread>
 
 namespace {
     // A point is three texels of four 32-bit words each along x (GpuSkyCell, skyCellTexels), read by exact texels.
@@ -51,20 +53,36 @@ VulkanSkyVisibility::VulkanSkyVisibility(const VulkanDevice& device, ImmediateCo
 * bakes). A quick bake's cost is scaled up by the rays' ratio, so the refinement after a refill keeps to the budget
 * from its first frame. A frame bakes at least a round of jobs for every core, and only such batches measure the cost:
 * a smaller one runs on fewer cores and would measure a point dearer than it is (skyCellsForBudget).
+*
+* With backgroundBake, the frame only hands batches to the background baker and applies what it finished: a batch of
+* about skyBackgroundBatchSeconds, the waiting points first (quickly, while the quick rays are fewer), then refinement.
+* A fresh grid and a capture still bake whole on the frame, after waiting for the batch baking (so nothing it brings
+* lands after them).
 */
 void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs,
                                bool everything) {
     const bool afresh = grid.follow(centre, settings, frame.staticLevelVersion);
-    const int waiting = grid.getWaiting();
-    const int refining = grid.getRefining();
+    const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
+    const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());
+    applyFinished(quickShare, minimumBatch);
 
-    if (waiting + refining == 0 || frame.staticLevel == nullptr) {
+    if (grid.getWaiting() + grid.getRefining() == 0 || frame.staticLevel == nullptr) {
         return;
     }
 
+    if (settings.backgroundBake && !everything && !afresh) {
+        startBackground(frame, settings, quickShare);
+        return;
+    }
+
+    if (baker && baker->busy()) {
+        baker->waitFinished();
+        applyFinished(quickShare, minimumBatch);
+    }
+
+    const int waiting = grid.getWaiting();
+    const int refining = grid.getRefining();
     const double budgetSeconds = settings.bakeMilliseconds * 1e-3;
-    const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
-    const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());
     const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining, minimumBatch);
     const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting, minimumBatch);
     const SkyBakePlan plan = planSkyBake(waiting, refining, afresh, everything, budget, quickBudget, settings.quickRays < settings.rays);
@@ -81,6 +99,60 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
             secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(baked + refined);
         }
     }
+}
+
+// A finished background batch into the grid, its cost (at the full rays) kept when it was big enough to measure it.
+void VulkanSkyVisibility::applyFinished(double quickShare, int minimumBatch) {
+    if (!baker) {
+        return;
+    }
+
+    const std::optional<SkyBakeBatch> done = baker->takeFinished();
+
+    if (!done) {
+        return;
+    }
+
+    if (static_cast<int>(done->entries.size()) >= minimumBatch && done->secondsPerCell > 0.0) {
+        secondsPerCell = done->secondsPerCell / (done->quick ? quickShare : 1.0);
+    }
+
+    grid.applyBatch(*done);
+}
+
+// The next batch for the background baker, when it is free: the waiting points, else refinement.
+void VulkanSkyVisibility::startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings, double quickShare) {
+    // Its threads, the baker's own among them: the settings' share of the CPU's. Remade when that changes, once the
+    // batch baking is in.
+    const unsigned threads = skyBackgroundWorkers(settings.backgroundShare, std::max(std::thread::hardware_concurrency(), 1u));
+
+    if (baker && bakeJobs->getThreadCount() != threads) {
+        baker->waitFinished();
+        applyFinished(quickShare, skyMinimumBatch(bakeJobs->getThreadCount()));
+        baker.reset();
+        bakeJobs.reset();
+    }
+
+    if (!baker) {
+        // Below the frame's threads, so the frame comes first and the bake takes what is left.
+        const auto lowPriority = [] {
+            SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+        };
+        bakeJobs = std::make_unique<JobSystem>(threads - 1, lowPriority);
+        baker = std::make_unique<SkyBackgroundBaker>(*bakeJobs, lowPriority);
+    }
+
+    if (baker->busy()) {
+        return;
+    }
+
+    const int minimumBatch = skyMinimumBatch(bakeJobs->getThreadCount());
+    const int waiting = grid.getWaiting();
+    const bool quick = waiting > 0 && settings.quickRays < settings.rays;
+    const int cells = skyCellsForBudget(skyBackgroundBatchSeconds, secondsPerCell * (quick ? quickShare : 1.0), waiting > 0 ? waiting : grid.getRefining(),
+                                        minimumBatch);
+    SkyBakeBatch batch = waiting > 0 ? grid.takeBatch(cells, quick, frame.camera.getForward()) : grid.takeRefineBatch(cells);
+    baker->start(std::move(batch), frame.staticLevel, frame.staticAlbedo);
 }
 
 /*

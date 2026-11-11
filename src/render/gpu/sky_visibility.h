@@ -79,6 +79,16 @@ struct SkyVisibilitySettings {
     // and a refill after the level or the grid's shape changed, is baked whole at once.
     float bakeMilliseconds = 1.0f;
 
+    // Bakes on a thread of its own on every core the frame leaves free (SkyBackgroundBaker), as fast as they allow,
+    // instead of within bakeMilliseconds of each frame: a walk's backlog in about a second instead of ten. The frame
+    // never waits for it; its results come in as they finish. Off: the frame's budget, as before.
+    bool backgroundBake = true;
+
+    // The share of the CPU's threads the background bake gets (at least one, at low priority). Half: on the laptop
+    // (8 cores, 16 threads) all of them slowed debug frames from 20 to 28 ms while baking (the bake's threads share
+    // cores with the frame's), half from 23 to 26, the waiting points of a 60 m jump cleared in 6 s instead of 4.
+    float backgroundShare = 0.5f;
+
     // A debug view: the light from all around shown as grey, the share of the sky each surface sees.
     bool debugView = false;
 };

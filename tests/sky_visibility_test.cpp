@@ -11,6 +11,8 @@
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -576,6 +578,10 @@ namespace {
         assert(skyCellsForBudget(0.001, 1e-6, 5000, 128) == 1000);
         assert(skyCellsForBudget(0.0, 1e-5, 40, 128) == 0);
         assert(skyMinimumBatch(16) == 16 * static_cast<int>(skyBakePointsPerJob) && skyMinimumBatch(0) == static_cast<int>(skyBakePointsPerJob));
+
+        // The background bake's workers: its share of the threads, at least one.
+        assert(skyBackgroundWorkers(0.5f, 16) == 8 && skyBackgroundWorkers(1.0f, 16) == 16);
+        assert(skyBackgroundWorkers(0.0f, 16) == 1 && skyBackgroundWorkers(0.5f, 1) == 1 && skyBackgroundWorkers(2.0f, 4) == 4);
     }
 
     /*
@@ -795,6 +801,129 @@ namespace {
         }
 
         assert(checked == 50);
+    }
+
+    /*
+    * Baking in batches, as the background baker does: a batch taken from the grid is baked apart from it (on another
+    * thread, against the grid as it stood) and applied later, while the grid may have followed the camera on.
+    *
+    * - Taken and applied straight away, the points are what the synchronous bake gives, and they leave the queue.
+    * - A point whose slot a move gave to another place before its result came is not put in the slot (which holds
+    *   another place now): the store keeps it, so coming back finds it baked.
+    * - A slot that left and came back to the same place meanwhile waits again; the result fills it and it stops waiting.
+    * - A fresh start (a new level) meanwhile throws the result away.
+    * - Refinement batches likewise.
+    */
+    void testBatchesBakeApart() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        settings.quickRays = 2;
+        const int count = skyVisibilityCellCount(settings);
+        const int plane = SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS;
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        const Vec3 east{settings.spacing, 0.0f, 0.0f};
+
+        SkyVisibilityGrid grid;
+        grid.follow(centre, settings, 1);
+        SkyBakeBatch batch = grid.takeBatch(100, false);
+        assert(batch.entries.size() == 100 && grid.getWaiting() == count - 100);
+        assert(grid.takeBatch(0, false).entries.empty());
+        bakeSkyBatch(level, serialJobs(), {}, batch);
+        grid.applyBatch(batch);
+        assert(grid.getWaiting() == count - 100 && grid.getRefining() == 0);
+
+        for (const SkyBakeBatch::Entry& entry : batch.entries) {
+            assert(bakedWith(grid, level, settings, entry.cell, 6));
+        }
+
+        // The rest quickly, then a move east before the result comes: the plane that left was in the batch.
+        SkyBakeBatch rest = grid.takeBatch(count, true);
+        assert(static_cast<int>(rest.entries.size()) == count - 100 && grid.getWaiting() == 0);
+        bakeSkyBatch(level, serialJobs(), {}, rest);
+        grid.follow(centre + east, settings, 1);
+        assert(grid.getWaiting() == plane);
+        grid.applyBatch(rest);
+        assert(grid.getWaiting() == plane);
+
+        int unknown = 0;
+        for (const SkyCell& cell : grid.getCells()) {
+            unknown += cell.state == SkyCellState::Unknown ? 1 : 0;
+        }
+        assert(unknown == plane); // the new plane, not filled with the old one's results
+
+        // Back west: the plane that left comes back from the store (its results kept by place), and waits no more.
+        grid.follow(centre, settings, 1);
+        assert(grid.getWaiting() == 0);
+        unknown = 0;
+        for (const SkyCell& cell : grid.getCells()) {
+            unknown += cell.state == SkyCellState::Unknown ? 1 : 0;
+        }
+        assert(unknown == 0);
+        assert(grid.getRefining() > 0);
+
+        // A refinement batch, applied: those points are baked at the full rays and leave the queue.
+        const int refining = grid.getRefining();
+        SkyBakeBatch refine = grid.takeRefineBatch(40);
+        assert(refine.entries.size() == 40 && grid.getRefining() == refining - 40);
+        bakeSkyBatch(level, serialJobs(), {}, refine);
+        grid.applyBatch(refine);
+        assert(grid.getRefining() == refining - 40);
+        for (const SkyBakeBatch::Entry& entry : refine.entries) {
+            assert(bakedWith(grid, level, settings, entry.cell, 6));
+        }
+
+        // Away and back again before a batch's result comes: the slot waits again, and the result fills it.
+        SkyVisibilityGrid round;
+        round.follow(centre, settings, 1);
+        round.bake(level, serialJobs(), count);
+        round.follow(centre + east, settings, 1);
+        SkyBakeBatch planeBatch = round.takeBatch(plane, false);
+        assert(static_cast<int>(planeBatch.entries.size()) == plane && round.getWaiting() == 0);
+        bakeSkyBatch(level, serialJobs(), {}, planeBatch);
+        round.follow(centre, settings, 1); // the plane in the batch leaves, unbaked
+        round.follow(centre + east, settings, 1); // and comes back: not in the store, so it waits again
+        assert(round.getWaiting() == plane);
+        round.applyBatch(planeBatch);
+        assert(round.getWaiting() == 0);
+        for (const SkyBakeBatch::Entry& entry : planeBatch.entries) {
+            assert(bakedWith(round, level, settings, entry.cell, 6));
+        }
+
+        // A new level meanwhile: the result is thrown away.
+        SkyVisibilityGrid fresh;
+        fresh.follow(centre, settings, 1);
+        SkyBakeBatch stale = fresh.takeBatch(50, false);
+        bakeSkyBatch(level, serialJobs(), {}, stale);
+        fresh.follow(centre, settings, 2);
+        fresh.applyBatch(stale);
+        assert(fresh.getWaiting() == count);
+        for (const SkyCell& cell : fresh.getCells()) {
+            assert(cell.state == SkyCellState::Unknown);
+        }
+    }
+
+    // The background baker: a batch started on its thread comes back baked as on the caller's.
+    void testTheBackgroundBaker() {
+        const auto level = std::make_shared<const StaticLevel>(roomWithADoor());
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        SkyVisibilityGrid grid;
+        grid.follow(centre, settings, 1);
+
+        SkyBackgroundBaker baker{serialJobs()};
+        assert(!baker.busy() && !baker.takeFinished());
+        baker.start(grid.takeBatch(200, false), level, nullptr);
+        assert(baker.busy());
+        baker.waitFinished();
+        std::optional<SkyBakeBatch> done = baker.takeFinished();
+        assert(done && done->entries.size() == 200 && done->secondsPerCell >= 0.0);
+        assert(!baker.busy() && !baker.takeFinished());
+        grid.applyBatch(*done);
+        for (const SkyBakeBatch::Entry& entry : done->entries) {
+            assert(bakedWith(grid, *level, settings, entry.cell, 6));
+        }
     }
 
     // A point's place in the world, from its number.
@@ -1064,6 +1193,8 @@ void testSkyVisibility() {
     testChangedPoints();
     testTheGridFollowsTheCamera();
     testQuickBakesAreRefined();
+    testBatchesBakeApart();
+    testTheBackgroundBaker();
     testFallingBehindBakesWhatMattersFirst();
     testTheStoreKeepsBakedPoints();
     testComingBackFindsWhatWasBaked();

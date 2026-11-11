@@ -106,6 +106,8 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Ray length", settings.rayLength, {.min = 0.1f, .max = 1000.0f, .sliderMin = 5.0f, .sliderMax = 100.0f, .unit = "m"});
     visitor.field("Lookup bias", settings.lookupBias, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
     visitor.field("Bake milliseconds", settings.bakeMilliseconds, {.min = 0.0f, .max = 100.0f, .sliderMin = 0.0f, .sliderMax = 8.0f, .unit = "ms"});
+    visitor.field("Background bake", settings.backgroundBake);
+    visitor.field("Background share", settings.backgroundShare, {.min = 0.0f, .max = 1.0f});
     visitor.field("Debug view", settings.debugView);
 }
 
@@ -121,6 +123,10 @@ void validateSkyVisibility(const SkyVisibilitySettings& settings) {
 
     if (!(settings.bakeMilliseconds >= 0.0f) || !(settings.lookupBias >= 0.0f) || !(settings.storeMegabytes >= 0.0f)) {
         throw std::invalid_argument("Sky visibility needs a bake time, a lookup bias and a store of at least 0");
+    }
+
+    if (!(settings.backgroundShare >= 0.0f && settings.backgroundShare <= 1.0f)) {
+        throw std::invalid_argument("Sky visibility's background share must be 0 to 1");
     }
 
     if (settings.cascades < 1 || settings.cascades > maxSkyVisibilityCascades || settings.rays < 1 || settings.quickRays < 1) {

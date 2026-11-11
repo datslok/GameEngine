@@ -203,4 +203,25 @@ void testJobSystem() {
             assert(run.load() == 1);
         }
     }
+
+    // Each worker runs the start hook once, on its own thread, before any job (a background pool lowers its threads'
+    // priority there).
+    {
+        std::atomic<int> started{0};
+        std::mutex lock;
+        std::set<std::thread::id> threads;
+        {
+            JobSystem jobs{3, [&] {
+                const std::lock_guard<std::mutex> guard{lock};
+                threads.insert(std::this_thread::get_id());
+                ++started;
+            }};
+            std::atomic<int> ran{0};
+            jobs.parallelFor(1000, 1, [&](std::size_t) {
+                ran.fetch_add(1, std::memory_order_relaxed);
+            });
+            assert(ran.load() == 1000);
+        }
+        assert(started.load() == 3 && threads.size() == 3 && !threads.contains(std::this_thread::get_id()));
+    }
 }

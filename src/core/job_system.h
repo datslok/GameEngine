@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -44,7 +45,9 @@ JobSystem& serialJobs();
 
 class JobSystem {
 public:
-    explicit JobSystem(unsigned workerCount = defaultWorkerCount());
+    // workerStart, when given, runs on each worker's own thread as it starts, before any job (to lower a background
+    // pool's priority, say).
+    explicit JobSystem(unsigned workerCount = defaultWorkerCount(), std::function<void()> workerStart = {});
     ~JobSystem();
 
     JobSystem(const JobSystem&) = delete;

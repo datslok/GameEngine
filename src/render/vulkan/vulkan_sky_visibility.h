@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 class ImmediateCommands;
@@ -51,6 +52,14 @@ private:
     VulkanImage cells;
     std::array<VulkanBuffer, maxFramesInFlight> staging;
     SkyVisibilityGrid grid;
+
+    // Bakes batches off the frame (settings.backgroundBake) on a job system of its own at low priority, both made the
+    // first time it is used; the baker goes first (it finishes its batch on those workers).
+    std::unique_ptr<JobSystem> bakeJobs;
+    std::unique_ptr<SkyBackgroundBaker> baker;
+
+    void applyFinished(double quickShare, int minimumBatch);
+    void startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings, double quickShare);
 
     // The points changed since the last copy (SkyVisibilityGrid::takeChanges), kept to reuse its memory.
     std::vector<int> changed;
