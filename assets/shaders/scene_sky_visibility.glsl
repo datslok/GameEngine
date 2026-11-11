@@ -90,7 +90,7 @@ bool skyVisibilityCascadeAt(int index, vec3 point, vec3 normal, vec3 toViewer, o
 
 // The sky's reach and the bounce at a point measured from the camera (a zero normal and way to the eye for a point in
 // the air): each cascade, densest first, adds its blend times its weight times what the denser ones left; the rest is
-// open sky with nothing bounced.
+// open field (SKY_OPEN_FIELD_*: the sky above, the ground below) with nothing bounced.
 SkySample skyVisibilityAt(vec3 point, vec3 normal, vec3 toViewer) {
     SkySample sum = noSkySample();
     float total = 0.0;
@@ -108,7 +108,8 @@ SkySample skyVisibilityAt(vec3 point, vec3 normal, vec3 toViewer) {
         total += weight;
     }
 
-    sum.visibility.open += 1.0 - total;
+    sum.visibility.open += float(SKY_OPEN_FIELD_OPEN) * (1.0 - total);
+    sum.visibility.lean.y += float(SKY_OPEN_FIELD_LEAN_UP) * (1.0 - total);
     return sum;
 }
 

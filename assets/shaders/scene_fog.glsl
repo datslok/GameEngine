@@ -6,6 +6,7 @@
 #ifndef SCENE_FOG_GLSL
 #define SCENE_FOG_GLSL
 
+#include "render/gpu/sky_visibility_shared.h"
 #include "volumetric_fog.glsl"
 
 // Must match GpuFog in render/gpu/volumetric_fog.h.
@@ -36,9 +37,13 @@ FogIntegration fogVolumeAt(vec3 coordinate) {
 }
 
 // The light the fog past the grid scatters towards the eye along a view direction per unit of optical depth: the
-// directional lights' (as they reach the ground) and the flat ambient, through the albedo.
+// directional lights' (as they reach the ground) and the flat ambient, through the albedo. The flat ambient is what a
+// surface facing up gets; the air in the open gets the open field's share of it (SKY_OPEN_FIELD_OPEN: the sky above,
+// not the ground below), as the sky visibility grid and the probes give the air nearer, unless neither is read, when
+// all the fog takes the flat ambient alike.
 vec3 fogBeyondSource(vec3 viewDirection) {
-    vec3 light = flatAmbient();
+    bool airModelled = skyVisibilityOptions.x > 0.5 || frameFog.options.z > 0.5;
+    vec3 light = flatAmbient() * (airModelled ? float(SKY_OPEN_FIELD_OPEN) : 1.0);
 
     for (int i = 0; i < counts.x; ++i) {
         light += fogInScattering(directional[i].radiance.rgb, directional[i].toLight.xyz, viewDirection, frameFog.medium.w);

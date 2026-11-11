@@ -308,8 +308,9 @@ SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<
         total += weight;
     }
 
-    // What the cascades leave is the open sky (a = 1, b = 0), with nothing bounced.
-    sum.visibility.open += 1.0f - total;
+    // What the cascades leave is an open field (skyOpenField), with nothing bounced.
+    sum.visibility.open += skyOpenField.open * (1.0f - total);
+    sum.visibility.lean = sum.visibility.lean + skyOpenField.lean * (1.0f - total);
     sum.known = total;
 
     // A denser cascade's gap is offered to the next one too, so it may be counted twice: never more than is unknown.

@@ -229,8 +229,10 @@ namespace {
     }
 
     /*
-    * Nothing baked yet reads as the open sky, as before the grid, with no bounce and nothing known; points that all agree
-    * read as that, bounce too, wholly known.
+    * Nothing baked yet reads as an open field (the sky above, the ground below, a = 1/2 and b = 3/4 up), with no bounce
+    * and nothing known: a floor gets the whole flat ambient, as before the grid, but a wall or the air only half, as
+    * inside the grid in the open, so the fog and walls past the grid do not jump to twice the light. Points that all
+    * agree read as that, bounce too, wholly known.
     */
     void testReadingTheGrid() {
         SkyVisibilitySettings settings;
@@ -240,7 +242,12 @@ namespace {
 
         const std::vector<SkyCell> unknown(static_cast<std::size_t>(count));
         const SkySample open = sampleSkyVisibility(cascades, unknown, settings.lookupBias, centre, up, up);
-        assert(open.visibility.open == 1.0f && open.visibility.lean.x == 0.0f && open.visibility.lean.y == 0.0f && open.visibility.lean.z == 0.0f);
+        assert(open.visibility.open == skyOpenField.open && open.visibility.lean.x == 0.0f && open.visibility.lean.y == skyOpenField.lean.y &&
+               open.visibility.lean.z == 0.0f);
+        assert(near(skyOpenField.open, 0.5f, 0.0f) && near(skyOpenField.lean.y, 0.75f, 0.0f));
+        assert(nearColour(skyLightFacing(open.visibility, open.bounce, up, 0.0f), grey(1.0f), 1e-5f));
+        assert(nearColour(skyLightFacing(open.visibility, open.bounce, east, 0.0f), grey(0.5f), 1e-5f));
+        assert(nearColour(skyLightInAir(open.visibility, open.bounce, 0.0f), grey(0.5f), 1e-5f));
         assert(open.known == 0.0f && open.bounce[0].open == 0.0f);
         assert(open.missing == 1.0f); // inside the grid, nothing baked there yet
 
@@ -252,9 +259,9 @@ namespace {
         assert(near(read.known, 1.0f, 1e-5f) && read.missing == 0.0f);
         assert(near(read.bounce[0].open, 0.3f, 1e-5f) && near(read.bounce[0].lean.x, 0.1f, 1e-5f) && near(read.bounce[2].lean.z, -0.05f, 1e-5f));
 
-        // Far past the last cascade, the open sky again, nothing bounced and nothing known.
+        // Far past the last cascade, the open field again, nothing bounced and nothing known.
         const SkySample far = sampleSkyVisibility(cascades, same, settings.lookupBias, centre + Vec3{500.0f, 0.0f, 0.0f}, up, up);
-        assert(far.visibility.open == 1.0f && far.known == 0.0f && far.bounce[1].open == 0.0f);
+        assert(far.visibility.open == skyOpenField.open && far.visibility.lean.y == skyOpenField.lean.y && far.known == 0.0f && far.bounce[1].open == 0.0f);
         assert(far.missing == 0.0f); // past the grid: not missing, just not there
     }
 

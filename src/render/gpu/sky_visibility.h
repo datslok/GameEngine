@@ -120,6 +120,9 @@ float skySeenAlong(const SkyVisibility& visibility, const Vec3& direction);
 * channel (red, green, blue) the two bands of what its rays brought back (open the mean, lean towards where it came
 * from), read as skySeenFacing and skySeenAlong read the sky's. None by default.
 */
+// What the grid reads where it knows nothing (SKY_OPEN_FIELD_OPEN, _LEAN_UP): an open field.
+inline const SkyVisibility skyOpenField{static_cast<float>(SKY_OPEN_FIELD_OPEN), Vec3{0.0f, static_cast<float>(SKY_OPEN_FIELD_LEAN_UP), 0.0f}};
+
 using SkyBounce = std::array<SkyVisibility, 3>;
 inline const SkyBounce noSkyBounce{SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}, SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}},
                                        SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}};
