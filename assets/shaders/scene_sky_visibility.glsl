@@ -15,10 +15,12 @@ layout(std430, set = 1, binding = 30) readonly buffer SkyVisibilityCascades {
     ProbeCascade skyVisibilityCascades[];
 };
 
-// The sky a point sees and the bounce light round it (SkySample, without how much was known).
+// The sky a point sees and the bounce light round it, and the share the grid reached but had no point to read
+// (SkySample, without how much was known).
 struct SkySample {
     SkyVisibility visibility;
     SkyBounce bounce;
+    float missing;
 };
 
 bool skyVisibilityRead() {
@@ -35,14 +37,15 @@ SkyVisibility scaledSkyBands(SkyVisibility value, float factor) {
 
 SkySample noSkySample() {
     SkyVisibility none = SkyVisibility(0.0, vec3(0.0));
-    return SkySample(none, SkyBounce(none, none, none));
+    return SkySample(none, SkyBounce(none, none, none), 0.0);
 }
 
 // sum + value times weight, the sky's bands and each bounce channel's.
 SkySample weightedSkySample(SkySample sum, SkySample value, float weight) {
     return SkySample(weightedSkyBands(sum.visibility, value.visibility, weight),
                      SkyBounce(weightedSkyBands(sum.bounce.red, value.bounce.red, weight), weightedSkyBands(sum.bounce.green, value.bounce.green, weight),
-                               weightedSkyBands(sum.bounce.blue, value.bounce.blue, weight)));
+                               weightedSkyBands(sum.bounce.blue, value.bounce.blue, weight)),
+                     sum.missing);
 }
 
 // One point of the grid: its three texels along x.
@@ -78,13 +81,13 @@ bool skyVisibilityCascadeAt(int index, vec3 point, vec3 normal, vec3 toViewer, o
         }
 
         float weight = crushProbeWeight(probeBackFaceWeight(normal, position - point)) * probeTrilinearWeight(cell.alpha, corner);
-        sum = weightedSkySample(sum, SkySample(sky.visibility, sky.bounce), weight);
+        sum = weightedSkySample(sum, SkySample(sky.visibility, sky.bounce, 0.0), weight);
         total += weight;
     }
 
     float share = 1.0 / max(total, 1e-30);
     blend = SkySample(scaledSkyBands(sum.visibility, share),
-                      SkyBounce(scaledSkyBands(sum.bounce.red, share), scaledSkyBands(sum.bounce.green, share), scaledSkyBands(sum.bounce.blue, share)));
+                      SkyBounce(scaledSkyBands(sum.bounce.red, share), scaledSkyBands(sum.bounce.green, share), scaledSkyBands(sum.bounce.blue, share)), 0.0);
     return total > 0.0;
 }
 
@@ -100,7 +103,12 @@ SkySample skyVisibilityAt(vec3 point, vec3 normal, vec3 toViewer) {
         float weight = cascadeWeight(skyVisibilityCascades[index], point) * (1.0 - total);
         SkySample blend;
 
-        if (weight <= 0.0 || !skyVisibilityCascadeAt(index, point, normal, toViewer, blend)) {
+        if (weight <= 0.0) {
+            continue;
+        }
+
+        if (!skyVisibilityCascadeAt(index, point, normal, toViewer, blend)) {
+            sum.missing += weight;
             continue;
         }
 
@@ -110,7 +118,16 @@ SkySample skyVisibilityAt(vec3 point, vec3 normal, vec3 toViewer) {
 
     sum.visibility.open += float(SKY_OPEN_FIELD_OPEN) * (1.0 - total);
     sum.visibility.lean.y += float(SKY_OPEN_FIELD_LEAN_UP) * (1.0 - total);
+    // A denser cascade's gap is offered to the next one too, so it may be counted twice: never more than is unknown.
+    sum.missing = min(sum.missing, 1.0 - total);
     return sum;
+}
+
+// skyMissingLeftDark: the share reached but unread left dark instead of the open field, for the air.
+SkySample skyMissingLeftDark(SkySample read) {
+    read.visibility.open -= float(SKY_OPEN_FIELD_OPEN) * read.missing;
+    read.visibility.lean.y -= float(SKY_OPEN_FIELD_LEAN_UP) * read.missing;
+    return read;
 }
 
 // The light from all around the air at a point gets, as a share of the open sky's per colour channel (1 while the grid
@@ -120,7 +137,7 @@ vec3 skyVisibilityInAirAt(vec3 point) {
         return vec3(1.0);
     }
 
-    SkySample sky = skyVisibilityAt(point, vec3(0.0), vec3(0.0));
+    SkySample sky = skyMissingLeftDark(skyVisibilityAt(point, vec3(0.0), vec3(0.0)));
     return skyLightInAir(sky.visibility, sky.bounce, skyVisibilityOptions.y);
 }
 

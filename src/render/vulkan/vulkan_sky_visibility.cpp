@@ -118,6 +118,10 @@ std::span<const ProbeCascade> VulkanSkyVisibility::getCascades() const {
     return grid.getCascades();
 }
 
+std::string VulkanSkyVisibility::describePoints(const Vec3& place) const {
+    return grid.describePoints(place);
+}
+
 SampledImage VulkanSkyVisibility::sampled() const {
     return SampledImage{cells.getView(), nearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 }

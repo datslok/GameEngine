@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <utility>
 #include <vector>
 
@@ -512,6 +513,31 @@ std::span<const ProbeCascade> SkyVisibilityGrid::getCascades() const {
 
 std::span<const SkyCell> SkyVisibilityGrid::getCells() const {
     return cells;
+}
+
+std::string SkyVisibilityGrid::describePoints(const Vec3& place) const {
+    std::string text = std::format("waiting {}  refining {}", waitingCount, refiningCount);
+    const char* const states[] = {"unknown", "baked", "buried"};
+
+    for (std::size_t c = 0; c < cascades.size(); ++c) {
+        const ProbeCascade& cascade = cascades[c];
+        const ProbeVolume& volume = cascade.volume;
+        text += std::format("\ncascade {} (spacing {:.2f} m)", c, volume.spacing.x);
+        const ProbeCell cell = probeCell(volume, place);
+
+        for (int corner = 0; corner < 8; ++corner) {
+            const int slot = probeSlot(volume, probeCellCorner(cell, volume.counts, corner));
+            const std::size_t index = static_cast<std::size_t>(cascade.firstProbe + slot);
+            const SkyCell& sky = cells[index];
+            const Vec3 position = probePosition(volume, slot);
+            text += std::format("\n  ({:.2f} {:.2f} {:.2f}) {}{}{}  open {:.4f}  unsure {:.2f}  bounce {:.4f} {:.4f} {:.4f}", position.x, position.y, position.z,
+                                states[static_cast<std::size_t>(sky.state)], isWaiting[index] == Waiting ? ", waiting" : "",
+                                isRefining[index] != 0 ? ", quick" : "", sky.visibility.open, sky.unsureShare, sky.bounce[0].open, sky.bounce[1].open,
+                                sky.bounce[2].open);
+        }
+    }
+
+    return text;
 }
 
 std::uint64_t SkyVisibilityGrid::getVersion() const {

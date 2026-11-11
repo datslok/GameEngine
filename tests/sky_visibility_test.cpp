@@ -263,6 +263,20 @@ namespace {
         const SkySample far = sampleSkyVisibility(cascades, same, settings.lookupBias, centre + Vec3{500.0f, 0.0f, 0.0f}, up, up);
         assert(far.visibility.open == skyOpenField.open && far.visibility.lean.y == skyOpenField.lean.y && far.known == 0.0f && far.bounce[1].open == 0.0f);
         assert(far.missing == 0.0f); // past the grid: not missing, just not there
+
+        // The air where the grid reaches but has no point to read (inside a wall, every point round it buried) stays
+        // dark, at the floor: fog samples jittered across a wall would otherwise flip between a room's light and the
+        // open field's. Past the grid nothing is missing, so it keeps the open field; a known point is unchanged.
+        std::vector<SkyCell> buried(static_cast<std::size_t>(count));
+        for (SkyCell& cell : buried) {
+            cell.state = SkyCellState::Buried;
+        }
+        const SkySample walled = skyMissingLeftDark(sampleSkyVisibility(cascades, buried, settings.lookupBias, centre, Vec3{}, Vec3{}));
+        assert(nearColour(skyLightInAir(walled.visibility, walled.bounce, 0.025f), grey(0.025f), 1e-6f));
+        const SkySample farAir = skyMissingLeftDark(far);
+        assert(farAir.visibility.open == skyOpenField.open && farAir.visibility.lean.y == skyOpenField.lean.y);
+        const SkySample readAir = skyMissingLeftDark(read);
+        assert(readAir.visibility.open == read.visibility.open && readAir.visibility.lean.x == read.visibility.lean.x);
     }
 
     /*
@@ -588,6 +602,34 @@ namespace {
         settings.cascades = 1;
         settings.rays = 4;
         return settings;
+    }
+
+    /*
+    * The points round a place, described for the sky-points command: the queues' counts, then each cascade's eight
+    * points with their state, whether they wait or are quick bakes still to refine, and their values.
+    */
+    void testDescribingPoints() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 8;
+        settings.quickRays = 4;
+        const int count = skyVisibilityCellCount(settings);
+        SkyVisibilityGrid grid;
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        grid.follow(centre, settings, 1);
+
+        const std::string waiting = grid.describePoints(centre);
+        assert(waiting.find("waiting " + std::to_string(count)) != std::string::npos);
+        assert(waiting.find("cascade 0") != std::string::npos && waiting.find("cascade 1") == std::string::npos);
+        assert(waiting.find("unknown, waiting") != std::string::npos);
+
+        grid.bake(level, serialJobs(), count, true);
+        const std::string quick = grid.describePoints(centre);
+        assert(quick.find("waiting 0") != std::string::npos && quick.find("refining " + std::to_string(count)) != std::string::npos);
+        assert(quick.find("quick") != std::string::npos && quick.find("open ") != std::string::npos);
+
+        grid.refine(level, serialJobs(), count);
+        assert(grid.describePoints(centre).find("quick") == std::string::npos);
     }
 
     /*
@@ -982,6 +1024,7 @@ void testSkyVisibility() {
     testNoBounceInTheDarkOrInWalls();
     testTheBudget();
     testPlanningAFrame();
+    testDescribingPoints();
     testTheGridFollowsTheCamera();
     testQuickBakesAreRefined();
     testFallingBehindBakesWhatMattersFirst();

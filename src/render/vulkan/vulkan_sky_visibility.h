@@ -39,6 +39,9 @@ public:
 
     std::span<const ProbeCascade> getCascades() const;
 
+    // The grid's points round a place in the world, as text (SkyVisibilityGrid::describePoints).
+    std::string describePoints(const Vec3& place) const;
+
     // The image as the scene set samples it.
     SampledImage sampled() const;
 

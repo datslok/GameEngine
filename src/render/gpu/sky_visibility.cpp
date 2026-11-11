@@ -318,6 +318,13 @@ SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<
     return sum;
 }
 
+SkySample skyMissingLeftDark(const SkySample& sample) {
+    SkySample dark = sample;
+    dark.visibility.open -= skyOpenField.open * sample.missing;
+    dark.visibility.lean = dark.visibility.lean - skyOpenField.lean * sample.missing;
+    return dark;
+}
+
 GpuSkyVisibilityOptions packSkyVisibilityOptions(const SkyVisibilitySettings& settings, int cascadesRead) {
     if (cascadesRead <= 0) {
         return GpuSkyVisibilityOptions{{0.0f, 0.0f, 0.0f, 0.0f}};

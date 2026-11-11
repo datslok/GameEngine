@@ -224,6 +224,13 @@ SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<
                               const Vec3& normal, const Vec3& toViewer);
 
 /*
+* A sample for the air: the share the grid reaches but had no point to read (missing: inside a wall, or not baked yet)
+* left dark instead of the open field, which stays for what lies past the grid. The fog's samples move a little every
+* frame, and one landing in a wall or past it would otherwise flip between a room's light and the open field's.
+*/
+SkySample skyMissingLeftDark(const SkySample& sample);
+
+/*
 * The settings the shaders read (sky_visibility.glsl), in the frame's uniform block: x how many cascades the frame's
 * records hold (0 when the grid is not read), y the ambient floor, z the lookup bias, w 1 for the debug view. All zero
 * when it is not read.

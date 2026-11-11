@@ -1036,6 +1036,10 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
     frame.timestampsComplete = static_cast<bool>(frame.timestamps);
 }
 
+std::string VulkanRenderer::describeSkyPoints(const Vec3& place) const {
+    return skyVisibility->describePoints(place);
+}
+
 PipelineProgress VulkanRenderer::pipelineProgress() const {
     return device.getPipelineCompiler().progress();
 }

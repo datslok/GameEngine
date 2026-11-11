@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <string>
 #include <vector>
 
 /*
@@ -162,6 +163,14 @@ public:
 
     // Changes whenever a point does: what the GPU's copy is compared with.
     std::uint64_t getVersion() const;
+
+    /*
+    * The points round a place in the world, as text for the sky-points command: how many wait and how many quick bakes
+    * wait to be refined, then each cascade's eight points round it with their place, state (unknown, baked, buried),
+    * whether they wait or are quick bakes still to refine, their open share, the share their hits were unsure of, and
+    * their bounce's mean (red, green, blue).
+    */
+    std::string describePoints(const Vec3& place) const;
 
 private:
     void startAfresh();
