@@ -15,12 +15,14 @@ namespace {
     constexpr VkFormat depthAgeFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 }
 
-VulkanAmbientOcclusion::VulkanAmbientOcclusion(const VulkanDevice& device, VkSampler nearest, std::uint32_t framesInFlight):
+VulkanAmbientOcclusion::VulkanAmbientOcclusion(const VulkanDevice& device, VkSampler nearest, std::uint32_t framesInFlight,
+                                               VkDescriptorSetLayout texturesLayout, VkDescriptorSetLayout frameLayout):
     device(device),
     nearest(nearest)
 {
     ComputePipelineDescription occlusion;
     occlusion.shader = "assets/shaders/ambient_occlusion.comp.spv";
+    occlusion.sharedSets = {texturesLayout, frameLayout};
     occlusion.storageBuffers = 1;
     occlusion.sampledImages = 3;
     occlusion.storageImages = 2;
@@ -159,7 +161,8 @@ void VulkanAmbientOcclusion::denoiseInto(VkCommandBuffer commands, FrameDescript
 * written, their old contents discarded, every pixel being written. The accumulation then reads the pass's image (see
 * accumulate). With the denoiser, the accumulation's image (or the pass's) then goes through its passes (see denoiseInto); whichever the main pass reads ends readable by fragment shaders.
 */
-void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth,
+void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frameSet,
+                                     std::uint32_t frameIndex, VulkanImage& depth,
                                      const SampledImage* gatherPicture, const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass, bool blur,
                                      bool previousCameraKnown) {
     // Whether last frame's history carries over is known here, where what it was made for is kept.
@@ -190,6 +193,8 @@ void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors&
     };
 
     bindComputeSet(commands, device.getDevice(), descriptors, *occlusionPipeline, occlusionBindings);
+    const std::array<VkDescriptorSet, 2> sceneSets{textures, frameSet};
+    bindSharedSets(commands, *occlusionPipeline, sceneSets);
     const std::uint32_t groupsAcross = workgroupCount(size.width, AO_GROUP_SIDE);
     const std::uint32_t groupsDown = workgroupCount(size.height, AO_GROUP_SIDE);
     vkCmdDispatch(commands, groupsAcross, groupsDown, 1);

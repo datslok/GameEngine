@@ -118,7 +118,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     mirrorDepthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
-    ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
+    ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight, bindlessTextures->getLayout(),
+                                                                sceneLayout->getFrameLayout());
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -1556,7 +1557,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             gatherPicture = reflections->sampledColourPyramid();
         }
 
-        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
                                                            settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
                                   occlusionBlurred, previousCamera.known);

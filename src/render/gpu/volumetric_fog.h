@@ -120,6 +120,14 @@ FogIntegration fogFollow(const FogIntegration& front, const FogIntegration& behi
 Vec3 fogComposite(const Vec3& colour, const FogIntegration& fog);
 
 /*
+* fogComposite undone: the surface's own light from a picture seen through the fog in front of it, for light gathered
+* from the picture (ambient occlusion's bounce), which should be what the surface sends, not the fog's glow between it
+* and the camera. Never below black (a blurred picture can be darker than the fog at one point), and the dimming undone
+* only down to FOG_REMOVAL_MIN_TRANSMITTANCE.
+*/
+Vec3 fogRemoved(const Vec3& seen, const FogIntegration& fog);
+
+/*
 * What glass adds through the fog in front of it, drawn over a picture already fogged up to the surface behind (which
 * holds the same fog's light): its own light dimmed by the fog, plus the fog's light for the share the glass does not
 * let through (per colour), so glass over the picture gives the glass and the surface fogged in turn.

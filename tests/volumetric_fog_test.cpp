@@ -268,6 +268,28 @@ namespace {
     }
 
     /*
+    * Taking the fog back off a picture (for light gathered from it, which should be what surfaces send, not the fog in
+    * front of them): the surface again through any fog it can see through, never below black where the picture is
+    * darker than the fog (a blurred picture mixes in nearer surfaces), and no more than undone through fog that lets
+    * almost nothing through (the floor), where dividing would blow up noise.
+    */
+    void testRemovingFog() {
+        FogIntegration front;
+        fogIntegrateSlice(front, Vec3{0.3f, 0.3f, 0.35f}, 0.04f, 12.0f);
+        const Vec3 surface{1.0f, 0.5f, 0.25f};
+        assert(nearVec(fogRemoved(fogComposite(surface, front), front), surface, 1e-5f));
+        assert(nearVec(fogRemoved(surface, FogIntegration{}), surface, 0.0f));
+
+        const Vec3 darker = front.light * 0.5f;
+        assert(nearVec(fogRemoved(darker, front), Vec3{0.0f, 0.0f, 0.0f}, 0.0f));
+
+        const FogIntegration thick{Vec3{0.2f, 0.2f, 0.2f}, 0.001f};
+        const Vec3 seen{0.3f, 0.3f, 0.3f};
+        const float floor = static_cast<float>(FOG_REMOVAL_MIN_TRANSMITTANCE);
+        assert(nearVec(fogRemoved(seen, thick), (seen - thick.light) * (1.0f / floor), 1e-6f));
+    }
+
+    /*
     * Reading the integrated grid at a slice: texel k holds the fog from the camera to the far side of slice k, so a slice
     * coordinate is read half a texel earlier, and inside the first half slice the reading fades towards no fog at all.
     */
@@ -384,6 +406,7 @@ void testVolumetricFog() {
     testInScattering();
     testSlab();
     testCompositing();
+    testRemovingFog();
     testSliceRead();
     testHistoryWeight();
     testColumn();

@@ -124,8 +124,7 @@ SampledImage VulkanFog::sampledVolume() const {
 
 void VulkanFog::bindScene(VkCommandBuffer commands, const ComputePipeline& pipeline, VkDescriptorSet textures, VkDescriptorSet frameSet) const {
     const std::array<VkDescriptorSet, 2> sets{textures, frameSet};
-    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), bindlessTextureSet, static_cast<std::uint32_t>(sets.size()),
-                            sets.data(), 0, nullptr);
+    bindSharedSets(commands, pipeline, sets);
 }
 
 /*

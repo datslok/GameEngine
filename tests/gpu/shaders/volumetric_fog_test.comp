@@ -49,5 +49,6 @@ void main() {
         testOutput(3, vec4(followed.light, followed.transmittance));
         testOutput(4, vec4(fogComposite(colour, soFar), 0.0));
         testOutput(5, vec4(fogOverGlass(added, colour, soFar), 0.0));
+        testOutput(6, vec4(fogRemoved(colour + soFar.light * 0.8, soFar), 0.0));
     }
 }

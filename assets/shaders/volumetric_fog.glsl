@@ -83,6 +83,11 @@ vec3 fogComposite(vec3 colour, FogIntegration fog) {
     return colour * fog.transmittance + fog.light;
 }
 
+vec3 fogRemoved(vec3 seen, FogIntegration fog) {
+    float letThrough = max(fog.transmittance, float(FOG_REMOVAL_MIN_TRANSMITTANCE));
+    return max((seen - fog.light) * (1.0 / letThrough), vec3(0.0));
+}
+
 vec3 fogOverGlass(vec3 added, vec3 transmittance, FogIntegration fog) {
     return added * fog.transmittance + (vec3(1.0) - transmittance) * fog.light;
 }

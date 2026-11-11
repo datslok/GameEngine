@@ -138,11 +138,11 @@ namespace {
             inputs.push_back(gpuVec4(colour(1.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_LIGHT, inputs, 7, 6);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_LIGHT, inputs, 7, 7);
 
-        for (std::size_t i = 0; i < outputs.size() / 6; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 7; ++i) {
             const GpuVec4* in = &inputs[i * 7];
-            const GpuVec4* out = &outputs[i * 6];
+            const GpuVec4* out = &outputs[i * 7];
             const FogIntegration soFar{vec3From(in[4]), in[3][3]};
             FogIntegration slab = soFar;
             fogIntegrateSlice(slab, vec3From(in[3]), in[1][3], in[2][3]);
@@ -156,6 +156,7 @@ namespace {
             report.check("fogFollow", transcendentalTolerance, followed.transmittance, out[3][3]);
             report.check("fogComposite", arithmeticTolerance, fogComposite(vec3From(in[5]), soFar), vec3From(out[4]));
             report.check("fogOverGlass", arithmeticTolerance, fogOverGlass(vec3From(in[6]), vec3From(in[5]), soFar), vec3From(out[5]));
+            report.check("fogRemoved", arithmeticTolerance, fogRemoved(vec3From(in[5]) + soFar.light * 0.8f, soFar), vec3From(out[6]));
         }
     }
 }

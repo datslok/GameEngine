@@ -129,6 +129,12 @@ Vec3 fogComposite(const Vec3& colour, const FogIntegration& fog) {
     return colour * fog.transmittance + fog.light;
 }
 
+Vec3 fogRemoved(const Vec3& seen, const FogIntegration& fog) {
+    const float letThrough = std::max(fog.transmittance, static_cast<float>(FOG_REMOVAL_MIN_TRANSMITTANCE));
+    const Vec3 surface = (seen - fog.light) * (1.0f / letThrough);
+    return Vec3{std::max(surface.x, 0.0f), std::max(surface.y, 0.0f), std::max(surface.z, 0.0f)};
+}
+
 Vec3 fogOverGlass(const Vec3& added, const Vec3& transmittance, const FogIntegration& fog) {
     return added * fog.transmittance + (Vec3{1.0f, 1.0f, 1.0f} - transmittance) * fog.light;
 }

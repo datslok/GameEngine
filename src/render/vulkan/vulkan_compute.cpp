@@ -161,3 +161,7 @@ void bindComputeSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors&
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.get());
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), pipeline.getResourceSet(), 1, &set, 0, nullptr);
 }
+
+void bindSharedSets(VkCommandBuffer commands, const ComputePipeline& pipeline, std::span<const VkDescriptorSet> sets) {
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getLayout(), 0, static_cast<std::uint32_t>(sets.size()), sets.data(), 0, nullptr);
+}
