@@ -51,6 +51,9 @@ private:
     VulkanImage cells;
     std::array<VulkanBuffer, maxFramesInFlight> staging;
     SkyVisibilityGrid grid;
+
+    // The points changed since the last copy (SkyVisibilityGrid::takeChanges), kept to reuse its memory.
+    std::vector<int> changed;
     std::vector<GpuSkyCell> packed;
     std::uint64_t uploadedVersion = 0;
 

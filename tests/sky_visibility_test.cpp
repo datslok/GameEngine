@@ -567,6 +567,15 @@ namespace {
         assert(skyCellsForBudget(0.001, 0.0, 40) == 40);
         assert(skyCellsForBudget(0.0, 1e-5, 40) == 0);
         assert(skyCellsForBudget(0.001, 1e-5, 0) == 0);
+
+        // Never fewer than a round of jobs for every core (when that many wait): a batch of one runs on one core and
+        // measures a point sixteen times dearer, which shrank the next budget until the bake crawled at a point a frame.
+        assert(skyCellsForBudget(0.001, 1.0, 400, 128) == 128);
+        assert(skyCellsForBudget(0.001, 1.0, 40, 128) == 40);
+        assert(skyCellsForBudget(0.001, 1e-5, 1000, 128) == 128);
+        assert(skyCellsForBudget(0.001, 1e-6, 5000, 128) == 1000);
+        assert(skyCellsForBudget(0.0, 1e-5, 40, 128) == 0);
+        assert(skyMinimumBatch(16) == 16 * static_cast<int>(skyBakePointsPerJob) && skyMinimumBatch(0) == static_cast<int>(skyBakePointsPerJob));
     }
 
     /*
@@ -630,6 +639,33 @@ namespace {
 
         grid.refine(level, serialJobs(), count);
         assert(grid.describePoints(centre).find("quick") == std::string::npos);
+    }
+
+    /*
+    * The points changed since the copy-up last asked, so it repacks only those: all after a fresh start, then each
+    * batch baked or refined, and the plane a move brings in; nothing when nothing changed.
+    */
+    void testChangedPoints() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 8;
+        settings.quickRays = 4;
+        SkyVisibilityGrid grid;
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        std::vector<int> changed;
+
+        grid.follow(centre, settings, 1);
+        assert(grid.takeChanges(changed));
+        assert(!grid.takeChanges(changed) && changed.empty());
+
+        assert(grid.bake(level, serialJobs(), 100, true) == 100);
+        assert(!grid.takeChanges(changed) && changed.size() == 100);
+        assert(grid.refine(level, serialJobs(), 30) == 30);
+        assert(!grid.takeChanges(changed) && changed.size() == 30);
+
+        grid.follow(centre + Vec3{settings.spacing, 0.0f, 0.0f}, settings, 1);
+        assert(!grid.takeChanges(changed) && changed.size() == static_cast<std::size_t>(SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS));
+        assert(!grid.takeChanges(changed) && changed.empty());
     }
 
     /*
@@ -1025,6 +1061,7 @@ void testSkyVisibility() {
     testTheBudget();
     testPlanningAFrame();
     testDescribingPoints();
+    testChangedPoints();
     testTheGridFollowsTheCamera();
     testQuickBakesAreRefined();
     testFallingBehindBakesWhatMattersFirst();

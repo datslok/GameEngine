@@ -49,7 +49,8 @@ VulkanSkyVisibility::VulkanSkyVisibility(const VulkanDevice& device, ImmediateCo
 /*
 * The budget is CPU time on every core, from what a point cost at full rays last time (planSkyBake says what a frame
 * bakes). A quick bake's cost is scaled up by the rays' ratio, so the refinement after a refill keeps to the budget
-* from its first frame.
+* from its first frame. A frame bakes at least a round of jobs for every core, and only such batches measure the cost:
+* a smaller one runs on fewer cores and would measure a point dearer than it is (skyCellsForBudget).
 */
 void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs,
                                bool everything) {
@@ -63,24 +64,30 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
 
     const double budgetSeconds = settings.bakeMilliseconds * 1e-3;
     const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
-    const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining);
-    const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting);
+    const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());
+    const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining, minimumBatch);
+    const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting, minimumBatch);
     const SkyBakePlan plan = planSkyBake(waiting, refining, afresh, everything, budget, quickBudget, settings.quickRays < settings.rays);
     const int count = plan.waiting + plan.refine;
 
     if (count > 0) {
         const double start = profilerSeconds();
         const std::span<const Vec3> albedo = frame.staticAlbedo ? std::span<const Vec3>{*frame.staticAlbedo} : std::span<const Vec3>{};
-        grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward(), albedo);
+        const int baked = grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward(), albedo);
         // A capture also refines what this very bake left unfinished (points baked before the grid round their hits was).
         const int refined = grid.refine(*frame.staticLevel, jobs, everything ? grid.getRefining() : plan.refine, albedo);
-        secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(std::max(plan.waiting + refined, 1));
+
+        if (baked + refined >= minimumBatch) {
+            secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(baked + refined);
+        }
     }
 }
 
 /*
 * The copy goes through this frame in flight's own staging buffer, which the GPU has finished with (its frame came
-* round again), and its barrier waits for every earlier frame's reads of the image.
+* round again), and its barrier waits for every earlier frame's reads of the image. Only the points changed since the
+* last copy are packed again (packing all of them, half floats and all, cost milliseconds every frame while baking);
+* the packed copy is whole, so each staging buffer gets all of it.
 */
 void VulkanSkyVisibility::record(VkCommandBuffer commands, std::uint32_t frameIndex) {
     if (grid.getVersion() == uploadedVersion) {
@@ -88,10 +95,18 @@ void VulkanSkyVisibility::record(VkCommandBuffer commands, std::uint32_t frameIn
     }
 
     const std::span<const SkyCell> baked = grid.getCells();
-    packed.resize(baked.size());
+    const bool everyPoint = grid.takeChanges(changed) || packed.size() != baked.size();
 
-    for (std::size_t cell = 0; cell < baked.size(); ++cell) {
-        packed[cell] = packSkyCell(baked[cell]);
+    if (everyPoint) {
+        packed.resize(baked.size());
+
+        for (std::size_t cell = 0; cell < baked.size(); ++cell) {
+            packed[cell] = packSkyCell(baked[cell]);
+        }
+    } else {
+        for (const int cell : changed) {
+            packed[static_cast<std::size_t>(cell)] = packSkyCell(baked[static_cast<std::size_t>(cell)]);
+        }
     }
 
     VulkanBuffer& buffer = staging[frameIndex];

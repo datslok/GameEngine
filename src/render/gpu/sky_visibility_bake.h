@@ -52,8 +52,19 @@ Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback);
 SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks,
                     std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {});
 
-// How many points fit a budget, from the time one took last: at least one, at most what is waiting.
-int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting);
+// A job takes this many points at once, so handing them out costs little beside their rays.
+inline constexpr std::size_t skyBakePointsPerJob = 8;
+
+// The smallest batch worth baking on threads workers: a round of jobs for each (so the time a point takes is measured
+// as when the batch is spread over every core).
+int skyMinimumBatch(unsigned threads);
+
+/*
+* How many points fit a budget, from the time one took last: at least minimumBatch (and one), at most what is waiting.
+* A batch smaller than a round of jobs for every core runs on fewer cores and measures a point dearer than it is, which
+* would shrink the next budget in turn until the bake crawled at a point a frame.
+*/
+int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting, int minimumBatch = 1);
 
 // What one frame bakes: waiting points (quickly, at the quick rays, or at the full rays), then points to refine.
 struct SkyBakePlan {
@@ -165,6 +176,12 @@ public:
     std::uint64_t getVersion() const;
 
     /*
+    * The points changed since the last call, for the GPU's copy to repack only those: true when every point may have
+    * (a fresh start), changed then left empty; otherwise false with changed holding the points (each at least once).
+    */
+    bool takeChanges(std::vector<int>& changed);
+
+    /*
     * The points round a place in the world, as text for the sky-points command: how many wait and how many quick bakes
     * wait to be refined, then each cascade's eight points round it with their place, state (unknown, baked, buried),
     * whether they wait or are quick bakes still to refine, their open share, the share their hits were unsure of, and
@@ -221,4 +238,8 @@ private:
     int refiningCount = 0;
 
     std::uint64_t version = 0;
+
+    // What changed since takeChanges last ran: every point, or these.
+    bool allChanged = true;
+    std::vector<int> changedCells;
 };

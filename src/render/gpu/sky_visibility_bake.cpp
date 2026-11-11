@@ -9,8 +9,6 @@
 #include <vector>
 
 namespace {
-    // A job takes this many points at once, so handing them out costs little beside their rays.
-    constexpr std::size_t pointsPerJob = 8;
 
     // A triangle's outward normal, from its winding (counterclockwise seen from the front), not of unit length.
     Vec3 triangleFacing(const StaticLevel& level, std::uint32_t triangle) {
@@ -111,7 +109,11 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     return cell;
 }
 
-int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting) {
+int skyMinimumBatch(unsigned threads) {
+    return static_cast<int>(std::max(threads, 1u) * skyBakePointsPerJob);
+}
+
+int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting, int minimumBatch) {
     if (waiting <= 0 || !(budgetSeconds > 0.0)) {
         return 0;
     }
@@ -121,7 +123,7 @@ int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting) 
     }
 
     const double fit = std::round(budgetSeconds / secondsPerCell);
-    return fit >= static_cast<double>(waiting) ? waiting : std::max(1, static_cast<int>(fit));
+    return fit >= static_cast<double>(waiting) ? waiting : std::min(waiting, std::max({1, minimumBatch, static_cast<int>(fit)}));
 }
 
 SkyBakePlan planSkyBake(int waiting, int refining, bool afresh, bool everything, int budgetCells, int quickBudgetCells, bool quickFewer) {
@@ -290,6 +292,8 @@ void SkyVisibilityGrid::startAfresh() {
         wait(cell);
     }
 
+    allChanged = true;
+    changedCells.clear();
     ++version;
 }
 
@@ -316,6 +320,10 @@ void SkyVisibilityGrid::wait(int cell) {
 }
 
 void SkyVisibilityGrid::arrive(std::size_t cascade, int cell, const ProbeCascade& now) {
+    if (!allChanged) {
+        changedCells.push_back(cell);
+    }
+
     const std::optional<StoredSkyCell> found = store.find(static_cast<int>(cascade), probeLatticeCoord(now, cell - now.firstProbe));
 
     if (!found) {
@@ -367,7 +375,7 @@ void SkyVisibilityGrid::bakeCells(const StaticLevel& level, JobSystem& jobs, std
         return sampleSkyVisibility(cascades, cells, shape.lookupBias, point, normal, toViewer);
     };
 
-    jobs.parallelFor(batch.size(), pointsPerJob, [&](std::size_t index) {
+    jobs.parallelFor(batch.size(), skyBakePointsPerJob, [&](std::size_t index) {
         thread_local GridMarks marks;
         const int cell = batch[index];
         const ProbeCascade& cascade = cascades[static_cast<std::size_t>(probeCascadeHolding(cascades, cell))];
@@ -377,6 +385,10 @@ void SkyVisibilityGrid::bakeCells(const StaticLevel& level, JobSystem& jobs, std
 
     for (std::size_t index = 0; index < batch.size(); ++index) {
         cells[static_cast<std::size_t>(batch[index])] = baked[index];
+    }
+
+    if (!allChanged) {
+        changedCells.insert(changedCells.end(), batch.begin(), batch.end());
     }
 }
 
@@ -538,6 +550,19 @@ std::string SkyVisibilityGrid::describePoints(const Vec3& place) const {
     }
 
     return text;
+}
+
+bool SkyVisibilityGrid::takeChanges(std::vector<int>& changed) {
+    changed.swap(changedCells);
+    changedCells.clear();
+
+    if (allChanged) {
+        allChanged = false;
+        changed.clear();
+        return true;
+    }
+
+    return false;
 }
 
 std::uint64_t SkyVisibilityGrid::getVersion() const {
