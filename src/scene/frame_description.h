@@ -113,6 +113,10 @@ struct FrameDescription {
     // when nothing blocks the sky. The version changes whenever the level does.
     std::shared_ptr<const StaticLevel> staticLevel;
     std::uint64_t staticLevelVersion = 0;
+
+    // Each of its triangles' diffuse albedo, in linear light and in its triangle order, for the bounce light the grid
+    // gathers; changing it changes the version too.
+    std::shared_ptr<const std::vector<Vec3>> staticAlbedo;
 };
 
 // Give each draw of a deformed mesh its shape's fingerprint.

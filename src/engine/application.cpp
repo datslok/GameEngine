@@ -410,6 +410,7 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
         staticGeometry.update(frame.draws, assets);
         frame.staticLevel = staticGeometry.getLevel();
         frame.staticLevelVersion = staticGeometry.getVersion();
+        frame.staticAlbedo = staticGeometry.getAlbedo();
     }
     return frame;
 }

@@ -15,9 +15,19 @@ namespace {
     // The clamped cosine's second band over its first, (2 pi / 3) / pi: how much the lean counts on a surface.
     constexpr float facingLean = 2.0f / 3.0f;
 
-    // The sky seen, plus what the blocked share brings back: the bounce share of how lit the blockers are.
-    float withBounce(float seen, float blockersLit, float bounceShare) {
-        return seen + bounceShare * blockersLit * (1.0f - seen);
+    // sum += value times weight, both bands.
+    void addWeighted(SkyVisibility& sum, const SkyVisibility& value, float weight) {
+        sum.open += value.open * weight;
+        sum.lean = sum.lean + value.lean * weight;
+    }
+
+    SkyVisibility scaled(const SkyVisibility& value, float factor) {
+        return SkyVisibility{value.open * factor, value.lean * factor};
+    }
+
+    // The sky's share and each bounce channel's, each within 0..1, added and at least floor.
+    Vec3 lightOf(float sky, float red, float green, float blue, float floor) {
+        return Vec3{std::max(sky + red, floor), std::max(sky + green, floor), std::max(sky + blue, floor)};
     }
 
     std::uint32_t packHalves(float low, float high) {
@@ -37,14 +47,14 @@ namespace {
         return crushProbeWeight(probeBackFaceWeight(normal, toCorner)) * trilinear;
     }
 
-    // One cascade's blend at a point, or nothing when no point round it is baked, out of the walls and in sight.
-    std::optional<SkyVisibility> sampleCascade(const ProbeCascade& cascade, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
-                                               const Vec3& normal, const Vec3& toViewer) {
+    // One cascade's blend at a point (known unset), or nothing when no point round it is baked, out of the walls and in sight.
+    std::optional<SkySample> sampleCascade(const ProbeCascade& cascade, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
+                                           const Vec3& normal, const Vec3& toViewer) {
         const ProbeVolume& volume = cascade.volume;
         const Vec3 biased = point + probeSelfShadowBias(normal, toViewer, volume.spacing, lookupBias);
         const ProbeCell cell = probeCell(volume, biased);
         float total = 0.0f;
-        SkyVisibility sum{0.0f, Vec3{0.0f, 0.0f, 0.0f}};
+        SkySample sum{SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}, noSkyBounce, 0.0f};
 
         for (int corner = 0; corner < 8; ++corner) {
             const int slot = probeSlot(volume, probeCellCorner(cell, volume.counts, corner));
@@ -61,8 +71,12 @@ namespace {
             }
 
             const float weight = cornerWeight(normal, position - point, probeTrilinearWeight(cell.alpha, corner));
-            sum.open += sky.visibility.open * weight;
-            sum.lean = sum.lean + sky.visibility.lean * weight;
+            addWeighted(sum.visibility, sky.visibility, weight);
+
+            for (std::size_t channel = 0; channel < sum.bounce.size(); ++channel) {
+                addWeighted(sum.bounce[channel], sky.bounce[channel], weight);
+            }
+
             total += weight;
         }
 
@@ -70,14 +84,20 @@ namespace {
             return std::nullopt;
         }
 
-        return SkyVisibility{sum.open / total, sum.lean * (1.0f / total)};
+        const float share = 1.0f / total;
+        sum.visibility = scaled(sum.visibility, share);
+
+        for (SkyVisibility& channel : sum.bounce) {
+            channel = scaled(channel, share);
+        }
+
+        return sum;
     }
 }
 
 void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
-    visitor.field("Bounce share", settings.bounceShare, {.min = 0.0f, .max = 1.0f});
-    visitor.field("Blockers lit floor", settings.blockersLitFloor, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Ambient floor", settings.ambientFloor, {.min = 0.0f, .max = 1.0f, .sliderMin = 0.0f, .sliderMax = 0.2f});
     visitor.field("Spacing", settings.spacing, {.min = 0.05f, .max = 16.0f, .sliderMin = 0.25f, .sliderMax = 2.0f, .unit = "m"});
     visitor.field("Cascades", settings.cascades, {.min = 1, .max = maxSkyVisibilityCascades});
     visitor.field("Rays", settings.rays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
@@ -91,8 +111,8 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
 
 // Written so not a number fails too.
 void validateSkyVisibility(const SkyVisibilitySettings& settings) {
-    if (!(settings.bounceShare >= 0.0f && settings.bounceShare <= 1.0f) || !(settings.blockersLitFloor >= 0.0f && settings.blockersLitFloor <= 1.0f)) {
-        throw std::invalid_argument("Sky visibility needs a bounce share and a blockers' floor from 0 to 1");
+    if (!(settings.ambientFloor >= 0.0f && settings.ambientFloor <= 1.0f)) {
+        throw std::invalid_argument("Sky visibility needs an ambient floor from 0 to 1");
     }
 
     if (!(settings.spacing > 0.0f) || !(settings.rayLength > 0.0f)) {
@@ -150,21 +170,18 @@ float skySeenAlong(const SkyVisibility& visibility, const Vec3& direction) {
     return std::clamp(visibility.open + visibility.lean.dot(direction), 0.0f, 1.0f);
 }
 
-// Under an open sky a point sees half the sphere and its ground sees all of it, hence twice the open share.
-float skyBlockersLit(const SkyVisibility& visibility, float floor) {
-    return std::max(std::clamp(2.0f * visibility.open, 0.0f, 1.0f), floor);
+Vec3 skyLightFacing(const SkyVisibility& visibility, const SkyBounce& bounce, const Vec3& normal, float floor) {
+    return lightOf(skySeenFacing(visibility, normal), skySeenFacing(bounce[0], normal), skySeenFacing(bounce[1], normal), skySeenFacing(bounce[2], normal), floor);
 }
 
-float skyVisibilityFacing(const SkyVisibility& visibility, const Vec3& normal, float bounceShare, float blockersFloor) {
-    return withBounce(skySeenFacing(visibility, normal), skyBlockersLit(visibility, blockersFloor), bounceShare);
+Vec3 skyLightAlong(const SkyVisibility& visibility, const SkyBounce& bounce, const Vec3& direction, float floor) {
+    return lightOf(skySeenAlong(visibility, direction), skySeenAlong(bounce[0], direction), skySeenAlong(bounce[1], direction), skySeenAlong(bounce[2], direction),
+                   floor);
 }
 
-float skyVisibilityAlong(const SkyVisibility& visibility, const Vec3& direction, float bounceShare, float blockersFloor) {
-    return withBounce(skySeenAlong(visibility, direction), skyBlockersLit(visibility, blockersFloor), bounceShare);
-}
-
-float skyVisibilityInAir(const SkyVisibility& visibility, float bounceShare, float blockersFloor) {
-    return withBounce(std::clamp(visibility.open, 0.0f, 1.0f), skyBlockersLit(visibility, blockersFloor), bounceShare);
+Vec3 skyLightInAir(const SkyVisibility& visibility, const SkyBounce& bounce, float floor) {
+    const auto mean = [](const SkyVisibility& bands) { return std::clamp(bands.open, 0.0f, 1.0f); };
+    return lightOf(mean(visibility), mean(bounce[0]), mean(bounce[1]), mean(bounce[2]), floor);
 }
 
 Vec3 skyReachDirection(int direction) {
@@ -202,6 +219,13 @@ GpuSkyCell packSkyCell(const SkyCell& cell) {
     packed.words[1] = packHalves(cell.visibility.lean.y, cell.visibility.lean.z);
     packed.words[2] = reachByte(cell.reach[0]) | (reachByte(cell.reach[1]) << 8) | (reachByte(cell.reach[2]) << 16) | (reachByte(cell.reach[3]) << 24);
     packed.words[3] = reachByte(cell.reach[4]) | (reachByte(cell.reach[5]) << 8) | (static_cast<std::uint32_t>(cell.state) << 24);
+
+    for (std::size_t channel = 0; channel < cell.bounce.size(); ++channel) {
+        const SkyVisibility& bands = cell.bounce[channel];
+        packed.words[4 + 2 * channel] = packHalves(bands.open, bands.lean.x);
+        packed.words[5 + 2 * channel] = packHalves(bands.lean.y, bands.lean.z);
+    }
+
     return packed;
 }
 
@@ -218,6 +242,15 @@ SkyCell unpackSkyCell(const GpuSkyCell& packed) {
     cell.reach[4] = reachOfByte(packed.words[3], 0);
     cell.reach[5] = reachOfByte(packed.words[3], 1);
     cell.state = static_cast<SkyCellState>(packed.words[3] >> 24);
+
+    for (std::size_t channel = 0; channel < cell.bounce.size(); ++channel) {
+        const std::uint32_t first = packed.words[4 + 2 * channel];
+        const std::uint32_t second = packed.words[5 + 2 * channel];
+        cell.bounce[channel] = SkyVisibility{halfToFloat(static_cast<std::uint16_t>(first & 0xFFFFu)),
+                                             Vec3{halfToFloat(static_cast<std::uint16_t>(first >> 16)), halfToFloat(static_cast<std::uint16_t>(second & 0xFFFFu)),
+                                                  halfToFloat(static_cast<std::uint16_t>(second >> 16))}};
+    }
+
     return cell;
 }
 
@@ -243,9 +276,9 @@ int skyVisibilityCellCount(const SkyVisibilitySettings& settings) {
     return std::clamp(settings.cascades, 1, maxSkyVisibilityCascades) * probeCount(skyVisibilityCounts);
 }
 
-SkyVisibility sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
-                                  const Vec3& normal, const Vec3& toViewer) {
-    SkyVisibility sum{0.0f, Vec3{0.0f, 0.0f, 0.0f}};
+SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
+                              const Vec3& normal, const Vec3& toViewer) {
+    SkySample sum{SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}, noSkyBounce, 0.0f};
     float total = 0.0f;
 
     for (const ProbeCascade& cascade : cascades) {
@@ -259,27 +292,35 @@ SkyVisibility sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::s
             continue;
         }
 
-        const std::optional<SkyVisibility> read = sampleCascade(cascade, cells, lookupBias, point, normal, toViewer);
+        const std::optional<SkySample> read = sampleCascade(cascade, cells, lookupBias, point, normal, toViewer);
 
         if (!read) {
+            sum.missing += weight;
             continue;
         }
 
-        sum.open += read->open * weight;
-        sum.lean = sum.lean + read->lean * weight;
+        addWeighted(sum.visibility, read->visibility, weight);
+
+        for (std::size_t channel = 0; channel < sum.bounce.size(); ++channel) {
+            addWeighted(sum.bounce[channel], read->bounce[channel], weight);
+        }
+
         total += weight;
     }
 
-    // What the cascades leave is the open sky (a = 1, b = 0).
-    sum.open += 1.0f - total;
+    // What the cascades leave is the open sky (a = 1, b = 0), with nothing bounced.
+    sum.visibility.open += 1.0f - total;
+    sum.known = total;
+
+    // A denser cascade's gap is offered to the next one too, so it may be counted twice: never more than is unknown.
+    sum.missing = std::min(sum.missing, 1.0f - total);
     return sum;
 }
 
 GpuSkyVisibilityOptions packSkyVisibilityOptions(const SkyVisibilitySettings& settings, int cascadesRead) {
     if (cascadesRead <= 0) {
-        return GpuSkyVisibilityOptions{{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}};
+        return GpuSkyVisibilityOptions{{0.0f, 0.0f, 0.0f, 0.0f}};
     }
 
-    return GpuSkyVisibilityOptions{{static_cast<float>(cascadesRead), settings.bounceShare, settings.lookupBias, settings.debugView ? 1.0f : 0.0f},
-                                   {settings.blockersLitFloor, 0.0f, 0.0f, 0.0f}};
+    return GpuSkyVisibilityOptions{{static_cast<float>(cascadesRead), settings.ambientFloor, settings.lookupBias, settings.debugView ? 1.0f : 0.0f}};
 }

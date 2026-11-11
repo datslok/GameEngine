@@ -45,59 +45,83 @@ namespace {
     const Vec3 down{0.0f, -1.0f, 0.0f};
     const Vec3 east{1.0f, 0.0f, 0.0f};
 
+    bool nearColour(const Vec3& a, const Vec3& b, float tolerance) {
+        return near(a.x, b.x, tolerance) && near(a.y, b.y, tolerance) && near(a.z, b.z, tolerance);
+    }
+
+    Vec3 grey(float value) {
+        return Vec3{value, value, value};
+    }
+
+    // Each colour channel's bands of a light coming from wherever open(direction) says, times that channel's value.
+    template <typename Open>
+    SkyBounce bounceOf(Open open, const Vec3& colour) {
+        const SkyVisibility bands = bandsOf(open);
+        SkyBounce bounce = noSkyBounce;
+        const float channels[3] = {colour.x, colour.y, colour.z};
+
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            bounce[channel] = SkyVisibility{bands.open * channels[channel], bands.lean * channels[channel]};
+        }
+
+        return bounce;
+    }
+
     /*
     * An open field: the sky above, the ground below. The bands are a = 1/2 and b = 3/4 up, so a floor gets all of the
-    * sky's light (as the flat ambient assumed for every surface), a wall half and a ceiling none.
+    * sky's light (as the flat ambient assumed for every surface), a wall half and a ceiling none of the sky; with the
+    * ground's bounce (albedo rho, lit by the whole sky), a ceiling gets rho, a wall half of 1 and half of rho.
     */
     void testAnOpenFieldLightsTheFloorFully() {
         const SkyVisibility field = bandsOf([](const Vec3& direction) { return direction.y > 0.0f; });
         assert(near(field.open, 0.5f, 0.01f));
         assert(near(field.lean.y, 0.75f, 0.02f) && near(field.lean.x, 0.0f, 0.02f) && near(field.lean.z, 0.0f, 0.02f));
 
-        assert(near(skyVisibilityFacing(field, up, 0.0f), 1.0f, 0.02f));
-        assert(near(skyVisibilityFacing(field, east, 0.0f), 0.5f, 0.02f));
-        assert(near(skyVisibilityFacing(field, down, 0.0f), 0.0f, 0.02f));
-        assert(near(skyVisibilityInAir(field, 0.0f), 0.5f, 0.01f));
-        assert(near(skyVisibilityAlong(field, up, 0.0f), 1.0f, 0.02f));
+        assert(nearColour(skyLightFacing(field, noSkyBounce, up, 0.0f), grey(1.0f), 0.02f));
+        assert(nearColour(skyLightFacing(field, noSkyBounce, east, 0.0f), grey(0.5f), 0.02f));
+        assert(nearColour(skyLightFacing(field, noSkyBounce, down, 0.0f), grey(0.0f), 0.02f));
+        assert(nearColour(skyLightInAir(field, noSkyBounce, 0.0f), grey(0.5f), 0.01f));
+        assert(nearColour(skyLightAlong(field, noSkyBounce, up, 0.0f), grey(1.0f), 0.02f));
+
+        const Vec3 rho{0.8f, 0.4f, 0.2f};
+        const SkyBounce ground = bounceOf([](const Vec3& direction) { return direction.y < 0.0f; }, rho);
+        assert(nearColour(skyLightFacing(field, ground, down, 0.0f), rho, 0.02f));
+        assert(nearColour(skyLightFacing(field, ground, up, 0.0f), grey(1.0f), 0.02f));
+        assert(nearColour(skyLightFacing(field, ground, east, 0.0f), grey(0.5f) + rho * 0.5f, 0.02f));
+        assert(nearColour(skyLightInAir(field, ground, 0.0f), grey(0.5f) + rho * 0.5f, 0.01f));
+        // Along one direction two bands overshoot a hemisphere by a quarter (a + b . d = 1.25), each channel kept within 0..1.
+        assert(nearColour(skyLightAlong(field, ground, down, 0.0f), Vec3{1.0f, 0.5f, 0.25f}, 0.03f));
     }
 
-    // A closed box sees no sky, and its walls none either, so nothing comes back: it is dark whatever the bounce share;
-    // with everything open, every surface gets all.
+    // A closed box sees no sky, and nothing lit bounces into it: dark, or the floor (dim, not black); with everything
+    // open, every surface gets all.
     void testAClosedBoxIsDark() {
         const SkyVisibility box = bandsOf([](const Vec3&) { return false; });
         const SkyVisibility open = bandsOf([](const Vec3&) { return true; });
 
         for (const Vec3& normal : {up, down, east}) {
-            assert(skyVisibilityFacing(box, normal, 0.0f) == 0.0f);
-            assert(skyVisibilityFacing(box, normal, 0.25f) == 0.0f);
-            assert(near(skyVisibilityFacing(open, normal, 0.25f), 1.0f, 1e-4f));
+            assert(skyLightFacing(box, noSkyBounce, normal, 0.0f).x == 0.0f);
+            assert(nearColour(skyLightFacing(box, noSkyBounce, normal, 0.025f), grey(0.025f), 1e-6f));
+            assert(nearColour(skyLightFacing(open, noSkyBounce, normal, 0.025f), grey(1.0f), 1e-4f));
         }
 
-        assert(skyVisibilityInAir(box, 0.3f) == 0.0f);
-
-        // With a floor on how lit blockers count, a closed room keeps that much of the bounce: dim, not black.
-        assert(near(skyVisibilityFacing(box, up, 0.25f, 0.1f), 0.025f, 1e-6f));
-        assert(near(skyVisibilityInAir(box, 0.3f, 0.1f), 0.03f, 1e-6f));
-        assert(skyBlockersLit(box, 0.1f) == 0.1f && near(skyBlockersLit(open, 0.1f), 1.0f, 1e-6f));
-
-        // Under an open sky the blocked half (the ground) brings back the whole bounce share: a ceiling gets beta, a wall
-        // half the sky and beta of the other half.
-        const SkyVisibility field = bandsOf([](const Vec3& direction) { return direction.y > 0.0f; });
-        assert(near(skyVisibilityFacing(field, down, 0.25f), 0.25f, 0.02f));
-        assert(near(skyVisibilityFacing(field, east, 0.25f), 0.5f + 0.25f * 0.5f, 0.02f));
+        assert(nearColour(skyLightInAir(box, noSkyBounce, 0.03f), grey(0.03f), 1e-6f));
+        assert(nearColour(skyLightAlong(box, noSkyBounce, up, 0.03f), grey(0.03f), 1e-6f));
     }
 
-    // Two bands blur sharp edges and can overshoot: the sky seen is kept within 0..1 before the bounce is added.
+    // Two bands blur sharp edges and can overshoot: the sky seen and each bounce channel are kept within 0..1 before
+    // they are added.
     void testTheShareStaysWithinItsRange() {
         const SkyVisibility ringing{0.2f, Vec3{0.0f, 0.9f, 0.0f}};
-        const float blockersLit = 0.4f; // twice the open share
-        assert(near(skyVisibilityFacing(ringing, down, 0.25f), 0.25f * blockersLit, 1e-6f));
-        assert(skyVisibilityAlong(ringing, up, 0.25f) == 1.0f);
+        assert(nearColour(skyLightFacing(ringing, noSkyBounce, down, 0.0f), grey(0.0f), 1e-6f));
+        assert(nearColour(skyLightAlong(ringing, noSkyBounce, up, 0.0f), grey(1.0f), 1e-6f));
+        assert(nearColour(skyLightFacing(ringing, noSkyBounce, up, 0.0f), grey(0.8f), 1e-5f));
 
-        // f + beta g (1 - f), with f = a + 2/3 b . n.
-        const float seen = 0.2f + 0.6f;
-        assert(near(skyVisibilityFacing(ringing, up, 0.5f), seen + 0.5f * blockersLit * (1.0f - seen), 1e-5f));
-        assert(near(skyVisibilityInAir(ringing, 0.5f), 0.2f + 0.5f * blockersLit * 0.8f, 1e-5f));
+        SkyBounce overshoot = noSkyBounce;
+        overshoot[0] = SkyVisibility{0.3f, Vec3{0.0f, -0.9f, 0.0f}};
+        const Vec3 facingDown = skyLightFacing(ringing, overshoot, down, 0.0f);
+        assert(near(facingDown.x, 0.9f, 1e-5f) && facingDown.y == 0.0f);
+        assert(skyLightFacing(ringing, overshoot, up, 0.0f).x == skyLightFacing(ringing, noSkyBounce, up, 0.0f).x);
     }
 
     // A point whose open side leans up sees the sky facing up, and none looking straight down.
@@ -133,8 +157,16 @@ namespace {
         cell.reach = {0.0f, 1.0f, 0.5f, 0.25f, 0.75f, 0.1f};
         cell.state = SkyCellState::Baked;
 
+        cell.bounce = {SkyVisibility{0.25f, Vec3{0.0625f, -0.125f, 0.5f}}, SkyVisibility{0.5f, Vec3{0.25f, 0.0f, -0.75f}},
+                       SkyVisibility{0.125f, Vec3{-0.5f, 0.375f, 0.0f}}};
+
         const SkyCell back = unpackSkyCell(packSkyCell(cell));
         assert(back.visibility.open == 0.375f && back.visibility.lean.x == -0.25f && back.visibility.lean.y == 0.5f && back.visibility.lean.z == 0.125f);
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            assert(back.bounce[channel].open == cell.bounce[channel].open);
+            assert(back.bounce[channel].lean.x == cell.bounce[channel].lean.x && back.bounce[channel].lean.y == cell.bounce[channel].lean.y &&
+                   back.bounce[channel].lean.z == cell.bounce[channel].lean.z);
+        }
         for (std::size_t direction = 0; direction < cell.reach.size(); ++direction) {
             assert(near(back.reach[direction], cell.reach[direction], 0.5f / skyVisibilityReachSteps + 1e-6f));
         }
@@ -146,6 +178,7 @@ namespace {
         const SkyCell buried = unpackSkyCell(packSkyCell(cell));
         assert(buried.reach[0] == 1.0f && buried.state == SkyCellState::Buried);
         assert(unpackSkyCell(packSkyCell(SkyCell{})).state == SkyCellState::Unknown);
+        assert(unpackSkyCell(packSkyCell(SkyCell{})).bounce[1].open == 0.0f);
     }
 
     // The cascades: each the same window of points, twice the last one's spacing, numbered one after another.
@@ -187,14 +220,18 @@ namespace {
         return cells;
     }
 
-    SkyCell bakedCell(const SkyVisibility& visibility) {
+    SkyCell bakedCell(const SkyVisibility& visibility, const SkyBounce& bounce = noSkyBounce) {
         SkyCell cell;
         cell.visibility = visibility;
+        cell.bounce = bounce;
         cell.state = SkyCellState::Baked;
         return cell;
     }
 
-    // Nothing baked yet reads as the open sky, as before the grid; points that all agree read as that.
+    /*
+    * Nothing baked yet reads as the open sky, as before the grid, with no bounce and nothing known; points that all agree
+    * read as that, bounce too, wholly known.
+    */
     void testReadingTheGrid() {
         SkyVisibilitySettings settings;
         const Vec3 centre{0.37f, 1.61f, -0.22f};
@@ -202,17 +239,23 @@ namespace {
         const int count = skyVisibilityCellCount(settings);
 
         const std::vector<SkyCell> unknown(static_cast<std::size_t>(count));
-        const SkyVisibility open = sampleSkyVisibility(cascades, unknown, settings.lookupBias, centre, up, up);
-        assert(open.open == 1.0f && open.lean.x == 0.0f && open.lean.y == 0.0f && open.lean.z == 0.0f);
+        const SkySample open = sampleSkyVisibility(cascades, unknown, settings.lookupBias, centre, up, up);
+        assert(open.visibility.open == 1.0f && open.visibility.lean.x == 0.0f && open.visibility.lean.y == 0.0f && open.visibility.lean.z == 0.0f);
+        assert(open.known == 0.0f && open.bounce[0].open == 0.0f);
+        assert(open.missing == 1.0f); // inside the grid, nothing baked there yet
 
         const SkyVisibility room{0.1f, Vec3{0.05f, 0.02f, 0.0f}};
-        const std::vector<SkyCell> same = placedCells(cascades, count, [&](const Vec3&) { return bakedCell(room); });
-        const SkyVisibility read = sampleSkyVisibility(cascades, same, settings.lookupBias, centre, up, up);
-        assert(near(read.open, room.open, 1e-5f) && near(read.lean.x, room.lean.x, 1e-5f) && near(read.lean.y, room.lean.y, 1e-5f));
+        const SkyBounce walls{SkyVisibility{0.3f, Vec3{0.1f, 0.0f, 0.0f}}, SkyVisibility{0.2f, Vec3{}}, SkyVisibility{0.1f, Vec3{0.0f, 0.0f, -0.05f}}};
+        const std::vector<SkyCell> same = placedCells(cascades, count, [&](const Vec3&) { return bakedCell(room, walls); });
+        const SkySample read = sampleSkyVisibility(cascades, same, settings.lookupBias, centre, up, up);
+        assert(near(read.visibility.open, room.open, 1e-5f) && near(read.visibility.lean.x, room.lean.x, 1e-5f) && near(read.visibility.lean.y, room.lean.y, 1e-5f));
+        assert(near(read.known, 1.0f, 1e-5f) && read.missing == 0.0f);
+        assert(near(read.bounce[0].open, 0.3f, 1e-5f) && near(read.bounce[0].lean.x, 0.1f, 1e-5f) && near(read.bounce[2].lean.z, -0.05f, 1e-5f));
 
-        // Far past the last cascade, the open sky again.
-        const SkyVisibility far = sampleSkyVisibility(cascades, same, settings.lookupBias, centre + Vec3{500.0f, 0.0f, 0.0f}, up, up);
-        assert(far.open == 1.0f);
+        // Far past the last cascade, the open sky again, nothing bounced and nothing known.
+        const SkySample far = sampleSkyVisibility(cascades, same, settings.lookupBias, centre + Vec3{500.0f, 0.0f, 0.0f}, up, up);
+        assert(far.visibility.open == 1.0f && far.known == 0.0f && far.bounce[1].open == 0.0f);
+        assert(far.missing == 0.0f); // past the grid: not missing, just not there
     }
 
     /*
@@ -233,7 +276,7 @@ namespace {
             cell.state = position.x < centre.x ? SkyCellState::Buried : SkyCellState::Baked;
             return cell;
         });
-        assert(near(sampleSkyVisibility(cascades, buried, settings.lookupBias, centre, up, up).open, 1.0f, 1e-5f));
+        assert(near(sampleSkyVisibility(cascades, buried, settings.lookupBias, centre, up, up).visibility.open, 1.0f, 1e-5f));
 
         const std::vector<SkyCell> walled = placedCells(cascades, count, [&](const Vec3& position) {
             SkyCell cell = bakedCell(position.x < centre.x ? dark : sky);
@@ -242,11 +285,11 @@ namespace {
             }
             return cell;
         });
-        assert(near(sampleSkyVisibility(cascades, walled, settings.lookupBias, centre, up, up).open, 1.0f, 1e-5f));
+        assert(near(sampleSkyVisibility(cascades, walled, settings.lookupBias, centre, up, up).visibility.open, 1.0f, 1e-5f));
 
         // Without the wall both sides count.
         const std::vector<SkyCell> both = placedCells(cascades, count, [&](const Vec3& position) { return bakedCell(position.x < centre.x ? dark : sky); });
-        const float mixed = sampleSkyVisibility(cascades, both, settings.lookupBias, centre, up, up).open;
+        const float mixed = sampleSkyVisibility(cascades, both, settings.lookupBias, centre, up, up).visibility.open;
         assert(mixed > 0.2f && mixed < 0.8f);
     }
 
@@ -261,22 +304,21 @@ namespace {
             return bakedCell(SkyVisibility{position.y > floorPoint.y ? 1.0f : 0.0f, Vec3{0.0f, 0.0f, 0.0f}});
         });
 
-        assert(sampleSkyVisibility(cascades, cells, settings.lookupBias, floorPoint, up, up).open > 0.75f);
-        assert(sampleSkyVisibility(cascades, cells, settings.lookupBias, floorPoint, down, down).open < 0.3f);
+        assert(sampleSkyVisibility(cascades, cells, settings.lookupBias, floorPoint, up, up).visibility.open > 0.75f);
+        assert(sampleSkyVisibility(cascades, cells, settings.lookupBias, floorPoint, down, down).visibility.open < 0.3f);
     }
 
     void testTheSettings() {
         const SkyVisibilitySettings defaults;
-        assert(defaults.enabled && defaults.bounceShare == 0.25f && defaults.spacing == 0.5f && defaults.cascades == 2);
+        assert(defaults.enabled && defaults.spacing == 0.5f && defaults.cascades == 2);
         assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
-        assert(defaults.blockersLitFloor == 0.1f && defaults.quickRays == 64 && defaults.storeMegabytes == 256.0f);
+        assert(defaults.ambientFloor == 0.025f && defaults.quickRays == 64 && defaults.storeMegabytes == 256.0f);
         validateSkyVisibility(defaults);
 
         SkyVisibilitySettings bad;
-        bad.bounceShare = 1.5f;
+        bad.ambientFloor = 1.5f;
         assert(rejects(bad));
-        bad = {};
-        bad.blockersLitFloor = -0.1f;
+        bad.ambientFloor = -0.1f;
         assert(rejects(bad));
         bad = {};
         bad.spacing = 0.0f;
@@ -307,11 +349,10 @@ namespace {
 
         // Only what shapes the grid bakes it again.
         SkyVisibilitySettings other;
-        other.bounceShare = 0.5f;
         other.lookupBias = 0.1f;
         other.bakeMilliseconds = 3.0f;
         other.debugView = true;
-        other.blockersLitFloor = 0.3f;
+        other.ambientFloor = 0.3f;
         other.quickRays = 16;         // only how a refill gets there, not what it ends as
         other.storeMegabytes = 32.0f; // only what is kept, not what is baked
         assert(sameSkyVisibilityGrid(defaults, other));
@@ -324,17 +365,15 @@ namespace {
             visit(settings, visitor);
         };
         const std::vector<std::string> warnings =
-            applySettings({{"skyVisibility.bounceShare", "0.4"}, {"skyVisibility.enabled", "false"}, {"skyVisibility.debugView", "true"}, {"skyVisibility.blockersLitFloor", "0.2"}}, walk,
-                          StartupFields::Keep);
-        assert(warnings.empty() && settings.skyVisibility.bounceShare == 0.4f && !settings.skyVisibility.enabled && settings.skyVisibility.debugView);
-        assert(settings.skyVisibility.blockersLitFloor == 0.2f);
+            applySettings({{"skyVisibility.enabled", "false"}, {"skyVisibility.debugView", "true"}, {"skyVisibility.ambientFloor", "0.2"}}, walk, StartupFields::Keep);
+        assert(warnings.empty() && !settings.skyVisibility.enabled && settings.skyVisibility.debugView);
+        assert(settings.skyVisibility.ambientFloor == 0.2f);
 
-        // The shaders' options: nothing while not read.
+        // The shaders' options: nothing while not read; x the cascades read, y the floor, z the lookup bias, w the view.
         const GpuSkyVisibilityOptions off = packSkyVisibilityOptions(defaults, 0);
-        assert(off.values[0] == 0.0f && off.values[1] == 0.0f && off.values[2] == 0.0f && off.values[3] == 0.0f && off.more[0] == 0.0f);
+        assert(off.values[0] == 0.0f && off.values[1] == 0.0f && off.values[2] == 0.0f && off.values[3] == 0.0f);
         const GpuSkyVisibilityOptions on = packSkyVisibilityOptions(other, 2);
-        assert(on.values[0] == 2.0f && on.values[1] == 0.5f && on.values[2] == 0.1f && on.values[3] == 1.0f);
-        assert(on.more[0] == 0.3f);
+        assert(on.values[0] == 2.0f && on.values[1] == 0.3f && on.values[2] == 0.1f && on.values[3] == 1.0f);
     }
 
     // Off on Low, as ambient occlusion is; on from Medium up.
@@ -354,8 +393,8 @@ namespace {
         GridMarks marks;
         const SkyCell cell = bakeSkyCell(level, Vec3{0.3f, 0.1f, 0.2f}, manyRays, 30.0f, 0.5f, marks);
         assert(cell.state == SkyCellState::Baked);
-        assert(near(skyVisibilityFacing(cell.visibility, up, 0.0f), 1.0f, 0.03f));
-        assert(near(skyVisibilityFacing(cell.visibility, down, 0.0f), 0.0f, 0.03f));
+        assert(near(skySeenFacing(cell.visibility, up), 1.0f, 0.03f));
+        assert(near(skySeenFacing(cell.visibility, down), 0.0f, 0.03f));
         assert(near(cell.reach[3], 0.2f, 0.01f));
         assert(cell.reach[0] == 1.0f && cell.reach[1] == 1.0f && cell.reach[2] == 1.0f && cell.reach[4] == 1.0f && cell.reach[5] == 1.0f);
 
@@ -363,9 +402,9 @@ namespace {
         StaticLevel roofed = flatLevel();
         roofed.add(block(Vec3{-50.0f, 40.0f, -50.0f}, Vec3{50.0f, 41.0f, 50.0f}));
         const SkyCell under = bakeSkyCell(roofed, Vec3{0.3f, 1.0f, 0.2f}, manyRays, 30.0f, 0.5f, marks);
-        assert(near(skyVisibilityFacing(under.visibility, up, 0.0f), 1.0f, 0.03f));
+        assert(near(skySeenFacing(under.visibility, up), 1.0f, 0.03f));
         const SkyCell roofSeen = bakeSkyCell(roofed, Vec3{0.3f, 1.0f, 0.2f}, manyRays, 100.0f, 0.5f, marks);
-        assert(skyVisibilityFacing(roofSeen.visibility, up, 0.0f) < 0.6f);
+        assert(skySeenFacing(roofSeen.visibility, up) < 0.6f);
     }
 
     // A room of walls 0.2 m thick, 6 by 3 by 6 m inside, with a doorway 1 m wide and 2 m high in its east wall.
@@ -387,11 +426,11 @@ namespace {
         GridMarks marks;
         const SkyCell inside = bakeSkyCell(level, Vec3{1.5f, 1.0f, 0.1f}, manyRays, 30.0f, 0.5f, marks);
         assert(inside.state == SkyCellState::Baked);
-        const float towardsDoor = skyVisibilityFacing(inside.visibility, east, 0.0f);
-        const float awayFromDoor = skyVisibilityFacing(inside.visibility, Vec3{-1.0f, 0.0f, 0.0f}, 0.0f);
+        const float towardsDoor = skySeenFacing(inside.visibility, east);
+        const float awayFromDoor = skySeenFacing(inside.visibility, Vec3{-1.0f, 0.0f, 0.0f});
         assert(inside.visibility.open < 0.1f);
         assert(towardsDoor > awayFromDoor);
-        assert(skyVisibilityFacing(inside.visibility, up, 0.0f) < 0.15f);
+        assert(skySeenFacing(inside.visibility, up) < 0.15f);
 
         const SkyCell inWall = bakeSkyCell(level, Vec3{-3.1f, 1.0f, 0.1f}, manyRays, 30.0f, 0.5f, marks);
         assert(inWall.state == SkyCellState::Buried);
@@ -399,6 +438,105 @@ namespace {
         // Beside the west wall's inside face, 0.1 m off: its reach west is a fifth of a spacing.
         const SkyCell byWall = bakeSkyCell(level, Vec3{-2.9f, 1.0f, 0.1f}, 8, 30.0f, 0.5f, marks);
         assert(near(byWall.reach[1], 0.2f, 0.01f) && byWall.reach[0] == 1.0f);
+    }
+
+    std::vector<Vec3> albedoOf(const StaticLevel& level, const Vec3& colour) {
+        return std::vector<Vec3>(level.getTriangleCount(), colour);
+    }
+
+    // What the grid says round a hit: the whole sphere open (a point under an open sky), wholly known.
+    SkySample openSkyAt(const Vec3&, const Vec3&, const Vec3&) {
+        SkySample sample;
+        sample.visibility = SkyVisibility{1.0f, Vec3{}};
+        sample.known = 1.0f;
+        return sample;
+    }
+
+    // Nothing known round a hit yet.
+    SkySample unknownAt(const Vec3&, const Vec3&, const Vec3&) {
+        return SkySample{};
+    }
+
+    /*
+    * The light on a hit, per unit of the open sky's light: the sky it sees facing its normal plus the bounce there; where
+    * the grid knows less than half of what is round it, the fallback grey instead.
+    */
+    void testTheLightOnAHit() {
+        SkySample field;
+        field.visibility = bandsOf([](const Vec3& direction) { return direction.y > 0.0f; });
+        field.bounce = bounceOf([](const Vec3& direction) { return direction.y < 0.0f; }, Vec3{0.8f, 0.4f, 0.2f});
+        field.known = 1.0f;
+        assert(nearColour(skyHitLight(field, up, 0.3f), grey(1.0f), 0.02f));
+        assert(nearColour(skyHitLight(field, down, 0.3f), Vec3{0.8f, 0.4f, 0.2f}, 0.02f));
+
+        field.known = 0.4f;
+        assert(nearColour(skyHitLight(field, up, 0.3f), grey(0.3f), 1e-6f));
+    }
+
+    /*
+    * The bounce over an open floor of albedo rho, its points lit by the whole sky (the analytic case: facing down the
+    * hemisphere is all floor, of radiance rho L under a sky of L, so rho of the sky's light; facing up none; sideways
+    * half). The same with nothing known round the hits, through the guess (twice the point's open share, here all).
+    * Without albedo or a way to read the grid, no bounce.
+    */
+    void testBounceOverAFloor() {
+        const StaticLevel level = flatLevel();
+        const Vec3 rho{0.8f, 0.4f, 0.2f};
+        const std::vector<Vec3> albedo = albedoOf(level, rho);
+        const Vec3 point{0.3f, 0.1f, 0.2f};
+        GridMarks marks;
+
+        const SkyCell cell = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, albedo, openSkyAt);
+        assert(nearColour(skyLightFacing(cell.visibility, cell.bounce, down, 0.0f), rho, 0.03f));
+        assert(nearColour(skyLightFacing(cell.visibility, cell.bounce, up, 0.0f), grey(1.0f), 0.03f));
+        assert(nearColour(skyLightFacing(cell.visibility, cell.bounce, east, 0.0f), grey(0.5f) + rho * 0.5f, 0.03f));
+
+        assert(cell.unsureShare == 0.0f);
+
+        // Nothing known round the hits because they lie past the grid: guessed, but nothing to wait for.
+        const SkyCell guessed = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, albedo, unknownAt);
+        assert(nearColour(skyLightFacing(guessed.visibility, guessed.bounce, down, 0.0f), rho, 0.03f));
+        assert(guessed.unsureShare == 0.0f);
+
+        // Nothing known because nothing round them is baked yet: guessed, and worth baking again later.
+        const SkyCell waiting = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, albedo, [](const Vec3&, const Vec3&, const Vec3&) {
+            SkySample sample;
+            sample.missing = 1.0f;
+            return sample;
+        });
+        assert(waiting.unsureShare == 1.0f);
+
+        const SkyCell plain = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks);
+        for (const SkyVisibility& channel : plain.bounce) {
+            assert(channel.open == 0.0f && channel.lean.x == 0.0f && channel.lean.y == 0.0f && channel.lean.z == 0.0f);
+        }
+    }
+
+    /*
+    * A closed room with nothing known round its hits: its own open share is none, so the guess lights nothing and no
+    * bounce comes back. A point inside a block standing alone meets only the backs of its triangles, which bring none
+    * either (inside a wall of a level, some rays leave through faces that touch others, the floor's or the roof's, and
+    * meet their fronts; such a point is buried and never read).
+    */
+    void testNoBounceInTheDarkOrInWalls() {
+        StaticLevel closed = roomWithADoor();
+        closed.add(block(Vec3{3.0f, 0.0f, -0.5f}, Vec3{3.2f, 2.0f, 0.5f})); // the door shut
+        const std::vector<Vec3> albedo = albedoOf(closed, grey(0.9f));
+        GridMarks marks;
+
+        const SkyCell inside = bakeSkyCell(closed, Vec3{1.5f, 1.0f, 0.1f}, manyRays, 30.0f, 0.5f, marks, albedo, unknownAt);
+        assert(inside.visibility.open == 0.0f);
+        for (const SkyVisibility& channel : inside.bounce) {
+            assert(channel.open == 0.0f);
+        }
+
+        StaticLevel alone;
+        alone.add(block(Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}));
+        const SkyCell inBlock = bakeSkyCell(alone, Vec3{0.1f, 0.2f, -0.3f}, manyRays, 30.0f, 0.5f, marks, albedoOf(alone, grey(0.9f)), openSkyAt);
+        assert(inBlock.state == SkyCellState::Buried);
+        for (const SkyVisibility& channel : inBlock.bounce) {
+            assert(channel.open == 0.0f);
+        }
     }
 
     void testTheBudget() {
@@ -486,7 +624,7 @@ namespace {
         assert(grid.getWaiting() == 0);
 
         SkyVisibilitySettings looks = settings;
-        looks.bounceShare = 0.6f;
+        looks.ambientFloor = 0.06f;
         looks.bakeMilliseconds = 4.0f;
         assert(!grid.follow(centre, looks, 1));
         assert(grid.follow(centre, looks, 2) && grid.getWaiting() == count);
@@ -667,9 +805,9 @@ namespace {
         assert(store.size() == 3);
 
         const std::optional<StoredSkyCell> foundA = store.find(0, a);
-        assert(foundA && !foundA->quick && sameWords(foundA->cell, inside));
+        assert(foundA && !foundA->unfinished && sameWords(foundA->cell, inside));
         const std::optional<StoredSkyCell> foundB = store.find(0, b);
-        assert(foundB && foundB->quick && sameWords(foundB->cell, outside));
+        assert(foundB && foundB->unfinished && sameWords(foundB->cell, outside));
         assert(store.find(1, a) && sameWords(store.find(1, a)->cell, outside));
         assert(!store.find(0, c) && !store.find(2, a));
 
@@ -759,6 +897,34 @@ namespace {
         assert(forgetful.getWaiting() == count);
     }
 
+    /*
+    * Points baked before the grid round their hits was: queued to be baked again once, when it is, as quick ones are;
+    * baking them again does not queue them a third time, nor does the store bring them back as finished.
+    */
+    void testPointsBakedTooEarlyAreBakedAgain() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 8;
+        const std::vector<Vec3> albedo = albedoOf(level, grey(0.6f));
+        const int count = skyVisibilityCellCount(settings);
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+
+        SkyVisibilityGrid grid;
+        grid.follow(centre, settings, 1);
+        assert(grid.bake(level, serialJobs(), count, false, Vec3{}, albedo) == count);
+        const int early = grid.getRefining();
+        assert(early > 0 && early <= count);
+
+        assert(grid.refine(level, serialJobs(), count, albedo) == early);
+        assert(grid.getRefining() == 0);
+
+        // Without albedo there is no bounce to be unsure of.
+        SkyVisibilityGrid plain;
+        plain.follow(centre, settings, 1);
+        plain.bake(level, serialJobs(), count);
+        assert(plain.getRefining() == 0);
+    }
+
     // Many threads bake exactly what one does.
     void testBakingIsTheSameOnEveryCore() {
         const StaticLevel level = roomWithADoor();
@@ -766,19 +932,23 @@ namespace {
         settings.rays = 16;
         const Vec3 centre{0.37f, 1.61f, -0.22f};
 
+        // Two bakes, the second reading what the first left round its hits.
+        const std::vector<Vec3> albedo = albedoOf(level, Vec3{0.7f, 0.5f, 0.3f});
         SkyVisibilityGrid alone;
         alone.follow(centre, settings, 1);
-        alone.bake(level, serialJobs(), 5000);
+        alone.bake(level, serialJobs(), 5000, false, Vec3{}, albedo);
+        alone.bake(level, serialJobs(), 5000, false, Vec3{}, albedo);
 
         JobSystem jobs{4};
         SkyVisibilityGrid together;
         together.follow(centre, settings, 1);
-        together.bake(level, jobs, 5000);
+        together.bake(level, jobs, 5000, false, Vec3{}, albedo);
+        together.bake(level, jobs, 5000, false, Vec3{}, albedo);
 
         for (std::size_t cell = 0; cell < alone.getCells().size(); ++cell) {
             const GpuSkyCell a = packSkyCell(alone.getCells()[cell]);
             const GpuSkyCell b = packSkyCell(together.getCells()[cell]);
-            for (int word = 0; word < 4; ++word) {
+            for (std::size_t word = 0; word < std::size(a.words); ++word) {
                 assert(a.words[word] == b.words[word]);
             }
         }
@@ -800,6 +970,9 @@ void testSkyVisibility() {
     testThePresets();
     testBakingAPointOverAFloor();
     testBakingARoom();
+    testTheLightOnAHit();
+    testBounceOverAFloor();
+    testNoBounceInTheDarkOrInWalls();
     testTheBudget();
     testPlanningAFrame();
     testTheGridFollowsTheCamera();
@@ -807,5 +980,6 @@ void testSkyVisibility() {
     testFallingBehindBakesWhatMattersFirst();
     testTheStoreKeepsBakedPoints();
     testComingBackFindsWhatWasBaked();
+    testPointsBakedTooEarlyAreBakedAgain();
     testBakingIsTheSameOnEveryCore();
 }
