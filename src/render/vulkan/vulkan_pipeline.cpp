@@ -5,12 +5,37 @@
 #include <algorithm>
 #include <array>
 #include <stdexcept>
+#include <string>
 
 namespace {
     enum LayoutKind {
         EmptyLayout,
         UniformLayout,
         FragmentResourceLayout
+    };
+
+    // A description with its own copies of the shaders' paths, for a build that runs after the caller's strings may be
+    // gone; view() is the description pointing at them.
+    struct OwnedPipelineDescription {
+        PipelineDescription description;
+        std::string vertexShader;
+        std::string fragmentShader;
+        bool hasFragmentShader = false;
+
+        explicit OwnedPipelineDescription(const PipelineDescription& from):
+            description(from),
+            vertexShader(from.vertexShader != nullptr ? from.vertexShader : ""),
+            fragmentShader(from.fragmentShader != nullptr ? from.fragmentShader : ""),
+            hasFragmentShader(from.fragmentShader != nullptr)
+        {
+        }
+
+        PipelineDescription view() const {
+            PipelineDescription copy = description;
+            copy.vertexShader = vertexShader.c_str();
+            copy.fragmentShader = hasFragmentShader ? fragmentShader.c_str() : nullptr;
+            return copy;
+        }
     };
 }
 
@@ -82,13 +107,12 @@ VkDescriptorSetLayout DescriptorLayouts::fragmentResources(std::uint32_t sampler
 }
 
 /*
-* The fixed-function state copies SDL_GPU's choices for the same pipeline descriptions, so the port draws the same
-* pixels. In particular depth clamping is on (SDL's enable_depth_clip defaults to false): a depth past the near or far
-* plane is clamped to it rather than the triangle being cut there, which lets shadow casters behind a light's near plane
-* still write the nearest depth ("pancaking").
+* The layouts are made here, at once (they are shared and cheap); the pipeline itself, the driver compiling the shaders,
+* on the device's pipeline compiler's threads, and get() waits for it.
 */
 VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& layouts, const PipelineDescription& description):
-    resources(description.resources)
+    resources(description.resources),
+    deviceHandle(device.getDevice())
 {
     const VkDevice handle = device.getDevice();
 
@@ -115,6 +139,18 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
         layout = createdLayout;
     }
 
+    const OwnedPipelineDescription owned{description};
+    building = device.getPipelineCompiler().submit([&device, owned, pipelineLayout = layout] { return build(device, owned.view(), pipelineLayout); });
+}
+
+/*
+* The fixed-function state copies SDL_GPU's choices for the same pipeline descriptions, so the port draws the same
+* pixels. In particular depth clamping is on (SDL's enable_depth_clip defaults to false): a depth past the near or far
+* plane is clamped to it rather than the triangle being cut there, which lets shadow casters behind a light's near plane
+* still write the nearest depth ("pancaking"). Runs on a compiler thread: it reads only what it is given.
+*/
+VkPipeline VulkanPipeline::build(const VulkanDevice& device, const PipelineDescription& description, VkPipelineLayout layout) {
+    const VkDevice handle = device.getDevice();
     const OwnedHandle<VkShaderModule> vertexShader = device.loadShader(description.vertexShader);
     // No fragment shader: depth only (the depth prepass), where the depth test and write need nothing from one.
     const bool hasFragmentShader = description.fragmentShader != nullptr;
@@ -287,10 +323,15 @@ VulkanPipeline::VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& la
 
     VkPipeline created = VK_NULL_HANDLE;
     vulkanCheck(vkCreateGraphicsPipelines(handle, VK_NULL_HANDLE, 1, &info, nullptr, &created), hasFragmentShader ? description.fragmentShader : description.vertexShader);
-    pipeline = OwnedHandle<VkPipeline>{handle, created, vkDestroyPipeline};
+    return created;
 }
 
+// The first use waits for the build and takes the pipeline over (rethrowing the build's error).
 VkPipeline VulkanPipeline::get() const {
+    if (building.valid()) {
+        pipeline = OwnedHandle<VkPipeline>{deviceHandle, building.take(), vkDestroyPipeline};
+    }
+
     return pipeline.get();
 }
 

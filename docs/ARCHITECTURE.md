@@ -397,6 +397,8 @@ Compute pipelines: `ComputePipeline` (`render/vulkan/vulkan_compute`, from `Comp
 - `input`, `world`, `assets`, ...;
 - `debugUi` (after the window and renderer, so it is destroyed first).
 
+**Starting:** the constructor runs the game's `onInit`, then `waitForPipelines`: the loading screen until every pipeline the renderer asked for is built (see VulkanRenderer, Pipelines on every core). The command server starts after it, so a `--send` waits until the game is ready.
+
 **Each frame:**
 
 - First the commands (`runCommands`, see Commands), before the frame's time is measured; a paused simulation (`ticksThisFrame`) runs no ticks and draws at alpha 1.
@@ -634,6 +636,7 @@ Point and spot lights get soft shadows (PCSS, `softShadowFromTile`; the arithmet
 Public calls:
 
 - the constructor (`SDL_Window*`, `validation`);
+- `pipelineProgress`, `finishPipelines`, `drawLoadingScreen` (see Pipelines on every core);
 - `render`, `capture`;
 - `uploadMesh`, `uploadTexture` and their counts;
 - `startDebugUi`, `beginDebugUiFrame`, `stopDebugUi`;
@@ -680,7 +683,19 @@ Files:
 - `render_pass` (`beginRendering`, `bindFragmentResources`, `drawFullScreenTriangle`).
 - `vulkan_mesh`, `vulkan_texture`, `vulkan_bloom`, `vulkan_debug_lines`, `vulkan_overlay`, `vulkan_renderer`.
 
-Outside the folder: `render/window_display` (`readWindowDisplay`, the window's HDR properties), `render/mesh_upload` (`checkMeshUpload`), `render/present_mode.h` and `render/gpu/column_major.h` (`writeColumnMajor`, matrices for GLSL).
+- `pipeline_compiler` (`PipelineCompiler`, `PipelineFuture`, `PipelineProgress`: see Pipelines on every core).
+
+Outside the folder: `render/window_display` (`readWindowDisplay`, the window's HDR properties), `render/mesh_upload` (`checkMeshUpload`), `render/present_mode.h`, `render/gpu/column_major.h` (`writeColumnMajor`, matrices for GLSL) and `render/gpu/loading_screen` (the loading screen's layout and block font).
+
+### Pipelines on every core
+
+After a build that changed the shaders, the driver compiles every pipeline's shaders into the GPU's own code again, and the renderer made its pipelines one after another on the main thread: on the laptop (RTX 4070 Laptop, 16 threads) the light lab took **199.5 s** to start with an empty driver cache, about 5 s with a full one, with the window not answering meanwhile (`loading-screen`, Nov 11 2026, the user: "can we have a screen that says building shaders and a loading bar").
+
+- **The compiler** (`PipelineCompiler`, `render/vulkan/pipeline_compiler`): one worker thread per core (`defaultWorkers`), owned by the `VulkanDevice` (`getPipelineCompiler`), stopped first in its teardown, since a running build uses the device. `submit` queues a build and returns a `PipelineFuture`; `take` waits for it and hands the pipeline over, or rethrows its error; `progress` counts built of asked; `waitAll` waits for everything and rethrows the first error nobody was told of. A future dropped untaken gives its pipeline back to be destroyed, and a build whose future went before it started is skipped (closing the window while loading does not wait for the rest). It holds nothing of the GPU: the build and the destroy function are given to it, so `pipeline_compiler_test` runs it with stand-in handles.
+- **The pipelines:** `VulkanPipeline` and `ComputePipeline` make their layouts at once (cheap, and `DescriptorLayouts` is not thread-safe) and hand the rest (loading the SPIR-V, `vkCreate*Pipelines`) to the compiler as a static `build` that reads only what it is given (the description with its own copies of the shader paths, the layout); the first `get()` takes the pipeline over, waiting if needed. So nothing else changed: anything used early simply waits for its own build. Making pipelines from many threads at once is valid Vulkan (only one object may not be changed from two threads together).
+- **The loading screen:** the `Application` constructor runs the game's `onInit` while the pipelines compile, then `waitForPipelines` shows `VulkanRenderer::drawLoadingScreen` about 30 times a second until all are built, handling the window's events (closing it quits). The screen is "BUILDING SHADERS", "built / total" and a bar (`layoutLoadingScreen`), drawn only by clearing rectangles of the window's image (`vkCmdClearAttachments`, a 5 x 7 block font, `blockText`), since no pipeline may be ready; a font pixel is a 180th of the window's height.
+- **Measured** on the laptop, the light lab: with an empty driver cache (`__GL_SHADER_DISK_CACHE_PATH` pointed at a new folder, which stands in for a fresh build) **38.8 s**, against 199.5 s; with a full cache 4.2 s, against about 5 s. Debug with validation on and an empty cache: 40.1 s, no validation errors.
+- **Not changed:** the debug UI's own pipeline (ImGui's backend makes it) and the GPU tests' pipelines (built on first use, as before).
 
 ### Kept from SDL_GPU
 

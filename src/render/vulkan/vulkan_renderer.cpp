@@ -5,6 +5,7 @@
 #include "render/gpu/camera_relative.h"
 #include "render/gpu/depth_shared.h"
 #include "render/gpu/gpu_depth_range.h"
+#include "render/gpu/loading_screen.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/compute_dispatch.h"
 #include "render/gpu/ddgi_sampling.h"
@@ -1032,6 +1033,96 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
     writeTimestampsThrough(context, gpuTimestampCount - 1);
     Frame& frame = frames[context.frameIndex];
     frame.timestampsComplete = static_cast<bool>(frame.timestamps);
+}
+
+PipelineProgress VulkanRenderer::pipelineProgress() const {
+    return device.getPipelineCompiler().progress();
+}
+
+void VulkanRenderer::finishPipelines() {
+    device.getPipelineCompiler().waitAll();
+}
+
+namespace {
+    // The loading screen's colours, in linear light: a dark background, light grey text, the bar's track and its fill.
+    constexpr std::array<float, 4> loadingBackground{0.010f, 0.012f, 0.016f, 1.0f};
+    constexpr std::array<float, 4> loadingText{0.75f, 0.75f, 0.75f, 1.0f};
+    constexpr std::array<float, 4> loadingBarTrack{0.04f, 0.045f, 0.05f, 1.0f};
+    constexpr std::array<float, 4> loadingBarFill{0.25f, 0.45f, 0.8f, 1.0f};
+
+    // These rectangles of the colour target cleared to colour, kept within it; empty ones left out.
+    void clearRectangles(VkCommandBuffer commands, VkExtent2D extent, std::span<const ScreenRect> rects, const std::array<float, 4>& colour) {
+        std::vector<VkClearRect> clears;
+        clears.reserve(rects.size());
+
+        for (const ScreenRect& rect : rects) {
+            const int left = std::clamp(rect.x, 0, static_cast<int>(extent.width));
+            const int top = std::clamp(rect.y, 0, static_cast<int>(extent.height));
+            const int right = std::clamp(rect.x + rect.width, 0, static_cast<int>(extent.width));
+            const int bottom = std::clamp(rect.y + rect.height, 0, static_cast<int>(extent.height));
+
+            if (right > left && bottom > top) {
+                clears.push_back(VkClearRect{VkRect2D{{left, top}, {static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top)}}, 0, 1});
+            }
+        }
+
+        if (clears.empty()) {
+            return;
+        }
+
+        VkClearAttachment attachment{};
+        attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        attachment.colorAttachment = 0;
+        std::copy(colour.begin(), colour.end(), attachment.clearValue.color.float32);
+        vkCmdClearAttachments(commands, 1, &attachment, static_cast<std::uint32_t>(clears.size()), clears.data());
+    }
+}
+
+/*
+* The window's image cleared to the background as the rendering begins, then the bar and the text as cleared
+* rectangles: the one way to draw that needs no pipeline, since none may be built yet.
+*/
+bool VulkanRenderer::drawLoadingScreen(const PipelineProgress& progress) {
+    if (!prepareSwapchain()) {
+        SDL_Delay(10);
+        return false;
+    }
+
+    FrameContext frame = beginFrame();
+
+    try {
+        acquiredImage = swapchain.acquire(frames[frameIndex].imageAcquired.get());
+
+        if (!acquiredImage) {
+            submitFrame(frame, false);
+            return false;
+        }
+
+        const VkExtent2D extent = swapchain.getExtent();
+        const std::uint32_t image = *acquiredImage;
+        ImageState& imageState = swapchain.getState(image);
+        transitionImage(frame.commands, swapchain.getImage(image), VK_IMAGE_ASPECT_COLOR_BIT, imageState, ImageState::ColourTarget, ImageContents::Discard);
+
+        const ColourAttachment colour{swapchain.getView(image), VK_ATTACHMENT_LOAD_OP_CLEAR, loadingBackground};
+        beginRendering(frame.commands, extent, &colour, nullptr);
+        renderingOpen = true;
+
+        const LoadingScreenLayout screen = layoutLoadingScreen(static_cast<int>(extent.width), static_cast<int>(extent.height), progress.built, progress.total);
+        clearRectangles(frame.commands, extent, std::span<const ScreenRect>{&screen.barBack, 1}, loadingBarTrack);
+        clearRectangles(frame.commands, extent, std::span<const ScreenRect>{&screen.barFill, 1}, loadingBarFill);
+        clearRectangles(frame.commands, extent, screen.text, loadingText);
+
+        vkCmdEndRendering(frame.commands);
+        renderingOpen = false;
+        transitionImage(frame.commands, swapchain.getImage(image), VK_IMAGE_ASPECT_COLOR_BIT, imageState, ImageState::Present);
+        submitFrame(frame, true);
+    }
+    catch (...) {
+        abandonFrame();
+        throw;
+    }
+
+    return true;
 }
 
 /*

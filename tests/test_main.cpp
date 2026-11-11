@@ -150,6 +150,8 @@ void testMirroredLight();
 void testAmbientOcclusion();
 void testVolumetricFog();
 void testSkyVisibility();
+void testPipelineCompiler();
+void testLoadingScreen();
 void testStaticGeometry();
 void testUpscaling();
 void testDisplayOutput();
@@ -341,6 +343,8 @@ int main(int argumentCount, char** arguments) {
     testAmbientOcclusion();
     testVolumetricFog();
     testSkyVisibility();
+    testPipelineCompiler();
+    testLoadingScreen();
     testStaticGeometry();
     testUpscaling();
     testDisplayOutput();

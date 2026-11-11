@@ -30,6 +30,9 @@ Application::Application(const char* title, int width, int height, Game& game, c
     game.useJobs(jobs);
     game.onInit(world, assets);
 
+    // The renderer's pipelines have been compiling on every core meanwhile; the rest with the loading screen up.
+    waitForPipelines();
+
     mouseLookEnabled = game.wantsMouseLook();
     window.setMouseLookEnabled(mouseLookEnabled);
 
@@ -45,6 +48,23 @@ Application::Application(const char* title, int width, int height, Game& game, c
             SDL_Log("Commands are off: %s", error.what());
         }
     }
+}
+
+// A frame of the loading screen at most this often: it only counts, so the threads get the cores.
+constexpr Uint32 loadingFrameMilliseconds = 33;
+
+void Application::waitForPipelines() {
+    while (!renderer.pipelineProgress().done()) {
+        if (!window.processEvents(input)) {
+            quitRequested = true;
+            return;
+        }
+
+        renderer.drawLoadingScreen(renderer.pipelineProgress());
+        SDL_Delay(loadingFrameMilliseconds);
+    }
+
+    renderer.finishPipelines();
 }
 
 void Application::queueCommands(const std::vector<std::string>& lines) {

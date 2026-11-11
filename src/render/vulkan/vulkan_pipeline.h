@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/vulkan/owned_handle.h"
+#include "render/vulkan/pipeline_compiler.h"
 
 #include "volk/volk.h"
 
@@ -111,12 +112,15 @@ struct PipelineDescription {
 
 /*
 * A graphics pipeline: the shaders and all fixed-function state compiled together by the driver, so switching to it is
-* one bind. Built for dynamic rendering, so it names only the formats of the images it draws into.
+* one bind. Built for dynamic rendering, so it names only the formats of the images it draws into. Compiled on the
+* device's pipeline compiler's threads (render/vulkan/pipeline_compiler.h): constructing one only asks for it, and the
+* first get() waits until it is built.
 */
 class VulkanPipeline {
 public:
     VulkanPipeline(const VulkanDevice& device, DescriptorLayouts& layouts, const PipelineDescription& description);
 
+    // Waits for the build the first time (rethrowing its error).
     VkPipeline get() const;
     VkPipelineLayout getLayout() const;
     const ShaderResources& getResources() const;
@@ -126,10 +130,15 @@ public:
 
 private:
     ShaderResources resources;
+    VkDevice deviceHandle = VK_NULL_HANDLE;
     VkDescriptorSetLayout fragmentResourceLayout = VK_NULL_HANDLE;
     OwnedHandle<VkPipelineLayout> ownedLayout;
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    OwnedHandle<VkPipeline> pipeline;
+    mutable OwnedHandle<VkPipeline> pipeline;
+    mutable PipelineFuture building;
+
+    // The slow part, on a compiler thread: the shaders loaded and the pipeline made against layout.
+    static VkPipeline build(const VulkanDevice& device, const PipelineDescription& description, VkPipelineLayout layout);
 };
 
 /*
