@@ -27,6 +27,7 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Occlusion history depth share", settings.historyDepthShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.005f, .sliderMax = 0.2f});
     visitor.field("Occlusion anti-lag", settings.antiLag);
     visitor.field("Occlusion anti-lag deviations", settings.antiLagDeviations, {.min = 0.1f, .max = 20.0f, .sliderMin = 1.0f, .sliderMax = 6.0f});
+    visitor.field("Occlusion history clip", settings.historyClip, {.min = 0.0f, .max = 20.0f, .sliderMin = 0.0f, .sliderMax = 6.0f});
     visitor.field("Occlusion denoise passes", settings.denoisePasses, {.min = 0, .max = AO_DENOISE_MAX_PASSES});
     visitor.field("Occlusion denoise plane share", settings.denoisePlaneShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.002f, .sliderMax = 0.1f});
 }
@@ -67,6 +68,10 @@ void validateAmbientOcclusion(const AmbientOcclusionSettings& settings) {
 
     if (!(settings.antiLagDeviations > 0.0f)) {
         throw std::invalid_argument("Ambient occlusion needs anti-lag deviations above 0");
+    }
+
+    if (!(settings.historyClip >= 0.0f)) {
+        throw std::invalid_argument("Ambient occlusion needs a history clip of at least 0");
     }
 
     if (!(settings.denoisePlaneShare > 0.0f)) {
@@ -530,7 +535,53 @@ bool aoLightChanged(float fastMean, float slowMean, float secondMoment, float de
     return std::abs(fastMean - slowMean) > std::max(deviations * fastSpread, floor);
 }
 
-AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, const AmbientOcclusionSettings& settings) {
+AoClipBox aoNeighbourhood(int x, int y, RenderSize size, const AoDepthImage& depthAt, const AoLightImage& currentAt) {
+    Vec4 sum;
+    Vec4 squares;
+    int count = 0;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            const int tapX = x + dx;
+            const int tapY = y + dy;
+
+            if (tapX < 0 || tapY < 0 || tapX >= static_cast<int>(size.width) || tapY >= static_cast<int>(size.height) || depthAt(tapX, tapY) == gpuFarDepth) {
+                continue;
+            }
+
+            const Vec4 value = currentAt(tapX, tapY);
+            sum = sum + value;
+            squares = squares + Vec4{value.x * value.x, value.y * value.y, value.z * value.z, value.w * value.w};
+            ++count;
+        }
+    }
+
+    if (count == 0) {
+        return AoClipBox{};
+    }
+
+    const float share = 1.0f / static_cast<float>(count);
+    return AoClipBox{sum * share, squares * share, true};
+}
+
+namespace {
+    // One channel: the same sums the shader does with vec4s.
+    float clipAoChannel(float history, float mean, float meanOfSquares, float deviations) {
+        const float spread = std::sqrt(std::max(meanOfSquares - mean * mean, 0.0f));
+        return std::clamp(history, mean - deviations * spread, mean + deviations * spread);
+    }
+}
+
+Vec4 clipAoHistory(const Vec4& historyLight, const Vec4& mean, const Vec4& meanOfSquares, float deviations) {
+    if (!(deviations > 0.0f)) {
+        return historyLight;
+    }
+
+    return Vec4{clipAoChannel(historyLight.x, mean.x, meanOfSquares.x, deviations), clipAoChannel(historyLight.y, mean.y, meanOfSquares.y, deviations),
+                clipAoChannel(historyLight.z, mean.z, meanOfSquares.z, deviations), clipAoChannel(historyLight.w, mean.w, meanOfSquares.w, deviations)};
+}
+
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, const AmbientOcclusionSettings& settings, const AoClipBox& box) {
     const float luminance = aoLuminance(Vec3{current.x, current.y, current.z});
 
     // Nothing to carry on: the frame alone, its noise estimate starting from it.
@@ -548,11 +599,14 @@ AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistor
 
     const float age = aoHistoryAge(history.age, settings.historyFrames);
     const float share = aoCurrentShare(age);
-    return AoHistoryTexel{accumulatedAo(current, history.light, age), viewDepth, age, fastMean,
+    const Vec4 historyLight = box.valid ? clipAoHistory(history.light, box.mean, box.meanOfSquares, settings.historyClip) : history.light;
+    return AoHistoryTexel{accumulatedAo(current, historyLight, age), viewDepth, age, fastMean,
                           history.secondMoment + (luminance * luminance - history.secondMoment) * share};
 }
+
 AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
-                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable) {
+                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable,
+                            const AoLightImage& currentAt) {
     const float depth = depthAt(x, y);
 
     if (depth == gpuFarDepth) {
@@ -564,7 +618,8 @@ AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& repr
     const float viewDepth = viewDistanceAtPixel(frame.inverseViewProjection, pixel, depth, size);
     const AoHistory previous = historyUsable ? readAoHistory(history, frame.size, aoPreviousPlace(reprojection, pixel, depth, viewDepth, size), settings.historyDepthShare)
                                              : AoHistory{};
-    return accumulateAo(current, viewDepth, previous, settings);
+    const AoClipBox box = currentAt && settings.historyClip > 0.0f ? aoNeighbourhood(x, y, frame.size, depthAt, currentAt) : AoClipBox{};
+    return accumulateAo(current, viewDepth, previous, settings, box);
 }
 
 bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey& now, bool previousCameraKnown) {
@@ -601,5 +656,6 @@ GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjecti
     pass.denoise[1] = settings.denoisePlaneShare;
     pass.antiLag[0] = settings.antiLag ? 1.0f : 0.0f;
     pass.antiLag[1] = settings.antiLagDeviations;
+    pass.antiLag[2] = settings.historyClip;
     return pass;
 }

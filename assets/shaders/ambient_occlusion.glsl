@@ -250,4 +250,15 @@ vec4 accumulatedAo(vec4 current, vec4 historyLight, float age) {
     return historyLight + (current - historyLight) * aoCurrentShare(age);
 }
 
+// The history clip: the history held within mean plus or minus deviations of the neighbourhood's spread, each channel
+// on its own; deviations 0 leaves it as it is.
+vec4 clipAoHistory(vec4 historyLight, vec4 mean, vec4 meanOfSquares, float deviations) {
+    if (!(deviations > 0.0)) {
+        return historyLight;
+    }
+
+    vec4 spread = sqrt(max(meanOfSquares - mean * mean, vec4(0.0)));
+    return clamp(historyLight, mean - deviations * spread, mean + deviations * spread);
+}
+
 #endif

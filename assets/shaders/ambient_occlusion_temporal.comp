@@ -7,7 +7,8 @@
 * the frames before, read where the point was on last frame's screen from the four texels round it whose view depth
 * shows the same point. The new frame weighs one over the age, the frames the average holds, at most the history's
 * frames, so a newly seen point starts from this frame alone; with anti-lag, a history whose 3-frame average strays from
-* its long one past its own noise restarts too (accumulateAo).
+* its long one past its own noise restarts too (accumulateAo); otherwise the history is first clipped into this frame's
+* 3 x 3 neighbourhood (clipAoHistory), so light the neighbourhood no longer shows is dropped at once.
 * Writes this frame's history (the average, and the view depth, age, fast mean and second moment), which the denoiser and the main pass read and the
 * next frame reprojects.
 */
@@ -27,7 +28,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     vec4 gather;
     vec4 history;               // x: the history's frames, y: its depth share, z: 1 while accumulating, w: 1 when last frame's is usable
     vec4 denoise;
-    vec4 antiLag;               // x: 1 while on, y: its deviations
+    vec4 antiLag;               // x: 1 while anti-lag is on, y: its deviations, z: the history clip's deviations (0 off)
 } pass;
 
 layout(set = 0, binding = 1) uniform sampler2D depth;                     // exact texels
@@ -106,6 +107,31 @@ void main() {
         imageStore(light, texel, now);
         imageStore(depthAge, texel, vec4(viewDepth, 1.0, luminance, luminance * luminance));
         return;
+    }
+
+    // As aoNeighbourhood: the 3 x 3 texels of this frame's result round the pixel, on screen and not sky, for the clip.
+    if (pass.antiLag.z > 0.0) {
+        vec4 sum = vec4(0.0);
+        vec4 squares = vec4(0.0);
+        float count = 0.0;
+
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                ivec2 at = texel + ivec2(dx, dy);
+
+                if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, size)) || texelFetch(depth, at, 0).r == float(GPU_FAR_DEPTH)) {
+                    continue;
+                }
+
+                vec4 value = texelFetch(current, at, 0);
+                sum += value;
+                squares += value * value;
+                count += 1.0;
+            }
+        }
+
+        // The pixel itself is never sky here, so the count is at least 1.
+        historyLight = clipAoHistory(historyLight, sum / count, squares / count, pass.antiLag.z);
     }
 
     float age = aoHistoryAge(historyAge, int(pass.history.x));

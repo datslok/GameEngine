@@ -118,11 +118,11 @@ namespace {
             inputs.push_back(GpuVec4{expected, i % 5 == 0 ? 0.0f : expected * random.between(0.9f, 1.1f), random.between(0.01f, 0.1f), static_cast<float>(i % 4)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 6);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 7);
 
-        for (std::size_t i = 0; i < outputs.size() / 6; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 7; ++i) {
             const GpuVec4* in = &inputs[i * 9];
-            const GpuVec4* out = &outputs[i * 6];
+            const GpuVec4* out = &outputs[i * 7];
             const Vec2 pixel{in[4][0], in[4][1]};
             const Vec2 size{in[5][0], in[5][1]};
             const AoPreviousPlace place = aoPreviousPlace(reprojections[i], pixel, in[4][2], in[4][3], size);
@@ -161,6 +161,12 @@ namespace {
             if (aoLightChanged(fast * 1.001f + 1e-5f, slow, moment, 3.0f) == aoLightChanged(fast * 0.999f - 1e-5f, slow, moment, 3.0f)) {
                 report.check("aoLightChanged", exactTolerance, aoLightChanged(fast, slow, moment, 3.0f) ? 1.0f : 0.0f, out[5][1]);
             }
+
+            const Vec4 mean{in[6][0], in[6][1], in[6][2], in[6][3]};
+            const Vec4 squares{mean.x * mean.x + in[8][2], mean.y * mean.y + in[8][2], mean.z * mean.z + in[8][2], mean.w * mean.w + in[8][2]};
+            const Vec4 clipped = clipAoHistory(Vec4{in[7][0], in[7][1], in[7][2], in[7][3]}, mean, squares, 2.0f);
+            report.check("clipAoHistory", transcendentalTolerance, Vec3{clipped.x, clipped.y, clipped.z}, vec3From(out[6]));
+            report.check("clipAoHistory", transcendentalTolerance, clipped.w, out[6][3]);
         }
     }
 }

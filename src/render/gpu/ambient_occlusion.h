@@ -111,13 +111,19 @@ struct AmbientOcclusionSettings {
     // in a few frames instead of the history's.
     bool antiLag = true;
     float antiLagDeviations = 3.0f;
+
+    // The history clip (variance clipping, Salvi 2016): before the new frame is blended in, the history is held within
+    // the new frame's 3 x 3 neighbourhood mean plus or minus this many deviations of its spread, each channel on its own.
+    // A history the neighbourhood no longer supports (a switched-off flashlight's bounce) is gone in a frame; steady
+    // noise, whose box is as wide as the noise, is left alone. 0 turns it off.
+    float historyClip = 2.0f;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a radius, indirect radius, thickness, brightest sample or history depth share not
-// denoise plane share or anti-lag deviations not above 0, a falloff outside (0, 1], slices, steps or history frames outside 1 up to
+// denoise plane share or anti-lag deviations not above 0, a history clip below 0, a falloff outside (0, 1], slices, steps or history frames outside 1 up to
 // AO_MAX_SLICES, AO_MAX_STEPS and AO_MAX_HISTORY_FRAMES, or denoise passes outside 0 up to AO_DENOISE_MAX_PASSES.
 void validateAmbientOcclusion(const AmbientOcclusionSettings& settings);
 
@@ -356,14 +362,31 @@ float aoLuminance(const Vec3& light);
 */
 bool aoLightChanged(float fastMean, float slowMean, float secondMoment, float deviations);
 
+// The new frame's neighbourhood for the history clip: the mean of its values and of their squares, each channel on its
+// own; not valid where it holds nothing.
+struct AoClipBox {
+    Vec4 mean;
+    Vec4 meanOfSquares;
+    bool valid = false;
+};
+
+// The 3 x 3 texels of the new frame round (x, y) that lie on screen and are not sky.
+AoClipBox aoNeighbourhood(int x, int y, RenderSize size, const AoDepthImage& depthAt, const AoLightImage& currentAt);
+
+// The history's light held within mean plus or minus deviations of the spread sqrt(meanOfSquares - mean^2), each
+// channel on its own (a spread rounded below 0 is none); deviations 0 leaves it as it is.
+Vec4 clipAoHistory(const Vec4& historyLight, const Vec4& mean, const Vec4& meanOfSquares, float deviations);
+
 /*
 * The new frame (rgb the gathered light, a the visibility) blended into the history, at the point's view depth, with the
 * fast mean and second moment carried on. With anti-lag, a history at least AO_ANTILAG_LEAST_AGE frames old whose light
 * has changed (aoLightChanged: the fast mean with this frame against the history's slow mean and noise before it, since
 * the jump itself would swell the noise and hide it) restarts from the new frame alone, its noise estimate with it; a
-* younger one follows quickly anyway.
+* younger one follows quickly anyway. Otherwise, with a valid box, the history's light is clipped into it
+* (settings.historyClip) before the blend; anti-lag looks at it unclipped, so its own test is unchanged.
 */
-AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, const AmbientOcclusionSettings& settings);
+AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistory& history, const AmbientOcclusionSettings& settings,
+                            const AoClipBox& box = {});
 
 /*
 * The temporal pass's loop, as ambient_occlusion_temporal.comp runs it, at texel (x, y): the sky holds open, nothing
@@ -374,9 +397,13 @@ AoHistoryTexel accumulateAo(const Vec4& current, float viewDepth, const AoHistor
 * so the average covers the footprint, as supersampling would. So the texel's centre is reprojected without taking the
 * jitter off, and a still camera reads exactly its own texel every frame; taking it off (and putting last frame's back
 * on) would read between texels each frame and blur the history a little more every time.
+*
+* With the pass's whole result (currentAt, whose texel (x, y) is current) and the history clip on, the history is
+* clipped into its neighbourhood there (aoNeighbourhood); without it, nothing is clipped.
 */
 AoHistoryTexel aoTemporalAt(int x, int y, const AoFrame& frame, const Mat4& reprojection, const AmbientOcclusionSettings& settings,
-                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable);
+                            const AoDepthImage& depthAt, const Vec4& current, const AoHistoryImage& history, bool historyUsable,
+                            const AoLightImage& currentAt = {});
 
 // What last frame's history was made for: a history is only carried over to a frame of the same size gathering the
 // same way (the light means something else with and without gathering) with last frame's camera known.
@@ -392,7 +419,8 @@ bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey
 // radius, falloff, slices and steps, the frame (turning the noise; 0 while there is no anti-aliasing, whose blur wants it
 // still), this frame's clip space (without the jitter) to last frame's, x the thickness, y 1 while gathering and z
 // the brightest sample, and the history: x its frames, y its depth share, z 1 while accumulating, w 1 when last
-// frame's history is usable (set by VulkanAmbientOcclusion, which knows), the denoiser: x its passes, y its plane share, and anti-lag: x 1 while on, y its deviations.
+// frame's history is usable (set by VulkanAmbientOcclusion, which knows), the denoiser: x its passes, y its plane share, and the history's guards: x 1 while
+// anti-lag is on, y its deviations, z the history clip's deviations (0 off).
 struct GpuAmbientOcclusionPass {
     float inverseViewProjection[16];
     float size[4];

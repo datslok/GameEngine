@@ -90,6 +90,15 @@ namespace {
         wrong = {};
         wrong.antiLagDeviations = 0.0f;
         assert(rejects(wrong));
+
+        assert(defaults.historyClip == 2.0f);
+        wrong = {};
+        wrong.historyClip = -0.5f;
+        assert(rejects(wrong));
+        wrong.historyClip = std::numeric_limits<float>::quiet_NaN();
+        assert(rejects(wrong));
+        wrong.historyClip = 0.0f;
+        validateAmbientOcclusion(wrong);
         wrong = {};
         wrong.denoisePasses = -1;
         assert(rejects(wrong));
@@ -889,6 +898,124 @@ namespace {
             }
         }
     }
+
+    // The history held within the neighbourhood's mean plus or minus the deviations of its spread, each channel on its
+    // own; inside it untouched, 0 deviations off.
+    void testClipAoHistory() {
+        const Vec4 mean{0.5f, 0.5f, 0.5f, 0.8f};
+        const Vec4 squares{0.5f * 0.5f + 0.01f, 0.5f * 0.5f + 0.01f, 0.5f * 0.5f + 0.01f, 0.8f * 0.8f}; // spread 0.1, none in w
+        const Vec4 inside = clipAoHistory(Vec4{0.65f, 0.4f, 0.31f, 0.8f}, mean, squares, 2.0f);
+        assert(near(inside.x, 0.65f, 1e-6f) && near(inside.y, 0.4f, 1e-6f) && near(inside.z, 0.31f, 1e-6f) && near(inside.w, 0.8f, 1e-6f));
+
+        const Vec4 outside = clipAoHistory(Vec4{0.9f, 0.1f, 0.5f, 0.2f}, mean, squares, 2.0f);
+        assert(near(outside.x, 0.7f, 1e-5f) && near(outside.y, 0.3f, 1e-5f) && near(outside.z, 0.5f, 1e-6f) && near(outside.w, 0.8f, 1e-5f));
+
+        const Vec4 off = clipAoHistory(Vec4{0.9f, 0.1f, 0.5f, 0.2f}, mean, squares, 0.0f);
+        assert(off.x == 0.9f && off.y == 0.1f && off.w == 0.2f);
+
+        // A rounding error making the mean of squares a hair under the squared mean is no spread, not a not-a-number.
+        const Vec4 rounded = clipAoHistory(Vec4{0.9f, 0.9f, 0.9f, 0.9f}, mean, Vec4{0.2499f, 0.2499f, 0.2499f, 0.6399f}, 2.0f);
+        assert(near(rounded.x, 0.5f, 1e-6f) && near(rounded.w, 0.8f, 1e-6f));
+    }
+
+    // The 3 x 3 pixels round a texel, the sky and texels off screen left out.
+    void testAoNeighbourhood() {
+        const RenderSize size{4, 3};
+        const AoDepthImage depthAt = [](int x, int y) { return x == 2 && y == 0 ? gpuFarDepth : 0.5f; };
+        const AoLightImage currentAt = [](int x, int y) {
+            const float value = static_cast<float>(x + 4 * y);
+            return Vec4{value, 2.0f * value, 0.0f, 1.0f};
+        };
+
+        // Round (1, 1): every texel of rows 0 to 2 and columns 0 to 2 but the sky at (2, 0): 0, 1, 4, 5, 6, 8, 9, 10.
+        const AoClipBox middle = aoNeighbourhood(1, 1, size, depthAt, currentAt);
+        assert(middle.valid);
+        assert(near(middle.mean.x, 43.0f / 8.0f, 1e-5f) && near(middle.mean.y, 86.0f / 8.0f, 1e-5f) && middle.mean.w == 1.0f);
+        assert(near(middle.meanOfSquares.x, (0.0f + 1.0f + 16.0f + 25.0f + 36.0f + 64.0f + 81.0f + 100.0f) / 8.0f, 1e-4f));
+
+        // Round the corner (0, 0): only 0, 1, 4 and 5 lie on screen.
+        const AoClipBox corner = aoNeighbourhood(0, 0, size, depthAt, currentAt);
+        assert(corner.valid && near(corner.mean.x, 2.5f, 1e-6f));
+
+        // Sky all round leaves nothing to clip to.
+        const AoDepthImage sky = [](int, int) { return gpuFarDepth; };
+        assert(!aoNeighbourhood(1, 1, size, sky, currentAt).valid);
+    }
+
+    /*
+    * The flashlight's ghost: a long history of bright gathered light, then the light goes out and the neighbourhood is
+    * uniformly dark. With anti-lag off, so only the clip acts: clipped, the history is gone in one frame; without, the
+    * average has hardly moved.
+    */
+    void testHistoryClipEndsGhost() {
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false;
+        const Vec4 dark{0.02f, 0.02f, 0.02f, 0.9f};
+        const AoHistory bright{Vec4{0.8f, 0.8f, 0.8f, 0.9f}, 16.0f, 0.8f, 0.64f};
+        const AoClipBox box{dark, Vec4{0.0004f, 0.0004f, 0.0004f, 0.81f}, true};
+
+        assert(near(accumulateAo(dark, 5.0f, bright, settings, box).light.x, 0.02f, 1e-4f));
+
+        settings.historyClip = 0.0f;
+        assert(accumulateAo(dark, 5.0f, bright, settings, box).light.x > 0.7f);
+
+        // Through the pass's loop, which finds the box itself from the current image.
+        settings.historyClip = 2.0f;
+        const Camera camera = wallCamera(Vec3{});
+        const std::vector<float> depths = wallDepths(camera);
+        const AoFrame frame = wallFrame(camera);
+        const Vec2 size{static_cast<float>(screenSize.width), static_cast<float>(screenSize.height)};
+        const int x = 100;
+        const int y = 70;
+        HistoryTexels history(screenSize.width * screenSize.height);
+        const float viewDepth = viewDistanceAtPixel(frame.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depths[y * screenSize.width + x], size);
+        history[static_cast<std::size_t>(y) * screenSize.width + static_cast<std::size_t>(x)] = AoHistoryTexel{bright.light, viewDepth, 16.0f, 0.8f, 0.64f};
+        const AoLightImage currentAt = [&dark](int, int) { return dark; };
+
+        const AoHistoryTexel clipped = aoTemporalAt(x, y, frame, Mat4::identity(), settings, depthImage(depths), dark, historyImage(history), true, currentAt);
+        assert(clipped.age == 16.0f && near(clipped.light.x, 0.02f, 1e-4f));
+
+        // Without the current image there is no box, so nothing is clipped.
+        const AoHistoryTexel unclipped = aoTemporalAt(x, y, frame, Mat4::identity(), settings, depthImage(depths), dark, historyImage(history), true);
+        assert(unclipped.light.x > 0.7f);
+    }
+
+    // Steady noise of spread 0.29 about 0.5 in every pixel: the clip, its box as wide as the noise, leaves the average as
+    // smooth and as unbiased as without it.
+    void testHistoryClipKeepsSteadyNoise() {
+        AmbientOcclusionSettings settings;
+        settings.antiLag = false;
+        NoiseSequence noise;
+        AoHistoryTexel texel = accumulateAo(Vec4{0.5f, 0.5f, 0.5f, 1.0f}, 5.0f, AoHistory{}, settings);
+        double sum = 0.0;
+        double spread = 0.0;
+        int counted = 0;
+
+        for (int frame = 0; frame < 2000; ++frame) {
+            Vec4 mean;
+            Vec4 squares;
+            float centre = 0.0f;
+
+            for (int tap = 0; tap < 9; ++tap) {
+                const float value = noise.next(0.5f, 0.5f);
+                centre = tap == 4 ? value : centre;
+                mean = mean + Vec4{value, value, value, 1.0f} * (1.0f / 9.0f);
+                squares = squares + Vec4{value * value, value * value, value * value, 1.0f} * (1.0f / 9.0f);
+            }
+
+            texel = accumulateAo(Vec4{centre, centre, centre, 1.0f}, 5.0f, historyOf(texel), settings, AoClipBox{mean, squares, true});
+
+            if (frame >= 100) {
+                sum += texel.light.x;
+                spread += (texel.light.x - 0.5) * (texel.light.x - 0.5);
+                ++counted;
+            }
+        }
+
+        assert(std::abs(sum / counted - 0.5) < 0.02);
+        assert(std::sqrt(spread / counted) < 0.08);
+    }
+
     void testAccumulateAo() {
         AmbientOcclusionSettings settings;
         settings.antiLag = false;
@@ -1324,7 +1451,7 @@ namespace {
         assert(pass.gather[0] == 0.25f && pass.gather[1] == 0.0f && pass.gather[2] == 8.0f);
         assert(pass.history[0] == 16.0f && pass.history[1] == 0.05f && pass.history[2] == 1.0f && pass.history[3] == 0.0f);
         assert(pass.denoise[0] == 4.0f && pass.denoise[1] == 0.02f);
-        assert(pass.antiLag[0] == 1.0f && pass.antiLag[1] == 3.0f);
+        assert(pass.antiLag[0] == 1.0f && pass.antiLag[1] == 3.0f && pass.antiLag[2] == 2.0f);
 
         // Gathering reaches further than occlusion alone.
         const GpuAmbientOcclusionPass gathering = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{}, RenderSize{200, 100}, settings, 7, true, false);
@@ -1357,6 +1484,10 @@ void testAmbientOcclusion() {
     testLightChanged();
     testAntiLagIgnoresNoise();
     testAntiLagFollowsChanges();
+    testClipAoHistory();
+    testAoNeighbourhood();
+    testHistoryClipEndsGhost();
+    testHistoryClipKeepsSteadyNoise();
     testAccumulateAo();
     testStillCameraConverges();
     testFurnaceAndNoHistory();
