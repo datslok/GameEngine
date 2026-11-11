@@ -108,6 +108,20 @@ public:
     // drawn over everything, or null. Returns false, drawing nothing, when no image was available (a minimised window).
     bool render(const FrameDescription& frame, const RenderSettings& settings, ImDrawData* ui = nullptr);
 
+    // How many of the pipelines asked for are built (render/vulkan/pipeline_compiler.h): its constructor only asks for
+    // them, and they are compiled on every core while the caller shows drawLoadingScreen.
+    PipelineProgress pipelineProgress() const;
+
+    // Waits for every pipeline asked for, rethrowing the first that failed to build.
+    void finishPipelines();
+
+    /*
+    * One frame of the loading screen for this progress (render/gpu/loading_screen.h): the title, the count and a bar,
+    * drawn by clearing rectangles of the window's image, so it needs no pipeline. Returns false, drawing nothing, when no
+    * image was available.
+    */
+    bool drawLoadingScreen(const PipelineProgress& progress);
+
     // The same frame drawn off screen at width x height for a fixed display output, and read back (engine/golden.h): the
     // scene image and the tone mapped image as that display would get it. Presents nothing; waits for the GPU. A frame
     // with light probes is drawn probeWarmUpFrames times first, so the probes have gathered their light and bounces.

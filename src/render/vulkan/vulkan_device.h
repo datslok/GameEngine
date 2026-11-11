@@ -2,6 +2,7 @@
 
 #include "render/gpu/video_memory.h"
 #include "render/vulkan/owned_handle.h"
+#include "render/vulkan/pipeline_compiler.h"
 
 #include "vk-bootstrap/VkBootstrap.h"
 #include "vma/vk_mem_alloc.h"
@@ -10,6 +11,7 @@
 #include <SDL3/SDL.h>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -112,6 +114,10 @@ public:
     OwnedHandle<VkCommandPool> createCommandPool() const;
     OwnedHandle<VkShaderModule> loadShader(const char* path) const;
 
+    // The threads pipelines are compiled on (render/vulkan/pipeline_compiler.h), one per core, stopped first when the
+    // device goes; what the pipeline classes hand their builds to, and what the loading screen counts.
+    PipelineCompiler& getPipelineCompiler() const;
+
 private:
     SDL_Window* window = nullptr;
     vkb::Instance instance;
@@ -132,6 +138,7 @@ private:
     bool debugUtils = false;
     std::uint32_t timestampValidBits = 0;
     std::atomic<std::uint32_t> validationErrors{0};
+    std::unique_ptr<PipelineCompiler> pipelineCompiler;
 
     void createInstance(bool validation, const std::vector<std::string>& optional);
     void selectPhysicalDevice(const std::vector<std::string>& optional);

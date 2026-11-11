@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/vulkan/owned_handle.h"
+#include "render/vulkan/pipeline_compiler.h"
 
 #include "volk/volk.h"
 
@@ -41,8 +42,10 @@ struct ComputePipelineDescription {
 */
 class ComputePipeline {
 public:
+    // Asks for the pipeline: compiled on the device's pipeline compiler's threads (render/vulkan/pipeline_compiler.h).
     ComputePipeline(const VulkanDevice& device, const ComputePipelineDescription& description);
 
+    // Waits for the build the first time (rethrowing its error).
     VkPipeline get() const;
     VkPipelineLayout getLayout() const;
 
@@ -56,12 +59,15 @@ public:
 private:
     std::uint32_t pushConstantBytes = 0;
     std::uint32_t resourceSet = 0;
+    VkDevice deviceHandle = VK_NULL_HANDLE;
     VkPipelineLayout sharedLayout = VK_NULL_HANDLE;
     OwnedHandle<VkDescriptorSetLayout> resourceLayout;
     OwnedHandle<VkPipelineLayout> layout;
-    OwnedHandle<VkPipeline> pipeline;
+    mutable OwnedHandle<VkPipeline> pipeline;
+    mutable PipelineFuture building;
 
     VkPipelineLayout createLayout(VkDevice handle, const ComputePipelineDescription& description);
+    static VkPipeline build(const VulkanDevice& device, const char* shaderPath, VkPipelineLayout pipelineLayout);
 };
 
 // One binding of a compute pass's set 0: a storage buffer, a sampled image or a storage image.

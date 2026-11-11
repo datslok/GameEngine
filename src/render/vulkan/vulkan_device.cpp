@@ -22,6 +22,12 @@ VulkanDevice::VulkanDevice(SDL_Window* window, bool validation, const OptionalEx
         selectPhysicalDevice(optional.device);
         createDevice();
         createAllocator();
+
+        // Pipelines nobody took (one abandoned part-way through a failed start) are destroyed by it.
+        const VkDevice handle = device.device;
+        pipelineCompiler = std::make_unique<PipelineCompiler>(PipelineCompiler::defaultWorkers(), [handle](VkPipeline pipeline) {
+            vkDestroyPipeline(handle, pipeline, nullptr);
+        });
     }
     catch (...) {
         cleanup();
@@ -303,6 +309,9 @@ void VulkanDevice::createAllocator() {
 
 // In reverse order of creation: everything made from the device first, the instance last.
 void VulkanDevice::cleanup() noexcept {
+    // First: builds still running use the device, and their threads must stop before it goes.
+    pipelineCompiler.reset();
+
     if (allocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(allocator);
         allocator = VK_NULL_HANDLE;
@@ -593,6 +602,10 @@ OwnedHandle<VkCommandPool> VulkanDevice::createCommandPool() const {
 }
 
 // A compiled SPIR-V file (glslc's output), whole: SDL_LoadFile's buffer is aligned for the 32-bit words Vulkan reads.
+PipelineCompiler& VulkanDevice::getPipelineCompiler() const {
+    return *pipelineCompiler;
+}
+
 OwnedHandle<VkShaderModule> VulkanDevice::loadShader(const char* path) const {
     std::size_t codeSize = 0;
     void* code = SDL_LoadFile(path, &codeSize);

@@ -4,30 +4,41 @@
 #include "render/vulkan/vulkan_device.h"
 
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 /*
 * Three objects, each built from the one before: the descriptor set layout (which kinds of resource sit at which
 * binding), the pipeline layout (that set plus the push constant range), and the pipeline (the compiled shader against
 * that layout). The shader module is only needed while the driver compiles, so it is dropped at the end.
-* With a shared layout the first two are made elsewhere (the scene's) and only the pipeline is built here.
+* With a shared layout the first two are made elsewhere (the scene's) and only the pipeline is built here. The layouts
+* are made at once; the pipeline on the device's pipeline compiler's threads, and get() waits for it.
 */
 ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipelineDescription& description):
     pushConstantBytes(description.pushConstantBytes),
-    resourceSet(static_cast<std::uint32_t>(description.sharedSets.size()))
+    resourceSet(static_cast<std::uint32_t>(description.sharedSets.size())),
+    deviceHandle(device.getDevice())
 {
     if (description.shader == nullptr) {
         throw std::invalid_argument("A compute pipeline needs a shader");
     }
 
-    const VkDevice handle = device.getDevice();
     VkPipelineLayout pipelineLayout = description.sharedLayout;
 
     if (pipelineLayout == VK_NULL_HANDLE) {
-        pipelineLayout = createLayout(handle, description);
+        pipelineLayout = createLayout(deviceHandle, description);
     }
 
-    const OwnedHandle<VkShaderModule> shader = device.loadShader(description.shader);
+    sharedLayout = description.sharedLayout;
+    building = device.getPipelineCompiler().submit([&device, shader = std::string{description.shader}, pipelineLayout] {
+        return build(device, shader.c_str(), pipelineLayout);
+    });
+}
+
+// The slow part, on a compiler thread: the shader loaded and the pipeline made against the layout.
+VkPipeline ComputePipeline::build(const VulkanDevice& device, const char* shaderPath, VkPipelineLayout pipelineLayout) {
+    const VkDevice handle = device.getDevice();
+    const OwnedHandle<VkShaderModule> shader = device.loadShader(shaderPath);
 
     VkComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -38,9 +49,8 @@ ComputePipeline::ComputePipeline(const VulkanDevice& device, const ComputePipeli
     pipelineInfo.layout = pipelineLayout;
 
     VkPipeline createdPipeline = VK_NULL_HANDLE;
-    vulkanCheck(vkCreateComputePipelines(handle, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &createdPipeline), description.shader);
-    pipeline = OwnedHandle<VkPipeline>{handle, createdPipeline, vkDestroyPipeline};
-    sharedLayout = description.sharedLayout;
+    vulkanCheck(vkCreateComputePipelines(handle, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &createdPipeline), shaderPath);
+    return createdPipeline;
 }
 
 // The set layout of the storage buffers, sampled images and storage images, and the pipeline layout of any shared sets,
@@ -89,7 +99,12 @@ VkPipelineLayout ComputePipeline::createLayout(VkDevice handle, const ComputePip
     return createdLayout;
 }
 
+// The first use waits for the build and takes the pipeline over (rethrowing the build's error).
 VkPipeline ComputePipeline::get() const {
+    if (building.valid()) {
+        pipeline = OwnedHandle<VkPipeline>{deviceHandle, building.take(), vkDestroyPipeline};
+    }
+
     return pipeline.get();
 }
 

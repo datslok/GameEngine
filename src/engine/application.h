@@ -109,6 +109,12 @@ private:
     // The engine's commands, those of engine/engine_commands.h and the ones needing the window and GPU.
     void registerCommands();
 
+    /*
+    * Shows the loading screen (VulkanRenderer::drawLoadingScreen) until every pipeline the renderer asked for is built,
+    * handling the window's events meanwhile, so it keeps answering; closing it quits. Rethrows a failed build.
+    */
+    void waitForPipelines();
+
     // Take the server's new commands and run what is queued, unless a wait is still counting down its frames.
     void runCommands();
 
