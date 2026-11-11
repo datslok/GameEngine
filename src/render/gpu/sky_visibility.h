@@ -64,6 +64,12 @@ struct SkyVisibilitySettings {
     int rays = 256;
     float rayLength = 30.0f;
 
+    // The rays a point gets in a refill (the first fill, a new level or shape, a long jump), when every waiting point is
+    // baked at once: at 256 a refill froze the frame about 2.6 s, at 64 about 0.65. The points are then baked again at
+    // the full rays within the frame budget, the blobs 64 rays leave gone a second or two later. Not part of the grid's
+    // shape: changing it bakes nothing again.
+    int quickRays = 64;
+
     // How far a surface's lookup is moved off it, as the probes' self-shadow bias (a share of their formula's offset).
     float lookupBias = 0.3f;
 
@@ -79,10 +85,11 @@ struct SkyVisibilitySettings {
 void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a bounce share or blockers' floor outside 0..1, a spacing or ray length not above 0, a negative bake
-// time or lookup bias, cascades outside 1..maxSkyVisibilityCascades, or rays below 1.
+// time or lookup bias, cascades outside 1..maxSkyVisibilityCascades, or rays or quick rays below 1.
 void validateSkyVisibility(const SkyVisibilitySettings& settings);
 
-// Whether two settings bake the same grid: everything but the bounce share and floor, the lookup bias, the budget and the view.
+// Whether two settings bake the same grid: everything but the bounce share and floor, the lookup bias, the budget, the quick
+// rays and the view.
 bool sameSkyVisibilityGrid(const SkyVisibilitySettings& a, const SkyVisibilitySettings& b);
 
 // The open sphere's two harmonic bands: a (the share open) and b (towards the open side). The default is all open.

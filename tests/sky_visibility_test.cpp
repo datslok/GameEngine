@@ -269,7 +269,7 @@ namespace {
         const SkyVisibilitySettings defaults;
         assert(defaults.enabled && defaults.bounceShare == 0.25f && defaults.spacing == 0.5f && defaults.cascades == 2);
         assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
-        assert(defaults.blockersLitFloor == 0.1f);
+        assert(defaults.blockersLitFloor == 0.1f && defaults.quickRays == 64);
         validateSkyVisibility(defaults);
 
         SkyVisibilitySettings bad;
@@ -288,6 +288,9 @@ namespace {
         bad.rays = 0;
         assert(rejects(bad));
         bad = {};
+        bad.quickRays = 0;
+        assert(rejects(bad));
+        bad = {};
         bad.rayLength = -1.0f;
         assert(rejects(bad));
         bad = {};
@@ -304,6 +307,7 @@ namespace {
         other.bakeMilliseconds = 3.0f;
         other.debugView = true;
         other.blockersLitFloor = 0.3f;
+        other.quickRays = 16; // only how a refill gets there, not what it ends as
         assert(sameSkyVisibilityGrid(defaults, other));
         other.rays = 32;
         assert(!sameSkyVisibilityGrid(defaults, other));
@@ -400,6 +404,26 @@ namespace {
         assert(skyCellsForBudget(0.001, 1e-5, 0) == 0);
     }
 
+    /*
+    * What a frame bakes: a capture everything at full rays, refinement included; a refill (afresh, or more than half
+    * waiting) every waiting point at once, quickly when quick rays are fewer; otherwise the budget, waiting points first
+    * and refinement with what is left.
+    */
+    void testPlanningAFrame() {
+        const auto same = [](const SkyBakePlan& a, const SkyBakePlan& b) {
+            return a.waiting == b.waiting && a.quick == b.quick && a.refine == b.refine;
+        };
+
+        assert(same(planSkyBake(300, 500, 1000, false, true, 10, true), SkyBakePlan{300, false, 500}));
+        assert(same(planSkyBake(1000, 0, 1000, true, false, 10, true), SkyBakePlan{1000, true, 0}));
+        assert(same(planSkyBake(1000, 0, 1000, true, false, 10, false), SkyBakePlan{1000, false, 0}));
+        assert(same(planSkyBake(600, 200, 1000, false, false, 10, true), SkyBakePlan{600, true, 0}));
+        assert(same(planSkyBake(4, 500, 1000, false, false, 10, true), SkyBakePlan{4, false, 6}));
+        assert(same(planSkyBake(40, 500, 1000, false, false, 10, true), SkyBakePlan{10, false, 0}));
+        assert(same(planSkyBake(0, 3, 1000, false, false, 10, true), SkyBakePlan{0, false, 3}));
+        assert(same(planSkyBake(0, 0, 1000, false, false, 10, true), SkyBakePlan{0, false, 0}));
+    }
+
     // Few rays, so a whole cascade bakes quickly in a test.
     SkyVisibilitySettings quickGrid() {
         SkyVisibilitySettings settings;
@@ -459,6 +483,75 @@ namespace {
         assert(grid.follow(centre, shape, 2) && grid.getWaiting() == count);
     }
 
+    // Whether a point holds exactly what baking it alone at this many rays gives.
+    bool bakedWith(const SkyVisibilityGrid& grid, const StaticLevel& level, const SkyVisibilitySettings& settings, int cell, int rays) {
+        const ProbeCascade& cascade = grid.getCascades()[static_cast<std::size_t>(probeCascadeHolding(grid.getCascades(), cell))];
+        GridMarks marks;
+        const SkyCell alone = bakeSkyCell(level, probePosition(cascade.volume, cell - cascade.firstProbe), rays, settings.rayLength,
+                                          cascade.volume.spacing.x, marks);
+        const GpuSkyCell a = packSkyCell(alone);
+        const GpuSkyCell b = packSkyCell(grid.getCells()[static_cast<std::size_t>(cell)]);
+        return a.words[0] == b.words[0] && a.words[1] == b.words[1] && a.words[2] == b.words[2] && a.words[3] == b.words[3];
+    }
+
+    /*
+    * The two-step refill: a quick bake at the quick rays leaves every point waiting for refinement; refining bakes them
+    * again at the full rays, in the order they came; points a move clears wait again instead, at full rays, and drop
+    * out of refinement. With quick rays not fewer than the rays, a quick bake is a full one.
+    */
+    void testQuickBakesAreRefined() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        settings.quickRays = 2;
+        const int count = skyVisibilityCellCount(settings);
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        SkyVisibilityGrid grid;
+
+        assert(grid.follow(centre, settings, 1));
+        assert(grid.bake(level, serialJobs(), count, true) == count);
+        assert(grid.getWaiting() == 0 && grid.getRefining() == count);
+        assert(bakedWith(grid, level, settings, 0, 2) && bakedWith(grid, level, settings, count / 2, 2));
+
+        const std::uint64_t before = grid.getVersion();
+        assert(grid.refine(level, serialJobs(), 10) == 10);
+        assert(grid.getRefining() == count - 10 && grid.getVersion() != before);
+
+        for (int cell = 0; cell < 10; ++cell) {
+            assert(bakedWith(grid, level, settings, cell, 6));
+        }
+
+        assert(bakedWith(grid, level, settings, 10, 2));
+
+        // A move clears a plane: its points wait, and those still to be refined leave the queue.
+        assert(!grid.follow(centre + Vec3{settings.spacing, 0.0f, 0.0f}, settings, 1));
+        int cleared = 0;
+
+        for (int cell = 10; cell < count; ++cell) {
+            cleared += grid.getCells()[static_cast<std::size_t>(cell)].state == SkyCellState::Unknown ? 1 : 0;
+        }
+
+        assert(grid.getRefining() == count - 10 - cleared);
+        assert(grid.refine(level, serialJobs(), count) == count - 10 - cleared);
+        assert(grid.getRefining() == 0 && grid.getWaiting() == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
+        assert(grid.refine(level, serialJobs(), count) == 0);
+
+        // The plane bakes at full rays, quick or not when its turn comes in the budget.
+        assert(grid.bake(level, serialJobs(), count) == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
+        assert(grid.getRefining() == 0);
+
+        for (int cell = 0; cell < count; cell += 997) {
+            assert(bakedWith(grid, level, settings, cell, 6));
+        }
+
+        // Quick rays as many as the rays: nothing to refine.
+        settings.quickRays = 6;
+        SkyVisibilityGrid full;
+        full.follow(centre, settings, 1);
+        assert(full.bake(level, serialJobs(), 50, true) == 50 && full.getRefining() == 0);
+        assert(bakedWith(full, level, settings, 7, 6));
+    }
+
     // Many threads bake exactly what one does.
     void testBakingIsTheSameOnEveryCore() {
         const StaticLevel level = roomWithADoor();
@@ -501,6 +594,8 @@ void testSkyVisibility() {
     testBakingAPointOverAFloor();
     testBakingARoom();
     testTheBudget();
+    testPlanningAFrame();
     testTheGridFollowsTheCamera();
+    testQuickBakesAreRefined();
     testBakingIsTheSameOnEveryCore();
 }

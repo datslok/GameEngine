@@ -25,10 +25,12 @@ public:
     VulkanSkyVisibility(const VulkanDevice& device, ImmediateCommands& uploads, VkSampler nearest);
 
     /*
-    * Follows the camera (centre) and bakes on the CPU within the settings' budget against the frame's static level: all
-    * that waits when everything is asked (a capture, whose picture must not depend on what came before), when the grid
-    * starts afresh, or when more than half of it waits. Called before the frame holds a swapchain image, so a long bake
-    * keeps nothing of the screen's waiting. Only for frames that read it (a static level, the setting on, no probes).
+    * Follows the camera (centre) and bakes on the CPU against the frame's static level as planSkyBake says: all that
+    * waits, refinement included, when everything is asked (a capture, whose picture must not depend on what came
+    * before); all that waits at the quick rays when the grid starts afresh or more than half of it waits; otherwise
+    * within the settings' budget, waiting points first, then refinement to the full rays. Called before the frame holds
+    * a swapchain image, so a long bake keeps nothing of the screen's waiting. Only for frames that read it (a static
+    * level, the setting on, no probes).
     */
     void bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs, bool everything);
 
@@ -49,6 +51,6 @@ private:
     std::vector<GpuSkyCell> packed;
     std::uint64_t uploadedVersion = 0;
 
-    // What a point cost to bake last time (seconds on every core), for the budget; none known at first.
+    // What a point cost to bake at full rays last time (seconds on every core), for the budget; none known at first.
     double secondsPerCell = 0.0;
 };

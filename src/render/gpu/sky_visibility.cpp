@@ -81,6 +81,7 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Spacing", settings.spacing, {.min = 0.05f, .max = 16.0f, .sliderMin = 0.25f, .sliderMax = 2.0f, .unit = "m"});
     visitor.field("Cascades", settings.cascades, {.min = 1, .max = maxSkyVisibilityCascades});
     visitor.field("Rays", settings.rays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
+    visitor.field("Quick rays", settings.quickRays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
     visitor.field("Ray length", settings.rayLength, {.min = 0.1f, .max = 1000.0f, .sliderMin = 5.0f, .sliderMax = 100.0f, .unit = "m"});
     visitor.field("Lookup bias", settings.lookupBias, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
     visitor.field("Bake milliseconds", settings.bakeMilliseconds, {.min = 0.0f, .max = 100.0f, .sliderMin = 0.0f, .sliderMax = 8.0f, .unit = "ms"});
@@ -101,8 +102,8 @@ void validateSkyVisibility(const SkyVisibilitySettings& settings) {
         throw std::invalid_argument("Sky visibility needs a bake time and a lookup bias of at least 0");
     }
 
-    if (settings.cascades < 1 || settings.cascades > maxSkyVisibilityCascades || settings.rays < 1) {
-        throw std::invalid_argument("Sky visibility needs 1 to SKY_VISIBILITY_MAX_CASCADES cascades and at least 1 ray");
+    if (settings.cascades < 1 || settings.cascades > maxSkyVisibilityCascades || settings.rays < 1 || settings.quickRays < 1) {
+        throw std::invalid_argument("Sky visibility needs 1 to SKY_VISIBILITY_MAX_CASCADES cascades and at least 1 ray and quick ray");
     }
 }
 
