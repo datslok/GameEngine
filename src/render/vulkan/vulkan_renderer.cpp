@@ -1,4 +1,5 @@
 #include "render/vulkan/vulkan_renderer.h"
+#include "core/blue_noise.h"
 #include "scene/sky_object.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/camera_relative.h"
@@ -675,6 +676,25 @@ void VulkanRenderer::createFixedTextures() {
     noProbes.bytesPerTexel = 8;
     noProbes.surface = false;
     noProbesTexture = std::make_unique<VulkanTexture>(device, uploads, 1, 1, black, noProbes);
+
+    // Ambient occlusion's noise: three blue noise tiles (core/blue_noise.h) as one texture's channels, exact floats.
+    const int noiseSize = AO_BLUE_NOISE_SIZE;
+    const std::array<std::vector<float>, 3> channels{makeBlueNoise(noiseSize, 1u), makeBlueNoise(noiseSize, 2u), makeBlueNoise(noiseSize, 3u)};
+    std::vector<float> noiseTexels(static_cast<std::size_t>(noiseSize * noiseSize * 4), 0.0f);
+
+    for (std::size_t texel = 0; texel < channels[0].size(); ++texel) {
+        for (std::size_t channel = 0; channel < channels.size(); ++channel) {
+            noiseTexels[texel * 4 + channel] = channels[channel][texel];
+        }
+    }
+
+    VulkanTextureDescription noise;
+    noise.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    noise.bytesPerTexel = 4 * sizeof(float);
+    noise.surface = false;
+    blueNoiseTexture = std::make_unique<VulkanTexture>(
+        device, uploads, noiseSize, noiseSize,
+        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(noiseTexels.data()), noiseTexels.size() * sizeof(float)}, noise);
     noProbeStates = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeState), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
     noProbeCascades = VulkanBuffer{device.getAllocator(), sizeof(GpuProbeCascade), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BufferMemory::Gpu};
 }
@@ -1320,14 +1340,22 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         mirroredLights->ensureSize(sceneSize);
     }
 
-    // Ambient occlusion (render/gpu/ambient_occlusion.h) from the depth prepass's depths, blurred while there is no
+    // Ambient occlusion (render/gpu/ambient_occlusion.h) from the depth prepass's depths, denoised while there is no
     // anti-aliasing to average its noise or it gathers bounce light, whose noise is far stronger. It gathers from last
     // frame's finished picture, still what finishedScene points at, unless the light probes hold the bounce light already.
     // Its images are made the first time, as the mirrored lights' are.
     validateAmbientOcclusion(settings.ambientOcclusion);
     const bool occlusion = settings.ambientOcclusion.enabled && settings.depthPrepass && inverseViewProjection;
     const bool gathersLight = occlusion && settings.ambientOcclusion.indirect && previousPictureUsable && previousCamera.known && probes.empty();
-    const bool occlusionBlurred = occlusion && (!temporal || gathersLight);
+    const bool occlusionBlurred = occlusion && (!temporal || gathersLight) && settings.ambientOcclusion.denoisePasses > 0;
+
+    // Its result averaged over the frames before while anti-aliasing turns its noise each frame (the accumulation); a
+    // frame without it in between starts the average afresh.
+    const bool occlusionAccumulates = occlusion && temporal && settings.ambientOcclusion.temporal;
+
+    if (!occlusion) {
+        ambientOcclusion->forgetHistory();
+    }
 
     if (occlusion && !ambientOcclusion->hasImages()) {
         ambientOcclusion->ensureSize(sceneSize);
@@ -1355,7 +1383,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Written straight into this frame's upload memory: no copy pass, since the GPU reads them where they are.
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
-                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, gathersLight, glassShadows, frameFog, readsSkyVisibility);
+                                                hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
+                                                readsSkyVisibility);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1423,13 +1452,23 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::DepthPrepass);
     }
 
+    reflections->forgetColourPyramid();
+
     if (occlusion) {
         beginGpuPass(frame, GpuPass::AmbientOcclusion);
         const std::uint32_t noiseFrame = temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0;
-        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gathersLight ? finishedScene : nullptr, sampled(*noProbesTexture),
+        // Gathering reads last frame's picture's pyramid, built here for the reflections to use too (aoSampleLevel).
+        std::optional<SampledImage> gatherPicture;
+
+        if (gathersLight) {
+            reflections->prepareColourPyramid(frame.commands, frame.descriptors, *finishedScene);
+            gatherPicture = reflections->sampledColourPyramid();
+        }
+
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
-                                                           settings.ambientOcclusion, noiseFrame, gathersLight),
-                                  occlusionBlurred);
+                                                           settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
+                                  occlusionBlurred, previousCamera.known);
         endGpuPass(frame, GpuPass::AmbientOcclusion);
     }
 
@@ -1489,7 +1528,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::PlanarReflection);
         const RenderSize size = planarReflection->getSize();
         drawPlanarReflection(frame, captureDraws[cubeFaceCount], sceneSet, traceProbes, captureTracesRays, mirrorViewProjection,
-                             planarClipPlane(planeRelativeTo(*mirror, cameraOrigin)),
+                             planarClipPlane(planeRelativeTo(*mirror, cameraOrigin)), reflectAcrossPlane(Vec3{}, planeRelativeTo(*mirror, cameraOrigin)),
                              mirroredRays(packRayDebugView(camera, RayDebugView::Off, size.width, size.height), *mirror), description.lighting.background, air.has_value());
 
         // How far the mirror shows, for fitting a later frame's mirror cascades, as the screen's depths are measured.
@@ -1698,7 +1737,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
-                                           bool occlusionBlurred, bool gathersLight, bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility) {
+                                           bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
+                                           bool readsSkyVisibility) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1787,10 +1827,9 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         description.lighting.atmosphere ? atmosphere->sampledSkyView() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledLight() : sampled(*noProbesTexture),
         mirrorLight ? mirroredLights->sampledDirection() : sampled(*noProbesTexture),
-        occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred) : sampled(*noProbesTexture),
+        occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred, occlusionAccumulates) : sampled(*noProbesTexture),
         fog->sampledVolume(),
         skyVisibility->sampled(),
-        occlusion ? ambientOcclusion->sampledFill() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2235,7 +2274,8 @@ void VulkanRenderer::bindCaptureScene(FrameContext& frame, VkPipelineLayout layo
 * picture's blurrier levels (finishDraw).
 */
 void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
-                                          const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky) {
+                                          const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays,
+                                          const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
     const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false, traceRays)];
     const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true, traceRays)]->get(), VK_CULL_MODE_FRONT_BIT};
@@ -2248,7 +2288,7 @@ void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraw
     beginRendering(commands, {size.width, size.height}, &colour, &depthTarget);
     renderingOpen = true;
     bindCaptureScene(frame, layout, sceneSet, traceRays);
-    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane);
+    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane, eye);
     vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
     stats.drawCalls += drawBatches(commands, draws.batches, capturing);
 
@@ -2351,6 +2391,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
     const int framesBefore = std::max(tracesProbes(description, settings) ? probeWarmUpFrames : (settings.shadows.fitCascadesToDepth ? 1 : 0),
                                       temporalAntiAliasing(settings.upscaling) ? taaSettleFrames : 0);
     taa->forgetHistory();
+    ambientOcclusion->forgetHistory();
     fsrHistory = false;
     dlssHistory = false;
     previousCamera.known = false;

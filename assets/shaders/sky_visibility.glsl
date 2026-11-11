@@ -48,10 +48,6 @@ float skyVisibilityInAir(SkyVisibility visibility, float bounceShare, float bloc
     return skyWithBounce(clamp(visibility.open, 0.0, 1.0), skyBlockersLit(visibility, blockersFloor), bounceShare);
 }
 
-vec3 skyLightWithFill(vec3 flatAmbient, float seen, float bounceGuess, vec3 fill) {
-    return flatAmbient * seen + max(flatAmbient * bounceGuess, fill) * (1.0 - seen);
-}
-
 // GpuSkyCell's words: a and b.x as halves, b.y and b.z as halves, the reaches along +x -x +y -y in bytes, those along
 // +z -z and the state in the top byte.
 SkyCell unpackSkyCell(uvec4 words) {

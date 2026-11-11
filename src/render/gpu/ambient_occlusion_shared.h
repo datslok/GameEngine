@@ -2,7 +2,7 @@
 #define RENDER_GPU_AMBIENT_OCCLUSION_SHARED_H
 
 // Ambient occlusion's numbers, shared by render/gpu/ambient_occlusion.h and the shaders (ambient_occlusion.glsl,
-// ambient_occlusion.comp, ambient_occlusion_blur.comp). Only #defines of plain numbers, since GLSL reads them too.
+// ambient_occlusion.comp, ambient_occlusion_temporal.comp, ambient_occlusion_denoise.comp). Only #defines of plain numbers, since GLSL reads them too.
 
 // The most slices a pixel takes each frame, and steps along each side of a slice: the settings' limits.
 #define AO_MAX_SLICES 8
@@ -27,16 +27,33 @@
 #define AO_BOUNCE_C_SLOPE 2.7552
 #define AO_BOUNCE_C_OFFSET 0.6903
 
-// The blur while there is no anti-aliasing to average the noise: this many texels each way, a neighbour counting less
-// the further its view distance is from the pixel's, nothing past this share of it.
-#define AO_BLUR_RADIUS 2
-#define AO_BLUR_DEPTH_SHARE 0.1
+// The denoiser (ambient_occlusion_denoise.comp, an edge-aware a-trous filter): the most passes (each twice as wide as
+// the last, a 5 x 5 B3-spline kernel), the power of the normals' cosine a tap is weighted by (corners stop it), and how
+// many first passes filter the visibility too (the light gathered takes them all: bounce light is soft, the darkening in
+// creases is detail).
+#define AO_DENOISE_MAX_PASSES 5
+#define AO_DENOISE_NORMAL_POWER 32.0
+#define AO_DENOISE_VISIBILITY_PASSES 1
 
-// The fill's blur (ambient_fill_blur.comp), always while gathering: the fill stands for the surroundings' brightness, a
-// smooth thing, but each pixel's comes from a few dozen samples, and a bright patch among them leaves noise the
-// upscalers turn into swirls. Two passes, across then down, this many taps each way this many pixels apart.
-#define AO_FILL_BLUR_TAPS 12
-#define AO_FILL_BLUR_STRIDE 4
+// The pass's noise (aoNoise): a blue noise tile (core/blue_noise.h) this many texels a side, three channels, repeated
+// over the screen, each channel moved on by an irrational step a frame (the golden ratio's fraction, sqrt(2) - 1,
+// sqrt(3) - 1; with 1 independent over the rationals, so no two channels' sequences ever fall into step) and wrapped:
+// blue across the screen, evenly spread over the frames.
+#define AO_BLUE_NOISE_SIZE 64
+#define AO_SLICE_NOISE_FRAME_STEP 0.6180339887
+#define AO_STEP_NOISE_FRAME_STEP 0.4142135624
+#define AO_SECTOR_NOISE_FRAME_STEP 0.7320508076
+
+// The most frames the temporal accumulation's average may hold (AmbientOcclusionSettings::historyFrames' limit).
+#define AO_MAX_HISTORY_FRAMES 64
+
+// Anti-lag (aoLightChanged): the fast average's share of each frame (about 3 frames), the least threshold as a share of
+// the slow mean plus a floor (in the picture's linear light), and the least age a history must have before it is tested
+// (a younger one follows quickly anyway, and its noise estimate is still too young to trust).
+#define AO_ANTILAG_FAST_SHARE 0.3333333
+#define AO_ANTILAG_RELATIVE_FLOOR 0.05
+#define AO_ANTILAG_ABSOLUTE_FLOOR 0.001
+#define AO_ANTILAG_LEAST_AGE 4.0
 
 // The passes' workgroups: 8 x 8 pixels.
 #define AO_GROUP_SIDE 8

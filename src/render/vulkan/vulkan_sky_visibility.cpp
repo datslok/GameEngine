@@ -46,25 +46,32 @@ VulkanSkyVisibility::VulkanSkyVisibility(const VulkanDevice& device, ImmediateCo
 }
 
 /*
-* The budget is CPU time on every core, from what a point cost last time; the first bake of a fresh grid, or of one
-* that has to start over after a long jump, bakes everything at once, since half a room of open sky would be worse
-* than one long frame.
+* The budget is CPU time on every core, from what a point cost at full rays last time (planSkyBake says what a frame
+* bakes). A quick bake's cost is scaled up by the rays' ratio, so the refinement after a refill keeps to the budget
+* from its first frame.
 */
 void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs,
                                bool everything) {
     const bool afresh = grid.follow(centre, settings, frame.staticLevelVersion);
     const int waiting = grid.getWaiting();
-    const int total = static_cast<int>(grid.getCells().size());
+    const int refining = grid.getRefining();
 
-    if (waiting > 0 && frame.staticLevel != nullptr) {
-        const bool all = everything || afresh || waiting * 2 > total;
-        const int count = all ? waiting : skyCellsForBudget(settings.bakeMilliseconds * 1e-3, secondsPerCell, waiting);
+    if (waiting + refining == 0 || frame.staticLevel == nullptr) {
+        return;
+    }
 
-        if (count > 0) {
-            const double start = profilerSeconds();
-            grid.bake(*frame.staticLevel, jobs, count);
-            secondsPerCell = (profilerSeconds() - start) / static_cast<double>(count);
-        }
+    const double budgetSeconds = settings.bakeMilliseconds * 1e-3;
+    const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
+    const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining);
+    const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting);
+    const SkyBakePlan plan = planSkyBake(waiting, refining, afresh, everything, budget, quickBudget, settings.quickRays < settings.rays);
+    const int count = plan.waiting + plan.refine;
+
+    if (count > 0) {
+        const double start = profilerSeconds();
+        grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward());
+        grid.refine(*frame.staticLevel, jobs, plan.refine);
+        secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(count);
     }
 }
 

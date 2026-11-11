@@ -419,6 +419,7 @@ private:
 
     // Bound in place of the light probes' atlases while there are none (one black texel, never read then).
     std::unique_ptr<VulkanTexture> noProbesTexture;
+    std::unique_ptr<VulkanTexture> blueNoiseTexture; // ambient occlusion's noise tile, three channels
 
     // Bound in place of the light probes' states while there are none (one probe's worth of zeros, never read then).
     VulkanBuffer noProbeStates;
@@ -486,13 +487,14 @@ private:
     // captureDraws: each reflection probe face's draws, following the velocity pass's in the draw list (none without a capture).
     // mirrorPairs: the lights and shiny surfaces the mirrored light search runs over (none when off); the main pass
     // reads the mirrored light pass's images when there are any. occlusion: the main pass reads ambient occlusion, the
-    // blurred image when occlusionBlurred; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
+    // blurred image when occlusionBlurred, else the accumulated one when occlusionAccumulates; gathersLight: it holds bounce light, in place of the bounce fit. glassShadows: shadowed lights are tinted by the glass in the world's bounds.
     // frameFog: the fog's record (off without fog).
     VkDescriptorSet writeScene(FrameContext& frame, const FrameDescription& description, const GpuLights& lights, const ShadowPlan& shadows,
                                const BatchedDraws& mainDraws, const ShadowDraws& shadowDraws, const BatchedDraws& motionDraws,
                                std::span<const BatchedDraws> captureDraws, const SortedTransparentDraws& transparent, const RenderSettings& settings,
                                std::span<const ProbeCascade> probes,
-                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred, bool gathersLight,
+                               const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
+                               bool occlusionAccumulates, bool gathersLight,
                                bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility);
 
     // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the
@@ -539,9 +541,11 @@ private:
     void bindCaptureScene(FrameContext& frame, VkPipelineLayout layout, VkDescriptorSet sceneSet, bool traceRays);
 
     // The scene drawn through a flat mirror into its picture, as a capture face is, the sky in it when there is one.
-    // Everything behind clipPlane (planarClipPlane) is cut away.
+    // Everything behind clipPlane (planarClipPlane) is cut away; eye is where it is seen from (the camera reflected across
+    // the mirror, measured from the camera), for its shading's view direction.
     void drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
-                              const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky);
+                              const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays, const Vec3& background,
+                              bool sky);
 
     void drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
                           bool traceRays, float farPlane, const Vec3& background, bool sky);

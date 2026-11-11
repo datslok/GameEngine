@@ -31,6 +31,12 @@ layout(location = 4) flat in uint materialIndex;
 // How much the object scales lengths, for lengths its material gives in model units (thick glass's thickness).
 layout(location = 5) flat in float objectScale;
 
+#ifdef PROBE_CAPTURE
+// Where a capture is seen from, measured from the camera: the camera for the probe's cube faces, the camera reflected
+// across the mirror for a mirror's picture (GpuCaptureView's eye).
+layout(location = 6) flat in vec3 viewerPosition;
+#endif
+
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
 
@@ -125,9 +131,6 @@ layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
 // that turn it into the occlusion of the light from all around and of the reflection.
 layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 
-// The mean of the picture round each pixel while ambient occlusion gathers light (AoLight::fill), for the sky
-// visibility's blocked share.
-layout(set = 1, binding = 31) uniform sampler2D ambientFill;
 #include "ambient_occlusion.glsl"
 
 #ifdef TRANSPARENT
@@ -604,8 +607,14 @@ void main() {
     vec3 specular = vec3(0.0);
 
     float normalLength = length(surfaceNormal);
-    // The camera is at the origin, so the way to it is minus the fragment's position.
+    // The camera is at the origin, so the way to it is minus the fragment's position. A capture is seen from its own
+    // eye: a mirror's picture from the camera reflected across it, so the view direction (shading, and the sky
+    // visibility grid's lookup, moved towards the viewer) is the one the mirror shows.
+#ifdef PROBE_CAPTURE
+    vec3 cameraOffset = viewerPosition - relativePosition;
+#else
     vec3 cameraOffset = -relativePosition;
+#endif
     float cameraDistance = length(cameraOffset);
 
     // Without a usable normal there is no way to tell which side faces a light, so only ambient applies, seen head-on.
@@ -728,19 +737,13 @@ void main() {
     }
 
     // Without probes, the flat ambient for the sky the point sees (the grid round the camera, facing the shading normal),
-    // and for the rest the brighter of the bounce guess and the screen's fill, how bright the surroundings really are
-    // (skyLightWithFill). The reflection's stand-in takes the share along the mirror direction with the guess alone: the
-    // fill is what lies round the point, not what a mirror shows, and a bright patch near a mirror would light it up.
+    // and for the rest the bounce guess (skyWithBounce); the reflection's stand-in the share along the mirror direction.
     float skyShare = 1.0;
 
     if (!probesOn && skyVisibilityRead()) {
         SkyVisibility sky = skyVisibilityAt(relativePosition, geometricNormal, toCamera);
-        bool filled = ambientOcclusionOptions.x != 0 && !captureView && !transparentView;
-        vec3 fill = filled ? texelFetch(ambientFill, ivec2(gl_FragCoord.xy), 0).rgb : vec3(0.0);
-        float bounceGuess = skyVisibilityOptions.y * skyBlockersLit(sky, skyVisibilityMore.x);
-        float seen = skySeenFacing(sky, shadingNormal);
-        skyShare = skyWithBounce(seen, skyBlockersLit(sky, skyVisibilityMore.x), skyVisibilityOptions.y);
-        diffuseLight = skyLightWithFill(flatAmbient(), seen, bounceGuess, fill);
+        skyShare = skyVisibilityFacing(sky, shadingNormal, skyVisibilityOptions.y, skyVisibilityMore.x);
+        diffuseLight = flatAmbient() * skyShare;
         mirrorLight = flatAmbient() * skyVisibilityAlong(sky, reflect(-toCamera, shadingNormal), skyVisibilityOptions.y, skyVisibilityMore.x);
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
     }

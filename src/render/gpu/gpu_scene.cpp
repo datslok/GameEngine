@@ -29,13 +29,16 @@ GpuShadowView packShadowView(const Mat4& tileMatrix) {
     return view;
 }
 
-GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane) {
+GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye) {
     GpuCaptureView view{};
     writeColumnMajor(viewProjection, view.viewProjection);
     view.clipPlane[0] = clipPlane.x;
     view.clipPlane[1] = clipPlane.y;
     view.clipPlane[2] = clipPlane.z;
     view.clipPlane[3] = clipPlane.w;
+    view.eye[0] = eye.x;
+    view.eye[1] = eye.y;
+    view.eye[2] = eye.z;
     return view;
 }
 

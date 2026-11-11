@@ -22,8 +22,7 @@ namespace {
     /*
     * Bands across their range, some overshooting either way (so the clamp is met), unit normals and directions, bounce
     * shares and blockers' floors from 0 to 1. Inputs per case: (a, b), (normal, bounce share), (direction, floor).
-    * Outputs: (facing, along, in air, blockers lit), (the light with the fill: the flat ambient (1, 0.5, 0.25), the sky
-    * seen facing the normal, the bounce guess, a fill of the direction's absolute values).
+    * Output: (facing, along, in air, blockers lit).
     */
     void checkShares(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{307};
@@ -35,7 +34,7 @@ namespace {
             inputs.push_back(gpuVec4(randomUnit(random), i % 3 == 0 ? 0.0f : random.between(0.0f, 1.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SKY_VISIBILITY_SHARES, inputs, 3, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_SKY_VISIBILITY_SHARES, inputs, 3, 1);
 
         for (std::size_t i = 0; i < inputs.size() / 3; ++i) {
             const GpuVec4& bands = inputs[3 * i];
@@ -44,15 +43,11 @@ namespace {
             const float bounce = inputs[3 * i + 1][3];
             const Vec3 direction = vec3From(inputs[3 * i + 2]);
             const float floor = inputs[3 * i + 2][3];
-            const GpuVec4& shares = outputs[2 * i];
+            const GpuVec4& shares = outputs[i];
             report.check("skyVisibilityFacing", arithmeticTolerance, skyVisibilityFacing(visibility, normal, bounce, floor), shares[0]);
             report.check("skyVisibilityAlong", arithmeticTolerance, skyVisibilityAlong(visibility, direction, bounce, floor), shares[1]);
             report.check("skyVisibilityInAir", arithmeticTolerance, skyVisibilityInAir(visibility, bounce, floor), shares[2]);
             report.check("skyBlockersLit", arithmeticTolerance, skyBlockersLit(visibility, floor), shares[3]);
-
-            const Vec3 fill{std::abs(direction.x), std::abs(direction.y), std::abs(direction.z)};
-            const Vec3 light = skyLightWithFill(Vec3{1.0f, 0.5f, 0.25f}, skySeenFacing(visibility, normal), bounce * skyBlockersLit(visibility, floor), fill);
-            report.check("skyLightWithFill", arithmeticTolerance, light, vec3From(outputs[2 * i + 1]));
         }
     }
 

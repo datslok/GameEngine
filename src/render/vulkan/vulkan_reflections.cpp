@@ -114,6 +114,19 @@ std::vector<VkFormat> VulkanReflections::surfaceFormats() const {
     return {normalFormat, propertiesFormat, standInFormat};
 }
 
+void VulkanReflections::prepareColourPyramid(VkCommandBuffer commands, FrameDescriptors& descriptors, VulkanImage& previousPicture) {
+    colourPyramid->build(commands, descriptors, &previousPicture, ImageState::ComputeRead);
+    colourPyramidPrepared = true;
+}
+
+void VulkanReflections::forgetColourPyramid() {
+    colourPyramidPrepared = false;
+}
+
+SampledImage VulkanReflections::sampledColourPyramid() const {
+    return SampledImage{colourPyramid->getImage().getView(), pyramidSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+}
+
 std::uint32_t VulkanReflections::getPyramidLevels() const {
     return depthPyramid.getDescription().levels;
 }
@@ -175,9 +188,14 @@ void VulkanReflections::reflect(VkCommandBuffer commands, FrameDescriptors& desc
     record.flush();
 
     buildDepthPyramid(commands, descriptors, depth);
+    const bool prepared = colourPyramidPrepared;
+    colourPyramidPrepared = false;
 
-    // Last frame's picture with its blurred levels, readable by the reflection pass at the end.
-    if (previousPicture != nullptr) {
+    // Last frame's picture with its blurred levels, readable by the reflection pass at the end (built already when the
+    // ambient occlusion pass gathered from it).
+    if (previousPicture != nullptr && prepared) {
+        colourPyramid->getImage().transition(commands, ImageState::ComputeRead);
+    } else if (previousPicture != nullptr) {
         colourPyramid->build(commands, descriptors, previousPicture, ImageState::ComputeRead);
     } else {
         colourPyramid->getImage().transition(commands, ImageState::ComputeRead, ImageContents::Discard);

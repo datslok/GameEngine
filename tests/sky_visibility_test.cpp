@@ -100,23 +100,8 @@ namespace {
         assert(near(skyVisibilityInAir(ringing, 0.5f), 0.2f + 0.5f * blockersLit * 0.8f, 1e-5f));
     }
 
-    /*
-    * The light from all around with the screen's fill: with none, the flat ambient times the facing share; a fill
-    * brighter than the bounce guess stands in for the blocked share, a dimmer one leaves the guess. A room whose walls
-    * are as bright as its open sky's light gets that light from every way.
-    */
-    void testTheFillLightsTheBlockedShare() {
-        const Vec3 flat{0.4f, 0.5f, 0.6f};
-        const float seen = 0.2f;
-        const float guess = 0.25f * 0.1f;
-        const Vec3 none = skyLightWithFill(flat, seen, guess, Vec3{0.0f, 0.0f, 0.0f});
-        assert(near(none.y, 0.5f * (seen + guess * (1.0f - seen)), 1e-6f));
-
-        const Vec3 lit = skyLightWithFill(flat, seen, guess, Vec3{0.3f, 0.3f, 0.0f});
-        assert(near(lit.x, 0.4f * seen + 0.3f * 0.8f, 1e-6f) && near(lit.z, 0.6f * (seen + guess * 0.8f), 1e-6f));
-
-        const Vec3 even = skyLightWithFill(flat, seen, guess, flat);
-        assert(near(even.x, flat.x, 1e-6f) && near(even.y, flat.y, 1e-6f) && near(even.z, flat.z, 1e-6f));
+    // A point whose open side leans up sees the sky facing up, and none looking straight down.
+    void testSeenFacingAndAlong() {
         assert(near(skySeenFacing(SkyVisibility{0.2f, Vec3{0.0f, 0.9f, 0.0f}}, up), 0.8f, 1e-6f));
         assert(skySeenAlong(SkyVisibility{0.2f, Vec3{0.0f, 0.9f, 0.0f}}, down) == 0.0f);
     }
@@ -283,8 +268,8 @@ namespace {
     void testTheSettings() {
         const SkyVisibilitySettings defaults;
         assert(defaults.enabled && defaults.bounceShare == 0.25f && defaults.spacing == 0.5f && defaults.cascades == 2);
-        assert(defaults.rays == 64 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
-        assert(defaults.blockersLitFloor == 0.1f);
+        assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
+        assert(defaults.blockersLitFloor == 0.1f && defaults.quickRays == 64 && defaults.storeMegabytes == 256.0f);
         validateSkyVisibility(defaults);
 
         SkyVisibilitySettings bad;
@@ -303,6 +288,14 @@ namespace {
         bad.rays = 0;
         assert(rejects(bad));
         bad = {};
+        bad.quickRays = 0;
+        assert(rejects(bad));
+        bad = {};
+        bad.storeMegabytes = -1.0f;
+        assert(rejects(bad));
+        bad.storeMegabytes = 0.0f;
+        assert(!rejects(bad));
+        bad = {};
         bad.rayLength = -1.0f;
         assert(rejects(bad));
         bad = {};
@@ -319,6 +312,8 @@ namespace {
         other.bakeMilliseconds = 3.0f;
         other.debugView = true;
         other.blockersLitFloor = 0.3f;
+        other.quickRays = 16;         // only how a refill gets there, not what it ends as
+        other.storeMegabytes = 32.0f; // only what is kept, not what is baked
         assert(sameSkyVisibilityGrid(defaults, other));
         other.rays = 32;
         assert(!sameSkyVisibilityGrid(defaults, other));
@@ -415,6 +410,33 @@ namespace {
         assert(skyCellsForBudget(0.001, 1e-5, 0) == 0);
     }
 
+    /*
+    * What a frame bakes: a capture everything at full rays, refinement included; a fresh grid every waiting point at
+    * once, quickly when quick rays are fewer; otherwise never more than the budget, however far behind a move left it:
+    * at full rays while the budget covers what waits, waiting points first and refinement with what is left, and past
+    * it the quick budget's worth at the quick rays.
+    */
+    void testPlanningAFrame() {
+        const auto same = [](const SkyBakePlan& a, const SkyBakePlan& b) {
+            return a.waiting == b.waiting && a.quick == b.quick && a.refine == b.refine;
+        };
+
+        assert(same(planSkyBake(300, 500, false, true, 10, 40, true), SkyBakePlan{300, false, 500}));
+        assert(same(planSkyBake(1000, 0, true, false, 10, 40, true), SkyBakePlan{1000, true, 0}));
+        assert(same(planSkyBake(1000, 0, true, false, 10, 40, false), SkyBakePlan{1000, false, 0}));
+
+        // Far behind after a fast move: the quick budget, no long frame.
+        assert(same(planSkyBake(60000, 200, false, false, 10, 40, true), SkyBakePlan{40, true, 0}));
+        assert(same(planSkyBake(11, 200, false, false, 10, 40, true), SkyBakePlan{11, true, 0}));
+        assert(same(planSkyBake(60000, 200, false, false, 10, 40, false), SkyBakePlan{10, false, 0}));
+
+        // Keeping up: full rays, then refinement.
+        assert(same(planSkyBake(4, 500, false, false, 10, 40, true), SkyBakePlan{4, false, 6}));
+        assert(same(planSkyBake(10, 500, false, false, 10, 40, true), SkyBakePlan{10, false, 0}));
+        assert(same(planSkyBake(0, 3, false, false, 10, 40, true), SkyBakePlan{0, false, 3}));
+        assert(same(planSkyBake(0, 0, false, false, 10, 40, true), SkyBakePlan{0, false, 0}));
+    }
+
     // Few rays, so a whole cascade bakes quickly in a test.
     SkyVisibilitySettings quickGrid() {
         SkyVisibilitySettings settings;
@@ -459,9 +481,9 @@ namespace {
         }
         assert(unknown == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
 
-        // Moving back before it is baked brings in the other plane, each point waiting once.
+        // Moving back before it is baked brings back the plane it left, which the store kept: nothing waits.
         assert(!grid.follow(centre, settings, 1));
-        assert(grid.getWaiting() == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
+        assert(grid.getWaiting() == 0);
 
         SkyVisibilitySettings looks = settings;
         looks.bounceShare = 0.6f;
@@ -472,6 +494,269 @@ namespace {
         shape.rayLength = 10.0f;
         grid.bake(level, serialJobs(), count);
         assert(grid.follow(centre, shape, 2) && grid.getWaiting() == count);
+    }
+
+    // Whether a point holds exactly what baking it alone at this many rays gives.
+    bool bakedWith(const SkyVisibilityGrid& grid, const StaticLevel& level, const SkyVisibilitySettings& settings, int cell, int rays) {
+        const ProbeCascade& cascade = grid.getCascades()[static_cast<std::size_t>(probeCascadeHolding(grid.getCascades(), cell))];
+        GridMarks marks;
+        const SkyCell alone = bakeSkyCell(level, probePosition(cascade.volume, cell - cascade.firstProbe), rays, settings.rayLength,
+                                          cascade.volume.spacing.x, marks);
+        const GpuSkyCell a = packSkyCell(alone);
+        const GpuSkyCell b = packSkyCell(grid.getCells()[static_cast<std::size_t>(cell)]);
+        return a.words[0] == b.words[0] && a.words[1] == b.words[1] && a.words[2] == b.words[2] && a.words[3] == b.words[3];
+    }
+
+    /*
+    * The two-step refill: a quick bake at the quick rays leaves every point waiting for refinement; refining bakes them
+    * again at the full rays, in the order they came; points a move clears wait again instead, at full rays, and drop
+    * out of refinement. With quick rays not fewer than the rays, a quick bake is a full one.
+    */
+    void testQuickBakesAreRefined() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        settings.quickRays = 2;
+        const int count = skyVisibilityCellCount(settings);
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        SkyVisibilityGrid grid;
+
+        assert(grid.follow(centre, settings, 1));
+        assert(grid.bake(level, serialJobs(), count, true) == count);
+        assert(grid.getWaiting() == 0 && grid.getRefining() == count);
+        assert(bakedWith(grid, level, settings, 0, 2) && bakedWith(grid, level, settings, count / 2, 2));
+
+        const std::uint64_t before = grid.getVersion();
+        assert(grid.refine(level, serialJobs(), 10) == 10);
+        assert(grid.getRefining() == count - 10 && grid.getVersion() != before);
+
+        for (int cell = 0; cell < 10; ++cell) {
+            assert(bakedWith(grid, level, settings, cell, 6));
+        }
+
+        assert(bakedWith(grid, level, settings, 10, 2));
+
+        // A move clears a plane: its points wait, and those still to be refined leave the queue.
+        assert(!grid.follow(centre + Vec3{settings.spacing, 0.0f, 0.0f}, settings, 1));
+        int cleared = 0;
+
+        for (int cell = 10; cell < count; ++cell) {
+            cleared += grid.getCells()[static_cast<std::size_t>(cell)].state == SkyCellState::Unknown ? 1 : 0;
+        }
+
+        assert(grid.getRefining() == count - 10 - cleared);
+        assert(grid.refine(level, serialJobs(), count) == count - 10 - cleared);
+        assert(grid.getRefining() == 0 && grid.getWaiting() == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
+        assert(grid.refine(level, serialJobs(), count) == 0);
+
+        // The plane bakes at full rays, quick or not when its turn comes in the budget.
+        assert(grid.bake(level, serialJobs(), count) == SKY_VISIBILITY_HIGH * SKY_VISIBILITY_ACROSS);
+        assert(grid.getRefining() == 0);
+
+        for (int cell = 0; cell < count; cell += 997) {
+            assert(bakedWith(grid, level, settings, cell, 6));
+        }
+
+        // Quick rays as many as the rays: nothing to refine.
+        settings.quickRays = 6;
+        SkyVisibilityGrid full;
+        full.follow(centre, settings, 1);
+        assert(full.bake(level, serialJobs(), 50, true) == 50 && full.getRefining() == 0);
+        int checked = 0;
+
+        for (int cell = 0; cell < count; ++cell) {
+            if (full.getCells()[static_cast<std::size_t>(cell)].state != SkyCellState::Unknown) {
+                assert(bakedWith(full, level, settings, cell, 6));
+                ++checked;
+            }
+        }
+
+        assert(checked == 50);
+    }
+
+    // A point's place in the world, from its number.
+    Vec3 cellPosition(const SkyVisibilityGrid& grid, int cell) {
+        const ProbeCascade& cascade = grid.getCascades()[static_cast<std::size_t>(probeCascadeHolding(grid.getCascades(), cell))];
+        return probePosition(cascade.volume, cell - cascade.firstProbe);
+    }
+
+    /*
+    * Behind a long move, what the budget bakes first: the coarsest cascade (a coarse point covers eight times what a
+    * point a level denser does), and within it the points ahead of the motion or in front of the camera, nearest first.
+    */
+    void testFallingBehindBakesWhatMattersFirst() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.cascades = 2;
+        settings.rays = 2;
+        const int perCascade = skyVisibilityCellCount(settings) / 2;
+        const Vec3 start{0.37f, 1.61f, -0.22f};
+        const Vec3 centre = start + Vec3{200.0f, 0.0f, 0.0f};
+        SkyVisibilityGrid grid;
+        grid.follow(start, settings, 1);
+        assert(!grid.follow(centre, settings, 1) && grid.getWaiting() == 2 * perCascade);
+
+        const auto baked = [&grid](int cell) {
+            return grid.getCells()[static_cast<std::size_t>(cell)].state != SkyCellState::Unknown;
+        };
+
+        // No view direction: the move east alone says what lies ahead.
+        assert(grid.bake(level, serialJobs(), 500, false, Vec3{}) == 500);
+        assert(grid.getWaiting() == 2 * perCascade - 500);
+        float farthestBaked = 0.0f;
+
+        for (int cell = 0; cell < 2 * perCascade; ++cell) {
+            if (baked(cell)) {
+                const Vec3 offset = cellPosition(grid, cell) - centre;
+                assert(cell >= perCascade && offset.x >= 0.0f);
+                farthestBaked = std::max(farthestBaked, offset.length());
+            }
+        }
+
+        for (int cell = perCascade; cell < 2 * perCascade; ++cell) {
+            const Vec3 offset = cellPosition(grid, cell) - centre;
+
+            if (!baked(cell) && offset.x >= 0.0f) {
+                assert(offset.length() >= farthestBaked - 1e-4f);
+            }
+        }
+
+        // Standing still and looking north (-z): what is in front of the camera.
+        assert(!grid.follow(centre, settings, 1));
+        assert(grid.bake(level, serialJobs(), 500, false, Vec3{0.0f, 0.0f, -1.0f}) == 500);
+        int northBaked = 0;
+
+        for (int cell = 0; cell < 2 * perCascade; ++cell) {
+            const Vec3 offset = cellPosition(grid, cell) - centre;
+
+            if (baked(cell) && offset.x < 0.0f) {
+                assert(cell >= perCascade && offset.z <= 0.0f);
+                ++northBaked;
+            }
+        }
+
+        assert(northBaked > 0);
+    }
+
+    bool sameWords(const SkyCell& a, const SkyCell& b) {
+        const GpuSkyCell packedA = packSkyCell(a);
+        const GpuSkyCell packedB = packSkyCell(b);
+        return packedA.words[0] == packedB.words[0] && packedA.words[1] == packedB.words[1] && packedA.words[2] == packedB.words[2] &&
+               packedA.words[3] == packedB.words[3];
+    }
+
+    /*
+    * The store keeps points by cascade and lattice place, as the GPU reads them (so a kept point packs to exactly the
+    * words it would have), with whether they were quick; past its capacity the one used longest ago goes first; places
+    * past its coordinates' range are not kept; its capacity follows the megabytes.
+    */
+    void testTheStoreKeepsBakedPoints() {
+        const StaticLevel level = roomWithADoor();
+        GridMarks marks;
+        const SkyCell inside = bakeSkyCell(level, Vec3{1.5f, 1.0f, 0.1f}, 16, 30.0f, 0.5f, marks);
+        const SkyCell outside = bakeSkyCell(level, Vec3{8.0f, 1.0f, 0.1f}, 16, 30.0f, 0.5f, marks);
+
+        SkyCellStore store;
+        store.setCapacity(3);
+        const ProbeGridCoord a{3, 2, 1};
+        const ProbeGridCoord b{-4, 0, 7};
+        const ProbeGridCoord c{100, 5, -9};
+        store.keep(0, a, inside, false);
+        store.keep(0, b, outside, true);
+        store.keep(1, a, outside, false);
+        assert(store.size() == 3);
+
+        const std::optional<StoredSkyCell> foundA = store.find(0, a);
+        assert(foundA && !foundA->quick && sameWords(foundA->cell, inside));
+        const std::optional<StoredSkyCell> foundB = store.find(0, b);
+        assert(foundB && foundB->quick && sameWords(foundB->cell, outside));
+        assert(store.find(1, a) && sameWords(store.find(1, a)->cell, outside));
+        assert(!store.find(0, c) && !store.find(2, a));
+
+        // Finding is using: oldest (0, a), then (0, b), then (1, a). Touching (0, a) makes (0, b) the oldest.
+        store.touch(0, a);
+        store.keep(0, c, inside, false);
+        assert(store.size() == 3 && !store.find(0, b) && store.find(0, a) && store.find(0, c) && store.find(1, a));
+
+        // Keeping a place again replaces it (a refined point).
+        store.keep(0, c, outside, false);
+        assert(store.size() == 3 && sameWords(store.find(0, c)->cell, outside));
+
+        // Out of the coordinates' range: not kept.
+        store.keep(0, ProbeGridCoord{1 << 21, 0, 0}, inside, false);
+        assert(!store.find(0, ProbeGridCoord{1 << 21, 0, 0}) && store.size() == 3);
+
+        store.clear();
+        assert(store.size() == 0 && !store.find(0, a));
+        store.setCapacity(0);
+        store.keep(0, a, inside, false);
+        assert(store.size() == 0);
+
+        SkyVisibilitySettings settings;
+        assert(skyStoreCapacity(settings) == static_cast<std::size_t>(256.0 * 1024.0 * 1024.0 / skyStoreBytesPerPoint));
+        settings.storeMegabytes = 0.0f;
+        assert(skyStoreCapacity(settings) == 0);
+    }
+
+    /*
+    * Coming back: points baked before a long move are found in the store when their places come back into the grid,
+    * so nothing waits; quick ones go back to refinement. With the store off, or after a new level (which empties it),
+    * they wait again.
+    */
+    void testComingBackFindsWhatWasBaked() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 6;
+        settings.quickRays = 2;
+        const int count = skyVisibilityCellCount(settings);
+        const Vec3 home{0.37f, 1.61f, -0.22f};
+        const Vec3 away = home + Vec3{200.0f, 0.0f, 0.0f};
+
+        SkyVisibilityGrid grid;
+        grid.follow(home, settings, 1);
+        grid.bake(level, serialJobs(), count);
+        const std::vector<SkyCell> baked(grid.getCells().begin(), grid.getCells().end());
+
+        assert(!grid.follow(away, settings, 1) && grid.getWaiting() == count);
+        const std::uint64_t before = grid.getVersion();
+        assert(!grid.follow(home, settings, 1));
+        assert(grid.getWaiting() == 0 && grid.getRefining() == 0 && grid.getVersion() != before);
+
+        for (int cell = 0; cell < count; ++cell) {
+            assert(sameWords(grid.getCells()[static_cast<std::size_t>(cell)], baked[static_cast<std::size_t>(cell)]));
+        }
+
+        // Halfway back after a partial bake away: only the places never baked wait.
+        grid.follow(away, settings, 1);
+        assert(grid.bake(level, serialJobs(), 100) == 100);
+        grid.follow(home, settings, 1);
+        assert(grid.getWaiting() == 0);
+        grid.follow(away, settings, 1);
+        assert(grid.getWaiting() == count - 100);
+
+        // Quick points come back still to be refined.
+        SkyVisibilityGrid quick;
+        quick.follow(home, settings, 1);
+        quick.bake(level, serialJobs(), count, true);
+        quick.follow(away, settings, 1);
+        assert(quick.getRefining() == 0);
+        quick.follow(home, settings, 1);
+        assert(quick.getWaiting() == 0 && quick.getRefining() == count);
+
+        // A new level empties the store.
+        assert(grid.follow(home, settings, 2) && grid.getWaiting() == count);
+        grid.follow(away, settings, 2);
+        grid.follow(home, settings, 2);
+        assert(grid.getWaiting() == count);
+
+        // The store off: nothing comes back.
+        settings.storeMegabytes = 0.0f;
+        SkyVisibilityGrid forgetful;
+        forgetful.follow(home, settings, 1);
+        forgetful.bake(level, serialJobs(), count);
+        forgetful.follow(away, settings, 1);
+        forgetful.follow(home, settings, 1);
+        assert(forgetful.getWaiting() == count);
     }
 
     // Many threads bake exactly what one does.
@@ -504,7 +789,7 @@ void testSkyVisibility() {
     testAnOpenFieldLightsTheFloorFully();
     testAClosedBoxIsDark();
     testTheShareStaysWithinItsRange();
-    testTheFillLightsTheBlockedShare();
+    testSeenFacingAndAlong();
     testACornerSeesWithinItsReach();
     testAPointPacksForTheShaders();
     testTheCascadesNestRoundTheCamera();
@@ -516,6 +801,11 @@ void testSkyVisibility() {
     testBakingAPointOverAFloor();
     testBakingARoom();
     testTheBudget();
+    testPlanningAFrame();
     testTheGridFollowsTheCamera();
+    testQuickBakesAreRefined();
+    testFallingBehindBakesWhatMattersFirst();
+    testTheStoreKeepsBakedPoints();
+    testComingBackFindsWhatWasBaked();
     testBakingIsTheSameOnEveryCore();
 }

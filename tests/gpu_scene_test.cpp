@@ -168,7 +168,8 @@ namespace {
         assert(sameFloats(packShadowView(tile).matrix, expected, 16));
     }
 
-    // A capture's view (a cube face's or a mirror's) is pushed the same way, followed by the plane it clips at.
+    // A capture's view (a cube face's or a mirror's) is pushed the same way, followed by the plane it clips at and the
+    // eye it is seen from (from the camera): the camera itself unless given.
     void testCaptureViewCarriesItsClipPlane() {
         const Mat4 view = pointShadowFaceMatrix(Vec3{1.0f, 2.0f, 3.0f}, 4, 50.0f);
 
@@ -177,6 +178,10 @@ namespace {
         const GpuCaptureView packed = packCaptureView(view, Vec4{0.0f, 0.6f, 0.8f, -2.5f});
         assert(sameFloats(packed.viewProjection, expected, 16));
         assert(packed.clipPlane[0] == 0.0f && packed.clipPlane[1] == 0.6f && packed.clipPlane[2] == 0.8f && packed.clipPlane[3] == -2.5f);
+        assert(packed.eye[0] == 0.0f && packed.eye[1] == 0.0f && packed.eye[2] == 0.0f);
+
+        const GpuCaptureView seen = packCaptureView(view, Vec4{0.0f, 0.6f, 0.8f, -2.5f}, Vec3{0.0f, 0.0f, 6.0f});
+        assert(seen.eye[0] == 0.0f && seen.eye[1] == 0.0f && seen.eye[2] == 6.0f);
     }
 
     // The vertex shader makes the model matrix camera-relative by subtracting the camera from its translation column,
