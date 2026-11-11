@@ -405,23 +405,30 @@ namespace {
     }
 
     /*
-    * What a frame bakes: a capture everything at full rays, refinement included; a refill (afresh, or more than half
-    * waiting) every waiting point at once, quickly when quick rays are fewer; otherwise the budget, waiting points first
-    * and refinement with what is left.
+    * What a frame bakes: a capture everything at full rays, refinement included; a fresh grid every waiting point at
+    * once, quickly when quick rays are fewer; otherwise never more than the budget, however far behind a move left it:
+    * at full rays while the budget covers what waits, waiting points first and refinement with what is left, and past
+    * it the quick budget's worth at the quick rays.
     */
     void testPlanningAFrame() {
         const auto same = [](const SkyBakePlan& a, const SkyBakePlan& b) {
             return a.waiting == b.waiting && a.quick == b.quick && a.refine == b.refine;
         };
 
-        assert(same(planSkyBake(300, 500, 1000, false, true, 10, true), SkyBakePlan{300, false, 500}));
-        assert(same(planSkyBake(1000, 0, 1000, true, false, 10, true), SkyBakePlan{1000, true, 0}));
-        assert(same(planSkyBake(1000, 0, 1000, true, false, 10, false), SkyBakePlan{1000, false, 0}));
-        assert(same(planSkyBake(600, 200, 1000, false, false, 10, true), SkyBakePlan{600, true, 0}));
-        assert(same(planSkyBake(4, 500, 1000, false, false, 10, true), SkyBakePlan{4, false, 6}));
-        assert(same(planSkyBake(40, 500, 1000, false, false, 10, true), SkyBakePlan{10, false, 0}));
-        assert(same(planSkyBake(0, 3, 1000, false, false, 10, true), SkyBakePlan{0, false, 3}));
-        assert(same(planSkyBake(0, 0, 1000, false, false, 10, true), SkyBakePlan{0, false, 0}));
+        assert(same(planSkyBake(300, 500, false, true, 10, 40, true), SkyBakePlan{300, false, 500}));
+        assert(same(planSkyBake(1000, 0, true, false, 10, 40, true), SkyBakePlan{1000, true, 0}));
+        assert(same(planSkyBake(1000, 0, true, false, 10, 40, false), SkyBakePlan{1000, false, 0}));
+
+        // Far behind after a fast move: the quick budget, no long frame.
+        assert(same(planSkyBake(60000, 200, false, false, 10, 40, true), SkyBakePlan{40, true, 0}));
+        assert(same(planSkyBake(11, 200, false, false, 10, 40, true), SkyBakePlan{11, true, 0}));
+        assert(same(planSkyBake(60000, 200, false, false, 10, 40, false), SkyBakePlan{10, false, 0}));
+
+        // Keeping up: full rays, then refinement.
+        assert(same(planSkyBake(4, 500, false, false, 10, 40, true), SkyBakePlan{4, false, 6}));
+        assert(same(planSkyBake(10, 500, false, false, 10, 40, true), SkyBakePlan{10, false, 0}));
+        assert(same(planSkyBake(0, 3, false, false, 10, 40, true), SkyBakePlan{0, false, 3}));
+        assert(same(planSkyBake(0, 0, false, false, 10, 40, true), SkyBakePlan{0, false, 0}));
     }
 
     // Few rays, so a whole cascade bakes quickly in a test.
@@ -549,7 +556,80 @@ namespace {
         SkyVisibilityGrid full;
         full.follow(centre, settings, 1);
         assert(full.bake(level, serialJobs(), 50, true) == 50 && full.getRefining() == 0);
-        assert(bakedWith(full, level, settings, 7, 6));
+        int checked = 0;
+
+        for (int cell = 0; cell < count; ++cell) {
+            if (full.getCells()[static_cast<std::size_t>(cell)].state != SkyCellState::Unknown) {
+                assert(bakedWith(full, level, settings, cell, 6));
+                ++checked;
+            }
+        }
+
+        assert(checked == 50);
+    }
+
+    // A point's place in the world, from its number.
+    Vec3 cellPosition(const SkyVisibilityGrid& grid, int cell) {
+        const ProbeCascade& cascade = grid.getCascades()[static_cast<std::size_t>(probeCascadeHolding(grid.getCascades(), cell))];
+        return probePosition(cascade.volume, cell - cascade.firstProbe);
+    }
+
+    /*
+    * Behind a long move, what the budget bakes first: the coarsest cascade (a coarse point covers eight times what a
+    * point a level denser does), and within it the points ahead of the motion or in front of the camera, nearest first.
+    */
+    void testFallingBehindBakesWhatMattersFirst() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.cascades = 2;
+        settings.rays = 2;
+        const int perCascade = skyVisibilityCellCount(settings) / 2;
+        const Vec3 start{0.37f, 1.61f, -0.22f};
+        const Vec3 centre = start + Vec3{200.0f, 0.0f, 0.0f};
+        SkyVisibilityGrid grid;
+        grid.follow(start, settings, 1);
+        assert(!grid.follow(centre, settings, 1) && grid.getWaiting() == 2 * perCascade);
+
+        const auto baked = [&grid](int cell) {
+            return grid.getCells()[static_cast<std::size_t>(cell)].state != SkyCellState::Unknown;
+        };
+
+        // No view direction: the move east alone says what lies ahead.
+        assert(grid.bake(level, serialJobs(), 500, false, Vec3{}) == 500);
+        assert(grid.getWaiting() == 2 * perCascade - 500);
+        float farthestBaked = 0.0f;
+
+        for (int cell = 0; cell < 2 * perCascade; ++cell) {
+            if (baked(cell)) {
+                const Vec3 offset = cellPosition(grid, cell) - centre;
+                assert(cell >= perCascade && offset.x >= 0.0f);
+                farthestBaked = std::max(farthestBaked, offset.length());
+            }
+        }
+
+        for (int cell = perCascade; cell < 2 * perCascade; ++cell) {
+            const Vec3 offset = cellPosition(grid, cell) - centre;
+
+            if (!baked(cell) && offset.x >= 0.0f) {
+                assert(offset.length() >= farthestBaked - 1e-4f);
+            }
+        }
+
+        // Standing still and looking north (-z): what is in front of the camera.
+        assert(!grid.follow(centre, settings, 1));
+        assert(grid.bake(level, serialJobs(), 500, false, Vec3{0.0f, 0.0f, -1.0f}) == 500);
+        int northBaked = 0;
+
+        for (int cell = 0; cell < 2 * perCascade; ++cell) {
+            const Vec3 offset = cellPosition(grid, cell) - centre;
+
+            if (baked(cell) && offset.x < 0.0f) {
+                assert(cell >= perCascade && offset.z <= 0.0f);
+                ++northBaked;
+            }
+        }
+
+        assert(northBaked > 0);
     }
 
     // Many threads bake exactly what one does.
@@ -597,5 +677,6 @@ void testSkyVisibility() {
     testPlanningAFrame();
     testTheGridFollowsTheCamera();
     testQuickBakesAreRefined();
+    testFallingBehindBakesWhatMattersFirst();
     testBakingIsTheSameOnEveryCore();
 }

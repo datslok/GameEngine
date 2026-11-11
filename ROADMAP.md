@@ -599,6 +599,10 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - Meshlets (meshoptimizer) and mesh shaders where the GPU has them.
   - A visibility buffer if scenes ever get dense enough to need it
 - [ ] Open-world scale: streaming textures and meshes in and out by distance, impostors for far objects, and a render graph that orders passes and places barriers from what each pass reads and writes, once the hand-placed barriers of phase 6b no longer keep up
+- [ ] Sky visibility baked offline and streamed, for big worlds (added Nov 11 2026)
+  - The grid only bakes against the static level, which does not change, so a level can be baked once, automatically (no hand-placed volumes), saved, and streamed in tiles by distance with the world, as open-world games do with their probe grids and sky occlusion.
+  - Sparse storage: dense points only near geometry, coarse ones in open air (a uniform 0.5 m grid over kilometres would not fit), coarse tiles loaded first, read ahead along the camera's velocity.
+  - The runtime bake stays for what changes (phase 15's falling buildings, re-baked locally within the frame budget).
 
 ### Tools and the rest
 

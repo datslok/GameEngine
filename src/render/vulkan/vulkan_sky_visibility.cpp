@@ -60,17 +60,18 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
         return;
     }
 
-    const int budget = skyCellsForBudget(settings.bakeMilliseconds * 1e-3, secondsPerCell, waiting + refining);
-    const SkyBakePlan plan = planSkyBake(waiting, refining, static_cast<int>(grid.getCells().size()), afresh, everything, budget,
-                                         settings.quickRays < settings.rays);
+    const double budgetSeconds = settings.bakeMilliseconds * 1e-3;
+    const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
+    const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining);
+    const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting);
+    const SkyBakePlan plan = planSkyBake(waiting, refining, afresh, everything, budget, quickBudget, settings.quickRays < settings.rays);
     const int count = plan.waiting + plan.refine;
 
     if (count > 0) {
         const double start = profilerSeconds();
-        grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick);
+        grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward());
         grid.refine(*frame.staticLevel, jobs, plan.refine);
-        const double rayShare = plan.quick ? static_cast<double>(settings.rays) / static_cast<double>(settings.quickRays) : 1.0;
-        secondsPerCell = (profilerSeconds() - start) * rayShare / static_cast<double>(count);
+        secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(count);
     }
 }
 

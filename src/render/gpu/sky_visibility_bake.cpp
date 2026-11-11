@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 
 namespace {
     // A job takes this many points at once, so handing them out costs little beside their rays.
@@ -65,27 +67,32 @@ int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting) 
     return fit >= static_cast<double>(waiting) ? waiting : std::max(1, static_cast<int>(fit));
 }
 
-SkyBakePlan planSkyBake(int waiting, int refining, int total, bool afresh, bool everything, int budgetCells, bool quickFewer) {
+SkyBakePlan planSkyBake(int waiting, int refining, bool afresh, bool everything, int budgetCells, int quickBudgetCells, bool quickFewer) {
     if (everything) {
         return SkyBakePlan{waiting, false, refining};
     }
 
-    if (waiting > 0 && (afresh || waiting * 2 > total)) {
+    if (waiting > 0 && afresh) {
         return SkyBakePlan{waiting, quickFewer, 0};
     }
 
-    const int baked = std::min(waiting, budgetCells);
-    return SkyBakePlan{baked, false, std::min(refining, std::max(budgetCells - baked, 0))};
+    if (waiting > budgetCells) {
+        return quickFewer ? SkyBakePlan{std::min(waiting, quickBudgetCells), true, 0} : SkyBakePlan{budgetCells, false, 0};
+    }
+
+    return SkyBakePlan{waiting, false, std::min(refining, std::max(budgetCells - waiting, 0))};
 }
 
 /*
 * Afresh when nothing was placed yet, the level changed, or the settings shape another grid; otherwise each cascade's
 * window moves, and the slots whose lattice point changed (scrolledProbes) are cleared and wait.
 */
-bool SkyVisibilityGrid::follow(const Vec3& centre, const SkyVisibilitySettings& settings, std::uint64_t level) {
+bool SkyVisibilityGrid::follow(const Vec3& place, const SkyVisibilitySettings& settings, std::uint64_t level) {
     const bool afresh = !started || level != levelVersion || !sameSkyVisibilityGrid(shape, settings);
-    std::vector<ProbeCascade> next = skyVisibilityCascades(centre, settings);
+    std::vector<ProbeCascade> next = skyVisibilityCascades(place, settings);
     shape = settings;
+    motion = afresh ? Vec3{} : place - centre;
+    centre = place;
 
     if (afresh) {
         started = true;
@@ -118,8 +125,8 @@ void SkyVisibilityGrid::startAfresh() {
     const int count = skyVisibilityCellCount(shape);
     cells.assign(static_cast<std::size_t>(count), SkyCell{});
     isWaiting.assign(static_cast<std::size_t>(count), 0);
-    waiting.clear();
-    nextWaiting = 0;
+    waiting.assign(cascades.size(), {});
+    waitingCount = 0;
     isRefining.assign(static_cast<std::size_t>(count), 0);
     refining.clear();
     nextRefining = 0;
@@ -138,7 +145,8 @@ void SkyVisibilityGrid::wait(int cell) {
 
     if (flag == 0) {
         flag = 1;
-        waiting.push_back(cell);
+        waiting[static_cast<std::size_t>(probeCascadeHolding(cascades, cell))].push_back(cell);
+        ++waitingCount;
     }
 
     std::uint8_t& refined = isRefining[static_cast<std::size_t>(cell)];
@@ -163,14 +171,55 @@ void SkyVisibilityGrid::bakeCells(const StaticLevel& level, JobSystem& jobs, std
     });
 }
 
-int SkyVisibilityGrid::bake(const StaticLevel& level, JobSystem& jobs, int maxCells, bool quick) {
+/*
+* All of a cascade's list in its order when it fits; otherwise each point's rank, worked out once (behind counts as
+* farther than anything ahead), and the best count chosen by nth_element, linear in the list, with the point's number
+* breaking ties so the choice never depends on the list's order.
+*/
+void SkyVisibilityGrid::takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch) {
+    std::vector<int>& list = waiting[cascade];
+
+    if (list.size() <= count) {
+        batch.insert(batch.end(), list.begin(), list.end());
+        list.clear();
+        return;
+    }
+
+    const ProbeCascade& holding = cascades[cascade];
+    const bool hasForward = forward.lengthSquared() > 0.0f;
+    const bool hasMotion = motion.lengthSquared() > 0.0f;
+    constexpr float behindRank = 1e9f;
+    thread_local std::vector<std::pair<float, int>> ranked;
+    ranked.clear();
+
+    for (const int cell : list) {
+        const Vec3 offset = probePosition(holding.volume, cell - holding.firstProbe) - centre;
+        const bool ahead = (!hasForward && !hasMotion) || (hasForward && offset.dot(forward) >= 0.0f) || (hasMotion && offset.dot(motion) >= 0.0f);
+        ranked.emplace_back(offset.length() + (ahead ? 0.0f : behindRank), cell);
+    }
+
+    std::nth_element(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(count), ranked.end());
+    list.clear();
+
+    for (std::size_t i = 0; i < ranked.size(); ++i) {
+        (i < count ? batch : list).push_back(ranked[i].second);
+    }
+}
+
+int SkyVisibilityGrid::bake(const StaticLevel& level, JobSystem& jobs, int maxCells, bool quick, const Vec3& forward) {
     const int count = std::min(maxCells, getWaiting());
 
     if (count <= 0) {
         return 0;
     }
 
-    const std::span<const int> batch{waiting.data() + nextWaiting, static_cast<std::size_t>(count)};
+    thread_local std::vector<int> batch;
+    batch.clear();
+
+    for (std::size_t c = waiting.size(); c-- > 0 && static_cast<int>(batch.size()) < count;) {
+        takeWaiting(c, static_cast<std::size_t>(count) - batch.size(), forward, batch);
+    }
+
     const bool refines = quick && shape.quickRays < shape.rays;
     bakeCells(level, jobs, batch, refines ? shape.quickRays : shape.rays);
 
@@ -184,13 +233,7 @@ int SkyVisibilityGrid::bake(const StaticLevel& level, JobSystem& jobs, int maxCe
         }
     }
 
-    nextWaiting += batch.size();
-
-    // The list's done front is dropped once it is most of the list.
-    if (nextWaiting * 2 > waiting.size()) {
-        waiting.erase(waiting.begin(), waiting.begin() + static_cast<std::ptrdiff_t>(nextWaiting));
-        nextWaiting = 0;
-    }
+    waitingCount -= count;
 
     ++version;
     return count;
@@ -233,7 +276,7 @@ int SkyVisibilityGrid::refine(const StaticLevel& level, JobSystem& jobs, int max
 }
 
 int SkyVisibilityGrid::getWaiting() const {
-    return static_cast<int>(waiting.size() - nextWaiting);
+    return waitingCount;
 }
 
 int SkyVisibilityGrid::getRefining() const {

@@ -34,16 +34,19 @@ struct SkyBakePlan {
 
 /*
 * everything (a capture, whose picture must not depend on what came before): every waiting point and every one to
-* refine, at full rays. A refill (afresh, or more than half the total waiting): every waiting point at once, quickly
-* when quickFewer (the quick rays are fewer than the rays), since half a room of open sky would be worse than one long
-* frame and a quick one is a quarter as long. Otherwise budgetCells: waiting points first, refinement with what is left.
+* refine, at full rays. afresh (the first fill, a new level or shape, which has nothing at all to read): every waiting
+* point at once, quickly when quickFewer (the quick rays are fewer than the rays). Otherwise never more than a frame's
+* budget, however far a move left it behind, so moving never freezes the frame: while budgetCells (at full rays)
+* covers what waits, the waiting points and refinement with what is left; past it, quickBudgetCells at the quick rays
+* when quickFewer (budgetCells at full rays when not). Points behind read the coarser cascade, or the open sky.
 */
-SkyBakePlan planSkyBake(int waiting, int refining, int total, bool afresh, bool everything, int budgetCells, bool quickFewer);
+SkyBakePlan planSkyBake(int waiting, int refining, bool afresh, bool everything, int budgetCells, int quickBudgetCells, bool quickFewer);
 
 /*
 * The grid round the camera and its baking. follow moves the cascades with the camera; points a move brings in, or
-* every point when the level or the grid's shape changed, wait (left out when read) until bake reaches them, densest
-* cascade first, in the order they came. Render-only: nothing here touches the simulation.
+* every point when the level or the grid's shape changed, wait (left out when read) until bake reaches them: the
+* coarsest cascade first, and within one the points ahead first, nearest first. Render-only: nothing here touches the
+* simulation.
 */
 class SkyVisibilityGrid {
 public:
@@ -56,8 +59,13 @@ public:
     /*
     * Bakes up to maxCells waiting points against level, a job per point on jobs. Returns how many it baked. quick bakes
     * them at the settings' quick rays and queues them for refine, when those are fewer than the rays.
+    *
+    * Which first, when not all fit: the coarsest cascade's (a coarse point covers eight times the space a point a level
+    * denser does, so falling behind costs least there, and a missing dense point reads the coarser one); within a
+    * cascade, the points ahead (in front of the camera, along forward, or ahead of the last move, either one; all of
+    * them when neither is known), then the rest, nearest the camera first in each.
     */
-    int bake(const StaticLevel& level, JobSystem& jobs, int maxCells, bool quick = false);
+    int bake(const StaticLevel& level, JobSystem& jobs, int maxCells, bool quick = false, const Vec3& forward = Vec3{});
 
     // Bakes up to maxCells quickly baked points again at the full rays, in the order they were baked. Returns how many.
     int refine(const StaticLevel& level, JobSystem& jobs, int maxCells);
@@ -81,16 +89,23 @@ private:
     // Bakes these points at rays rays, each into its own entry.
     void bakeCells(const StaticLevel& level, JobSystem& jobs, std::span<const int> batch, int rays);
 
+    // Moves up to count of cascade's waiting points into batch, the first by bake's order.
+    void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);
+
     SkyVisibilitySettings shape;
     std::uint64_t levelVersion = 0;
     bool started = false;
     std::vector<ProbeCascade> cascades;
     std::vector<SkyCell> cells;
 
-    // The points waiting, in the order they came (those before nextWaiting are done), and which are.
-    std::vector<int> waiting;
+    // Where the cascades were placed round last, and the last move (zero for none).
+    Vec3 centre;
+    Vec3 motion;
+
+    // Each cascade's waiting points, and which points wait.
+    std::vector<std::vector<int>> waiting;
     std::vector<std::uint8_t> isWaiting;
-    std::size_t nextWaiting = 0;
+    int waitingCount = 0;
 
     // The quickly baked points, in the order they were baked (those before nextRefining are done), and which still are:
     // a point a move clears leaves the queue by its flag alone.

@@ -27,10 +27,10 @@ public:
     /*
     * Follows the camera (centre) and bakes on the CPU against the frame's static level as planSkyBake says: all that
     * waits, refinement included, when everything is asked (a capture, whose picture must not depend on what came
-    * before); all that waits at the quick rays when the grid starts afresh or more than half of it waits; otherwise
-    * within the settings' budget, waiting points first, then refinement to the full rays. Called before the frame holds
-    * a swapchain image, so a long bake keeps nothing of the screen's waiting. Only for frames that read it (a static
-    * level, the setting on, no probes).
+    * before); all that waits at the quick rays when the grid starts afresh; otherwise within the settings' budget,
+    * however fast the camera moves: at the quick rays when behind, the coarsest cascade and the points ahead of the
+    * camera first. Called before the frame holds a swapchain image, so a long bake keeps nothing of the screen's
+    * waiting. Only for frames that read it (a static level, the setting on, no probes).
     */
     void bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs, bool everything);
 
