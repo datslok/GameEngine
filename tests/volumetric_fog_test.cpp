@@ -353,8 +353,9 @@ namespace {
 
     /*
     * The frame's fog record: off without a Fog or with the setting off; otherwise the grid, the range (no further than
-    * the camera's far plane, past which the clusters list no lights), the medium, and last frame's grid only when it is
-    * usable.
+    * the camera's far plane, past which the clusters list no lights), the medium, last frame's grid only when it is
+    * usable, and the light probes read for the air only when the frame has them (without, their reading falls back to
+    * the open sky's light, which lit the air in closed rooms as outdoors; the sky visibility grid lights it then).
     */
     void testPacking() {
         const Mat4 viewProjection = cameraRelativeViewProjection(testCamera());
@@ -364,19 +365,23 @@ namespace {
         fog.anisotropy = 0.5f;
         fog.albedo = Vec3{0.9f, 0.8f, 0.7f};
 
-        const GpuFog none = packFog(nullptr, settings, viewProjection, viewProjection, true, 0, 500.0f);
+        const GpuFog none = packFog(nullptr, settings, viewProjection, viewProjection, true, true, 0, 500.0f);
         assert(none.options[0] == 0.0f);
         FogSettings off;
         off.enabled = false;
-        assert(packFog(&fog, off, viewProjection, viewProjection, true, 0, 500.0f).options[0] == 0.0f);
+        assert(packFog(&fog, off, viewProjection, viewProjection, true, true, 0, 500.0f).options[0] == 0.0f);
 
-        const GpuFog packed = packFog(&fog, settings, viewProjection, viewProjection, true, 3, 500.0f);
+        const GpuFog packed = packFog(&fog, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
         assert(packed.options[0] == 1.0f && packed.options[1] == settings.historyWeight && packed.options[2] == 1.0f);
         assert(packed.grid[0] == 160.0f && packed.grid[1] == 90.0f && packed.grid[2] == 64.0f && packed.grid[3] == 100.0f);
         assert(packed.medium[0] == 0.03f && packed.medium[3] == 0.5f && packed.albedo[2] == 0.7f && packed.albedo[3] == fog.maxDistance);
         assert(nearVec(Vec3{packed.jitter[0], packed.jitter[1], packed.jitter[2]}, fogJitter(3), 0.0f));
-        assert(packFog(&fog, settings, viewProjection, viewProjection, false, 3, 500.0f).options[1] == 0.0f);
-        assert(packFog(&fog, settings, viewProjection, viewProjection, true, 3, 60.0f).grid[3] == 60.0f);
+        assert(packFog(&fog, settings, viewProjection, viewProjection, false, true, 3, 500.0f).options[1] == 0.0f);
+        assert(packFog(&fog, settings, viewProjection, viewProjection, true, true, 3, 60.0f).grid[3] == 60.0f);
+        assert(packFog(&fog, settings, viewProjection, viewProjection, true, false, 3, 500.0f).options[2] == 0.0f);
+        FogSettings noProbeLight;
+        noProbeLight.probeLight = false;
+        assert(packFog(&fog, noProbeLight, viewProjection, viewProjection, true, true, 3, 500.0f).options[2] == 0.0f);
     }
 
     // A Fog component reaches the frame's lighting (the first, if several).

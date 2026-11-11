@@ -174,7 +174,7 @@ FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHei
 }
 
 GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
-               std::uint64_t frame, float cameraFar) {
+               bool probesRead, std::uint64_t frame, float cameraFar) {
     GpuFog packed{};
 
     if (fog == nullptr || !settings.enabled) {
@@ -202,7 +202,7 @@ GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProj
 
     packed.options[0] = 1.0f;
     packed.options[1] = historyUsable ? settings.historyWeight : 0.0f;
-    packed.options[2] = settings.probeLight ? 1.0f : 0.0f;
+    packed.options[2] = settings.probeLight && probesRead ? 1.0f : 0.0f;
 
     const Vec3 jitter = fogJitter(frame);
     packed.jitter[0] = jitter.x;

@@ -1461,7 +1461,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Volumetric fog (render/gpu/volumetric_fog.h), its grid readied before the scene set points at it: the grid's camera
     // is the camera without the jitter (the froxels' own samples move instead), its samples turned every frame.
     const std::optional<Fog>& fogInAir = description.lighting.fog;
-    const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, memoryFrameNumber,
+    const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, !probes.empty(), memoryFrameNumber,
                                          camera.getFarPlane());
 
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed

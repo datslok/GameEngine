@@ -90,21 +90,21 @@ void VulkanFog::ensureGrid(const FogSettings& settings) {
     previousKnown = false;
 }
 
-GpuFog VulkanFog::prepare(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Vec3& cameraOrigin, std::uint64_t frame,
-                          float cameraFar) {
+GpuFog VulkanFog::prepare(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Vec3& cameraOrigin, bool probesRead,
+                          std::uint64_t frame, float cameraFar) {
     validateFog(settings);
     fogThisFrame = fog != nullptr && settings.enabled;
 
     if (!fogThisFrame) {
         previousKnown = false;
-        return packFog(nullptr, settings, viewProjection, viewProjection, false, frame, cameraFar);
+        return packFog(nullptr, settings, viewProjection, viewProjection, false, probesRead, frame, cameraFar);
     }
 
     ensureGrid(settings);
     const float range = std::min(settings.range, cameraFar);
     const bool historyUsable = previousKnown && previousRange == range;
     const Mat4 previous = historyUsable ? previousRelativeViewProjection(previousViewProjection, previousOrigin, cameraOrigin) : viewProjection;
-    const GpuFog packed = packFog(fog, settings, viewProjection, previous, historyUsable, frame, cameraFar);
+    const GpuFog packed = packFog(fog, settings, viewProjection, previous, historyUsable, probesRead, frame, cameraFar);
 
     previousViewProjection = viewProjection;
     previousOrigin = cameraOrigin;

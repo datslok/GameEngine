@@ -179,9 +179,11 @@ struct GpuFog {
 
 static_assert(sizeof(GpuFog) == 272, "GpuFog must match scene_fog.glsl's Fog");
 
-// The frame's record: off without a fog or with the setting off; the range no further than the camera's far plane.
+// The frame's record: off without a fog or with the setting off; the range no further than the camera's far plane; the
+// air lit by the light probes only when probesRead (the frame has them), since without them their reading falls back to
+// the open sky's light, which lit the air in closed rooms as outdoors (the sky visibility grid lights it instead).
 GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
-               std::uint64_t frame, float cameraFar);
+               bool probesRead, std::uint64_t frame, float cameraFar);
 
 // The picture pass's push constants (fog_apply.comp): the camera-relative view-projection's inverse as the frame was
 // drawn (jitter included), and the render size.
