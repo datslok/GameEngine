@@ -541,9 +541,11 @@ private:
     void bindCaptureScene(FrameContext& frame, VkPipelineLayout layout, VkDescriptorSet sceneSet, bool traceRays);
 
     // The scene drawn through a flat mirror into its picture, as a capture face is, the sky in it when there is one.
-    // Everything behind clipPlane (planarClipPlane) is cut away.
+    // Everything behind clipPlane (planarClipPlane) is cut away; eye is where it is seen from (the camera reflected across
+    // the mirror, measured from the camera), for its shading's view direction.
     void drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
-                              const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky);
+                              const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays, const Vec3& background,
+                              bool sky);
 
     void drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
                           bool traceRays, float farPlane, const Vec3& background, bool sky);

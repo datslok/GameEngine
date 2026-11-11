@@ -50,14 +50,19 @@ static_assert(sizeof(GpuShadowView) == 64, "GpuShadowView must match shadow.vert
 /*
 * A capture's view (a reflection probe cube face's, or a flat mirror's), pushed before its draws: the view-projection
 * (column-major, camera-relative) and the plane triangle.vert clips at (render/gpu/planar_reflection.h, planarClipPlane;
-* noClipPlane for the cube and for the passes that push it only because the shader names it).
+* noClipPlane for the cube and for the passes that push it only because the shader names it), and the eye the capture
+* is seen from, measured from the camera (xyz; w unused): the camera itself for the cube, the camera reflected across
+* the mirror for a mirror's picture (reflectAcrossPlane), which the capture's shading takes its view direction from. Seen
+* from the real camera instead, a wall facing the mirror with the camera behind it was looked up in the sky visibility
+* grid from its back (its lookup moved towards the camera, through the wall) and lit as open sky.
 */
 struct GpuCaptureView {
     float viewProjection[16];
     float clipPlane[4];
+    float eye[4];
 };
 
-static_assert(sizeof(GpuCaptureView) == 80, "GpuCaptureView must match triangle.vert's push constants");
+static_assert(sizeof(GpuCaptureView) == 96, "GpuCaptureView must match triangle.vert's push constants");
 
 /*
 * The frame's small uniform block (std140): for the vertex shader the camera's view-projection measured from the camera
@@ -97,7 +102,7 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
 GpuShadowView packShadowView(const Mat4& tileMatrix);
 
-GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane);
+GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye = Vec3{});
 
 GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProjection, const Vec3& cameraOrigin,
                            const ClusterGrid& clusters, bool clusteredShading, bool clusterHeatmap, const ShadowSettings& shadows = {});

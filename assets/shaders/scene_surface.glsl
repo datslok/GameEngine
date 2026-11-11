@@ -31,6 +31,12 @@ layout(location = 4) flat in uint materialIndex;
 // How much the object scales lengths, for lengths its material gives in model units (thick glass's thickness).
 layout(location = 5) flat in float objectScale;
 
+#ifdef PROBE_CAPTURE
+// Where a capture is seen from, measured from the camera: the camera for the probe's cube faces, the camera reflected
+// across the mirror for a mirror's picture (GpuCaptureView's eye).
+layout(location = 6) flat in vec3 viewerPosition;
+#endif
+
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
 
@@ -601,8 +607,14 @@ void main() {
     vec3 specular = vec3(0.0);
 
     float normalLength = length(surfaceNormal);
-    // The camera is at the origin, so the way to it is minus the fragment's position.
+    // The camera is at the origin, so the way to it is minus the fragment's position. A capture is seen from its own
+    // eye: a mirror's picture from the camera reflected across it, so the view direction (shading, and the sky
+    // visibility grid's lookup, moved towards the viewer) is the one the mirror shows.
+#ifdef PROBE_CAPTURE
+    vec3 cameraOffset = viewerPosition - relativePosition;
+#else
     vec3 cameraOffset = -relativePosition;
+#endif
     float cameraDistance = length(cameraOffset);
 
     // Without a usable normal there is no way to tell which side faces a light, so only ambient applies, seen head-on.

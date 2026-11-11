@@ -15,6 +15,7 @@ layout(constant_id = PROBE_CAPTURE_VERTEX_CONSTANT) const bool captureView = fal
 layout(push_constant) uniform CaptureView {
     mat4 captureViewProjection;
     vec4 captureClipPlane; // what is behind it is cut away: a mirror's plane (planarClipPlane), or one nothing is behind
+    vec4 captureEye;       // xyz: the eye it is seen from (the camera, or the camera reflected across the mirror)
 };
 
 // Every pipeline clamps depth rather than clip at the near plane, so a mirror's picture cuts what is behind the mirror
@@ -35,6 +36,8 @@ layout(location = 3) out vec4 worldTangent;
 layout(location = 4) flat out uint materialIndex;
 // How much the object scales lengths (uniformScale), for lengths its material gives in model units (thick glass).
 layout(location = 5) flat out float objectScale;
+// Where a capture is seen from, measured from the camera (the origin outside captures), for the fragments' view direction.
+layout(location = 6) flat out vec3 viewerPosition;
 
 // The depth prepass runs this same shader, and the main pass then shades only fragments whose depth EQUALS the one the
 // prepass stored. Invariant makes the compiler compute the position the same way in both pipelines, bit for bit (it
@@ -57,6 +60,7 @@ void main() {
     relativePosition = (model * vec4(position, 1.0)).xyz;
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
     gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
+    viewerPosition = captureView ? captureEye.xyz : vec3(0.0);
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;

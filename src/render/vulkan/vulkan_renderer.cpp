@@ -1528,7 +1528,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::PlanarReflection);
         const RenderSize size = planarReflection->getSize();
         drawPlanarReflection(frame, captureDraws[cubeFaceCount], sceneSet, traceProbes, captureTracesRays, mirrorViewProjection,
-                             planarClipPlane(planeRelativeTo(*mirror, cameraOrigin)),
+                             planarClipPlane(planeRelativeTo(*mirror, cameraOrigin)), reflectAcrossPlane(Vec3{}, planeRelativeTo(*mirror, cameraOrigin)),
                              mirroredRays(packRayDebugView(camera, RayDebugView::Off, size.width, size.height), *mirror), description.lighting.background, air.has_value());
 
         // How far the mirror shows, for fitting a later frame's mirror cascades, as the screen's depths are measured.
@@ -2274,7 +2274,8 @@ void VulkanRenderer::bindCaptureScene(FrameContext& frame, VkPipelineLayout layo
 * picture's blurrier levels (finishDraw).
 */
 void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraws& draws, VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays,
-                                          const Mat4& viewProjection, const Vec4& clipPlane, const GpuRayDebugView& skyRays, const Vec3& background, bool sky) {
+                                          const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays,
+                                          const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
     const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false, traceRays)];
     const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true, traceRays)]->get(), VK_CULL_MODE_FRONT_BIT};
@@ -2287,7 +2288,7 @@ void VulkanRenderer::drawPlanarReflection(FrameContext& frame, const BatchedDraw
     beginRendering(commands, {size.width, size.height}, &colour, &depthTarget);
     renderingOpen = true;
     bindCaptureScene(frame, layout, sceneSet, traceRays);
-    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane);
+    const GpuCaptureView view = packCaptureView(viewProjection, clipPlane, eye);
     vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
     stats.drawCalls += drawBatches(commands, draws.batches, capturing);
 
