@@ -1,6 +1,6 @@
 # GameEngine
 
-A game engine written from scratch in C++20, as a learning project.
+A game engine written from scratch in C++23, as a learning project.
 
 The long-term goal is an engine that can run both an **FPS** and a **MOBA**, and eventually a dressmaking game with real cloth physics. The core stays genre-agnostic, and genre-specific code (camera styles, weapons, abilities, netcode) sits on top.
 
@@ -224,7 +224,7 @@ The project is developed on **Windows** with **MSYS2** (UCRT64 environment). You
 | Software | Used for |
 |---|---|
 | [MSYS2](https://www.msys2.org/) | Shell, `make` and package manager |
-| GCC with C++20 support | Compiler (`g++`) |
+| GCC with C++23 support | Compiler (`g++`) |
 | SDL3 and SDL3_image | Window, input and image loading |
 | shaderc (`glslc`) | Compiling GLSL shaders to SPIR-V |
 | Vulkan headers and validation layers | Building the renderer, and checking it in debug builds |

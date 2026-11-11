@@ -21,7 +21,7 @@ else
 endif
 
 # Never -DNDEBUG (the tests rely on assert) or -ffast-math (it changes floating-point results and breaks NaN checks).
-CXXFLAGS := -std=c++20 -Wall -Wextra -g $(OPTIMISATION) $(BUILD_DEFINES)
+CXXFLAGS := -std=c++23 -Wall -Wextra -g $(OPTIMISATION) $(BUILD_DEFINES)
 # Includes are written from these roots, for example "math/vec3.h" and "cgltf/cgltf.h". VK_NO_PROTOTYPES: every Vulkan
 # function is a pointer volk fetches from the driver at run time (external/volk), never a symbol linked from the loader.
 CPPFLAGS := -Isrc -Iexternal -DVK_NO_PROTOTYPES

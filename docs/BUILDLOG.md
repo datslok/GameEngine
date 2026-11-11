@@ -1347,6 +1347,11 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 
 ## Tools outside the phases
 
+- `cpp23` (Nov 11 2026): the engine builds as C++23 (`-std=c++23`), not C++20. The user asked why C++20; it had been the makefile's flag since its first commit, never a recorded choice.
+  - **Why:** C++23 is nearly complete in GCC 16 and costs one flag. It brings `std::mdspan` (the grids: the distance field, froxels, atlases), `std::flat_map` (a map in a fixed order, for determinism), deducing `this` (one member function for `const` and not), `std::print` and smaller fixes. C++26 (static reflection, which could generate the settings' `visit()` lists and the state hash) waits until its support is stable.
+  - **How:** only the flag changed. No code uses C++23 yet: its features are to be taken up where they clearly help, not by rewriting working code.
+  - **Checked:** the debug game and the release tests build without a warning or an error; the release tests pass.
+
 - `ray-tracing-off` (Nov 1 2026): ray tracing off by default. The user: "lets turn off any rtx features by default first", before carrying on with self-collision on the GPU.
   - **Asked first; the user chose** one master switch (`RenderSettings::rayTracing`, "Ray tracing" in F5 Passes, `engine.render.passes.rayTracing`) over flipping each feature's own default, so one click turns ray tracing on and the quality presets stay about quality alone (Ultra still sets ray-traced reflections and mirrored lights, read only while the switch is on).
   - **What it covers:** ray-traced reflections, mirrored lights, tinted glass shadows, the reflection probe's traced sun shadow (its capture pipelines are now kept both ways) and the ray debug view, and, the user's choice too, the light probes: with no software tracer yet (phase 14) the default draws no bounce light, only the flat ambient. DLSS stays the default upscaler (no ray tracing in it).
