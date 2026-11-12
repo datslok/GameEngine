@@ -102,6 +102,8 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Cascades", settings.cascades, {.min = 1, .max = maxSkyVisibilityCascades});
     visitor.field("Rays", settings.rays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
     visitor.field("Quick rays", settings.quickRays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
+    visitor.field("Deep rays", settings.deepRays, {.min = 0, .max = 16384, .sliderMin = 0, .sliderMax = 4096});
+    visitor.field("Deep below escaped rays", settings.deepOpenRays, {.min = 1, .max = 1024, .sliderMin = 1, .sliderMax = 128});
     visitor.field("Store megabytes", settings.storeMegabytes, {.min = 0.0f, .max = 16384.0f, .sliderMin = 0.0f, .sliderMax = 1024.0f, .unit = "MB"});
     visitor.field("Ray length", settings.rayLength, {.min = 0.1f, .max = 1000.0f, .sliderMin = 5.0f, .sliderMax = 100.0f, .unit = "m"});
     visitor.field("Lookup bias", settings.lookupBias, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
@@ -131,6 +133,10 @@ void validateSkyVisibility(const SkyVisibilitySettings& settings) {
 
     if (settings.cascades < 1 || settings.cascades > maxSkyVisibilityCascades || settings.rays < 1 || settings.quickRays < 1) {
         throw std::invalid_argument("Sky visibility needs 1 to SKY_VISIBILITY_MAX_CASCADES cascades and at least 1 ray and quick ray");
+    }
+
+    if (settings.deepRays < 0 || settings.deepOpenRays < 1) {
+        throw std::invalid_argument("Sky visibility needs deep rays of at least 0 and a deep threshold of at least 1 escaped ray");
     }
 }
 

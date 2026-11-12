@@ -49,6 +49,7 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     openings.clear();
     frontHits.clear();
     int backFaces = 0;
+    int escaped = 0;
 
     for (int ray = 0; ray < rays; ++ray) {
         const Vec3 direction = skyVisibilityRay(ray, rays);
@@ -57,6 +58,7 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
         openings.push_back(hit ? 0.0f : 1.0f);
 
         if (!hit) {
+            ++escaped;
             continue;
         }
 
@@ -72,6 +74,7 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     SkyCell cell;
     cell.visibility = skyVisibilityFromRays(directions, openings);
     cell.state = static_cast<float>(backFaces) > skyVisibilityBuriedShare * static_cast<float>(rays) ? SkyCellState::Buried : SkyCellState::Baked;
+    cell.escapedRays = escaped;
 
     // Each channel's values in turn: zero for every ray, then each front hit's albedo times the light on it.
     if (!albedo.empty() && hitSampler) {
@@ -108,6 +111,14 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     }
 
     return cell;
+}
+
+bool skyWantsDeepRays(const SkyCell& cell, const SkyVisibilitySettings& settings) {
+    return settings.deepRays > settings.rays && cell.state == SkyCellState::Baked && cell.escapedRays > 0 && cell.escapedRays < settings.deepOpenRays;
+}
+
+double skySecondsAtFullRays(double secondsPerCell, int rays, int fullRays) {
+    return rays > 0 ? secondsPerCell * static_cast<double>(fullRays) / static_cast<double>(rays) : 0.0;
 }
 
 unsigned skyBackgroundWorkers(float share, unsigned hardwareThreads) {
@@ -184,7 +195,7 @@ void SkyCellStore::clear() {
     places.clear();
 }
 
-void SkyCellStore::keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, bool unfinished) {
+void SkyCellStore::keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, SkyBakeStage next) {
     const std::optional<std::uint64_t> key = storeKey(cascade, place);
 
     if (capacity == 0 || !key) {
@@ -195,12 +206,12 @@ void SkyCellStore::keep(int cascade, const ProbeGridCoord& place, const SkyCell&
 
     if (found != places.end()) {
         found->second->packed = packSkyCell(cell);
-        found->second->unfinished = unfinished;
+        found->second->next = next;
         used.splice(used.begin(), used, found->second);
         return;
     }
 
-    used.push_front(Entry{*key, packSkyCell(cell), unfinished});
+    used.push_front(Entry{*key, packSkyCell(cell), next});
     places.emplace(*key, used.begin());
     setCapacity(capacity);
 }
@@ -219,7 +230,7 @@ std::optional<StoredSkyCell> SkyCellStore::find(int cascade, const ProbeGridCoor
     }
 
     used.splice(used.begin(), used, found->second);
-    return StoredSkyCell{unpackSkyCell(found->second->packed), found->second->unfinished};
+    return StoredSkyCell{unpackSkyCell(found->second->packed), found->second->next};
 }
 
 void SkyCellStore::touch(int cascade, const ProbeGridCoord& place) {
@@ -288,10 +299,8 @@ void SkyVisibilityGrid::startAfresh() {
     isWaiting.assign(static_cast<std::size_t>(count), NotListed);
     waiting.assign(cascades.size(), {});
     waitingCount = 0;
-    isRefining.assign(static_cast<std::size_t>(count), 0);
-    refining.clear();
-    nextRefining = 0;
-    refiningCount = 0;
+    refining.reset(static_cast<std::size_t>(count));
+    deepening.reset(static_cast<std::size_t>(count));
 
     for (int cell = 0; cell < count; ++cell) {
         wait(cell);
@@ -303,7 +312,7 @@ void SkyVisibilityGrid::startAfresh() {
     ++version;
 }
 
-// A point waiting again (cleared by a move) is baked afresh at full rays, so it leaves refinement. One found in the
+// A point waiting again (cleared by a move) is baked afresh at full rays, so it leaves both queues. One found in the
 // store meanwhile is still listed, so it only waits again.
 void SkyVisibilityGrid::wait(int cell) {
     std::uint8_t& flag = isWaiting[static_cast<std::size_t>(cell)];
@@ -317,12 +326,8 @@ void SkyVisibilityGrid::wait(int cell) {
         ++waitingCount;
     }
 
-    std::uint8_t& refined = isRefining[static_cast<std::size_t>(cell)];
-
-    if (refined != 0) {
-        refined = 0;
-        --refiningCount;
-    }
+    refining.remove(cell);
+    deepening.remove(cell);
 }
 
 void SkyVisibilityGrid::arrive(std::size_t cascade, int cell, const ProbeCascade& now) {
@@ -346,29 +351,74 @@ void SkyVisibilityGrid::arrive(std::size_t cascade, int cell, const ProbeCascade
         --waitingCount;
     }
 
-    std::uint8_t& refined = isRefining[static_cast<std::size_t>(cell)];
+    queueNext(cell, found->next);
+}
 
-    if (refined != 0) {
-        refined = 0;
-        --refiningCount;
+void SkyVisibilityGrid::queueNext(int cell, SkyBakeStage next) {
+    if (next == SkyBakeStage::Refine) {
+        refining.push(cell);
+    } else {
+        refining.remove(cell);
     }
 
-    if (found->unfinished) {
-        queueRefine(cell);
+    if (next == SkyBakeStage::Deepen) {
+        deepening.push(cell);
+    } else {
+        deepening.remove(cell);
     }
 }
 
-// Once: a point already queued stays where it is in the queue.
-void SkyVisibilityGrid::queueRefine(int cell) {
-    std::uint8_t& refined = isRefining[static_cast<std::size_t>(cell)];
+void SkyVisibilityGrid::BakeQueue::reset(std::size_t cells) {
+    order.clear();
+    queued.assign(cells, 0);
+    next = 0;
+    count = 0;
+}
 
-    if (refined != 0) {
+// Once: a point already queued stays where it is in the queue.
+void SkyVisibilityGrid::BakeQueue::push(int cell) {
+    std::uint8_t& flag = queued[static_cast<std::size_t>(cell)];
+
+    if (flag != 0) {
         return;
     }
 
-    refined = 1;
-    refining.push_back(cell);
-    ++refiningCount;
+    flag = 1;
+    order.push_back(cell);
+    ++count;
+}
+
+void SkyVisibilityGrid::BakeQueue::remove(int cell) {
+    std::uint8_t& flag = queued[static_cast<std::size_t>(cell)];
+
+    if (flag != 0) {
+        flag = 0;
+        --count;
+    }
+}
+
+bool SkyVisibilityGrid::BakeQueue::contains(int cell) const {
+    return queued[static_cast<std::size_t>(cell)] != 0;
+}
+
+/*
+* Walked from its front, skipping points a move took out of it, until the batch is full; the walked part is dropped
+* once it is more than half the list.
+*/
+void SkyVisibilityGrid::BakeQueue::take(int maxCells, std::vector<int>& points) {
+    while (next < order.size() && static_cast<int>(points.size()) < maxCells) {
+        const int cell = order[next++];
+
+        if (contains(cell)) {
+            remove(cell);
+            points.push_back(cell);
+        }
+    }
+
+    if (next * 2 > order.size()) {
+        order.erase(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(next));
+        next = 0;
+    }
 }
 
 
@@ -401,13 +451,14 @@ void bakeSkyBatch(const StaticLevel& level, JobSystem& jobs, std::span<const Vec
 }
 
 // The places and positions are worked out now, while the cascades are those the points belong to.
-SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays, bool quick, bool refining) const {
+SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays, bool quick, bool refining, bool deepening) const {
     SkyBakeBatch batch;
     batch.rays = rays;
     batch.rayLength = shape.rayLength;
     batch.lookupBias = shape.lookupBias;
     batch.quick = quick;
     batch.refining = refining;
+    batch.deepening = deepening;
     batch.generation = generation;
     batch.entries.reserve(points.size());
 
@@ -486,6 +537,13 @@ int SkyVisibilityGrid::refine(const StaticLevel& level, JobSystem& jobs, int max
     return static_cast<int>(batch.entries.size());
 }
 
+int SkyVisibilityGrid::deepen(const StaticLevel& level, JobSystem& jobs, int maxCells, std::span<const Vec3> albedo) {
+    SkyBakeBatch batch = takeDeepBatch(maxCells);
+    bakeSkyBatch(level, jobs, albedo, batch);
+    applyBatch(batch);
+    return static_cast<int>(batch.entries.size());
+}
+
 SkyBakeBatch SkyVisibilityGrid::takeBatch(int maxCells, bool quick, const Vec3& forward) {
     const int count = std::min(maxCells, getWaiting());
     thread_local std::vector<int> points;
@@ -501,39 +559,34 @@ SkyBakeBatch SkyVisibilityGrid::takeBatch(int maxCells, bool quick, const Vec3& 
 
     waitingCount -= static_cast<int>(points.size());
     const bool refines = quick && shape.quickRays < shape.rays;
-    return makeBatch(points, refines ? shape.quickRays : shape.rays, refines, false);
+    return makeBatch(points, refines ? shape.quickRays : shape.rays, refines, false, false);
 }
 
-/*
-* The queue is walked from its front, skipping points a move took out of it, until the batch is full; those taken
-* leave it now, and replace their quick bake in the store when applied.
-*/
+// Those taken replace their earlier bake in the store when applied.
 SkyBakeBatch SkyVisibilityGrid::takeRefineBatch(int maxCells) {
     thread_local std::vector<int> points;
     points.clear();
+    refining.take(maxCells, points);
+    return makeBatch(points, shape.rays, false, true, false);
+}
 
-    while (nextRefining < refining.size() && static_cast<int>(points.size()) < maxCells) {
-        const int cell = refining[nextRefining++];
-        std::uint8_t& refined = isRefining[static_cast<std::size_t>(cell)];
+// The deep rays turned off (or no more than the rays) meanwhile: the queue is let go.
+SkyBakeBatch SkyVisibilityGrid::takeDeepBatch(int maxCells) {
+    thread_local std::vector<int> points;
+    points.clear();
 
-        if (refined != 0) {
-            refined = 0;
-            --refiningCount;
-            points.push_back(cell);
-        }
+    if (shape.deepRays <= shape.rays) {
+        deepening.reset(cells.size());
     }
 
-    if (nextRefining * 2 > refining.size()) {
-        refining.erase(refining.begin(), refining.begin() + static_cast<std::ptrdiff_t>(nextRefining));
-        nextRefining = 0;
-    }
-
-    return makeBatch(points, shape.rays, false, true);
+    deepening.take(maxCells, points);
+    return makeBatch(points, shape.deepRays, false, false, true);
 }
 
 /*
-* A quick point, or one baked (not refined) before the grid round its hits was, is to be baked again; the store keeps
-* it so. A point placed while queued for refinement (it came back from the store meanwhile) is refined by this result.
+* A quick point, or one baked (not refined) before the grid round its hits was, is to be baked again; one baked or
+* refined at the full rays that wants the deep rays is to get them; a deep bake is finished. The store keeps each so. A
+* point placed while queued (it came back from the store meanwhile) takes this result's next step instead.
 */
 void SkyVisibilityGrid::applyBatch(const SkyBakeBatch& batch) {
     if (batch.generation != generation || batch.entries.empty()) {
@@ -556,8 +609,15 @@ void SkyVisibilityGrid::applyBatch(const SkyBakeBatch& batch) {
             continue;
         }
 
-        const bool unfinished = !batch.refining && (batch.quick || result.unsureShare > skyUnsureRefineShare);
-        store.keep(entry.cascade, entry.place, result, unfinished);
+        SkyBakeStage next = SkyBakeStage::Finished;
+
+        if (!batch.deepening && !batch.refining && (batch.quick || result.unsureShare > skyUnsureRefineShare)) {
+            next = SkyBakeStage::Refine;
+        } else if (!batch.deepening && skyWantsDeepRays(result, shape)) {
+            next = SkyBakeStage::Deepen;
+        }
+
+        store.keep(entry.cascade, entry.place, result, next);
 
         if (!samePlace) {
             continue;
@@ -571,12 +631,7 @@ void SkyVisibilityGrid::applyBatch(const SkyBakeBatch& batch) {
             --waitingCount;
         }
 
-        if (unfinished) {
-            queueRefine(entry.cell);
-        } else if (isRefining[cell] != 0) {
-            isRefining[cell] = 0;
-            --refiningCount;
-        }
+        queueNext(entry.cell, next);
 
         if (!allChanged) {
             changedCells.push_back(entry.cell);
@@ -591,7 +646,11 @@ int SkyVisibilityGrid::getWaiting() const {
 }
 
 int SkyVisibilityGrid::getRefining() const {
-    return refiningCount;
+    return refining.count;
+}
+
+int SkyVisibilityGrid::getDeepening() const {
+    return deepening.count;
 }
 
 std::span<const ProbeCascade> SkyVisibilityGrid::getCascades() const {
@@ -603,7 +662,7 @@ std::span<const SkyCell> SkyVisibilityGrid::getCells() const {
 }
 
 std::string SkyVisibilityGrid::describePoints(const Vec3& place) const {
-    std::string text = std::format("waiting {}  refining {}", waitingCount, refiningCount);
+    std::string text = std::format("waiting {}  refining {}  deepening {}", waitingCount, refining.count, deepening.count);
     const char* const states[] = {"unknown", "baked", "buried"};
 
     for (std::size_t c = 0; c < cascades.size(); ++c) {
@@ -617,10 +676,11 @@ std::string SkyVisibilityGrid::describePoints(const Vec3& place) const {
             const std::size_t index = static_cast<std::size_t>(cascade.firstProbe + slot);
             const SkyCell& sky = cells[index];
             const Vec3 position = probePosition(volume, slot);
-            text += std::format("\n  ({:.2f} {:.2f} {:.2f}) {}{}{}  open {:.4f}  unsure {:.2f}  bounce {:.4f} {:.4f} {:.4f}", position.x, position.y, position.z,
-                                states[static_cast<std::size_t>(sky.state)], isWaiting[index] == Waiting ? ", waiting" : "",
-                                isRefining[index] != 0 ? ", quick" : "", sky.visibility.open, sky.unsureShare, sky.bounce[0].open, sky.bounce[1].open,
-                                sky.bounce[2].open);
+            const int slotIndex = static_cast<int>(index);
+            text += std::format("\n  ({:.2f} {:.2f} {:.2f}) {}{}{}{}  open {:.4f}  escaped {}  unsure {:.2f}  bounce {:.4f} {:.4f} {:.4f}", position.x, position.y,
+                                position.z, states[static_cast<std::size_t>(sky.state)], isWaiting[index] == Waiting ? ", waiting" : "",
+                                refining.contains(slotIndex) ? ", quick" : "", deepening.contains(slotIndex) ? ", deep" : "", sky.visibility.open,
+                                sky.escapedRays, sky.unsureShare, sky.bounce[0].open, sky.bounce[1].open, sky.bounce[2].open);
         }
     }
 

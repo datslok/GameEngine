@@ -67,6 +67,14 @@ struct SkyVisibilitySettings {
     // shape: changing it bakes nothing again.
     int quickRays = 64;
 
+    // A point whose full bake saw the sky through fewer than deepOpenRays rays is baked once more at deepRays, last of
+    // all (render/gpu/sky_visibility_bake.h, skyWantsDeepRays): k rays escaping measure the sky's share to about one
+    // part in the square root of k, so a room seen through a door (5 rays of 256, +-45%) showed blotches the grid's
+    // size; at 2,048 about 40 escape, +-16%. Points in the open or seeing no sky at all are left as they are. 0 (or no
+    // more than the rays) turns it off. Not part of the grid's shape: changing them bakes nothing again.
+    int deepRays = 2048;
+    int deepOpenRays = 32;
+
     // How much memory may keep baked points by their place in the world after they leave the grid (megabytes, 0 off),
     // so coming back to a place finds them instead of baking them again (render/gpu/sky_visibility_bake.h,
     // SkyCellStore). Used only as places are visited; the points used longest ago go first. Not part of the grid's shape.
@@ -97,11 +105,12 @@ struct SkyVisibilitySettings {
 void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for an ambient floor outside 0..1, a spacing or ray length not above 0, a negative bake
-// time, lookup bias or store, cascades outside 1..maxSkyVisibilityCascades, or rays or quick rays below 1.
+// time, lookup bias or store, cascades outside 1..maxSkyVisibilityCascades, rays or quick rays below 1, deep rays below
+// 0 or a deep threshold below 1.
 void validateSkyVisibility(const SkyVisibilitySettings& settings);
 
-// Whether two settings bake the same grid: everything but the ambient floor, the lookup bias, the budget, the quick rays,
-// the store and the view.
+// Whether two settings bake the same grid: everything but the ambient floor, the lookup bias, the budget, the quick and
+// deep rays, the store and the view.
 bool sameSkyVisibilityGrid(const SkyVisibilitySettings& a, const SkyVisibilitySettings& b);
 
 // The open sphere's two harmonic bands: a (the share open) and b (towards the open side). The default is all open.
@@ -172,6 +181,9 @@ struct SkyCell {
     // The bake's own note, not packed for the shaders: the share of its rays' front hits whose light was guessed
     // because the grid round them was not baked yet, which baking it again later would improve.
     float unsureShare = 0.0f;
+
+    // Also the bake's own: how many of its rays escaped to the sky (how sure its share is).
+    int escapedRays = 0;
 };
 
 /*

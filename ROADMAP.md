@@ -289,6 +289,7 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [x] Screen-space global illumination (`screen-space-gi`)
   - [x] Its noise averaged over frames and denoised before the upscalers see it, and the fill removed (`ao-temporal`)
 - [x] Sky visibility: rooms dark without probes, a CPU-baked grid of how much sky each point sees (`sky-visibility`; its screen fill removed in `ao-temporal`)
+  - [x] Deep rays where the sky is seen through few rays (`sky-adaptive-rays`)
 - [ ] The sky visibility grid as CPU light probes: its rays' hits lit, so the grid carries bounce light (designed Nov 11 2026)
   - [x] Stage 1: the sky's bounce, per unit of the flat ambient, from each triangle's albedo, in place of the guess (`sky-bounce`)
   - [ ] Stage 2: the sun's bounce, per unit of the sun's light, re-baked on a rolling budget as the sun moves
@@ -601,12 +602,15 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - Meshlets (meshoptimizer) and mesh shaders where the GPU has them.
   - A visibility buffer if scenes ever get dense enough to need it
 - [ ] Open-world scale: streaming textures and meshes in and out by distance, impostors for far objects, and a render graph that orders passes and places barriers from what each pass reads and writes, once the hand-placed barriers of phase 6b no longer keep up
+- [ ] The sky grid denoised: each point blended with its neighbours that see it (`skyCornerSees`, so never through a wall), weighted by how sure each is (its escaped rays), as bakers denoise lightmaps (added Nov 12 2026, after the deep rays near openings)
+- [ ] The sky grid's rays aimed at openings: doors and windows found automatically (rays that escaped, clustered by direction, or the level's gaps between rooms), more rays sent through them and weighted back (importance sampling, as bakers' portals), with no hand-placed volumes (added Nov 12 2026)
 - [ ] Sky visibility baked offline and streamed, for big worlds (added Nov 11 2026)
   - The grid only bakes against the static level, which does not change, so a level can be baked once, automatically (no hand-placed volumes), saved, and streamed in tiles by distance with the world, as open-world games do with their probe grids and sky occlusion.
   - Bake geometry, not light: what is baked (how much sky each place sees) is combined with the sun and sky at run time, so the time of day stays free.
   - Sparse, adaptive storage, following surfaces rather than volume: fine points (0.5-1 m) near walls, streets and interiors, coarse ones (several metres) over open ground and air, none inside solid buildings (bricks allocated only near geometry, or an octree subdividing only where the value changes; a uniform 0.5 m grid over the light lab's 800 x 800 m would be about 2.4 GB). Coarse tiles loaded first, read ahead along the camera's velocity.
   - The runtime store (`SkyCellStore`, `ao-temporal`) is its first half: points kept by their place in the world; this writes that store to disk.
   - The runtime bake stays for what changes (phase 15's falling buildings, re-baked locally by the background bake).
+  - Offline, it can afford thousands of rays a point (bakers use about 512 to 4,000 a texel), and the two cures below.
   - Agreed Nov 11 2026 (option C: the background bake first, `ao-bounce-unfog`, then this as its own project): what it stores is geometry and albedo (the sky's reach and the bounce per unit of sky light), so it is baked once per level; the sun's bounce (phase 16 stage 2) depends on the sun's place and stays a runtime layer on top. Plan it with a research write-up first (formats, sparse layouts, streaming, what shipped engines store), as for the other big systems.
 
 ### Tools and the rest
