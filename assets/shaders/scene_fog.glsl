@@ -47,21 +47,31 @@ FogIntegration fogVolumeTexel(vec2 across, int k) {
     return FogIntegration(texel.rgb, texel.a);
 }
 
+// Slice k's medium (fogSliceMedium) at a place across the screen, from the texels either side of it (the first
+// slice's for k below 0).
+FogMedium fogVolumeMedium(vec2 across, int k) {
+    int slice = max(k, 0);
+    int slices = int(frameFog.grid.z);
+    float range = frameFog.grid.w;
+    float length = fogSliceDepth(float(slice + 1) / float(slices), range) - fogSliceDepth(float(slice) / float(slices), range);
+    return fogSliceMedium(fogVolumeTexel(across, slice - 1), fogVolumeTexel(across, slice), length);
+}
+
 /*
-* The fog to a surface at a place in the grid (fogToSurface): never the slice the surface lies in, whose jittered light
-* sample may lie behind it, but the slice before carried on to it; in the first slice, and past the grid's end, the
-* grid as fogVolumeAt reads it.
+* The fog to a surface at a place in the grid (fogSurfaceRead): never the slice the surface lies in, whose jittered light
+* sample may lie behind it, but the grid up to one slice before the surface and over the last slice's depth a medium
+* sliding between the two slices before, continuous across slice boundaries; in the first slice, and past the grid's
+* end, the grid as fogVolumeAt reads it.
 */
 FogIntegration fogVolumeToSurface(vec3 coordinate) {
-    int slices = int(frameFog.grid.z);
-    int slice = fogSurfaceSlice(coordinate.z, slices);
+    FogSurfaceRead read = fogSurfaceRead(coordinate.z, int(frameFog.grid.z), frameFog.grid.w);
 
-    if (slice < 1 || slice >= slices) {
+    if (!read.extended) {
         return fogVolumeAt(coordinate);
     }
 
-    return fogToSurface(fogVolumeTexel(coordinate.xy, slice - 2), fogVolumeTexel(coordinate.xy, slice - 1),
-                        fogSurfaceShare(coordinate.z, slices, frameFog.grid.w));
+    FogMedium medium = mixFogMedium(fogVolumeMedium(coordinate.xy, read.last - 1), fogVolumeMedium(coordinate.xy, read.last), read.mixShare);
+    return fogFollow(fogVolumeAt(vec3(coordinate.xy, read.front)), fogThroughMedium(medium, read.stretch));
 }
 
 // The light the fog past the grid scatters towards the eye along a view direction per unit of optical depth: the

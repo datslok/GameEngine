@@ -145,29 +145,43 @@ FogSliceRead fogSliceRead(float slice, int slices) {
     return FogSliceRead{std::clamp(slice - half, half, 1.0f - half), std::clamp(slice * count, 0.0f, 1.0f)};
 }
 
-int fogSurfaceSlice(float slice, int slices) {
-    return std::clamp(static_cast<int>(std::floor(slice * static_cast<float>(slices))), 0, slices);
+FogMedium fogSliceMedium(const FogIntegration& before, const FogIntegration& after, float length) {
+    if (!(before.transmittance > 0.0f) || !(length > 0.0f)) {
+        return FogMedium{};
+    }
+
+    const float through = std::clamp(after.transmittance / before.transmittance, 0.0f, 1.0f);
+    const Vec3 sliceLight = (after.light - before.light) * (1.0f / before.transmittance);
+    const Vec3 light{std::max(sliceLight.x, 0.0f), std::max(sliceLight.y, 0.0f), std::max(sliceLight.z, 0.0f)};
+    const float extinction = -std::log(std::max(through, std::exp(-static_cast<float>(FOG_MAX_EXPONENT)))) / length;
+
+    // Light per metre: the slice's light S (1 - T) is S extinction per metre over its length; nearly clear, its light
+    // over its length (the same limit, without dividing by nothing).
+    const float opaque = 1.0f - through;
+    return FogMedium{opaque > 1e-4f ? light * (extinction / opaque) : light * (1.0f / length), extinction};
 }
 
-float fogSurfaceShare(float slice, int slices, float range) {
+FogMedium mixFogMedium(const FogMedium& a, const FogMedium& b, float t) {
+    return FogMedium{a.light + (b.light - a.light) * t, a.extinction + (b.extinction - a.extinction) * t};
+}
+
+FogIntegration fogThroughMedium(const FogMedium& medium, float length) {
+    const float depth = medium.extinction * length;
+    const float through = std::exp(-depth);
+    return FogIntegration{depth > 1e-4f ? medium.light * ((1.0f - through) / medium.extinction) : medium.light * length, through};
+}
+
+FogSurfaceRead fogSurfaceRead(float slice, int slices, float range) {
     const float count = static_cast<float>(slices);
-    const float index = std::floor(slice * count);
-    const float start = fogSliceDepth(index / count, range);
-    const float before = fogSliceDepth((index - 1.0f) / count, range);
-    return (fogSliceDepth(slice, range) - start) / std::max(start - before, 1e-6f);
-}
+    const float place = slice * count;
 
-FogIntegration fogToSurface(const FogIntegration& twoBack, const FogIntegration& oneBack, float share) {
-    const bool seen = twoBack.transmittance > 0.0f;
-    const float through = seen ? std::clamp(oneBack.transmittance / twoBack.transmittance, 0.0f, 1.0f) : 1.0f;
-    const Vec3 sliceLight = seen ? (oneBack.light - twoBack.light) * (1.0f / twoBack.transmittance) : Vec3{0.0f, 0.0f, 0.0f};
-    const float stretchThrough = std::pow(through, share);
-    // The slice's light over a share of its depth: S (1 - T^share) for S = its light / (1 - T), or the share itself
-    // as T nears 1 (the same limit, without dividing by nothing).
-    const float lightShare = 1.0f - through > 1e-4f ? (1.0f - stretchThrough) / (1.0f - through) : share;
-    const Vec3 light = sliceLight * lightShare;
-    const FogIntegration stretch{Vec3{std::max(light.x, 0.0f), std::max(light.y, 0.0f), std::max(light.z, 0.0f)}, stretchThrough};
-    return fogFollow(oneBack, stretch);
+    if (place < 1.0f || place >= count) {
+        return FogSurfaceRead{};
+    }
+
+    const float index = std::floor(place);
+    const float front = (place - 1.0f) / count;
+    return FogSurfaceRead{true, static_cast<int>(index) - 1, place - index, front, fogSliceDepth(slice, range) - fogSliceDepth(front, range)};
 }
 
 float fogHistoryWeight(const Vec3& previousCoordinate, float weight) {

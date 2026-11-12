@@ -113,7 +113,8 @@ namespace {
             report.check("fogDepthSlice", transcendentalTolerance, fogDepthSlice(vec3From(in[8]).length(), range), out[1][3]);
             report.check("fogSliceRead", arithmeticTolerance, Vec3{read.z, read.share, 0.0f}, Vec3{out[2][0], out[2][1], 0.0f});
             report.check("fogHistoryWeight", exactTolerance, fogHistoryWeight(coordinate * 1.2f - Vec3{0.1f, 0.1f, 0.1f}, in[10][3]), out[2][2]);
-            report.check("fogSurfaceShare", transcendentalTolerance, fogSurfaceShare(coordinate.z, slices, range), out[2][3]);
+            const FogSurfaceRead surfaceRead = fogSurfaceRead(coordinate.z, slices, range);
+            report.check("fogSurfaceRead", transcendentalTolerance, surfaceRead.extended ? surfaceRead.stretch + static_cast<float>(surfaceRead.last) + surfaceRead.mix : -1.0f, out[2][3]);
         }
     }
 
@@ -158,9 +159,10 @@ namespace {
             report.check("fogComposite", arithmeticTolerance, fogComposite(vec3From(in[5]), soFar), vec3From(out[4]));
             report.check("fogOverGlass", arithmeticTolerance, fogOverGlass(vec3From(in[6]), vec3From(in[5]), soFar), vec3From(out[5]));
             report.check("fogRemoved", arithmeticTolerance, fogRemoved(vec3From(in[5]) + soFar.light * 0.8f, soFar), vec3From(out[6]));
-            const FogIntegration surface = fogToSurface(soFar, followed, in[2][3] / 40.0f);
-            report.check("fogToSurface", transcendentalTolerance, surface.light, vec3From(out[7]));
-            report.check("fogToSurface", transcendentalTolerance, surface.transmittance, out[7][3]);
+            const FogMedium medium = mixFogMedium(fogSliceMedium(soFar, followed, in[2][3] + 0.1f), FogMedium{vec3From(in[6]), in[1][3]}, in[0][3] * 0.5f + 0.5f);
+            const FogIntegration through = fogThroughMedium(medium, in[2][3] * 0.5f);
+            report.check("fogSliceMedium, mixFogMedium, fogThroughMedium", transcendentalTolerance, through.light, vec3From(out[7]));
+            report.check("fogSliceMedium, mixFogMedium, fogThroughMedium", transcendentalTolerance, through.transmittance, out[7][3]);
         }
     }
 }

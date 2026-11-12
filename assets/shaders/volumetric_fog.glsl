@@ -99,25 +99,52 @@ vec2 fogSliceRead(float slice, int slices) {
     return vec2(clamp(slice - halfTexel, halfTexel, 1.0 - halfTexel), clamp(slice * count, 0.0, 1.0));
 }
 
-int fogSurfaceSlice(float slice, int slices) {
-    return clamp(int(floor(slice * float(slices))), 0, slices);
+struct FogMedium {
+    vec3 light;
+    float extinction;
+};
+
+FogMedium fogSliceMedium(FogIntegration before, FogIntegration after, float length) {
+    if (!(before.transmittance > 0.0) || !(length > 0.0)) {
+        return FogMedium(vec3(0.0), 0.0);
+    }
+
+    float through = clamp(after.transmittance / before.transmittance, 0.0, 1.0);
+    vec3 light = max((after.light - before.light) * (1.0 / before.transmittance), vec3(0.0));
+    float extinction = -log(max(through, exp(-float(FOG_MAX_EXPONENT)))) / length;
+    float opaque = 1.0 - through;
+    return FogMedium(opaque > 1e-4 ? light * (extinction / opaque) : light * (1.0 / length), extinction);
 }
 
-float fogSurfaceShare(float slice, int slices, float range) {
+FogMedium mixFogMedium(FogMedium a, FogMedium b, float t) {
+    return FogMedium(a.light + (b.light - a.light) * t, a.extinction + (b.extinction - a.extinction) * t);
+}
+
+FogIntegration fogThroughMedium(FogMedium medium, float length) {
+    float depth = medium.extinction * length;
+    float through = exp(-depth);
+    return FogIntegration(depth > 1e-4 ? medium.light * ((1.0 - through) / medium.extinction) : medium.light * length, through);
+}
+
+struct FogSurfaceRead {
+    bool extended;
+    int last;
+    float mixShare;
+    float front;
+    float stretch;
+};
+
+FogSurfaceRead fogSurfaceRead(float slice, int slices, float range) {
     float count = float(slices);
-    float index = floor(slice * count);
-    float start = fogSliceDepth(index / count, range);
-    float before = fogSliceDepth((index - 1.0) / count, range);
-    return (fogSliceDepth(slice, range) - start) / max(start - before, 1e-6);
-}
+    float place = slice * count;
 
-FogIntegration fogToSurface(FogIntegration twoBack, FogIntegration oneBack, float share) {
-    bool seen = twoBack.transmittance > 0.0;
-    float through = seen ? clamp(oneBack.transmittance / twoBack.transmittance, 0.0, 1.0) : 1.0;
-    vec3 sliceLight = seen ? (oneBack.light - twoBack.light) * (1.0 / twoBack.transmittance) : vec3(0.0);
-    float stretchThrough = pow(through, share);
-    float lightShare = 1.0 - through > 1e-4 ? (1.0 - stretchThrough) / (1.0 - through) : share;
-    return fogFollow(oneBack, FogIntegration(max(sliceLight * lightShare, vec3(0.0)), stretchThrough));
+    if (place < 1.0 || place >= count) {
+        return FogSurfaceRead(false, 0, 0.0, 0.0, 0.0);
+    }
+
+    float index = floor(place);
+    float front = (place - 1.0) / count;
+    return FogSurfaceRead(true, int(index) - 1, place - index, front, fogSliceDepth(slice, range) - fogSliceDepth(front, range));
 }
 
 float fogHistoryWeight(vec3 previousCoordinate, float weight) {
