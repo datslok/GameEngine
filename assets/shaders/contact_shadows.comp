@@ -3,11 +3,13 @@
 
 /*
 * Contact shadows (render/gpu/contact_shadows.h), one invocation per render pixel, after the depth prepass and before
-* the main pass: the march contactShadowAt mirrors. From the pixel's surface towards the light in even steps (their start
+* the main pass: the march contactShadowAt and contactShadowTowards mirror. From the pixel's surface towards the sun, and
+* towards each local light that reaches it (stopping its clearance short of the light), in even steps (their start
 * turned by blue noise and the frame), each projected onto the screen and tested against the depth image there; the
-* first step that crossed a surface since the last (now behind it within a step's reach) leaves its darkness, faded at the screen's edge and with the pixel's distance; steps landing on a
-* cut-out (the prepass's solid mask) are passed over. The mask (1 lit, 0 in shadow) the main pass multiplies the sun's
-* shadow by.
+* first step that crossed a surface since the last (now behind it within a step's reach) leaves its darkness, faded at
+* the screen's edge and with the pixel's distance; steps landing on a cut-out (the prepass's solid mask) are passed
+* over. Two masks (1 lit, 0 in shadow) the main pass multiplies shadows by: the sun's, and the local lights' a channel
+* each.
 */
 #include "render/gpu/depth_shared.h"
 #include "screen_reflections.glsl"
@@ -21,15 +23,63 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     mat4 viewProjection;        // camera-relative, as the frame was drawn (jitter included)
     mat4 inverseViewProjection;
     vec4 size;                  // xy: the render size in pixels, zw: their inverses
-    vec4 toLight;               // xyz: the unit way to the light, w: a pixel's footprint per metre of view distance
+    vec4 toLight;               // xyz: the unit way to the sun, w: a pixel's footprint per metre of view distance
     vec4 options;               // x: length, y: steps, z: a step's reach, w: the frame's turn of the noise
     vec4 fade;                  // x: where the fade starts, y: where it ends (view distance)
+    vec4 lightPositionRange[CONTACT_MAX_LIGHTS]; // each local light: xyz camera-relative, w its range
+    vec4 lightBeam[CONTACT_MAX_LIGHTS];          // xyz its beam, w the cosine of its cone (CONTACT_NO_CONE for a point light)
+    float lightStop[CONTACT_MAX_LIGHTS];         // how far short of it a march stops
+    vec4 lightOptions;          // x: how many local lights, y: 1 when the sun marches too
 } pass;
 
-layout(set = 0, binding = 1) uniform sampler2D depth;                // exact texels
-layout(set = 0, binding = 2) uniform sampler2D blueNoise;            // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
-layout(set = 0, binding = 3) uniform sampler2D solidMask;            // the depth prepass's: 1 solid, 0 a cut-out nearest, exact texels
-layout(set = 0, binding = 4, r32f) uniform writeonly image2D shadow; // 1 lit, 0 in shadow
+layout(set = 0, binding = 1) uniform sampler2D depth;                     // exact texels
+layout(set = 0, binding = 2) uniform sampler2D blueNoise;                 // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
+layout(set = 0, binding = 3) uniform sampler2D solidMask;                 // the depth prepass's: 1 solid, 0 a cut-out nearest, exact texels
+layout(set = 0, binding = 4, r32f) uniform writeonly image2D shadow;      // the sun's: 1 lit, 0 in shadow
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D lights;   // the local lights', a channel each
+
+// One march from the pixel's surface at start (view distance startDistance, its fade) along toLight for marchLength.
+float contactMarch(vec3 start, float startDistance, float fadeHere, vec3 toLight, float marchLength, float noise) {
+    int steps = int(pass.options.y);
+    float bias = contactBias(pass.toLight.w, startDistance);
+    float reach = contactStepReach(marchLength, steps);
+    float previousBehind = 0.0; // the start lies on its own surface
+
+    for (int stepIndex = 0; stepIndex < steps; ++stepIndex) {
+        vec3 point = start + toLight * contactStepDistance(stepIndex, steps, noise, marchLength);
+        vec4 clip = pass.viewProjection * vec4(point, 1.0);
+
+        if (clip.w < float(CONTACT_NEAREST_W)) {
+            break;
+        }
+
+        vec3 onScreen = clipToScreen(clip, pass.size.xy);
+
+        if (onScreen.x < 0.0 || onScreen.y < 0.0 || onScreen.x >= pass.size.x || onScreen.y >= pass.size.y) {
+            break;
+        }
+
+        ivec2 sceneTexel = ivec2(onScreen.xy);
+        float sceneDepth = texelFetch(depth, sceneTexel, 0).r;
+
+        // The sky, and cut-outs (a millimetre of wire would count as a step deep; their shadow maps draw them), are
+        // passed over (counted as in front).
+        if (sceneDepth == float(GPU_FAR_DEPTH) || texelFetch(solidMask, sceneTexel, 0).r < 0.5) {
+            previousBehind = 0.0;
+            continue;
+        }
+
+        float behind = clip.w - viewDistanceAtPixel(pass.inverseViewProjection, vec2(sceneTexel) + 0.5, sceneDepth, pass.size.xy);
+
+        if (contactBlocked(previousBehind, behind, bias, reach)) {
+            return 1.0 - fadeHere * contactEdgeFade(onScreen.xy, pass.size.xy);
+        }
+
+        previousBehind = behind;
+    }
+
+    return 1.0;
+}
 
 void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -40,58 +90,34 @@ void main() {
     }
 
     float pixelDepth = texelFetch(depth, texel, 0).r;
+    float sunLit = 1.0;
+    vec4 lightsLit = vec4(1.0);
 
-    if (pixelDepth == float(GPU_FAR_DEPTH)) {
-        imageStore(shadow, texel, vec4(1.0));
-        return;
-    }
+    if (pixelDepth != float(GPU_FAR_DEPTH)) {
+        vec2 pixel = vec2(texel) + 0.5;
+        float viewDistance = viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
+        float fadeHere = contactDistanceFade(viewDistance, pass.fade.x, pass.fade.y);
 
-    vec2 pixel = vec2(texel) + 0.5;
-    float viewDistance = viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
-    float fade = contactDistanceFade(viewDistance, pass.fade.x, pass.fade.y);
-    float lit = 1.0;
+        if (fadeHere > 0.0) {
+            vec3 start = positionAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
+            float noise = fract(texelFetch(blueNoise, texel % AO_BLUE_NOISE_SIZE, 0).g + pass.options.w);
 
-    if (fade > 0.0) {
-        vec3 start = positionAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
-        float bias = contactBias(pass.toLight.w, viewDistance);
-        float noise = fract(texelFetch(blueNoise, texel % AO_BLUE_NOISE_SIZE, 0).g + pass.options.w);
-        int steps = int(pass.options.y);
-        float previousBehind = 0.0; // the start lies on its own surface
-
-        for (int stepIndex = 0; stepIndex < steps; ++stepIndex) {
-            vec3 point = start + pass.toLight.xyz * contactStepDistance(stepIndex, steps, noise, pass.options.x);
-            vec4 clip = pass.viewProjection * vec4(point, 1.0);
-
-            if (clip.w < float(CONTACT_NEAREST_W)) {
-                break;
+            if (pass.lightOptions.y > 0.5) {
+                sunLit = contactMarch(start, viewDistance, fadeHere, pass.toLight.xyz, pass.options.x, noise);
             }
 
-            vec3 onScreen = clipToScreen(clip, pass.size.xy);
+            int count = int(pass.lightOptions.x);
 
-            if (onScreen.x < 0.0 || onScreen.y < 0.0 || onScreen.x >= pass.size.x || onScreen.y >= pass.size.y) {
-                break;
+            for (int light = 0; light < count; ++light) {
+                vec4 ray = contactLightRay(pass.lightPositionRange[light], pass.lightBeam[light], pass.lightStop[light], start, pass.options.x);
+
+                if (ray.w > 0.0) {
+                    lightsLit[light] = contactMarch(start, viewDistance, fadeHere, ray.xyz, ray.w, noise);
+                }
             }
-
-            ivec2 sceneTexel = ivec2(onScreen.xy);
-            float sceneDepth = texelFetch(depth, sceneTexel, 0).r;
-
-            // The sky, and cut-outs (a millimetre of wire would count as thickness deep; their shadow maps draw them).
-            // (counted as in front).
-            if (sceneDepth == float(GPU_FAR_DEPTH) || texelFetch(solidMask, sceneTexel, 0).r < 0.5) {
-                previousBehind = 0.0;
-                continue;
-            }
-
-            float behind = clip.w - viewDistanceAtPixel(pass.inverseViewProjection, vec2(sceneTexel) + 0.5, sceneDepth, pass.size.xy);
-
-            if (contactBlocked(previousBehind, behind, bias, pass.options.z)) {
-                lit = 1.0 - fade * contactEdgeFade(onScreen.xy, pass.size.xy);
-                break;
-            }
-
-            previousBehind = behind;
         }
     }
 
-    imageStore(shadow, texel, vec4(lit));
+    imageStore(shadow, texel, vec4(sunLit));
+    imageStore(lights, texel, lightsLit);
 }

@@ -10,6 +10,7 @@
 
 #include "test_levels.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <optional>
@@ -34,6 +35,7 @@ namespace {
         const ContactShadowSettings defaults;
         assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 32);
         assert(defaults.fadeStart == 40.0f && defaults.fadeEnd == 60.0f);
+        assert(defaults.localLights == CONTACT_MAX_LIGHTS && CONTACT_MAX_LIGHTS == 4);
         assert(contactStepReach(0.3f, 32) == 0.3f / 32.0f);
         validateContactShadows(defaults);
 
@@ -45,6 +47,12 @@ namespace {
         assert(rejects(bad));
         bad = {};
         bad.steps = CONTACT_MAX_STEPS + 1;
+        assert(rejects(bad));
+        bad = {};
+        bad.localLights = -1;
+        assert(rejects(bad));
+        bad = {};
+        bad.localLights = CONTACT_MAX_LIGHTS + 1;
         assert(rejects(bad));
         bad = {};
         bad.fadeEnd = bad.fadeStart - 1.0f;
@@ -355,6 +363,135 @@ namespace {
         }
     }
 
+    /*
+    * The way and length of a march towards a point or spot light from a point (camera-relative): towards the light, as
+    * long as the settings' length but stopping the clearance short of the light (its own bulb's glowing mesh must not
+    * shadow it); none out of its range, outside a spot's cone, or nearer the light than the clearance.
+    */
+    void testTheRayTowardsALight() {
+        const ContactLight lamp{Vec3{0.0f, 2.0f, 0.0f}, 5.0f, Vec3{0.0f, 0.0f, -1.0f}, static_cast<float>(CONTACT_NO_CONE), 0.3f};
+        const std::optional<ContactRay> up = contactLightRay(lamp, Vec3{0.0f, 0.0f, 0.0f}, 0.3f);
+        assert(up && near(up->toLight.y, 1.0f, 1e-6f) && near(up->length, 0.3f, 1e-6f));
+
+        const std::optional<ContactRay> close = contactLightRay(lamp, Vec3{0.0f, 1.5f, 0.0f}, 0.3f);
+        assert(close && near(close->length, 0.2f, 1e-6f));
+        assert(!contactLightRay(lamp, Vec3{0.0f, 1.8f, 0.0f}, 0.3f));
+
+        ContactLight short_ = lamp;
+        short_.range = 1.0f;
+        assert(!contactLightRay(short_, Vec3{0.0f, 0.0f, 0.0f}, 0.3f));
+
+        ContactLight downwards = lamp;
+        downwards.beam = Vec3{0.0f, -1.0f, 0.0f};
+        downwards.cosOuter = std::cos(0.44f);
+        assert(contactLightRay(downwards, Vec3{0.1f, 0.0f, 0.0f}, 0.3f));
+        ContactLight sideways = downwards;
+        sideways.beam = Vec3{1.0f, 0.0f, 0.0f};
+        assert(!contactLightRay(sideways, Vec3{0.1f, 0.0f, 0.0f}, 0.3f));
+
+        // The clearance: the light's own glowing size and CONTACT_LIGHT_CLEARANCE past it.
+        assert(near(contactLightStop(0.05f), 0.05f + static_cast<float>(CONTACT_LIGHT_CLEARANCE), 1e-6f));
+    }
+
+    /*
+    * The march towards a lamp at real pixels: a lamp low in the east shadows the floor just west of the block, as the
+    * low sun did; a lamp high over the floor point (the block not in the way), one out of reach and a spot turned away
+    * leave it lit. A block round the lamp itself (its bulb's glowing mesh) casts nothing on the floor beside it, the march
+    * stopping short of the light; with no clearance the march would walk into it.
+    */
+    void testTheMarchTowardsALamp() {
+        const StaticLevel level = blockOnAFloor();
+        const Camera camera = sceneCamera();
+        const Mat4 viewProjection = cameraRelativeViewProjection(camera);
+        const Mat4 inverseViewProjection = *inverse(viewProjection);
+        const std::vector<float> depths = drawDepths(level, camera, viewProjection, inverseViewProjection);
+        const AoDepthImage depthAt = [&](int x, int y) {
+            return depths[static_cast<std::size_t>(y) * screen.width + static_cast<std::size_t>(x)];
+        };
+
+        ContactShadowSettings settings;
+        settings.length = 0.5f;
+        const ContactShadowView view = contactShadowView(viewProjection, inverseViewProjection, screen, Vec3{0.0f, 1.0f, 0.0f}, settings);
+        const auto lampAt = [&](const Vec3& world, float range) {
+            return ContactLight{world - camera.getPosition(), range, Vec3{0.0f, 0.0f, -1.0f}, static_cast<float>(CONTACT_NO_CONE), contactLightStop(0.05f)};
+        };
+        const Vec2 westFloor = pixelOf(viewProjection, camera, Vec3{-0.25f, 0.0f, 0.0f});
+
+        assert(contactShadowTowards(view, depthAt, westFloor, 0.5f, lampAt(Vec3{1.0f, 0.35f, 0.0f}, 5.0f)) < 0.01f);
+        assert(contactShadowTowards(view, depthAt, westFloor, 0.5f, lampAt(Vec3{-0.25f, 3.0f, 0.0f}, 5.0f)) == 1.0f);
+        assert(contactShadowTowards(view, depthAt, westFloor, 0.5f, lampAt(Vec3{1.0f, 0.35f, 0.0f}, 1.0f)) == 1.0f);
+
+        ContactLight turnedAway = lampAt(Vec3{1.0f, 0.35f, 0.0f}, 5.0f);
+        turnedAway.beam = Vec3{1.0f, 0.0f, 0.0f};
+        turnedAway.cosOuter = std::cos(0.44f);
+        assert(contactShadowTowards(view, depthAt, westFloor, 0.5f, turnedAway) == 1.0f);
+
+        // A bulb's glowing mesh round a lamp low beside the floor point, its west face towards the camera: the march stops
+        // the clearance short of the lamp and never meets it; with no clearance it walks into that face.
+        StaticLevel bulbLevel = flatLevel();
+        bulbLevel.add(block(Vec3{0.5f, 0.05f, -0.1f}, Vec3{0.7f, 0.25f, 0.1f}));
+        const std::vector<float> bulbDepths = drawDepths(bulbLevel, camera, viewProjection, inverseViewProjection);
+        const AoDepthImage bulbDepthAt = [&](int x, int y) {
+            return bulbDepths[static_cast<std::size_t>(y) * screen.width + static_cast<std::size_t>(x)];
+        };
+        const Vec2 besideBulb = pixelOf(viewProjection, camera, Vec3{0.3f, 0.0f, 0.0f});
+        ContactLight bulb = lampAt(Vec3{0.6f, 0.15f, 0.0f}, 5.0f);
+        assert(contactShadowTowards(view, bulbDepthAt, besideBulb, 0.5f, bulb) == 1.0f);
+        bulb.stop = 0.0f;
+        assert(contactShadowTowards(view, bulbDepthAt, besideBulb, 0.5f, bulb) < 0.01f);
+    }
+
+    /*
+    * The lights that get a contact shadow channel: only seated lights holding a shadow, ranked by how brightly they light
+    * the focus (light priority's measure), at most count; last frame's keep theirs unless a rival is clearly brighter
+    * (incumbentAdvantage). Each is named in the frame's data by its slot, spotlights past CONTACT_SPOT_SLOT_BASE, -1 for an
+    * empty channel.
+    */
+    void testChoosingTheLights() {
+        const auto point = [](float x, std::uint32_t entity, bool shadowed) {
+            PlacedPointLight placed;
+            placed.position = Vec3{x, 2.0f, 0.0f};
+            placed.light.castsShadows = shadowed;
+            placed.entity = Entity{entity, 1};
+            return placed;
+        };
+        FrameLighting seated;
+        seated.pointLights = {point(10.0f, 1, true), point(0.0f, 2, false), point(1.0f, 3, true), point(30.0f, 4, true)};
+        PlacedSpotLight spot;
+        spot.position = Vec3{0.5f, 2.0f, 0.0f};
+        spot.entity = Entity{5, 1};
+        seated.spotLights = {spot};
+        const Vec3 focus{0.0f, 0.0f, 0.0f};
+
+        const std::vector<ContactLightPick> two = chooseContactLights(seated, focus, {}, 2, 1.25f);
+        assert(two.size() == 2);
+        assert(two[0].kind == ContactLightKind::Spot && two[0].slot == 0);
+        assert(two[1].kind == ContactLightKind::Point && two[1].slot == 2);
+
+        const std::vector<ContactLightPick> all = chooseContactLights(seated, focus, {}, 4, 1.25f);
+        assert(all.size() == 4);
+        for (const ContactLightPick& pick : all) {
+            assert(!(pick.kind == ContactLightKind::Point && pick.slot == 1));
+        }
+        assert(chooseContactLights(seated, focus, {}, 0, 1.25f).empty());
+
+        // The point light at 1 m lights the focus a little less than the spot at 0.5 m: holding a channel, it keeps it.
+        const std::vector<ContactLightPick> kept = chooseContactLights(seated, focus, {Entity{3, 1}}, 1, 1.25f);
+        assert(kept.size() == 1 && kept[0].kind == ContactLightKind::Point && kept[0].slot == 2);
+
+        const std::array<std::int32_t, CONTACT_MAX_LIGHTS> codes = contactLightSlotCodes(two);
+        assert(codes[0] == CONTACT_SPOT_SLOT_BASE && codes[1] == 2 && codes[2] == -1 && codes[3] == -1);
+
+        // A pick's march target, measured from the camera, with its range, cone and clearance.
+        const Vec3 cameraPosition{0.0f, 1.0f, 5.0f};
+        const ContactLight target = contactLightFor(seated, two[1], cameraPosition);
+        assert(near(target.position.x, 1.0f, 1e-6f) && near(target.position.y, 1.0f, 1e-6f) && near(target.position.z, -5.0f, 1e-6f));
+        assert(target.range == seated.pointLights[2].light.range && target.cosOuter == static_cast<float>(CONTACT_NO_CONE));
+        assert(near(target.stop, contactLightStop(seated.pointLights[2].light.emitterRadius), 1e-6f));
+        const ContactLight spotTarget = contactLightFor(seated, two[0], cameraPosition);
+        assert(near(spotTarget.cosOuter, std::cos(spot.light.outerAngle), 1e-6f));
+    }
+
     // The pass record: the matrices column-major, the size and its inverse, the way to the light with the pixel's
     // footprint, the options and the frame's noise turn, the fades.
     void testPacking() {
@@ -371,6 +508,15 @@ namespace {
         assert(near(pass.options[3], contactNoiseTurn(3), 0.0f) && contactNoiseTurn(3) >= 0.0f && contactNoiseTurn(3) < 1.0f);
         assert(contactNoiseTurn(0) == 0.0f && contactNoiseTurn(1) != contactNoiseTurn(2));
         assert(pass.fade[0] == 40.0f && pass.fade[1] == 60.0f);
+
+        // Without lights: the sun alone. With them: each light's place and range, beam and cone, clearance, and the
+        // count and whether the sun marches too.
+        assert(pass.lightOptions[0] == 0.0f && pass.lightOptions[1] == 1.0f);
+        const std::vector<ContactLight> lamps{ContactLight{Vec3{1.0f, 2.0f, 3.0f}, 7.0f, Vec3{0.0f, -1.0f, 0.0f}, 0.9f, 0.3f}};
+        const GpuContactShadowPass withLamps = packContactShadowPass(viewProjection, inverseViewProjection, screen, toLight, settings, 3, lamps, false);
+        assert(withLamps.lightOptions[0] == 1.0f && withLamps.lightOptions[1] == 0.0f);
+        assert(withLamps.lightPositionRange[0][0] == 1.0f && withLamps.lightPositionRange[0][2] == 3.0f && withLamps.lightPositionRange[0][3] == 7.0f);
+        assert(withLamps.lightBeam[0][1] == -1.0f && withLamps.lightBeam[0][3] == 0.9f && withLamps.lightStop[0] == 0.3f);
     }
 }
 
@@ -382,5 +528,8 @@ void testContactShadows() {
     testTheMarch();
     testAThinPen();
     testNoHaloRoundThingsInFront();
+    testTheRayTowardsALight();
+    testTheMarchTowardsALamp();
+    testChoosingTheLights();
     testPacking();
 }

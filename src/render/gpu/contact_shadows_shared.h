@@ -24,4 +24,17 @@
 // A march stops where its point comes closer to the camera than this (metres along the view), behind it or nearly.
 #define CONTACT_NEAREST_W 0.05
 
+// The most point and spot lights that get contact shadows at once (the local mask's four channels).
+#define CONTACT_MAX_LIGHTS 4
+
+// A march towards a point or spot light stops this far (metres) short of its glowing part, so the light's own bulb or
+// fixture, which the depth image shows, does not shadow it: a street bulb's glow is a 24 cm box round the light.
+#define CONTACT_LIGHT_CLEARANCE 0.25
+
+// The frame's data names a point light with a contact shadow channel by its slot, a spotlight by this plus its slot.
+#define CONTACT_SPOT_SLOT_BASE 65536
+
+// A cone cosine below any real one: a point light, lighting every way.
+#define CONTACT_NO_CONE -2.0
+
 #endif

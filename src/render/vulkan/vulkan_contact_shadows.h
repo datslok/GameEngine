@@ -15,8 +15,8 @@ class VulkanDevice;
 
 /*
 * Contact shadows on the GPU (render/gpu/contact_shadows.h): the pass (contact_shadows.comp) after the depth prepass and
-* ambient occlusion, before the main pass, and the render-size mask the main pass multiplies the sun's shadow by (scene
-* set 1, binding 31).
+* ambient occlusion, before the main pass, and the render-size masks the main pass multiplies shadows by: the sun's
+* (scene set 1, binding 31) and the local lights', a channel each (binding 32).
 */
 class VulkanContactShadows {
 public:
@@ -32,8 +32,9 @@ public:
     // Whether the mask exists (ensureSize was called), so the scene set can point at it.
     bool hasImages() const;
 
-    // The mask the main pass samples (set 1, binding 31).
+    // The sun's mask the main pass samples (set 1, binding 31), and the local lights' (binding 32, a channel each).
     SampledImage sampledShadow() const;
+    SampledImage sampledLights() const;
 
     /*
     * Record the pass: the depth (the prepass's, left readable by compute), the prepass's solid mask and the blue noise
@@ -49,4 +50,5 @@ private:
     std::vector<VulkanBuffer> passRecords;
     RenderSize size;
     VulkanImage mask;
+    VulkanImage lightsMask;
 };

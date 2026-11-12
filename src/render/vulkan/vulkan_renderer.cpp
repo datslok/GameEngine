@@ -1480,14 +1480,26 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ambientOcclusion->ensureSize(sceneSize);
     }
 
-    // Contact shadows (render/gpu/contact_shadows.h) for the brightest directional light, the one with the cascades,
-    // marched through the prepass's depths; its mask made the first time, as ambient occlusion's is.
+    // Contact shadows (render/gpu/contact_shadows.h) for the brightest directional light, the one with the cascades, and
+    // the shadowed point and spot lights lighting the focus most brightly, marched through the prepass's depths; their
+    // masks made the first time, as ambient occlusion's is. The picks are remembered so they keep their channels.
     validateContactShadows(settings.contactShadows);
     const std::vector<DirectionalLight>& sunLights = prioritized.lighting.directionalLights;
-    const bool contact = settings.contactShadows.enabled && settings.depthPrepass && inverseViewProjection && !sunLights.empty() &&
-                         sunLights.front().castsShadows && sunLights.front().direction.lengthSquared() > 0.0f;
+    const bool contactPossible = settings.contactShadows.enabled && settings.depthPrepass && inverseViewProjection;
+    ContactShadowFrame contact;
+    contact.sun = contactPossible && !sunLights.empty() && sunLights.front().castsShadows && sunLights.front().direction.lengthSquared() > 0.0f;
 
-    if (contact && !contactShadows->hasImages()) {
+    if (contactPossible) {
+        contact.lights = chooseContactLights(prioritized.lighting, description.lightFocus, contactLightHistory, settings.contactShadows.localLights,
+                                             settings.lights.incumbentAdvantage);
+    }
+
+    contactLightHistory.clear();
+    for (const ContactLightPick& pick : contact.lights) {
+        contactLightHistory.push_back(pick.entity);
+    }
+
+    if (contact.runs() && !contactShadows->hasImages()) {
         contactShadows->ensureSize(sceneSize);
     }
 
@@ -1602,12 +1614,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         endGpuPass(frame, GpuPass::AmbientOcclusion);
     }
 
-    if (contact) {
+    if (contact.runs()) {
         beginGpuPass(frame, GpuPass::ContactShadows);
-        const Vec3 toSun = (sunLights.front().direction * -1.0f).normalized();
+        const Vec3 toSun = contact.sun ? (sunLights.front().direction * -1.0f).normalized() : Vec3{0.0f, 1.0f, 0.0f};
+        std::vector<ContactLight> targets;
+
+        for (const ContactLightPick& pick : contact.lights) {
+            targets.push_back(contactLightFor(prioritized.lighting, pick, cameraOrigin));
+        }
+
         contactShadows->shade(frame.commands, frame.descriptors, frame.frameIndex, depth, solidMask, sampled(*blueNoiseTexture),
                               packContactShadowPass(relativeViewProjection, *inverseViewProjection, sceneSize, toSun, settings.contactShadows,
-                                                    temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0));
+                                                    temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0, targets, contact.sun));
         endGpuPass(frame, GpuPass::ContactShadows);
     }
 
@@ -1877,7 +1895,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
                                            bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
-                                           bool readsSkyVisibility, bool contact) {
+                                           bool readsSkyVisibility, const ContactShadowFrame& contact) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1935,7 +1953,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     const std::span<const ProbeCascade> skyCascades = readsSkyVisibility ? skyVisibility->getCascades() : std::span<const ProbeCascade>{};
     const GpuSkyVisibilityOptions skyOptions = packSkyVisibilityOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()));
     std::copy(std::begin(skyOptions.values), std::end(skyOptions.values), std::begin(frameData.skyVisibilityOptions));
-    frameData.contactShadowOptions[0] = contact ? 1.0f : 0.0f;
+    frameData.contactShadowOptions[0] = contact.sun ? 1.0f : 0.0f;
+    frameData.contactShadowOptions[1] = contact.lights.empty() ? 0.0f : 1.0f;
+    const std::array<std::int32_t, CONTACT_MAX_LIGHTS> contactSlots = contactLightSlotCodes(contact.lights);
+    std::copy(contactSlots.begin(), contactSlots.end(), std::begin(frameData.contactLightSlots));
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1969,7 +1990,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred, occlusionAccumulates) : sampled(*noProbesTexture),
         fog->sampledVolume(),
         skyVisibility->sampled(),
-        contact ? contactShadows->sampledShadow() : sampled(*noProbesTexture),
+        contact.runs() ? contactShadows->sampledShadow() : sampled(*noProbesTexture),
+        contact.runs() ? contactShadows->sampledLights() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2632,6 +2654,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
 void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings,
                                              int frames) {
     const LightHistory coldHistory = lightHistory;
+    const std::vector<Entity> coldContactLights = contactLightHistory;
     const ShadowAtlasLayout coldLayout = shadowLayout;
     std::uint32_t lastFrame = 0;
 
@@ -2654,6 +2677,7 @@ void VulkanRenderer::drawFramesBeforeCapture(const FrameDescription& description
 
     device.waitIdle();
     lightHistory = coldHistory;
+    contactLightHistory = coldContactLights;
     shadowLayout = coldLayout;
     shadowMemory.forgetAll();
 

@@ -161,6 +161,22 @@ void testProfiler() {
         assert(profileText(profiler, 1, false) == "TOTAL 0.0  IDLE 0.0  BUSY 2.0  MS");
     }
 
+    // An empty GPU pass still takes a few nanoseconds between its timestamps: what would show as nothing at the
+    // decimals shown counts as idle too.
+    {
+        Profiler profiler{0.5};
+        const int total = profiler.addSection("TOTAL");
+        const int empty = profiler.addSection("EMPTY");
+        const int small = profiler.addSection("SMALL");
+        profiler.update(0.0);
+        profiler.record(total, 0.001);
+        profiler.record(empty, 0.000004);
+        profiler.record(small, 0.000006);
+        profiler.update(0.5);
+
+        assert(profileText(profiler, 2, false, true) == "TOTAL 1.00  SMALL 0.01  MS");
+    }
+
     // A range of sections: from the first to before the end; idle ones hidden, the first spared only when it is the total.
     {
         Profiler profiler{0.5};
