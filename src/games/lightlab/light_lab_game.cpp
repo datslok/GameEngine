@@ -286,6 +286,23 @@ void visit(LightLabMistSettings& settings, SettingsVisitor& visitor) {
     visit(settings.fog, visitor);
 }
 
+void visit(LightLabFenceTorchSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("On", settings.on);
+    visitor.field("Bearing", settings.bearingDegrees, {.min = -360.0f, .max = 360.0f, .sliderMin = -180.0f, .sliderMax = 180.0f, .unit = "degrees from north"});
+    visitor.field("Dip", settings.dipDegrees, {.min = -89.0f, .max = 89.0f, .unit = "degrees"});
+}
+
+/*
+* The bearing turns from north (-z) towards east (+x), the dip down from level: spherical coordinates with the polar
+* angle measured from the horizon.
+*/
+FlashlightPose fenceTorchPose(const LightLabFenceTorchSettings& settings) {
+    const float bearing = radiansFromDegrees(settings.bearingDegrees);
+    const float dip = radiansFromDegrees(settings.dipDegrees);
+    const float level = std::cos(dip);
+    return FlashlightPose{labFenceTorchPosition, Vec3{level * std::sin(bearing), -std::sin(dip), -level * std::cos(bearing)}};
+}
+
 float starVisibility(const Vec3& towardsSun) {
     return 1.0f - smoothStep(radiansFromDegrees(labStarsFullBelowDegrees), radiansFromDegrees(labStarsAppearBelowDegrees), sunElevation(towardsSun));
 }
@@ -466,6 +483,8 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     probes = world.create();
     world.add(probes, ProbeCascades{});
     flashlight.create(world, false);
+    fenceTorch.create(world, false);
+    fenceTorch.place(world, fenceTorchPose(fenceTorchSettings));
 
     // The lamp's panel stands for the bulb's glow, so like the sun disc it must not block the light it gives.
     ModelRenderer fixture;
@@ -625,6 +644,12 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
     updateDaylight(world);
     updateStreetLights(world);
     flashlight.place(world, flashlightInHand(controls.getCamera()));
+
+    // The fence torch follows its settings, so the slider or a set command switches and aims it at once.
+    fenceTorch.place(world, fenceTorchPose(fenceTorchSettings));
+    if (fenceTorch.isOn(world) != fenceTorchSettings.on) {
+        fenceTorch.toggle(world);
+    }
 }
 
 void LightLabGame::updateDaylight(World& world) {
@@ -747,6 +772,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Mist", [&] {
         visit(mistSettings, visitor);
     });
+    visitor.group("Fence torch", [&] {
+        visit(fenceTorchSettings, visitor);
+    });
     controls.visitSettings(visitor);
 }
 
@@ -807,6 +835,14 @@ LightLabNightSettings& LightLabGame::getNightSettings() {
 
 LightLabMistSettings& LightLabGame::getMistSettings() {
     return mistSettings;
+}
+
+LightLabFenceTorchSettings& LightLabGame::getFenceTorchSettings() {
+    return fenceTorchSettings;
+}
+
+Entity LightLabGame::getFenceTorch() const {
+    return fenceTorch.getEntity();
 }
 
 Entity LightLabGame::getMoon() const {

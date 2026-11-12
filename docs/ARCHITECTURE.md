@@ -3226,6 +3226,7 @@ Every game starts in first person. Adding a game is one line in the table.
   - F5 Light lab, Atmosphere, for its numbers.
 - **Controls:** the demo's `PlayerControls` (free camera from (0, 2, 6) looking north, MOBA look point (0, 0, -8), body at the origin, far plane 1000) and F4 for the engine's debug view.
 - **The shared flashlight** (F, `gameplay/flashlight`, each switch a scene event over its reach): off at the start so the golden views keep the sunlit picture, held in the right hand in every mode and placed each frame after the camera, for watching a moving light's bounce in the probes.
+- **The fence torch** (F5 Light lab, Fence torch: `lightLab.fenceTorch.on`, `bearing`, `dip`; `LightLabFenceTorchSettings`): a second `Flashlight` on top of the fence's first post (`labFenceTorchPosition`), off at the start, pointing east and 10 degrees down by default (`fenceTorchPose`, the bearing from north towards east). `onUpdate` places it and switches it to its settings every frame, so the beam stays still in the mist and can be seen from the side or the front: the mist scatters forward (g 0.6), so one's own torch, seen from behind, shows its beam least.
 
 **The back room's ceiling lamp** (L, `toggleLamp`, off at the start): an entity at `labLampPosition` (under the middle of the ceiling, 15 cm down).
 
