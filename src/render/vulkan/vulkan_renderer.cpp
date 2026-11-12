@@ -384,7 +384,7 @@ void VulkanRenderer::createPipelines() {
 
     // Cut-outs' depth needs their holes thrown away (cut_out.frag), so they have a fragment shader; nothing else does.
     PipelineDescription prepassCutOut = prepass;
-    prepassCutOut.fragmentShader = "assets/shaders/cut_out.frag.spv";
+    prepassCutOut.fragmentShader = "assets/shaders/cut_out_prepass.frag.spv";
     depthPrepassCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepassCutOut);
 
     PipelineDescription shadow;

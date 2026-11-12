@@ -792,7 +792,7 @@ A frame (`render`) runs these steps:
 
 - depth to `DepthTarget` (discarded);
 - a rendering block with no colour attachment that clears depth to far and stores it;
-- `depthPrepassPipeline`: the main pass's `triangle.vert` and vertex layout with no fragment shader and no colour format; `GREATER`, written (`prepassDepthState`); `depthPrepassCutOutPipeline` the same with `cut_out.frag`, for cut-outs;
+- `depthPrepassPipeline`: the main pass's `triangle.vert` and vertex layout with no fragment shader and no colour format; `GREATER`, written (`prepassDepthState`); `depthPrepassCutOutPipeline` the same with `cut_out_prepass.frag` (`cut_out.frag`'s work, taking every output of `triangle.vert` so the validation layers do not warn of unread ones), for cut-outs;
 - and the same `drawBatches` as the main pass, so the depth image holds the nearest surface at every pixel.
 
 **Main pass:** scene to `ColourTarget` (discarded, cleared to 0, 0, 0, 1) and depth to `DepthTarget`:
@@ -2724,7 +2724,7 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 
 | Pass | Plain batches | Cut-out batches |
 |---|---|---|
-| Depth prepass | no fragment shader | `cut_out.frag` (the colour texture's alpha with the frame's mip bias, `fragmentCutAway` in `cut_out_fragment.glsl`) |
+| Depth prepass | no fragment shader | `cut_out_prepass.frag` (the colour texture's alpha with the frame's mip bias, `fragmentCutAway` in `cut_out_fragment.glsl`) |
 | Main pass after the prepass | as before | the same pipeline: the holes have no depth for its `EQUAL` test to match |
 | Main pass without it, the probe capture | as before | the specialization constant `MATERIAL_CUT_OUT_CONSTANT` (1) adds a discard after every texture read |
 | Shadow pass | `shadow.vert`, no fragment shader work | `shadow_cut_out.vert` with texture coordinates, `cut_out.frag` |
