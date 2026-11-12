@@ -17,11 +17,23 @@ struct ViewAngles {
     float pitch = 0.0f;
 };
 
+/*
+* Overwatch's mouse sensitivity scale: each unit of sensitivity turns the view this many degrees per mouse count (the
+* mouse's own unit of motion, 1/800 inch at 800 DPI), sideways and up alike, whatever the field of view. Measuring
+* sensitivity on the same scale lets a player bring their Overwatch number, and their aim, straight across.
+*/
+inline constexpr float overwatchDegreesPerCount = 0.0066f;
+
 // The tuning shared by every mouse-look controller.
 struct LookSettings {
-    float radiansPerPixel = 0.001f; // mouse sensitivity
-    float sprintMultiplier = 2.0f;  // movement speed multiple while either Shift key is held (run, or fly fast)
+    float sensitivity = 5.0f;      // mouse sensitivity on Overwatch's scale (5 turns 0.033 degrees per count)
+    float sprintMultiplier = 2.0f; // movement speed multiple while either Shift key is held (run, or fly fast)
 };
+
+// The turn in radians per mouse count for a sensitivity on Overwatch's scale.
+constexpr float radiansPerCount(float sensitivity) {
+    return radiansFromDegrees(sensitivity * overwatchDegreesPerCount);
+}
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(LookSettings& settings, SettingsVisitor& visitor);
@@ -35,8 +47,9 @@ Vec3 directionFromAngles(const ViewAngles& angles);
 // The angles of a direction, so a controller can take over from wherever the camera currently looks.
 ViewAngles anglesFromDirection(const Vec3& direction);
 
-// Turn by mouse motion: moving right turns right, moving up looks up. Pitch is clamped to +/- maxPitchRadians.
-void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPerPixel);
+// Turn by mouse motion in counts (SDL's relative mode reports raw counts, not screen pixels): moving right turns right,
+// moving up looks up. Pitch is clamped to +/- maxPitchRadians.
+void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPerCount);
 
 // WASD as axes: x is strafe (+1 right), y is forward (+1 forward). Not normalized.
 Vec2 getMoveAxes(const Input& input);

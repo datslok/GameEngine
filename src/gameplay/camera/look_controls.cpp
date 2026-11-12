@@ -28,12 +28,12 @@ ViewAngles anglesFromDirection(const Vec3& direction) {
     };
 }
 
-void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPerPixel) {
-    angles.yaw = wrapAngle(angles.yaw + mouseDelta.x * radiansPerPixel);
+void applyMouseLook(ViewAngles& angles, const Vec2& mouseDelta, float radiansPerCount) {
+    angles.yaw = wrapAngle(angles.yaw + mouseDelta.x * radiansPerCount);
 
     // Screen y grows downwards, so moving the mouse up (negative y) looks up.
     angles.pitch = std::clamp(
-        angles.pitch - mouseDelta.y * radiansPerPixel,
+        angles.pitch - mouseDelta.y * radiansPerCount,
         -maxPitchRadians,
         maxPitchRadians
     );
@@ -45,7 +45,7 @@ float getSpeedMultiplier(const Input& input, float sprintMultiplier) {
 }
 
 void turnCamera(Camera& camera, ViewAngles& angles, const Input& input, const LookSettings& look) {
-    applyMouseLook(angles, input.getMouseDelta(), look.radiansPerPixel);
+    applyMouseLook(angles, input.getMouseDelta(), radiansPerCount(look.sensitivity));
     camera.setForward(directionFromAngles(angles));
 }
 
@@ -79,6 +79,7 @@ Vec2 getMoveAxes(const Input& input) {
 }
 
 void visit(LookSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Sensitivity", settings.radiansPerPixel, {.min = 0.0f, .sliderMax = 0.005f, .unit = "rad/pixel"});
+    // Overwatch's own range is 0.01 to 100; the slider covers the 1 to 50 players use.
+    visitor.field("Sensitivity", settings.sensitivity, {.min = 0.0f, .max = 100.0f, .sliderMin = 1.0f, .sliderMax = 50.0f, .unit = "Overwatch"});
     visitor.field("Sprint multiplier", settings.sprintMultiplier, {.min = 0.0f, .sliderMax = 4.0f});
 }

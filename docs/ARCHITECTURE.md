@@ -26,7 +26,8 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
   - and `render`.
 - `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes), with `rayTracing`, the master switch for everything ray-traced (off by default; see Ray tracing). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
 - Camera controllers each own a settings struct (`FreeFlyCameraSettings`, `FirstPersonCameraSettings`, `MobaCameraSettings`), passed to the constructor and editable through `getSettings()`.
-  - The look ones nest the shared `LookSettings`: `radiansPerPixel`, `sprintMultiplier`.
+  - The look ones nest the shared `LookSettings`: `sensitivity`, `sprintMultiplier`.
+  - `sensitivity` is on Overwatch's scale (default 5, slider 1 to 50): `radiansPerCount` turns it into `sensitivity` x `overwatchDegreesPerCount` (0.0066 degrees) per mouse count. SDL's relative mouse mode reports raw counts, unscaled by Windows' pointer speed, as Overwatch reads them, so the same number turns the same angle for the same hand motion in both, sideways and up alike, at any field of view.
 
 **Reaching them**
 
