@@ -10,7 +10,7 @@
 void visit(ContactShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
     visitor.field("Length", settings.length, {.min = 0.01f, .max = 10.0f, .sliderMin = 0.05f, .sliderMax = 1.0f, .unit = "m"});
-    visitor.field("Steps", settings.steps, {.min = 1, .max = CONTACT_MAX_STEPS, .sliderMin = 4, .sliderMax = 32});
+    visitor.field("Steps", settings.steps, {.min = 1, .max = CONTACT_MAX_STEPS, .sliderMin = 4, .sliderMax = CONTACT_MAX_STEPS});
     visitor.field("Fade start", settings.fadeStart, {.min = 0.0f, .max = 10000.0f, .sliderMin = 5.0f, .sliderMax = 200.0f, .unit = "m"});
     visitor.field("Fade end", settings.fadeEnd, {.min = 0.0f, .max = 10000.0f, .sliderMin = 5.0f, .sliderMax = 200.0f, .unit = "m"});
 }
