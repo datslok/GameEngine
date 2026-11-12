@@ -100,6 +100,10 @@ struct PipelineDescription {
     VkFormat colourFormat = VK_FORMAT_UNDEFINED; // none: depth only
     BlendMode blend = BlendMode::None;
 
+    // Off: the colour targets are left as they are (a pipeline without a fragment shader drawing into a pass that has
+    // them: the depth prepass's solid draws, beside its cut-outs marking the solid mask).
+    bool colourWrites = true;
+
     // More colour targets after the first, written by the fragment shader's outputs at locations 1, 2..., never
     // blended (the main pass's reflection surfaces, render/gpu/screen_reflections.h).
     std::vector<VkFormat> extraColourFormats;

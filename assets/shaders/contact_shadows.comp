@@ -5,8 +5,9 @@
 * Contact shadows (render/gpu/contact_shadows.h), one invocation per render pixel, after the depth prepass and before
 * the main pass: the march contactShadowAt mirrors. From the pixel's surface towards the light in even steps (their start
 * turned by blue noise and the frame), each projected onto the screen and tested against the depth image there; the
-* first blocked step leaves its darkness, faded at the screen's edge and with the pixel's distance. The mask (1 lit, 0 in
-* shadow) the main pass multiplies the sun's shadow by.
+* first blocked step leaves its darkness, faded at the screen's edge and with the pixel's distance; steps landing on a
+* cut-out (the prepass's solid mask) are passed over. The mask (1 lit, 0 in shadow) the main pass multiplies the sun's
+* shadow by.
 */
 #include "render/gpu/depth_shared.h"
 #include "screen_reflections.glsl"
@@ -27,7 +28,8 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
 
 layout(set = 0, binding = 1) uniform sampler2D depth;                // exact texels
 layout(set = 0, binding = 2) uniform sampler2D blueNoise;            // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
-layout(set = 0, binding = 3, r32f) uniform writeonly image2D shadow; // 1 lit, 0 in shadow
+layout(set = 0, binding = 3) uniform sampler2D solidMask;            // the depth prepass's: 1 solid, 0 a cut-out nearest, exact texels
+layout(set = 0, binding = 4, r32f) uniform writeonly image2D shadow; // 1 lit, 0 in shadow
 
 void main() {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
@@ -72,7 +74,8 @@ void main() {
             ivec2 sceneTexel = ivec2(onScreen.xy);
             float sceneDepth = texelFetch(depth, sceneTexel, 0).r;
 
-            if (sceneDepth == float(GPU_FAR_DEPTH)) {
+            // The sky, and cut-outs (a millimetre of wire would count as thickness deep; their shadow maps draw them).
+            if (sceneDepth == float(GPU_FAR_DEPTH) || texelFetch(solidMask, sceneTexel, 0).r < 0.5) {
                 continue;
             }
 

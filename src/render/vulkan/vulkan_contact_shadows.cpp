@@ -19,7 +19,7 @@ VulkanContactShadows::VulkanContactShadows(const VulkanDevice& device, VkSampler
     ComputePipelineDescription description;
     description.shader = "assets/shaders/contact_shadows.comp.spv";
     description.storageBuffers = 1;
-    description.sampledImages = 2;
+    description.sampledImages = 3;
     description.storageImages = 1;
     pipeline = std::make_unique<ComputePipeline>(device, description);
     setFramesInFlight(framesInFlight);
@@ -58,23 +58,26 @@ SampledImage VulkanContactShadows::sampledShadow() const {
 
 /*
 * The barriers: the depth from being drawn into by the prepass (or read by the ambient occlusion before) to being read by
-* compute (the main pass turns it back into a depth target, keeping it); the mask from being read by last frame's main
+* compute (the main pass turns it back into a depth target, keeping it); the solid mask from being drawn into by the
+* prepass to being read by compute (the next prepass discards it); the mask from being read by last frame's main
 * pass (or nothing yet) to being written, its old contents discarded since every pixel is written, then to being read by
 * fragment shaders.
 */
-void VulkanContactShadows::shade(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth,
+void VulkanContactShadows::shade(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, VulkanImage& solid,
                                  const SampledImage& blueNoise, const GpuContactShadowPass& pass) {
     VulkanBuffer& record = passRecords.at(frameIndex);
     std::memcpy(record.getMapped(), &pass, sizeof(pass));
     record.flush();
 
     depth.transition(commands, ImageState::DepthComputeRead);
+    solid.transition(commands, ImageState::ComputeRead);
     mask.transition(commands, ImageState::ComputeStorage, ImageContents::Discard);
 
-    const std::array<ComputeBinding, 4> bindings{
+    const std::array<ComputeBinding, 5> bindings{
         storageBufferBinding(record.get()),
         sampledBinding(nearest, depth.getView(), VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL),
         sampledBinding(blueNoise.sampler, blueNoise.view, blueNoise.layout),
+        sampledBinding(nearest, solid.getView(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
         storageImageBinding(mask.getView()),
     };
 

@@ -38,6 +38,9 @@ namespace {
     // The lit scene: 16-bit floats keep about three significant digits from a millionth up to 65504, plenty for light
     // far brighter than white, at half the memory of 32-bit floats. Alpha is unused, but there is no 3-channel format.
     constexpr VkFormat sceneColourFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+    // The depth prepass's solid mask: one byte a pixel, 1 solid, 0 a cut-out.
+    constexpr VkFormat solidMaskFormat = VK_FORMAT_R8_UNORM;
     constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 
     // The most textures the bindless array holds (see createSceneLayout).
@@ -377,15 +380,21 @@ void VulkanRenderer::createPipelines() {
         }
     }
 
+    // The prepass also marks where a cut-out is nearest in the solid mask (contact shadows pass over those pixels): the
+    // solid draws, without a fragment shader, leave it as cleared (solid); the cut-outs, drawn last, write 0.
     PipelineDescription prepass = main;
     prepass.fragmentShader = nullptr;
-    prepass.colourFormat = VK_FORMAT_UNDEFINED;
+    prepass.colourFormat = solidMaskFormat;
+    prepass.extraColourFormats.clear();
+    prepass.blend = BlendMode::None;
+    prepass.colourWrites = false;
     setDepthState(prepass, prepassDepthState());
     depthPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepass);
 
     // Cut-outs' depth needs their holes thrown away (cut_out.frag), so they have a fragment shader; nothing else does.
     PipelineDescription prepassCutOut = prepass;
     prepassCutOut.fragmentShader = "assets/shaders/cut_out_prepass.frag.spv";
+    prepassCutOut.colourWrites = true;
     depthPrepassCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepassCutOut);
 
     PipelineDescription shadow;
@@ -726,6 +735,14 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     depthDescription.name = "Scene depth";
     VulkanImage depthReplacement{device, depthDescription};
 
+    ImageDescription solidDescription;
+    solidDescription.format = solidMaskFormat;
+    solidDescription.width = scene.width;
+    solidDescription.height = scene.height;
+    solidDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    solidDescription.name = "Solid mask";
+    VulkanImage solidReplacement{device, solidDescription};
+
     ImageDescription sceneDescription;
     sceneDescription.format = sceneColourFormat;
     sceneDescription.width = scene.width;
@@ -742,6 +759,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
 
     device.waitIdle();
     depth = std::move(depthReplacement);
+    solidMask = std::move(solidReplacement);
     sceneColour = std::move(sceneReplacement);
     clusterMasks = std::move(masksReplacement);
     taa->ensureSize(width, height, scene);
@@ -1587,7 +1605,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (contact) {
         beginGpuPass(frame, GpuPass::ContactShadows);
         const Vec3 toSun = (sunLights.front().direction * -1.0f).normalized();
-        contactShadows->shade(frame.commands, frame.descriptors, frame.frameIndex, depth, sampled(*blueNoiseTexture),
+        contactShadows->shade(frame.commands, frame.descriptors, frame.frameIndex, depth, solidMask, sampled(*blueNoiseTexture),
                               packContactShadowPass(relativeViewProjection, *inverseViewProjection, sceneSize, toSun, settings.contactShadows,
                                                     temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0));
         endGpuPass(frame, GpuPass::ContactShadows);
@@ -2123,14 +2141,17 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 /*
 * The camera's depth alone: the same draws as the main pass, with the main pass's vertex shader and no fragment shader,
 * so the depth image ends up holding the nearest surface at every pixel, computed exactly as the main pass computes it.
-* The depth image starts cleared (its old contents discarded) and is stored for the main pass.
+* The depth image starts cleared (its old contents discarded) and is stored for the main pass. The solid mask starts
+* cleared to 1 (solid) and the cut-outs, drawn last, write 0 where they are nearest (contact shadows pass over them).
 */
 void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet) {
     const VkCommandBuffer commands = frame.commands;
     depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
+    solidMask.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
 
     const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {sceneSize.width, sceneSize.height}, nullptr, &depthTarget);
+    const ColourAttachment solidTarget{solidMask.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {1.0f, 1.0f, 1.0f, 1.0f}};
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &solidTarget, &depthTarget);
     renderingOpen = true;
 
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);

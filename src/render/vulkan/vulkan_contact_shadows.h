@@ -36,10 +36,10 @@ public:
     SampledImage sampledShadow() const;
 
     /*
-    * Record the pass: the depth (the prepass's, left readable by compute) and the blue noise tile (AO_BLUE_NOISE_SIZE a
-    * side) in, the mask left readable by fragment shaders for the main pass.
+    * Record the pass: the depth (the prepass's, left readable by compute), the prepass's solid mask and the blue noise
+    * tile (AO_BLUE_NOISE_SIZE a side) in, the mask left readable by fragment shaders for the main pass.
     */
-    void shade(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, const SampledImage& blueNoise,
+    void shade(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, VulkanImage& solid, const SampledImage& blueNoise,
                const GpuContactShadowPass& pass);
 
 private:

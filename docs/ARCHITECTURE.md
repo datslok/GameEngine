@@ -2473,6 +2473,25 @@ With it off and no baked occlusion every factor is exactly 1 and the picture is 
 
 **Not measured yet**: its cost and its look in the game, with bounce light too. **Not yet**: half resolution, if the cost calls for it.
 
+## Contact shadows
+
+The sun's short shadows the shadow map misses (`contact-shadows`): `render/gpu/contact_shadows` (mirrored by `assets/shaders/contact_shadows.glsl`, numbers in `contact_shadows_shared.h`), `render/vulkan/vulkan_contact_shadows`, `contact_shadows.comp`.
+
+**Why.** A shadow map's texels are millimetres to centimetres across and its lookups are pushed towards the light against acne, so a small object's shadow comes loose from it or vanishes, worst at a grazing sun.
+
+**The march** (`contactShadowAt`, the pass's loop): after the depth prepass, each render pixel (one invocation, 8 x 8 groups) walks from its surface towards the brightest directional light (the one with the cascades, `prioritized.lighting.directionalLights[0]` with `castsShadows`) in `steps` (16) even steps over `length` (0.3 m), the start turned by the blue noise tile's green channel plus the frame's turn (`contactNoiseTurn`, the golden ratio a frame, only while anti-aliasing averages it). Each step's point (camera-relative) goes through the frame's jittered view-projection to its pixel (`clipToScreen`) and view distance (clip w); the depth image's surface there to its own view distance (`viewDistanceAtPixel`). A step behind that surface by more than the bias (`contactBias`: `CONTACT_BIAS_PIXELS` 2 pixels' footprint at the pixel's distance) and less than `thickness` (0.2 m, since the depth image shows only fronts) is blocked (`contactBlocked`): the pixel's mask is 1 minus the distance fade (`contactDistanceFade`, `fadeStart` 40 m to `fadeEnd` 60 m) times the edge fade where it read the depth (`contactEdgeFade`, over `CONTACT_EDGE_PIXELS` 16). The sky is lit; a march stops at the screen's edge or nearer the camera than `CONTACT_NEAREST_W`.
+
+**Cut-outs pass over.** A cut-out's wire is a millimetre thin but counted as `thickness` deep: in the light lab the chain-link fence's foot went dark in a sawtooth band and the post behind the mesh went dark, where the shadow map already draws the holes. The depth prepass now also writes a solid mask (`solidMask`, R8, at the render size, cleared to 1): the solid pipeline has the attachment with its colour writes off (`PipelineDescription::colourWrites`) and no fragment shader, the cut-out pipeline (`cut_out_prepass.frag`) writes 0, and cut-outs are drawn last (`drawBatches`), so a solid in front of one stays 1. Steps landing on a 0 are passed over.
+
+**Main pass:** the mask (an R32F storage image; scene set 1 binding 31, `ContactShadowsBinding`, a stand-in when off) multiplies directional light 0's shadow while `GpuFrameData::contactShadowOptions.x` is 1, not in captures (no depth image of their own) or glass (not in it).
+
+**Settings** (`ContactShadowSettings`, `RenderSettings::contactShadows`, F5 Contact shadows, `engine.render.contactShadows.*`): `enabled` (off on Low), `length`, `steps` (1 to `CONTACT_MAX_STEPS` 64), `thickness`, `fadeStart`, `fadeEnd`.
+
+**Cost:** 0.18-0.19 ms at 1920 x 1080 on the laptop's RTX 4070 Laptop (`GpuPass::ContactShadows`, CONTACT).
+
+**Tests:** `contact_shadows_test` (the settings, keys and presets; the steps, the blocked test, the bias, the fades, the noise turn; the march through depths drawn by casting rays against a floor and a 30 cm block: the floor beside it shadowed with the sun low behind it, lit elsewhere, on its top and in the sky, nothing with a millimetre's thickness, the other side with the sun reversed, nothing past the fade, nothing with the block marked a cut-out; packing), `gpu_timing_test`; GPU tests in `contact_shadows_gpu_test` (written and built, not run).
+
+**Limits:** only what is on screen casts one (a caster off screen or hidden casts nothing); only the brightest directional light (point and spot lights later, if their shadows look loose); the golden images differ.
 ## Sky visibility
 
 How much of the sky each point round the camera sees, so the flat ambient light (the sky's light on an open floor, the same for every surface) dims indoors without light probes or ray tracing (`sky-visibility`, phase 16). Without it a closed room got the open sky's light, and the screen-space bounce light, reaching 2 m and seeing only the screen, could not tell a room was closed. `render/gpu/sky_visibility` (the maths, mirrored by `sky_visibility.glsl`, numbers in `sky_visibility_shared.h`), `render/gpu/sky_visibility_bake` (the CPU bake), `engine/static_geometry` (the level it bakes against), `render/vulkan/vulkan_sky_visibility`, `scene_sky_visibility.glsl`.

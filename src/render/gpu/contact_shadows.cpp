@@ -75,7 +75,7 @@ ContactShadowView contactShadowView(const Mat4& viewProjection, const Mat4& inve
 * Each step's point, measured from the camera, through the view-projection to its pixel and view distance (clip w);
 * the depth image's surface there to its own view distance; the first blocked step ends the march.
 */
-float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt, Vec2 pixel, float noise) {
+float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt, Vec2 pixel, float noise, const AoDepthImage& solidAt) {
     const int x = static_cast<int>(std::floor(pixel.x));
     const int y = static_cast<int>(std::floor(pixel.y));
     const float depth = depthAt(x, y);
@@ -112,7 +112,7 @@ float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt
         const int texelY = static_cast<int>(onScreen.y);
         const float sceneDepth = depthAt(texelX, texelY);
 
-        if (sceneDepth == gpuFarDepth) {
+        if (sceneDepth == gpuFarDepth || (solidAt && solidAt(texelX, texelY) < 0.5f)) {
             continue;
         }
 

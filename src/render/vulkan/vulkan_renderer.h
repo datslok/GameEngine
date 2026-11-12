@@ -277,6 +277,9 @@ private:
     // its depth. The frame's own size is the output's, the swapchain's or a capture's.
     VulkanImage sceneColour;
     VulkanImage depth;
+
+    // Where the depth prepass found a cut-out nearest (0) or anything else (1), for contact shadows to pass over.
+    VulkanImage solidMask;
     std::uint32_t frameWidth = 0;
     std::uint32_t frameHeight = 0;
     RenderSize sceneSize;

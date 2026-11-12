@@ -85,9 +85,12 @@ ContactShadowView contactShadowView(const Mat4& viewProjection, const Mat4& inve
 * The mask at a pixel (its centre, from the top-left corner), noise its start's turn: 1 lit, down to 0 where a step is
 * blocked, the blocked step's darkness faded by the screen's edge where it read the depth and by the pixel's distance.
 * The sky is lit; a march stops at the screen's edge or nearer the camera than CONTACT_NEAREST_W. contact_shadows.comp's
-* loop, the depths read as the AO pass reads them.
+* loop, the depths read as the AO pass reads them. solidAt (the depth prepass's solid mask, read the same way; every
+* pixel solid without it) is below a half where a cut-out is nearest: a step landing there is passed over. A cut-out's
+* wire is a millimetre thin but would count as thickness deep, so a fence's foot went dark where its shadow map already
+* draws its holes.
 */
-float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt, Vec2 pixel, float noise);
+float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt, Vec2 pixel, float noise, const AoDepthImage& solidAt = {});
 
 /*
 * The pass's numbers (contact_shadows.comp's storage buffer, std430): the matrices, the size and its inverse, the way to

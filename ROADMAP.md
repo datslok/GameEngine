@@ -296,7 +296,8 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [ ] Stage 3 (optional): lamps, each point keeping its brightest few with shadow rays, refreshed in a region when one switches
 - [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
   - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
-- [ ] Contact shadows: short screen-space rays, so small objects sit on what they touch
+- [x] Contact shadows for the sun, cut-outs passed over (`contact-shadows`)
+  - [ ] For point and spot lights too (the flashlight, lamps), marching in the main pass, if their shadows look loose
 - [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
   - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
   - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.

@@ -190,6 +190,24 @@ namespace {
         const ContactShadowView fromWest = contactShadowView(viewProjection, inverseViewProjection, screen, Vec3{-1.0f, 0.35f, 0.0f}.normalized(), settings);
         assert(contactShadowAt(fromWest, depthAt, pixelOf(viewProjection, camera, Vec3{-0.25f, 0.0f, 0.0f}), 0.5f) == 1.0f);
 
+        // A cut-out (a fence's wire, a leaf) casts none: its pixels marked not solid are passed over, as their shadow map
+        // already draws their holes; marked solid, the block shadows again.
+        const AoDepthImage blockIsCutOut = [&](int x, int y) {
+            const Vec2 size{static_cast<float>(screen.width), static_cast<float>(screen.height)};
+            const float texelDepth = depthAt(x, y);
+
+            if (texelDepth == gpuFarDepth) {
+                return 1.0f;
+            }
+
+            const Vec3 world = positionAtPixel(inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, texelDepth, size) + camera.getPosition();
+            return world.y > 0.01f ? 0.0f : 1.0f;
+        };
+        const AoDepthImage allSolid = [](int, int) { return 1.0f; };
+        const Vec2 westFloor = pixelOf(viewProjection, camera, Vec3{-0.25f, 0.0f, 0.0f});
+        assert(contactShadowAt(view, depthAt, westFloor, 0.5f, blockIsCutOut) == 1.0f);
+        assert(contactShadowAt(view, depthAt, westFloor, 0.5f, allSolid) < 0.01f);
+
         // Beyond the fade nothing is shadowed.
         ContactShadowSettings near = settings;
         near.fadeStart = 0.5f;
