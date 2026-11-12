@@ -187,7 +187,7 @@ Several games run on one engine, picked at start-up with `--game`.
 
 ### Tools for building and testing
 
-- **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity, grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
+- **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity (on Overwatch's scale, 5 by default), grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
   - **a debug UI** (F5, Dear ImGui): a slider, checkbox or list for every setting, Save and Reset buttons, drawn over the image in its own layer so it looks right in HDR too
   - **quality presets** Low, Medium, High and Ultra (see the table below)
   - **a settings file** (`settings.cfg`): only the values changed from the defaults, loaded at start-up, forgiving of hand edits
