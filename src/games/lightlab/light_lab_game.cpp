@@ -406,6 +406,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     world.add(glass, std::move(pane));
     addStatic(blocksRenderer(cube, layout.street));
     addStatic(blocksRenderer(cube, layout.reflectors));
+    addStatic(blocksRenderer(cube, layout.table));
 
     // The mirror ball, finely divided so its outline and the reflections across it stay smooth.
     const MeshHandle sphere = assets.addMesh(Mesh::sphere(96, 48));

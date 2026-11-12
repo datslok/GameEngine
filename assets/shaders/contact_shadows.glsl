@@ -15,9 +15,12 @@ float contactBias(float footprint, float viewDistance) {
     return float(CONTACT_BIAS_PIXELS) * footprint * viewDistance;
 }
 
-bool contactBlocked(float rayDistance, float sceneDistance, float bias, float thickness) {
-    float behind = rayDistance - sceneDistance;
-    return behind > bias && behind < thickness;
+float contactStepReach(float marchLength, int steps) {
+    return marchLength / float(steps);
+}
+
+bool contactBlocked(float previousBehind, float behind, float bias, float reach) {
+    return previousBehind <= bias && behind > bias && behind < bias + reach;
 }
 
 float contactEdgeFade(vec2 pixel, vec2 size) {

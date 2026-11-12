@@ -11,7 +11,7 @@ void main() {
     }
 
     if (function == GPU_TEST_CONTACT_SHADOWS) {
-        // Inputs: (step, steps, noise, length), (ray distance, scene distance, bias, thickness), (pixel, size),
+        // Inputs: (step, steps, noise, length), (previous behind, behind, bias, reach), (pixel, size),
         // (footprint, view distance, fade start, fade end).
         vec4 march = testInput(0);
         vec4 depths = testInput(1);
@@ -20,6 +20,6 @@ void main() {
         float stepDistance = contactStepDistance(int(march.x), int(march.y), march.z, march.w);
         float blocked = contactBlocked(depths.x, depths.y, depths.z, depths.w) ? 1.0 : 0.0;
         testOutput(0, vec4(stepDistance, contactBias(fades.x, fades.y), blocked, contactEdgeFade(screen.xy, screen.zw)));
-        testOutput(1, vec4(contactDistanceFade(fades.y, fades.z, fades.w), 0.0, 0.0, 0.0));
+        testOutput(1, vec4(contactDistanceFade(fades.y, fades.z, fades.w), contactStepReach(march.w, int(march.y)), 0.0, 0.0));
     }
 }

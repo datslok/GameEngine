@@ -21,6 +21,34 @@ namespace {
         return LabBlock{(minimum + maximum) * 0.5f, (maximum - minimum) * 0.5f, surface};
     }
 
+    /*
+    * The top, the legs at its corners, then on the top: a red pen along x (its shadow falling along it), a white pen
+    * along z (its shadow falling across it), a wooden pencil along x and a white pen standing on end.
+    */
+    std::vector<LabBlock> buildPenTable() {
+        const float underside = labTableHeight - 2.0f * labTableTopHalfThickness;
+        std::vector<LabBlock> table;
+        table.push_back(LabBlock{Vec3{labTableX, labTableHeight - labTableTopHalfThickness, labTableZ},
+                                 Vec3{labTableHalfLength, labTableTopHalfThickness, labTableHalfDepth}, LabSurface::Wood});
+
+        for (const float alongX : {-1.0f, 1.0f}) {
+            for (const float alongZ : {-1.0f, 1.0f}) {
+                const Vec3 centre{labTableX + alongX * (labTableHalfLength - labTableLegInset), underside * 0.5f,
+                                  labTableZ + alongZ * (labTableHalfDepth - labTableLegInset)};
+                table.push_back(LabBlock{centre, Vec3{labTableLegHalfWidth, underside * 0.5f, labTableLegHalfWidth}, LabSurface::Wood});
+            }
+        }
+
+        const auto lying = [](float x, float z, const Vec3& halfSize, LabSurface surface) {
+            return LabBlock{Vec3{labTableX + x, labTableHeight + halfSize.y, labTableZ + z}, halfSize, surface};
+        };
+        table.push_back(lying(-0.18f, -0.1f, Vec3{labPenHalfLength, labPenHalfWidth, labPenHalfWidth}, LabSurface::RedPaint));
+        table.push_back(lying(0.05f, -0.02f, Vec3{labPenHalfWidth, labPenHalfWidth, labPenHalfLength}, LabSurface::Plaster));
+        table.push_back(lying(-0.15f, 0.12f, Vec3{labPenHalfLength, labPencilHalfWidth, labPencilHalfWidth}, LabSurface::Wood));
+        table.push_back(lying(0.25f, 0.1f, Vec3{labPenHalfWidth, labPenHalfLength, labPenHalfWidth}, LabSurface::Plaster));
+        return table;
+    }
+
     Aabb grown(const Aabb& box, float margin) {
         return Aabb{box.minimum - Vec3{margin, margin, margin}, box.maximum + Vec3{margin, margin, margin}};
     }
@@ -259,12 +287,13 @@ namespace {
 }
 
 LightLabLayout buildLightLabLayout() {
-    LightLabLayout layout{buildTowers(), buildFence(), buildTrees(), buildBuilding(), {}, {}, {}, {}};
+    LightLabLayout layout{buildTowers(), buildFence(), buildTrees(), buildBuilding(), {}, {}, {}, {}, {}};
     buildStreet(layout);
 
     layout.reflectors.push_back(spanning(labPolishedSlab.minimum, labPolishedSlab.maximum, LabSurface::Polished));
     layout.reflectors.push_back(spanning(labMirror.minimum, labMirror.maximum, LabSurface::Mirror));
     layout.reflectors.push_back(spanning(labSteelPanel.minimum, labSteelPanel.maximum, LabSurface::BrushedSteel));
+    layout.table = buildPenTable();
     return layout;
 }
 

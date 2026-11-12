@@ -10,10 +10,11 @@ namespace {
     const std::string shader = gpuTestShader("contact_shadows_test");
 
     /*
-    * Steps across their counts with every noise, rays and surfaces from far in front to far behind (round the bias and
-    * the thickness), pixels all over and off the screen, distances either side of the fades. Inputs per case: (step,
-    * steps, noise, length), (ray distance, scene distance, bias, thickness), (pixel, size), (footprint, view distance,
-    * fade start, fade end). Outputs: (step distance, bias, blocked, edge fade), (distance fade).
+    * Steps across their counts with every noise, steps from far in front to far behind their surfaces after steps in
+    * front, inside or behind (round the bias and the reach), pixels all over and off the screen, distances either side of
+    * the fades. Inputs per case: (step, steps, noise, length), (previous behind, behind, bias, reach), (pixel, size),
+    * (footprint, view distance, fade start, fade end). Outputs: (step distance, bias, blocked, edge fade), (distance
+    * fade, step reach).
     */
     void checkContactShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{419};
@@ -21,10 +22,9 @@ namespace {
 
         for (int i = 0; i < 256; ++i) {
             const int steps = 1 + i % CONTACT_MAX_STEPS;
-            const float scene = random.between(0.2f, 80.0f);
-            const float thickness = random.between(0.01f, 0.5f);
+            const float reach = random.between(0.005f, 0.1f);
             inputs.push_back(GpuVec4{static_cast<float>(i % steps), static_cast<float>(steps), random.between(0.0f, 0.999f), random.between(0.05f, 2.0f)});
-            inputs.push_back(GpuVec4{scene + random.between(-0.2f, 0.7f), scene, random.between(0.0f, 0.05f), thickness});
+            inputs.push_back(GpuVec4{random.between(-0.2f, 0.3f), random.between(-0.2f, 0.3f), random.between(0.0f, 0.05f), reach});
             const float width = random.between(64.0f, 2560.0f);
             const float height = random.between(64.0f, 1440.0f);
             inputs.push_back(GpuVec4{random.between(-20.0f, width + 20.0f), random.between(-20.0f, height + 20.0f), width, height});
@@ -43,6 +43,7 @@ namespace {
             report.check("contactBlocked", exactTolerance, contactBlocked(in[1][0], in[1][1], in[1][2], in[1][3]) ? 1.0f : 0.0f, out[0][2]);
             report.check("contactEdgeFade", arithmeticTolerance, contactEdgeFade(Vec2{in[2][0], in[2][1]}, Vec2{in[2][2], in[2][3]}), out[0][3]);
             report.check("contactDistanceFade", arithmeticTolerance, contactDistanceFade(in[3][1], in[3][2], in[3][3]), out[1][0]);
+            report.check("contactStepReach", arithmeticTolerance, contactStepReach(in[0][3], static_cast<int>(in[0][1])), out[1][1]);
         }
     }
 }

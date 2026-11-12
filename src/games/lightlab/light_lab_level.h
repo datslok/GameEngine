@@ -75,6 +75,24 @@ inline constexpr float labRailHeight = 1.0f;     // its centre
 inline constexpr float labRailHalfWidth = 0.03f;
 
 /*
+* The pen table, for contact shadows: a wooden table 4 m ahead of the start and a little west, 80 x 50 cm and 75 cm
+* high, with three 1 cm pens and a 7 mm pencil on it, one pen standing. Things a centimetre across are what a shadow
+* map's texels miss and contact shadows must catch without drawing them fat; the afternoon sun throws their shadows
+* across the top to the east-north-east.
+*/
+inline constexpr float labTableX = -2.5f;
+inline constexpr float labTableZ = 2.0f;
+inline constexpr float labTableHeight = 0.75f;       // the top's upper face
+inline constexpr float labTableHalfLength = 0.4f;    // along x
+inline constexpr float labTableHalfDepth = 0.25f;    // along z
+inline constexpr float labTableTopHalfThickness = 0.015f;
+inline constexpr float labTableLegHalfWidth = 0.02f;
+inline constexpr float labTableLegInset = 0.05f;     // each leg's centre in from the top's corner
+inline constexpr float labPenHalfWidth = 0.005f;
+inline constexpr float labPencilHalfWidth = 0.0035f;
+inline constexpr float labPenHalfLength = 0.07f;
+
+/*
 * The chain-link along the fence: one panel through the posts from the ground to their tops, a diamond wire mesh drawn as
 * a cut-out (render/gpu/alpha_mask.h), double-sided, so sun shadows, light probes and far mip levels all meet holes. Its
 * texture is made here and repeats every tile; its smaller mips are built to keep the wire's coverage, so the fence stays
@@ -230,6 +248,7 @@ struct LightLabLayout {
     std::vector<LabWindow> windows;
     std::vector<Vec3> streetLamps; // each lamp's bulb: the north side's west to east, then the south side's
     std::vector<LabBlock> reflectors; // the polished slab, the mirror, then the steel panel (the mirror ball is a sphere, placed by the game)
+    std::vector<LabBlock> table;      // the pen table: its top, four legs, then the pens and pencil
 };
 
 LightLabLayout buildLightLabLayout();

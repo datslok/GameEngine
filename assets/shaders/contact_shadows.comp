@@ -5,7 +5,7 @@
 * Contact shadows (render/gpu/contact_shadows.h), one invocation per render pixel, after the depth prepass and before
 * the main pass: the march contactShadowAt mirrors. From the pixel's surface towards the light in even steps (their start
 * turned by blue noise and the frame), each projected onto the screen and tested against the depth image there; the
-* first blocked step leaves its darkness, faded at the screen's edge and with the pixel's distance; steps landing on a
+* first step that crossed a surface since the last (now behind it within a step's reach) leaves its darkness, faded at the screen's edge and with the pixel's distance; steps landing on a
 * cut-out (the prepass's solid mask) are passed over. The mask (1 lit, 0 in shadow) the main pass multiplies the sun's
 * shadow by.
 */
@@ -22,7 +22,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     mat4 inverseViewProjection;
     vec4 size;                  // xy: the render size in pixels, zw: their inverses
     vec4 toLight;               // xyz: the unit way to the light, w: a pixel's footprint per metre of view distance
-    vec4 options;               // x: length, y: steps, z: thickness, w: the frame's turn of the noise
+    vec4 options;               // x: length, y: steps, z: a step's reach, w: the frame's turn of the noise
     vec4 fade;                  // x: where the fade starts, y: where it ends (view distance)
 } pass;
 
@@ -56,6 +56,7 @@ void main() {
         float bias = contactBias(pass.toLight.w, viewDistance);
         float noise = fract(texelFetch(blueNoise, texel % AO_BLUE_NOISE_SIZE, 0).g + pass.options.w);
         int steps = int(pass.options.y);
+        float previousBehind = 0.0; // the start lies on its own surface
 
         for (int stepIndex = 0; stepIndex < steps; ++stepIndex) {
             vec3 point = start + pass.toLight.xyz * contactStepDistance(stepIndex, steps, noise, pass.options.x);
@@ -75,16 +76,20 @@ void main() {
             float sceneDepth = texelFetch(depth, sceneTexel, 0).r;
 
             // The sky, and cut-outs (a millimetre of wire would count as thickness deep; their shadow maps draw them).
+            // (counted as in front).
             if (sceneDepth == float(GPU_FAR_DEPTH) || texelFetch(solidMask, sceneTexel, 0).r < 0.5) {
+                previousBehind = 0.0;
                 continue;
             }
 
-            float sceneDistance = viewDistanceAtPixel(pass.inverseViewProjection, vec2(sceneTexel) + 0.5, sceneDepth, pass.size.xy);
+            float behind = clip.w - viewDistanceAtPixel(pass.inverseViewProjection, vec2(sceneTexel) + 0.5, sceneDepth, pass.size.xy);
 
-            if (contactBlocked(clip.w, sceneDistance, bias, pass.options.z)) {
+            if (contactBlocked(previousBehind, behind, bias, pass.options.z)) {
                 lit = 1.0 - fade * contactEdgeFade(onScreen.xy, pass.size.xy);
                 break;
             }
+
+            previousBehind = behind;
         }
     }
 

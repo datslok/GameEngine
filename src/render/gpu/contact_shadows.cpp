@@ -11,15 +11,14 @@ void visit(ContactShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Enabled", settings.enabled);
     visitor.field("Length", settings.length, {.min = 0.01f, .max = 10.0f, .sliderMin = 0.05f, .sliderMax = 1.0f, .unit = "m"});
     visitor.field("Steps", settings.steps, {.min = 1, .max = CONTACT_MAX_STEPS, .sliderMin = 4, .sliderMax = 32});
-    visitor.field("Thickness", settings.thickness, {.min = 0.001f, .max = 10.0f, .sliderMin = 0.02f, .sliderMax = 1.0f, .unit = "m"});
     visitor.field("Fade start", settings.fadeStart, {.min = 0.0f, .max = 10000.0f, .sliderMin = 5.0f, .sliderMax = 200.0f, .unit = "m"});
     visitor.field("Fade end", settings.fadeEnd, {.min = 0.0f, .max = 10000.0f, .sliderMin = 5.0f, .sliderMax = 200.0f, .unit = "m"});
 }
 
 // Written so not a number fails too.
 void validateContactShadows(const ContactShadowSettings& settings) {
-    if (!(settings.length > 0.0f) || !(settings.thickness > 0.0f)) {
-        throw std::invalid_argument("Contact shadows need a length and a thickness above 0");
+    if (!(settings.length > 0.0f)) {
+        throw std::invalid_argument("Contact shadows need a length above 0");
     }
 
     if (settings.steps < 1 || settings.steps > CONTACT_MAX_STEPS) {
@@ -44,9 +43,16 @@ float contactEdgeFade(Vec2 pixel, Vec2 size) {
     return std::clamp(nearest / static_cast<float>(CONTACT_EDGE_PIXELS), 0.0f, 1.0f);
 }
 
-bool contactBlocked(float rayDistance, float sceneDistance, float bias, float thickness) {
-    const float behind = rayDistance - sceneDistance;
-    return behind > bias && behind < thickness;
+float contactStepReach(float length, int steps) {
+    return length / static_cast<float>(steps);
+}
+
+/*
+* The last step in front of its surface (or within the bias), this one just inside something: no further behind its front
+* than a step goes. A last step behind something (inside it, or behind a thing nearer the camera) is no crossing.
+*/
+bool contactBlocked(float previousBehind, float behind, float bias, float reach) {
+    return previousBehind <= bias && behind > bias && behind < bias + reach;
 }
 
 // A fade of no width cuts off at its start.
@@ -73,7 +79,8 @@ ContactShadowView contactShadowView(const Mat4& viewProjection, const Mat4& inve
 
 /*
 * Each step's point, measured from the camera, through the view-projection to its pixel and view distance (clip w);
-* the depth image's surface there to its own view distance; the first blocked step ends the march.
+* the depth image's surface there to its own view distance; the first step that crossed a surface ends the march. The
+* start lies on its own surface, and a step passed over (the sky, a cut-out) counts as in front.
 */
 float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt, Vec2 pixel, float noise, const AoDepthImage& solidAt) {
     const int x = static_cast<int>(std::floor(pixel.x));
@@ -93,6 +100,8 @@ float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt
 
     const Vec3 start = positionAtPixel(view.inverseViewProjection, pixel, depth, view.size);
     const float bias = contactBias(view.footprint, distance);
+    const float reach = contactStepReach(view.settings.length, view.settings.steps);
+    float previousBehind = 0.0f;
 
     for (int step = 0; step < view.settings.steps; ++step) {
         const Vec3 point = start + view.toLight * contactStepDistance(step, view.settings.steps, noise, view.settings.length);
@@ -113,15 +122,18 @@ float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt
         const float sceneDepth = depthAt(texelX, texelY);
 
         if (sceneDepth == gpuFarDepth || (solidAt && solidAt(texelX, texelY) < 0.5f)) {
+            previousBehind = 0.0f;
             continue;
         }
 
         const Vec2 texelCentre{static_cast<float>(texelX) + 0.5f, static_cast<float>(texelY) + 0.5f};
-        const float sceneDistance = viewDistanceAtPixel(view.inverseViewProjection, texelCentre, sceneDepth, view.size);
+        const float behind = clip.w - viewDistanceAtPixel(view.inverseViewProjection, texelCentre, sceneDepth, view.size);
 
-        if (contactBlocked(clip.w, sceneDistance, bias, view.settings.thickness)) {
+        if (contactBlocked(previousBehind, behind, bias, reach)) {
             return 1.0f - fade * contactEdgeFade(Vec2{onScreen.x, onScreen.y}, view.size);
         }
+
+        previousBehind = behind;
     }
 
     return 1.0f;
@@ -144,7 +156,7 @@ GpuContactShadowPass packContactShadowPass(const Mat4& viewProjection, const Mat
     pass.toLight[3] = pixelFootprint(viewProjection, height);
     pass.options[0] = settings.length;
     pass.options[1] = static_cast<float>(settings.steps);
-    pass.options[2] = settings.thickness;
+    pass.options[2] = contactStepReach(settings.length, settings.steps);
     pass.options[3] = contactNoiseTurn(frame);
     pass.fade[0] = settings.fadeStart;
     pass.fade[1] = settings.fadeEnd;

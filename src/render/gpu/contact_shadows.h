@@ -14,9 +14,12 @@
 * Contact shadows: short shadows the shadow map misses, from the depth image. A shadow map's texels are millimetres to
 * centimetres across and its lookups are pushed towards the light against acne, so a small object's shadow comes loose
 * from it or vanishes, worst where the sun grazes. After the depth prepass every pixel marches a short way from its
-* surface towards the sun, each step projected onto the screen: a step behind the surface the depth image shows there
-* (by more than a pixel's rounding, by less than an assumed thickness, since the depth image shows only fronts) is
-* blocked, and the pixel is in shadow. The pass writes a mask the main pass multiplies the sun's shadow by; the shadow
+* surface towards the sun, each step projected onto the screen: a step that crossed the surface the depth image shows
+* there since the last step (now behind it by more than a pixel's rounding and by less than a step can reach, the last
+* step not) is blocked, and the pixel is in shadow. The depth image shows only fronts, so nothing says how thick a
+* thing is; a ray that entered something within the last step can be no further behind its front than one step, so
+* anything further behind is something the ray passes behind (a thing nearer the camera, or the far side of a thin one).
+* A thin thing's shadow is then too wide by at most a step's reach: more steps, finer shadows. The pass writes a mask the main pass multiplies the sun's shadow by; the shadow
 * map stays in charge of everything longer. Only what is on screen casts one, so the marches are short and fade at the
 * screen's edge and with distance.
 *
@@ -27,15 +30,12 @@ struct ContactShadowSettings {
     // On by default (off on the Low preset).
     bool enabled = true;
 
-    // How far each pixel marches towards the sun (metres) and in how many steps.
+    // How far each pixel marches towards the sun (metres) and in how many steps. A step's reach (length / steps, 1.9 cm)
+    // is how much too wide a thin thing's shadow may be, and a thing thinner than it can be stepped over on some frames.
+    // (A fixed 5 cm thickness came before it: a 1 cm pen's shadow was 4 cm too wide; at 0.2 m a fence post cast a
+    // second, wider stub of shadow beside its own.)
     float length = 0.3f;
     int steps = 16;
-
-    // How thick anything on screen is taken to be (metres): a step further behind a surface than this passes behind it.
-    // Too thin and thin objects are missed; too thick and objects grow dark haloes behind them: at 0.2 m a fence post
-    // cast a second, wider stub of shadow beside its own (the user's "double shadow"). 5 cm is still over twice the
-    // march's step (0.3 m in 16), so a step cannot jump past a solid object's front.
-    float thickness = 0.05f;
 
     // The shadow fades out between these view distances (metres), where a pixel covers too much for so short a march.
     float fadeStart = 40.0f;
@@ -45,7 +45,7 @@ struct ContactShadowSettings {
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(ContactShadowSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a length or thickness not above 0, steps outside 1..CONTACT_MAX_STEPS, or a fade
+// Throws std::invalid_argument for a length not above 0, steps outside 1..CONTACT_MAX_STEPS, or a fade
 // that ends before it starts (or starts below 0).
 void validateContactShadows(const ContactShadowSettings& settings);
 
@@ -56,9 +56,14 @@ float contactStepDistance(int step, int steps, float noise, float length);
 // that view distance (footprint: a pixel's height per metre of view distance, pixelFootprint).
 float contactBias(float footprint, float viewDistance);
 
-// Whether a step at rayDistance (along the view) is blocked by the surface the depth image shows at sceneDistance:
-// behind it by more than bias and less than thickness.
-bool contactBlocked(float rayDistance, float sceneDistance, float bias, float thickness);
+// How far one step goes: the length over the steps.
+float contactStepReach(float length, int steps);
+
+// Whether a step crossed a surface since the last one. behind is how far the step is behind the surface the depth image
+// shows at it (along the view; negative in front), previousBehind the last step's (0 for the march's start on its own
+// surface, and for a step passed over). Blocked: now behind by more than bias and less than bias + reach, and the last
+// step was not.
+bool contactBlocked(float previousBehind, float behind, float bias, float reach);
 
 // 0 at the screen's edge, rising to 1 over CONTACT_EDGE_PIXELS inwards (pixel from the top-left corner).
 float contactEdgeFade(Vec2 pixel, Vec2 size);
@@ -89,14 +94,14 @@ ContactShadowView contactShadowView(const Mat4& viewProjection, const Mat4& inve
 * The sky is lit; a march stops at the screen's edge or nearer the camera than CONTACT_NEAREST_W. contact_shadows.comp's
 * loop, the depths read as the AO pass reads them. solidAt (the depth prepass's solid mask, read the same way; every
 * pixel solid without it) is below a half where a cut-out is nearest: a step landing there is passed over. A cut-out's
-* wire is a millimetre thin but would count as thickness deep, so a fence's foot went dark where its shadow map already
+* wire is a millimetre thin but would count as a step deep, so a fence's foot went dark where its shadow map already
 * draws its holes.
 */
 float contactShadowAt(const ContactShadowView& view, const AoDepthImage& depthAt, Vec2 pixel, float noise, const AoDepthImage& solidAt = {});
 
 /*
 * The pass's numbers (contact_shadows.comp's storage buffer, std430): the matrices, the size and its inverse, the way to
-* the light with the footprint in w, the options (length, steps, thickness, the frame's noise turn) and the fades.
+* the light with the footprint in w, the options (length, steps, a step's reach, the frame's noise turn) and the fades.
 */
 struct GpuContactShadowPass {
     float viewProjection[16];

@@ -28,11 +28,13 @@ namespace {
         return false;
     }
 
-    // On by default (off on Low), 16 steps over 0.3 m, a 5 cm thickness, fading out from 40 to 60 m; reachable by key.
+    // On by default (off on Low), 16 steps over 0.3 m, fading out from 40 to 60 m; reachable by key. A step's reach, the
+    // most a step may be behind a surface and still count, is the length over the steps.
     void testTheSettings() {
         const ContactShadowSettings defaults;
-        assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 16 && defaults.thickness == 0.05f);
+        assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 16);
         assert(defaults.fadeStart == 40.0f && defaults.fadeEnd == 60.0f);
+        assert(contactStepReach(0.3f, 16) == 0.3f / 16.0f);
         validateContactShadows(defaults);
 
         ContactShadowSettings bad;
@@ -43,9 +45,6 @@ namespace {
         assert(rejects(bad));
         bad = {};
         bad.steps = CONTACT_MAX_STEPS + 1;
-        assert(rejects(bad));
-        bad = {};
-        bad.thickness = 0.0f;
         assert(rejects(bad));
         bad = {};
         bad.fadeEnd = bad.fadeStart - 1.0f;
@@ -84,15 +83,28 @@ namespace {
     }
 
     /*
-    * Blocked: the ray's point behind the surface the depth image shows there by more than the bias (so a surface never
-    * shadows itself through the depth's rounding) and by less than the thickness (the depth image shows only fronts,
-    * so a point far behind one passes behind the object). In front: never.
+    * Blocked: the step crossed a surface since the last one. It is now behind the surface the depth image shows there by
+    * more than the bias (so a surface never shadows itself through the depth's rounding) and by less than the bias and a
+    * step's reach (the depth image shows only fronts, and a ray that entered something within the last step can be no
+    * further behind its front than that), and the last step was not (it was in front, within the bias, or passed over).
     */
     void testBlocked() {
-        assert(contactBlocked(5.05f, 5.0f, 0.01f, 0.2f));
-        assert(!contactBlocked(5.5f, 5.0f, 0.01f, 0.2f));
-        assert(!contactBlocked(4.9f, 5.0f, 0.01f, 0.2f));
-        assert(!contactBlocked(5.005f, 5.0f, 0.01f, 0.2f));
+        const float bias = 0.01f;
+        const float reach = 0.02f;
+        assert(contactBlocked(0.0f, 0.02f, bias, reach));
+        assert(contactBlocked(-0.5f, 0.02f, bias, reach));
+        assert(contactBlocked(bias, 0.029f, bias, reach));
+
+        // In front, within the bias, or further behind than a step can reach (passing behind something nearer the camera).
+        assert(!contactBlocked(0.0f, -0.1f, bias, reach));
+        assert(!contactBlocked(0.0f, 0.005f, bias, reach));
+        assert(!contactBlocked(0.0f, 0.031f, bias, reach));
+        assert(!contactBlocked(0.0f, 0.5f, bias, reach));
+
+        // Already behind a surface at the last step: no crossing.
+        assert(!contactBlocked(0.015f, 0.02f, bias, reach));
+        assert(!contactBlocked(0.5f, 0.02f, bias, reach));
+
         assert(near(contactBias(0.001f, 10.0f), static_cast<float>(CONTACT_BIAS_PIXELS) * 0.01f, 1e-7f));
     }
 
@@ -126,19 +138,20 @@ namespace {
                       static_cast<float>(screen.width) / static_cast<float>(screen.height), 0.1f, 500.0f};
     }
 
-    std::vector<float> drawDepths(const StaticLevel& level, const Camera& camera, const Mat4& viewProjection, const Mat4& inverseViewProjection) {
-        const Vec2 size{static_cast<float>(screen.width), static_cast<float>(screen.height)};
-        std::vector<float> depths(static_cast<std::size_t>(screen.width) * screen.height, gpuFarDepth);
+    std::vector<float> drawDepths(const StaticLevel& level, const Camera& camera, const Mat4& viewProjection, const Mat4& inverseViewProjection,
+                                  RenderSize image = screen) {
+        const Vec2 size{static_cast<float>(image.width), static_cast<float>(image.height)};
+        std::vector<float> depths(static_cast<std::size_t>(image.width) * image.height, gpuFarDepth);
 
-        for (std::uint32_t y = 0; y < screen.height; ++y) {
-            for (std::uint32_t x = 0; x < screen.width; ++x) {
+        for (std::uint32_t y = 0; y < image.height; ++y) {
+            for (std::uint32_t x = 0; x < image.width; ++x) {
                 const Vec3 direction = positionAtPixel(inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, 0.5f, size).normalized();
                 const std::optional<LevelHit> hit = raycast(level, Ray{camera.getPosition(), direction}, 400.0f);
 
                 if (hit) {
                     const Vec3 point = direction * hit->hit.distance;
                     const Vec4 clip = viewProjection * Vec4{point.x, point.y, point.z, 1.0f};
-                    depths[static_cast<std::size_t>(y) * screen.width + x] = clip.z / clip.w;
+                    depths[static_cast<std::size_t>(y) * image.width + x] = clip.z / clip.w;
                 }
             }
         }
@@ -147,18 +160,17 @@ namespace {
     }
 
     // The pixel a world point shows at.
-    Vec2 pixelOf(const Mat4& viewProjection, const Camera& camera, const Vec3& world) {
+    Vec2 pixelOf(const Mat4& viewProjection, const Camera& camera, const Vec3& world, RenderSize image = screen) {
         const Vec3 relative = world - camera.getPosition();
         const Vec3 screenPoint = clipToScreen(viewProjection * Vec4{relative.x, relative.y, relative.z, 1.0f},
-                                              Vec2{static_cast<float>(screen.width), static_cast<float>(screen.height)});
+                                              Vec2{static_cast<float>(image.width), static_cast<float>(image.height)});
         return Vec2{std::floor(screenPoint.x) + 0.5f, std::floor(screenPoint.y) + 0.5f};
     }
 
     /*
     * The march at real pixels, the sun low from +x: the floor just west of the block is shadowed by it (the shadow map
     * would miss so short a shadow at a grazing sun); the floor east of it, far from it, and the block's top are lit; the
-    * sky is lit. With a thickness of a millimetre the march passes behind the block's front and finds nothing; with
-    * the sun from the other side, the west floor is lit. Every step stays within the length.
+    * sky is lit. With the sun from the other side, the west floor is lit. Every step stays within the length.
     */
     void testTheMarch() {
         const StaticLevel level = blockOnAFloor();
@@ -182,11 +194,6 @@ namespace {
         assert(contactShadowAt(view, depthAt, pixelOf(viewProjection, camera, Vec3{-1.0f, 0.0f, 0.8f}), 0.5f) == 1.0f);
         assert(contactShadowAt(view, depthAt, pixelOf(viewProjection, camera, Vec3{0.0f, 0.3f, 0.0f}), 0.5f) == 1.0f);
         assert(contactShadowAt(view, depthAt, Vec2{160.5f, 0.5f}, 0.5f) == 1.0f);
-
-        ContactShadowSettings thin = settings;
-        thin.thickness = 0.001f;
-        const ContactShadowView thinView = contactShadowView(viewProjection, inverseViewProjection, screen, fromEast, thin);
-        assert(contactShadowAt(thinView, depthAt, pixelOf(viewProjection, camera, Vec3{-0.25f, 0.0f, 0.0f}), 0.5f) == 1.0f);
 
         const ContactShadowView fromWest = contactShadowView(viewProjection, inverseViewProjection, screen, Vec3{-1.0f, 0.35f, 0.0f}.normalized(), settings);
         assert(contactShadowAt(fromWest, depthAt, pixelOf(viewProjection, camera, Vec3{-0.25f, 0.0f, 0.0f}), 0.5f) == 1.0f);
@@ -217,6 +224,136 @@ namespace {
         assert(contactShadowAt(fadedView, depthAt, pixelOf(viewProjection, camera, Vec3{-0.25f, 0.0f, 0.0f}), 0.5f) == 1.0f);
     }
 
+    /*
+    * A 1 cm pen standing on a floor, the sun low from +x, seen from the south (+z) and above at 640 x 360, a pixel about
+    * 2 mm across there. Its true shadow on the floor west of it is 1 cm wide (|z| <= 5 mm). Rays from floor points north
+    * of it (z < 0) pass behind the pen as the camera sees it: the old fixed thickness (5 cm) counted those up to 5 cm
+    * behind its front as blocked, a shadow 4 cm too wide. Now a step counts only within its own reach, so the shadow is
+    * too wide by at most that reach and the bias, and rays south of it pass in front and are never blocked.
+    */
+    constexpr RenderSize fine{640, 360};
+    constexpr float penHalfWidth = 0.005f;
+
+    struct PenScene {
+        Camera camera{Vec3{0.0f, 0.35f, 0.55f}, Vec3{-0.04f, 0.02f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.0f,
+                      static_cast<float>(fine.width) / static_cast<float>(fine.height), 0.05f, 100.0f};
+        Mat4 viewProjection = cameraRelativeViewProjection(camera);
+        Mat4 inverseViewProjection = *inverse(viewProjection);
+        std::vector<float> depths;
+
+        explicit PenScene(const StaticLevel& level) : depths(drawDepths(level, camera, viewProjection, inverseViewProjection, fine)) {
+        }
+
+        AoDepthImage depthAt() const {
+            return [this](int x, int y) {
+                return depths[static_cast<std::size_t>(y) * fine.width + static_cast<std::size_t>(x)];
+            };
+        }
+
+        // The mask at a floor point averaged over the noise's turns, as the anti-aliasing averages the frames.
+        float meanShadow(const ContactShadowSettings& settings, const Vec3& toLight, const Vec3& floorPoint) const {
+            const ContactShadowView view = contactShadowView(viewProjection, inverseViewProjection, fine, toLight, settings);
+            const Vec2 pixel = pixelOf(viewProjection, camera, floorPoint, fine);
+            float sum = 0.0f;
+            constexpr int turns = 8;
+
+            for (int turn = 0; turn < turns; ++turn) {
+                sum += contactShadowAt(view, depthAt(), pixel, (static_cast<float>(turn) + 0.5f) / static_cast<float>(turns));
+            }
+
+            return sum / static_cast<float>(turns);
+        }
+
+        // The view distance a world point is at, and a pixel's width there.
+        float pixelWidthAt(const Vec3& world) const {
+            const Vec3 relative = world - camera.getPosition();
+            const float distance = (viewProjection * Vec4{relative.x, relative.y, relative.z, 1.0f}).w;
+            return pixelFootprint(viewProjection, static_cast<float>(fine.height)) * distance;
+        }
+    };
+
+    StaticLevel penOnAFloor() {
+        StaticLevel level = flatLevel();
+        level.add(block(Vec3{-penHalfWidth, 0.0f, -penHalfWidth}, Vec3{penHalfWidth, 0.14f, penHalfWidth}));
+        return level;
+    }
+
+    // The span of z (north to south) along x = -5 cm where the floor is darkened at all (mean below 0.9), 1 mm apart.
+    struct Band {
+        float north = 1.0f;
+        float south = -1.0f;
+    };
+
+    Band shadowBand(const PenScene& scene, const ContactShadowSettings& settings, const Vec3& toLight) {
+        Band band;
+
+        for (int millimetre = -60; millimetre <= 30; ++millimetre) {
+            const float z = static_cast<float>(millimetre) * 0.001f;
+
+            if (scene.meanShadow(settings, toLight, Vec3{-0.05f, 0.0f, z}) < 0.9f) {
+                band.north = std::min(band.north, z);
+                band.south = std::max(band.south, z);
+            }
+        }
+
+        return band;
+    }
+
+    void testAThinPen() {
+        const PenScene scene{penOnAFloor()};
+        const Vec3 fromEast = Vec3{1.0f, 0.35f, 0.0f}.normalized();
+        const Vec3 floorPoint{-0.05f, 0.0f, 0.0f};
+        const float pixel = scene.pixelWidthAt(floorPoint);
+        assert(pixel < 0.003f);
+
+        for (const int steps : {16, 32}) {
+            ContactShadowSettings settings;
+            settings.steps = steps;
+            const float reach = contactStepReach(settings.length, steps);
+            const float bias = static_cast<float>(CONTACT_BIAS_PIXELS) * pixel;
+
+            // Its shadow is there: right behind the pen it is dark on average (at 16 steps of 1.9 cm a step can jump
+            // a 1 cm pen, so only most turns find it; at 32 every turn does).
+            const float behind = scene.meanShadow(settings, fromEast, floorPoint);
+            assert(steps == 16 ? behind < 0.6f : behind < 0.05f);
+
+            // A step counts once it is the bias behind the pen's front and until it is a step's reach further: the shadow
+            // is moved away from the camera by the bias (the near side loses up to the bias, never gains) and reaches
+            // past the far side by at most the reach and the bias less the pen's own width (and a couple of pixels'
+            // rounding). The old 5 cm thickness reached about 4 cm past it.
+            const Band band = shadowBand(scene, settings, fromEast);
+            assert(band.north <= -penHalfWidth);
+            assert(band.north > penHalfWidth - reach - bias - 2.0f * pixel);
+            assert(band.north > -0.025f);
+            assert(band.south >= penHalfWidth - bias - 2.0f * pixel);
+            assert(band.south < penHalfWidth + pixel);
+        }
+
+        // 32 steps make it tighter than 16.
+        ContactShadowSettings coarse;
+        ContactShadowSettings fineSteps;
+        fineSteps.steps = 32;
+        assert(shadowBand(scene, fineSteps, fromEast).north > shadowBand(scene, coarse, fromEast).north);
+    }
+
+    /*
+    * A bar hanging between the camera and the floor, well clear of it: floor pixels beside its silhouette march into its
+    * pixels, a metre behind its front. That is no crossing within a step, so the floor keeps no halo round it; only its
+    * real shadow (towards the sun's side, further away) is in the shadow map's charge.
+    */
+    void testNoHaloRoundThingsInFront() {
+        StaticLevel level = flatLevel();
+        level.add(block(Vec3{-0.2f, 0.2f, 0.25f}, Vec3{0.2f, 0.22f, 0.27f}));
+        const PenScene scene{level};
+        const Vec3 fromNorth = Vec3{0.0f, 0.6f, -1.0f}.normalized();
+        ContactShadowSettings settings;
+
+        for (int millimetre = -40; millimetre <= 40; millimetre += 2) {
+            const Vec3 floorPoint{static_cast<float>(millimetre) * 0.001f, 0.0f, 0.05f};
+            assert(scene.meanShadow(settings, fromNorth, floorPoint) == 1.0f);
+        }
+    }
+
     // The pass record: the matrices column-major, the size and its inverse, the way to the light with the pixel's
     // footprint, the options and the frame's noise turn, the fades.
     void testPacking() {
@@ -229,7 +366,7 @@ namespace {
         assert(pass.viewProjection[1] == viewProjection.values[1][0] && pass.inverseViewProjection[4] == inverseViewProjection.values[0][1]);
         assert(pass.size[0] == 320.0f && pass.size[1] == 180.0f && near(pass.size[2], 1.0f / 320.0f, 1e-9f));
         assert(pass.toLight[0] == toLight.x && near(pass.toLight[3], pixelFootprint(viewProjection, 180.0f), 1e-9f));
-        assert(pass.options[0] == 0.3f && pass.options[1] == 16.0f && pass.options[2] == 0.05f);
+        assert(pass.options[0] == 0.3f && pass.options[1] == 16.0f && pass.options[2] == 0.3f / 16.0f);
         assert(near(pass.options[3], contactNoiseTurn(3), 0.0f) && contactNoiseTurn(3) >= 0.0f && contactNoiseTurn(3) < 1.0f);
         assert(contactNoiseTurn(0) == 0.0f && contactNoiseTurn(1) != contactNoiseTurn(2));
         assert(pass.fade[0] == 40.0f && pass.fade[1] == 60.0f);
@@ -242,5 +379,7 @@ void testContactShadows() {
     testBlocked();
     testTheFades();
     testTheMarch();
+    testAThinPen();
+    testNoHaloRoundThingsInFront();
     testPacking();
 }
