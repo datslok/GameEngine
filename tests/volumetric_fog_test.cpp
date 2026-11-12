@@ -172,6 +172,89 @@ namespace {
         assert(!nearVec(fogJitter(0), fogJitter(1), 1e-3f));
     }
 
+    bool insideUnit(const Vec3& value) {
+        return value.x >= 0.0f && value.x < 1.0f && value.y >= 0.0f && value.y < 1.0f && value.z >= 0.0f && value.z < 1.0f;
+    }
+
+    /*
+    * Each froxel's own turn of the frames' offsets: fixed, within 0..1, unlike its neighbours' and spread evenly over the
+    * grid. Its offsets stay within half a froxel, repeat every cycle and still average to its middle, and neighbours
+    * sample different places in the same frame (one pattern moving together over the whole grid shimmered).
+    */
+    void testFroxelJitter() {
+        const FogFroxel froxel{17, 4, 33};
+        const Vec3 turn = fogFroxelTurn(froxel);
+        assert(insideUnit(turn));
+        assert(nearVec(fogFroxelTurn(froxel), turn, 0.0f));
+
+        for (const FogFroxel& neighbour : {FogFroxel{18, 4, 33}, FogFroxel{17, 5, 33}, FogFroxel{17, 4, 34}, FogFroxel{16, 4, 33}}) {
+            assert(!nearVec(fogFroxelTurn(neighbour), turn, 1e-2f));
+            assert(!nearVec(fogFroxelJitter(fogJitter(3), neighbour), fogFroxelJitter(fogJitter(3), froxel), 1e-2f));
+        }
+
+        Vec3 turns;
+        constexpr int side = 16;
+
+        for (int x = 0; x < side; ++x) {
+            for (int y = 0; y < side; ++y) {
+                for (int z = 0; z < side; ++z) {
+                    const Vec3 each = fogFroxelTurn(FogFroxel{x, y, z});
+                    assert(insideUnit(each));
+                    turns = turns + each;
+                }
+            }
+        }
+
+        assert(nearVec(turns * (1.0f / (side * side * side)), Vec3{0.5f, 0.5f, 0.5f}, 0.02f));
+
+        for (const FogFroxel& each : {froxel, FogFroxel{0, 0, 0}, FogFroxel{159, 89, 63}}) {
+            Vec3 sum;
+
+            for (std::uint64_t frame = 0; frame < fogJitterFrames; ++frame) {
+                const Vec3 offset = fogFroxelJitter(fogJitter(frame), each);
+                assert(insideUnit(offset + Vec3{0.5f, 0.5f, 0.5f}));
+                assert(nearVec(fogFroxelJitter(fogJitter(frame + fogJitterFrames), each), offset, 0.0f));
+                sum = sum + offset;
+            }
+
+            assert(nearVec(sum * (1.0f / fogJitterFrames), Vec3{}, 0.1f));
+        }
+    }
+
+    /*
+    * A froxel's place in the grid at an offset from its middle (its middle with none), held inside the grid. Its history
+    * is read where its middle was last frame: with the camera still, exactly its own texel's middle (read at the jittered
+    * point, the filter mixed in its neighbours with weights changing every frame); with the camera moved, wherever the
+    * middle's point lies in last frame's grid.
+    */
+    void testFroxelCoordinates() {
+        const FogFroxel size{160, 90, 64};
+        const FogFroxel froxel{40, 70, 12};
+        assert(nearVec(fogFroxelCoordinate(froxel, size, Vec3{}), Vec3{40.5f / 160.0f, 70.5f / 90.0f, 12.5f / 64.0f}, 1e-7f));
+        assert(nearVec(fogFroxelCoordinate(froxel, size, Vec3{0.25f, -0.5f, 0.4f}), Vec3{40.75f / 160.0f, 70.0f / 90.0f, 12.9f / 64.0f}, 1e-6f));
+        assert(nearVec(fogFroxelCoordinate(FogFroxel{0, 0, 0}, size, Vec3{-0.5f, -0.5f, -0.5f}), Vec3{}, 0.0f));
+        assert(nearVec(fogFroxelCoordinate(FogFroxel{159, 89, 63}, size, Vec3{0.6f, 0.6f, 0.6f}), Vec3{1.0f, 1.0f, 1.0f}, 0.0f));
+
+        const float range = 100.0f;
+        const Camera camera{Vec3{3.0f, 1.6f, -2.0f}, Vec3{4.0f, 1.4f, -7.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, 1000.0f};
+        const Mat4 viewProjection = cameraRelativeViewProjection(camera);
+        const Mat4 inverseViewProjection = *inverse(viewProjection);
+        const Vec3 middle = fogFroxelCoordinate(froxel, size, Vec3{});
+
+        for (const FogFroxel& each : {froxel, FogFroxel{0, 0, 0}, FogFroxel{159, 89, 63}, FogFroxel{80, 45, 32}}) {
+            const Vec3 still = fogHistoryCoordinate(each, size, inverseViewProjection, viewProjection, camera.getForward(), range);
+            assert(nearVec(still, fogFroxelCoordinate(each, size, Vec3{}), 1e-4f / 64.0f));
+        }
+
+        // The camera half a metre to the right last frame: this frame's camera-relative points in last frame's grid.
+        const Camera before{Vec3{3.5f, 1.6f, -2.0f}, Vec3{4.5f, 1.4f, -7.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, 1000.0f};
+        const Mat4 previousViewProjection = cameraRelativeViewProjection(before) * Mat4::translation(-0.5f, 0.0f, 0.0f);
+        const Vec3 point = fogVolumePoint(middle, inverseViewProjection, camera.getForward(), range);
+        const Vec3 moved = fogHistoryCoordinate(froxel, size, inverseViewProjection, previousViewProjection, camera.getForward(), range);
+        assert(nearVec(moved, fogVolumeCoordinate(point, previousViewProjection, range), 1e-6f));
+        assert(!nearVec(moved, middle, 1e-3f));
+    }
+
     /*
     * Light scattered towards the eye: a light's irradiance times pi times the phase function (the engine's pixels are pi
     * times radiance). Even scattering (g 0) sends a quarter of the irradiance, forward scattering more when looking
@@ -511,6 +594,8 @@ void testVolumetricFog() {
     testSlices();
     testVolumeCoordinates();
     testJitter();
+    testFroxelJitter();
+    testFroxelCoordinates();
     testInScattering();
     testSlab();
     testCompositing();

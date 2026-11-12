@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -45,4 +46,28 @@ constexpr std::uint64_t mixBits(std::uint64_t value) {
     value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ull;
     value = (value ^ (value >> 27)) * 0x94d049bb133111ebull;
     return value ^ (value >> 31);
+}
+
+/*
+* PCG3D (Jarzynski and Olano 2020, "Hash Functions for GPU Rendering"): three 32-bit numbers hashed together, each output
+* depending on every input, cheap and well spread on a GPU. 32-bit wrapping arithmetic only, so a shader's copy gives the
+* same bits (volumetric_fog.glsl's fogFroxelTurn).
+*/
+constexpr std::array<std::uint32_t, 3> pcg3d(std::array<std::uint32_t, 3> v) {
+    for (std::uint32_t& each : v) {
+        each = each * 1664525u + 1013904223u;
+    }
+
+    v[0] += v[1] * v[2];
+    v[1] += v[2] * v[0];
+    v[2] += v[0] * v[1];
+
+    for (std::uint32_t& each : v) {
+        each ^= each >> 16u;
+    }
+
+    v[0] += v[1] * v[2];
+    v[1] += v[2] * v[0];
+    v[2] += v[0] * v[1];
+    return v;
 }

@@ -8,6 +8,7 @@
 #include "render/gpu/volumetric_fog_shared.h"
 #include "scene/fog.h"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -91,6 +92,34 @@ Vec3 fogVolumePoint(const Vec3& coordinate, const Mat4& inverseViewProjection, c
 // (2, 3, 5) point of the frame's place in a cycle of fogJitterFrames (counted from 1, since point 0 is the corner).
 inline constexpr std::uint64_t fogJitterFrames = FOG_JITTER_FRAMES;
 Vec3 fogJitter(std::uint64_t frame);
+
+// A froxel's place in the grid: across, down and in depth, each from 0.
+using FogFroxel = std::array<int, 3>;
+
+/*
+* A froxel's own turn of the frames' offsets, each 0..1: the PCG3D hash of its place (Jarzynski and Olano 2020), its top
+* 24 bits as a share. Integer arithmetic, so the shader's is the same to the bit.
+*/
+Vec3 fogFroxelTurn(const FogFroxel& froxel);
+
+/*
+* This frame's offset of one froxel's sample point from its middle: the frame's jitter turned by the froxel's own turn
+* and wrapped round into -0.5..0.5 (a Cranley-Patterson rotation). Each froxel still visits its cycle's evenly spread
+* points, but neighbours visit them in different places at once, so what the history leaves is fine noise rather than
+* one pattern moving over the whole grid (which shimmered).
+*/
+Vec3 fogFroxelJitter(const Vec3& frameJitter, const FogFroxel& froxel);
+
+// A froxel's place in the grid, 0..1 each way, at an offset from its middle in froxels, held inside the grid.
+Vec3 fogFroxelCoordinate(const FogFroxel& froxel, const FogFroxel& size, const Vec3& offset);
+
+/*
+* Where a froxel's history is read: its middle's point in last frame's grid (previousViewProjection takes this frame's
+* camera-relative points). With the camera still, exactly its own texel's middle. Read at the jittered sample point
+* instead, the filter mixed in the neighbours with weights changing every frame, and sunbeams' edges shimmered.
+*/
+Vec3 fogHistoryCoordinate(const FogFroxel& froxel, const FogFroxel& size, const Mat4& inverseViewProjection, const Mat4& previousViewProjection,
+                          const Vec3& viewForward, float range);
 
 // The light a light of this irradiance scatters towards the eye per unit of optical depth (in pixel units): pi times the
 // phase function (Henyey-Greenstein, anisotropy g) at the angle between the view direction and the way to the light.

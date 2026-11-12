@@ -63,7 +63,8 @@ namespace {
     /*
     * Cameras looking every way with every lens, points all over their views from the camera out past the range, places
     * all over the grid. Inputs per case: the view-projection's columns, its inverse's columns, (point, range),
-    * (coordinate, slices), (forward, history weight).
+    * (coordinate, slices), (forward, history weight), (froxel, 0), (grid size, 0); the coordinate less a half is the frame's
+    * jitter, and last frame's camera is this one's.
     */
     void checkGrid(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{212};
@@ -83,15 +84,19 @@ namespace {
             inputs.push_back(gpuVec4(point, range));
             inputs.push_back(gpuVec4(coordinate, static_cast<float>(8 + i % 120)));
             inputs.push_back(gpuVec4(camera.getForward(), random.between(0.0f, 0.98f)));
+            const FogFroxel size{8 + i % 200, 8 + (i * 7) % 120, 8 + (i * 13) % 248};
+            const FogFroxel froxel{(i * 31) % size[0], (i * 17) % size[1], (i * 5) % size[2]};
+            inputs.push_back(GpuVec4{static_cast<float>(froxel[0]), static_cast<float>(froxel[1]), static_cast<float>(froxel[2]), 0.0f});
+            inputs.push_back(GpuVec4{static_cast<float>(size[0]), static_cast<float>(size[1]), static_cast<float>(size[2]), 0.0f});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_GRID, inputs, 11, 3);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_GRID, inputs, 13, 7);
         // Through a projection and back: a little more than arithmetic.
         const FloatTolerance projectionTolerance{.absolute = 1e-5f, .relative = 1e-4f};
 
         for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
-            const GpuVec4* in = &inputs[i * 11];
-            const GpuVec4* out = &outputs[i * 3];
+            const GpuVec4* in = &inputs[i * 13];
+            const GpuVec4* out = &outputs[i * 7];
             Mat4 viewProjection;
             Mat4 inverseViewProjection;
 
@@ -115,6 +120,14 @@ namespace {
             report.check("fogHistoryWeight", exactTolerance, fogHistoryWeight(coordinate * 1.2f - Vec3{0.1f, 0.1f, 0.1f}, in[10][3]), out[2][2]);
             const FogSurfaceRead surfaceRead = fogSurfaceRead(coordinate.z, slices, range);
             report.check("fogSurfaceRead", transcendentalTolerance, surfaceRead.extended ? surfaceRead.stretch + static_cast<float>(surfaceRead.last) + surfaceRead.mix : -1.0f, out[2][3]);
+            const FogFroxel froxel{static_cast<int>(in[11][0]), static_cast<int>(in[11][1]), static_cast<int>(in[11][2])};
+            const FogFroxel size{static_cast<int>(in[12][0]), static_cast<int>(in[12][1]), static_cast<int>(in[12][2])};
+            const Vec3 jitter = fogFroxelJitter(coordinate - Vec3{0.5f, 0.5f, 0.5f}, froxel);
+            report.check("fogFroxelTurn", exactTolerance, fogFroxelTurn(froxel), vec3From(out[3]));
+            report.check("fogFroxelJitter", arithmeticTolerance, jitter, vec3From(out[4]));
+            report.check("fogFroxelCoordinate", arithmeticTolerance, fogFroxelCoordinate(froxel, size, jitter), vec3From(out[5]));
+            report.check("fogHistoryCoordinate", projectionTolerance,
+                         fogHistoryCoordinate(froxel, size, inverseViewProjection, viewProjection, vec3From(in[10]), range), vec3From(out[6]));
         }
     }
 

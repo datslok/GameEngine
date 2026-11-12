@@ -301,10 +301,8 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.
 - [ ] Mirrored lights without ray tracing: the image light for flat mirrors
   - **Moved here from 6e** (Oct 24 2026, the user's choice): only GPUs without ray tracing would use it, as with the software tracer; the rest of image quality comes first.
-- [ ] Steadier volumetric fog: sunbeams through the light lab's window shimmer
-  - Read each froxel's history at its centre, not at its jittered sample point (with the camera still the read now lands up to half a froxel off, so the filter mixes in neighbours with weights that change every frame).
-  - Give each froxel its own phase of the Halton jitter (a hash of its place added and wrapped, a Cranley-Patterson rotation), so the leftover error is fine noise the history and DLSS remove rather than one pattern moving together.
-  - Possibly set the history as a time constant in seconds, as the probes do, so it lags the same at any frame rate.
+- [x] Steadier volumetric fog: history read at each froxel's middle, a jitter turned per froxel (`steadier-fog`)
+- [ ] The fog's history as a time constant in seconds, as the probes', so it lags the same at any frame rate (left out of `steadier-fog`: it does not help the shimmer)
 - [ ] Materials
   - Clear coat, anisotropy, subsurface scattering for skin, parallax occlusion mapping, decals
   - Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials

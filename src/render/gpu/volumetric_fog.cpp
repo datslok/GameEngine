@@ -1,4 +1,5 @@
 #include "render/gpu/volumetric_fog.h"
+#include "core/hash.h"
 #include "render/gpu/atmosphere.h"
 #include "render/gpu/column_major.h"
 #include "render/gpu/taa.h"
@@ -105,6 +106,36 @@ Vec3 fogVolumePoint(const Vec3& coordinate, const Mat4& inverseViewProjection, c
 Vec3 fogJitter(std::uint64_t frame) {
     const std::uint32_t index = static_cast<std::uint32_t>(frame % fogJitterFrames) + 1;
     return Vec3{halton(index, 2) - 0.5f, halton(index, 3) - 0.5f, halton(index, 5) - 0.5f};
+}
+
+Vec3 fogFroxelTurn(const FogFroxel& froxel) {
+    const std::array<std::uint32_t, 3> hashed =
+        pcg3d({static_cast<std::uint32_t>(froxel[0]), static_cast<std::uint32_t>(froxel[1]), static_cast<std::uint32_t>(froxel[2])});
+    constexpr float share = 1.0f / 16777216.0f;
+    return Vec3{static_cast<float>(hashed[0] >> 8u) * share, static_cast<float>(hashed[1] >> 8u) * share, static_cast<float>(hashed[2] >> 8u) * share};
+}
+
+// The jitter is the Halton point less a half: the point turned, wrapped into 0..1 (x - floor(x), GLSL's fract), less a half.
+Vec3 fogFroxelJitter(const Vec3& frameJitter, const FogFroxel& froxel) {
+    const Vec3 turn = fogFroxelTurn(froxel);
+    const auto wrapped = [](float jitter, float turn) {
+        const float value = jitter + 0.5f + turn;
+        return value - std::floor(value) - 0.5f;
+    };
+    return Vec3{wrapped(frameJitter.x, turn.x), wrapped(frameJitter.y, turn.y), wrapped(frameJitter.z, turn.z)};
+}
+
+Vec3 fogFroxelCoordinate(const FogFroxel& froxel, const FogFroxel& size, const Vec3& offset) {
+    const auto along = [](int place, int count, float offset) {
+        return std::clamp((static_cast<float>(place) + 0.5f + offset) / static_cast<float>(count), 0.0f, 1.0f);
+    };
+    return Vec3{along(froxel[0], size[0], offset.x), along(froxel[1], size[1], offset.y), along(froxel[2], size[2], offset.z)};
+}
+
+Vec3 fogHistoryCoordinate(const FogFroxel& froxel, const FogFroxel& size, const Mat4& inverseViewProjection, const Mat4& previousViewProjection,
+                          const Vec3& viewForward, float range) {
+    const Vec3 middle = fogVolumePoint(fogFroxelCoordinate(froxel, size, Vec3{}), inverseViewProjection, viewForward, range);
+    return fogVolumeCoordinate(middle, previousViewProjection, range);
 }
 
 Vec3 fogInScattering(const Vec3& irradiance, const Vec3& toLight, const Vec3& viewDirection, float anisotropy) {
