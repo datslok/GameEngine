@@ -26,7 +26,8 @@ Settings: every value a game, the debug UI or a player may tune lives in one set
   - and `render`.
 - `RenderSettings` (`render/gpu/render_settings.h`) = `LightPrioritySettings lights` + `ShadowSettings shadows` + `BloomSettings bloom` + `ToneMappingSettings toneMapping` + `DisplaySettings display` + `GlobalIlluminationSettings globalIllumination` (render/gpu/ddgi.h; see Light probes), with `rayTracing`, the master switch for everything ray-traced (off by default; see Ray tracing). It is passed to `VulkanRenderer::render(frame, settings)` each frame.
 - Camera controllers each own a settings struct (`FreeFlyCameraSettings`, `FirstPersonCameraSettings`, `MobaCameraSettings`), passed to the constructor and editable through `getSettings()`.
-  - The look ones nest the shared `LookSettings`: `radiansPerPixel`, `sprintMultiplier`.
+  - The look ones nest the shared `LookSettings`: `sensitivity`, `sprintMultiplier`.
+  - `sensitivity` is on Overwatch's scale (default 5, slider 1 to 50): `radiansPerCount` turns it into `sensitivity` x `overwatchDegreesPerCount` (0.0066 degrees) per mouse count. SDL's relative mouse mode reports raw counts, unscaled by Windows' pointer speed, as Overwatch reads them, so the same number turns the same angle for the same hand motion in both, sideways and up alike, at any field of view.
 
 **Reaching them**
 
@@ -3244,6 +3245,7 @@ Every game starts in first person. Adding a game is one line in the table.
   - F5 Light lab, Atmosphere, for its numbers.
 - **Controls:** the demo's `PlayerControls` (free camera from (0, 2, 6) looking north, MOBA look point (0, 0, -8), body at the origin, far plane 1000) and F4 for the engine's debug view.
 - **The shared flashlight** (F, `gameplay/flashlight`, each switch a scene event over its reach): off at the start so the golden views keep the sunlit picture, held in the right hand in every mode and placed each frame after the camera, for watching a moving light's bounce in the probes.
+- **The fence torch** (F5 Light lab, Fence torch: `lightLab.fenceTorch.on`, `bearing`, `dip`; `LightLabFenceTorchSettings`): a second `Flashlight` on top of the fence's first post (`labFenceTorchPosition`), off at the start, pointing east and 10 degrees down by default (`fenceTorchPose`, the bearing from north towards east). `onUpdate` places it and switches it to its settings every frame, so the beam stays still in the mist and can be seen from the side or the front: the mist scatters forward (g 0.6), so one's own torch, seen from behind, shows its beam least.
 
 **The back room's ceiling lamp** (L, `toggleLamp`, off at the start): an entity at `labLampPosition` (under the middle of the ceiling, 15 cm down).
 

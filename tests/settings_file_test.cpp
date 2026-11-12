@@ -265,6 +265,8 @@ namespace {
         assert(keys.count("demo.grenade.throwSpeed") == 1);
         assert(keys.count("demo.freeCamera.moveSpeed") == 1);
         assert(valueOf(entries, "engine.render.toneMapping.curve") == "AgX");
+        assert(valueOf(entries, "demo.firstPersonCamera.look.sensitivity") == "5");
+        assert(valueOf(entries, "demo.freeCamera.look.sensitivity") == "5");
 
         // A round trip through the file text with nothing changed writes nothing but the header.
         const std::string text = formatSettingsText(entries, entries);

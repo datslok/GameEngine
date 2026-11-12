@@ -1,5 +1,9 @@
+#include "core/command_registry.h"
 #include "core/coverage_mips.h"
+#include "engine/engine_commands.h"
+#include "engine/engine_settings.h"
 #include "engine/golden.h"
+#include "engine/settings_file.h"
 #include "games/lightlab/light_lab_game.h"
 #include "games/lightlab/light_lab_level.h"
 #include "gameplay/first_person_body.h"
@@ -891,6 +895,66 @@ namespace {
         assert(!lab.world.has<SpotLight>(flashlight));
     }
 
+    /*
+    * The fence torch: a second flashlight clamped on top of the first fence post, for seeing its beam in the mist from
+    * the side and from the front. Off at the start; its settings (and so the set command) switch and aim it, and it stays
+    * where it is while the camera moves.
+    */
+    void testTheFenceTorch() {
+        Lab lab;
+        const Entity torch = lab.game.getFenceTorch();
+        assert(lab.world.isAlive(torch) && !lab.world.has<SpotLight>(torch));
+        assert(!lab.game.getFenceTorchSettings().on);
+
+        // On the post's top, aimed east by default and dipping 10 degrees.
+        assert(near(labFenceTorchPosition.x, labFenceX, 1e-6f) && near(labFenceTorchPosition.z, labFirstPostZ, 1e-6f));
+        assert(labFenceTorchPosition.y > labPostHeight);
+        const FlashlightPose east = fenceTorchPose(LightLabFenceTorchSettings{.on = true, .bearingDegrees = 90.0f, .dipDegrees = 10.0f});
+        const Vec3 eastDown{std::cos(radiansFromDegrees(10.0f)), -std::sin(radiansFromDegrees(10.0f)), 0.0f};
+        assert(east.direction.normalized().dot(eastDown) > 0.99999f);
+        const FlashlightPose north = fenceTorchPose(LightLabFenceTorchSettings{.on = true, .bearingDegrees = 0.0f, .dipDegrees = 0.0f});
+        assert(north.direction.normalized().dot(Vec3{0.0f, 0.0f, -1.0f}) > 0.99999f);
+
+        EngineSettings engine;
+        CommandRegistry registry;
+        const SettingsWalk walk = engineAndGameSettings(engine, lab.game);
+        addSettingsCommands(registry, walk, captureSettings(walk));
+
+        Input idle;
+        idle.beginFrame();
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        clearProbeEvents(lab.world);
+        assert(registry.execute("set lightLab.fenceTorch.on true").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(lab.world.has<SpotLight>(torch));
+
+        // Switching it is a scene event for the probes round it, as the player's torch is.
+        assert(collectLighting(lab.world, 1.0f).probeEvents.size() == 1);
+        clearProbeEvents(lab.world);
+
+        const Vec3 position = lab.world.get<Transform>(torch).position;
+        assert(near(position.x, labFenceTorchPosition.x, 1e-6f) && near(position.y, labFenceTorchPosition.y, 1e-6f) &&
+               near(position.z, labFenceTorchPosition.z, 1e-6f));
+        const FlashlightPose aimed = fenceTorchPose(lab.game.getFenceTorchSettings());
+        assert(lab.world.get<SpotLight>(torch).direction.normalized().dot(aimed.direction.normalized()) > 0.99999f);
+
+        // The camera moving elsewhere leaves it where it is (the player's own torch follows the view).
+        lab.game.poseCamera(lab.world, Vec3{20.0f, 5.0f, 20.0f}, Vec3{0.0f, 0.0f, 0.0f});
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        const Vec3 after = lab.world.get<Transform>(torch).position;
+        assert(near(after.x, position.x, 1e-6f) && near(after.y, position.y, 1e-6f) && near(after.z, position.z, 1e-6f));
+
+        // Aimed live: north and level.
+        assert(registry.execute("set lightLab.fenceTorch.bearing 0").ok);
+        assert(registry.execute("set lightLab.fenceTorch.dip 0").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(lab.world.get<SpotLight>(torch).direction.normalized().dot(Vec3{0.0f, 0.0f, -1.0f}) > 0.99999f);
+
+        assert(registry.execute("set lightLab.fenceTorch.on false").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(!lab.world.has<SpotLight>(torch));
+    }
+
     // The probe events signalled since the last frame, cleared as the engine does once the frame is built.
     std::vector<ProbeEvent> takeProbeEvents(Lab& lab) {
         const std::vector<ProbeEvent> events = collectLighting(lab.world, 1.0f).probeEvents;
@@ -1091,6 +1155,7 @@ void testLightLab() {
     testTheReflectionCorner();
     testTheMirror();
     testTheLabsFlashlight();
+    testTheFenceTorch();
     testTheBackRoomLamp();
     testTheStreetLights();
     testAClockJumpRestartsTheProbes();

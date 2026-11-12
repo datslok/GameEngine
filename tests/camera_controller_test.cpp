@@ -1,3 +1,6 @@
+#include "core/command_registry.h"
+#include "engine/engine_commands.h"
+#include "engine/settings_file.h"
 #include "gameplay/camera/first_person_camera_controller.h"
 #include "gameplay/camera/free_fly_camera_controller.h"
 #include "gameplay/camera/look_controls.h"
@@ -24,9 +27,9 @@ namespace {
         return Camera{position, target, Vec3{0.0f, 1.0f, 0.0f}, pi / 2.0f, 16.0f / 9.0f, 0.1f, 100.0f};
     }
 
-    // The look settings the first-person checks below are worked out for: 0.001 radians per pixel of mouse motion.
+    // The look settings the first-person checks below are worked out for: Overwatch's sensitivity 5.
     const FirstPersonCameraSettings walker{
-        .look = LookSettings{.radiansPerPixel = 0.001f, .sprintMultiplier = 2.0f}
+        .look = LookSettings{.sensitivity = 5.0f, .sprintMultiplier = 2.0f}
     };
 
     // A focused window with the mouse captured for mouse look.
@@ -64,6 +67,47 @@ void testCameraControllers() {
 
         applyMouseLook(angles, Vec2{0.0f, -100000.0f}, 0.01f);
         assert(nearlyEqual(angles.pitch, maxPitchRadians));
+    }
+
+    // Sensitivity is Overwatch's: 0.0066 degrees of turn per mouse count per unit, the same for both cameras by default.
+    {
+        assert(std::abs(radiansPerCount(1.0f) - radiansFromDegrees(0.0066f)) < 1e-9f);
+        assert(std::abs(radiansPerCount(5.0f) - radiansFromDegrees(0.033f)) < 1e-9f);
+        assert(std::abs(radiansPerCount(50.0f) - radiansFromDegrees(0.33f)) < 1e-8f);
+        assert(LookSettings{}.sensitivity == 5.0f);
+        assert(FirstPersonCameraSettings{}.look.sensitivity == 5.0f);
+        assert(FreeFlyCameraSettings{}.look.sensitivity == 5.0f);
+
+        // 1000 counts at sensitivity 5 turn exactly 33 degrees, as in Overwatch.
+        Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        FirstPersonCameraController controller{walker};
+        controller.takeOver(camera);
+        Input turn = capturedInput();
+        turn.addMouseMotion(1000.0f, 0.0f);
+        controller.update(camera, turn, 1.0f);
+        assert(nearlyEqual(controller.getAngles().yaw, radiansFromDegrees(33.0f)));
+    }
+
+    // The sensitivity is a setting like any other, so the command line can change it on a live controller.
+    {
+        FirstPersonCameraController controller{walker};
+        const SettingsWalk walk = [&controller](SettingsVisitor& visitor) {
+            visitor.group("First person camera", [&] {
+                visit(controller.getSettings(), visitor);
+            });
+        };
+        CommandRegistry registry;
+        addSettingsCommands(registry, walk, captureSettings(walk));
+
+        assert(registry.execute("set firstPersonCamera.look.sensitivity 10").ok);
+        assert(controller.getSettings().look.sensitivity == 10.0f);
+
+        Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
+        controller.takeOver(camera);
+        Input turn = capturedInput();
+        turn.addMouseMotion(1000.0f, 0.0f);
+        controller.update(camera, turn, 1.0f);
+        assert(nearlyEqual(controller.getAngles().yaw, radiansFromDegrees(66.0f)));
     }
 
     // Free fly moves along the view direction, including up and down.
@@ -123,7 +167,7 @@ void testCameraControllers() {
         assert(nearlyEqual(camera.getPosition(), Vec3{0.0f, 1.0f, 0.0f}));
 
         Input turn = capturedInput();
-        turn.addMouseMotion(pi / 2.0f / 0.001f, 0.0f);
+        turn.addMouseMotion(pi / 2.0f / radiansPerCount(walker.look.sensitivity), 0.0f);
         controller.update(camera, turn, 1.0f);
         assert(nearlyEqual(controller.getAngles().yaw, pi / 2.0f));
         assert(nearlyEqual(camera.getForward(), Vec3{1.0f, 0.0f, 0.0f}));
@@ -197,11 +241,11 @@ void testCameraControllers() {
         Camera camera = makeCamera(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, -1.0f});
         FirstPersonCameraController controller{walker};
         controller.takeOver(camera);
-        controller.getSettings().look.radiansPerPixel = 0.002f;
+        controller.getSettings().look.sensitivity = 10.0f;
         Input turn = capturedInput();
         turn.addMouseMotion(100.0f, 0.0f);
         controller.update(camera, turn, 1.0f);
-        assert(nearlyEqual(controller.getAngles().yaw, 0.2f));
+        assert(nearlyEqual(controller.getAngles().yaw, 100.0f * radiansPerCount(10.0f)));
         camera.setPose(Vec3{0.0f, 1.0f, -15.0f}, Vec3{0.0f, 1.0f, -16.0f}, Vec3{0.0f, 1.0f, 0.0f});
 
         FreeFlyCameraController flyer;

@@ -188,7 +188,7 @@ Several games run on one engine, picked at start-up with `--game`.
 
 ### Tools for building and testing
 
-- **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity, grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
+- **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity (on Overwatch's scale, 5 by default), grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
   - **a debug UI** (F5, Dear ImGui): a slider, checkbox or list for every setting, Save and Reset buttons, drawn over the image in its own layer so it looks right in HDR too
   - **quality presets** Low, Medium, High and Ultra (see the table below)
   - **a settings file** (`settings.cfg`): only the values changed from the defaults, loaded at start-up, forgiving of hand edits
@@ -395,6 +395,8 @@ The light lab is the default game (`--game lightlab`; the exe alone in the zip).
 **The lights**
 
 The flashlight (F) is a fast light: its bounce is kept apart with a short memory, and switching it tells the light probes, so its bounce comes and goes with it. Shine it into the light lab's dark back room to watch its bounce light follow it.
+
+The light lab's fence torch (F5, Fence torch, off at the start) is a second flashlight fixed on the fence's first post. Walk round its beam to see the mist light up: brightest looking into the beam, faintest from behind it, which is how you see your own torch.
 
 The back room's ceiling lamp (L) is a still light. Its bounce comes in at once when switched, since the switch tells the light probes round it to start afresh. Moving the clock by hand does the same for every probe.
 
