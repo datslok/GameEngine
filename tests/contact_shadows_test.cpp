@@ -28,13 +28,13 @@ namespace {
         return false;
     }
 
-    // On by default (off on Low), 16 steps over 0.3 m, fading out from 40 to 60 m; reachable by key. A step's reach, the
+    // On by default (off on Low), 32 steps over 0.3 m, fading out from 40 to 60 m; reachable by key. A step's reach, the
     // most a step may be behind a surface and still count, is the length over the steps.
     void testTheSettings() {
         const ContactShadowSettings defaults;
-        assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 16);
+        assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 32);
         assert(defaults.fadeStart == 40.0f && defaults.fadeEnd == 60.0f);
-        assert(contactStepReach(0.3f, 16) == 0.3f / 16.0f);
+        assert(contactStepReach(0.3f, 32) == 0.3f / 32.0f);
         validateContactShadows(defaults);
 
         ContactShadowSettings bad;
@@ -331,6 +331,7 @@ namespace {
 
         // 32 steps make it tighter than 16.
         ContactShadowSettings coarse;
+        coarse.steps = 16;
         ContactShadowSettings fineSteps;
         fineSteps.steps = 32;
         assert(shadowBand(scene, fineSteps, fromEast).north > shadowBand(scene, coarse, fromEast).north);
@@ -366,7 +367,7 @@ namespace {
         assert(pass.viewProjection[1] == viewProjection.values[1][0] && pass.inverseViewProjection[4] == inverseViewProjection.values[0][1]);
         assert(pass.size[0] == 320.0f && pass.size[1] == 180.0f && near(pass.size[2], 1.0f / 320.0f, 1e-9f));
         assert(pass.toLight[0] == toLight.x && near(pass.toLight[3], pixelFootprint(viewProjection, 180.0f), 1e-9f));
-        assert(pass.options[0] == 0.3f && pass.options[1] == 16.0f && pass.options[2] == 0.3f / 16.0f);
+        assert(pass.options[0] == 0.3f && pass.options[1] == 32.0f && pass.options[2] == 0.3f / 32.0f);
         assert(near(pass.options[3], contactNoiseTurn(3), 0.0f) && contactNoiseTurn(3) >= 0.0f && contactNoiseTurn(3) < 1.0f);
         assert(contactNoiseTurn(0) == 0.0f && contactNoiseTurn(1) != contactNoiseTurn(2));
         assert(pass.fade[0] == 40.0f && pass.fade[1] == 60.0f);

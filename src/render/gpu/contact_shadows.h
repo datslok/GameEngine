@@ -30,12 +30,14 @@ struct ContactShadowSettings {
     // On by default (off on the Low preset).
     bool enabled = true;
 
-    // How far each pixel marches towards the sun (metres) and in how many steps. A step's reach (length / steps, 1.9 cm)
-    // is how much too wide a thin thing's shadow may be, and a thing thinner than it can be stepped over on some frames.
+    // How far each pixel marches towards the sun (metres) and in how many steps. A step's reach (length / steps, 0.9 cm)
+    // is how much too wide a thin thing's shadow may be, and a thing thinner than it can be stepped over on some frames:
+    // at 16 steps (1.9 cm) a 1 cm pen's shadow was half dark; at 32 it is solid, for about twice the pass's time (0.42
+    // to 0.77 ms in the user's window on the laptop; chosen by the user by eye on the light lab's pen table).
     // (A fixed 5 cm thickness came before it: a 1 cm pen's shadow was 4 cm too wide; at 0.2 m a fence post cast a
     // second, wider stub of shadow beside its own.)
     float length = 0.3f;
-    int steps = 16;
+    int steps = 32;
 
     // The shadow fades out between these view distances (metres), where a pixel covers too much for so short a march.
     float fadeStart = 40.0f;
