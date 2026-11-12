@@ -8,6 +8,8 @@
 #include "render/gpu/shadow_map.h"
 #include "scene/lighting.h"
 
+#include <optional>
+#include <span>
 #include <vector>
 
 /*
@@ -85,3 +87,7 @@ void visit(LightPrioritySettings& settings, SettingsVisitor& visitor);
 // elapsedSeconds is the time since then, which moves the fades along.
 PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& focus, const Frustum& view, const LightHistory& previous,
                                      float elapsedSeconds, const LightPrioritySettings& settings = {});
+
+// The directional light prioritizeLights puts first: the brightest that can be drawn (its brightest channel times its
+// intensity), the first of equals; none without one. What the sky grid's sun bounce follows.
+std::optional<DirectionalLight> brightestDirectionalLight(std::span<const DirectionalLight> lights);

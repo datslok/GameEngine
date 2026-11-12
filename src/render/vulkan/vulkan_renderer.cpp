@@ -1815,8 +1815,33 @@ void VulkanRenderer::bakeSkyVisibility(const FrameDescription& description, cons
     validateSkyVisibility(settings.skyVisibility);
 
     if (readsSkyGrid(description, settings)) {
-        skyVisibility->bake(description, description.camera.getPosition(), settings.skyVisibility, jobs, everything);
+        skyVisibility->bake(description, description.camera.getPosition(), settings.skyVisibility, jobs, everything, sunBounceDirection(description));
     }
+}
+
+/*
+* The way to the light the sky grid's sun bounce follows: the brightest directional light after the air has dimmed it, as
+* prioritizeLights ranks them (the main pass reads its irradiance from slot 0), so the moon takes over once the sun has
+* set. None without one.
+*/
+std::optional<Vec3> VulkanRenderer::sunBounceDirection(const FrameDescription& description) const {
+    std::vector<DirectionalLight> lights = description.lighting.directionalLights;
+
+    if (const std::optional<Atmosphere>& air = description.lighting.atmosphere) {
+        const float radius = atmosphereViewRadius(*air, description.camera.getPosition().y);
+
+        for (DirectionalLight& light : lights) {
+            light = throughAtmosphere(light, *air, radius);
+        }
+    }
+
+    const std::optional<DirectionalLight> brightest = brightestDirectionalLight(lights);
+
+    if (!brightest || brightest->direction.lengthSquared() <= 0.0f) {
+        return std::nullopt;
+    }
+
+    return (brightest->direction * -1.0f).normalized();
 }
 
 /*
@@ -1892,6 +1917,8 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     const std::span<const ProbeCascade> skyCascades = readsSkyVisibility ? skyVisibility->getCascades() : std::span<const ProbeCascade>{};
     const GpuSkyVisibilityOptions skyOptions = packSkyVisibilityOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()));
     std::copy(std::begin(skyOptions.values), std::end(skyOptions.values), std::begin(frameData.skyVisibilityOptions));
+    const GpuSkySunBounceOptions sunOptions = packSkySunBounceOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()), lights.counts[0]);
+    std::copy(std::begin(sunOptions.values), std::end(sunOptions.values), std::begin(frameData.skySunBounceOptions));
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};

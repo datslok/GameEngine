@@ -75,6 +75,13 @@ struct SkyVisibilitySettings {
     int deepRays = 2048;
     int deepOpenRays = 32;
 
+    // The sun's bounce: each point also keeps the light the surfaces round it bounce from the brightest directional light
+    // (the sun, or the moon at night), per unit of its irradiance, so its colour and strength are free at run time and
+    // only its direction is baked. A move of that light past sunRefreshDegrees bakes the grid again in the background
+    // (about 8 minutes of the real sun at 2). Neither is part of the grid's shape: the refresh bakes it again instead.
+    bool sunBounce = true;
+    float sunRefreshDegrees = 2.0f;
+
     // How much memory may keep baked points by their place in the world after they leave the grid (megabytes, 0 off),
     // so coming back to a place finds them instead of baking them again (render/gpu/sky_visibility_bake.h,
     // SkyCellStore). Used only as places are visited; the points used longest ago go first. Not part of the grid's shape.
@@ -106,7 +113,7 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for an ambient floor outside 0..1, a spacing or ray length not above 0, a negative bake
 // time, lookup bias or store, cascades outside 1..maxSkyVisibilityCascades, rays or quick rays below 1, deep rays below
-// 0 or a deep threshold below 1.
+// 0, a deep threshold below 1, or a sun refresh angle not above 0.
 void validateSkyVisibility(const SkyVisibilitySettings& settings);
 
 // Whether two settings bake the same grid: everything but the ambient floor, the lookup bias, the budget, the quick and
@@ -152,6 +159,11 @@ inline const SkyBounce noSkyBounce{SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}, 
 */
 Vec3 skyLightFacing(const SkyVisibility& visibility, const SkyBounce& bounce, const Vec3& normal, float floor);
 
+// A bounce's light alone, per channel, facing a unit normal (skySeenFacing of each) and along a unit direction
+// (skySeenAlong): the sun's bounce, which the shaders scale by the light's irradiance.
+Vec3 skyBounceFacing(const SkyBounce& bounce, const Vec3& normal);
+Vec3 skyBounceAlong(const SkyBounce& bounce, const Vec3& direction);
+
 // The same along one unit direction (the reflection's stand-in): the sky and the bounce seen along it.
 Vec3 skyLightAlong(const SkyVisibility& visibility, const SkyBounce& bounce, const Vec3& direction, float floor);
 
@@ -169,12 +181,14 @@ inline constexpr int skyReachDirections = 6;
 Vec3 skyReachDirection(int direction);
 
 /*
-* One grid point: its bands, the bounce light round it, how far it sees along each axis direction as a share of its
-* cascade's spacing (at most 1), and its state. Not baked yet by default.
+* One grid point: its bands, the bounce light round it (of the sky's light, and of the sun's per unit of its
+* irradiance), how far it sees along each axis direction as a share of its cascade's spacing (at most 1), and its state.
+* Not baked yet by default.
 */
 struct SkyCell {
     SkyVisibility visibility;
     SkyBounce bounce = noSkyBounce;
+    SkyBounce sunBounce = noSkyBounce;
     std::array<float, skyReachDirections> reach{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     SkyCellState state = SkyCellState::Unknown;
 
@@ -197,13 +211,13 @@ bool skyCornerSees(const std::array<float, skyReachDirections>& reach, const Vec
 * A grid point as the shaders read it (sky_visibility.glsl, unpackSkyCell), three texels of four words: a and b's x as
 * two halves, b's y and z as two halves, the reaches along +x, -x, +y, -y in 8 bits each, and those along +z and -z and
 * the state in the last; then each bounce channel's a and b's x, b's y and z, as halves, red, green and blue (two words
-* each); the last two words unused.
+* each); then the sun's bounce likewise; the last four words unused.
 */
 struct GpuSkyCell {
-    std::uint32_t words[12];
+    std::uint32_t words[4 * SKY_CELL_TEXELS];
 };
 
-static_assert(sizeof(GpuSkyCell) == 48, "GpuSkyCell must match sky_visibility.glsl's packed cell");
+static_assert(sizeof(GpuSkyCell) == 64, "GpuSkyCell must match sky_visibility.glsl's packed cell");
 
 // The texels each grid point takes in the shaders' image, along x.
 inline constexpr int skyCellTexels = SKY_CELL_TEXELS;
@@ -238,6 +252,7 @@ int skyVisibilityCellCount(const SkyVisibilitySettings& settings);
 struct SkySample {
     SkyVisibility visibility;
     SkyBounce bounce = noSkyBounce;
+    SkyBounce sunBounce = noSkyBounce;
     float known = 0.0f;
     float missing = 0.0f;
 };
@@ -262,3 +277,11 @@ struct GpuSkyVisibilityOptions {
 };
 
 GpuSkyVisibilityOptions packSkyVisibilityOptions(const SkyVisibilitySettings& settings, int cascadesRead);
+
+// The sun's bounce as the shaders read it: x 1 while the grid is read, its sun bounce is on and the frame has a
+// directional light (the brightest, slot 0, whose irradiance scales it); the rest unused.
+struct GpuSkySunBounceOptions {
+    float values[4];
+};
+
+GpuSkySunBounceOptions packSkySunBounceOptions(const SkyVisibilitySettings& settings, int cascadesRead, int directionalLights);

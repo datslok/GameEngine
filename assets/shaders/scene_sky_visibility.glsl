@@ -2,7 +2,7 @@
 #define SCENE_SKY_VISIBILITY_GLSL
 
 // The sky visibility grid as the frame's scene set holds it (render/gpu/sky_visibility.h): every cascade's points one
-// after another along z, each three texels along x (set 1 binding 29, exact texels), and the cascades' records,
+// after another along z, each SKY_CELL_TEXELS texels along x (set 1 binding 29, exact texels), and the cascades' records,
 // measured from the camera (binding 30), read at a point as sampleSkyVisibility does. Needs frame_data.glsl, whose
 // skyVisibilityOptions say whether and how it is read. Included by scene_surface.glsl and fog_light.comp.
 
@@ -15,11 +15,12 @@ layout(std430, set = 1, binding = 30) readonly buffer SkyVisibilityCascades {
     ProbeCascade skyVisibilityCascades[];
 };
 
-// The sky a point sees and the bounce light round it, and the share the grid reached but had no point to read
-// (SkySample, without how much was known).
+// The sky a point sees and the bounce light round it (the sky's, and the sun's per unit of its irradiance), and the
+// share the grid reached but had no point to read (SkySample, without how much was known).
 struct SkySample {
     SkyVisibility visibility;
     SkyBounce bounce;
+    SkyBounce sunBounce;
     float missing;
 };
 
@@ -37,22 +38,29 @@ SkyVisibility scaledSkyBands(SkyVisibility value, float factor) {
 
 SkySample noSkySample() {
     SkyVisibility none = SkyVisibility(0.0, vec3(0.0));
-    return SkySample(none, SkyBounce(none, none, none), 0.0);
+    return SkySample(none, SkyBounce(none, none, none), SkyBounce(none, none, none), 0.0);
 }
 
-// sum + value times weight, the sky's bands and each bounce channel's.
+// sum + value times weight, for each of a bounce's channels.
+SkyBounce weightedSkyBounce(SkyBounce sum, SkyBounce value, float weight) {
+    return SkyBounce(weightedSkyBands(sum.red, value.red, weight), weightedSkyBands(sum.green, value.green, weight), weightedSkyBands(sum.blue, value.blue, weight));
+}
+
+SkyBounce scaledSkyBounce(SkyBounce value, float factor) {
+    return SkyBounce(scaledSkyBands(value.red, factor), scaledSkyBands(value.green, factor), scaledSkyBands(value.blue, factor));
+}
+
+// sum + value times weight, the sky's bands and each bounce channel's, the sky's and the sun's.
 SkySample weightedSkySample(SkySample sum, SkySample value, float weight) {
-    return SkySample(weightedSkyBands(sum.visibility, value.visibility, weight),
-                     SkyBounce(weightedSkyBands(sum.bounce.red, value.bounce.red, weight), weightedSkyBands(sum.bounce.green, value.bounce.green, weight),
-                               weightedSkyBands(sum.bounce.blue, value.bounce.blue, weight)),
-                     sum.missing);
+    return SkySample(weightedSkyBands(sum.visibility, value.visibility, weight), weightedSkyBounce(sum.bounce, value.bounce, weight),
+                     weightedSkyBounce(sum.sunBounce, value.sunBounce, weight), sum.missing);
 }
 
-// One point of the grid: its three texels along x.
+// One point of the grid: its four texels along x.
 SkyCell skyCellAt(ivec3 texel) {
     ivec3 first = ivec3(texel.x * SKY_CELL_TEXELS, texel.yz);
     return unpackSkyCell(texelFetch(skyVisibilityCells, first, 0), texelFetch(skyVisibilityCells, first + ivec3(1, 0, 0), 0),
-                         texelFetch(skyVisibilityCells, first + ivec3(2, 0, 0), 0));
+                         texelFetch(skyVisibilityCells, first + ivec3(2, 0, 0), 0), texelFetch(skyVisibilityCells, first + ivec3(3, 0, 0), 0));
 }
 
 // One cascade's blend at a point (sampleCascade): false when no point round it is baked, out of the walls and in sight.
@@ -81,13 +89,12 @@ bool skyVisibilityCascadeAt(int index, vec3 point, vec3 normal, vec3 toViewer, o
         }
 
         float weight = crushProbeWeight(probeBackFaceWeight(normal, position - point)) * probeTrilinearWeight(cell.alpha, corner);
-        sum = weightedSkySample(sum, SkySample(sky.visibility, sky.bounce, 0.0), weight);
+        sum = weightedSkySample(sum, SkySample(sky.visibility, sky.bounce, sky.sunBounce, 0.0), weight);
         total += weight;
     }
 
     float share = 1.0 / max(total, 1e-30);
-    blend = SkySample(scaledSkyBands(sum.visibility, share),
-                      SkyBounce(scaledSkyBands(sum.bounce.red, share), scaledSkyBands(sum.bounce.green, share), scaledSkyBands(sum.bounce.blue, share)), 0.0);
+    blend = SkySample(scaledSkyBands(sum.visibility, share), scaledSkyBounce(sum.bounce, share), scaledSkyBounce(sum.sunBounce, share), 0.0);
     return total > 0.0;
 }
 

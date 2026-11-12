@@ -23,6 +23,7 @@ struct SkyBounce {
 struct SkyCell {
     SkyVisibility visibility;
     SkyBounce bounce;
+    SkyBounce sunBounce; // the sun's bounce, per unit of its irradiance
     vec3 reachPositive; // how far it sees along +x, +y and +z, as shares of its cascade's spacing
     vec3 reachNegative; // along -x, -y and -z
     int state;          // SKY_VISIBILITY_UNKNOWN, _BAKED or _BURIED
@@ -36,14 +37,20 @@ float skySeenAlong(SkyVisibility visibility, vec3 direction) {
     return clamp(visibility.open + dot(visibility.lean, direction), 0.0, 1.0);
 }
 
+vec3 skyBounceFacing(SkyBounce bounce, vec3 normal) {
+    return vec3(skySeenFacing(bounce.red, normal), skySeenFacing(bounce.green, normal), skySeenFacing(bounce.blue, normal));
+}
+
+vec3 skyBounceAlong(SkyBounce bounce, vec3 direction) {
+    return vec3(skySeenAlong(bounce.red, direction), skySeenAlong(bounce.green, direction), skySeenAlong(bounce.blue, direction));
+}
+
 vec3 skyLightFacing(SkyVisibility visibility, SkyBounce bounce, vec3 normal, float floorShare) {
-    vec3 bounced = vec3(skySeenFacing(bounce.red, normal), skySeenFacing(bounce.green, normal), skySeenFacing(bounce.blue, normal));
-    return max(skySeenFacing(visibility, normal) + bounced, vec3(floorShare));
+    return max(skySeenFacing(visibility, normal) + skyBounceFacing(bounce, normal), vec3(floorShare));
 }
 
 vec3 skyLightAlong(SkyVisibility visibility, SkyBounce bounce, vec3 direction, float floorShare) {
-    vec3 bounced = vec3(skySeenAlong(bounce.red, direction), skySeenAlong(bounce.green, direction), skySeenAlong(bounce.blue, direction));
-    return max(skySeenAlong(visibility, direction) + bounced, vec3(floorShare));
+    return max(skySeenAlong(visibility, direction) + skyBounceAlong(bounce, direction), vec3(floorShare));
 }
 
 vec3 skyLightInAir(SkyVisibility visibility, SkyBounce bounce, float floorShare) {
@@ -58,9 +65,9 @@ SkyVisibility unpackSkyBands(uint first, uint second) {
     return SkyVisibility(low.x, vec3(low.y, high.x, high.y));
 }
 
-// GpuSkyCell's three texels: a and b as halves, the reaches along +x -x +y -y in bytes, those along +z -z and the state
-// in the top byte; then the bounce's red, green and blue bands as halves, two words each.
-SkyCell unpackSkyCell(uvec4 words, uvec4 bounceWords, uvec4 lastWords) {
+// GpuSkyCell's four texels: a and b as halves, the reaches along +x -x +y -y in bytes, those along +z -z and the state
+// in the top byte; then the bounce's red, green and blue bands as halves, two words each; then the sun's bounce's.
+SkyCell unpackSkyCell(uvec4 words, uvec4 bounceWords, uvec4 lastWords, uvec4 sunWords) {
     vec4 reaches = vec4((uvec4(words.z) >> uvec4(0u, 8u, 16u, 24u)) & 0xFFu) / float(SKY_VISIBILITY_REACH_STEPS);
     vec2 reachesZ = vec2((uvec2(words.w) >> uvec2(0u, 8u)) & 0xFFu) / float(SKY_VISIBILITY_REACH_STEPS);
 
@@ -68,6 +75,7 @@ SkyCell unpackSkyCell(uvec4 words, uvec4 bounceWords, uvec4 lastWords) {
     cell.visibility = unpackSkyBands(words.x, words.y);
     cell.bounce = SkyBounce(unpackSkyBands(bounceWords.x, bounceWords.y), unpackSkyBands(bounceWords.z, bounceWords.w),
                             unpackSkyBands(lastWords.x, lastWords.y));
+    cell.sunBounce = SkyBounce(unpackSkyBands(lastWords.z, lastWords.w), unpackSkyBands(sunWords.x, sunWords.y), unpackSkyBands(sunWords.z, sunWords.w));
     cell.reachPositive = vec3(reaches.x, reaches.z, reachesZ.x);
     cell.reachNegative = vec3(reaches.y, reaches.w, reachesZ.y);
     cell.state = int(words.w >> 24u);

@@ -23,7 +23,7 @@
 #define SKY_VISIBILITY_REACH_STEPS 255
 
 // The texels of four 32-bit words each grid point takes along x in the shaders' image (GpuSkyCell).
-#define SKY_CELL_TEXELS 3
+#define SKY_CELL_TEXELS 4
 
 // A point's state, in its record's top byte: not baked yet, baked, or inside a wall.
 #define SKY_VISIBILITY_UNKNOWN 0

@@ -590,7 +590,36 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The light the sky grid's sun bounce follows: the brightest directional light that can be drawn (its brightest
+    * channel times its intensity), the first of equals, as prioritizeLights puts first; none without one.
+    */
+    void testTheBrightestDirectionalLight() {
+        std::vector<DirectionalLight> lights(4);
+        lights[0].intensity = 2.0f;
+        lights[1].intensity = 5.0f;
+        lights[1].direction = Vec3{1.0f, -1.0f, 0.0f};
+        lights[2].intensity = 5.0f;
+        lights[3].intensity = 50.0f;
+        lights[3].direction = Vec3{0.0f, 0.0f, 0.0f}; // brightest, but no way to shine: not drawn
+        assert(brightestDirectionalLight(lights)->direction.x == 1.0f);
+
+        lights[0].colour = Vec3{0.0f, 9.0f, 0.0f};
+        assert(brightestDirectionalLight(lights)->intensity == 2.0f);
+
+        FrameLighting lighting;
+        lighting.directionalLights = lights;
+        const PrioritizedLighting prioritized = prioritizeLights(lighting, focus, makeTestView(), LightHistory{}, frame, LightPrioritySettings{});
+        assert(prioritized.lighting.directionalLights.front().intensity == brightestDirectionalLight(lights)->intensity);
+
+        assert(!brightestDirectionalLight(std::vector<DirectionalLight>{}));
+        assert(!brightestDirectionalLight(std::vector<DirectionalLight>{lights[3]}));
+    }
+}
+
 void testLightPriority() {
+    testTheBrightestDirectionalLight();
     testSeatsDefaultToTheBuffersCapacity();
     testNewLightsStartAtFullStrength();
     testShadowHandoverFades();

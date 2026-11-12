@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <numbers>
 #include <utility>
 #include <vector>
 
@@ -34,13 +35,19 @@ Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback) {
     return skyLightFacing(sample.visibility, sample.bounce, normal, 0.0f);
 }
 
+Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal, const Vec3& toSun, bool sunlit) {
+    const float direct = sunlit ? std::max(normal.dot(toSun), 0.0f) : 0.0f;
+    const Vec3 bounced = sample.known >= skyHitKnownShare ? skyBounceFacing(sample.sunBounce, normal) : Vec3{0.0f, 0.0f, 0.0f};
+    return Vec3{direct + bounced.x, direct + bounced.y, direct + bounced.z};
+}
+
 /*
 * The rays' directions, openings and front hits go into this thread's own scratch lists, so a point allocates nothing
 * once the first has grown them, and the bands come from skyVisibilityFromRays, as the tests' do. The hits are lit after
 * every ray is cast, since their fallback is the point's own open share.
 */
 SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks, std::span<const Vec3> albedo,
-                    const SkyHitSampler& hitSampler) {
+                    const SkyHitSampler& hitSampler, const std::optional<Vec3>& toSun) {
     thread_local std::vector<Vec3> directions;
     thread_local std::vector<float> openings;
     thread_local std::vector<FrontHit> frontHits;
@@ -76,32 +83,55 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     cell.state = static_cast<float>(backFaces) > skyVisibilityBuriedShare * static_cast<float>(rays) ? SkyCellState::Buried : SkyCellState::Baked;
     cell.escapedRays = escaped;
 
-    // Each channel's values in turn: zero for every ray, then each front hit's albedo times the light on it.
+    // The light on each front hit, the sky's and (towards a sun) the sun's, from the grid round it.
     if (!albedo.empty() && hitSampler) {
         thread_local std::vector<Vec3> hitLight;
+        thread_local std::vector<Vec3> sunLight;
         hitLight.clear();
+        sunLight.clear();
         const float fallback = std::clamp(2.0f * cell.visibility.open, 0.0f, 1.0f);
         int unsure = 0;
 
         for (const FrontHit& hit : frontHits) {
             const SkySample sample = hitSampler(hit.point, hit.normal, directions[hit.ray] * -1.0f);
             hitLight.push_back(skyHitLight(sample, hit.normal, fallback));
+
+            // The sun's: a shadow ray only from a hit facing it.
+            if (toSun) {
+                const bool facing = hit.normal.dot(*toSun) > 0.0f;
+                const bool sunlit = facing && !raycast(level, Ray{hit.point + hit.normal * skySunRayLift, *toSun}, rayLength, marks);
+                sunLight.push_back(skySunHitLight(sample, hit.normal, *toSun, sunlit));
+            }
+
             unsure += sample.known < skyHitKnownShare && sample.missing >= skyHitKnownShare ? 1 : 0;
         }
 
         cell.unsureShare = frontHits.empty() ? 0.0f : static_cast<float>(unsure) / static_cast<float>(frontHits.size());
 
-        for (std::size_t channel = 0; channel < cell.bounce.size(); ++channel) {
-            bounced.assign(directions.size(), 0.0f);
+        // Each channel's values in turn: zero for every ray, then each front hit's albedo times the light on it.
+        const auto bandsOf = [&](const std::vector<Vec3>& light) {
+            SkyBounce bands = noSkyBounce;
 
-            for (std::size_t index = 0; index < frontHits.size(); ++index) {
-                const FrontHit& hit = frontHits[index];
-                const Vec3 rho = hit.triangle < albedo.size() ? albedo[hit.triangle] : Vec3{0.0f, 0.0f, 0.0f};
-                const float channels[3] = {rho.x * hitLight[index].x, rho.y * hitLight[index].y, rho.z * hitLight[index].z};
-                bounced[hit.ray] = channels[channel];
+            for (std::size_t channel = 0; channel < bands.size(); ++channel) {
+                bounced.assign(directions.size(), 0.0f);
+
+                for (std::size_t index = 0; index < frontHits.size(); ++index) {
+                    const FrontHit& hit = frontHits[index];
+                    const Vec3 rho = hit.triangle < albedo.size() ? albedo[hit.triangle] : Vec3{0.0f, 0.0f, 0.0f};
+                    const float channels[3] = {rho.x * light[index].x, rho.y * light[index].y, rho.z * light[index].z};
+                    bounced[hit.ray] = channels[channel];
+                }
+
+                bands[channel] = skyVisibilityFromRays(directions, bounced);
             }
 
-            cell.bounce[channel] = skyVisibilityFromRays(directions, bounced);
+            return bands;
+        };
+
+        cell.bounce = bandsOf(hitLight);
+
+        if (toSun) {
+            cell.sunBounce = bandsOf(sunLight);
         }
     }
 
@@ -195,7 +225,7 @@ void SkyCellStore::clear() {
     places.clear();
 }
 
-void SkyCellStore::keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, SkyBakeStage next) {
+void SkyCellStore::keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, SkyBakeStage next, std::uint32_t sunEpoch) {
     const std::optional<std::uint64_t> key = storeKey(cascade, place);
 
     if (capacity == 0 || !key) {
@@ -207,11 +237,12 @@ void SkyCellStore::keep(int cascade, const ProbeGridCoord& place, const SkyCell&
     if (found != places.end()) {
         found->second->packed = packSkyCell(cell);
         found->second->next = next;
+        found->second->sunEpoch = sunEpoch;
         used.splice(used.begin(), used, found->second);
         return;
     }
 
-    used.push_front(Entry{*key, packSkyCell(cell), next});
+    used.push_front(Entry{*key, packSkyCell(cell), next, sunEpoch});
     places.emplace(*key, used.begin());
     setCapacity(capacity);
 }
@@ -230,7 +261,7 @@ std::optional<StoredSkyCell> SkyCellStore::find(int cascade, const ProbeGridCoor
     }
 
     used.splice(used.begin(), used, found->second);
-    return StoredSkyCell{unpackSkyCell(found->second->packed), found->second->next};
+    return StoredSkyCell{unpackSkyCell(found->second->packed), found->second->next, found->second->sunEpoch};
 }
 
 void SkyCellStore::touch(int cascade, const ProbeGridCoord& place) {
@@ -351,7 +382,34 @@ void SkyVisibilityGrid::arrive(std::size_t cascade, int cell, const ProbeCascade
         --waitingCount;
     }
 
-    queueNext(cell, found->next);
+    // Baked for an older sun: at least baked again at the full rays.
+    queueNext(cell, found->sunEpoch != sunEpoch && found->next == SkyBakeStage::Finished ? SkyBakeStage::Refine : found->next);
+}
+
+/*
+* The angle between two unit directions, past the refresh's, by their dot product against its cosine. Every baked
+* point (buried ones too: cheap, and the same rule everywhere) goes to the refinement queue, which follows the waiting
+* points and comes before the deep rays; the version stays, since no point changed yet.
+*/
+bool SkyVisibilityGrid::followSun(const std::optional<Vec3>& toSun) {
+    const std::optional<Vec3> wanted = shape.sunBounce ? toSun : std::nullopt;
+    const float refreshCosine = std::cos(shape.sunRefreshDegrees * std::numbers::pi_v<float> / 180.0f);
+    const bool moved = wanted.has_value() != sun.has_value() || (wanted && sun && wanted->dot(*sun) < refreshCosine);
+
+    if (!moved) {
+        return false;
+    }
+
+    sun = wanted;
+    ++sunEpoch;
+
+    for (std::size_t cell = 0; cell < cells.size(); ++cell) {
+        if (cells[cell].state != SkyCellState::Unknown && isWaiting[cell] != Waiting) {
+            queueNext(static_cast<int>(cell), SkyBakeStage::Refine);
+        }
+    }
+
+    return true;
 }
 
 void SkyVisibilityGrid::queueNext(int cell, SkyBakeStage next) {
@@ -444,7 +502,7 @@ void bakeSkyBatch(const StaticLevel& level, JobSystem& jobs, std::span<const Vec
     jobs.parallelFor(batch.entries.size(), skyBakePointsPerJob, [&](std::size_t index) {
         thread_local GridMarks marks;
         const SkyBakeBatch::Entry& entry = batch.entries[index];
-        batch.results[index] = bakeSkyCell(level, entry.position, batch.rays, batch.rayLength, entry.spacing, marks, albedo, gridAtHits);
+        batch.results[index] = bakeSkyCell(level, entry.position, batch.rays, batch.rayLength, entry.spacing, marks, albedo, gridAtHits, batch.toSun);
     });
 
     batch.secondsPerCell = (profilerSeconds() - start) / static_cast<double>(batch.entries.size());
@@ -460,6 +518,8 @@ SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays,
     batch.refining = refining;
     batch.deepening = deepening;
     batch.generation = generation;
+    batch.toSun = sun;
+    batch.sunEpoch = sunEpoch;
     batch.entries.reserve(points.size());
 
     for (const int cell : points) {
@@ -617,7 +677,12 @@ void SkyVisibilityGrid::applyBatch(const SkyBakeBatch& batch) {
             next = SkyBakeStage::Deepen;
         }
 
-        store.keep(entry.cascade, entry.place, result, next);
+        // Baked for a sun since moved on: placed (better than nothing meanwhile) and baked again.
+        if (batch.sunEpoch != sunEpoch && next == SkyBakeStage::Finished) {
+            next = SkyBakeStage::Refine;
+        }
+
+        store.keep(entry.cascade, entry.place, result, next, batch.sunEpoch);
 
         if (!samePlace) {
             continue;

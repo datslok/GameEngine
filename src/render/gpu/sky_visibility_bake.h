@@ -42,6 +42,17 @@ inline constexpr float skyUnsureRefineShare = 0.1f;
 Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback);
 
 /*
+* The sun's light falling on a hit, per unit of its irradiance and per colour channel: n . L where the sun reaches it
+* (sunlit: a shadow ray towards it escaped), plus the sun's bounce the grid round it holds facing its normal (so the
+* sun's light keeps bouncing as the grid refreshes); none of that where the grid knows less than skyHitKnownShare.
+*/
+Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal, const Vec3& toSun, bool sunlit);
+
+// How far a shadow ray towards the sun starts off its hit, along the surface's normal (metres), so it does not meet
+// the surface it leaves.
+inline constexpr float skySunRayLift = 0.01f;
+
+/*
 * One point: rays rays of rayLength (skyVisibilityRay), each open if it meets nothing; a ray meeting the back of a
 * triangle (the side its winding faces away from) counts as blocked and as a vote that the point is inside a wall, which
 * it is when more than skyVisibilityBuriedShare of them do. Then its reach along each axis direction: the nearest hit
@@ -52,9 +63,13 @@ Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback);
 * fallback the point's own guess, twice its open share within 0..1: under an open sky a point sees half the sphere and
 * its ground all of it), each colour channel's values made into bands as the sky's are: the cell's bounce. Without
 * them, no bounce.
+*
+* With toSun too (the unit way to the brightest directional light), each front hit facing it casts a shadow ray that
+* way (rayLength long, lifted skySunRayLift off the surface), and brings back its albedo times the sun's light on it
+* (skySunHitLight): the cell's sun bounce, per unit of the sun's irradiance. Without it, none.
 */
 SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks,
-                    std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {});
+                    std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {}, const std::optional<Vec3>& toSun = std::nullopt);
 
 // A job takes this many points at once, so handing them out costs little beside their rays.
 inline constexpr std::size_t skyBakePointsPerJob = 8;
@@ -107,15 +122,16 @@ double skySecondsAtFullRays(double secondsPerCell, int rays, int fullRays);
 // round its hits was), or the deep rays (skyWantsDeepRays).
 enum class SkyBakeStage : std::uint8_t { Finished, Refine, Deepen };
 
-// A point the store kept: as the GPU reads it (packed and unpacked again, so it packs to the very same words), and what
-// it still needs.
+// A point the store kept: as the GPU reads it (packed and unpacked again, so it packs to the very same words), what
+// it still needs, and which of the grid's suns it was baked with (SkyVisibilityGrid::followSun).
 struct StoredSkyCell {
     SkyCell cell;
     SkyBakeStage next = SkyBakeStage::Finished;
+    std::uint32_t sunEpoch = 0;
 };
 
 // About what one kept point costs: its key, its packed point and flag, and the list and map round them.
-inline constexpr std::size_t skyStoreBytesPerPoint = 128;
+inline constexpr std::size_t skyStoreBytesPerPoint = 144;
 
 // The points the settings' store holds at most (storeMegabytes over skyStoreBytesPerPoint).
 std::size_t skyStoreCapacity(const SkyVisibilitySettings& settings);
@@ -132,7 +148,7 @@ public:
     void clear();
 
     // Keeps (or replaces) the point at a place, as used now.
-    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, SkyBakeStage next);
+    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, SkyBakeStage next, std::uint32_t sunEpoch = 0);
 
     // The point kept at a place, marked used now; none when not kept.
     std::optional<StoredSkyCell> find(int cascade, const ProbeGridCoord& place);
@@ -147,6 +163,7 @@ private:
         std::uint64_t key = 0;
         GpuSkyCell packed{};
         SkyBakeStage next = SkyBakeStage::Finished;
+        std::uint32_t sunEpoch = 0;
     };
 
     // The most recently used at the front.
@@ -184,6 +201,11 @@ struct SkyBakeBatch {
     // Which fresh start of the grid it was taken in: one taken before a new level or shape is thrown away.
     std::uint64_t generation = 0;
 
+    // The way to the sun its points' sun bounce is baked for (none: no sun bounce), and which of the grid's suns that is:
+    // a point baked for an older one is placed and baked again.
+    std::optional<Vec3> toSun;
+    std::uint32_t sunEpoch = 0;
+
     // The grid as it stood, for the hits.
     std::vector<ProbeCascade> cascades;
     std::shared_ptr<const std::vector<SkyCell>> grid;
@@ -212,6 +234,14 @@ public:
     * true when it started afresh: every point waiting (the first call, a new level or a new shape).
     */
     bool follow(const Vec3& centre, const SkyVisibilitySettings& settings, std::uint64_t levelVersion);
+
+    /*
+    * The way to the light the sun bounce follows (the brightest directional light; none without one), after follow:
+    * none while the settings' sun bounce is off. When it appears, goes, or moves past the settings' sunRefreshDegrees
+    * from the one the grid bakes with, the grid takes it and every baked point is queued to be baked again at the full
+    * rays (the refinement queue), and the store's points come back queued. Returns whether it did.
+    */
+    bool followSun(const std::optional<Vec3>& toSun);
 
     /*
     * Bakes up to maxCells waiting points against level, a job per point on jobs. Returns how many it baked. quick bakes
@@ -293,6 +323,10 @@ private:
 
     // Each fresh start counts one, so a batch taken before it is known to be stale.
     std::uint64_t generation = 0;
+
+    // The way to the sun the grid bakes with, and each change of it counts one.
+    std::optional<Vec3> sun;
+    std::uint32_t sunEpoch = 0;
 
     // Moves up to count of cascade's waiting points into batch, the first by bake's order.
     void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);

@@ -746,6 +746,15 @@ void main() {
         skyShare = skyLightFacing(sky.visibility, sky.bounce, shadingNormal, skyVisibilityOptions.y);
         diffuseLight = flatAmbient() * skyShare;
         mirrorLight = flatAmbient() * skyLightAlong(sky.visibility, sky.bounce, reflect(-toCamera, shadingNormal), skyVisibilityOptions.y);
+
+        // The sun's bounce: the grid's, per unit of the sun's irradiance, times the brightest directional light's (slot 0,
+        // the one the grid bakes it for), so its colour through the air and its strength cost no bake.
+        if (skySunBounceOptions.x > 0.5) {
+            vec3 sunIrradiance = directional[0].radiance.rgb;
+            diffuseLight += sunIrradiance * skyBounceFacing(sky.sunBounce, shadingNormal);
+            mirrorLight += sunIrradiance * skyBounceAlong(sky.sunBounce, reflect(-toCamera, shadingNormal));
+        }
+
         ambientReflected = shadeProbeAmbient(point, diffuseLight, mirrorLight);
     }
 

@@ -15,6 +15,11 @@ namespace {
         return std::max({colour.x, colour.y, colour.z});
     }
 
+    // How bright a directional light is, for ranking: its brightest channel times its intensity.
+    float directionalBrightness(const DirectionalLight& light) {
+        return light.intensity * brightestChannel(light.colour);
+    }
+
     // Entity{} belongs to no one, so a light without an entity never counts as last frame's.
     bool wasChosen(const Entity& entity, const std::vector<Entity>& incumbents) {
         return entity != Entity{} && std::find(incumbents.begin(), incumbents.end(), entity) != incumbents.end();
@@ -306,7 +311,7 @@ PrioritizedLighting prioritizeLights(const FrameLighting& lighting, const Vec3& 
 
     std::vector<DirectionalLight>& directional = result.lighting.directionalLights;
     std::stable_sort(directional.begin(), directional.end(), [](const DirectionalLight& a, const DirectionalLight& b) {
-        return a.intensity * brightestChannel(a.colour) > b.intensity * brightestChannel(b.colour);
+        return directionalBrightness(a) > directionalBrightness(b);
     });
 
     if (directional.size() > static_cast<std::size_t>(maxDirectionalLights)) {
@@ -347,4 +352,17 @@ void visit(LightPrioritySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Shadowed spots", settings.shadowedSpots, {.min = 0, .max = maxShadowedSpotLights});
     visitor.field("Incumbent advantage", settings.incumbentAdvantage, {.min = 1.0f, .sliderMax = 3.0f});
     visitor.field("Fade", settings.fadeSeconds, {.min = 0.0f, .sliderMax = 2.0f, .unit = "s"});
+}
+
+// The first strictly brighter than every earlier one: the stable sort's first.
+std::optional<DirectionalLight> brightestDirectionalLight(std::span<const DirectionalLight> lights) {
+    std::optional<DirectionalLight> brightest;
+
+    for (const DirectionalLight& light : lights) {
+        if (canBeDrawn(light) && (!brightest || directionalBrightness(light) > directionalBrightness(*brightest))) {
+            brightest = light;
+        }
+    }
+
+    return brightest;
 }

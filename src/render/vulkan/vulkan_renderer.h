@@ -522,6 +522,9 @@ private:
     // its budget, or everything waiting (captures).
     void bakeSkyVisibility(const FrameDescription& description, const RenderSettings& settings, bool everything);
 
+    // The way to the light the grid's sun bounce follows (the brightest directional light through the air), if any.
+    std::optional<Vec3> sunBounceDirection(const FrameDescription& description) const;
+
     // Whether this frame traces (and samples) light probes: ray tracing (the GPU's and the setting), global illumination
     // on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;

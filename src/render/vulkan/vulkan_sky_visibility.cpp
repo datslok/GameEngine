@@ -62,8 +62,9 @@ VulkanSkyVisibility::VulkanSkyVisibility(const VulkanDevice& device, ImmediateCo
 * lands after them).
 */
 void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs,
-                               bool everything) {
+                               bool everything, const std::optional<Vec3>& toSun) {
     const bool afresh = grid.follow(centre, settings, frame.staticLevelVersion);
+    grid.followSun(toSun);
     const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
     const double deepShare = static_cast<double>(settings.deepRays) / static_cast<double>(settings.rays);
     const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());

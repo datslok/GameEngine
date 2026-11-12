@@ -23,15 +23,20 @@ void main() {
         testOutput(0, vec4(skyLightFacing(visibility, bounce, normal.xyz, normal.w), 0.0));
         testOutput(1, vec4(skyLightAlong(visibility, bounce, direction, normal.w), 0.0));
         testOutput(2, vec4(skyLightInAir(visibility, bounce, normal.w), 0.0));
+        testOutput(3, vec4(skyBounceFacing(bounce, normal.xyz), 0.0));
+        testOutput(4, vec4(skyBounceAlong(bounce, direction), 0.0));
     } else if (function == GPU_TEST_SKY_VISIBILITY_UNPACK) {
-        // Input: the twelve words, their bits carried in floats.
-        SkyCell cell = unpackSkyCell(floatBitsToUint(testInput(0)), floatBitsToUint(testInput(1)), floatBitsToUint(testInput(2)));
+        // Input: the sixteen words, their bits carried in floats.
+        SkyCell cell = unpackSkyCell(floatBitsToUint(testInput(0)), floatBitsToUint(testInput(1)), floatBitsToUint(testInput(2)), floatBitsToUint(testInput(3)));
         testOutput(0, vec4(cell.visibility.open, cell.visibility.lean));
         testOutput(1, vec4(cell.reachPositive, float(cell.state)));
         testOutput(2, vec4(cell.reachNegative, 0.0));
         testOutput(3, vec4(cell.bounce.red.open, cell.bounce.red.lean));
         testOutput(4, vec4(cell.bounce.green.open, cell.bounce.green.lean));
         testOutput(5, vec4(cell.bounce.blue.open, cell.bounce.blue.lean));
+        testOutput(6, vec4(cell.sunBounce.red.open, cell.sunBounce.red.lean));
+        testOutput(7, vec4(cell.sunBounce.green.open, cell.sunBounce.green.lean));
+        testOutput(8, vec4(cell.sunBounce.blue.open, cell.sunBounce.blue.lean));
     } else if (function == GPU_TEST_SKY_CORNER_SEES) {
         // Inputs: (reaches along +x +y +z, spacing), (reaches along -x -y -z), (offset from the point).
         vec4 positive = testInput(0);

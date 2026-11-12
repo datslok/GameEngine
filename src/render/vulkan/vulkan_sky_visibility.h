@@ -33,7 +33,8 @@ public:
     * camera first. Called before the frame holds a swapchain image, so a long bake keeps nothing of the screen's
     * waiting. Only for frames that read it (a static level, the setting on, no probes).
     */
-    void bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs, bool everything);
+    void bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs, bool everything,
+              const std::optional<Vec3>& toSun = std::nullopt);
 
     // Records the copy of a grid changed since the last into commands, before anything this frame reads it.
     void record(VkCommandBuffer commands, std::uint32_t frameIndex);

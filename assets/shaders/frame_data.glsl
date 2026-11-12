@@ -24,6 +24,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     ivec4 mirroredLightOptions;  // x: 1 when the main pass adds the light mirrors reflect (mirrored_light.comp), y: the frame, turning rough mirrors' samples
     ivec4 ambientOcclusionOptions; // x: 1 when the main pass reads ambient occlusion (ambient_occlusion.comp), y: 1 with multiple bounces, z: 1 with specular occlusion
     vec4 skyVisibilityOptions;   // the sky visibility grid (sky_visibility.glsl): x its cascades read (0: not read), y the ambient floor, z the lookup bias, w 1 for its debug view
+    vec4 skySunBounceOptions;    // x: 1 when the grid's sun bounce is read, scaled by directional light 0's irradiance (packSkySunBounceOptions)
 };
 
 #endif
