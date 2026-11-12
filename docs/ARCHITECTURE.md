@@ -888,13 +888,13 @@ The same file has:
 
 - `beginFrame` reads a complete frame's stamps after its fence with `vkGetQueryPoolResults` (64-bit, no wait; `VK_NOT_READY` skips the frame) into `unreportedGpuTimings`.
 - `drawScene` moves them into `RenderStats::gpu`, so each measured frame is reported once, as many frames late as there are in flight.
-- `Application` records them into its `gpuProfiler` (`makeGpuProfiler`: GPU (the total) as section 0, then one section per pass; `recordGpuTimings` skips invalid timings), updated with the CPU profiler and drawn on readout line `gpuProfileReadoutLine` (9) in the F4 view.
+- `Application` records them into its `gpuProfiler` (`makeGpuProfiler`: GPU (the total) as section 0, then one section per pass; `recordGpuTimings` skips invalid timings), updated with the CPU profiler and drawn on readout lines `gpuProfileReadoutLine` (9: the total and the scene's passes up to the main pass) and `gpuPictureReadoutLine` (10: the picture's, from `firstPicturePass` on) in the F4 view (`drawGpuProfile`, `gpuProfileLines`: one line no longer fit a window), passes that took no time left out (`profileText`'s `hideIdle` over a range of sections); the `stats` command prints the same two lines.
 
 **The cloth's passes by kind** (`cloth-gpu-timing`; `render/gpu/cloth_timing`, tested in `cloth_timing_test`; `render/vulkan/cloth_pass_stamps`): a frame records a thousand or so cloth dispatches, too many to name one by one, so they are summed by kind (`ClothPass`: predict, stretch, bend, sweep, held, gradient, coarse step, spread, the line search's terms and total, move, finish, shape, copy).
 
 - While `VulkanRenderer::setClothPassTiming` is on (`Application` sets it while the debug view shows, since it adds a stamp a dispatch) and some cloth runs on the GPU, `runCloths` begins this frame in flight's `ClothPassStamps` (a pool of `maxClothPassStamps`, 16,384, reset whole) with a stamp before the first pass, and `VulkanCloth` marks one after each dispatch, shape pass and copy with its kind (`recordTicks`, `recordShape` and `recordReadback` take the stamps; the yardstick and the GPU tests pass none). A frame past the pool's size is not measured, and its timings say so (`ClothPassTimings::overflowed`).
 - Each stamp is at `ALL_COMMANDS`, after the barrier every cloth pass ends with, so each gap is how much later the cloth work finished because of that pass. `beginFrame` reads them after the fence; `clothPassTimingsFromTicks` credits each gap to its kind (all ticks and cloths together) into `RenderStats::cloth`.
-- `Application`'s `clothProfiler` (`makeClothProfiler`: CLOTH, then one section per kind; `recordClothTimings`) is drawn on readout line `clothProfileReadoutLine` (10) only while it has timings, its idle kinds left out (`profileText`'s `hideIdle`), so the line names only the passes the cloths' solvers ran; while the latest frame overflowed it reads `clothPassesNotMeasuredText` instead (`clothReadoutText`, `drawClothReadout`), rather than going blank.
+- `Application`'s `clothProfiler` (`makeClothProfiler`: CLOTH, then one section per kind; `recordClothTimings`) is drawn on readout line `clothProfileReadoutLine` (11) only while it has timings, its idle kinds left out (`profileText`'s `hideIdle`), so the line names only the passes the cloths' solvers ran; while the latest frame overflowed it reads `clothPassesNotMeasuredText` instead (`clothReadoutText`, `drawClothReadout`), rather than going blank.
 
 **Debug names:**
 
@@ -3209,7 +3209,7 @@ MOBA mode uses a confined visible cursor, edge panning (`gameplay/edge_pan`, fro
 
 - `pick(world, ray)`, shared with selection, raycasts the collision scene, then the static level up to that distance, and the nearer wins, so walls hide what is behind them;
 - `getHovered` is the entity, outlined in dimmed cyan; `getHoveredTriangle` the level triangle, outlined with its normal only in the F4 view;
-- with F4, readout lines 12 and 13 (`firstGameReadoutLine` + 1 and + 2, after the demo's system timings) show colliders and level triangles, tested and cells walked, and line 14 the duck's controller (grounded or airborne, slope, substeps) with its ground normal drawn at its feet;
+- with F4, readout lines 13 and 14 (`firstGameReadoutLine` + 1 and + 2, after the demo's system timings) show colliders and level triangles, tested and cells walked, and line 15 the duck's controller (grounded or airborne, slope, substeps) with its ground normal drawn at its feet;
 - the duck's controller has radius 0.5 and `mobaUnitAcceleration` (1000) so it starts and stops within a tick.
 
 **The obstacle course** (`buildObstacleCourse`): cube parts of one entity at `obstacleCourseOrigin` (17, 0, -4) with the slab top at `obstacleCourseFloorTop`.
@@ -3539,7 +3539,7 @@ Broad phase: `UniformGrid` (`physics/uniform_grid`):
 
 ### Readout lines and profiling
 
-`debugReadoutLine(n)` and `debugReadoutTextHeight` (`engine/debug_views`) place readout lines. The engine uses 0-10, and a game starts at `firstGameReadoutLine` (11):
+`debugReadoutLine(n)` and `debugReadoutTextHeight` (`engine/debug_views`) place readout lines. The engine uses 0-11, and a game starts at `firstGameReadoutLine` (12):
 
 | Line | Constant | Shows |
 |---|---|---|
@@ -3548,8 +3548,9 @@ Broad phase: `UniformGrid` (`physics/uniform_grid`):
 | 6 | `exposureReadoutLine` | the eye's exposure |
 | 7 | `cameraReadoutLine` | the camera's position and view direction (`cameraText`, "CAMERA x y z  LOOK x y z", for setting up a golden view where a problem was seen) |
 | 8 | `engineProfileReadoutLine` | its CPU timings |
-| 9 | `gpuProfileReadoutLine` | its GPU timings per pass |
-| 10 | `clothProfileReadoutLine` | the GPU cloth's time by kind of pass, while cloth runs there |
+| 9 | `gpuProfileReadoutLine` | its GPU time in all, and per pass for the scene: the passes up to the main pass (`gpuProfileLines`, idle passes left out) |
+| 10 | `gpuPictureReadoutLine` | its GPU time per pass for the picture: from `firstPicturePass` (the probe balls, after the main pass) on |
+| 11 | `clothProfileReadoutLine` | the GPU cloth's time by kind of pass, while cloth runs there |
 
 Profiling: `Profiler` (`core/profiler`, plain C++ so games and tests stay headless) has numbered sections (`addSection` once, `record(section, seconds)`).
 

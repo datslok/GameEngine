@@ -9,6 +9,7 @@
 #include "scene/frame_description.h"
 #include "scene/model.h"
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -45,14 +46,16 @@ constexpr int cameraReadoutLine = 7;
 // The readout line drawRenderStats leaves for the engine's timings (drawProfile).
 constexpr int engineProfileReadoutLine = 8;
 
-// The readout line for the GPU's timings per pass (a profiler from makeGpuProfiler).
+// The readout lines for the GPU's timings per pass (a profiler from makeGpuProfiler, gpuProfileLines): the total and
+// the scene's passes, then the picture's.
 constexpr int gpuProfileReadoutLine = 9;
+constexpr int gpuPictureReadoutLine = 10;
 
 // The readout line for the cloth's GPU time by kind of pass (a profiler from makeClothProfiler), while cloth runs there.
-constexpr int clothProfileReadoutLine = 10;
+constexpr int clothProfileReadoutLine = 11;
 
-// The engine's readout uses lines 0 to 10; a game's own lines start here.
-constexpr int firstGameReadoutLine = 11;
+// The engine's readout uses lines 0 to 11; a game's own lines start here.
+constexpr int firstGameReadoutLine = 12;
 
 // The light probes' line: how many, traced (awake ones among them), asleep, off and moved by relocation, or "PROBES -"
 // without probes.
@@ -81,6 +84,19 @@ Profiler makeGpuProfiler();
 // not measured does not count as one that took no time.
 void recordGpuTimings(Profiler& profiler, const GpuTimings& timings);
 
+// The first pass on the GPU readout's second line: the picture's passes, after the main pass drew the scene.
+inline constexpr GpuPass firstPicturePass = GpuPass::ProbeBalls;
+
+/*
+* A profiler from makeGpuProfiler as the readout's two lines (one did not fit a window), in milliseconds to two
+* decimals with the passes that took no time left out: the total and the scene's passes up to the main pass, then the
+* picture's after it.
+*/
+std::array<std::string, 2> gpuProfileLines(const Profiler& profiler);
+
+// gpuProfileLines drawn on gpuProfileReadoutLine and gpuPictureReadoutLine.
+void drawGpuProfile(const Profiler& profiler, DebugDraw& debug);
+
 // A profiler for the cloth's GPU time: "CLOTH" (all of it) as section 0, then one section per kind in ClothPass order.
 Profiler makeClothProfiler();
 
@@ -89,10 +105,11 @@ void recordClothTimings(Profiler& profiler, const ClothPassTimings& timings);
 
 /*
 * A profiler's numbers as one line of text: each section's name and its average per call, then "/" and the worst call
-* if withWorst, in milliseconds with that many decimals, then "MS". With hideIdle, sections after the first that took
-* no time are left out (the cloth's kinds of pass another solver uses), so a long list fits the line.
+* if withWorst, in milliseconds with that many decimals, then "MS". With hideIdle, sections that took no time are left
+* out (the cloth's kinds of pass another solver uses), except section 0, the total, so a long list fits the line. Only
+* the sections from firstSection to before endSection (-1: all of them to the last).
 */
-std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle = false);
+std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle = false, int firstSection = 0, int endSection = -1);
 
 // profileText drawn on one readout line.
 void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle = false);

@@ -341,7 +341,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
 
         // Also from the previous window: the profiler shows a finished half second at a time.
         drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
-        drawProfile(gpuProfiler, gpuProfileReadoutLine, 2, false, profileDebugColour, debugDraw);
+        drawGpuProfile(gpuProfiler, debugDraw);
 
         // The cloth's passes by kind, only while some cloth runs on the GPU and only those kinds that took time; or why
         // they could not be measured.
