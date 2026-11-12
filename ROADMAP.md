@@ -292,7 +292,7 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [x] Deep rays where the sky is seen through few rays (`sky-adaptive-rays`)
 - [ ] The sky visibility grid as CPU light probes: its rays' hits lit, so the grid carries bounce light (designed Nov 11 2026)
   - [x] Stage 1: the sky's bounce, per unit of the flat ambient, from each triangle's albedo, in place of the guess (`sky-bounce`)
-  - [ ] Stage 2: the sun's bounce, per unit of the sun's light, re-baked on a rolling budget as the sun moves
+  - Stage 2, the sun's bounce: shelved Nov 12 2026 at the user's choice, moved to phase 17 (the unmerged `sun-bounce` branch)
   - [ ] Stage 3 (optional): lamps, each point keeping its brightest few with shadow rays, refreshed in a region when one switches
 - [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
   - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
@@ -321,6 +321,9 @@ The top of the quality ladder, once the path without ray tracing is finished. Al
 
 **Items**
 
+- [ ] The sun's bounce without probes' blotches (moved here from phase 16 on Nov 12 2026, the user's choice: bounced sunlight is for the ray-traced path)
+  - With ray tracing the probes carry it already; this is for rooms lit only by sunlight bounced off a patch next door.
+  - Tried on the CPU grid, on the unmerged `sun-bounce` branch: a shadow ray from every hit (blotchy, 4 times the bake's time) and aiming at sunlit spots found down the sun's beam (smoother, 2.5 times; spikes from light seen through doors the point's rays missed, and a defensive mixture against them leaves more noise). Read docs/BUILDLOG.md, `sun-bounce`, before taking it up again.
 - [ ] More hardware ray tracing: ray-traced shadows and ReSTIR
   - Ray-traced shadows (exact soft shadows from area lights), ray-traced reflections, then ReSTIR-style sampling of many lights or a path-traced reference mode.
   - **Always optional:** settings in `RenderSettings` (so the debug UI and a player's options menu can reach them) switch each ray-traced feature on or off while the game runs, falling back to shadow maps, reflection probes and the software-traced probes.
