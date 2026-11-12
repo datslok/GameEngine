@@ -55,7 +55,9 @@ VulkanSkyVisibility::VulkanSkyVisibility(const VulkanDevice& device, ImmediateCo
 * a smaller one runs on fewer cores and would measure a point dearer than it is (skyCellsForBudget).
 *
 * With backgroundBake, the frame only hands batches to the background baker and applies what it finished: a batch of
-* about skyBackgroundBatchSeconds, the waiting points first (quickly, while the quick rays are fewer), then refinement.
+* about skyBackgroundBatchSeconds, the waiting points first (quickly, while the quick rays are fewer), then refinement,
+* then the deep rays. On the frame, the deep rays take what budget is left once nothing waits or is refined; a capture
+* gives every point its deep rays too.
 * A fresh grid and a capture still bake whole on the frame, after waiting for the batch baking (so nothing it brings
 * lands after them).
 */
@@ -63,21 +65,22 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
                                bool everything) {
     const bool afresh = grid.follow(centre, settings, frame.staticLevelVersion);
     const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
+    const double deepShare = static_cast<double>(settings.deepRays) / static_cast<double>(settings.rays);
     const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());
-    applyFinished(quickShare, minimumBatch);
+    applyFinished(settings.rays, minimumBatch);
 
-    if (grid.getWaiting() + grid.getRefining() == 0 || frame.staticLevel == nullptr) {
+    if (grid.getWaiting() + grid.getRefining() + grid.getDeepening() == 0 || frame.staticLevel == nullptr) {
         return;
     }
 
     if (settings.backgroundBake && !everything && !afresh) {
-        startBackground(frame, settings, quickShare);
+        startBackground(frame, settings);
         return;
     }
 
     if (baker && baker->busy()) {
         baker->waitFinished();
-        applyFinished(quickShare, minimumBatch);
+        applyFinished(settings.rays, minimumBatch);
     }
 
     const int waiting = grid.getWaiting();
@@ -88,9 +91,10 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
     const SkyBakePlan plan = planSkyBake(waiting, refining, afresh, everything, budget, quickBudget, settings.quickRays < settings.rays);
     const int count = plan.waiting + plan.refine;
 
+    const std::span<const Vec3> albedo = frame.staticAlbedo ? std::span<const Vec3>{*frame.staticAlbedo} : std::span<const Vec3>{};
+
     if (count > 0) {
         const double start = profilerSeconds();
-        const std::span<const Vec3> albedo = frame.staticAlbedo ? std::span<const Vec3>{*frame.staticAlbedo} : std::span<const Vec3>{};
         const int baked = grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward(), albedo);
         // A capture also refines what this very bake left unfinished (points baked before the grid round their hits was).
         const int refined = grid.refine(*frame.staticLevel, jobs, everything ? grid.getRefining() : plan.refine, albedo);
@@ -99,10 +103,23 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
             secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(baked + refined);
         }
     }
+
+    // The deep rays last: a capture's every point (those this very bake queued too), else what the budget leaves.
+    const int deepening = grid.getDeepening();
+
+    if (deepening > 0 && (everything || (count == 0 && !afresh))) {
+        const int deep = everything ? deepening : skyCellsForBudget(budgetSeconds, secondsPerCell * deepShare, deepening, minimumBatch);
+        const double start = profilerSeconds();
+        const int baked = grid.deepen(*frame.staticLevel, jobs, deep, albedo);
+
+        if (baked >= minimumBatch) {
+            secondsPerCell = skySecondsAtFullRays((profilerSeconds() - start) / static_cast<double>(baked), settings.deepRays, settings.rays);
+        }
+    }
 }
 
 // A finished background batch into the grid, its cost (at the full rays) kept when it was big enough to measure it.
-void VulkanSkyVisibility::applyFinished(double quickShare, int minimumBatch) {
+void VulkanSkyVisibility::applyFinished(int fullRays, int minimumBatch) {
     if (!baker) {
         return;
     }
@@ -114,21 +131,21 @@ void VulkanSkyVisibility::applyFinished(double quickShare, int minimumBatch) {
     }
 
     if (static_cast<int>(done->entries.size()) >= minimumBatch && done->secondsPerCell > 0.0) {
-        secondsPerCell = done->secondsPerCell / (done->quick ? quickShare : 1.0);
+        secondsPerCell = skySecondsAtFullRays(done->secondsPerCell, done->rays, fullRays);
     }
 
     grid.applyBatch(*done);
 }
 
-// The next batch for the background baker, when it is free: the waiting points, else refinement.
-void VulkanSkyVisibility::startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings, double quickShare) {
+// The next batch for the background baker, when it is free: the waiting points, else refinement, else the deep rays.
+void VulkanSkyVisibility::startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings) {
     // Its threads, the baker's own among them: the settings' share of the CPU's. Remade when that changes, once the
     // batch baking is in.
     const unsigned threads = skyBackgroundWorkers(settings.backgroundShare, std::max(std::thread::hardware_concurrency(), 1u));
 
     if (baker && bakeJobs->getThreadCount() != threads) {
         baker->waitFinished();
-        applyFinished(quickShare, skyMinimumBatch(bakeJobs->getThreadCount()));
+        applyFinished(settings.rays, skyMinimumBatch(bakeJobs->getThreadCount()));
         baker.reset();
         bakeJobs.reset();
     }
@@ -148,10 +165,14 @@ void VulkanSkyVisibility::startBackground(const FrameDescription& frame, const S
 
     const int minimumBatch = skyMinimumBatch(bakeJobs->getThreadCount());
     const int waiting = grid.getWaiting();
+    const int refining = grid.getRefining();
     const bool quick = waiting > 0 && settings.quickRays < settings.rays;
-    const int cells = skyCellsForBudget(skyBackgroundBatchSeconds, secondsPerCell * (quick ? quickShare : 1.0), waiting > 0 ? waiting : grid.getRefining(),
-                                        minimumBatch);
-    SkyBakeBatch batch = waiting > 0 ? grid.takeBatch(cells, quick, frame.camera.getForward()) : grid.takeRefineBatch(cells);
+    const int rays = quick ? settings.quickRays : waiting > 0 || refining > 0 ? settings.rays : settings.deepRays;
+    const double seconds = secondsPerCell * static_cast<double>(rays) / static_cast<double>(settings.rays);
+    const int cells = skyCellsForBudget(skyBackgroundBatchSeconds, seconds, waiting > 0 ? waiting : refining > 0 ? refining : grid.getDeepening(), minimumBatch);
+    SkyBakeBatch batch = waiting > 0   ? grid.takeBatch(cells, quick, frame.camera.getForward())
+                         : refining > 0 ? grid.takeRefineBatch(cells)
+                                        : grid.takeDeepBatch(cells);
     baker->start(std::move(batch), frame.staticLevel, frame.staticAlbedo);
 }
 

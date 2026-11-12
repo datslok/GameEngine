@@ -58,8 +58,8 @@ private:
     std::unique_ptr<JobSystem> bakeJobs;
     std::unique_ptr<SkyBackgroundBaker> baker;
 
-    void applyFinished(double quickShare, int minimumBatch);
-    void startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings, double quickShare);
+    void applyFinished(int fullRays, int minimumBatch);
+    void startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings);
 
     // The points changed since the last copy (SkyVisibilityGrid::takeChanges), kept to reuse its memory.
     std::vector<int> changed;

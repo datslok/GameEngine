@@ -94,11 +94,24 @@ struct SkyBakePlan {
 */
 SkyBakePlan planSkyBake(int waiting, int refining, bool afresh, bool everything, int budgetCells, int quickBudgetCells, bool quickFewer);
 
-// A point the store kept: as the GPU reads it (packed and unpacked again, so it packs to the very same words), and
-// whether it is still to be baked again (baked at the quick rays, or before the grid round its hits was).
+/*
+* Whether a point baked at the full rays gets the deep rays as well (SkyVisibilitySettings::deepRays): it was baked, saw
+* the sky through at least one ray but fewer than deepOpenRays, and the deep rays are more than the rays.
+*/
+bool skyWantsDeepRays(const SkyCell& cell, const SkyVisibilitySettings& settings);
+
+// A batch's measured time a point (secondsPerCell, at rays rays) as it would be at fullRays: in proportion (0 for no rays).
+double skySecondsAtFullRays(double secondsPerCell, int rays, int fullRays);
+
+// What a baked point still needs: nothing, baking again at the full rays (baked at the quick rays, or before the grid
+// round its hits was), or the deep rays (skyWantsDeepRays).
+enum class SkyBakeStage : std::uint8_t { Finished, Refine, Deepen };
+
+// A point the store kept: as the GPU reads it (packed and unpacked again, so it packs to the very same words), and what
+// it still needs.
 struct StoredSkyCell {
     SkyCell cell;
-    bool unfinished = false;
+    SkyBakeStage next = SkyBakeStage::Finished;
 };
 
 // About what one kept point costs: its key, its packed point and flag, and the list and map round them.
@@ -119,7 +132,7 @@ public:
     void clear();
 
     // Keeps (or replaces) the point at a place, as used now.
-    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, bool unfinished);
+    void keep(int cascade, const ProbeGridCoord& place, const SkyCell& cell, SkyBakeStage next);
 
     // The point kept at a place, marked used now; none when not kept.
     std::optional<StoredSkyCell> find(int cascade, const ProbeGridCoord& place);
@@ -133,7 +146,7 @@ private:
     struct Entry {
         std::uint64_t key = 0;
         GpuSkyCell packed{};
-        bool unfinished = false;
+        SkyBakeStage next = SkyBakeStage::Finished;
     };
 
     // The most recently used at the front.
@@ -162,9 +175,11 @@ struct SkyBakeBatch {
     float rayLength = 0.0f;
     float lookupBias = 0.0f;
 
-    // Quick: baked at the quick rays, to be baked again. Refining: taken from the refinement queue.
+    // Quick: baked at the quick rays, to be baked again. Refining: taken from the refinement queue. Deepening: from the
+    // deep queue, at the deep rays.
     bool quick = false;
     bool refining = false;
+    bool deepening = false;
 
     // Which fresh start of the grid it was taken in: one taken before a new level or shape is thrown away.
     std::uint64_t generation = 0;
@@ -216,6 +231,10 @@ public:
     // from albedo as bake gives it. Returns how many.
     int refine(const StaticLevel& level, JobSystem& jobs, int maxCells, std::span<const Vec3> albedo = {});
 
+    // Bakes up to maxCells points queued for the deep rays (skyWantsDeepRays) at them, in the order they were queued,
+    // after which they are finished. Returns how many.
+    int deepen(const StaticLevel& level, JobSystem& jobs, int maxCells, std::span<const Vec3> albedo = {});
+
     /*
     * Takes up to maxCells waiting points, in bake's order, into a batch to bake apart (bakeSkyBatch) and apply later:
     * they wait no more meanwhile, and read as not baked. quick as bake's.
@@ -225,10 +244,14 @@ public:
     // Takes up to maxCells quick points to bake again at the full rays, in the order refine takes them.
     SkyBakeBatch takeRefineBatch(int maxCells);
 
+    // Takes up to maxCells points queued for the deep rays, in the order deepen takes them.
+    SkyBakeBatch takeDeepBatch(int maxCells);
+
     /*
     * Puts a baked batch in place: each point into its slot while the slot still holds its place (a slot waiting there
     * again stops waiting), else into the store by its place; quick ones, or ones whose hits were mostly guessed, are
-    * queued to be baked again. Nothing when the grid started afresh since it was taken.
+    * queued to be baked again; others baked at the full rays that want the deep rays are queued for them (a deep bake
+    * is finished). Nothing when the grid started afresh since it was taken.
     */
     void applyBatch(const SkyBakeBatch& batch);
 
@@ -236,6 +259,9 @@ public:
 
     // How many quickly baked points wait to be baked again at the full rays.
     int getRefining() const;
+
+    // How many points wait for the deep rays.
+    int getDeepening() const;
     std::span<const ProbeCascade> getCascades() const;
 
     // Every cascade's points by number (each cascade's from its firstProbe, in slot order).
@@ -263,7 +289,7 @@ private:
     void wait(int cell);
 
     // A batch of these points (the grid as it stands copied for its hits), to bake at rays rays.
-    SkyBakeBatch makeBatch(std::span<const int> points, int rays, bool quick, bool refining) const;
+    SkyBakeBatch makeBatch(std::span<const int> points, int rays, bool quick, bool refining, bool deepening) const;
 
     // Each fresh start counts one, so a batch taken before it is known to be stale.
     std::uint64_t generation = 0;
@@ -271,11 +297,31 @@ private:
     // Moves up to count of cascade's waiting points into batch, the first by bake's order.
     void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);
 
-    // A point a move brought into its slot: the store's, if it kept that place (back to refinement if unfinished), else waiting.
+    // A point a move brought into its slot: the store's, if it kept that place (back to the queue of what it still
+    // needs), else waiting.
     void arrive(std::size_t cascade, int cell, const ProbeCascade& now);
 
-    // Queues a point for refinement.
-    void queueRefine(int cell);
+    // A point into the queue of what it still needs, out of the other (nothing for a finished one).
+    void queueNext(int cell, SkyBakeStage next);
+
+    /*
+    * Points to bake again, in the order they were queued (those before next are done), and which still are: a point a
+    * move clears leaves by its flag alone. Each point is in it once at most.
+    */
+    struct BakeQueue {
+        std::vector<int> order;
+        std::vector<std::uint8_t> queued;
+        std::size_t next = 0;
+        int count = 0;
+
+        void reset(std::size_t cells);
+        void push(int cell);
+        void remove(int cell);
+        bool contains(int cell) const;
+
+        // Up to maxCells points from the front, which leave it.
+        void take(int maxCells, std::vector<int>& points);
+    };
 
 
     SkyCellStore store;
@@ -297,12 +343,10 @@ private:
     std::vector<std::uint8_t> isWaiting;
     int waitingCount = 0;
 
-    // The quickly baked points, in the order they were baked (those before nextRefining are done), and which still are:
-    // a point a move clears leaves the queue by its flag alone.
-    std::vector<int> refining;
-    std::vector<std::uint8_t> isRefining;
-    std::size_t nextRefining = 0;
-    int refiningCount = 0;
+    // The points to bake again at the full rays (quick ones, and ones baked before the grid round their hits was), and
+    // those to bake at the deep rays.
+    BakeQueue refining;
+    BakeQueue deepening;
 
     std::uint64_t version = 0;
 

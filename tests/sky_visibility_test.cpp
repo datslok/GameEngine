@@ -336,6 +336,7 @@ namespace {
         assert(defaults.enabled && defaults.spacing == 0.5f && defaults.cascades == 2);
         assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
         assert(defaults.ambientFloor == 0.025f && defaults.quickRays == 64 && defaults.storeMegabytes == 256.0f);
+        assert(defaults.deepRays == 2048 && defaults.deepOpenRays == 32);
         validateSkyVisibility(defaults);
 
         SkyVisibilitySettings bad;
@@ -354,6 +355,14 @@ namespace {
         assert(rejects(bad));
         bad = {};
         bad.quickRays = 0;
+        assert(rejects(bad));
+        bad = {};
+        bad.deepRays = -1;
+        assert(rejects(bad));
+        bad.deepRays = 0;
+        assert(!rejects(bad));
+        bad = {};
+        bad.deepOpenRays = 0;
         assert(rejects(bad));
         bad = {};
         bad.storeMegabytes = -1.0f;
@@ -378,6 +387,8 @@ namespace {
         other.ambientFloor = 0.3f;
         other.quickRays = 16;         // only how a refill gets there, not what it ends as
         other.storeMegabytes = 32.0f; // only what is kept, not what is baked
+        other.deepRays = 512;         // only the last step, which a point takes once it is baked
+        other.deepOpenRays = 8;
         assert(sameSkyVisibilityGrid(defaults, other));
         other.rays = 32;
         assert(!sameSkyVisibilityGrid(defaults, other));
@@ -461,6 +472,83 @@ namespace {
         // Beside the west wall's inside face, 0.1 m off: its reach west is a fifth of a spacing.
         const SkyCell byWall = bakeSkyCell(level, Vec3{-2.9f, 1.0f, 0.1f}, 8, 30.0f, 0.5f, marks);
         assert(near(byWall.reach[1], 0.2f, 0.01f) && byWall.reach[0] == 1.0f);
+    }
+
+    // roomWithADoor with its door bricked up: no ray from inside escapes.
+    StaticLevel closedRoom() {
+        StaticLevel level = roomWithADoor();
+        level.add(block(Vec3{3.0f, 0.0f, -0.5f}, Vec3{3.2f, 2.0f, 0.5f}));
+        return level;
+    }
+
+    /*
+    * Which points get the deep rays: k rays escaping measure the sky's share to about one part in the square root of k,
+    * so a point that saw the sky through only a few (inside, through the door) is baked once more at many more rays. Not
+    * one in the open (many escaped), nor one that saw none (a closed room, or inside a wall), nor any when the deep rays
+    * are not more than the rays (0 turns them off).
+    */
+    void testWhichPointsGoDeeper() {
+        const SkyVisibilitySettings settings;
+        assert(settings.deepRays == 2048 && settings.deepOpenRays == 32);
+        const StaticLevel level = roomWithADoor();
+        GridMarks marks;
+        const SkyCell inside = bakeSkyCell(level, Vec3{1.5f, 1.0f, 0.1f}, settings.rays, settings.rayLength, settings.spacing, marks);
+        const SkyCell outside = bakeSkyCell(level, Vec3{8.0f, 1.0f, 0.1f}, settings.rays, settings.rayLength, settings.spacing, marks);
+        const SkyCell closed = bakeSkyCell(closedRoom(), Vec3{1.5f, 1.0f, 0.1f}, settings.rays, settings.rayLength, settings.spacing, marks);
+        const SkyCell inWall = bakeSkyCell(level, Vec3{-3.1f, 1.0f, 0.1f}, settings.rays, settings.rayLength, settings.spacing, marks);
+
+        // Each point's escaped rays are its bake's own note.
+        assert(inside.escapedRays > 0 && inside.escapedRays < settings.deepOpenRays);
+        assert(near(inside.visibility.open, static_cast<float>(inside.escapedRays) / static_cast<float>(settings.rays), 1e-6f));
+        assert(outside.escapedRays > 100 && closed.escapedRays == 0);
+
+        assert(skyWantsDeepRays(inside, settings));
+        assert(!skyWantsDeepRays(outside, settings));
+        assert(!skyWantsDeepRays(closed, settings));
+        assert(!skyWantsDeepRays(inWall, settings));
+
+        SkyVisibilitySettings off = settings;
+        off.deepRays = 0;
+        assert(!skyWantsDeepRays(inside, off));
+        off.deepRays = settings.rays;
+        assert(!skyWantsDeepRays(inside, off));
+        off = settings;
+        off.deepOpenRays = inside.escapedRays;
+        assert(!skyWantsDeepRays(inside, off));
+    }
+
+    /*
+    * The deep rays measure the sky through the door closer to the truth (a bake at 16 times the deep rays): over points
+    * across the room, their mean error is well under the full rays' own.
+    */
+    void testDeepRaysAreCloser() {
+        const SkyVisibilitySettings settings;
+        const StaticLevel level = roomWithADoor();
+        GridMarks marks;
+        float fullError = 0.0f;
+        float deepError = 0.0f;
+        int points = 0;
+
+        for (float x = -1.0f; x <= 2.0f; x += 0.5f) {
+            for (float z = -2.0f; z <= 2.0f; z += 1.0f) {
+                const Vec3 point{x, 1.3f, z};
+                const SkyCell full = bakeSkyCell(level, point, settings.rays, settings.rayLength, settings.spacing, marks);
+
+                if (!skyWantsDeepRays(full, settings)) {
+                    continue;
+                }
+
+                const float truth = bakeSkyCell(level, point, 16 * settings.deepRays, settings.rayLength, settings.spacing, marks).visibility.open;
+                const float deep = bakeSkyCell(level, point, settings.deepRays, settings.rayLength, settings.spacing, marks).visibility.open;
+                fullError += std::abs(full.visibility.open - truth) / truth;
+                deepError += std::abs(deep - truth) / truth;
+                ++points;
+            }
+        }
+
+        assert(points >= 10);
+        assert(deepError < 0.5f * fullError);
+        assert(deepError / static_cast<float>(points) < 0.15f);
     }
 
     std::vector<Vec3> albedoOf(const StaticLevel& level, const Vec3& colour) {
@@ -1013,35 +1101,35 @@ namespace {
         const ProbeGridCoord a{3, 2, 1};
         const ProbeGridCoord b{-4, 0, 7};
         const ProbeGridCoord c{100, 5, -9};
-        store.keep(0, a, inside, false);
-        store.keep(0, b, outside, true);
-        store.keep(1, a, outside, false);
+        store.keep(0, a, inside, SkyBakeStage::Finished);
+        store.keep(0, b, outside, SkyBakeStage::Refine);
+        store.keep(1, a, outside, SkyBakeStage::Finished);
         assert(store.size() == 3);
 
         const std::optional<StoredSkyCell> foundA = store.find(0, a);
-        assert(foundA && !foundA->unfinished && sameWords(foundA->cell, inside));
+        assert(foundA && foundA->next == SkyBakeStage::Finished && sameWords(foundA->cell, inside));
         const std::optional<StoredSkyCell> foundB = store.find(0, b);
-        assert(foundB && foundB->unfinished && sameWords(foundB->cell, outside));
+        assert(foundB && foundB->next == SkyBakeStage::Refine && sameWords(foundB->cell, outside));
         assert(store.find(1, a) && sameWords(store.find(1, a)->cell, outside));
         assert(!store.find(0, c) && !store.find(2, a));
 
         // Finding is using: oldest (0, a), then (0, b), then (1, a). Touching (0, a) makes (0, b) the oldest.
         store.touch(0, a);
-        store.keep(0, c, inside, false);
+        store.keep(0, c, inside, SkyBakeStage::Finished);
         assert(store.size() == 3 && !store.find(0, b) && store.find(0, a) && store.find(0, c) && store.find(1, a));
 
-        // Keeping a place again replaces it (a refined point).
-        store.keep(0, c, outside, false);
-        assert(store.size() == 3 && sameWords(store.find(0, c)->cell, outside));
+        // Keeping a place again replaces it (a refined point, to be deepened).
+        store.keep(0, c, outside, SkyBakeStage::Deepen);
+        assert(store.size() == 3 && sameWords(store.find(0, c)->cell, outside) && store.find(0, c)->next == SkyBakeStage::Deepen);
 
         // Out of the coordinates' range: not kept.
-        store.keep(0, ProbeGridCoord{1 << 21, 0, 0}, inside, false);
+        store.keep(0, ProbeGridCoord{1 << 21, 0, 0}, inside, SkyBakeStage::Finished);
         assert(!store.find(0, ProbeGridCoord{1 << 21, 0, 0}) && store.size() == 3);
 
         store.clear();
         assert(store.size() == 0 && !store.find(0, a));
         store.setCapacity(0);
-        store.keep(0, a, inside, false);
+        store.keep(0, a, inside, SkyBakeStage::Finished);
         assert(store.size() == 0);
 
         SkyVisibilitySettings settings;
@@ -1139,6 +1227,105 @@ namespace {
         assert(plain.getRefining() == 0);
     }
 
+    // How many of the grid's points want the deep rays as they stand.
+    int wantingDeepRays(const SkyVisibilityGrid& grid, const SkyVisibilitySettings& settings) {
+        int wanting = 0;
+
+        for (const SkyCell& cell : grid.getCells()) {
+            wanting += skyWantsDeepRays(cell, settings) ? 1 : 0;
+        }
+
+        return wanting;
+    }
+
+    /*
+    * The deep bake is the last step: a point baked at the full rays (not a quick one) that wants the deep rays is
+    * queued for them, after every waiting and refinement; deepening bakes it at the deep rays and never queues it again.
+    * A point a move clears leaves the queue; a point the store kept comes back still to be deepened when it was, and
+    * finished when it was deepened. Batches carry the deep rays. With the deep rays off nothing is queued.
+    */
+    void testDeepBakesComeLast() {
+        const StaticLevel level = roomWithADoor();
+        SkyVisibilitySettings settings = quickGrid();
+        settings.rays = 8;
+        settings.quickRays = 2;
+        settings.deepRays = 32;
+        settings.deepOpenRays = 4;
+        const int count = skyVisibilityCellCount(settings);
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        const Vec3 away = centre + Vec3{200.0f, 0.0f, 0.0f};
+
+        // Quick bakes are not judged; their refinement is.
+        SkyVisibilityGrid grid;
+        grid.follow(centre, settings, 1);
+        grid.bake(level, serialJobs(), count, true);
+        assert(grid.getDeepening() == 0 && grid.getRefining() == count);
+        grid.refine(level, serialJobs(), count);
+        const int deep = grid.getDeepening();
+        assert(deep > 0 && deep < count && deep == wantingDeepRays(grid, settings));
+
+        // Deepened at the deep rays, then finished, even where few rays escaped still.
+        std::vector<int> queued;
+
+        for (int cell = 0; cell < count; ++cell) {
+            if (skyWantsDeepRays(grid.getCells()[static_cast<std::size_t>(cell)], settings)) {
+                queued.push_back(cell);
+            }
+        }
+
+        assert(grid.deepen(level, serialJobs(), 10) == 10 && grid.getDeepening() == deep - 10);
+        assert(grid.deepen(level, serialJobs(), count) == deep - 10 && grid.getDeepening() == 0);
+        assert(grid.deepen(level, serialJobs(), count) == 0);
+
+        for (const int cell : queued) {
+            assert(bakedWith(grid, level, settings, cell, 32));
+        }
+
+        // Kept by the store as finished: coming back queues nothing.
+        grid.follow(away, settings, 1);
+        assert(grid.getDeepening() == 0);
+        grid.follow(centre, settings, 1);
+        assert(grid.getWaiting() == 0 && grid.getRefining() == 0 && grid.getDeepening() == 0);
+
+        // Full bakes are judged at once; a move clears the queue's points and the store brings them back queued.
+        SkyVisibilityGrid full;
+        full.follow(centre, settings, 1);
+        assert(full.bake(level, serialJobs(), count) == count);
+        assert(full.getRefining() == 0 && full.getDeepening() == wantingDeepRays(full, settings) && full.getDeepening() > 0);
+        const int fullDeep = full.getDeepening();
+        full.follow(away, settings, 1);
+        assert(full.getDeepening() == 0);
+        full.follow(centre, settings, 1);
+        assert(full.getWaiting() == 0 && full.getDeepening() == fullDeep);
+
+        // A batch carries the deep rays and leaves the points finished.
+        SkyBakeBatch batch = full.takeDeepBatch(5);
+        assert(batch.entries.size() == 5 && batch.rays == 32 && batch.deepening && !batch.quick && !batch.refining);
+        assert(full.getDeepening() == fullDeep - 5);
+        bakeSkyBatch(level, serialJobs(), {}, batch);
+        full.applyBatch(batch);
+        assert(full.getDeepening() == fullDeep - 5);
+
+        for (const SkyBakeBatch::Entry& entry : batch.entries) {
+            assert(bakedWith(full, level, settings, entry.cell, 32));
+        }
+
+        // The deep rays off: nothing queued.
+        settings.deepRays = 0;
+        SkyVisibilityGrid shallow;
+        shallow.follow(centre, settings, 1);
+        shallow.bake(level, serialJobs(), count);
+        assert(shallow.getDeepening() == 0);
+    }
+
+    // A batch's time a point, as it would be at the full rays: in proportion to the rays.
+    void testTheCostAtFullRays() {
+        assert(near(static_cast<float>(skySecondsAtFullRays(0.008, 2048, 256)), 0.001f, 1e-9f));
+        assert(near(static_cast<float>(skySecondsAtFullRays(0.00025, 64, 256)), 0.001f, 1e-9f));
+        assert(skySecondsAtFullRays(0.001, 256, 256) == 0.001);
+        assert(skySecondsAtFullRays(0.001, 0, 256) == 0.0);
+    }
+
     // Many threads bake exactly what one does.
     void testBakingIsTheSameOnEveryCore() {
         const StaticLevel level = roomWithADoor();
@@ -1199,5 +1386,9 @@ void testSkyVisibility() {
     testTheStoreKeepsBakedPoints();
     testComingBackFindsWhatWasBaked();
     testPointsBakedTooEarlyAreBakedAgain();
+    testWhichPointsGoDeeper();
+    testDeepRaysAreCloser();
+    testDeepBakesComeLast();
+    testTheCostAtFullRays();
     testBakingIsTheSameOnEveryCore();
 }
