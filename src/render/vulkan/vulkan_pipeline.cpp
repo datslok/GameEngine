@@ -251,7 +251,7 @@ VkPipeline VulkanPipeline::build(const VulkanDevice& device, const PipelineDescr
     depthStencil.depthCompareOp = description.depthCompare;
 
     VkPipelineColorBlendAttachmentState blend{};
-    blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    blend.colorWriteMask = description.colourWrites ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT : 0;
 
     if (description.blend != BlendMode::None) {
         const VkBlendFactor destination = description.blend == BlendMode::Additive ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;

@@ -140,6 +140,9 @@
 #define GPU_TEST_FOG_GRID 1
 #define GPU_TEST_FOG_LIGHT 2
 
+// contact_shadows_test.comp
+#define GPU_TEST_CONTACT_SHADOWS 0
+
 // alpha_mask_test.comp
 #define GPU_TEST_ALPHA_MASK 0
 

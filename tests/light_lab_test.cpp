@@ -64,8 +64,8 @@ namespace {
 
         // The ground, the towers, fence, its chain-link, the window's glass, trees, building, the street, its windows and its bulbs' glow (static, and
         // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror), the
-        // mirror ball and refraction's glass pieces.
-        assert(staticModels == 13);
+        // mirror ball, refraction's glass pieces and the pen table.
+        assert(staticModels == 14);
         assert(others > 0);
     }
 
@@ -292,6 +292,51 @@ namespace {
         const Aabb rail = layout.fence.back().bounds();
         assert(near(rail.maximum.z, labFirstPostZ, 0.1f));
         assert(near(rail.minimum.z, labLastPostZ, 0.1f));
+    }
+
+    /*
+    * The pen table, for contact shadows: a wooden table a few metres ahead of the start, its top, then four legs, then
+    * pens and a pencil lying on the top (and one standing), each a centimetre or less across, all within the top. Clear
+    * of the start, the first tower and the fence.
+    */
+    void testThePenTable() {
+        const LightLabLayout layout = buildLightLabLayout();
+        assert(layout.table.size() == 1 + 4 + 4);
+        const Aabb top = layout.table[0].bounds();
+        assert(layout.table[0].surface == LabSurface::Wood);
+        assert(near(top.maximum.y, labTableHeight, 1e-6f));
+
+        for (std::size_t leg = 1; leg <= 4; ++leg) {
+            const Aabb bounds = layout.table[leg].bounds();
+            assert(near(bounds.minimum.y, 0.0f, 1e-6f) && near(bounds.maximum.y, top.minimum.y, 1e-6f));
+            assert(bounds.minimum.x >= top.minimum.x && bounds.maximum.x <= top.maximum.x);
+            assert(bounds.minimum.z >= top.minimum.z && bounds.maximum.z <= top.maximum.z);
+        }
+
+        int standing = 0;
+        for (std::size_t pen = 5; pen < layout.table.size(); ++pen) {
+            const Aabb bounds = layout.table[pen].bounds();
+            const Vec3 size = bounds.maximum - bounds.minimum;
+            assert(near(bounds.minimum.y, top.maximum.y, 1e-6f));
+            assert(bounds.minimum.x > top.minimum.x && bounds.maximum.x < top.maximum.x);
+            assert(bounds.minimum.z > top.minimum.z && bounds.maximum.z < top.maximum.z);
+            assert(std::min({size.x, size.y, size.z}) <= 0.0101f);
+            standing += size.y > 0.1f ? 1 : 0;
+
+            for (std::size_t other = 5; other < pen; ++other) {
+                assert(!overlaps(bounds, layout.table[other].bounds()));
+            }
+        }
+        assert(standing == 1);
+
+        const Aabb whole = Aabb{Vec3{top.minimum.x, 0.0f, top.minimum.z}, top.maximum};
+        assert(!overlaps(grown(whole, 0.5f), Aabb{Vec3{-0.5f, 0.0f, -0.5f}, Vec3{0.5f, 2.0f, 0.5f}}));
+        for (const LabBlock& block : layout.towers) {
+            assert(!overlaps(grown(whole, 0.5f), block.bounds()));
+        }
+        for (const LabBlock& block : layout.fence) {
+            assert(!overlaps(grown(whole, 0.5f), block.bounds()));
+        }
     }
 
     /*
@@ -1163,6 +1208,7 @@ void testLightLab() {
     testSunDisc();
     testTowersDoubleAndFanOut();
     testFence();
+    testThePenTable();
     testChainLinkPattern();
     testTheChainLinkFence();
     testTheWindowGlass();

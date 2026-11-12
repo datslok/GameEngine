@@ -131,6 +131,9 @@ layout(set = 1, binding = 23) uniform sampler2D mirroredDirection;
 // that turn it into the occlusion of the light from all around and of the reflection.
 layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 
+// The sun's contact shadows (contact_shadows.comp), 1 lit, read while contactShadowOptions.x is 1.
+layout(set = 1, binding = 31) uniform sampler2D contactShadows;
+
 #include "ambient_occlusion.glsl"
 
 #ifdef TRANSPARENT
@@ -650,6 +653,12 @@ void main() {
             if (tile >= 0) {
                 radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount, geometricNormal,
                                       directional[i].toLight.xyz, directional[i].tanAngularRadius);
+
+                // The brightest light's short shadows the shadow map misses, from the camera's own depths (none in
+                // captures, which have no depth image of their own, or for glass, which is not in it).
+                if (i == 0 && contactShadowOptions.x > 0.5 && !captureView && !transparentView) {
+                    radiance *= texelFetch(contactShadows, ivec2(gl_FragCoord.xy), 0).r;
+                }
 #ifdef GLASS_SHADOW_RAYS
                 if (any(greaterThan(radiance, vec3(0.0)))) {
                     radiance *= glassShadow(directional[i].toLight.xyz, float(PROBE_SHADOW_RAY_REACH));

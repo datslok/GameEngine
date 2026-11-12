@@ -142,11 +142,6 @@ namespace {
         return inverseViewProjection * Vec4{ndc.x, ndc.y, depth, 1.0f};
     }
 
-    // A clip position to its pixel and depth.
-    Vec3 clipToScreen(const Vec4& clip, Vec2 size) {
-        const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size);
-        return Vec3{pixel.x, pixel.y, clip.z / clip.w};
-    }
 
     // The largest t in 0..end for which start + step t stays within low..high along one axis (start is inside).
     float stayWithin(float start, float step, float low, float high, float end) {
@@ -180,6 +175,11 @@ namespace {
         trace.level = level;
         return trace;
     }
+}
+
+Vec3 clipToScreen(const Vec4& clip, Vec2 size) {
+    const Vec2 pixel = ndcToPixel(Vec2{clip.x / clip.w, clip.y / clip.w}, size);
+    return Vec3{pixel.x, pixel.y, clip.z / clip.w};
 }
 
 Vec3 positionAtPixel(const Mat4& inverseViewProjection, Vec2 pixel, float depth, Vec2 size) {

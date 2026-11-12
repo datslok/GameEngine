@@ -148,6 +148,7 @@ void testReflectionProbe();
 void testPlanarReflection();
 void testMirroredLight();
 void testAmbientOcclusion();
+void testContactShadows();
 void testVolumetricFog();
 void testSkyVisibility();
 void testPipelineCompiler();
@@ -341,6 +342,7 @@ int main(int argumentCount, char** arguments) {
     testPlanarReflection();
     testMirroredLight();
     testAmbientOcclusion();
+    testContactShadows();
     testVolumetricFog();
     testSkyVisibility();
     testPipelineCompiler();

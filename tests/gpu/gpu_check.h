@@ -126,6 +126,7 @@ void gpuTestReflectionProbe(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestMirroredLight(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestAmbientOcclusion(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestVolumetricFog(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestContactShadows(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestAlphaMask(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestSkyVisibility(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTransparency(GpuFunctionRunner& runner, GpuCheckReport& report);

@@ -38,6 +38,9 @@ namespace {
     // The lit scene: 16-bit floats keep about three significant digits from a millionth up to 65504, plenty for light
     // far brighter than white, at half the memory of 32-bit floats. Alpha is unused, but there is no 3-channel format.
     constexpr VkFormat sceneColourFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+    // The depth prepass's solid mask: one byte a pixel, 1 solid, 0 a cut-out.
+    constexpr VkFormat solidMaskFormat = VK_FORMAT_R8_UNORM;
     constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 
     // The most textures the bindless array holds (see createSceneLayout).
@@ -120,6 +123,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     mirrorDepthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight, bindlessTextures->getLayout(),
                                                                 sceneLayout->getFrameLayout());
+    contactShadows = std::make_unique<VulkanContactShadows>(device, nearestSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -376,15 +380,21 @@ void VulkanRenderer::createPipelines() {
         }
     }
 
+    // The prepass also marks where a cut-out is nearest in the solid mask (contact shadows pass over those pixels): the
+    // solid draws, without a fragment shader, leave it as cleared (solid); the cut-outs, drawn last, write 0.
     PipelineDescription prepass = main;
     prepass.fragmentShader = nullptr;
-    prepass.colourFormat = VK_FORMAT_UNDEFINED;
+    prepass.colourFormat = solidMaskFormat;
+    prepass.extraColourFormats.clear();
+    prepass.blend = BlendMode::None;
+    prepass.colourWrites = false;
     setDepthState(prepass, prepassDepthState());
     depthPrepassPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepass);
 
     // Cut-outs' depth needs their holes thrown away (cut_out.frag), so they have a fragment shader; nothing else does.
     PipelineDescription prepassCutOut = prepass;
     prepassCutOut.fragmentShader = "assets/shaders/cut_out_prepass.frag.spv";
+    prepassCutOut.colourWrites = true;
     depthPrepassCutOutPipeline = std::make_unique<VulkanPipeline>(device, layouts, prepassCutOut);
 
     PipelineDescription shadow;
@@ -725,6 +735,14 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     depthDescription.name = "Scene depth";
     VulkanImage depthReplacement{device, depthDescription};
 
+    ImageDescription solidDescription;
+    solidDescription.format = solidMaskFormat;
+    solidDescription.width = scene.width;
+    solidDescription.height = scene.height;
+    solidDescription.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    solidDescription.name = "Solid mask";
+    VulkanImage solidReplacement{device, solidDescription};
+
     ImageDescription sceneDescription;
     sceneDescription.format = sceneColourFormat;
     sceneDescription.width = scene.width;
@@ -741,6 +759,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
 
     device.waitIdle();
     depth = std::move(depthReplacement);
+    solidMask = std::move(solidReplacement);
     sceneColour = std::move(sceneReplacement);
     clusterMasks = std::move(masksReplacement);
     taa->ensureSize(width, height, scene);
@@ -756,6 +775,10 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
 
     if (ambientOcclusion->hasImages()) {
         ambientOcclusion->ensureSize(scene);
+    }
+
+    if (contactShadows->hasImages()) {
+        contactShadows->ensureSize(scene);
     }
 
     fsrHistory = false;
@@ -1457,6 +1480,17 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ambientOcclusion->ensureSize(sceneSize);
     }
 
+    // Contact shadows (render/gpu/contact_shadows.h) for the brightest directional light, the one with the cascades,
+    // marched through the prepass's depths; its mask made the first time, as ambient occlusion's is.
+    validateContactShadows(settings.contactShadows);
+    const std::vector<DirectionalLight>& sunLights = prioritized.lighting.directionalLights;
+    const bool contact = settings.contactShadows.enabled && settings.depthPrepass && inverseViewProjection && !sunLights.empty() &&
+                         sunLights.front().castsShadows && sunLights.front().direction.lengthSquared() > 0.0f;
+
+    if (contact && !contactShadows->hasImages()) {
+        contactShadows->ensureSize(sceneSize);
+    }
+
     // Tinted shadows (render/gpu/transparency.h): while ray tracing is on and glass is anywhere in the world (a window
     // off screen still shades what is on it), shadowed lights pass through it by rays.
     const bool glassShadows = rays && settings.transparency.glassShadows &&
@@ -1480,7 +1514,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
                                                 hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
-                                                readsSkyVisibility);
+                                                readsSkyVisibility, contact);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1566,6 +1600,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                            settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
                                   occlusionBlurred, previousCamera.known);
         endGpuPass(frame, GpuPass::AmbientOcclusion);
+    }
+
+    if (contact) {
+        beginGpuPass(frame, GpuPass::ContactShadows);
+        const Vec3 toSun = (sunLights.front().direction * -1.0f).normalized();
+        contactShadows->shade(frame.commands, frame.descriptors, frame.frameIndex, depth, solidMask, sampled(*blueNoiseTexture),
+                              packContactShadowPass(relativeViewProjection, *inverseViewProjection, sceneSize, toSun, settings.contactShadows,
+                                                    temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0));
+        endGpuPass(frame, GpuPass::ContactShadows);
     }
 
     if (mirrorLight) {
@@ -1834,7 +1877,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
                                            bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
-                                           bool readsSkyVisibility) {
+                                           bool readsSkyVisibility, bool contact) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1892,6 +1935,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     const std::span<const ProbeCascade> skyCascades = readsSkyVisibility ? skyVisibility->getCascades() : std::span<const ProbeCascade>{};
     const GpuSkyVisibilityOptions skyOptions = packSkyVisibilityOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()));
     std::copy(std::begin(skyOptions.values), std::end(skyOptions.values), std::begin(frameData.skyVisibilityOptions));
+    frameData.contactShadowOptions[0] = contact ? 1.0f : 0.0f;
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1925,6 +1969,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred, occlusionAccumulates) : sampled(*noProbesTexture),
         fog->sampledVolume(),
         skyVisibility->sampled(),
+        contact ? contactShadows->sampledShadow() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2096,14 +2141,17 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 /*
 * The camera's depth alone: the same draws as the main pass, with the main pass's vertex shader and no fragment shader,
 * so the depth image ends up holding the nearest surface at every pixel, computed exactly as the main pass computes it.
-* The depth image starts cleared (its old contents discarded) and is stored for the main pass.
+* The depth image starts cleared (its old contents discarded) and is stored for the main pass. The solid mask starts
+* cleared to 1 (solid) and the cut-outs, drawn last, write 0 where they are nearest (contact shadows pass over them).
 */
 void VulkanRenderer::drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet) {
     const VkCommandBuffer commands = frame.commands;
     depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
+    solidMask.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
 
     const DepthAttachment depthTarget{depth.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
-    beginRendering(commands, {sceneSize.width, sceneSize.height}, nullptr, &depthTarget);
+    const ColourAttachment solidTarget{solidMask.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, {1.0f, 1.0f, 1.0f, 1.0f}};
+    beginRendering(commands, {sceneSize.width, sceneSize.height}, &solidTarget, &depthTarget);
     renderingOpen = true;
 
     bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
@@ -2949,6 +2997,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     }
 
     ambientOcclusion->setFramesInFlight(count);
+    contactShadows->setFramesInFlight(count);
 
     // A frame in flight that is no more would never come round to read the probes' relocation it asked for.
     if (ddgi) {
