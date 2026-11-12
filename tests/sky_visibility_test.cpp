@@ -365,6 +365,7 @@ namespace {
         assert(defaults.rays == 256 && defaults.rayLength == 30.0f && defaults.bakeMilliseconds == 1.0f && !defaults.debugView);
         assert(defaults.ambientFloor == 0.025f && defaults.quickRays == 64 && defaults.storeMegabytes == 256.0f);
         assert(defaults.deepRays == 2048 && defaults.deepOpenRays == 32);
+        assert(defaults.sunSamples == 64 && defaults.sunEmitterSpacing == 0.25f);
         validateSkyVisibility(defaults);
 
         SkyVisibilitySettings bad;
@@ -396,6 +397,12 @@ namespace {
         bad.sunRefreshDegrees = 0.0f;
         assert(rejects(bad));
         bad = {};
+        bad.sunSamples = 0;
+        assert(rejects(bad));
+        bad = {};
+        bad.sunEmitterSpacing = 0.0f;
+        assert(rejects(bad));
+        bad = {};
         bad.storeMegabytes = -1.0f;
         assert(rejects(bad));
         bad.storeMegabytes = 0.0f;
@@ -422,6 +429,8 @@ namespace {
         other.deepOpenRays = 8;
         other.sunBounce = false;       // the sun's own refresh bakes it again, not a new grid
         other.sunRefreshDegrees = 5.0f;
+        other.sunSamples = 16;
+        other.sunEmitterSpacing = 1.0f;
         assert(sameSkyVisibilityGrid(defaults, other));
         other.rays = 32;
         assert(!sameSkyVisibilityGrid(defaults, other));
@@ -602,10 +611,70 @@ namespace {
         return sample;
     }
 
+    // A box round a point, half a side each way along x and z, and up and down.
+    Aabb boxAround(const Vec3& centre, float across, float down, float up) {
+        return Aabb{centre - Vec3{across, down, across}, centre + Vec3{across, up, across}};
+    }
+
+    /*
+    * The sunlit spots: rays down from the sun spacing apart across its beam, each first hit facing it inside the region
+    * a spot, with its triangle's albedo, standing for spacing^2 / (n . L) of surface. A floor in the region gets one a
+    * spacing^2 / (n . L) of it: 400 over a 10 m square at 0.5 m with the sun overhead, half as many with it 60 degrees
+    * from overhead. Under a roof, only the roof's top is lit. No sun light, no albedo: none. The spots go into cells of
+    * skySunCellSize, each holding its spots' share of the light and where they are.
+    */
+    void testSunEmitters() {
+        const StaticLevel level = flatLevel();
+        const Vec3 rho{0.6f, 0.4f, 0.2f};
+        const std::vector<Vec3> albedo = albedoOf(level, rho);
+        const Aabb region{Vec3{-5.0f, -1.0f, -5.0f}, Vec3{5.0f, 3.0f, 5.0f}};
+        const float sine60 = std::sqrt(3.0f) * 0.5f;
+
+        const SunEmitters overhead = buildSunEmitters(level, albedo, up, region, 0.5f, serialJobs());
+        assert(std::abs(static_cast<int>(overhead.emitters.size()) - 400) <= 40);
+
+        for (const SunEmitter& spot : overhead.emitters) {
+            assert(near(spot.position.y, 0.0f, 1e-3f) && nearColour(spot.normal, up, 1e-5f) && nearColour(spot.albedo, rho, 0.0f));
+            assert(region.contains(spot.position));
+        }
+
+        const SunEmitters slanted = buildSunEmitters(level, albedo, Vec3{sine60, 0.5f, 0.0f}, region, 0.5f, serialJobs());
+        assert(std::abs(static_cast<int>(slanted.emitters.size()) - 200) <= 30);
+
+        // The cells hold every spot once, their light the spots' albedo times spacing^2.
+        float flux = 0.0f;
+        std::size_t spots = 0;
+
+        for (const SunEmitterCell& cell : overhead.cells) {
+            flux += cell.flux;
+            spots += cell.count;
+            assert(cell.count > 0 && cell.first + cell.count <= overhead.emitters.size());
+        }
+
+        assert(spots == overhead.emitters.size() && near(flux, static_cast<float>(spots) * 0.25f * 0.6f, 1e-2f));
+
+        StaticLevel roofed = flatLevel();
+        roofed.add(block(Vec3{-50.0f, 2.0f, -50.0f}, Vec3{50.0f, 2.2f, 50.0f}));
+        const SunEmitters shaded = buildSunEmitters(roofed, albedoOf(roofed, rho), up, region, 0.5f, serialJobs());
+        assert(!shaded.emitters.empty());
+
+        for (const SunEmitter& spot : shaded.emitters) {
+            assert(near(spot.position.y, 2.2f, 1e-3f));
+        }
+
+        assert(buildSunEmitters(level, {}, up, region, 0.5f, serialJobs()).emitters.empty());
+    }
+
+    // The sunlit spots round a point, for the bake tests: 30 m each way, 2 m down, 10 m up.
+    SunEmitters spotsRound(const StaticLevel& level, std::span<const Vec3> albedo, const Vec3& toSun, const Vec3& point) {
+        return buildSunEmitters(level, albedo, toSun, boxAround(point, 30.0f, 2.0f, 10.0f), 0.25f, serialJobs());
+    }
+
     /*
     * The sun's bounce over a sunlit floor of albedo rho, per unit of the sun's irradiance: the floor sends rho E (n . L)
     * / pi in every direction, so a surface facing down (seeing all of it) gets rho (n . L) and one facing up none, with
-    * the sun straight up and 60 degrees from it. A roof shading the floor leaves none; so does no sun, or no albedo.
+    * the sun straight up and 60 degrees from it. A roof shading the floor leaves none (its top is lit, but out of sight);
+    * so do no spots.
     */
     void testSunBounceOverAFloor() {
         const StaticLevel level = flatLevel();
@@ -616,37 +685,53 @@ namespace {
         const float sine60 = std::sqrt(3.0f) * 0.5f;
 
         for (const auto& [toSun, cosine] : {std::pair{up, 1.0f}, std::pair{Vec3{sine60, 0.5f, 0.0f}, 0.5f}}) {
-            const SkyCell cell = bakeSkyCell(level, point, 1024, 30.0f, 0.5f, marks, albedo, openSkyNoSunAt, toSun);
-            assert(nearColour(skyBounceFacing(cell.sunBounce, down), rho * cosine, 0.03f));
+            const SunEmitters spots = spotsRound(level, albedo, toSun, point);
+            const SkyCell cell = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, albedo, openSkyNoSunAt, &spots, 256);
+            assert(nearColour(skyBounceFacing(cell.sunBounce, down), rho * cosine, 0.04f));
             assert(nearColour(skyBounceFacing(cell.sunBounce, up), Vec3{}, 0.01f));
         }
 
         StaticLevel roofed = flatLevel();
         roofed.add(block(Vec3{-50.0f, 3.0f, -50.0f}, Vec3{50.0f, 3.2f, 50.0f}));
-        const SkyCell shaded = bakeSkyCell(roofed, point, manyRays, 30.0f, 0.5f, marks, albedoOf(roofed, rho), openSkyNoSunAt, up);
+        const std::vector<Vec3> roofAlbedo = albedoOf(roofed, rho);
+        const SunEmitters roofSpots = spotsRound(roofed, roofAlbedo, up, point);
+        assert(!roofSpots.emitters.empty());
+        const SkyCell shaded = bakeSkyCell(roofed, point, manyRays, 30.0f, 0.5f, marks, roofAlbedo, openSkyNoSunAt, &roofSpots);
         assert(nearColour(skyBounceFacing(shaded.sunBounce, down), Vec3{}, 0.0f) && nearColour(skyBounceFacing(shaded.sunBounce, up), Vec3{}, 0.0f));
 
         const SkyCell noSun = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, albedo, openSkyNoSunAt);
         assert(nearColour(skyBounceFacing(noSun.sunBounce, down), Vec3{}, 0.0f));
-        const SkyCell noAlbedo = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, {}, openSkyNoSunAt, up);
-        assert(nearColour(skyBounceFacing(noAlbedo.sunBounce, down), Vec3{}, 0.0f));
     }
 
     /*
     * A dark room lit only by the sun's bounce: the low sun from the east shines through the door onto the floor inside,
-    * whose light reaches a point across the room; with the door bricked up, none does. The grid round the hits tells
-    * the second bounce: a hit there gets the sun bounce it reads too (its albedo times it).
+    * whose light reaches a point across the room; with the door bricked up, none does (the sunlit ground outside is
+    * behind the walls). Few samples read it nearly as many do (the spots are aimed at, not met by chance). The grid round
+    * the hits tells the second bounce: a hit there gets the sun bounce it reads too (its albedo times it).
     */
     void testSunBounceThroughADoor() {
         const Vec3 toSun = Vec3{1.0f, 0.5f, 0.0f}.normalized();
         const Vec3 point{-1.5f, 1.5f, 0.0f};
         GridMarks marks;
         const StaticLevel level = roomWithADoor();
-        const SkyCell lit = bakeSkyCell(level, point, 1024, 30.0f, 0.5f, marks, albedoOf(level, grey(0.5f)), openSkyNoSunAt, toSun);
-        assert(skyBounceFacing(lit.sunBounce, down).x > 0.002f);
+        const std::vector<Vec3> albedo = albedoOf(level, grey(0.5f));
+        const SunEmitters spots = spotsRound(level, albedo, toSun, point);
+        const SkyCell lit = bakeSkyCell(level, point, manyRays, 30.0f, 0.5f, marks, albedo, openSkyNoSunAt, &spots);
+        const float here = skyBounceFacing(lit.sunBounce, down).x;
+        assert(here > 0.002f);
+
+        // Steady: at points round the room, the default 64 samples within a fifth of what 4,096 give.
+        for (const Vec3& offset : {Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.5f, 0.0f, 0.0f}, Vec3{-1.0f, 0.0f, 1.0f}, Vec3{0.0f, 0.5f, -1.5f}}) {
+            const SkyCell few = bakeSkyCell(level, point + offset, manyRays, 30.0f, 0.5f, marks, albedo, openSkyNoSunAt, &spots, 64);
+            const SkyCell many = bakeSkyCell(level, point + offset, manyRays, 30.0f, 0.5f, marks, albedo, openSkyNoSunAt, &spots, 4096);
+            const float reference = skyBounceFacing(many.sunBounce, down).x;
+            assert(reference > 0.001f && near(skyBounceFacing(few.sunBounce, down).x, reference, 0.2f * reference));
+        }
 
         const StaticLevel closed = closedRoom();
-        const SkyCell dark = bakeSkyCell(closed, point, 1024, 30.0f, 0.5f, marks, albedoOf(closed, grey(0.5f)), openSkyNoSunAt, toSun);
+        const std::vector<Vec3> closedAlbedo = albedoOf(closed, grey(0.5f));
+        const SunEmitters outside = spotsRound(closed, closedAlbedo, toSun, point);
+        const SkyCell dark = bakeSkyCell(closed, point, manyRays, 30.0f, 0.5f, marks, closedAlbedo, openSkyNoSunAt, &outside);
         assert(nearColour(skyBounceFacing(dark.sunBounce, down), Vec3{}, 0.0f));
 
         // Every surface round the hits already bouncing sunlight at 0.1 of the sun's: the closed room's walls bring it back.
@@ -657,8 +742,19 @@ namespace {
             sample.sunBounce = {SkyVisibility{0.1f, Vec3{}}, SkyVisibility{0.1f, Vec3{}}, SkyVisibility{0.1f, Vec3{}}};
             return sample;
         };
-        const SkyCell again = bakeSkyCell(closed, point, manyRays, 30.0f, 0.5f, marks, albedoOf(closed, grey(0.5f)), bouncing, toSun);
+        const SkyCell again = bakeSkyCell(closed, point, manyRays, 30.0f, 0.5f, marks, closedAlbedo, bouncing, &outside);
         assert(nearColour(skyBounceFacing(again.sunBounce, down), grey(0.05f), 0.01f));
+
+        // Nothing gets through the closed room's walls, roof or their joints, for points near them and suns all round.
+        for (const Vec3& sun : {Vec3{-0.8f, 0.6f, 0.0f}, Vec3{-0.6f, 0.3f, 0.2f}, Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.3f, 0.5f, -0.8f}}) {
+            const SunEmitters spots = spotsRound(closed, closedAlbedo, sun.normalized(), point);
+
+            for (const Vec3& inside : {Vec3{-2.55f, 2.75f, 0.0f}, Vec3{-2.55f, 2.25f, 1.25f}, Vec3{2.75f, 2.75f, -2.75f}, Vec3{0.0f, 2.9f, 0.0f},
+                                       Vec3{-2.9f, 0.25f, -2.9f}}) {
+                const SkyCell shut = bakeSkyCell(closed, inside, manyRays, 30.0f, 0.5f, marks, closedAlbedo, openSkyNoSunAt, &spots);
+                assert(nearColour(skyBounceFacing(shut.sunBounce, down), Vec3{}, 0.0f) && nearColour(skyBounceFacing(shut.sunBounce, up), Vec3{}, 0.0f));
+            }
+        }
     }
 
     // What the grid says round a hit: the whole sphere open (a point under an open sky), wholly known.
@@ -1512,6 +1608,67 @@ namespace {
         assert(grid.getWaiting() == 0 && grid.getRefining() == count);
     }
 
+    /*
+    * The grid's spots: none until prepareSunEmitters, then built round the coarsest cascade (skySunEmitterMargin past it)
+    * for the grid's sun, shared by the batches taken; built again when the sun is refreshed or the grid has moved
+    * skySunEmitterRebuild from where they were built, not for a smaller move; none with no sun.
+    */
+    void testTheGridsSunlitSpots() {
+        const StaticLevel level = roomWithADoor();
+        const std::vector<Vec3> albedo = albedoOf(level, grey(0.5f));
+        SkyVisibilitySettings settings = quickGrid();
+        const Vec3 centre{0.37f, 1.61f, -0.22f};
+        const Vec3 toSun = Vec3{0.6f, 0.8f, 0.0f};
+
+        SkyVisibilityGrid grid;
+        grid.follow(centre, settings, 1);
+        grid.followSun(toSun);
+        assert(!grid.getSunEmitters());
+        grid.prepareSunEmitters(level, albedo, serialJobs());
+        const std::shared_ptr<const SunEmitters> first = grid.getSunEmitters();
+        assert(first && !first->emitters.empty() && grid.takeBatch(1, false).sunEmitters == first);
+
+        const ProbeCascade& coarsest = grid.getCascades().back();
+        const Vec3 last = coarsest.volume.origin + coarsest.volume.spacing * Vec3{static_cast<float>(coarsest.volume.counts.x - 1),
+                                                                                 static_cast<float>(coarsest.volume.counts.y - 1),
+                                                                                 static_cast<float>(coarsest.volume.counts.z - 1)};
+        assert(near(first->region.minimum.x, coarsest.volume.origin.x - skySunEmitterMargin, 1e-3f));
+        assert(near(first->region.maximum.y, last.y + skySunEmitterMargin, 1e-3f));
+        assert(near(first->spacing, settings.sunEmitterSpacing, 0.0f));
+
+        grid.follow(centre + Vec3{0.5f * skySunEmitterRebuild, 0.0f, 0.0f}, settings, 1);
+        grid.prepareSunEmitters(level, albedo, serialJobs());
+        assert(grid.getSunEmitters() == first);
+        grid.follow(centre + Vec3{1.5f * skySunEmitterRebuild, 0.0f, 0.0f}, settings, 1);
+        grid.prepareSunEmitters(level, albedo, serialJobs());
+        const std::shared_ptr<const SunEmitters> moved = grid.getSunEmitters();
+        assert(moved && moved != first);
+
+        grid.followSun(Vec3{0.0f, 1.0f, 0.0f});
+        grid.prepareSunEmitters(level, albedo, serialJobs());
+        assert(grid.getSunEmitters() != moved && near(grid.getSunEmitters()->toSun.y, 1.0f, 0.0f));
+
+        grid.followSun(std::nullopt);
+        grid.prepareSunEmitters(level, albedo, serialJobs());
+        assert(!grid.getSunEmitters());
+    }
+
+    /*
+    * The chance a cell is sampled with: half by its light over its distance squared and facing the point, half that
+    * cut to skySunOccludedImportance where the point's rays met a surface before it (a defensive mixture: a cell the
+    * rays wrongly hid, seen through a door they missed, is never sampled less than half as often as without the
+    * guess, so it cannot bring back a spike twenty times too bright).
+    */
+    void testTheSunCellChance() {
+        const float plain = 3.0f;
+        const float plainTotal = 10.0f;
+        assert(near(skySunCellChance(plain, plainTotal, plain, plainTotal), 0.3f, 1e-6f));
+        const float hidden = plain * skySunOccludedImportance;
+        const float hiddenChance = skySunCellChance(plain, plainTotal, hidden, 5.0f);
+        assert(hiddenChance >= 0.5f * plain / plainTotal);
+        assert(near(hiddenChance, 0.5f * 0.3f + 0.5f * hidden / 5.0f, 1e-6f));
+        assert(skySunCellChance(0.0f, plainTotal, 0.0f, 5.0f) == 0.0f);
+    }
     // A batch's time a point, as it would be at the full rays: in proportion to the rays.
     void testTheCostAtFullRays() {
         assert(near(static_cast<float>(skySecondsAtFullRays(0.008, 2048, 256)), 0.001f, 1e-9f));
@@ -1569,6 +1726,7 @@ void testSkyVisibility() {
     testTheLightOnAHit();
     testBounceOverAFloor();
     testNoBounceInTheDarkOrInWalls();
+    testSunEmitters();
     testSunBounceOverAFloor();
     testSunBounceThroughADoor();
     testTheBudget();
@@ -1587,6 +1745,8 @@ void testSkyVisibility() {
     testDeepRaysAreCloser();
     testDeepBakesComeLast();
     testTheCostAtFullRays();
+    testTheSunCellChance();
     testTheSunMovingBakesAgain();
+    testTheGridsSunlitSpots();
     testBakingIsTheSameOnEveryCore();
 }

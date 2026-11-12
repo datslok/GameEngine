@@ -82,6 +82,12 @@ struct SkyVisibilitySettings {
     bool sunBounce = true;
     float sunRefreshDegrees = 2.0f;
 
+    // How the sun's bounce is gathered (render/gpu/sky_visibility_bake.h, SunEmitters): the sunlit spots found every
+    // sunEmitterSpacing metres across the sun's beam, and the shadow rays each point aims at them (sunSamples). Random rays
+    // finding a small sunlit patch by chance left warm blotches even at 2,048 rays a point. Neither bakes anything again.
+    int sunSamples = 64;
+    float sunEmitterSpacing = 0.25f;
+
     // How much memory may keep baked points by their place in the world after they leave the grid (megabytes, 0 off),
     // so coming back to a place finds them instead of baking them again (render/gpu/sky_visibility_bake.h,
     // SkyCellStore). Used only as places are visited; the points used longest ago go first. Not part of the grid's shape.
@@ -113,7 +119,7 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for an ambient floor outside 0..1, a spacing or ray length not above 0, a negative bake
 // time, lookup bias or store, cascades outside 1..maxSkyVisibilityCascades, rays or quick rays below 1, deep rays below
-// 0, a deep threshold below 1, or a sun refresh angle not above 0.
+// 0, a deep threshold below 1, a sun refresh angle or spot spacing not above 0, or no sun samples.
 void validateSkyVisibility(const SkyVisibilitySettings& settings);
 
 // Whether two settings bake the same grid: everything but the ambient floor, the lookup bias, the budget, the quick and

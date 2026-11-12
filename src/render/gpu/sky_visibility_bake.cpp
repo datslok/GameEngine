@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <limits>
+#include <map>
+#include <mutex>
 #include <numbers>
 #include <utility>
 #include <vector>
@@ -25,7 +28,205 @@ namespace {
         Vec3 normal;
         std::uint32_t triangle = 0;
     };
+
+    // The cube's texels a side for looking up a point's nearest ray by direction (each about 5.6 degrees, finer than
+    // 256 rays' spacing of about 13).
+    constexpr int rayTableSide = 16;
+
+    // A direction's texel on the cube: its largest axis picks the face (+x, -x, +y, -y, +z, -z), the other two its place.
+    int cubeTexel(const Vec3& direction) {
+        const float ax = std::abs(direction.x);
+        const float ay = std::abs(direction.y);
+        const float az = std::abs(direction.z);
+        int face = 0;
+        float u = 0.0f;
+        float v = 0.0f;
+
+        if (ax >= ay && ax >= az) {
+            face = direction.x >= 0.0f ? 0 : 1;
+            u = direction.y / ax;
+            v = direction.z / ax;
+        } else if (ay >= az) {
+            face = direction.y >= 0.0f ? 2 : 3;
+            u = direction.x / ay;
+            v = direction.z / ay;
+        } else {
+            face = direction.z >= 0.0f ? 4 : 5;
+            u = direction.x / az;
+            v = direction.y / az;
+        }
+
+        const auto place = [](float along) {
+            return std::clamp(static_cast<int>((along + 1.0f) * 0.5f * static_cast<float>(rayTableSide)), 0, rayTableSide - 1);
+        };
+        return (face * rayTableSide + place(u)) * rayTableSide + place(v);
+    }
+
+    // A texel's middle direction (not of unit length), the inverse of cubeTexel.
+    Vec3 cubeTexelDirection(int texel) {
+        const int face = texel / (rayTableSide * rayTableSide);
+        const float u = (static_cast<float>(texel / rayTableSide % rayTableSide) + 0.5f) / static_cast<float>(rayTableSide) * 2.0f - 1.0f;
+        const float v = (static_cast<float>(texel % rayTableSide) + 0.5f) / static_cast<float>(rayTableSide) * 2.0f - 1.0f;
+        const float sign = face % 2 == 0 ? 1.0f : -1.0f;
+
+        switch (face / 2) {
+        case 0:
+            return Vec3{sign, u, v};
+        case 1:
+            return Vec3{u, sign, v};
+        default:
+            return Vec3{u, v, sign};
+        }
+    }
+
+    /*
+    * For each cube texel, the nearest of rays rays (skyVisibilityRay), worked out once per ray count and kept for the
+    * program's life (a few counts at most); each thread keeps the last one it used, so the lock is taken rarely.
+    */
+    const std::vector<int>& nearestRayTable(int rays) {
+        thread_local int cachedRays = -1;
+        thread_local const std::vector<int>* cached = nullptr;
+
+        if (rays == cachedRays) {
+            return *cached;
+        }
+
+        static std::mutex lock;
+        static std::map<int, std::vector<int>> tables;
+        const std::lock_guard guard(lock);
+        std::vector<int>& table = tables[rays];
+
+        if (table.empty()) {
+            table.resize(static_cast<std::size_t>(6 * rayTableSide * rayTableSide));
+
+            for (std::size_t texel = 0; texel < table.size(); ++texel) {
+                const Vec3 direction = cubeTexelDirection(static_cast<int>(texel)).normalized();
+                int nearest = 0;
+                float best = -2.0f;
+
+                for (int ray = 0; ray < rays; ++ray) {
+                    const float closeness = skyVisibilityRay(ray, rays).dot(direction);
+
+                    if (closeness > best) {
+                        best = closeness;
+                        nearest = ray;
+                    }
+                }
+
+                table[texel] = nearest;
+            }
+        }
+
+        cachedRays = rays;
+        cached = &table;
+        return table;
+    }
+
+    /*
+    * The sun's first bounce at a point from the sunlit spots, added into its bands (per channel, a = the sum over 4 pi, b
+    * = 3 times the sum along the directions over 4 pi, as skyVisibilityFromRays makes them from rays). Each cell's
+    * chance (skySunCellChance) mixes its light over its distance squared (at least a cell's size), facing the point, with
+    * the same cut to skySunOccludedImportance where the point's nearest ray met a surface well before it; the samples walk
+    * the chances in even steps and pick a spot in the cell by the golden ratio's sequence, so neighbouring points choose alike.
+    */
+    void addSunSpots(const StaticLevel& level, const Vec3& point, const SunEmitters& spots, int samples, std::span<const float> rayDistances, GridMarks& marks,
+                     SkyBounce& bands) {
+        if (spots.cells.empty() || samples <= 0 || rayDistances.empty()) {
+            return;
+        }
+
+        const std::vector<int>& nearest = nearestRayTable(static_cast<int>(rayDistances.size()));
+        thread_local std::vector<float> plain;
+        thread_local std::vector<float> guessed;
+        thread_local std::vector<float> running;
+        plain.clear();
+        guessed.clear();
+        running.clear();
+        float plainTotal = 0.0f;
+        float guessedTotal = 0.0f;
+        const float smallest = skySunCellSize * skySunCellSize;
+        const float slack = skySunCellSize;
+
+        for (const SunEmitterCell& cell : spots.cells) {
+            const Vec3 toCell = cell.centroid - point;
+            const float distanceSquared = toCell.lengthSquared();
+            const float distance = std::sqrt(distanceSquared);
+            const Vec3 direction = distance > 1e-6f ? toCell * (1.0f / distance) : Vec3{0.0f, 1.0f, 0.0f};
+            const float facing = 0.05f + std::max(-cell.normal.dot(direction), 0.0f);
+            const float met = rayDistances[static_cast<std::size_t>(nearest[static_cast<std::size_t>(cubeTexel(direction))])];
+            const float seen = met + slack < distance ? skySunOccludedImportance : 1.0f;
+            const float importance = cell.flux * facing / std::max(distanceSquared, smallest);
+            plain.push_back(importance);
+            guessed.push_back(importance * seen);
+            plainTotal += importance;
+            guessedTotal += importance * seen;
+        }
+
+        if (!(plainTotal > 0.0f)) {
+            return;
+        }
+
+        // The mixture's chances, running (each cell's in [running before it, its own)).
+        float total = 0.0f;
+
+        for (std::size_t index = 0; index < plain.size(); ++index) {
+            total += skySunCellChance(plain[index], plainTotal, guessed[index], guessedTotal);
+            running.push_back(total);
+        }
+
+        constexpr float golden = 0.61803398875f;
+        Vec3 open{0.0f, 0.0f, 0.0f};
+        std::array<Vec3, 3> lean{};
+        const float area = spots.spacing * spots.spacing;
+
+        for (int sample = 0; sample < samples; ++sample) {
+            const float target = (static_cast<float>(sample) + 0.5f) / static_cast<float>(samples) * total;
+            const std::size_t index = std::min(static_cast<std::size_t>(std::upper_bound(running.begin(), running.end(), target) - running.begin()),
+                                               running.size() - 1);
+            const SunEmitterCell& cell = spots.cells[index];
+            const float chance = (running[index] - (index > 0 ? running[index - 1] : 0.0f)) / total / static_cast<float>(cell.count);
+            const float pick = static_cast<float>(sample) * golden;
+            const std::uint32_t within = std::min(cell.count - 1, static_cast<std::uint32_t>((pick - std::floor(pick)) * static_cast<float>(cell.count)));
+            const SunEmitter& spot = spots.emitters[cell.first + within];
+            const Vec3 toSpot = spot.position + spot.normal * skySunRayLift - point;
+            const float distanceSquared = toSpot.lengthSquared();
+            const float distance = std::sqrt(distanceSquared);
+
+            if (!(distance > 1e-6f) || !(chance > 0.0f)) {
+                continue;
+            }
+
+            const Vec3 direction = toSpot * (1.0f / distance);
+            const float cosineOut = -spot.normal.dot(direction);
+
+            if (cosineOut <= 0.0f || raycast(level, Ray{point, direction}, distance, marks)) {
+                continue;
+            }
+
+            const Vec3 light = spot.albedo * (area * cosineOut / std::max(distanceSquared, area) / chance / static_cast<float>(samples));
+            open = open + light;
+            lean[0] = lean[0] + direction * light.x;
+            lean[1] = lean[1] + direction * light.y;
+            lean[2] = lean[2] + direction * light.z;
+        }
+
+        const float overSphere = 1.0f / (4.0f * std::numbers::pi_v<float>);
+        const float channels[3] = {open.x, open.y, open.z};
+
+        for (std::size_t channel = 0; channel < bands.size(); ++channel) {
+            bands[channel].open += channels[channel] * overSphere;
+            bands[channel].lean = bands[channel].lean + lean[channel] * (3.0f * overSphere);
+        }
+    }
 }
+
+float skySunCellChance(float plain, float plainTotal, float guessed, float guessedTotal) {
+    const float plainShare = plainTotal > 0.0f ? plain / plainTotal : 0.0f;
+    const float guessedShare = guessedTotal > 0.0f ? guessed / guessedTotal : plainShare;
+    return 0.5f * plainShare + 0.5f * guessedShare;
+}
+
+namespace {}
 
 Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback) {
     if (sample.known < skyHitKnownShare) {
@@ -35,10 +236,8 @@ Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback) {
     return skyLightFacing(sample.visibility, sample.bounce, normal, 0.0f);
 }
 
-Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal, const Vec3& toSun, bool sunlit) {
-    const float direct = sunlit ? std::max(normal.dot(toSun), 0.0f) : 0.0f;
-    const Vec3 bounced = sample.known >= skyHitKnownShare ? skyBounceFacing(sample.sunBounce, normal) : Vec3{0.0f, 0.0f, 0.0f};
-    return Vec3{direct + bounced.x, direct + bounced.y, direct + bounced.z};
+Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal) {
+    return sample.known >= skyHitKnownShare ? skyBounceFacing(sample.sunBounce, normal) : Vec3{0.0f, 0.0f, 0.0f};
 }
 
 /*
@@ -47,9 +246,11 @@ Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal, const Vec3& toS
 * every ray is cast, since their fallback is the point's own open share.
 */
 SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks, std::span<const Vec3> albedo,
-                    const SkyHitSampler& hitSampler, const std::optional<Vec3>& toSun) {
+                    const SkyHitSampler& hitSampler, const SunEmitters* sunEmitters, int sunSamples) {
     thread_local std::vector<Vec3> directions;
     thread_local std::vector<float> openings;
+    thread_local std::vector<float> distances;
+    distances.clear();
     thread_local std::vector<FrontHit> frontHits;
     thread_local std::vector<float> bounced;
     directions.clear();
@@ -63,6 +264,7 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
         const std::optional<LevelHit> hit = raycast(level, Ray{point, direction}, rayLength, marks);
         directions.push_back(direction);
         openings.push_back(hit ? 0.0f : 1.0f);
+        distances.push_back(hit ? hit->hit.distance : std::numeric_limits<float>::infinity());
 
         if (!hit) {
             ++escaped;
@@ -83,7 +285,7 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     cell.state = static_cast<float>(backFaces) > skyVisibilityBuriedShare * static_cast<float>(rays) ? SkyCellState::Buried : SkyCellState::Baked;
     cell.escapedRays = escaped;
 
-    // The light on each front hit, the sky's and (towards a sun) the sun's, from the grid round it.
+    // The light on each front hit, the sky's and (with sunlit spots) the sun's bounced light, from the grid round it.
     if (!albedo.empty() && hitSampler) {
         thread_local std::vector<Vec3> hitLight;
         thread_local std::vector<Vec3> sunLight;
@@ -96,11 +298,8 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
             const SkySample sample = hitSampler(hit.point, hit.normal, directions[hit.ray] * -1.0f);
             hitLight.push_back(skyHitLight(sample, hit.normal, fallback));
 
-            // The sun's: a shadow ray only from a hit facing it.
-            if (toSun) {
-                const bool facing = hit.normal.dot(*toSun) > 0.0f;
-                const bool sunlit = facing && !raycast(level, Ray{hit.point + hit.normal * skySunRayLift, *toSun}, rayLength, marks);
-                sunLight.push_back(skySunHitLight(sample, hit.normal, *toSun, sunlit));
+            if (sunEmitters) {
+                sunLight.push_back(skySunHitLight(sample, hit.normal));
             }
 
             unsure += sample.known < skyHitKnownShare && sample.missing >= skyHitKnownShare ? 1 : 0;
@@ -130,8 +329,10 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
 
         cell.bounce = bandsOf(hitLight);
 
-        if (toSun) {
+        // The sun's: its later bounces from the hits, its first aimed at the sunlit spots.
+        if (sunEmitters) {
             cell.sunBounce = bandsOf(sunLight);
+            addSunSpots(level, point, *sunEmitters, sunSamples, distances, marks, cell.sunBounce);
         }
     }
 
@@ -141,6 +342,116 @@ SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float
     }
 
     return cell;
+}
+
+/*
+* The beam's rays start on a plane across it past the region (its half diagonal, then skySunOccluderReach more, so
+* blockers above still shade it) and run through it; the plane's two axes from the sun's way, its extent the region's
+* corners seen along the beam. A hit counts when it faces the sun, lies in the region and its triangle has albedo. The
+* cells are sorted by their places, so the result does not depend on the jobs.
+*/
+SunEmitters buildSunEmitters(const StaticLevel& level, std::span<const Vec3> albedo, const Vec3& toSun, const Aabb& region, float spacing, JobSystem& jobs) {
+    SunEmitters spots;
+    spots.toSun = toSun.normalized();
+    spots.spacing = spacing;
+    spots.region = region;
+
+    if (albedo.empty() || !(spacing > 0.0f)) {
+        return spots;
+    }
+
+    const Vec3 along = spots.toSun;
+    const Vec3 helper = std::abs(along.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+    const Vec3 across = along.cross(helper).normalized();
+    const Vec3 up = across.cross(along);
+    const Vec3 centre = region.centre();
+    const float halfDiagonal = region.size().length() * 0.5f;
+    float lowU = 0.0f;
+    float highU = 0.0f;
+    float lowV = 0.0f;
+    float highV = 0.0f;
+
+    for (int corner = 0; corner < 8; ++corner) {
+        const Vec3 place{(corner & 1) ? region.maximum.x : region.minimum.x, (corner & 2) ? region.maximum.y : region.minimum.y,
+                         (corner & 4) ? region.maximum.z : region.minimum.z};
+        const Vec3 offset = place - centre;
+        lowU = std::min(lowU, offset.dot(across));
+        highU = std::max(highU, offset.dot(across));
+        lowV = std::min(lowV, offset.dot(up));
+        highV = std::max(highV, offset.dot(up));
+    }
+
+    const int columns = std::max(1, static_cast<int>(std::ceil((highU - lowU) / spacing)));
+    const int rows = std::max(1, static_cast<int>(std::ceil((highV - lowV) / spacing)));
+    const float start = halfDiagonal + skySunOccluderReach;
+    std::vector<std::vector<SunEmitter>> found(static_cast<std::size_t>(rows));
+
+    jobs.parallelFor(static_cast<std::size_t>(rows), 1, [&](std::size_t row) {
+        thread_local GridMarks marks;
+        const float v = lowV + (static_cast<float>(row) + 0.5f) * spacing;
+
+        for (int column = 0; column < columns; ++column) {
+            const float u = lowU + (static_cast<float>(column) + 0.5f) * spacing;
+            const Vec3 origin = centre + across * u + up * v + along * start;
+            const std::optional<LevelHit> hit = raycast(level, Ray{origin, along * -1.0f}, start + halfDiagonal, marks);
+
+            if (!hit || hit->triangle >= albedo.size()) {
+                continue;
+            }
+
+            const Vec3 facing = triangleFacing(level, hit->triangle);
+            const Vec3 point = origin - along * hit->hit.distance;
+            const Vec3 colour = albedo[hit->triangle];
+
+            if (facing.dot(along) <= 0.0f || !region.contains(point) || std::max({colour.x, colour.y, colour.z}) <= 0.0f) {
+                continue;
+            }
+
+            found[row].push_back(SunEmitter{point, facing.normalized(), colour});
+        }
+    });
+
+    struct Keyed {
+        std::int64_t key;
+        SunEmitter spot;
+    };
+
+    std::vector<Keyed> keyed;
+
+    for (const std::vector<SunEmitter>& row : found) {
+        for (const SunEmitter& spot : row) {
+            const auto cellOf = [](float coordinate) {
+                return static_cast<std::int64_t>(std::floor(coordinate / skySunCellSize)) + (std::int64_t{1} << 20);
+            };
+            keyed.push_back(Keyed{(cellOf(spot.position.x) << 42) | (cellOf(spot.position.y) << 21) | cellOf(spot.position.z), spot});
+        }
+    }
+
+    std::stable_sort(keyed.begin(), keyed.end(), [](const Keyed& a, const Keyed& b) { return a.key < b.key; });
+    spots.emitters.reserve(keyed.size());
+    const float area = spacing * spacing;
+
+    for (std::size_t index = 0; index < keyed.size(); ++index) {
+        if (index == 0 || keyed[index].key != keyed[index - 1].key) {
+            spots.cells.push_back(SunEmitterCell{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 0.0f}, 0.0f, static_cast<std::uint32_t>(index), 0});
+        }
+
+        const SunEmitter& spot = keyed[index].spot;
+        SunEmitterCell& cell = spots.cells.back();
+        const float flux = std::max({spot.albedo.x, spot.albedo.y, spot.albedo.z}) * area;
+        cell.centroid = cell.centroid + spot.position * flux;
+        cell.normal = cell.normal + spot.normal * flux;
+        cell.flux += flux;
+        ++cell.count;
+        spots.emitters.push_back(spot);
+    }
+
+    for (SunEmitterCell& cell : spots.cells) {
+        cell.centroid = cell.centroid * (1.0f / cell.flux);
+        cell.normal = cell.normal * (1.0f / cell.flux);
+    }
+
+    return spots;
 }
 
 bool skyWantsDeepRays(const SkyCell& cell, const SkyVisibilitySettings& settings) {
@@ -502,7 +813,8 @@ void bakeSkyBatch(const StaticLevel& level, JobSystem& jobs, std::span<const Vec
     jobs.parallelFor(batch.entries.size(), skyBakePointsPerJob, [&](std::size_t index) {
         thread_local GridMarks marks;
         const SkyBakeBatch::Entry& entry = batch.entries[index];
-        batch.results[index] = bakeSkyCell(level, entry.position, batch.rays, batch.rayLength, entry.spacing, marks, albedo, gridAtHits, batch.toSun);
+        batch.results[index] =
+            bakeSkyCell(level, entry.position, batch.rays, batch.rayLength, entry.spacing, marks, albedo, gridAtHits, batch.sunEmitters.get(), batch.sunSamples);
     });
 
     batch.secondsPerCell = (profilerSeconds() - start) / static_cast<double>(batch.entries.size());
@@ -520,6 +832,9 @@ SkyBakeBatch SkyVisibilityGrid::makeBatch(std::span<const int> points, int rays,
     batch.generation = generation;
     batch.toSun = sun;
     batch.sunEpoch = sunEpoch;
+    // Only spots found for this very sun (prepareSunEmitters runs right after followSun, so a frame's batches have them).
+    batch.sunEmitters = sun && sunEmittersEpoch == sunEpoch ? sunEmitters : nullptr;
+    batch.sunSamples = shape.sunSamples;
     batch.entries.reserve(points.size());
 
     for (const int cell : points) {
@@ -706,6 +1021,37 @@ void SkyVisibilityGrid::applyBatch(const SkyBakeBatch& batch) {
     ++version;
 }
 
+/*
+* Found round the coarsest cascade's window (its first and last points), skySunEmitterMargin past it on every side.
+* Rebuilt when the sun or the spacing changed, or the window's middle moved skySunEmitterRebuild from the last build's.
+*/
+void SkyVisibilityGrid::prepareSunEmitters(const StaticLevel& level, std::span<const Vec3> albedo, JobSystem& jobs) {
+    if (!sun || cascades.empty()) {
+        sunEmitters.reset();
+        return;
+    }
+
+    const ProbeVolume& coarsest = cascades.back().volume;
+    const Vec3 last = coarsest.origin + coarsest.spacing * Vec3{static_cast<float>(coarsest.counts.x - 1), static_cast<float>(coarsest.counts.y - 1),
+                                                                static_cast<float>(coarsest.counts.z - 1)};
+    const Vec3 margin{skySunEmitterMargin, skySunEmitterMargin, skySunEmitterMargin};
+    const Aabb region{coarsest.origin - margin, last + margin};
+    const bool current = sunEmitters && sunEmittersEpoch == sunEpoch && sunEmitters->spacing == shape.sunEmitterSpacing &&
+                         (region.centre() - sunEmittersCentre).length() < skySunEmitterRebuild;
+
+    if (current) {
+        return;
+    }
+
+    sunEmitters = std::make_shared<const SunEmitters>(buildSunEmitters(level, albedo, *sun, region, shape.sunEmitterSpacing, jobs));
+    sunEmittersEpoch = sunEpoch;
+    sunEmittersCentre = region.centre();
+}
+
+std::shared_ptr<const SunEmitters> SkyVisibilityGrid::getSunEmitters() const {
+    return sunEmitters;
+}
+
 int SkyVisibilityGrid::getWaiting() const {
     return waitingCount;
 }
@@ -742,10 +1088,11 @@ std::string SkyVisibilityGrid::describePoints(const Vec3& place) const {
             const SkyCell& sky = cells[index];
             const Vec3 position = probePosition(volume, slot);
             const int slotIndex = static_cast<int>(index);
-            text += std::format("\n  ({:.2f} {:.2f} {:.2f}) {}{}{}{}  open {:.4f}  escaped {}  unsure {:.2f}  bounce {:.4f} {:.4f} {:.4f}", position.x, position.y,
+            text += std::format("\n  ({:.2f} {:.2f} {:.2f}) {}{}{}{}  open {:.4f}  escaped {}  unsure {:.2f}  bounce {:.4f} {:.4f} {:.4f}  sun {:.4f} {:.4f} {:.4f}", position.x, position.y,
                                 position.z, states[static_cast<std::size_t>(sky.state)], isWaiting[index] == Waiting ? ", waiting" : "",
                                 refining.contains(slotIndex) ? ", quick" : "", deepening.contains(slotIndex) ? ", deep" : "", sky.visibility.open,
-                                sky.escapedRays, sky.unsureShare, sky.bounce[0].open, sky.bounce[1].open, sky.bounce[2].open);
+                                sky.escapedRays, sky.unsureShare, sky.bounce[0].open, sky.bounce[1].open, sky.bounce[2].open,
+                                sky.sunBounce[0].open, sky.sunBounce[1].open, sky.sunBounce[2].open);
         }
     }
 

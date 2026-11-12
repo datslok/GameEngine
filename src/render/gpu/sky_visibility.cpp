@@ -120,6 +120,8 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Deep below escaped rays", settings.deepOpenRays, {.min = 1, .max = 1024, .sliderMin = 1, .sliderMax = 128});
     visitor.field("Sun bounce", settings.sunBounce);
     visitor.field("Sun refresh degrees", settings.sunRefreshDegrees, {.min = 0.01f, .max = 180.0f, .sliderMin = 0.5f, .sliderMax = 15.0f, .unit = "deg"});
+    visitor.field("Sun samples", settings.sunSamples, {.min = 1, .max = 4096, .sliderMin = 8, .sliderMax = 256});
+    visitor.field("Sun spot spacing", settings.sunEmitterSpacing, {.min = 0.05f, .max = 8.0f, .sliderMin = 0.1f, .sliderMax = 1.0f, .unit = "m"});
     visitor.field("Store megabytes", settings.storeMegabytes, {.min = 0.0f, .max = 16384.0f, .sliderMin = 0.0f, .sliderMax = 1024.0f, .unit = "MB"});
     visitor.field("Ray length", settings.rayLength, {.min = 0.1f, .max = 1000.0f, .sliderMin = 5.0f, .sliderMax = 100.0f, .unit = "m"});
     visitor.field("Lookup bias", settings.lookupBias, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
@@ -151,8 +153,8 @@ void validateSkyVisibility(const SkyVisibilitySettings& settings) {
         throw std::invalid_argument("Sky visibility needs 1 to SKY_VISIBILITY_MAX_CASCADES cascades and at least 1 ray and quick ray");
     }
 
-    if (!(settings.sunRefreshDegrees > 0.0f)) {
-        throw std::invalid_argument("Sky visibility needs a sun refresh angle above 0");
+    if (!(settings.sunRefreshDegrees > 0.0f) || !(settings.sunEmitterSpacing > 0.0f) || settings.sunSamples < 1) {
+        throw std::invalid_argument("Sky visibility needs a sun refresh angle and spot spacing above 0 and at least 1 sun sample");
     }
 
     if (settings.deepRays < 0 || settings.deepOpenRays < 1) {

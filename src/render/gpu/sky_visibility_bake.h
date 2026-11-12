@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/job_system.h"
+#include "math/aabb.h"
 #include "physics/static_level.h"
 #include "render/gpu/sky_visibility.h"
 
@@ -42,15 +43,76 @@ inline constexpr float skyUnsureRefineShare = 0.1f;
 Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback);
 
 /*
-* The sun's light falling on a hit, per unit of its irradiance and per colour channel: n . L where the sun reaches it
-* (sunlit: a shadow ray towards it escaped), plus the sun's bounce the grid round it holds facing its normal (so the
-* sun's light keeps bouncing as the grid refreshes); none of that where the grid knows less than skyHitKnownShare.
+* The sun's bounced light falling on a hit, per unit of its irradiance and per colour channel: the sun's bounce the grid
+* round it holds facing its normal (the second and later bounces, so the sun's light keeps bouncing as the grid
+* refreshes; the first comes from the sunlit spots, SunEmitters); none where the grid knows less than skyHitKnownShare.
 */
-Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal, const Vec3& toSun, bool sunlit);
+Vec3 skySunHitLight(const SkySample& sample, const Vec3& normal);
 
-// How far a shadow ray towards the sun starts off its hit, along the surface's normal (metres), so it does not meet
-// the surface it leaves.
+// How far a ray to or from a sunlit spot stays off its surface, along the surface's normal (metres), so it does not
+// meet the surface itself.
 inline constexpr float skySunRayLift = 0.01f;
+
+/*
+* The sun's first bounce, gathered by aiming at the sunlit surfaces rather than meeting them by chance (next event
+* estimation). A small sunlit patch seen through a door is a small, bright source: random rays from a point meet it a
+* handful of times even at 2,048, and neighbouring points disagreed (warm blotches). So the sunlit surfaces round the
+* grid are found first, as spots: rays down the sun's beam spacing apart, each first hit facing the sun a spot (sunlit
+* by construction), standing for spacing^2 / (n . L) of surface, its radiance albedo (n . L) E / pi. Seen from a point d
+* away at cos_out to its normal it fills spacing^2 cos_out / (n . L) / d^2 of solid angle, so it brings albedo
+* spacing^2 cos_out / d^2 per unit of E / pi: n . L cancels (it is in how many spots a surface gets).
+*/
+struct SunEmitter {
+    Vec3 position;
+    Vec3 normal;
+    Vec3 albedo;
+};
+
+// The spots in a cell of skySunCellSize: where their light is (flux-weighted), which way they face on the whole, their
+// light (the brightest albedo channel times spacing^2, summed) and their run in SunEmitters::emitters.
+struct SunEmitterCell {
+    Vec3 centroid;
+    Vec3 normal;
+    float flux = 0.0f;
+    std::uint32_t first = 0;
+    std::uint32_t count = 0;
+};
+
+struct SunEmitters {
+    Vec3 toSun;
+    float spacing = 0.0f;
+    Aabb region;
+    std::vector<SunEmitter> emitters; // in their cells' order
+    std::vector<SunEmitterCell> cells;
+};
+
+// The cells' side (metres), how far past the grid's coarsest cascade spots are found, and how far the grid moves
+// before they are found again round it.
+inline constexpr float skySunCellSize = 2.0f;
+inline constexpr float skySunEmitterMargin = 8.0f;
+inline constexpr float skySunEmitterRebuild = 8.0f;
+
+// How far beyond the region a ray down the beam starts, so blockers above it still shade it (metres).
+inline constexpr float skySunOccluderReach = 30.0f;
+
+// A cell the point's own rays show a surface in front of is still sampled, this much less often (never 0, so the
+// estimate stays unbiased where the rays were wrong).
+inline constexpr float skySunOccludedImportance = 0.05f;
+
+/*
+* A cell's chance of being sampled: half its share of the plain importance (its light over its distance squared,
+* facing the point), half its share of that cut by the rays' guess at what is hidden (a defensive mixture). The point's
+* 256 rays cannot resolve a door 5 m off, so cells seen through one were guessed hidden, sampled twenty times less
+* often, and each sample that got through counted twenty times: green spikes from the grass outside. With half the
+* chance plain, no cell is sampled less than half as often as without the guess.
+*/
+float skySunCellChance(float plain, float plainTotal, float guessed, float guessedTotal);
+
+/*
+* The spots in region for the sun towards toSun (unit), spacing apart across its beam, each lit triangle's albedo (none
+* without albedo); a row of rays a job, kept in order. Then grouped into cells, in the order of their cells' places.
+*/
+SunEmitters buildSunEmitters(const StaticLevel& level, std::span<const Vec3> albedo, const Vec3& toSun, const Aabb& region, float spacing, JobSystem& jobs);
 
 /*
 * One point: rays rays of rayLength (skyVisibilityRay), each open if it meets nothing; a ray meeting the back of a
@@ -64,12 +126,15 @@ inline constexpr float skySunRayLift = 0.01f;
 * its ground all of it), each colour channel's values made into bands as the sky's are: the cell's bounce. Without
 * them, no bounce.
 *
-* With toSun too (the unit way to the brightest directional light), each front hit facing it casts a shadow ray that
-* way (rayLength long, lifted skySunRayLift off the surface), and brings back its albedo times the sun's light on it
-* (skySunHitLight): the cell's sun bounce, per unit of the sun's irradiance. Without it, none.
+* With the sunlit spots too (sunEmitters), the cell's sun bounce, per unit of the sun's irradiance: sunSamples shadow
+* rays at spots, each cell chosen in proportion to its light over its distance squared, facing the point, and far less
+* often where the point's own rays met a surface before it; a spot in it at random; each sample its spot's light over
+* its chance, made into bands as a ray's is. Plus the second bounce from the rays' hits (skySunHitLight). Without
+* spots, none.
 */
 SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks,
-                    std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {}, const std::optional<Vec3>& toSun = std::nullopt);
+                    std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {}, const SunEmitters* sunEmitters = nullptr,
+                    int sunSamples = 64);
 
 // A job takes this many points at once, so handing them out costs little beside their rays.
 inline constexpr std::size_t skyBakePointsPerJob = 8;
@@ -206,6 +271,10 @@ struct SkyBakeBatch {
     std::optional<Vec3> toSun;
     std::uint32_t sunEpoch = 0;
 
+    // The grid's sunlit spots (none: no sun bounce) and the shadow rays a point aims at them.
+    std::shared_ptr<const SunEmitters> sunEmitters;
+    int sunSamples = 0;
+
     // The grid as it stood, for the hits.
     std::vector<ProbeCascade> cascades;
     std::shared_ptr<const std::vector<SkyCell>> grid;
@@ -242,6 +311,15 @@ public:
     * rays (the refinement queue), and the store's points come back queued. Returns whether it did.
     */
     bool followSun(const std::optional<Vec3>& toSun);
+
+    /*
+    * The sunlit spots for the grid's sun (buildSunEmitters), round the coarsest cascade and skySunEmitterMargin past it,
+    * at the settings' spacing: found again after a sun refresh, a change of spacing, or once the grid has moved
+    * skySunEmitterRebuild from where they were found (points baked meanwhile keep what they had); none without a sun.
+    * The batches taken share them.
+    */
+    void prepareSunEmitters(const StaticLevel& level, std::span<const Vec3> albedo, JobSystem& jobs);
+    std::shared_ptr<const SunEmitters> getSunEmitters() const;
 
     /*
     * Bakes up to maxCells waiting points against level, a job per point on jobs. Returns how many it baked. quick bakes
@@ -327,6 +405,11 @@ private:
     // The way to the sun the grid bakes with, and each change of it counts one.
     std::optional<Vec3> sun;
     std::uint32_t sunEpoch = 0;
+
+    // The sunlit spots, the sun they were found for, and where the coarsest cascade was then.
+    std::shared_ptr<const SunEmitters> sunEmitters;
+    std::uint32_t sunEmittersEpoch = 0;
+    Vec3 sunEmittersCentre;
 
     // Moves up to count of cascade's waiting points into batch, the first by bake's order.
     void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);

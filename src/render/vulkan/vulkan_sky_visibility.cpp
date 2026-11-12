@@ -65,6 +65,11 @@ void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre
                                bool everything, const std::optional<Vec3>& toSun) {
     const bool afresh = grid.follow(centre, settings, frame.staticLevelVersion);
     grid.followSun(toSun);
+
+    // The sunlit spots the sun's bounce aims at, found again only when the sun or the grid has moved on.
+    if (frame.staticLevel != nullptr) {
+        grid.prepareSunEmitters(*frame.staticLevel, frame.staticAlbedo ? std::span<const Vec3>{*frame.staticAlbedo} : std::span<const Vec3>{}, jobs);
+    }
     const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
     const double deepShare = static_cast<double>(settings.deepRays) / static_cast<double>(settings.rays);
     const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());
