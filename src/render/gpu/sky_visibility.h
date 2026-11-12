@@ -79,6 +79,16 @@ struct SkyVisibilitySettings {
     // and a refill after the level or the grid's shape changed, is baked whole at once.
     float bakeMilliseconds = 1.0f;
 
+    // Bakes on a thread of its own on every core the frame leaves free (SkyBackgroundBaker), as fast as they allow,
+    // instead of within bakeMilliseconds of each frame: a walk's backlog in about a second instead of ten. The frame
+    // never waits for it; its results come in as they finish. Off: the frame's budget, as before.
+    bool backgroundBake = true;
+
+    // The share of the CPU's threads the background bake gets (at least one, at low priority). Half: on the laptop
+    // (8 cores, 16 threads) all of them slowed debug frames from 20 to 28 ms while baking (the bake's threads share
+    // cores with the frame's), half from 23 to 26, the waiting points of a 60 m jump cleared in 6 s instead of 4.
+    float backgroundShare = 0.5f;
+
     // A debug view: the light from all around shown as grey, the share of the sky each surface sees.
     bool debugView = false;
 };
@@ -120,6 +130,9 @@ float skySeenAlong(const SkyVisibility& visibility, const Vec3& direction);
 * channel (red, green, blue) the two bands of what its rays brought back (open the mean, lean towards where it came
 * from), read as skySeenFacing and skySeenAlong read the sky's. None by default.
 */
+// What the grid reads where it knows nothing (SKY_OPEN_FIELD_OPEN, _LEAN_UP): an open field.
+inline const SkyVisibility skyOpenField{static_cast<float>(SKY_OPEN_FIELD_OPEN), Vec3{0.0f, static_cast<float>(SKY_OPEN_FIELD_LEAN_UP), 0.0f}};
+
 using SkyBounce = std::array<SkyVisibility, 3>;
 inline const SkyBounce noSkyBounce{SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}, SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}},
                                        SkyVisibility{0.0f, Vec3{0.0f, 0.0f, 0.0f}}};
@@ -219,6 +232,13 @@ struct SkySample {
 
 SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<const SkyCell> cells, float lookupBias, const Vec3& point,
                               const Vec3& normal, const Vec3& toViewer);
+
+/*
+* A sample for the air: the share the grid reaches but had no point to read (missing: inside a wall, or not baked yet)
+* left dark instead of the open field, which stays for what lies past the grid. The fog's samples move a little every
+* frame, and one landing in a wall or past it would otherwise flip between a room's light and the open field's.
+*/
+SkySample skyMissingLeftDark(const SkySample& sample);
 
 /*
 * The settings the shaders read (sky_visibility.glsl), in the frame's uniform block: x how many cascades the frame's

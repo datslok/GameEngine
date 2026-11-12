@@ -26,6 +26,10 @@
 // into far away), so it stays a float; the light through it is long gone by then.
 #define FOG_MAX_EXPONENT 60.0
 
+// Taking the fog back off a picture (fogRemoved) undoes its dimming only down to this share let through: past it the
+// surface is mostly hidden, and dividing by less would magnify the picture's noise more than it recovers.
+#define FOG_REMOVAL_MIN_TRANSMITTANCE 0.1
+
 // The passes' workgroups: the lighting pass 4 x 4 x 4 froxels, the integration 8 x 8 columns, the picture 8 x 8 pixels.
 #define FOG_LIGHT_GROUP_SIDE 4
 #define FOG_COLUMN_GROUP_SIDE 8

@@ -4,13 +4,18 @@
 #include "physics/static_level.h"
 #include "render/gpu/sky_visibility.h"
 
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <string>
+#include <thread>
 #include <vector>
 
 /*
@@ -51,8 +56,26 @@ Vec3 skyHitLight(const SkySample& sample, const Vec3& normal, float fallback);
 SkyCell bakeSkyCell(const StaticLevel& level, const Vec3& point, int rays, float rayLength, float spacing, GridMarks& marks,
                     std::span<const Vec3> albedo = {}, const SkyHitSampler& hitSampler = {});
 
-// How many points fit a budget, from the time one took last: at least one, at most what is waiting.
-int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting);
+// A job takes this many points at once, so handing them out costs little beside their rays.
+inline constexpr std::size_t skyBakePointsPerJob = 8;
+
+// How long one background batch bakes for, about (seconds): long enough that handing it over costs little, short enough
+// that results come in steadily and a move's new points wait little behind it.
+inline constexpr double skyBackgroundBatchSeconds = 0.03;
+
+// The smallest batch worth baking on threads workers: a round of jobs for each (so the time a point takes is measured
+// as when the batch is spread over every core).
+int skyMinimumBatch(unsigned threads);
+
+// The workers the background bake's job system gets for a share of hardwareThreads: at least one.
+unsigned skyBackgroundWorkers(float share, unsigned hardwareThreads);
+
+/*
+* How many points fit a budget, from the time one took last: at least minimumBatch (and one), at most what is waiting.
+* A batch smaller than a round of jobs for every core runs on fewer cores and measures a point dearer than it is, which
+* would shrink the next budget in turn until the bake crawled at a point a frame.
+*/
+int skyCellsForBudget(double budgetSeconds, double secondsPerCell, int waiting, int minimumBatch = 1);
 
 // What one frame bakes: waiting points (quickly, at the quick rays, or at the full rays), then points to refine.
 struct SkyBakePlan {
@@ -120,6 +143,48 @@ private:
 };
 
 /*
+* Points taken from the grid to bake apart from it (SkyVisibilityGrid::takeBatch, takeRefineBatch), on another thread
+* while the grid follows the camera on, and applied when done (applyBatch). Each entry keeps its place in the world, so
+* a result whose slot a move gave to another place goes to the store instead. The grid as it stood when taken lights
+* the rays' hits, so a batch reads nothing the grid changes meanwhile.
+*/
+struct SkyBakeBatch {
+    struct Entry {
+        int cell = 0;
+        int cascade = 0;
+        ProbeGridCoord place;
+        Vec3 position;
+        float spacing = 0.0f;
+    };
+
+    std::vector<Entry> entries;
+    int rays = 0;
+    float rayLength = 0.0f;
+    float lookupBias = 0.0f;
+
+    // Quick: baked at the quick rays, to be baked again. Refining: taken from the refinement queue.
+    bool quick = false;
+    bool refining = false;
+
+    // Which fresh start of the grid it was taken in: one taken before a new level or shape is thrown away.
+    std::uint64_t generation = 0;
+
+    // The grid as it stood, for the hits.
+    std::vector<ProbeCascade> cascades;
+    std::shared_ptr<const std::vector<SkyCell>> grid;
+
+    // Filled by bakeSkyBatch: each entry's point, and the time a point took at the full rays (for the next batch's size).
+    std::vector<SkyCell> results;
+    double secondsPerCell = 0.0;
+};
+
+/*
+* Bakes a batch's points against level (a job per few points on jobs), their bounce from albedo (none when empty), the
+* hits lit from the grid as it stood when taken. Safe on any thread: it touches only the batch.
+*/
+void bakeSkyBatch(const StaticLevel& level, JobSystem& jobs, std::span<const Vec3> albedo, SkyBakeBatch& batch);
+
+/*
 * The grid round the camera and its baking. follow moves the cascades with the camera; points a move brings in, or
 * every point when the level or the grid's shape changed, wait (left out when read) until bake reaches them: the
 * coarsest cascade first, and within one the points ahead first, nearest first. Render-only: nothing here touches the
@@ -151,6 +216,22 @@ public:
     // from albedo as bake gives it. Returns how many.
     int refine(const StaticLevel& level, JobSystem& jobs, int maxCells, std::span<const Vec3> albedo = {});
 
+    /*
+    * Takes up to maxCells waiting points, in bake's order, into a batch to bake apart (bakeSkyBatch) and apply later:
+    * they wait no more meanwhile, and read as not baked. quick as bake's.
+    */
+    SkyBakeBatch takeBatch(int maxCells, bool quick, const Vec3& forward = Vec3{});
+
+    // Takes up to maxCells quick points to bake again at the full rays, in the order refine takes them.
+    SkyBakeBatch takeRefineBatch(int maxCells);
+
+    /*
+    * Puts a baked batch in place: each point into its slot while the slot still holds its place (a slot waiting there
+    * again stops waiting), else into the store by its place; quick ones, or ones whose hits were mostly guessed, are
+    * queued to be baked again. Nothing when the grid started afresh since it was taken.
+    */
+    void applyBatch(const SkyBakeBatch& batch);
+
     int getWaiting() const;
 
     // How many quickly baked points wait to be baked again at the full rays.
@@ -163,15 +244,29 @@ public:
     // Changes whenever a point does: what the GPU's copy is compared with.
     std::uint64_t getVersion() const;
 
+    /*
+    * The points changed since the last call, for the GPU's copy to repack only those: true when every point may have
+    * (a fresh start), changed then left empty; otherwise false with changed holding the points (each at least once).
+    */
+    bool takeChanges(std::vector<int>& changed);
+
+    /*
+    * The points round a place in the world, as text for the sky-points command: how many wait and how many quick bakes
+    * wait to be refined, then each cascade's eight points round it with their place, state (unknown, baked, buried),
+    * whether they wait or are quick bakes still to refine, their open share, the share their hits were unsure of, and
+    * their bounce's mean (red, green, blue).
+    */
+    std::string describePoints(const Vec3& place) const;
+
 private:
     void startAfresh();
     void wait(int cell);
 
-    // Bakes these points at rays rays, each into its own entry, their hits lit from the grid as it stood before.
-    void bakeCells(const StaticLevel& level, JobSystem& jobs, std::span<const int> batch, int rays, std::span<const Vec3> albedo);
+    // A batch of these points (the grid as it stands copied for its hits), to bake at rays rays.
+    SkyBakeBatch makeBatch(std::span<const int> points, int rays, bool quick, bool refining) const;
 
-    // The batch's results, written while the rest of the grid is read, then put in place.
-    std::vector<SkyCell> baked;
+    // Each fresh start counts one, so a batch taken before it is known to be stale.
+    std::uint64_t generation = 0;
 
     // Moves up to count of cascade's waiting points into batch, the first by bake's order.
     void takeWaiting(std::size_t cascade, std::size_t count, const Vec3& forward, std::vector<int>& batch);
@@ -182,8 +277,6 @@ private:
     // Queues a point for refinement.
     void queueRefine(int cell);
 
-    // Keeps these just-baked points in the store, at their places in the cascades as they stand.
-    void keepBaked(int cell, bool unfinished);
 
     SkyCellStore store;
 
@@ -212,4 +305,56 @@ private:
     int refiningCount = 0;
 
     std::uint64_t version = 0;
+
+    // What changed since takeChanges last ran: every point, or these.
+    bool allChanged = true;
+    std::vector<int> changedCells;
+};
+
+/*
+* Bakes batches on a thread of its own, its work spread over a job system's workers, so the grid fills as fast as the
+* cores allow without the frame waiting: the frame starts a batch when none is baking and applies it when done
+* (SkyVisibilityGrid::applyBatch). The level and the albedo are kept alive until the batch is done. The thread is
+* joined when the baker goes, after its batch finishes.
+*
+* Give it a job system of its own, not the frame's: a thread outside a job system shares one pile with every other such
+* thread, so the frame, waiting for its own jobs, would run the bake's meanwhile (a millisecond or more each), and its
+* frames grew from 25 to 37 ms while baking. threadStart runs first on its thread (to lower its priority, as its job
+* system's workers').
+*/
+class SkyBackgroundBaker {
+public:
+    explicit SkyBackgroundBaker(JobSystem& jobs, std::function<void()> threadStart = {});
+    ~SkyBackgroundBaker();
+
+    SkyBackgroundBaker(const SkyBackgroundBaker&) = delete;
+    SkyBackgroundBaker& operator=(const SkyBackgroundBaker&) = delete;
+
+    // A batch started and not taken back yet (baking, or done).
+    bool busy() const;
+
+    // Starts baking a batch (when not busy; an empty one is done at once).
+    void start(SkyBakeBatch batch, std::shared_ptr<const StaticLevel> level, std::shared_ptr<const std::vector<Vec3>> albedo);
+
+    // The batch, once done; none while it bakes or none was started.
+    std::optional<SkyBakeBatch> takeFinished();
+
+    // Waits until the batch started is done (at once when none is baking).
+    void waitFinished();
+
+private:
+    JobSystem& jobs;
+    mutable std::mutex lock;
+    std::condition_variable changed;
+    bool stopping = false;
+    bool started = false;
+    bool finished = false;
+    SkyBakeBatch batch;
+    std::shared_ptr<const StaticLevel> level;
+    std::shared_ptr<const std::vector<Vec3>> albedo;
+
+    // Last, so everything it reads is set up before it starts.
+    std::thread thread;
+
+    void run();
 };

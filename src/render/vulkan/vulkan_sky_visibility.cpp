@@ -4,8 +4,10 @@
 #include "render/vulkan/image_state.h"
 #include "render/vulkan/immediate_commands.h"
 
+#include <SDL3/SDL_thread.h>
 #include <algorithm>
 #include <cstring>
+#include <thread>
 
 namespace {
     // A point is three texels of four 32-bit words each along x (GpuSkyCell, skyCellTexels), read by exact texels.
@@ -49,38 +51,115 @@ VulkanSkyVisibility::VulkanSkyVisibility(const VulkanDevice& device, ImmediateCo
 /*
 * The budget is CPU time on every core, from what a point cost at full rays last time (planSkyBake says what a frame
 * bakes). A quick bake's cost is scaled up by the rays' ratio, so the refinement after a refill keeps to the budget
-* from its first frame.
+* from its first frame. A frame bakes at least a round of jobs for every core, and only such batches measure the cost:
+* a smaller one runs on fewer cores and would measure a point dearer than it is (skyCellsForBudget).
+*
+* With backgroundBake, the frame only hands batches to the background baker and applies what it finished: a batch of
+* about skyBackgroundBatchSeconds, the waiting points first (quickly, while the quick rays are fewer), then refinement.
+* A fresh grid and a capture still bake whole on the frame, after waiting for the batch baking (so nothing it brings
+* lands after them).
 */
 void VulkanSkyVisibility::bake(const FrameDescription& frame, const Vec3& centre, const SkyVisibilitySettings& settings, JobSystem& jobs,
                                bool everything) {
     const bool afresh = grid.follow(centre, settings, frame.staticLevelVersion);
-    const int waiting = grid.getWaiting();
-    const int refining = grid.getRefining();
+    const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
+    const int minimumBatch = skyMinimumBatch(jobs.getThreadCount());
+    applyFinished(quickShare, minimumBatch);
 
-    if (waiting + refining == 0 || frame.staticLevel == nullptr) {
+    if (grid.getWaiting() + grid.getRefining() == 0 || frame.staticLevel == nullptr) {
         return;
     }
 
+    if (settings.backgroundBake && !everything && !afresh) {
+        startBackground(frame, settings, quickShare);
+        return;
+    }
+
+    if (baker && baker->busy()) {
+        baker->waitFinished();
+        applyFinished(quickShare, minimumBatch);
+    }
+
+    const int waiting = grid.getWaiting();
+    const int refining = grid.getRefining();
     const double budgetSeconds = settings.bakeMilliseconds * 1e-3;
-    const double quickShare = static_cast<double>(settings.quickRays) / static_cast<double>(settings.rays);
-    const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining);
-    const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting);
+    const int budget = skyCellsForBudget(budgetSeconds, secondsPerCell, waiting + refining, minimumBatch);
+    const int quickBudget = skyCellsForBudget(budgetSeconds, secondsPerCell * quickShare, waiting, minimumBatch);
     const SkyBakePlan plan = planSkyBake(waiting, refining, afresh, everything, budget, quickBudget, settings.quickRays < settings.rays);
     const int count = plan.waiting + plan.refine;
 
     if (count > 0) {
         const double start = profilerSeconds();
         const std::span<const Vec3> albedo = frame.staticAlbedo ? std::span<const Vec3>{*frame.staticAlbedo} : std::span<const Vec3>{};
-        grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward(), albedo);
+        const int baked = grid.bake(*frame.staticLevel, jobs, plan.waiting, plan.quick, frame.camera.getForward(), albedo);
         // A capture also refines what this very bake left unfinished (points baked before the grid round their hits was).
         const int refined = grid.refine(*frame.staticLevel, jobs, everything ? grid.getRefining() : plan.refine, albedo);
-        secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(std::max(plan.waiting + refined, 1));
+
+        if (baked + refined >= minimumBatch) {
+            secondsPerCell = (profilerSeconds() - start) / (plan.quick ? quickShare : 1.0) / static_cast<double>(baked + refined);
+        }
     }
+}
+
+// A finished background batch into the grid, its cost (at the full rays) kept when it was big enough to measure it.
+void VulkanSkyVisibility::applyFinished(double quickShare, int minimumBatch) {
+    if (!baker) {
+        return;
+    }
+
+    const std::optional<SkyBakeBatch> done = baker->takeFinished();
+
+    if (!done) {
+        return;
+    }
+
+    if (static_cast<int>(done->entries.size()) >= minimumBatch && done->secondsPerCell > 0.0) {
+        secondsPerCell = done->secondsPerCell / (done->quick ? quickShare : 1.0);
+    }
+
+    grid.applyBatch(*done);
+}
+
+// The next batch for the background baker, when it is free: the waiting points, else refinement.
+void VulkanSkyVisibility::startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings, double quickShare) {
+    // Its threads, the baker's own among them: the settings' share of the CPU's. Remade when that changes, once the
+    // batch baking is in.
+    const unsigned threads = skyBackgroundWorkers(settings.backgroundShare, std::max(std::thread::hardware_concurrency(), 1u));
+
+    if (baker && bakeJobs->getThreadCount() != threads) {
+        baker->waitFinished();
+        applyFinished(quickShare, skyMinimumBatch(bakeJobs->getThreadCount()));
+        baker.reset();
+        bakeJobs.reset();
+    }
+
+    if (!baker) {
+        // Below the frame's threads, so the frame comes first and the bake takes what is left.
+        const auto lowPriority = [] {
+            SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+        };
+        bakeJobs = std::make_unique<JobSystem>(threads - 1, lowPriority);
+        baker = std::make_unique<SkyBackgroundBaker>(*bakeJobs, lowPriority);
+    }
+
+    if (baker->busy()) {
+        return;
+    }
+
+    const int minimumBatch = skyMinimumBatch(bakeJobs->getThreadCount());
+    const int waiting = grid.getWaiting();
+    const bool quick = waiting > 0 && settings.quickRays < settings.rays;
+    const int cells = skyCellsForBudget(skyBackgroundBatchSeconds, secondsPerCell * (quick ? quickShare : 1.0), waiting > 0 ? waiting : grid.getRefining(),
+                                        minimumBatch);
+    SkyBakeBatch batch = waiting > 0 ? grid.takeBatch(cells, quick, frame.camera.getForward()) : grid.takeRefineBatch(cells);
+    baker->start(std::move(batch), frame.staticLevel, frame.staticAlbedo);
 }
 
 /*
 * The copy goes through this frame in flight's own staging buffer, which the GPU has finished with (its frame came
-* round again), and its barrier waits for every earlier frame's reads of the image.
+* round again), and its barrier waits for every earlier frame's reads of the image. Only the points changed since the
+* last copy are packed again (packing all of them, half floats and all, cost milliseconds every frame while baking);
+* the packed copy is whole, so each staging buffer gets all of it.
 */
 void VulkanSkyVisibility::record(VkCommandBuffer commands, std::uint32_t frameIndex) {
     if (grid.getVersion() == uploadedVersion) {
@@ -88,10 +167,18 @@ void VulkanSkyVisibility::record(VkCommandBuffer commands, std::uint32_t frameIn
     }
 
     const std::span<const SkyCell> baked = grid.getCells();
-    packed.resize(baked.size());
+    const bool everyPoint = grid.takeChanges(changed) || packed.size() != baked.size();
 
-    for (std::size_t cell = 0; cell < baked.size(); ++cell) {
-        packed[cell] = packSkyCell(baked[cell]);
+    if (everyPoint) {
+        packed.resize(baked.size());
+
+        for (std::size_t cell = 0; cell < baked.size(); ++cell) {
+            packed[cell] = packSkyCell(baked[cell]);
+        }
+    } else {
+        for (const int cell : changed) {
+            packed[static_cast<std::size_t>(cell)] = packSkyCell(baked[static_cast<std::size_t>(cell)]);
+        }
     }
 
     VulkanBuffer& buffer = staging[frameIndex];
@@ -116,6 +203,10 @@ void VulkanSkyVisibility::record(VkCommandBuffer commands, std::uint32_t frameIn
 
 std::span<const ProbeCascade> VulkanSkyVisibility::getCascades() const {
     return grid.getCascades();
+}
+
+std::string VulkanSkyVisibility::describePoints(const Vec3& place) const {
+    return grid.describePoints(place);
 }
 
 SampledImage VulkanSkyVisibility::sampled() const {

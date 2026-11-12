@@ -28,8 +28,10 @@ class VulkanDevice;
 */
 class VulkanAmbientOcclusion {
 public:
-    // nearest samples the depth's and the occlusion's exact texels.
-    VulkanAmbientOcclusion(const VulkanDevice& device, VkSampler nearest, std::uint32_t framesInFlight);
+    // nearest samples the depth's and the occlusion's exact texels; the pass reads the scene's sets (the textures'
+    // and the frame's, laid out as texturesLayout and frameLayout) for the fog it takes off what it gathers.
+    VulkanAmbientOcclusion(const VulkanDevice& device, VkSampler nearest, std::uint32_t framesInFlight, VkDescriptorSetLayout texturesLayout,
+                           VkDescriptorSetLayout frameLayout);
 
     // One pass record per frame in flight, since the CPU writes the next frame's while the GPU may read the last.
     void setFramesInFlight(std::uint32_t count);
@@ -54,9 +56,11 @@ public:
     * pass): the depth (the prepass's, left readable by compute) and last frame's finished picture's pyramid in (every
     * level, readable by compute), or standIn when there is none to gather from, and the blue noise tile (AO_BLUE_NOISE_SIZE
     * a side, its three channels the pass's noises, aoNoise), the occlusion left readable by fragment
-    * shaders for the main pass.
+    * shaders for the main pass. textures and frameSet are the scene's sets, written already (the fog's grid in them
+    * integrated).
     */
-    void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, std::uint32_t frameIndex, VulkanImage& depth, const SampledImage* gatherPicture,
+    void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frameSet, std::uint32_t frameIndex,
+                 VulkanImage& depth, const SampledImage* gatherPicture,
                  const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass, bool blur, bool previousCameraKnown);
 
 private:

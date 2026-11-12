@@ -66,6 +66,18 @@ void Application::registerCommands() {
                      return commandOk("Waited " + std::to_string(frames) + " frames");
                  });
 
+    commands.add("sky-points", "sky-points <x y z>",
+                 "Shows the sky visibility grid's points round a place in the world: each cascade's eight, their state, whether they wait or still "
+                 "await their full bake, their open share and bounce, and how many points wait.",
+                 [this](const CommandArguments& arguments) {
+                     if (arguments.size() != 3) {
+                         return commandError("Usage: sky-points <x y z>");
+                     }
+
+                     const Vec3 place{floatArgument(arguments[0], "x"), floatArgument(arguments[1], "y"), floatArgument(arguments[2], "z")};
+                     return commandOk(renderer.describeSkyPoints(place));
+                 });
+
     commands.add("save-settings", "save-settings", "Saves the settings changed from their defaults to settings.cfg, as F5's Save does.",
                  [this](const CommandArguments& arguments) {
                      if (!arguments.empty()) {

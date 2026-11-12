@@ -85,3 +85,6 @@ ComputeBinding storageImageBinding(VkImageView view);
 // (any shared sets before it are the caller's to bind).
 void bindComputeSet(VkCommandBuffer commands, VkDevice device, FrameDescriptors& descriptors, const ComputePipeline& pipeline,
                     std::span<const ComputeBinding> bindings);
+
+// The sets made elsewhere that a pipeline reads before its own (its description's sharedSets), bound from set 0.
+void bindSharedSets(VkCommandBuffer commands, const ComputePipeline& pipeline, std::span<const VkDescriptorSet> sets);

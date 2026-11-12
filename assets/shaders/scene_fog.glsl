@@ -6,6 +6,7 @@
 #ifndef SCENE_FOG_GLSL
 #define SCENE_FOG_GLSL
 
+#include "render/gpu/sky_visibility_shared.h"
 #include "volumetric_fog.glsl"
 
 // Must match GpuFog in render/gpu/volumetric_fog.h.
@@ -35,10 +36,52 @@ FogIntegration fogVolumeAt(vec3 coordinate) {
     return FogIntegration(texel.rgb * read.y, mix(1.0, texel.a, read.y));
 }
 
+// The integrated grid's texel k (the fog from the camera to the far side of slice k) at a place across the screen;
+// the camera's, no fog, for k = -1.
+FogIntegration fogVolumeTexel(vec2 across, int k) {
+    if (k < 0) {
+        return FogIntegration(vec3(0.0), 1.0);
+    }
+
+    vec4 texel = textureLod(fogVolume, vec3(across, (float(k) + 0.5) / frameFog.grid.z), 0.0);
+    return FogIntegration(texel.rgb, texel.a);
+}
+
+// Slice k's medium (fogSliceMedium) at a place across the screen, from the texels either side of it (the first
+// slice's for k below 0).
+FogMedium fogVolumeMedium(vec2 across, int k) {
+    int slice = max(k, 0);
+    int slices = int(frameFog.grid.z);
+    float range = frameFog.grid.w;
+    float length = fogSliceDepth(float(slice + 1) / float(slices), range) - fogSliceDepth(float(slice) / float(slices), range);
+    return fogSliceMedium(fogVolumeTexel(across, slice - 1), fogVolumeTexel(across, slice), length);
+}
+
+/*
+* The fog to a surface at a place in the grid (fogSurfaceRead): never the slice the surface lies in, whose jittered light
+* sample may lie behind it, but the grid up to one slice before the surface and over the last slice's depth a medium
+* sliding between the two slices before, continuous across slice boundaries; in the first slice, and past the grid's
+* end, the grid as fogVolumeAt reads it.
+*/
+FogIntegration fogVolumeToSurface(vec3 coordinate) {
+    FogSurfaceRead read = fogSurfaceRead(coordinate.z, int(frameFog.grid.z), frameFog.grid.w);
+
+    if (!read.extended) {
+        return fogVolumeAt(coordinate);
+    }
+
+    FogMedium medium = mixFogMedium(fogVolumeMedium(coordinate.xy, read.last - 1), fogVolumeMedium(coordinate.xy, read.last), read.mixShare);
+    return fogFollow(fogVolumeAt(vec3(coordinate.xy, read.front)), fogThroughMedium(medium, read.stretch));
+}
+
 // The light the fog past the grid scatters towards the eye along a view direction per unit of optical depth: the
-// directional lights' (as they reach the ground) and the flat ambient, through the albedo.
+// directional lights' (as they reach the ground) and the flat ambient, through the albedo. The flat ambient is what a
+// surface facing up gets; the air in the open gets the open field's share of it (SKY_OPEN_FIELD_OPEN: the sky above,
+// not the ground below), as the sky visibility grid and the probes give the air nearer, unless neither is read, when
+// all the fog takes the flat ambient alike.
 vec3 fogBeyondSource(vec3 viewDirection) {
-    vec3 light = flatAmbient();
+    bool airModelled = skyVisibilityOptions.x > 0.5 || frameFog.options.z > 0.5;
+    vec3 light = flatAmbient() * (airModelled ? float(SKY_OPEN_FIELD_OPEN) : 1.0);
 
     for (int i = 0; i < counts.x; ++i) {
         light += fogInScattering(directional[i].radiance.rgb, directional[i].toLight.xyz, viewDirection, frameFog.medium.w);
@@ -55,7 +98,7 @@ FogIntegration fogAlongView(vec3 relativePoint, bool sky) {
     float range = frameFog.grid.w;
     vec3 direction = normalize(relativePoint);
     vec3 coordinate = fogVolumeCoordinate(relativePoint, frameFog.viewProjection, range);
-    FogIntegration fog = fogVolumeAt(vec3(coordinate.xy, sky ? 1.0 : coordinate.z));
+    FogIntegration fog = sky ? fogVolumeAt(vec3(coordinate.xy, 1.0)) : fogVolumeToSurface(coordinate);
 
     float gridEnd = range / dot(direction, viewForward.xyz);
     float end = min(sky ? frameFog.albedo.w : length(relativePoint), frameFog.albedo.w);

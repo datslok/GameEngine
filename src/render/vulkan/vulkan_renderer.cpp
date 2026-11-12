@@ -118,7 +118,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     overlay = std::make_unique<VulkanOverlay>(device, layouts, nearestSampler.get());
     depthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     mirrorDepthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
-    ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight);
+    ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight, bindlessTextures->getLayout(),
+                                                                sceneLayout->getFrameLayout());
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -1035,6 +1036,10 @@ void VulkanRenderer::finishGpuTimings(FrameContext& context) {
     frame.timestampsComplete = static_cast<bool>(frame.timestamps);
 }
 
+std::string VulkanRenderer::describeSkyPoints(const Vec3& place) const {
+    return skyVisibility->describePoints(place);
+}
+
 PipelineProgress VulkanRenderer::pipelineProgress() const {
     return device.getPipelineCompiler().progress();
 }
@@ -1460,7 +1465,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // Volumetric fog (render/gpu/volumetric_fog.h), its grid readied before the scene set points at it: the grid's camera
     // is the camera without the jitter (the froxels' own samples move instead), its samples turned every frame.
     const std::optional<Fog>& fogInAir = description.lighting.fog;
-    const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, memoryFrameNumber,
+    const GpuFog frameFog = fog->prepare(fogInAir ? &*fogInAir : nullptr, settings.fog, motionViewProjection, cameraOrigin, !probes.empty(), memoryFrameNumber,
                                          camera.getFarPlane());
 
     // Sky visibility (render/gpu/sky_visibility.h): the grid baked before the frame began (bakeSkyVisibility), its changed
@@ -1556,7 +1561,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             gatherPicture = reflections->sampledColourPyramid();
         }
 
-        ambientOcclusion->occlude(frame.commands, frame.descriptors, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
+        ambientOcclusion->occlude(frame.commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
                                                            settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
                                   occlusionBlurred, previousCamera.known);

@@ -106,6 +106,8 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Ray length", settings.rayLength, {.min = 0.1f, .max = 1000.0f, .sliderMin = 5.0f, .sliderMax = 100.0f, .unit = "m"});
     visitor.field("Lookup bias", settings.lookupBias, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
     visitor.field("Bake milliseconds", settings.bakeMilliseconds, {.min = 0.0f, .max = 100.0f, .sliderMin = 0.0f, .sliderMax = 8.0f, .unit = "ms"});
+    visitor.field("Background bake", settings.backgroundBake);
+    visitor.field("Background share", settings.backgroundShare, {.min = 0.0f, .max = 1.0f});
     visitor.field("Debug view", settings.debugView);
 }
 
@@ -121,6 +123,10 @@ void validateSkyVisibility(const SkyVisibilitySettings& settings) {
 
     if (!(settings.bakeMilliseconds >= 0.0f) || !(settings.lookupBias >= 0.0f) || !(settings.storeMegabytes >= 0.0f)) {
         throw std::invalid_argument("Sky visibility needs a bake time, a lookup bias and a store of at least 0");
+    }
+
+    if (!(settings.backgroundShare >= 0.0f && settings.backgroundShare <= 1.0f)) {
+        throw std::invalid_argument("Sky visibility's background share must be 0 to 1");
     }
 
     if (settings.cascades < 1 || settings.cascades > maxSkyVisibilityCascades || settings.rays < 1 || settings.quickRays < 1) {
@@ -308,13 +314,21 @@ SkySample sampleSkyVisibility(std::span<const ProbeCascade> cascades, std::span<
         total += weight;
     }
 
-    // What the cascades leave is the open sky (a = 1, b = 0), with nothing bounced.
-    sum.visibility.open += 1.0f - total;
+    // What the cascades leave is an open field (skyOpenField), with nothing bounced.
+    sum.visibility.open += skyOpenField.open * (1.0f - total);
+    sum.visibility.lean = sum.visibility.lean + skyOpenField.lean * (1.0f - total);
     sum.known = total;
 
     // A denser cascade's gap is offered to the next one too, so it may be counted twice: never more than is unknown.
     sum.missing = std::min(sum.missing, 1.0f - total);
     return sum;
+}
+
+SkySample skyMissingLeftDark(const SkySample& sample) {
+    SkySample dark = sample;
+    dark.visibility.open -= skyOpenField.open * sample.missing;
+    dark.visibility.lean = dark.visibility.lean - skyOpenField.lean * sample.missing;
+    return dark;
 }
 
 GpuSkyVisibilityOptions packSkyVisibilityOptions(const SkyVisibilitySettings& settings, int cascadesRead) {

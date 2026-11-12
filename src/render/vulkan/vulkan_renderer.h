@@ -112,6 +112,9 @@ public:
     // them, and they are compiled on every core while the caller shows drawLoadingScreen.
     PipelineProgress pipelineProgress() const;
 
+    // The sky visibility grid's points round a place in the world, as text, for the sky-points command.
+    std::string describeSkyPoints(const Vec3& place) const;
+
     // Waits for every pipeline asked for, rethrowing the first that failed to build.
     void finishPipelines();
 

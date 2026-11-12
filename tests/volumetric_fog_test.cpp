@@ -11,6 +11,7 @@
 #include "test_levels.h"
 
 #include <cassert>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -268,6 +269,28 @@ namespace {
     }
 
     /*
+    * Taking the fog back off a picture (for light gathered from it, which should be what surfaces send, not the fog in
+    * front of them): the surface again through any fog it can see through, never below black where the picture is
+    * darker than the fog (a blurred picture mixes in nearer surfaces), and no more than undone through fog that lets
+    * almost nothing through (the floor), where dividing would blow up noise.
+    */
+    void testRemovingFog() {
+        FogIntegration front;
+        fogIntegrateSlice(front, Vec3{0.3f, 0.3f, 0.35f}, 0.04f, 12.0f);
+        const Vec3 surface{1.0f, 0.5f, 0.25f};
+        assert(nearVec(fogRemoved(fogComposite(surface, front), front), surface, 1e-5f));
+        assert(nearVec(fogRemoved(surface, FogIntegration{}), surface, 0.0f));
+
+        const Vec3 darker = front.light * 0.5f;
+        assert(nearVec(fogRemoved(darker, front), Vec3{0.0f, 0.0f, 0.0f}, 0.0f));
+
+        const FogIntegration thick{Vec3{0.2f, 0.2f, 0.2f}, 0.001f};
+        const Vec3 seen{0.3f, 0.3f, 0.3f};
+        const float floor = static_cast<float>(FOG_REMOVAL_MIN_TRANSMITTANCE);
+        assert(nearVec(fogRemoved(seen, thick), (seen - thick.light) * (1.0f / floor), 1e-6f));
+    }
+
+    /*
     * Reading the integrated grid at a slice: texel k holds the fog from the camera to the far side of slice k, so a slice
     * coordinate is read half a texel earlier, and inside the first half slice the reading fades towards no fog at all.
     */
@@ -307,6 +330,108 @@ namespace {
         }
     }
 
+    // The grid read at a slice coordinate as the shaders read it (fogSliceRead: two texels blended, faded in the first
+    // half slice), and one texel by number (-1 the camera's, no fog).
+    FogIntegration readColumn(const std::vector<FogIntegration>& column, float coordinate) {
+        const int slices = static_cast<int>(column.size());
+        const FogSliceRead read = fogSliceRead(coordinate, slices);
+        const float place = read.z * static_cast<float>(slices) - 0.5f;
+        const int low = std::clamp(static_cast<int>(std::floor(place)), 0, slices - 1);
+        const int high = std::min(low + 1, slices - 1);
+        const float t = std::clamp(place - static_cast<float>(low), 0.0f, 1.0f);
+        const FogIntegration& a = column[static_cast<std::size_t>(low)];
+        const FogIntegration& b = column[static_cast<std::size_t>(high)];
+        const Vec3 light = a.light + (b.light - a.light) * t;
+        const float through = a.transmittance + (b.transmittance - a.transmittance) * t;
+        return FogIntegration{light * read.share, 1.0f + (through - 1.0f) * read.share};
+    }
+
+    FogIntegration columnTexel(const std::vector<FogIntegration>& column, int k) {
+        return k < 0 ? FogIntegration{} : column[static_cast<std::size_t>(k)];
+    }
+
+    // The fog to a surface at a slice coordinate as the shaders work it out (fogVolumeToSurface).
+    FogIntegration surfaceFog(const std::vector<FogIntegration>& column, float coordinate, float range) {
+        const int slices = static_cast<int>(column.size());
+        const FogSurfaceRead read = fogSurfaceRead(coordinate, slices, range);
+
+        if (!read.extended) {
+            return readColumn(column, coordinate);
+        }
+
+        const auto medium = [&](int k) {
+            const int slice = std::max(k, 0);
+            const float length = fogSliceDepth(static_cast<float>(slice + 1) / static_cast<float>(slices), range) -
+                                 fogSliceDepth(static_cast<float>(slice) / static_cast<float>(slices), range);
+            return fogSliceMedium(columnTexel(column, slice - 1), columnTexel(column, slice), length);
+        };
+
+        const FogMedium mixed = mixFogMedium(medium(read.last - 1), medium(read.last), read.mix);
+        return fogFollow(readColumn(column, read.front), fogThroughMedium(mixed, read.stretch));
+    }
+
+    /*
+    * The fog to a surface, which never reads the slice the surface lies in (its light was sampled at a jittered point
+    * that may lie behind the surface: sunlit air past a wall streaked it): the grid up to one slice before the
+    * surface, then a medium sliding between the two slices before as the surface moves through its slice, over the
+    * last slice''s depth. With every slice alike it is exact; a bright slice holding the surface changes nothing; and it
+    * is continuous across slice boundaries (a jump there drew lines down walls seen at an angle).
+    */
+    void testFogToASurface() {
+        const float range = 60.0f;
+        const int slices = 32;
+        const Vec3 scattered{0.4f, 0.5f, 0.6f};
+        const float extinction = 0.05f;
+        std::vector<Vec4> lighting(static_cast<std::size_t>(slices), Vec4{scattered.x, scattered.y, scattered.z, extinction});
+        const std::vector<FogIntegration> column = integrateFogColumn(lighting, range, 1.0f);
+
+        // Alike slices: exact anywhere from the second slice on (one slice's depth from the camera, past the first's fade).
+        // (Exact where the front lands on a slice boundary; between, the grid's own linear reading between two texels
+        // stands for an exponential, as it always has.)
+        for (const float slice : {1.0f, 2.0f, 2.5f, 9.0f, 9.6f, 20.01f, 31.9f}) {
+            const float coordinate = slice / static_cast<float>(slices);
+            FogIntegration exact;
+            fogIntegrateSlice(exact, scattered, extinction, fogSliceDepth(coordinate, range));
+            const FogIntegration read = surfaceFog(column, coordinate, range);
+            const float tolerance = slice == std::floor(slice) ? 2e-5f : 5e-3f;
+            assert(nearVec(read.light, exact.light, tolerance) && near(read.transmittance, exact.transmittance, tolerance));
+        }
+
+        // Sunlit air in the slice holding the surface: nothing changes.
+        std::vector<Vec4> sunlit = lighting;
+        sunlit[9] = Vec4{50.0f, 50.0f, 50.0f, extinction};
+        const std::vector<FogIntegration> leaky = integrateFogColumn(sunlit, range, 1.0f);
+        const float inNine = 9.6f / static_cast<float>(slices);
+        const FogIntegration clean = surfaceFog(column, inNine, range);
+        const FogIntegration unchanged = surfaceFog(leaky, inNine, range);
+        assert(nearVec(unchanged.light, clean.light, 1e-6f) && near(unchanged.transmittance, clean.transmittance, 1e-6f));
+
+        // Slices unlike each other: no jump at a slice boundary.
+        std::vector<Vec4> varied(static_cast<std::size_t>(slices));
+        for (int k = 0; k < slices; ++k) {
+            const float wobble = (k % 3 == 0) ? 2.0f : (k % 3 == 1 ? 0.3f : 1.1f);
+            varied[static_cast<std::size_t>(k)] = Vec4{0.5f * wobble, 0.4f * wobble, 0.3f * wobble, 0.02f + 0.03f * static_cast<float>(k % 2)};
+        }
+        const std::vector<FogIntegration> uneven = integrateFogColumn(varied, range, 1.0f);
+        for (const float boundary : {1.0f, 2.0f, 5.0f, 9.0f, 17.0f}) {
+            const FogIntegration below = surfaceFog(uneven, (boundary - 1e-4f) / static_cast<float>(slices), range);
+            const FogIntegration above = surfaceFog(uneven, (boundary + 1e-4f) / static_cast<float>(slices), range);
+            assert(nearVec(below.light, above.light, 2e-3f) && near(below.transmittance, above.transmittance, 2e-3f));
+        }
+
+        // A slice''s medium and nearly clear fog: light in proportion to the length, no division by nothing.
+        const FogMedium clear = fogSliceMedium(FogIntegration{Vec3{0.1f, 0.1f, 0.1f}, 0.9f}, FogIntegration{Vec3{0.1f, 0.1f, 0.1f}, 0.9f}, 2.0f);
+        assert(clear.extinction == 0.0f && clear.light.x == 0.0f);
+        const FogIntegration through = fogThroughMedium(FogMedium{Vec3{0.2f, 0.2f, 0.2f}, 0.0f}, 3.0f);
+        assert(near(through.transmittance, 1.0f, 0.0f) && near(through.light.x, 0.6f, 1e-6f));
+
+        // Which reads: in the first slice and past the grid, the grid as before.
+        assert(!fogSurfaceRead(0.5f / static_cast<float>(slices), slices, range).extended);
+        assert(!fogSurfaceRead(1.0f, slices, range).extended);
+        const FogSurfaceRead nine = fogSurfaceRead(inNine, slices, range);
+        assert(nine.extended && nine.last == 8 && near(nine.mix, 0.6f, 1e-4f) && near(nine.front, 8.6f / static_cast<float>(slices), 1e-6f));
+        assert(near(nine.stretch, fogSliceDepth(inNine, range) - fogSliceDepth(8.6f / static_cast<float>(slices), range), 1e-5f));
+    }
     // Past the grid, the height fog's closed form lit by one source: across, uniform fog's slab; nothing past its end.
     void testBeyondTheGrid() {
         Fog fog;
@@ -331,8 +456,9 @@ namespace {
 
     /*
     * The frame's fog record: off without a Fog or with the setting off; otherwise the grid, the range (no further than
-    * the camera's far plane, past which the clusters list no lights), the medium, and last frame's grid only when it is
-    * usable.
+    * the camera's far plane, past which the clusters list no lights), the medium, last frame's grid only when it is
+    * usable, and the light probes read for the air only when the frame has them (without, their reading falls back to
+    * the open sky's light, which lit the air in closed rooms as outdoors; the sky visibility grid lights it then).
     */
     void testPacking() {
         const Mat4 viewProjection = cameraRelativeViewProjection(testCamera());
@@ -342,19 +468,23 @@ namespace {
         fog.anisotropy = 0.5f;
         fog.albedo = Vec3{0.9f, 0.8f, 0.7f};
 
-        const GpuFog none = packFog(nullptr, settings, viewProjection, viewProjection, true, 0, 500.0f);
+        const GpuFog none = packFog(nullptr, settings, viewProjection, viewProjection, true, true, 0, 500.0f);
         assert(none.options[0] == 0.0f);
         FogSettings off;
         off.enabled = false;
-        assert(packFog(&fog, off, viewProjection, viewProjection, true, 0, 500.0f).options[0] == 0.0f);
+        assert(packFog(&fog, off, viewProjection, viewProjection, true, true, 0, 500.0f).options[0] == 0.0f);
 
-        const GpuFog packed = packFog(&fog, settings, viewProjection, viewProjection, true, 3, 500.0f);
+        const GpuFog packed = packFog(&fog, settings, viewProjection, viewProjection, true, true, 3, 500.0f);
         assert(packed.options[0] == 1.0f && packed.options[1] == settings.historyWeight && packed.options[2] == 1.0f);
         assert(packed.grid[0] == 160.0f && packed.grid[1] == 90.0f && packed.grid[2] == 64.0f && packed.grid[3] == 100.0f);
         assert(packed.medium[0] == 0.03f && packed.medium[3] == 0.5f && packed.albedo[2] == 0.7f && packed.albedo[3] == fog.maxDistance);
         assert(nearVec(Vec3{packed.jitter[0], packed.jitter[1], packed.jitter[2]}, fogJitter(3), 0.0f));
-        assert(packFog(&fog, settings, viewProjection, viewProjection, false, 3, 500.0f).options[1] == 0.0f);
-        assert(packFog(&fog, settings, viewProjection, viewProjection, true, 3, 60.0f).grid[3] == 60.0f);
+        assert(packFog(&fog, settings, viewProjection, viewProjection, false, true, 3, 500.0f).options[1] == 0.0f);
+        assert(packFog(&fog, settings, viewProjection, viewProjection, true, true, 3, 60.0f).grid[3] == 60.0f);
+        assert(packFog(&fog, settings, viewProjection, viewProjection, true, false, 3, 500.0f).options[2] == 0.0f);
+        FogSettings noProbeLight;
+        noProbeLight.probeLight = false;
+        assert(packFog(&fog, noProbeLight, viewProjection, viewProjection, true, true, 3, 500.0f).options[2] == 0.0f);
     }
 
     // A Fog component reaches the frame's lighting (the first, if several).
@@ -384,9 +514,11 @@ void testVolumetricFog() {
     testInScattering();
     testSlab();
     testCompositing();
+    testRemovingFog();
     testSliceRead();
     testHistoryWeight();
     testColumn();
+    testFogToASurface();
     testBeyondTheGrid();
     testProbeAirWeight();
     testPacking();

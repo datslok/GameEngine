@@ -120,6 +120,14 @@ FogIntegration fogFollow(const FogIntegration& front, const FogIntegration& behi
 Vec3 fogComposite(const Vec3& colour, const FogIntegration& fog);
 
 /*
+* fogComposite undone: the surface's own light from a picture seen through the fog in front of it, for light gathered
+* from the picture (ambient occlusion's bounce), which should be what the surface sends, not the fog's glow between it
+* and the camera. Never below black (a blurred picture can be darker than the fog at one point), and the dimming undone
+* only down to FOG_REMOVAL_MIN_TRANSMITTANCE.
+*/
+Vec3 fogRemoved(const Vec3& seen, const FogIntegration& fog);
+
+/*
 * What glass adds through the fog in front of it, drawn over a picture already fogged up to the surface behind (which
 * holds the same fog's light): its own light dimmed by the fog, plus the fog's light for the share the glass does not
 * let through (per colour), so glass over the picture gives the glass and the surface fogged in turn.
@@ -137,6 +145,40 @@ struct FogSliceRead {
 };
 
 FogSliceRead fogSliceRead(float slice, int slices);
+
+// Fog as a medium: the light it scatters towards the eye and its extinction, each per metre.
+struct FogMedium {
+    Vec3 light;
+    float extinction = 0.0f;
+};
+
+// One slice's medium, from the integrated grid to its near side (before) and its far side (after) and its depth.
+FogMedium fogSliceMedium(const FogIntegration& before, const FogIntegration& after, float length);
+
+// a and b blended: b's share t.
+FogMedium mixFogMedium(const FogMedium& a, const FogMedium& b, float t);
+
+// The fog through length metres of a medium (nearly clear: its light in proportion to the length).
+FogIntegration fogThroughMedium(const FogMedium& medium, float length);
+
+/*
+* How the fog to a surface is read without the slice the surface lies in, whose light was sampled at a jittered point
+* that may lie behind the surface (sunlit air past a wall streaked the wall): the grid read as usual up to one slice
+* before the surface (front, a slice coordinate, all of it in slices wholly in front), then over the last slice's
+* depth (stretch, metres) a medium sliding from slice last - 1's to slice last's as the surface moves through its
+* slice (mix), last being the slice before the surface's: continuous across slice boundaries (taking one slice's
+* medium jumped there and drew lines down walls seen at an angle) and exact when the slices are alike. Not extended
+* inside the first slice or past the grid: the grid as fogSliceRead reads it.
+*/
+struct FogSurfaceRead {
+    bool extended = false;
+    int last = 0;
+    float mix = 0.0f;
+    float front = 0.0f;
+    float stretch = 0.0f;
+};
+
+FogSurfaceRead fogSurfaceRead(float slice, int slices, float range);
 
 // How much of last frame's grid a froxel keeps: the weight where its point was inside last frame's grid, else nothing.
 float fogHistoryWeight(const Vec3& previousCoordinate, float weight);
@@ -171,9 +213,11 @@ struct GpuFog {
 
 static_assert(sizeof(GpuFog) == 272, "GpuFog must match scene_fog.glsl's Fog");
 
-// The frame's record: off without a fog or with the setting off; the range no further than the camera's far plane.
+// The frame's record: off without a fog or with the setting off; the range no further than the camera's far plane; the
+// air lit by the light probes only when probesRead (the frame has them), since without them their reading falls back to
+// the open sky's light, which lit the air in closed rooms as outdoors (the sky visibility grid lights it instead).
 GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
-               std::uint64_t frame, float cameraFar);
+               bool probesRead, std::uint64_t frame, float cameraFar);
 
 // The picture pass's push constants (fog_apply.comp): the camera-relative view-projection's inverse as the frame was
 // drawn (jitter included), and the render size.

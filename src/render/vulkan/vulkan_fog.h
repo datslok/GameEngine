@@ -32,10 +32,10 @@ public:
     /*
     * The frame's fog record, and the grid readied for it: remade (after waiting for the GPU) when its size changes, last
     * frame's grid carried along only when it was drawn last frame at the same size and range. Without fog (none in the
-    * frame, or the setting off) the record is off and the history forgotten.
+    * frame, or the setting off) the record is off and the history forgotten. probesRead: the frame has light probes.
     */
-    GpuFog prepare(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Vec3& cameraOrigin, std::uint64_t frame,
-                   float cameraFar);
+    GpuFog prepare(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Vec3& cameraOrigin, bool probesRead,
+                   std::uint64_t frame, float cameraFar);
 
     // Whether the frame prepare() readied draws fog.
     bool drawsFog() const;

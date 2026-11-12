@@ -129,6 +129,12 @@ Vec3 fogComposite(const Vec3& colour, const FogIntegration& fog) {
     return colour * fog.transmittance + fog.light;
 }
 
+Vec3 fogRemoved(const Vec3& seen, const FogIntegration& fog) {
+    const float letThrough = std::max(fog.transmittance, static_cast<float>(FOG_REMOVAL_MIN_TRANSMITTANCE));
+    const Vec3 surface = (seen - fog.light) * (1.0f / letThrough);
+    return Vec3{std::max(surface.x, 0.0f), std::max(surface.y, 0.0f), std::max(surface.z, 0.0f)};
+}
+
 Vec3 fogOverGlass(const Vec3& added, const Vec3& transmittance, const FogIntegration& fog) {
     return added * fog.transmittance + (Vec3{1.0f, 1.0f, 1.0f} - transmittance) * fog.light;
 }
@@ -137,6 +143,45 @@ FogSliceRead fogSliceRead(float slice, int slices) {
     const float count = static_cast<float>(slices);
     const float half = 0.5f / count;
     return FogSliceRead{std::clamp(slice - half, half, 1.0f - half), std::clamp(slice * count, 0.0f, 1.0f)};
+}
+
+FogMedium fogSliceMedium(const FogIntegration& before, const FogIntegration& after, float length) {
+    if (!(before.transmittance > 0.0f) || !(length > 0.0f)) {
+        return FogMedium{};
+    }
+
+    const float through = std::clamp(after.transmittance / before.transmittance, 0.0f, 1.0f);
+    const Vec3 sliceLight = (after.light - before.light) * (1.0f / before.transmittance);
+    const Vec3 light{std::max(sliceLight.x, 0.0f), std::max(sliceLight.y, 0.0f), std::max(sliceLight.z, 0.0f)};
+    const float extinction = -std::log(std::max(through, std::exp(-static_cast<float>(FOG_MAX_EXPONENT)))) / length;
+
+    // Light per metre: the slice's light S (1 - T) is S extinction per metre over its length; nearly clear, its light
+    // over its length (the same limit, without dividing by nothing).
+    const float opaque = 1.0f - through;
+    return FogMedium{opaque > 1e-4f ? light * (extinction / opaque) : light * (1.0f / length), extinction};
+}
+
+FogMedium mixFogMedium(const FogMedium& a, const FogMedium& b, float t) {
+    return FogMedium{a.light + (b.light - a.light) * t, a.extinction + (b.extinction - a.extinction) * t};
+}
+
+FogIntegration fogThroughMedium(const FogMedium& medium, float length) {
+    const float depth = medium.extinction * length;
+    const float through = std::exp(-depth);
+    return FogIntegration{depth > 1e-4f ? medium.light * ((1.0f - through) / medium.extinction) : medium.light * length, through};
+}
+
+FogSurfaceRead fogSurfaceRead(float slice, int slices, float range) {
+    const float count = static_cast<float>(slices);
+    const float place = slice * count;
+
+    if (place < 1.0f || place >= count) {
+        return FogSurfaceRead{};
+    }
+
+    const float index = std::floor(place);
+    const float front = (place - 1.0f) / count;
+    return FogSurfaceRead{true, static_cast<int>(index) - 1, place - index, front, fogSliceDepth(slice, range) - fogSliceDepth(front, range)};
 }
 
 float fogHistoryWeight(const Vec3& previousCoordinate, float weight) {
@@ -168,7 +213,7 @@ FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHei
 }
 
 GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
-               std::uint64_t frame, float cameraFar) {
+               bool probesRead, std::uint64_t frame, float cameraFar) {
     GpuFog packed{};
 
     if (fog == nullptr || !settings.enabled) {
@@ -196,7 +241,7 @@ GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProj
 
     packed.options[0] = 1.0f;
     packed.options[1] = historyUsable ? settings.historyWeight : 0.0f;
-    packed.options[2] = settings.probeLight ? 1.0f : 0.0f;
+    packed.options[2] = settings.probeLight && probesRead ? 1.0f : 0.0f;
 
     const Vec3 jitter = fogJitter(frame);
     packed.jitter[0] = jitter.x;

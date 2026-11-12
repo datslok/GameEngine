@@ -7,6 +7,12 @@
 #define SKY_VISIBILITY_ACROSS 48
 #define SKY_VISIBILITY_HIGH 24
 
+// What a point the grid knows nothing about reads (not baked yet, or past the last cascade): an open field, the sky
+// above and the ground below, its bands a = 1/2 and b = 3/4 straight up. A floor then gets the whole flat ambient, a
+// wall and the air half, as they do in the open inside the grid (less the ground's bounce, which is not known there).
+#define SKY_OPEN_FIELD_OPEN 0.5
+#define SKY_OPEN_FIELD_LEAN_UP 0.75
+
 // The most cascades the frame's records hold.
 #define SKY_VISIBILITY_MAX_CASCADES 4
 

@@ -8,14 +8,23 @@
 * image marking the sectors its samples block, gathering last frame's picture for each sector newly marked, and the open
 * share and the gathered light averaged. Its noise turns
 * with the frame for temporal anti-aliasing to average (still without it, for the blur).
+*
+* The picture it gathers from is seen through the frame's fog, whose glow between the camera and a surface is no light
+* the surface sends (in a dark misty room it outshines the walls, and corners, gathering the most, glowed): each sample
+* has the fog taken back off (fogRemoved), this frame's fog to its point, from the scene set (sets 0 and 1, as the fog's
+* own passes read them; its own set is 2).
 */
 #include "screen_reflections.glsl"
 #include "ambient_occlusion.glsl"
+#include "frame_data.glsl"
+#include "scene_lights.glsl"
+#include "scene_sky.glsl"
+#include "scene_fog.glsl"
 
 layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
 
 // Must match GpuAmbientOcclusionPass.
-layout(std430, set = 0, binding = 0) readonly buffer Pass {
+layout(std430, set = 2, binding = 0) readonly buffer Pass {
     mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
     vec4 size;                  // xy: the render size in pixels, zw: their inverses
     vec4 lens;                  // x: a pixel's footprint per metre of view distance
@@ -25,11 +34,11 @@ layout(std430, set = 0, binding = 0) readonly buffer Pass {
     vec4 gather;                // x: thickness, y: 1 while gathering, z: the brightest sample
 } pass;
 
-layout(set = 0, binding = 1) uniform sampler2D depth;                      // exact texels
-layout(set = 0, binding = 2) uniform sampler2D picture;                    // last frame's finished picture's pyramid, trilinear
-layout(set = 0, binding = 3) uniform sampler2D blueNoise;                  // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
-layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
-layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D geometry;  // for the denoiser: xyz the normal, w the view depth (0 for the sky and points left open)
+layout(set = 2, binding = 1) uniform sampler2D depth;                      // exact texels
+layout(set = 2, binding = 2) uniform sampler2D picture;                    // last frame's finished picture's pyramid, trilinear
+layout(set = 2, binding = 3) uniform sampler2D blueNoise;                  // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
+layout(set = 2, binding = 4, rgba16f) uniform writeonly image2D occlusion; // rgb: the light gathered, a: the visibility, 0 buried to 1 open
+layout(set = 2, binding = 5, rgba16f) uniform writeonly image2D geometry;  // for the denoiser: xyz the normal, w the view depth (0 for the sky and points left open)
 
 // The point at a texel clamped onto the screen (measured from the camera); the sky counts as the fallback point.
 vec3 pointAt(ivec2 texel, vec3 fallback) {
@@ -38,9 +47,9 @@ vec3 pointAt(ivec2 texel, vec3 fallback) {
     return texelDepth == float(GPU_FAR_DEPTH) ? fallback : positionAtPixel(pass.inverseViewProjection, vec2(clamped) + 0.5, texelDepth, pass.size.xy);
 }
 
-// Last frame's picture where it showed the point at this texel (a 1), read at a level of its pyramid, or nothing where
-// it was off screen (a 0).
-vec4 pictureAt(ivec2 texel, float texelDepth, float level) {
+// Last frame's picture where it showed the point at this texel (a 1), read at a level of its pyramid, the fog between
+// the camera and the point (measured from the camera) taken off, or nothing where it was off screen (a 0).
+vec4 pictureAt(ivec2 texel, float texelDepth, vec3 point, float level) {
     vec2 unjittered = vec2(texel) + 0.5 - pass.lens.yz;
     vec3 previous = reprojectPixel(pass.reprojection, unjittered, texelDepth, pass.size.xy);
 
@@ -48,7 +57,13 @@ vec4 pictureAt(ivec2 texel, float texelDepth, float level) {
         return vec4(0.0);
     }
 
-    return vec4(gatheredSampleLight(textureLod(picture, previous.xy * pass.size.zw, level).rgb, pass.gather.z), 1.0);
+    vec3 seen = textureLod(picture, previous.xy * pass.size.zw, level).rgb;
+
+    if (fogOn()) {
+        seen = fogRemoved(seen, fogAlongView(point, false));
+    }
+
+    return vec4(gatheredSampleLight(seen, pass.gather.z), 1.0);
 }
 
 void main() {
@@ -149,7 +164,7 @@ void main() {
                 uint fresh = mask & ~marked;
 
                 if (gathers && fresh != 0u) {
-                    sliceLight += pictureAt(at, atDepth, aoSampleLevel(index, steps, stepNoise, screenRadius)).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
+                    sliceLight += pictureAt(at, atDepth, position + offset, aoSampleLevel(index, steps, stepNoise, screenRadius)).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
                 }
 
                 marked |= mask;

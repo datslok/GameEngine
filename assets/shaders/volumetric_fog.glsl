@@ -83,6 +83,11 @@ vec3 fogComposite(vec3 colour, FogIntegration fog) {
     return colour * fog.transmittance + fog.light;
 }
 
+vec3 fogRemoved(vec3 seen, FogIntegration fog) {
+    float letThrough = max(fog.transmittance, float(FOG_REMOVAL_MIN_TRANSMITTANCE));
+    return max((seen - fog.light) * (1.0 / letThrough), vec3(0.0));
+}
+
 vec3 fogOverGlass(vec3 added, vec3 transmittance, FogIntegration fog) {
     return added * fog.transmittance + (vec3(1.0) - transmittance) * fog.light;
 }
@@ -92,6 +97,54 @@ vec2 fogSliceRead(float slice, int slices) {
     float count = float(slices);
     float halfTexel = 0.5 / count;
     return vec2(clamp(slice - halfTexel, halfTexel, 1.0 - halfTexel), clamp(slice * count, 0.0, 1.0));
+}
+
+struct FogMedium {
+    vec3 light;
+    float extinction;
+};
+
+FogMedium fogSliceMedium(FogIntegration before, FogIntegration after, float length) {
+    if (!(before.transmittance > 0.0) || !(length > 0.0)) {
+        return FogMedium(vec3(0.0), 0.0);
+    }
+
+    float through = clamp(after.transmittance / before.transmittance, 0.0, 1.0);
+    vec3 light = max((after.light - before.light) * (1.0 / before.transmittance), vec3(0.0));
+    float extinction = -log(max(through, exp(-float(FOG_MAX_EXPONENT)))) / length;
+    float opaque = 1.0 - through;
+    return FogMedium(opaque > 1e-4 ? light * (extinction / opaque) : light * (1.0 / length), extinction);
+}
+
+FogMedium mixFogMedium(FogMedium a, FogMedium b, float t) {
+    return FogMedium(a.light + (b.light - a.light) * t, a.extinction + (b.extinction - a.extinction) * t);
+}
+
+FogIntegration fogThroughMedium(FogMedium medium, float length) {
+    float depth = medium.extinction * length;
+    float through = exp(-depth);
+    return FogIntegration(depth > 1e-4 ? medium.light * ((1.0 - through) / medium.extinction) : medium.light * length, through);
+}
+
+struct FogSurfaceRead {
+    bool extended;
+    int last;
+    float mixShare;
+    float front;
+    float stretch;
+};
+
+FogSurfaceRead fogSurfaceRead(float slice, int slices, float range) {
+    float count = float(slices);
+    float place = slice * count;
+
+    if (place < 1.0 || place >= count) {
+        return FogSurfaceRead(false, 0, 0.0, 0.0, 0.0);
+    }
+
+    float index = floor(place);
+    float front = (place - 1.0) / count;
+    return FogSurfaceRead(true, int(index) - 1, place - index, front, fogSliceDepth(slice, range) - fogSliceDepth(front, range));
 }
 
 float fogHistoryWeight(vec3 previousCoordinate, float weight) {

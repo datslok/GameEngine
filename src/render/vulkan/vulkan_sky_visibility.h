@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 class ImmediateCommands;
@@ -39,6 +40,9 @@ public:
 
     std::span<const ProbeCascade> getCascades() const;
 
+    // The grid's points round a place in the world, as text (SkyVisibilityGrid::describePoints).
+    std::string describePoints(const Vec3& place) const;
+
     // The image as the scene set samples it.
     SampledImage sampled() const;
 
@@ -48,6 +52,17 @@ private:
     VulkanImage cells;
     std::array<VulkanBuffer, maxFramesInFlight> staging;
     SkyVisibilityGrid grid;
+
+    // Bakes batches off the frame (settings.backgroundBake) on a job system of its own at low priority, both made the
+    // first time it is used; the baker goes first (it finishes its batch on those workers).
+    std::unique_ptr<JobSystem> bakeJobs;
+    std::unique_ptr<SkyBackgroundBaker> baker;
+
+    void applyFinished(double quickShare, int minimumBatch);
+    void startBackground(const FrameDescription& frame, const SkyVisibilitySettings& settings, double quickShare);
+
+    // The points changed since the last copy (SkyVisibilityGrid::takeChanges), kept to reuse its memory.
+    std::vector<int> changed;
     std::vector<GpuSkyCell> packed;
     std::uint64_t uploadedVersion = 0;
 

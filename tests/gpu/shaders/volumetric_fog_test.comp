@@ -5,6 +5,12 @@
 #include "gpu_test.glsl"
 #include "volumetric_fog.glsl"
 
+// fogSurfaceRead as one number to compare: stretch + last + mix, or -1 when not extended.
+float fogSurfaceReadValue(float slice, int slices, float range) {
+    FogSurfaceRead read = fogSurfaceRead(slice, slices, range);
+    return read.extended ? read.stretch + float(read.last) + read.mixShare : -1.0;
+}
+
 void main() {
     if (outsideTheCases()) {
         return;
@@ -29,7 +35,7 @@ void main() {
         vec2 read = fogSliceRead(coordinate.z, int(coordinate.w));
         testOutput(0, vec4(fogVolumeCoordinate(point.xyz, viewProjection, point.w), fogSliceDepth(coordinate.z, point.w)));
         testOutput(1, vec4(fogVolumePoint(coordinate.xyz, inverseViewProjection, forward.xyz, point.w), fogDepthSlice(length(point.xyz), point.w)));
-        testOutput(2, vec4(read, fogHistoryWeight(coordinate.xyz * 1.2 - 0.1, forward.w), 0.0));
+        testOutput(2, vec4(read, fogHistoryWeight(coordinate.xyz * 1.2 - 0.1, forward.w), fogSurfaceReadValue(coordinate.z, int(coordinate.w), point.w)));
     } else if (function == GPU_TEST_FOG_LIGHT) {
         // Inputs: (irradiance, anisotropy), (to the light, extinction), (view direction, length), (scattered, so far's
         // transmittance), (so far's light, 0), (colour or glass's transmittance, 0), (glass's added light, 0).
@@ -49,5 +55,9 @@ void main() {
         testOutput(3, vec4(followed.light, followed.transmittance));
         testOutput(4, vec4(fogComposite(colour, soFar), 0.0));
         testOutput(5, vec4(fogOverGlass(added, colour, soFar), 0.0));
+        testOutput(6, vec4(fogRemoved(colour + soFar.light * 0.8, soFar), 0.0));
+        FogMedium medium = mixFogMedium(fogSliceMedium(soFar, followed, view.w + 0.1), FogMedium(added, toLight.w), irradiance.w * 0.5 + 0.5);
+        FogIntegration surface = fogThroughMedium(medium, view.w * 0.5);
+        testOutput(7, vec4(surface.light, surface.transmittance));
     }
 }
