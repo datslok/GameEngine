@@ -26,7 +26,7 @@ void main() {
         testOutput(1, vec4(beyond.light, 0.0));
     } else if (function == GPU_TEST_FOG_GRID) {
         // Inputs: the view-projection's columns, its inverse's columns, (point, range), (coordinate, slices), (forward,
-        // history weight).
+        // history weight), (froxel, 0), (grid size, 0).
         mat4 viewProjection = mat4(testInput(0), testInput(1), testInput(2), testInput(3));
         mat4 inverseViewProjection = mat4(testInput(4), testInput(5), testInput(6), testInput(7));
         vec4 point = testInput(8);
@@ -36,6 +36,14 @@ void main() {
         testOutput(0, vec4(fogVolumeCoordinate(point.xyz, viewProjection, point.w), fogSliceDepth(coordinate.z, point.w)));
         testOutput(1, vec4(fogVolumePoint(coordinate.xyz, inverseViewProjection, forward.xyz, point.w), fogDepthSlice(length(point.xyz), point.w)));
         testOutput(2, vec4(read, fogHistoryWeight(coordinate.xyz * 1.2 - 0.1, forward.w), fogSurfaceReadValue(coordinate.z, int(coordinate.w), point.w)));
+        // (froxel, 0), (grid size, 0); the frame's jitter is the coordinate less a half, last frame's camera this one's.
+        ivec3 froxel = ivec3(testInput(11).xyz);
+        ivec3 size = ivec3(testInput(12).xyz);
+        vec3 jitter = fogFroxelJitter(coordinate.xyz - 0.5, froxel);
+        testOutput(3, vec4(fogFroxelTurn(froxel), 0.0));
+        testOutput(4, vec4(jitter, 0.0));
+        testOutput(5, vec4(fogFroxelCoordinate(froxel, size, jitter), 0.0));
+        testOutput(6, vec4(fogHistoryCoordinate(froxel, size, inverseViewProjection, viewProjection, forward.xyz, point.w), 0.0));
     } else if (function == GPU_TEST_FOG_LIGHT) {
         // Inputs: (irradiance, anisotropy), (to the light, extinction), (view direction, length), (scattered, so far's
         // transmittance), (so far's light, 0), (colour or glass's transmittance, 0), (glass's added light, 0).

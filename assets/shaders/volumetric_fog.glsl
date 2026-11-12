@@ -55,6 +55,36 @@ vec3 fogVolumePoint(vec3 coordinate, mat4 inverseViewProjection, vec3 viewForwar
     return direction * (fogSliceDepth(coordinate.z, range) / dot(direction, viewForward));
 }
 
+// PCG3D (Jarzynski and Olano 2020), core/hash.h's pcg3d: the same bits.
+uvec3 fogPcg3d(uvec3 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v;
+}
+
+vec3 fogFroxelTurn(ivec3 froxel) {
+    return vec3(fogPcg3d(uvec3(froxel)) >> 8u) * (1.0 / 16777216.0);
+}
+
+vec3 fogFroxelJitter(vec3 frameJitter, ivec3 froxel) {
+    return fract(frameJitter + 0.5 + fogFroxelTurn(froxel)) - 0.5;
+}
+
+vec3 fogFroxelCoordinate(ivec3 froxel, ivec3 size, vec3 offset) {
+    return clamp((vec3(froxel) + 0.5 + offset) / vec3(size), 0.0, 1.0);
+}
+
+vec3 fogHistoryCoordinate(ivec3 froxel, ivec3 size, mat4 inverseViewProjection, mat4 previousViewProjection, vec3 viewForward, float range) {
+    vec3 middle = fogVolumePoint(fogFroxelCoordinate(froxel, size, vec3(0.0)), inverseViewProjection, viewForward, range);
+    return fogVolumeCoordinate(middle, previousViewProjection, range);
+}
+
 vec3 fogInScattering(vec3 irradiance, vec3 toLight, vec3 viewDirection, float anisotropy) {
     return irradiance * (ATMOSPHERE_PI * henyeyGreensteinPhase(anisotropy, dot(viewDirection, toLight)));
 }

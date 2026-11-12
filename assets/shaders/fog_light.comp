@@ -4,10 +4,12 @@
 /*
 * The fog's grid lit (render/gpu/volumetric_fog.h), one invocation per froxel, after the shadows and the clusters' light
 * lists: the froxel's extinction from the height fog and the light it scatters towards the eye per unit of optical depth,
-* at a point moved round the froxel's middle by this frame's jitter. The light is the directional lights' (each with
-* its cascades' shadow), the point and spot lights its cluster lists (each with its shadow), and the light from all
-* around (the probes', or the flat ambient as much as the air sees the sky), through the albedo. Last frame's grid,
-* read where the point was then, keeps the history weight's share, so the frames' samples average into a smooth grid.
+* at a point moved round the froxel's middle by this frame's jitter, turned by the froxel's own turn (neighbours sample
+* different places at once). The light is the directional lights' (each with its cascades' shadow), the point and spot
+* lights its cluster lists (each with its shadow), and the light from all around (the probes', or the flat ambient as
+* much as the air sees the sky), through the albedo. Last frame's grid, read where the froxel's middle was then (with
+* the camera still its own texel, nothing of its neighbours), keeps the history weight's share, so the frames' samples
+* average into a smooth grid.
 */
 #include "render/gpu/shader_shared.h"
 #include "lighting.glsl"
@@ -104,7 +106,7 @@ void main() {
     }
 
     float range = frameFog.grid.w;
-    vec3 coordinate = clamp((vec3(froxel) + 0.5 + frameFog.jitter.xyz) / vec3(size), 0.0, 1.0);
+    vec3 coordinate = fogFroxelCoordinate(froxel, size, fogFroxelJitter(frameFog.jitter.xyz, froxel));
     vec3 position = fogVolumePoint(coordinate, frameFog.inverseViewProjection, viewForward.xyz, range);
     vec3 viewDirection = normalize(fogVolumePoint(vec3(coordinate.xy, 1.0), frameFog.inverseViewProjection, viewForward.xyz, range));
     vec3 light = vec3(0.0);
@@ -158,7 +160,7 @@ void main() {
     light += frameFog.options.z > 0.5 ? probeAmbientInAir(position) : flatAmbient() * skyVisibilityInAirAt(position);
 
     vec4 froxelLight = vec4(light * frameFog.albedo.rgb, fogDensity(frameFog.medium, position.y + cameraOrigin.y));
-    vec3 previous = fogVolumeCoordinate(position, frameFog.previousViewProjection, range);
+    vec3 previous = fogHistoryCoordinate(froxel, size, frameFog.inverseViewProjection, frameFog.previousViewProjection, viewForward.xyz, range);
     float kept = fogHistoryWeight(previous, frameFog.options.y);
 
     if (kept > 0.0) {
