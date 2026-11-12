@@ -2,8 +2,9 @@
 #extension GL_GOOGLE_include_directive : require
 
 /*
-* The depth-only passes' fragment shader for cut-outs (the depth prepass and the shadow pass): no colour, only the
-* holes thrown away, so their depth is not written there. Opaque draws need no fragment shader at all.
+* The shadow pass's fragment shader for cut-outs: no colour, only the holes thrown away, so their depth is not written
+* there. Opaque draws need no fragment shader at all. The depth prepass has its own, cut_out_prepass.frag, taking every
+* output of triangle.vert.
 */
 #include "frame_data.glsl"
 #include "cut_out_fragment.glsl"

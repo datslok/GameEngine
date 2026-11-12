@@ -1400,6 +1400,8 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Measured** in a hidden release copy of the light lab on the laptop: the whole start (110,000 points waiting, refined, then a few hundred at a time deepened) done in about 9 s; the back rooms' points from 2-20 escaped rays of 256 to 13-160 of 2,048 (about 8 times the escapes, so about a third of the noise).
   - **Checked:** the tests (release, tests first: which points want the deep rays, their error across the room under half the full rays', the queue's order and its life through moves, the store and batches, the cost's scaling, the settings and their checks); the release tests pass, the debug and release games build without warnings. **Not run:** `make gputest` and the golden views (only on request).
 
+- `cut-out-prepass-inputs` (Nov 12 2026): the validation layers' one warning, found during `sky-bounce`: `triangle.vert` writes outputs the cut-out depth prepass's `cut_out.frag` never took. The prepass now has `cut_out_prepass.frag`, the same work taking every output; the shadow pass keeps `cut_out.frag`, since its own vertex shader writes only the two it reads (taking more there would be an error, not a warning). **Checked:** the debug game builds without warnings; a hidden debug copy looking at the light lab's chain-link fence drew it with its holes and reported no validation messages.
+
 ## Tools outside the phases
 
 - `loading-screen` (Nov 11 2026): pipelines compiled on every core, with a loading screen. The user: "the game takes a very long time to respond after a fresh build", then "can we have a screen that says building shaders and a loading bar or something like that, rather than it just not responding for a min".
