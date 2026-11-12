@@ -145,6 +145,31 @@ FogSliceRead fogSliceRead(float slice, int slices) {
     return FogSliceRead{std::clamp(slice - half, half, 1.0f - half), std::clamp(slice * count, 0.0f, 1.0f)};
 }
 
+int fogSurfaceSlice(float slice, int slices) {
+    return std::clamp(static_cast<int>(std::floor(slice * static_cast<float>(slices))), 0, slices);
+}
+
+float fogSurfaceShare(float slice, int slices, float range) {
+    const float count = static_cast<float>(slices);
+    const float index = std::floor(slice * count);
+    const float start = fogSliceDepth(index / count, range);
+    const float before = fogSliceDepth((index - 1.0f) / count, range);
+    return (fogSliceDepth(slice, range) - start) / std::max(start - before, 1e-6f);
+}
+
+FogIntegration fogToSurface(const FogIntegration& twoBack, const FogIntegration& oneBack, float share) {
+    const bool seen = twoBack.transmittance > 0.0f;
+    const float through = seen ? std::clamp(oneBack.transmittance / twoBack.transmittance, 0.0f, 1.0f) : 1.0f;
+    const Vec3 sliceLight = seen ? (oneBack.light - twoBack.light) * (1.0f / twoBack.transmittance) : Vec3{0.0f, 0.0f, 0.0f};
+    const float stretchThrough = std::pow(through, share);
+    // The slice's light over a share of its depth: S (1 - T^share) for S = its light / (1 - T), or the share itself
+    // as T nears 1 (the same limit, without dividing by nothing).
+    const float lightShare = 1.0f - through > 1e-4f ? (1.0f - stretchThrough) / (1.0f - through) : share;
+    const Vec3 light = sliceLight * lightShare;
+    const FogIntegration stretch{Vec3{std::max(light.x, 0.0f), std::max(light.y, 0.0f), std::max(light.z, 0.0f)}, stretchThrough};
+    return fogFollow(oneBack, stretch);
+}
+
 float fogHistoryWeight(const Vec3& previousCoordinate, float weight) {
     const bool inside = previousCoordinate.x >= 0.0f && previousCoordinate.x <= 1.0f && previousCoordinate.y >= 0.0f && previousCoordinate.y <= 1.0f &&
                         previousCoordinate.z >= 0.0f && previousCoordinate.z <= 1.0f;

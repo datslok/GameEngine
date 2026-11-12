@@ -146,6 +146,24 @@ struct FogSliceRead {
 
 FogSliceRead fogSliceRead(float slice, int slices);
 
+/*
+* The fog to a surface, without the slice the surface lies in: that slice's light was measured at a jittered point that
+* may lie behind the surface (sunlit air past a wall streaked the wall), so the grid is read up to the slice before it
+* and that slice's own light and extinction carried on over the stretch to the surface (the air just in front of a
+* surface taken to be lit as the air a little nearer).
+*
+* fogSurfaceSlice: the slice a slice coordinate (0..1) lies in (slices past the grid's end); in the first there is no
+* slice before it, and the grid is read as fogSliceRead reads it.
+* fogSurfaceShare: the stretch from the start of that slice to the coordinate's depth, as a share of the slice before's
+* depth.
+* fogToSurface: from the integrated grid to the far side of the slice two before the surface's slice (the camera's,
+* no fog, for the second slice) and to the far side of the one before, that last slice carried on over share of its
+* length: exact when the slices are alike.
+*/
+int fogSurfaceSlice(float slice, int slices);
+float fogSurfaceShare(float slice, int slices, float range);
+FogIntegration fogToSurface(const FogIntegration& twoBack, const FogIntegration& oneBack, float share);
+
 // How much of last frame's grid a froxel keeps: the weight where its point was inside last frame's grid, else nothing.
 float fogHistoryWeight(const Vec3& previousCoordinate, float weight);
 

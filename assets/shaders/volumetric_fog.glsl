@@ -99,6 +99,27 @@ vec2 fogSliceRead(float slice, int slices) {
     return vec2(clamp(slice - halfTexel, halfTexel, 1.0 - halfTexel), clamp(slice * count, 0.0, 1.0));
 }
 
+int fogSurfaceSlice(float slice, int slices) {
+    return clamp(int(floor(slice * float(slices))), 0, slices);
+}
+
+float fogSurfaceShare(float slice, int slices, float range) {
+    float count = float(slices);
+    float index = floor(slice * count);
+    float start = fogSliceDepth(index / count, range);
+    float before = fogSliceDepth((index - 1.0) / count, range);
+    return (fogSliceDepth(slice, range) - start) / max(start - before, 1e-6);
+}
+
+FogIntegration fogToSurface(FogIntegration twoBack, FogIntegration oneBack, float share) {
+    bool seen = twoBack.transmittance > 0.0;
+    float through = seen ? clamp(oneBack.transmittance / twoBack.transmittance, 0.0, 1.0) : 1.0;
+    vec3 sliceLight = seen ? (oneBack.light - twoBack.light) * (1.0 / twoBack.transmittance) : vec3(0.0);
+    float stretchThrough = pow(through, share);
+    float lightShare = 1.0 - through > 1e-4 ? (1.0 - stretchThrough) / (1.0 - through) : share;
+    return fogFollow(oneBack, FogIntegration(max(sliceLight * lightShare, vec3(0.0)), stretchThrough));
+}
+
 float fogHistoryWeight(vec3 previousCoordinate, float weight) {
     bool inside = all(greaterThanEqual(previousCoordinate, vec3(0.0))) && all(lessThanEqual(previousCoordinate, vec3(1.0)));
     return inside ? weight : 0.0;

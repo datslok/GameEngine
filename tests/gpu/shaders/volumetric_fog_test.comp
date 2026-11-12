@@ -29,7 +29,7 @@ void main() {
         vec2 read = fogSliceRead(coordinate.z, int(coordinate.w));
         testOutput(0, vec4(fogVolumeCoordinate(point.xyz, viewProjection, point.w), fogSliceDepth(coordinate.z, point.w)));
         testOutput(1, vec4(fogVolumePoint(coordinate.xyz, inverseViewProjection, forward.xyz, point.w), fogDepthSlice(length(point.xyz), point.w)));
-        testOutput(2, vec4(read, fogHistoryWeight(coordinate.xyz * 1.2 - 0.1, forward.w), 0.0));
+        testOutput(2, vec4(read, fogHistoryWeight(coordinate.xyz * 1.2 - 0.1, forward.w), fogSurfaceShare(coordinate.z, int(coordinate.w), point.w)));
     } else if (function == GPU_TEST_FOG_LIGHT) {
         // Inputs: (irradiance, anisotropy), (to the light, extinction), (view direction, length), (scattered, so far's
         // transmittance), (so far's light, 0), (colour or glass's transmittance, 0), (glass's added light, 0).
@@ -50,5 +50,7 @@ void main() {
         testOutput(4, vec4(fogComposite(colour, soFar), 0.0));
         testOutput(5, vec4(fogOverGlass(added, colour, soFar), 0.0));
         testOutput(6, vec4(fogRemoved(colour + soFar.light * 0.8, soFar), 0.0));
+        FogIntegration surface = fogToSurface(soFar, followed, view.w / 40.0);
+        testOutput(7, vec4(surface.light, surface.transmittance));
     }
 }

@@ -113,6 +113,7 @@ namespace {
             report.check("fogDepthSlice", transcendentalTolerance, fogDepthSlice(vec3From(in[8]).length(), range), out[1][3]);
             report.check("fogSliceRead", arithmeticTolerance, Vec3{read.z, read.share, 0.0f}, Vec3{out[2][0], out[2][1], 0.0f});
             report.check("fogHistoryWeight", exactTolerance, fogHistoryWeight(coordinate * 1.2f - Vec3{0.1f, 0.1f, 0.1f}, in[10][3]), out[2][2]);
+            report.check("fogSurfaceShare", transcendentalTolerance, fogSurfaceShare(coordinate.z, slices, range), out[2][3]);
         }
     }
 
@@ -138,11 +139,11 @@ namespace {
             inputs.push_back(gpuVec4(colour(1.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_LIGHT, inputs, 7, 7);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_LIGHT, inputs, 7, 8);
 
-        for (std::size_t i = 0; i < outputs.size() / 7; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 8; ++i) {
             const GpuVec4* in = &inputs[i * 7];
-            const GpuVec4* out = &outputs[i * 7];
+            const GpuVec4* out = &outputs[i * 8];
             const FogIntegration soFar{vec3From(in[4]), in[3][3]};
             FogIntegration slab = soFar;
             fogIntegrateSlice(slab, vec3From(in[3]), in[1][3], in[2][3]);
@@ -157,6 +158,9 @@ namespace {
             report.check("fogComposite", arithmeticTolerance, fogComposite(vec3From(in[5]), soFar), vec3From(out[4]));
             report.check("fogOverGlass", arithmeticTolerance, fogOverGlass(vec3From(in[6]), vec3From(in[5]), soFar), vec3From(out[5]));
             report.check("fogRemoved", arithmeticTolerance, fogRemoved(vec3From(in[5]) + soFar.light * 0.8f, soFar), vec3From(out[6]));
+            const FogIntegration surface = fogToSurface(soFar, followed, in[2][3] / 40.0f);
+            report.check("fogToSurface", transcendentalTolerance, surface.light, vec3From(out[7]));
+            report.check("fogToSurface", transcendentalTolerance, surface.transmittance, out[7][3]);
         }
     }
 }

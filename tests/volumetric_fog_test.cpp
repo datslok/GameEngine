@@ -329,6 +329,58 @@ namespace {
         }
     }
 
+    /*
+    * The fog to a surface: the grid up to the slice before the surface's, then that slice's own light and extinction
+    * carried on over the stretch to the surface, never the surface's own slice, whose jittered sample may lie behind
+    * the surface (sunlit air past a wall streaked it). With every slice alike it is exact; a bright slice holding the
+    * surface changes nothing; nearly clear fog carries the slice's light in proportion to the stretch.
+    */
+    void testFogToASurface() {
+        const float range = 60.0f;
+        const int slices = 32;
+        const Vec3 scattered{0.4f, 0.5f, 0.6f};
+        const float extinction = 0.05f;
+        std::vector<Vec4> lighting(static_cast<std::size_t>(slices), Vec4{scattered.x, scattered.y, scattered.z, extinction});
+        const std::vector<FogIntegration> column = integrateFogColumn(lighting, range, 1.0f);
+
+        // A surface 60% of the way into slice 9.
+        const float slice = 9.6f;
+        const float coordinate = slice / static_cast<float>(slices);
+        const float share = fogSurfaceShare(coordinate, slices, range);
+        const float start = fogSliceDepth(9.0f / slices, range);
+        const float before = fogSliceDepth(8.0f / slices, range);
+        const float depth = fogSliceDepth(coordinate, range);
+        assert(near(share, (depth - start) / (start - before), 1e-5f));
+
+        FogIntegration exact = column[8];
+        fogIntegrateSlice(exact, scattered, extinction, depth - start);
+        const FogIntegration read = fogToSurface(column[7], column[8], share);
+        assert(nearVec(read.light, exact.light, 1e-5f) && near(read.transmittance, exact.transmittance, 1e-5f));
+
+        // Sunlit air behind the surface, in its slice: nothing changes, since that slice is never read.
+        std::vector<Vec4> sunlit = lighting;
+        sunlit[9] = Vec4{50.0f, 50.0f, 50.0f, extinction};
+        const std::vector<FogIntegration> leaky = integrateFogColumn(sunlit, range, 1.0f);
+        const FogIntegration unchanged = fogToSurface(leaky[7], leaky[8], share);
+        assert(nearVec(unchanged.light, read.light, 1e-6f) && near(unchanged.transmittance, read.transmittance, 1e-6f));
+
+        // The second slice reads from the camera (no fog) as the slice two back.
+        const FogIntegration second = fogToSurface(FogIntegration{}, column[0], 0.5f);
+        FogIntegration secondExact = column[0];
+        fogIntegrateSlice(secondExact, scattered, extinction, 0.5f * fogSliceDepth(1.0f / slices, range));
+        assert(nearVec(second.light, secondExact.light, 1e-5f) && near(second.transmittance, secondExact.transmittance, 1e-5f));
+
+        // Nearly clear: the slice's light in proportion to the stretch, no division by nothing.
+        const FogIntegration clearBefore{Vec3{0.1f, 0.1f, 0.1f}, 0.9f};
+        const FogIntegration clearAfter{Vec3{0.1f + 1e-7f, 0.1f + 1e-7f, 0.1f + 1e-7f}, 0.9f};
+        const FogIntegration clear = fogToSurface(clearBefore, clearAfter, 0.5f);
+        assert(near(clear.transmittance, 0.9f, 1e-6f) && std::isfinite(clear.light.x) && near(clear.light.x, 0.1f, 1e-5f));
+
+        // Which slices a surface reads: in the first, none before it (the grid read as it was).
+        assert(fogSurfaceSlice(0.5f / slices, slices) == 0 && fogSurfaceSlice(coordinate, slices) == 9);
+        assert(fogSurfaceSlice(1.0f, slices) == slices);
+    }
+
     // Past the grid, the height fog's closed form lit by one source: across, uniform fog's slab; nothing past its end.
     void testBeyondTheGrid() {
         Fog fog;
@@ -415,6 +467,7 @@ void testVolumetricFog() {
     testSliceRead();
     testHistoryWeight();
     testColumn();
+    testFogToASurface();
     testBeyondTheGrid();
     testProbeAirWeight();
     testPacking();

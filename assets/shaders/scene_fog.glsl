@@ -36,6 +36,34 @@ FogIntegration fogVolumeAt(vec3 coordinate) {
     return FogIntegration(texel.rgb * read.y, mix(1.0, texel.a, read.y));
 }
 
+// The integrated grid's texel k (the fog from the camera to the far side of slice k) at a place across the screen;
+// the camera's, no fog, for k = -1.
+FogIntegration fogVolumeTexel(vec2 across, int k) {
+    if (k < 0) {
+        return FogIntegration(vec3(0.0), 1.0);
+    }
+
+    vec4 texel = textureLod(fogVolume, vec3(across, (float(k) + 0.5) / frameFog.grid.z), 0.0);
+    return FogIntegration(texel.rgb, texel.a);
+}
+
+/*
+* The fog to a surface at a place in the grid (fogToSurface): never the slice the surface lies in, whose jittered light
+* sample may lie behind it, but the slice before carried on to it; in the first slice, and past the grid's end, the
+* grid as fogVolumeAt reads it.
+*/
+FogIntegration fogVolumeToSurface(vec3 coordinate) {
+    int slices = int(frameFog.grid.z);
+    int slice = fogSurfaceSlice(coordinate.z, slices);
+
+    if (slice < 1 || slice >= slices) {
+        return fogVolumeAt(coordinate);
+    }
+
+    return fogToSurface(fogVolumeTexel(coordinate.xy, slice - 2), fogVolumeTexel(coordinate.xy, slice - 1),
+                        fogSurfaceShare(coordinate.z, slices, frameFog.grid.w));
+}
+
 // The light the fog past the grid scatters towards the eye along a view direction per unit of optical depth: the
 // directional lights' (as they reach the ground) and the flat ambient, through the albedo. The flat ambient is what a
 // surface facing up gets; the air in the open gets the open field's share of it (SKY_OPEN_FIELD_OPEN: the sky above,
@@ -60,7 +88,7 @@ FogIntegration fogAlongView(vec3 relativePoint, bool sky) {
     float range = frameFog.grid.w;
     vec3 direction = normalize(relativePoint);
     vec3 coordinate = fogVolumeCoordinate(relativePoint, frameFog.viewProjection, range);
-    FogIntegration fog = fogVolumeAt(vec3(coordinate.xy, sky ? 1.0 : coordinate.z));
+    FogIntegration fog = sky ? fogVolumeAt(vec3(coordinate.xy, 1.0)) : fogVolumeToSurface(coordinate);
 
     float gridEnd = range / dot(direction, viewForward.xyz);
     float end = min(sky ? frameFog.albedo.w : length(relativePoint), frameFog.albedo.w);
