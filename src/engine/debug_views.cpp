@@ -4,6 +4,7 @@
 #include "scene/interpolation.h"
 #include "scene/debug_text.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -134,15 +135,16 @@ std::string videoMemoryText(const VideoMemory& memory) {
  Milliseconds rather than seconds, because frames and systems
 * cost thousandths of a second; the stroke font has no micro sign, so small costs get more decimals instead.
 */
-std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle) {
+std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle, int firstSection, int endSection) {
     const auto milliseconds = [decimals](double seconds) {
         char text[32];
         std::snprintf(text, sizeof(text), "%.*f", decimals, seconds * 1000.0);
         return std::string(text);
     };
 
+    const int end = endSection < 0 ? profiler.getSectionCount() : std::min(endSection, profiler.getSectionCount());
     std::string line;
-    for (int section = 0; section < profiler.getSectionCount(); ++section) {
+    for (int section = firstSection; section < end; ++section) {
         const SectionTiming& timing = profiler.getTiming(section);
         if (hideIdle && section > 0 && timing.averageSeconds == 0.0 && timing.worstSeconds == 0.0) {
             continue;
@@ -181,6 +183,18 @@ void recordGpuTimings(Profiler& profiler, const GpuTimings& timings) {
     for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
         profiler.record(static_cast<int>(pass) + 1, timings.passSeconds[pass]);
     }
+}
+
+// Section numbers are one past their passes (section 0 is the total), so the picture's line starts one past its pass.
+std::array<std::string, 2> gpuProfileLines(const Profiler& profiler) {
+    const int split = static_cast<int>(firstPicturePass) + 1;
+    return {profileText(profiler, 2, false, true, 0, split), profileText(profiler, 2, false, true, split)};
+}
+
+void drawGpuProfile(const Profiler& profiler, DebugDraw& debug) {
+    const std::array<std::string, 2> lines = gpuProfileLines(profiler);
+    debugText(debug, debugReadoutLine(gpuProfileReadoutLine), debugReadoutTextHeight, lines[0], profileDebugColour);
+    debugText(debug, debugReadoutLine(gpuPictureReadoutLine), debugReadoutTextHeight, lines[1], profileDebugColour);
 }
 
 Profiler makeClothProfiler() {

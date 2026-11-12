@@ -1,6 +1,7 @@
 #include "core/profiler.h"
 #include "engine/debug_views.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
@@ -158,6 +159,46 @@ void testProfiler() {
 
         assert(profileText(profiler, 1, false, true) == "TOTAL 0.0  BUSY 2.0  MS");
         assert(profileText(profiler, 1, false) == "TOTAL 0.0  IDLE 0.0  BUSY 2.0  MS");
+    }
+
+    // A range of sections: from the first to before the end; idle ones hidden, the first spared only when it is the total.
+    {
+        Profiler profiler{0.5};
+        const int total = profiler.addSection("TOTAL");
+        const int early = profiler.addSection("EARLY");
+        profiler.addSection("IDLE");
+        const int late = profiler.addSection("LATE");
+        profiler.update(0.0);
+        profiler.record(total, 0.003);
+        profiler.record(early, 0.001);
+        profiler.record(late, 0.002);
+        profiler.update(0.5);
+
+        assert(profileText(profiler, 1, false, true, 0, 2) == "TOTAL 3.0  EARLY 1.0  MS");
+        assert(profileText(profiler, 1, false, true, 2, 4) == "LATE 2.0  MS");
+        assert(profileText(profiler, 1, false, false, 2, 4) == "IDLE 0.0  LATE 2.0  MS");
+    }
+
+    /*
+    * The GPU's readout, two lines in the order the GPU runs its passes, idle passes left out: the total and the scene
+    * (up to the main pass), then the picture after it.
+    */
+    {
+        Profiler profiler = makeGpuProfiler();
+        GpuTimings timings;
+        timings.valid = true;
+        timings.totalSeconds = 0.010;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::Shadows)] = 0.001;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::Main)] = 0.002;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::AntiAliasing)] = 0.003;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::ToneMap)] = 0.0005;
+        profiler.update(0.0);
+        recordGpuTimings(profiler, timings);
+        profiler.update(0.5);
+
+        const std::array<std::string, 2> lines = gpuProfileLines(profiler);
+        assert(lines[0] == "GPU 10.00  SHADOW 1.00  MAIN 2.00  MS");
+        assert(lines[1] == "AA 3.00  TONE 0.50  MS");
     }
 
     // A window of no length would publish every frame and one of negative length makes no sense.

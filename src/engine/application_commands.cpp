@@ -187,7 +187,9 @@ CommandReply Application::stats() {
     const Camera& camera = game.getCamera();
     lines.push_back(cameraText(camera.getPosition(), camera.getForward()));
     lines.push_back(profileText(profiler, 2, true));
-    lines.push_back(profileText(gpuProfiler, 2, false));
+    for (const std::string& line : gpuProfileLines(gpuProfiler)) {
+        lines.push_back(line);
+    }
 
     if (clothProfiler.getTiming(0).calls > 0 || clothPassesUnmeasured) {
         lines.push_back(clothReadoutText(clothProfiler, clothPassesUnmeasured));
