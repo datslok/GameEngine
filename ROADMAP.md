@@ -297,6 +297,7 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
   - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
 - [x] Contact shadows for the sun, cut-outs passed over (`contact-shadows`)
+  - [ ] A crossing test in place of the fixed thickness (agreed Nov 12 2026, next): a step blocks only where the ray passed from in front of the depth image's surface to behind it since the last step, so thin things (a 1 cm pen) get at most a step's fringe instead of the thickness's (5 cm); a test with a 1 cm rod measures it; 32 steps if 16 still look fat. Not merged until then.
   - [ ] For point and spot lights too (the flashlight, lamps), marching in the main pass, if their shadows look loose
 - [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
   - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
