@@ -28,10 +28,10 @@ namespace {
         return false;
     }
 
-    // On by default (off on Low), 16 steps over 0.3 m, a 0.2 m thickness, fading out from 40 to 60 m; reachable by key.
+    // On by default (off on Low), 16 steps over 0.3 m, a 5 cm thickness, fading out from 40 to 60 m; reachable by key.
     void testTheSettings() {
         const ContactShadowSettings defaults;
-        assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 16 && defaults.thickness == 0.2f);
+        assert(defaults.enabled && defaults.length == 0.3f && defaults.steps == 16 && defaults.thickness == 0.05f);
         assert(defaults.fadeStart == 40.0f && defaults.fadeEnd == 60.0f);
         validateContactShadows(defaults);
 
@@ -172,6 +172,7 @@ namespace {
 
         ContactShadowSettings settings;
         settings.length = 0.5f;
+        settings.steps = 32;
         const Vec3 fromEast = Vec3{1.0f, 0.35f, 0.0f}.normalized();
         const ContactShadowView view = contactShadowView(viewProjection, inverseViewProjection, screen, fromEast, settings);
 
@@ -228,7 +229,7 @@ namespace {
         assert(pass.viewProjection[1] == viewProjection.values[1][0] && pass.inverseViewProjection[4] == inverseViewProjection.values[0][1]);
         assert(pass.size[0] == 320.0f && pass.size[1] == 180.0f && near(pass.size[2], 1.0f / 320.0f, 1e-9f));
         assert(pass.toLight[0] == toLight.x && near(pass.toLight[3], pixelFootprint(viewProjection, 180.0f), 1e-9f));
-        assert(pass.options[0] == 0.3f && pass.options[1] == 16.0f && pass.options[2] == 0.2f);
+        assert(pass.options[0] == 0.3f && pass.options[1] == 16.0f && pass.options[2] == 0.05f);
         assert(near(pass.options[3], contactNoiseTurn(3), 0.0f) && contactNoiseTurn(3) >= 0.0f && contactNoiseTurn(3) < 1.0f);
         assert(contactNoiseTurn(0) == 0.0f && contactNoiseTurn(1) != contactNoiseTurn(2));
         assert(pass.fade[0] == 40.0f && pass.fade[1] == 60.0f);

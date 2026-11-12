@@ -32,8 +32,10 @@ struct ContactShadowSettings {
     int steps = 16;
 
     // How thick anything on screen is taken to be (metres): a step further behind a surface than this passes behind it.
-    // Too thin and thin objects are missed; too thick and objects grow dark haloes behind them.
-    float thickness = 0.2f;
+    // Too thin and thin objects are missed; too thick and objects grow dark haloes behind them: at 0.2 m a fence post
+    // cast a second, wider stub of shadow beside its own (the user's "double shadow"). 5 cm is still over twice the
+    // march's step (0.3 m in 16), so a step cannot jump past a solid object's front.
+    float thickness = 0.05f;
 
     // The shadow fades out between these view distances (metres), where a pixel covers too much for so short a march.
     float fadeStart = 40.0f;
