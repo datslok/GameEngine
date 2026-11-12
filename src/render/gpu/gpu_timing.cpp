@@ -24,6 +24,8 @@ const char* gpuPassName(GpuPass pass) {
         return "PREPASS";
     case GpuPass::AmbientOcclusion:
         return "AO";
+    case GpuPass::ContactShadows:
+        return "CONTACT";
     case GpuPass::MirroredLights:
         return "MIRROR";
     case GpuPass::Main:

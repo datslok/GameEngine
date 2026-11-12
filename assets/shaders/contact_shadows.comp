@@ -1,0 +1,89 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Contact shadows (render/gpu/contact_shadows.h), one invocation per render pixel, after the depth prepass and before
+* the main pass: the march contactShadowAt mirrors. From the pixel's surface towards the light in even steps (their start
+* turned by blue noise and the frame), each projected onto the screen and tested against the depth image there; the
+* first blocked step leaves its darkness, faded at the screen's edge and with the pixel's distance. The mask (1 lit, 0 in
+* shadow) the main pass multiplies the sun's shadow by.
+*/
+#include "render/gpu/depth_shared.h"
+#include "screen_reflections.glsl"
+#include "contact_shadows.glsl"
+#include "render/gpu/ambient_occlusion_shared.h"
+
+layout(local_size_x = CONTACT_GROUP_SIDE, local_size_y = CONTACT_GROUP_SIDE) in;
+
+// Must match GpuContactShadowPass.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 viewProjection;        // camera-relative, as the frame was drawn (jitter included)
+    mat4 inverseViewProjection;
+    vec4 size;                  // xy: the render size in pixels, zw: their inverses
+    vec4 toLight;               // xyz: the unit way to the light, w: a pixel's footprint per metre of view distance
+    vec4 options;               // x: length, y: steps, z: thickness, w: the frame's turn of the noise
+    vec4 fade;                  // x: where the fade starts, y: where it ends (view distance)
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D depth;                // exact texels
+layout(set = 0, binding = 2) uniform sampler2D blueNoise;            // the noise tile, AO_BLUE_NOISE_SIZE a side, exact texels
+layout(set = 0, binding = 3, r32f) uniform writeonly image2D shadow; // 1 lit, 0 in shadow
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = ivec2(pass.size.xy);
+
+    if (texel.x >= size.x || texel.y >= size.y) {
+        return;
+    }
+
+    float pixelDepth = texelFetch(depth, texel, 0).r;
+
+    if (pixelDepth == float(GPU_FAR_DEPTH)) {
+        imageStore(shadow, texel, vec4(1.0));
+        return;
+    }
+
+    vec2 pixel = vec2(texel) + 0.5;
+    float viewDistance = viewDistanceAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
+    float fade = contactDistanceFade(viewDistance, pass.fade.x, pass.fade.y);
+    float lit = 1.0;
+
+    if (fade > 0.0) {
+        vec3 start = positionAtPixel(pass.inverseViewProjection, pixel, pixelDepth, pass.size.xy);
+        float bias = contactBias(pass.toLight.w, viewDistance);
+        float noise = fract(texelFetch(blueNoise, texel % AO_BLUE_NOISE_SIZE, 0).g + pass.options.w);
+        int steps = int(pass.options.y);
+
+        for (int stepIndex = 0; stepIndex < steps; ++stepIndex) {
+            vec3 point = start + pass.toLight.xyz * contactStepDistance(stepIndex, steps, noise, pass.options.x);
+            vec4 clip = pass.viewProjection * vec4(point, 1.0);
+
+            if (clip.w < float(CONTACT_NEAREST_W)) {
+                break;
+            }
+
+            vec3 onScreen = clipToScreen(clip, pass.size.xy);
+
+            if (onScreen.x < 0.0 || onScreen.y < 0.0 || onScreen.x >= pass.size.x || onScreen.y >= pass.size.y) {
+                break;
+            }
+
+            ivec2 sceneTexel = ivec2(onScreen.xy);
+            float sceneDepth = texelFetch(depth, sceneTexel, 0).r;
+
+            if (sceneDepth == float(GPU_FAR_DEPTH)) {
+                continue;
+            }
+
+            float sceneDistance = viewDistanceAtPixel(pass.inverseViewProjection, vec2(sceneTexel) + 0.5, sceneDepth, pass.size.xy);
+
+            if (contactBlocked(clip.w, sceneDistance, bias, pass.options.z)) {
+                lit = 1.0 - fade * contactEdgeFade(onScreen.xy, pass.size.xy);
+                break;
+            }
+        }
+    }
+
+    imageStore(shadow, texel, vec4(lit));
+}

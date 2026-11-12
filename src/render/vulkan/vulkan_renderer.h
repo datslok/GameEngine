@@ -48,6 +48,7 @@
 #include "render/vulkan/vulkan_mirrored_light.h"
 #include "render/gpu/planar_reflection.h"
 #include "render/vulkan/vulkan_ambient_occlusion.h"
+#include "render/vulkan/vulkan_contact_shadows.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
@@ -294,6 +295,7 @@ private:
 
     // Ambient occlusion from the depth prepass (render/gpu/ambient_occlusion.h).
     std::unique_ptr<VulkanAmbientOcclusion> ambientOcclusion;
+    std::unique_ptr<VulkanContactShadows> contactShadows;
 
     // Volumetric fog (render/gpu/volumetric_fog.h): its grid, lit after the shadows, and the picture seen through it.
     std::unique_ptr<VulkanFog> fog;
@@ -512,7 +514,8 @@ private:
                                std::span<const ProbeCascade> probes,
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
                                bool occlusionAccumulates, bool gathersLight,
-                               bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility);
+                               bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility,
+                               bool contact);
 
     // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the
     // sky's reach themselves).

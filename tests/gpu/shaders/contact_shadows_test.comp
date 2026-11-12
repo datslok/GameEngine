@@ -1,0 +1,25 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs contact_shadows.glsl's functions on the cases contact_shadows_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "contact_shadows.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_CONTACT_SHADOWS) {
+        // Inputs: (step, steps, noise, length), (ray distance, scene distance, bias, thickness), (pixel, size),
+        // (footprint, view distance, fade start, fade end).
+        vec4 march = testInput(0);
+        vec4 depths = testInput(1);
+        vec4 screen = testInput(2);
+        vec4 fades = testInput(3);
+        float stepDistance = contactStepDistance(int(march.x), int(march.y), march.z, march.w);
+        float blocked = contactBlocked(depths.x, depths.y, depths.z, depths.w) ? 1.0 : 0.0;
+        testOutput(0, vec4(stepDistance, contactBias(fades.x, fades.y), blocked, contactEdgeFade(screen.xy, screen.zw)));
+        testOutput(1, vec4(contactDistanceFade(fades.y, fades.z, fades.w), 0.0, 0.0, 0.0));
+    }
+}

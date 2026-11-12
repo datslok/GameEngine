@@ -26,6 +26,7 @@ namespace {
         bool ambientOcclusion = false; // ambient occlusion, its slices and its steps
         int occlusionSlices = 0;
         int occlusionSteps = 0;
+        bool contactShadows = false; // contact shadows
         bool fog = false; // volumetric fog and its grid
         int fogWidth = 0;
         int fogHeight = 0;
@@ -62,6 +63,7 @@ namespace {
             .ambientOcclusion = settings.ambientOcclusion.enabled,
             .occlusionSlices = settings.ambientOcclusion.slices,
             .occlusionSteps = settings.ambientOcclusion.steps,
+            .contactShadows = settings.contactShadows.enabled,
             .fog = settings.fog.enabled,
             .fogWidth = settings.fog.gridWidth,
             .fogHeight = settings.fog.gridHeight,
@@ -93,7 +95,7 @@ namespace {
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 4, .probeRays = 32, .fastProbeRays = 32, .probeSharing = 0.5f,
                         .probeCascades = 4, .probeSpacing = 1.0f, .densestProbesAcross = 19, .densestProbesHigh = 11,
                         .cascadeProbesAcross = 15, .cascadeProbesHigh = 9, .reflections = false, .reflectionSteps = 32, .probeSize = 64,
-                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3, .fog = false, .fogWidth = 96, .fogHeight = 54,
+                        .ambientOcclusion = false, .occlusionSlices = 2, .occlusionSteps = 3, .contactShadows = false, .fog = false, .fogWidth = 96, .fogHeight = 54,
                         .fogSlices = 32, .skyVisibility = false, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Medium:
                 return {.shadowedPoints = 24, .shadowedSpots = 8, .texelTarget = 0.06f, .spotTexelTarget = 0.03f,
@@ -101,7 +103,7 @@ namespace {
                         .cascadeResolution = CascadeResolution::Pixels2048, .bloomLevels = 5, .probeRays = 64, .fastProbeRays = 64, .probeSharing = 0.3f,
                         .probeCascades = 5, .probeSpacing = 0.5f, .densestProbesAcross = 25, .densestProbesHigh = 15,
                         .cascadeProbesAcross = 17, .cascadeProbesHigh = 11, .reflections = true, .reflectionSteps = 32, .probeSize = 64,
-                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3, .fog = true, .fogWidth = 128, .fogHeight = 72,
+                        .ambientOcclusion = true, .occlusionSlices = 2, .occlusionSteps = 3, .contactShadows = true, .fog = true, .fogWidth = 128, .fogHeight = 72,
                         .fogSlices = 48, .skyVisibility = true, .rayTracedReflections = false, .mirroredLights = false};
             case QualityPreset::Ultra:
                 break;
@@ -136,6 +138,7 @@ void applyQualityPreset(RenderSettings& settings, QualityPreset preset) {
     settings.ambientOcclusion.enabled = values.ambientOcclusion;
     settings.ambientOcclusion.slices = values.occlusionSlices;
     settings.ambientOcclusion.steps = values.occlusionSteps;
+    settings.contactShadows.enabled = values.contactShadows;
     settings.fog.enabled = values.fog;
     settings.fog.gridWidth = values.fogWidth;
     settings.fog.gridHeight = values.fogHeight;

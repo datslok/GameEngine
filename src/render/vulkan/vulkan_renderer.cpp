@@ -120,6 +120,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     mirrorDepthRange = std::make_unique<VulkanDepthRange>(device, nearestSampler.get(), framesInFlight);
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight, bindlessTextures->getLayout(),
                                                                 sceneLayout->getFrameLayout());
+    contactShadows = std::make_unique<VulkanContactShadows>(device, nearestSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -756,6 +757,10 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
 
     if (ambientOcclusion->hasImages()) {
         ambientOcclusion->ensureSize(scene);
+    }
+
+    if (contactShadows->hasImages()) {
+        contactShadows->ensureSize(scene);
     }
 
     fsrHistory = false;
@@ -1457,6 +1462,17 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ambientOcclusion->ensureSize(sceneSize);
     }
 
+    // Contact shadows (render/gpu/contact_shadows.h) for the brightest directional light, the one with the cascades,
+    // marched through the prepass's depths; its mask made the first time, as ambient occlusion's is.
+    validateContactShadows(settings.contactShadows);
+    const std::vector<DirectionalLight>& sunLights = prioritized.lighting.directionalLights;
+    const bool contact = settings.contactShadows.enabled && settings.depthPrepass && inverseViewProjection && !sunLights.empty() &&
+                         sunLights.front().castsShadows && sunLights.front().direction.lengthSquared() > 0.0f;
+
+    if (contact && !contactShadows->hasImages()) {
+        contactShadows->ensureSize(sceneSize);
+    }
+
     // Tinted shadows (render/gpu/transparency.h): while ray tracing is on and glass is anywhere in the world (a window
     // off screen still shades what is on it), shadowed lights pass through it by rays.
     const bool glassShadows = rays && settings.transparency.glassShadows &&
@@ -1480,7 +1496,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     debugLines->upload(frame.frameIndex, description.debugLines, description.debugScreenLines, displayOutput.whiteLevel);
     const VkDescriptorSet sceneSet = writeScene(frame, description, lights, shadows, mainDraws, shadowDraws, motionDraws, captureDraws, transparent, settings, probes,
                                                 hitLights, mirrorPairs, occlusion, occlusionBlurred, occlusionAccumulates, gathersLight, glassShadows, frameFog,
-                                                readsSkyVisibility);
+                                                readsSkyVisibility, contact);
 
     if (ui != nullptr) {
         beginGpuPass(frame, GpuPass::DebugUi);
@@ -1566,6 +1582,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                            settings.ambientOcclusion, noiseFrame, gathersLight, occlusionAccumulates),
                                   occlusionBlurred, previousCamera.known);
         endGpuPass(frame, GpuPass::AmbientOcclusion);
+    }
+
+    if (contact) {
+        beginGpuPass(frame, GpuPass::ContactShadows);
+        const Vec3 toSun = (sunLights.front().direction * -1.0f).normalized();
+        contactShadows->shade(frame.commands, frame.descriptors, frame.frameIndex, depth, sampled(*blueNoiseTexture),
+                              packContactShadowPass(relativeViewProjection, *inverseViewProjection, sceneSize, toSun, settings.contactShadows,
+                                                    temporal ? static_cast<std::uint32_t>(taaFrame % noiseCycleFrames) : 0));
+        endGpuPass(frame, GpuPass::ContactShadows);
     }
 
     if (mirrorLight) {
@@ -1834,7 +1859,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            std::span<const ProbeCascade> probes,
                                            const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion,
                                            bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
-                                           bool readsSkyVisibility) {
+                                           bool readsSkyVisibility, bool contact) {
     const bool mirrorLight = !mirrorPairs.empty();
     MaterialTable materials;
     std::vector<GpuInstance> instances;
@@ -1892,6 +1917,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     const std::span<const ProbeCascade> skyCascades = readsSkyVisibility ? skyVisibility->getCascades() : std::span<const ProbeCascade>{};
     const GpuSkyVisibilityOptions skyOptions = packSkyVisibilityOptions(settings.skyVisibility, static_cast<int>(skyCascades.size()));
     std::copy(std::begin(skyOptions.values), std::end(skyOptions.values), std::begin(frameData.skyVisibilityOptions));
+    frameData.contactShadowOptions[0] = contact ? 1.0f : 0.0f;
     buffers.frameData.write(&frameData, sizeof(frameData));
     buffers.skyLight.write(lights.ambient, sizeof(lights.ambient));
     const GpuAtmosphere packedAtmosphere = description.lighting.atmosphere ? packFrameAtmosphere(description, lights) : GpuAtmosphere{};
@@ -1925,6 +1951,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         occlusion ? ambientOcclusion->sampledOcclusion(occlusionBlurred, occlusionAccumulates) : sampled(*noProbesTexture),
         fog->sampledVolume(),
         skyVisibility->sampled(),
+        contact ? contactShadows->sampledShadow() : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2949,6 +2976,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     }
 
     ambientOcclusion->setFramesInFlight(count);
+    contactShadows->setFramesInFlight(count);
 
     // A frame in flight that is no more would never come round to read the probes' relocation it asked for.
     if (ddgi) {

@@ -3,6 +3,7 @@
 #include "core/settings_visitor.h"
 #include "render/gpu/ambient_occlusion.h"
 #include "render/gpu/bloom.h"
+#include "render/gpu/contact_shadows.h"
 #include "render/gpu/ddgi.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
@@ -42,6 +43,10 @@ struct RenderSettings {
     // Ambient occlusion (render/gpu/ambient_occlusion.h): the light from all around dimmed in creases and corners, from
     // the depth prepass's depths.
     AmbientOcclusionSettings ambientOcclusion;
+
+    // Contact shadows (render/gpu/contact_shadows.h): the sun's short shadows the shadow map misses, marched through the
+    // depth prepass's depths.
+    ContactShadowSettings contactShadows;
 
     // Sky visibility (render/gpu/sky_visibility.h): the flat ambient light dimmed by how much sky each point sees, from a
     // grid round the camera baked on the CPU against the static level, so rooms go dark without the light probes.

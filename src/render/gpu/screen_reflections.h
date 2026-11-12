@@ -123,6 +123,9 @@ float nearerDepth(float a, float b);
 // inverse of the camera-relative view-projection that drew it.
 Vec3 positionAtPixel(const Mat4& inverseViewProjection, Vec2 pixel, float depth, Vec2 size);
 
+// A clip position to its pixel (from the top-left corner) and its depth.
+Vec3 clipToScreen(const Vec4& clip, Vec2 size);
+
 // A pixel's distance along the view (clip w) at this depth: thickness is measured in it.
 float viewDistanceAtPixel(const Mat4& inverseViewProjection, Vec2 pixel, float depth, Vec2 size);
 
