@@ -105,8 +105,9 @@ void recordClothTimings(Profiler& profiler, const ClothPassTimings& timings);
 
 /*
 * A profiler's numbers as one line of text: each section's name and its average per call, then "/" and the worst call
-* if withWorst, in milliseconds with that many decimals, then "MS". With hideIdle, sections that took no time are left
-* out (the cloth's kinds of pass another solver uses), except section 0, the total, so a long list fits the line. Only
+* if withWorst, in milliseconds with that many decimals, then "MS". With hideIdle, sections that took no time (would
+* show as zero at those decimals) are left out (the cloth's kinds of pass another solver uses, the GPU's empty passes),
+* except section 0, the total, so a long list fits the line. Only
 * the sections from firstSection to before endSection (-1: all of them to the last).
 */
 std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle = false, int firstSection = 0, int endSection = -1);

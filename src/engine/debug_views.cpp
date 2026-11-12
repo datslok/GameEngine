@@ -5,6 +5,7 @@
 #include "scene/debug_text.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 
@@ -142,11 +143,14 @@ std::string profileText(const Profiler& profiler, int decimals, bool withWorst, 
         return std::string(text);
     };
 
+    // Idle: both numbers would show as zero at these decimals (an empty GPU pass still takes nanoseconds between its
+    // timestamps, so exact zero is too strict).
+    const double shownAsZero = 0.5 * std::pow(10.0, -decimals) / 1000.0;
     const int end = endSection < 0 ? profiler.getSectionCount() : std::min(endSection, profiler.getSectionCount());
     std::string line;
     for (int section = firstSection; section < end; ++section) {
         const SectionTiming& timing = profiler.getTiming(section);
-        if (hideIdle && section > 0 && timing.averageSeconds == 0.0 && timing.worstSeconds == 0.0) {
+        if (hideIdle && section > 0 && timing.averageSeconds < shownAsZero && timing.worstSeconds < shownAsZero) {
             continue;
         }
         line += profiler.getName(section) + " " + milliseconds(timing.averageSeconds);

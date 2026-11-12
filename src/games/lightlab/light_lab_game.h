@@ -124,6 +124,30 @@ inline const Vec3 labFenceTorchPosition{labFenceX, labPostHeight + 0.05f, labFir
 // Where the fence torch is and which way it shines for its settings.
 FlashlightPose fenceTorchPose(const LightLabFenceTorchSettings& settings);
 
+/*
+* A desk lamp beside the pen table: a shadowed spotlight west of it and above it, aimed low across the top at its
+* middle, so the pens' shadows (and their contact shadows from point and spot lights) fall east where the start's view
+* sees them. A still light, warm, sharp-shadowed (a small bulb). Off at the start (the golden views keep the sunlit
+* picture); each switch a scene event.
+*/
+struct LightLabDeskLampSettings {
+    bool on = false;
+};
+
+void visit(LightLabDeskLampSettings& settings, SettingsVisitor& visitor);
+
+inline const Vec3 labDeskLampPosition{labTableX - labTableHalfLength - 0.3f, labTableHeight + 0.35f, labTableZ + 0.1f};
+inline const SpotLight labDeskLampBeam{
+    .colour = Vec3{1.0f, 0.82f, 0.6f},
+    .intensity = 3.0f,
+    .range = 6.0f,
+    .direction = Vec3{labTableX, labTableHeight, labTableZ} - labDeskLampPosition,
+    .innerAngle = 0.35f,
+    .outerAngle = 0.6f,
+    .sourceRadius = 0.3f,
+    .emitterRadius = 0.01f
+};
+
 // The moonlight's colour: sunlight reflected by the moon's grey-brown ground, a little warmer than the sun's.
 inline const Vec3 labMoonColour{1.0f, 0.94f, 0.86f};
 
@@ -226,6 +250,8 @@ public:
     LightLabMistSettings& getMistSettings();
     LightLabFenceTorchSettings& getFenceTorchSettings();
     Entity getFenceTorch() const;
+    LightLabDeskLampSettings& getDeskLampSettings();
+    Entity getDeskLamp() const;
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -292,6 +318,10 @@ private:
     // Switched and aimed by its settings every frame (see LightLabFenceTorchSettings).
     LightLabFenceTorchSettings fenceTorchSettings;
     Flashlight fenceTorch;
+
+    // Switched by its settings every frame (see LightLabDeskLampSettings): a Transform always, its SpotLight while on.
+    LightLabDeskLampSettings deskLampSettings;
+    Entity deskLamp;
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;

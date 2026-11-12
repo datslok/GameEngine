@@ -328,6 +328,9 @@ private:
     ShadowTileMemory shadowMemory;
     LightHistory lightHistory;
 
+    // The local lights given contact shadow channels last frame (chooseContactLights' incumbents).
+    std::vector<Entity> contactLightHistory;
+
     // Fitting the sun's cascades to the screen (cascades.h): the depth measurement read back but not yet used (from a
     // frame or two ago), and where the cascades end now.
     std::unique_ptr<VulkanDepthRange> depthRange;
@@ -518,7 +521,7 @@ private:
                                const ProbeHitLights& hitLights, std::span<const MirrorPair> mirrorPairs, bool occlusion, bool occlusionBlurred,
                                bool occlusionAccumulates, bool gathersLight,
                                bool glassShadows, const GpuFog& frameFog, bool readsSkyVisibility,
-                               bool contact);
+                               const ContactShadowFrame& contact);
 
     // Whether a frame reads the sky visibility grid: the setting on, a static level, and no light probes (which know the
     // sky's reach themselves).

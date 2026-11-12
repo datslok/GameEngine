@@ -142,6 +142,7 @@
 
 // contact_shadows_test.comp
 #define GPU_TEST_CONTACT_SHADOWS 0
+#define GPU_TEST_CONTACT_LIGHT_RAYS 1
 
 // alpha_mask_test.comp
 #define GPU_TEST_ALPHA_MASK 0

@@ -134,6 +134,12 @@ layout(set = 1, binding = 25) uniform sampler2D ambientOcclusion;
 // The sun's contact shadows (contact_shadows.comp), 1 lit, read while contactShadowOptions.x is 1.
 layout(set = 1, binding = 31) uniform sampler2D contactShadows;
 
+// The local lights' contact shadows, a channel each (the lights contactLightSlots names), read while
+// contactShadowOptions.y is 1.
+layout(set = 1, binding = 32) uniform sampler2D lightContactShadows;
+
+#include "render/gpu/contact_shadows_shared.h"
+
 #include "ambient_occlusion.glsl"
 
 #ifdef TRANSPARENT
@@ -466,6 +472,25 @@ float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emi
 * One point light's share at this pixel, added to the sums. Beyond its range a light gives exactly nothing, so it is
 * skipped before the costly part, its shadow lookups; so is a light behind the surface.
 */
+/*
+* A local light's contact shadow at this pixel (1 lit): its channel of the local lights' mask, found by its slot code
+* (a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past it), 1 for a light without one. None in captures
+* (no depth image of their own) or for glass (not in it).
+*/
+float lightContactShadow(int slotCode) {
+    if (contactShadowOptions.y < 0.5 || captureView || transparentView) {
+        return 1.0;
+    }
+
+    for (int channel = 0; channel < CONTACT_MAX_LIGHTS; ++channel) {
+        if (contactLightSlots[channel] == slotCode) {
+            return texelFetch(lightContactShadows, ivec2(gl_FragCoord.xy), 0)[channel];
+        }
+    }
+
+    return 1.0;
+}
+
 void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 diffuse, inout vec3 specular) {
     vec3 offset = points[i].positionRange.xyz - relativePosition;
     float range = points[i].positionRange.w;
@@ -486,7 +511,8 @@ void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 d
     int firstTile = points[i].firstShadowTile;
 
     if (firstTile >= 0) {
-        radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius), points[i].shadowStrength);
+        radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius) * lightContactShadow(i),
+                        points[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         // To the bulb's surface, not its centre, so glass round the bulb itself does not tint its own light.
         if (any(greaterThan(radiance, vec3(0.0)))) {
@@ -521,7 +547,8 @@ void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 di
     int tile = spots[i].shadowTile;
 
     if (tile >= 0) {
-        radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius), spots[i].shadowStrength);
+        radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius) *
+                                 lightContactShadow(CONTACT_SPOT_SLOT_BASE + i), spots[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         if (any(greaterThan(radiance, vec3(0.0)))) {
             radiance *= mix(vec3(1.0), glassShadow(toLight, max(distance - spots[i].emitterRadius, 0.0)), spots[i].shadowStrength);

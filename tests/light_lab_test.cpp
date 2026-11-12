@@ -1000,6 +1000,46 @@ namespace {
         assert(!lab.world.has<SpotLight>(torch));
     }
 
+    /*
+    * The desk lamp: a shadowed spotlight beside the pen table, aimed low across its top so the pens' shadows (and their
+    * contact shadows) fall where the start's view sees them. Off at the start; its setting (and so the set command)
+    * switches it, each switch a scene event.
+    */
+    void testTheDeskLamp() {
+        Lab lab;
+        const Entity lamp = lab.game.getDeskLamp();
+        assert(lab.world.isAlive(lamp) && !lab.world.has<SpotLight>(lamp));
+        assert(!lab.game.getDeskLampSettings().on);
+
+        EngineSettings engine;
+        CommandRegistry registry;
+        const SettingsWalk walk = engineAndGameSettings(engine, lab.game);
+        addSettingsCommands(registry, walk, captureSettings(walk));
+
+        Input idle;
+        idle.beginFrame();
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        clearProbeEvents(lab.world);
+        assert(registry.execute("set lightLab.deskLamp.on true").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(lab.world.has<SpotLight>(lamp));
+        assert(collectLighting(lab.world, 1.0f).probeEvents.size() == 1);
+        clearProbeEvents(lab.world);
+
+        // Beside the table and above it, aimed at the middle of its top, reaching it, casting shadows.
+        const SpotLight& beam = lab.world.get<SpotLight>(lamp);
+        const Vec3 position = lab.world.get<Transform>(lamp).position;
+        const Vec3 tableMiddle{labTableX, labTableHeight, labTableZ};
+        assert(beam.castsShadows);
+        assert(position.y > labTableHeight && position.x < labTableX - labTableHalfLength);
+        assert(beam.direction.normalized().dot((tableMiddle - position).normalized()) > 0.9999f);
+        assert(beam.range > (tableMiddle - position).length() * 2.0f);
+
+        assert(registry.execute("set lightLab.deskLamp.on false").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(!lab.world.has<SpotLight>(lamp));
+    }
+
     // The probe events signalled since the last frame, cleared as the engine does once the frame is built.
     std::vector<ProbeEvent> takeProbeEvents(Lab& lab) {
         const std::vector<ProbeEvent> events = collectLighting(lab.world, 1.0f).probeEvents;
@@ -1201,6 +1241,7 @@ void testLightLab() {
     testTheMirror();
     testTheLabsFlashlight();
     testTheFenceTorch();
+    testTheDeskLamp();
     testTheBackRoomLamp();
     testTheStreetLights();
     testAClockJumpRestartsTheProbes();

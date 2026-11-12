@@ -303,6 +303,10 @@ FlashlightPose fenceTorchPose(const LightLabFenceTorchSettings& settings) {
     return FlashlightPose{labFenceTorchPosition, Vec3{level * std::sin(bearing), -std::sin(dip), -level * std::cos(bearing)}};
 }
 
+void visit(LightLabDeskLampSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("On", settings.on);
+}
+
 float starVisibility(const Vec3& towardsSun) {
     return 1.0f - smoothStep(radiansFromDegrees(labStarsFullBelowDegrees), radiansFromDegrees(labStarsAppearBelowDegrees), sunElevation(towardsSun));
 }
@@ -486,6 +490,10 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     flashlight.create(world, false);
     fenceTorch.create(world, false);
     fenceTorch.place(world, fenceTorchPose(fenceTorchSettings));
+    deskLamp = world.create();
+    Transform deskLampPlacement;
+    deskLampPlacement.position = labDeskLampPosition;
+    world.add(deskLamp, deskLampPlacement);
 
     // The lamp's panel stands for the bulb's glow, so like the sun disc it must not block the light it gives.
     ModelRenderer fixture;
@@ -651,6 +659,17 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
     if (fenceTorch.isOn(world) != fenceTorchSettings.on) {
         fenceTorch.toggle(world);
     }
+
+    // The desk lamp likewise; off removes its light, as the ceiling lamp's switch does.
+    if (world.has<SpotLight>(deskLamp) != deskLampSettings.on) {
+        if (deskLampSettings.on) {
+            world.add(deskLamp, labDeskLampBeam);
+        } else {
+            world.remove<SpotLight>(deskLamp);
+        }
+
+        signalProbeEvent(world, probeEventAround(ProbeEventKind::LightChange, labDeskLampPosition, labDeskLampBeam.range));
+    }
 }
 
 void LightLabGame::updateDaylight(World& world) {
@@ -776,6 +795,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Fence torch", [&] {
         visit(fenceTorchSettings, visitor);
     });
+    visitor.group("Desk lamp", [&] {
+        visit(deskLampSettings, visitor);
+    });
     controls.visitSettings(visitor);
 }
 
@@ -844,6 +866,14 @@ LightLabFenceTorchSettings& LightLabGame::getFenceTorchSettings() {
 
 Entity LightLabGame::getFenceTorch() const {
     return fenceTorch.getEntity();
+}
+
+LightLabDeskLampSettings& LightLabGame::getDeskLampSettings() {
+    return deskLampSettings;
+}
+
+Entity LightLabGame::getDeskLamp() const {
+    return deskLamp;
 }
 
 Entity LightLabGame::getMoon() const {

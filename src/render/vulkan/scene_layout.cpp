@@ -51,6 +51,7 @@ namespace {
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the sky visibility grid's points (compute for the fog)
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // its cascades
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the sun's contact shadows
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the local lights' contact shadows
     }};
 }
 
@@ -183,6 +184,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         VkDescriptorBufferInfo{},
         buffers.skyVisibilityCascades.describe(),
         VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -200,6 +202,7 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[FogVolumeBinding] = imageInfo(images.fogVolume);
     imageInfos[SkyVisibilityBinding] = imageInfo(images.skyVisibility);
     imageInfos[ContactShadowsBinding] = imageInfo(images.contactShadows);
+    imageInfos[LightContactShadowsBinding] = imageInfo(images.lightContactShadows);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 
