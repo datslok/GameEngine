@@ -395,6 +395,8 @@ The light lab is the default game (`--game lightlab`; the exe alone in the zip).
 
 The flashlight (F) is a fast light: its bounce is kept apart with a short memory, and switching it tells the light probes, so its bounce comes and goes with it. Shine it into the light lab's dark back room to watch its bounce light follow it.
 
+The light lab's fence torch (F5, Fence torch, off at the start) is a second flashlight fixed on the fence's first post. Walk round its beam to see the mist light up: brightest looking into the beam, faintest from behind it, which is how you see your own torch.
+
 The back room's ceiling lamp (L) is a still light. Its bounce comes in at once when switched, since the switch tells the light probes round it to start afresh. Moving the clock by hand does the same for every probe.
 
 The light lab's 60 street lamps and lit windows come on by themselves at dusk and go off at dawn. K flips them until the sun next does.

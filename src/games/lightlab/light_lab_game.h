@@ -103,6 +103,27 @@ struct LightLabMistSettings {
 
 void visit(LightLabMistSettings& settings, SettingsVisitor& visitor);
 
+/*
+* A second flashlight, the player's own beam (gameplay/flashlight), clamped on top of the fence's first post a few metres
+* north-west of the start: still, so its beam in the mist can be seen from the side and from the front, where the mist's
+* forward scattering makes it brightest, rather than only from behind, as one's own torch is. Off at the start (the golden
+* views keep the sunlit picture). It points along a bearing (degrees from north, positive to the east, as the towers'),
+* dipping below level; east and 10 degrees down by default, so the beam crosses the open field and lands about 11 m out.
+*/
+struct LightLabFenceTorchSettings {
+    bool on = false;
+    float bearingDegrees = 90.0f;
+    float dipDegrees = 10.0f;
+};
+
+void visit(LightLabFenceTorchSettings& settings, SettingsVisitor& visitor);
+
+// Just above the post's top, so the post does not shadow its own beam.
+inline const Vec3 labFenceTorchPosition{labFenceX, labPostHeight + 0.05f, labFirstPostZ};
+
+// Where the fence torch is and which way it shines for its settings.
+FlashlightPose fenceTorchPose(const LightLabFenceTorchSettings& settings);
+
 // The moonlight's colour: sunlight reflected by the moon's grey-brown ground, a little warmer than the sun's.
 inline const Vec3 labMoonColour{1.0f, 0.94f, 0.86f};
 
@@ -203,6 +224,8 @@ public:
     LightLabSunSettings& getSunSettings();
     LightLabNightSettings& getNightSettings();
     LightLabMistSettings& getMistSettings();
+    LightLabFenceTorchSettings& getFenceTorchSettings();
+    Entity getFenceTorch() const;
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -265,6 +288,10 @@ private:
     // F toggles it, held in the right hand (off at the start, so the golden views keep the sunlit picture): for seeing
     // how a moving light's bounce follows it.
     Flashlight flashlight;
+
+    // Switched and aimed by its settings every frame (see LightLabFenceTorchSettings).
+    LightLabFenceTorchSettings fenceTorchSettings;
+    Flashlight fenceTorch;
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;
