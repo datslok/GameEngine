@@ -142,6 +142,7 @@ void testToneMapping();
 void testToneMapUniforms();
 void testCameraFinish();
 void testMotionBlur();
+void testDepthOfField();
 void testBloom();
 void testBlueNoise();
 void testTaa();
@@ -338,6 +339,7 @@ int main(int argumentCount, char** arguments) {
     testToneMapUniforms();
     testCameraFinish();
     testMotionBlur();
+    testDepthOfField();
     testBloom();
     testBlueNoise();
     testTaa();

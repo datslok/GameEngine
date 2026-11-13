@@ -80,6 +80,12 @@ void visit(CameraSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Motion blur", settings.motionBlur);
     visitor.field("Shutter angle", settings.shutterAngle, {.min = 1.0f, .max = 360.0f, .unit = "degrees"});
     visitor.field("Camera motion blur", settings.cameraMotionBlur);
+    visitor.field("Depth of field", settings.depthOfField);
+    visitor.field("F-number", settings.fNumber, {.min = 0.7f, .max = 32.0f, .sliderMin = 0.7f, .sliderMax = 16.0f});
+    visitor.field("Autofocus", settings.autofocus);
+    visitor.field("Focus distance", settings.focusDistance, {.min = 0.1f, .max = 10000.0f, .sliderMin = 0.1f, .sliderMax = 50.0f, .unit = "m"});
+    visitor.field("Focus time", settings.focusSeconds, {.min = 0.0f, .max = 10.0f, .sliderMin = 0.0f, .sliderMax = 1.0f, .unit = "s"});
+    visitor.field("Show focus", settings.showFocus);
 }
 
 void validateCamera(const CameraSettings& settings) {
@@ -94,6 +100,9 @@ void validateCamera(const CameraSettings& settings) {
     check(settings.chromaticAberration >= 0.0f && settings.chromaticAberration <= 50.0f, "The chromatic aberration must be 0 to 50 pixels");
     check(settings.filmGrain >= 0.0f && settings.filmGrain <= 1.0f, "The film grain must be 0..1");
     check(settings.shutterAngle >= 1.0f && settings.shutterAngle <= 360.0f, "The shutter angle must be 1 to 360 degrees");
+    check(settings.fNumber >= 0.7f && settings.fNumber <= 32.0f, "The f-number must be 0.7 to 32");
+    check(settings.focusDistance >= 0.1f && settings.focusDistance <= 10000.0f, "The focus distance must be 0.1 to 10000 m");
+    check(settings.focusSeconds >= 0.0f && settings.focusSeconds <= 10.0f, "The focus time must be 0 to 10 s");
 }
 
 bool gradesColour(const CameraSettings& settings) {

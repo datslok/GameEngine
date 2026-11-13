@@ -194,4 +194,7 @@
 // motion_blur_test.comp
 #define GPU_TEST_MOTION_BLUR 0
 
+// depth_of_field_test.comp
+#define GPU_TEST_DEPTH_OF_FIELD 0
+
 #endif

@@ -56,6 +56,19 @@ struct CameraSettings {
     bool motionBlur = false;
     float shutterAngle = 180.0f;
     bool cameraMotionBlur = true;
+
+    /*
+    * Depth of field (render/gpu/depth_of_field.h), off by default (the user's choice): while on, what lies off the focus
+    * blurs as a thin lens of this f-number blurs it, the focal length set by the field of view on a 24 mm tall sensor.
+    * The focus follows the surface under the screen's centre (autofocus) or stays at focusDistance (metres), easing in
+    * dioptres with this time constant (seconds, 0 at once). showFocus tints the blur (near blue, far orange).
+    */
+    bool depthOfField = false;
+    float fNumber = 2.8f;
+    bool autofocus = true;
+    float focusDistance = 5.0f;
+    float focusSeconds = 0.2f;
+    bool showFocus = false;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

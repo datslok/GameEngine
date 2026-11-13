@@ -1,0 +1,32 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Depth of field's focus (render/gpu/depth_of_field.h), one invocation: the inverse distance of the surface under the
+* screen's centre (the crosshair; 0 for the sky) with autofocus, else the set focus, no nearer than the lens focuses,
+* eased towards in dioptres (easeFocus) as a lens motor would, or reached at once when snapping. It stays in the buffer
+* from frame to frame and the later passes read it the same frame, so the CPU never waits for the depth.
+*/
+#include "screen_reflections.glsl"
+#include "depth_of_field.glsl"
+
+layout(local_size_x = 1) in;
+
+#include "depth_of_field_pass.glsl"
+
+layout(set = 0, binding = 2) uniform sampler2D depth; // render size, exact texels
+
+void main() {
+    float target = pass.focus.x;
+
+    if (pass.focus.y > 0.5) {
+        ivec2 centre = ivec2(pass.renderSize.xy * 0.5);
+        target = inverseDistanceAt(centre, texelFetch(depth, centre, 0).r);
+    }
+
+    target = clamp(target, 0.0, pass.lens.z);
+    float current = focusState.inverseFocus.x;
+    // Written so a buffer never yet written (not a number, or out of range) snaps too.
+    bool snap = pass.lens.w > 0.5 || !(current >= 0.0 && current <= pass.lens.z);
+    focusState.inverseFocus = vec4(snap ? target : easeFocus(current, target, pass.focus.z, pass.focus.w), 0.0, 0.0, 0.0);
+}

@@ -1,0 +1,69 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Depth of field's second pass (render/gpu/depth_of_field.h, prepareBlurTexel mirrors a texel): a workgroup per tile of
+* DEPTH_OF_FIELD_TILE blur pixels a side, each invocation preparing a square of them: each blur pixel's light, the mean
+* of its 2 x 2 output pixels, and its blur radius, the nearest of the four's (the smallest), so a blurred background
+* never takes in a sharp edge's light; then the tile's longest near-field radius, by halving in shared memory.
+*/
+#include "screen_reflections.glsl"
+#include "depth_of_field.glsl"
+
+layout(local_size_x = DEPTH_OF_FIELD_GROUP, local_size_y = DEPTH_OF_FIELD_GROUP) in;
+
+#include "depth_of_field_pass.glsl"
+
+layout(set = 0, binding = 2) uniform sampler2D depth;                     // render size, exact texels
+layout(set = 0, binding = 3) uniform sampler2D picture;                   // output size, exact texels
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D prepared; // blur grid: rgb the light, a the blur radius
+layout(set = 0, binding = 5, r32f) uniform writeonly image2D tiles;       // a texel per tile: its longest near radius
+
+const int texelsPerInvocation = DEPTH_OF_FIELD_TILE / DEPTH_OF_FIELD_GROUP;
+shared float longest[DEPTH_OF_FIELD_GROUP * DEPTH_OF_FIELD_GROUP];
+
+void main() {
+    ivec2 tile = ivec2(gl_WorkGroupID.xy);
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    ivec2 outputPixels = ivec2(pass.outputSize.xy);
+    ivec2 grid = (outputPixels + 1) / 2;
+    float mine = 0.0;
+
+    for (int dy = 0; dy < texelsPerInvocation; ++dy) {
+        for (int dx = 0; dx < texelsPerInvocation; ++dx) {
+            ivec2 texel = tile * DEPTH_OF_FIELD_TILE + local * texelsPerInvocation + ivec2(dx, dy);
+
+            if (any(greaterThanEqual(texel, grid))) {
+                continue;
+            }
+
+            vec3 colour = vec3(0.0);
+            float radius = float(DEPTH_OF_FIELD_LARGEST_RADIUS);
+
+            for (int corner = 0; corner < 4; ++corner) {
+                ivec2 pixel = min(texel * 2 + ivec2(corner & 1, corner >> 1), outputPixels - 1);
+                colour += texelFetch(picture, pixel, 0).rgb;
+                radius = min(radius, outputBlurRadius(depth, pixel));
+            }
+
+            imageStore(prepared, texel, vec4(colour * 0.25, radius));
+            mine = max(mine, -radius);
+        }
+    }
+
+    uint index = gl_LocalInvocationIndex;
+    longest[index] = mine;
+    barrier();
+
+    for (uint stride = (DEPTH_OF_FIELD_GROUP * DEPTH_OF_FIELD_GROUP) / 2; stride > 0u; stride /= 2u) {
+        if (index < stride) {
+            longest[index] = max(longest[index], longest[index + stride]);
+        }
+
+        barrier();
+    }
+
+    if (index == 0u) {
+        imageStore(tiles, tile, vec4(longest[0], 0.0, 0.0, 0.0));
+    }
+}

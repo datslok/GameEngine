@@ -39,6 +39,7 @@ enum class GpuPass {
     FogApply,     // the picture before the glass seen through the fog
     Transparent,  // glass and blended surfaces, sorted, over the picture with its reflections (render/gpu/transparency.h)
     AntiAliasing, // TAA, FSR or DLSS, whichever smooths the frame (with the camera motion pass before FSR and DLSS)
+    DepthOfField, // depth of field on the finished picture (render/gpu/depth_of_field.h), while it is on
     MotionBlur,   // motion blur on the finished picture (render/gpu/motion_blur.h), while it is on
     EyeAdaptation,
     Bloom,

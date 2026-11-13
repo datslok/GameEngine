@@ -1,0 +1,37 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Depth of field's third pass (render/gpu/depth_of_field.h), one invocation per tile: the longest near-field radius of
+* the 3 x 3 tiles round it, so a pixel's gather reaches a blurred foreground spreading into its tile from the next (a
+* radius with its edge is at most a tile).
+*/
+#include "depth_of_field.glsl"
+
+layout(local_size_x = DEPTH_OF_FIELD_GROUP, local_size_y = DEPTH_OF_FIELD_GROUP) in;
+
+layout(set = 0, binding = 0) uniform sampler2D tiles;                 // each tile's longest near radius, exact texels
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D neighbours;
+
+void main() {
+    ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 count = textureSize(tiles, 0);
+
+    if (any(greaterThanEqual(tile, count))) {
+        return;
+    }
+
+    float longest = 0.0;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            ivec2 at = tile + ivec2(dx, dy);
+
+            if (all(greaterThanEqual(at, ivec2(0))) && all(lessThan(at, count))) {
+                longest = max(longest, texelFetch(tiles, at, 0).r);
+            }
+        }
+    }
+
+    imageStore(neighbours, tile, vec4(longest, 0.0, 0.0, 0.0));
+}
