@@ -4,7 +4,7 @@ How the engine works and why it is built this way. This is for people learning t
 
 This guide describes the engine as it is now. It is updated at the end of each roadmap phase and after any large feature.
 
-**Covers:** phases 0 to 6, every item done so far.
+**Covers:** phases 0 to 6 and 16, every item done in them (phase 7, the cloth, is parked and not covered yet).
 
 - Phases 0 to 5: foundations, GPU rendering and assets, the core loop and input, engine architecture, rendering upgrades, collision and movement
 - 6a: engine hygiene, quaternions, reversed-Z and camera-relative rendering, the debug UI, normal maps
@@ -12,6 +12,7 @@ This guide describes the engine as it is now. It is updated at the end of each r
 - 6c: the GPU scene, depth prepass, clustered shading, cascaded sun shadows
 - 6d: hardware ray tracing, light probes (DDGI) and their cascades, the sky and the air, the night sky
 - 6e: eye adaptation and night vision, TAA and upscaling, reflections, mirrored lights, ambient occlusion, glass, volumetric fog
+- 16: beautiful without ray tracing: bounce light from the screen, sky visibility, contact shadows, planar mirrors and image lights, coloured shadows through glass, clear coat, parallax occlusion mapping, the camera's finish, the typical GPU setup
 - Also: several games on one engine, the sun's place in the sky
 
 ---
@@ -1421,6 +1422,8 @@ Everything so far is **direct** light: from a light straight to a surface, then 
 
 The flat ambient term was a stand-in for all of that: the same light from every direction, everywhere, inside a closed room as much as on an open field.
 
+The light probes below trace their rays with hardware ray tracing, so since phase 16 they are off by default, with ray tracing; "Beautiful without ray tracing", further on, is what stands in for them.
+
 **What a surface needs.** A matte surface's brightness depends on its **irradiance** E: the light arriving from the whole hemisphere above it, each direction weighted by the cosine of its angle to the normal (Lambert's law again).
 
 Irradiance changes slowly from place to place and with the normal's direction, like a temperature field, so it can be measured at a coarse grid of points and interpolated in between. Those points are **light probes**, and the method here is DDGI ("dynamic diffuse global illumination", Majercik et al. 2019, as rebuilt for production in 2021).
@@ -1663,6 +1666,77 @@ Each frame three compute passes run:
 **Glass in fog.** Glass is drawn after the picture is fogged, over a picture that already holds the fog up to the surface behind it. So glass adds its own light dimmed by the fog in front of it, and the fog's light only for the share of light the glass does not let through. Working it out, that is exactly what the glass and the surface behind it fogged one after the other give.
 
 **What it leaves out**: lights without shadow maps light the fog through walls; the fog does not dim light on its way to a froxel; the probes in empty air stay asleep, so air high above the ground takes the coarser probes' light.
+
+### Beautiful without ray tracing
+
+Ray tracing is optional, and since November 2026 it is off by default, light probes included: most GPUs players own either lack it or cannot spare its cost in a real game. Phase 16 made the engine look finished without it. Each part below stands in for something rays would otherwise do, and each is judged with the **typical GPU setup** on (see the end of this section).
+
+### Light from the screen: bounce without rays
+
+Without probes, bounce light has to come from somewhere cheap. The picture already drawn last frame *is* the light leaving every visible surface, so a pixel can gather its bounce light from the pixels round it.
+
+- **The same walk as ambient occlusion.** The ambient occlusion pass already walks lines across the screen through each pixel, finding what rises above it. With nothing traced it reaches 2 m and, for every bit of sky a nearby surface blocks, it also reads that surface's colour from last frame's picture: light that would have come from the sky now comes off the wall instead. A red wall tints the floor beside it red.
+- **A visibility bitmask** (Therrien 2023). Horizons say only "everything below this angle is blocked", which treats a thin pole like a solid wall behind it. Instead each slice is cut into 32 equal shares of its cosine-weighted light, and each surface marks only the shares its own thickness covers. Light from a share already marked is not counted twice, and the gap behind a pole stays open.
+- **Noise, averaged then cleaned.** A few samples a pixel are noisy, so each pixel keeps a running average of its last 16 frames, reprojected as the camera moves, and an edge-aware blur (an *à-trous* filter, "with holes": the same 5 x 5 kernel spread 1, then 2 pixels apart) smooths what is left without bleeding across edges. It runs at half resolution by default, each half-size texel taking one of its four pixels in turn, then is spread back up keeping each pixel to its own surface.
+- **What it cannot see.** Only what is on screen gives light: turn away from a sunlit wall and its bounce goes. The sky visibility grid below covers the rest.
+
+### Sky visibility: rooms that go dark
+
+The flat ambient light is the sky's light arriving from everywhere. Indoors almost none of the sky is visible, so the flat ambient lights a closed room as brightly as a field. Probes knew better, by tracing; without them the engine asks, ahead of time, how much sky each point can see.
+
+- **A grid baked on the CPU.** Points every half metre round the camera (and a coarser grid every metre further out), each firing rays against the level's own triangles on every core: 64 rays when new, refined to 256 later, and 2,048 where the sky is seen only through a narrow opening (a window seen from deep in a room), since a handful of rays through a small gap is mostly luck.
+- **Two harmonic bands.** Each point keeps the open share in every direction as the first two spherical harmonic bands (a constant and a tilt, like the monopole and dipole of a field): enough to say "more sky above than below, more towards the window". A surface reads it facing its normal, a shiny one along its mirror direction.
+- **Bounce from the blockers.** A ray that does not reach the sky hits something, and that something is lit by the sky too: its colour times the sky light the grid gives there bounces back. So a room's walls light each other a little, and corners match their walls instead of going black.
+- **Following the camera.** The grid moves with the camera like the probes' cascades (a window on a fixed lattice, one plane of new points at a time), baked on a background job system so moving never stalls a frame, and every point baked is kept by its place, so coming back finds it.
+
+### Contact shadows: small things touching the ground
+
+Shadow maps store depth in texels a few centimetres wide and need a small bias against self-shadowing, so a pen on a table casts no visible shadow where it touches: it seems to float. **Contact shadows** fill that gap from the camera's own depth image: each pixel marches 30 cm towards the sun in 32 steps, and a step that crossed a surface on screen (in front of it last step, behind it now) is in shadow. Testing the crossing rather than "behind by some thickness" keeps a 1 cm pen's shadow no wider than a step. The four shadowed lamps lighting the view most brightly get the same, each march stopping short of the lamp so its own bulb casts nothing.
+
+### Planar mirrors: drawing the world twice
+
+A screen-space reflection can only show what is already on screen, and the reflection probe is a photograph from the camera's place. A flat mirror deserves better, and for a flat mirror there is an exact answer: the reflection is the world seen from the camera's image behind the glass. So the flattest, shiniest mirror filling most of the view gets the scene drawn a second time from that reflected camera, clipped at the glass so nothing behind the mirror shows through, with the sun's shadow cascades fitted to its own view. Its picture is read at the mirror's pixels, sharp to the last detail.
+
+**Lights in mirrors without rays.** The same image trick throws a lamp's light off a mirror: light from a lamp by way of a flat mirror is exactly light from the lamp's mirror image, as far behind the glass as the lamp is in front, shining out through the mirror's outline and dimmed by the mirror's reflectance (the path's length is the image's distance, and reflection keeps angles, so a flashlight's cone carries over). Each such image becomes one more spotlight, with a window shaped like the mirror, so everything that handles spotlights (clusters, shadows, fog) handles it at once.
+
+### Coloured shadows through glass
+
+With rays, a shadow ray through a stained glass window simply multiplies by each pane's colour. Without them, each light's shadow map gets a companion at half its size: the product of the share of light every glass face lets through, as the light sees them (multiply blending does the product), and the nearest glass depth. A point behind the glass takes the tint, one in front of it does not, and the shadow filters tint each of their samples, so the coloured patch's edge is as soft as a shadow's at that distance. Glass hidden from the light behind something solid is thrown away, so a basement window cannot colour the floor above. The fog reads it too: coloured shafts in the mist.
+
+### Clear coat: a second layer of shine
+
+Car paint, lacquered wood and varnished floors are two layers: a base under clear varnish. Light meets the varnish first and some reflects off it as off glass (4% head-on, nearly all at grazing, by Fresnel's law): a second, sharp, white highlight over the base's own. The rest passes into the base.
+
+- **Energy kept exactly.** The coat's share of the light from everywhere (its directional albedo, read from the same table the rest of the shading uses) is exactly what the base does not receive, so the base is dimmed by one minus it. The white furnace test, a white surface under even light returning all of it, still holds coated.
+- **Smooth over bumps.** The varnish fills the bumps a normal map draws, so the coat lies on the geometry's normal: lacquered wood keeps its grain under a mirror-flat finish.
+- **One reflection a pixel.** The reflection pass follows the smoother layer's mirror image (the coat's, on car paint); the other keeps its cheaper stand-in.
+
+### Parallax occlusion mapping: depth from a height map
+
+A normal map tilts the light but leaves the surface flat: at a slant, nothing hides behind anything. A **height map** says how high each texel stands, and each pixel follows its view ray down into it as into a little landscape under the polygon, stepping until the ray first drops below the ground, then reads every texture there (Tatarchuk 2006). A brick's near edge then hides the mortar behind it.
+
+- **The geometry.** In the surface's own frame, a ray going a fraction t of the way to the deepest point moves sideways by t times the view's sideways part over its part along the normal, times the depth: tan θ, the same as a pencil's shadow lengthening as the sun sinks. That is why bumps look tallest seen side-on, and why grazing views take more steps (8 straight down, up to 32).
+- **No stair steps.** Between the last step above the ground and the first below, the ground is taken as a straight line and the crossing found exactly.
+- **Its own shadows.** The same walk from the point found up towards the sun says whether a bump shades it: brick edges darken the mortar beside them, more as the sun sinks.
+- **Mips from the unshifted place.** The shift jumps at a brick's edge, so texture detail is chosen from where the flat polygon is, not where the ray landed.
+- **What it cannot do.** The outline stays flat, and everything that reads the depth image (ambient occlusion, contact shadows, screen reflections) still sees the flat polygon. Real geometry detail at scale is a different technique, cluster-based levels of detail as in Unreal's Nanite. (Hardware tessellation, the older answer, was considered and dropped: GPUs shade tiny triangles wastefully, every shadow and depth pass must tessellate identically, and rays never see it.)
+
+### The camera's finish
+
+A real camera adds its own character, all off by default and each a setting:
+
+- **White balance and grading.** White balance turns the light's colour temperature (a black body's colour, from Planck's law) to white the way the eye adapts, by scaling the cone responses (von Kries); the grade adjusts contrast, saturation, and lift, gamma and gain (shadows, midtones, highlights).
+- **Lens effects.** Vignetting darkens the corners by cos⁴ of the angle off axis (the natural fall-off of light through a lens), chromatic aberration splits colours towards the edges as glass bends each wavelength differently, and film grain adds a fine, moving noise.
+- **Motion blur.** A shutter open for a while sees things move. Each pixel's motion (the velocity image TAA already keeps) blurs it along its path, weighed so a still post in front of a moving background stays sharp (McGuire 2012).
+- **Depth of field.** A thin lens focuses one distance; a point nearer or farther spreads into a disc, its **circle of confusion**, whose diameter grows linearly in 1/distance (the lens equation). At half resolution, each pixel gathers the discs that reach it, far and near layers apart so a blurred foreground spreads over what is behind it (Jimenez 2014). Frosted glass uses the same gather: a point behind the pane spreads by its own distance behind the glass.
+
+### Judging on a typical GPU
+
+The engine's defaults (the Ultra preset, DLSS at full size) suit the strongest GPUs. **Quality presets** (Low, Medium, High, Ultra) trade looks for speed in one choice: shadow resolution and reach, probe rays, reflection and ambient occlusion detail. They never touch taste (exposure, bloom's strength) or ray tracing, which is its own switch.
+
+The **typical GPU setup** is one switch (F5's checkbox, the `typical-gpu` command, or `--typical-gpu` at launch) that draws the engine as a mid-range PC would: the High preset, ray tracing off, and DLSS at Quality (two thirds of the pixels across and down), or FSR where DLSS is missing, or the engine's own TAA upscaling where neither is. Switching it off gives back exactly the settings it found. Phase 16's milestone was judged with it on.
+
+Settings that need hardware ray tracing are tagged once, where their struct lists its fields, so on a GPU without it F5 greys them out and the `set` command says they do nothing there.
 
 ---
 

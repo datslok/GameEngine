@@ -277,7 +277,7 @@ Research notes, exact formulas and the reference code's numbers: [docs/ILLUMINAT
 
 ✔ (checked by the user, Oct 24 2026)
 
-## Phase 16: Beautiful without ray tracing ← current
+## Phase 16: Beautiful without ray tracing (done, Nov 6-13 2026)
 
 Everything a GPU without ray tracing needs to look finished, before any more ray tracing. Re-planned on Nov 6 2026, the user's choice: DDGI on hold, phase 7 parked.
 
@@ -290,10 +290,9 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [x] Its noise averaged over frames and denoised before the upscalers see it, and the fill removed (`ao-temporal`)
 - [x] Sky visibility: rooms dark without probes, a CPU-baked grid of how much sky each point sees (`sky-visibility`; its screen fill removed in `ao-temporal`)
   - [x] Deep rays where the sky is seen through few rays (`sky-adaptive-rays`)
-- [ ] The sky visibility grid as CPU light probes: its rays' hits lit, so the grid carries bounce light (designed Nov 11 2026)
+- [x] The sky visibility grid as CPU light probes: its rays' hits lit, so the grid carries bounce light (designed Nov 11 2026; stage 3, lamps, moved to phase 14)
   - [x] Stage 1: the sky's bounce, per unit of the flat ambient, from each triangle's albedo, in place of the guess (`sky-bounce`)
   - Stage 2, the sun's bounce: shelved Nov 12 2026 at the user's choice, moved to phase 17 (the unmerged `sun-bounce` branch)
-  - [ ] Stage 3 (optional): lamps, each point keeping its brightest few with shadow rays, refreshed in a region when one switches
 - [x] Planar reflections, with the mirror's own sun cascades (`planar-reflections`, on `screen-space-gi`)
   - Still optional: a sky stand-in in place of the flat colour where the probe is off or on Low; the reflection probe's missing sun shadows behind the camera without ray tracing.
 - [x] Contact shadows for the sun, cut-outs passed over (`contact-shadows`)
@@ -302,12 +301,9 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [x] Coloured shadow maps: glass tinting shadows without ray tracing, and the light lab's stained glass (`coloured-shadow-maps`)
 - [x] Mirrored lights without ray tracing: the image light for flat mirrors (`image-lights`)
 - [x] Steadier volumetric fog: history read at each froxel's middle, a jitter turned per froxel (`steadier-fog`)
-- [ ] The fog's history as a time constant in seconds, as the probes', so it lags the same at any frame rate (left out of `steadier-fog`: it does not help the shimmer)
-- [ ] Materials
+- [x] Materials (the rest moved on: anisotropy and skin to phase 14, sheen to phase 10, decals to phase 12)
   - [x] Clear coat: a varnish layer over any material, from glTF's KHR_materials_clearcoat, and the light lab's painted balls (`clear-coat`)
   - [x] Parallax occlusion mapping with self-shadowing from the sun, and the light lab's brick wall and cobbles (`parallax-occlusion`)
-  - [ ] Anisotropy, subsurface scattering for skin, decals
-  - Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
 - [x] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects (all off by default, the user's choice)
   - [x] Colour grading and lens effects: white balance, the grade, vignetting, chromatic aberration, film grain (`camera-grading`)
   - [x] Motion blur: McGuire 2012's reconstruction filter from the shutter angle, off by default (`motion-blur`)
@@ -315,11 +311,11 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [x] Frosted glass through the same gather: each point behind the pane spreading by its own distance behind the glass (`frosted-gather`)
 - [x] A typical GPU setup: the High preset, ray tracing off, DLSS at Quality (FSR, else TAA, where DLSS is missing), one switch, command or launch option to view it; `preset` as a command; ray-traced settings greyed out on GPUs without ray queries (`typical-gpu`)
 
-**Milestone:** with the typical GPU setup, the light lab and the demo look finished by day and at night, at a frame rate a mid-range GPU holds, with no feature that needs ray queries.
+**Milestone:** with the typical GPU setup, the light lab and the demo look finished by day and at night, at a frame rate a mid-range GPU holds, with no feature that needs ray queries. Met Nov 13 2026, checked by the user's eye. The fog's history in seconds was dropped: a fixed share a frame trails at low frame rates where one in seconds would shimmer, the worse of the two.
 
 ---
 
-## Phase 17: Ray tracing and path tracing
+## Phase 17: Ray tracing and path tracing ← current
 
 The top of the quality ladder, once the path without ray tracing is finished. Always optional, off by default, for GPUs with ray queries. DDGI comes off hold here if it is still wanted.
 
@@ -474,6 +470,7 @@ A third kind of game, on top of phase 7's cloth: cut fabric panels, sew them int
 
 **Rendering**
 - [ ] Weave detail with phase 6a's normal maps
+- [ ] Fabric shading: a sheen term for the soft rim highlight of cloth (glTF's KHR_materials_sheen), on top of physically based materials (moved here from phase 16)
 
 **Game**
 - [ ] Pattern editor: draw and edit panel outlines, choose which edges are sewn together
@@ -513,6 +510,7 @@ Deferred until there is a playable FPS slice (phase 12) worth playing together. 
   - Projectiles and grenades (phase 5's particles) must also hit moving things, characters and props, not only the static level.
   - Sweep the sphere against the moving colliders' shapes too (a sphere or capsule is a raycast against the shape grown by the radius, like `sweepSphere`; a box needs a rounded-box sweep)
 - [ ] Health, damage, death and respawn
+- [ ] Decals: bullet holes, scorch marks, signs and dirt projected onto surfaces, listed per screen tile as the lights are (moved here from phase 16)
 - [ ] First-person weapon model (attached with phase 9's hierarchy) and camera feel (bob, field of view)
 
 **MOBA**
@@ -589,6 +587,9 @@ Ideas with no fixed place and nothing waiting on them: pick one up when a game n
   - The exposure would map the real dynamic range (the moon disc is 10,000+ times brighter than moonlit ground) to the screen.
   - The night's look waits for it too: night vision's thresholds (now off by default), lower contrast at night (rods see less of it; the ground under a dim moon is crushed in the tone curve's toe while the sky shows), and the sky round a low or crescent moon (partly the sun's twilight) against the dark ground.
   - Until then the demo's moon glow and moonlight, and the light lab's sun and sky, are separate artistic dials
+- [ ] The sky visibility grid's lamps (phase 16's stage 3, optional): each point keeping its brightest few lamps found by shadow rays, refreshed in a region when one switches, so lamps bounce light without probes
+- [ ] Anisotropic highlights (brushed metal, hair, satin): GGX stretched along the tangent, glTF's KHR_materials_anisotropy
+- [ ] Subsurface scattering for skin, when the engine has characters with skin: light entering and leaving the skin a little way off, softening it (a screen-space blur by a diffusion profile, or a pre-integrated skin lookup)
 - [ ] Tighter clusters: depth bounds per tile from the prepass and smaller far tiles, since far clusters list 16 or more lamps where 4-8 reach; only if many lights ever cost more than a distance check each
 - [ ] Shadow redraw budget: at most N shadow tiles drawn per frame, most important first, far lights refreshed less often, so switching on many lights at once or turning quickly does not cost one long frame
 - [ ] Separate shadow caches for still and moving casters: keep a copy of each tile with only the still world, and draw the moving things over a copy of it each frame, so one spinning object no longer forces whole tiles to redraw
