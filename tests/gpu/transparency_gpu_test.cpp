@@ -159,6 +159,9 @@ namespace {
             report.check("transmissionSpread", arithmeticTolerance, spread, out[0][0]);
             report.check("refractionLevel", FloatTolerance{.absolute = 1e-4f, .relative = 1e-4f},
                          refractionLevel(spread, in[0][2], in[0][3], in[1][0], static_cast<std::uint32_t>(in[1][1])), out[0][1]);
+            report.check("frostedRadius", arithmeticTolerance, frostedRadius(spread, in[0][2], in[0][3], in[1][0]), out[0][2]);
+            report.check("frostedGatherLevel", FloatTolerance{.absolute = 1e-4f, .relative = 1e-4f},
+                         frostedGatherLevel(frostedReach(spread, in[1][0]), static_cast<std::uint32_t>(in[1][1])), out[0][3]);
             report.check("beerAttenuation", transcendentalTolerance, beerAttenuation(vec3From(in[2]), in[1][2], in[1][3]), vec3From(out[1]));
             report.check("solidRefractionExit", FloatTolerance{.absolute = 1e-5f, .relative = 1e-5f},
                          solidRefractionExit(vec3From(in[3]), vec3From(in[4]), vec3From(in[5]), in[0][1], in[5][3]), vec3From(out[2]));

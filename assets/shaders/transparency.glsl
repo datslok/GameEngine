@@ -5,6 +5,7 @@
 #define TRANSPARENCY_GLSL
 
 #include "render/gpu/transparency_shared.h"
+#include "render/gpu/depth_of_field_shared.h"
 
 // schlickFresnel, for the light crossing glass.
 #include "brdf.glsl"
@@ -52,10 +53,25 @@ float transmissionSpread(float roughness, float ior) {
     return max(ior - 1.0, 0.0) * roughness * roughness;
 }
 
-// The blurred picture's level: log2 of the cone's width in pixels, seen across the view and behind distances.
+// The radius in pixels of the disc a point behindDistance behind frosted glass spreads over on it, and its ceiling.
+float frostedRadius(float spread, float behindDistance, float viewDistance, float pixelsPerRadian) {
+    return spread * behindDistance / max(viewDistance + behindDistance, 1e-6) * pixelsPerRadian;
+}
+
+float frostedReach(float spread, float pixelsPerRadian) {
+    return spread * pixelsPerRadian;
+}
+
+// The blurred picture's level: log2 of the disc's width in pixels.
 float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, uint levels) {
-    float covered = 2.0 * spread * behindDistance / max(viewDistance + behindDistance, 1e-6);
-    return clamp(log2(max(covered * pixelsPerRadian, 1.0)), 0.0, float(levels) - 1.0);
+    float pixels = 2.0 * frostedRadius(spread, behindDistance, viewDistance, pixelsPerRadian);
+    return clamp(log2(max(pixels, 1.0)), 0.0, float(levels) - 1.0);
+}
+
+// The level frosted glass's gather reads its samples from: the rings' spacing about a texel there.
+float frostedGatherLevel(float reach, uint levels) {
+    float spacing = reach / float(DEPTH_OF_FIELD_RINGS);
+    return clamp(log2(max(spacing, 1.0)), 0.0, float(levels) - 1.0);
 }
 
 // A smooth read along one axis (bsplineAxis in transparency.cpp): xy the two bilinear reads' coordinates, zw their weights.

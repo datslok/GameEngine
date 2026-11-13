@@ -1,6 +1,7 @@
 #include "render/gpu/transparency.h"
 #include "render/gpu/brdf.h"
 #include "render/gpu/column_major.h"
+#include "render/gpu/depth_of_field.h"
 
 #include <algorithm>
 #include <cmath>
@@ -113,11 +114,45 @@ float transmissionSpread(float roughness, float ior) {
     return std::max(ior - 1.0f, 0.0f) * roughness * roughness;
 }
 
-// The cone's angle across the camera's view of what is behind, in pixels, then halvings of the picture.
+// The cone's half angle across the camera's view of what is behind (similar triangles from the camera), in pixels.
+float frostedRadius(float spread, float behindDistance, float viewDistance, float pixelsPerRadian) {
+    return spread * behindDistance / std::max(viewDistance + behindDistance, 1e-6f) * pixelsPerRadian;
+}
+
+float frostedReach(float spread, float pixelsPerRadian) {
+    return spread * pixelsPerRadian;
+}
+
+// The disc's width in pixels, then halvings of the picture.
 float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, std::uint32_t levels) {
-    const float covered = 2.0f * spread * behindDistance / std::max(viewDistance + behindDistance, 1e-6f);
-    const float pixels = covered * pixelsPerRadian;
+    const float pixels = 2.0f * frostedRadius(spread, behindDistance, viewDistance, pixelsPerRadian);
     return std::clamp(std::log2(std::max(pixels, 1.0f)), 0.0f, static_cast<float>(levels) - 1.0f);
+}
+
+float frostedGatherLevel(float reach, std::uint32_t levels) {
+    const float spacing = reach / static_cast<float>(DEPTH_OF_FIELD_RINGS);
+    return std::clamp(std::log2(std::max(spacing, 1.0f)), 0.0f, static_cast<float>(levels) - 1.0f);
+}
+
+Vec3 frostedGatherAt(const FrostedSample& centre, float reach, float level, const FrostedPicture& picture) {
+    const float texel = std::exp2(level);
+    const float sampled = reach / texel + static_cast<float>(DEPTH_OF_FIELD_EDGE);
+    float weights = scatterWeight(centre.radius / texel, 0.0f, sampled) * blurRingShare(0);
+    Vec3 sum = centre.colour * weights;
+
+    for (int ring = 1; ring <= DEPTH_OF_FIELD_RINGS; ++ring) {
+        const float share = blurRingShare(ring);
+
+        for (int step = 0; step < 8 * ring; ++step) {
+            const Vec2 offset = blurRingOffset(ring, step) * sampled;
+            const FrostedSample sample = picture(offset * texel);
+            const float weight = scatterWeight(sample.radius / texel, offset.length(), sampled) * share;
+            weights += weight;
+            sum = sum + sample.colour * weight;
+        }
+    }
+
+    return sum * (1.0f / weights);
 }
 
 /*

@@ -313,7 +313,7 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [x] Colour grading and lens effects: white balance, the grade, vignetting, chromatic aberration, film grain (`camera-grading`)
   - [x] Motion blur: McGuire 2012's reconstruction filter from the shutter angle, off by default (`motion-blur`)
   - [x] Depth of field: a thin lens's circle of confusion and scatter-as-gather at half resolution, off by default (`depth-of-field`)
-  - [ ] Frosted glass through the same gather: each point behind the pane blurred by its own spread times its distance behind the glass (a glint close behind a pane now throws too wide a glow where the pane's background is far; `frosted-glass-smooth` smoothed its shape)
+  - [x] Frosted glass through the same gather: each point behind the pane spreading by its own distance behind the glass (`frosted-gather`)
 - [ ] A typical GPU setup: ray tracing off, FSR or TAA in place of DLSS, the High or Medium preset, one switch or command to view it
   - Ray-traced options greyed out on GPUs without ray queries (detected at start-up)
 

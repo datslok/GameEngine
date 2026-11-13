@@ -143,6 +143,7 @@ void testToneMapUniforms();
 void testCameraFinish();
 void testMotionBlur();
 void testDepthOfField();
+void testFrostedGlass();
 void testBloom();
 void testBlueNoise();
 void testTaa();
@@ -340,6 +341,7 @@ int main(int argumentCount, char** arguments) {
     testCameraFinish();
     testMotionBlur();
     testDepthOfField();
+    testFrostedGlass();
     testBloom();
     testBlueNoise();
     testTaa();

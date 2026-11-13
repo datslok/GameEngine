@@ -84,12 +84,16 @@ float farSampleWeight(float sampleRadius, float pixelRadius, float distance) {
     return blurCoverage(std::min(std::max(sampleRadius, 0.0f), reach), distance);
 }
 
+float scatterWeight(float radius, float distance, float reach) {
+    return blurCoverage(radius, distance) * reach * reach / std::max(radius * radius, 1.0f);
+}
+
 float nearSampleWeight(float sampleRadius, float distance, float reach) {
     if (sampleRadius >= -inFocus) {
         return 0.0f;
     }
 
-    return blurCoverage(sampleRadius, distance) * reach * reach / std::max(sampleRadius * sampleRadius, 1.0f);
+    return scatterWeight(sampleRadius, distance, reach);
 }
 
 // Sorted in place: nine values are few enough that the sort's cost does not matter on the CPU; the shader takes the

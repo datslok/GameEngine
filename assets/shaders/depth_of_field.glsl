@@ -54,12 +54,16 @@ float farSampleWeight(float sampleRadius, float pixelRadius, float distance) {
     return blurCoverage(min(max(sampleRadius, 0.0), reach), distance);
 }
 
+float scatterWeight(float radius, float distance, float reach) {
+    return blurCoverage(radius, distance) * reach * reach / max(radius * radius, 1.0);
+}
+
 float nearSampleWeight(float sampleRadius, float distance, float reach) {
     if (sampleRadius >= -float(DEPTH_OF_FIELD_IN_FOCUS)) {
         return 0.0;
     }
 
-    return blurCoverage(sampleRadius, distance) * reach * reach / max(sampleRadius * sampleRadius, 1.0);
+    return scatterWeight(sampleRadius, distance, reach);
 }
 
 /*

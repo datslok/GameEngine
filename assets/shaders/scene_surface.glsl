@@ -152,6 +152,7 @@ layout(set = 1, binding = 32) uniform sampler2D lightContactShadows;
 */
 #include "reflection_probe.glsl"
 #include "transparency.glsl"
+#include "depth_of_field.glsl"
 const bool transparentView = true;
 
 // The fog in front of the glass (render/gpu/volumetric_fog.h): the picture behind it is already fogged.
@@ -196,16 +197,9 @@ vec3 smoothPictureLevel(vec2 coordinate, int level) {
 * then read smoothly (smoothPictureLevel), blended between the two whole levels round the level, level 0 itself (clear
 * glass) read as before.
 */
-vec3 refractedPicture(vec3 normal, vec3 toCamera, float roughness, float ior, float thickness) {
-    vec2 screen = clusterScreen.xy;
-    vec3 exit = thickness > 0.0 ? solidRefractionExit(relativePosition, toCamera, normal, ior, thickness) : relativePosition;
-    vec3 landed = clipToScreen(relativeViewProjection * vec4(exit, 1.0), screen);
-    vec2 pixel = clamp(landed.xy, vec2(0.5), screen - 0.5);
-    float viewDistance = dot(relativePosition, viewForward.xyz);
-    float spread = transmissionSpread(roughness, ior);
-    uint levels = uint(transparentRefraction.z);
-    vec2 coordinate = pixel / screen;
+vec3 ownDistancePicture(vec2 pixel, vec2 coordinate, float viewDistance, float spread, uint levels, out float ownRadius) {
     float behind = max(texelFetch(opaquePicture, ivec2(pixel), 0).a - viewDistance, 0.0);
+    ownRadius = frostedRadius(spread, behind, viewDistance, transparentRefraction.y);
     float firstLevel = refractionLevel(spread, behind, viewDistance, transparentRefraction.y, levels);
 
     if (firstLevel <= 0.0) {
@@ -218,6 +212,52 @@ vec3 refractedPicture(vec3 normal, vec3 toCamera, float roughness, float ior, fl
     int upper = min(lower + 1, int(levels) - 1);
     vec3 below = lower == 0 ? textureLod(opaquePicture, coordinate, 0.0).rgb : smoothPictureLevel(coordinate, lower);
     return mix(below, smoothPictureLevel(coordinate, upper), level - float(lower));
+}
+
+/*
+* Then, since every point behind really spreads over its own disc (render/gpu/transparency.h, frostedGatherAt mirrors
+* this), that read is the centre of a gather on the depth of field's rings out to the infinitely far's reach, each sample
+* read at frostedGatherLevel with its own distance (the level's averaged alpha) and weighed by its disc's scatter weight
+* and its ring's share: so a far glint's glow carries on over a thing right behind the pane instead of stopping at its
+* outline, and the thing itself stays sharp. Glass blurring less than a pixel even for the infinitely far reads level 0.
+*/
+vec3 refractedPicture(vec3 normal, vec3 toCamera, float roughness, float ior, float thickness) {
+    vec2 screen = clusterScreen.xy;
+    vec3 exit = thickness > 0.0 ? solidRefractionExit(relativePosition, toCamera, normal, ior, thickness) : relativePosition;
+    vec3 landed = clipToScreen(relativeViewProjection * vec4(exit, 1.0), screen);
+    vec2 pixel = clamp(landed.xy, vec2(0.5), screen - 0.5);
+    float viewDistance = dot(relativePosition, viewForward.xyz);
+    float spread = transmissionSpread(roughness, ior);
+    uint levels = uint(transparentRefraction.z);
+    vec2 coordinate = pixel / screen;
+    float reach = frostedReach(spread, transparentRefraction.y);
+
+    if (reach < 1.0) {
+        return textureLod(opaquePicture, coordinate, 0.0).rgb;
+    }
+
+    float ownRadius;
+    vec3 centre = ownDistancePicture(pixel, coordinate, viewDistance, spread, levels, ownRadius);
+    float level = frostedGatherLevel(reach, levels);
+    float texel = exp2(level);
+    float sampled = reach / texel + float(DEPTH_OF_FIELD_EDGE);
+    float weights = scatterWeight(ownRadius / texel, 0.0, sampled) * blurRingShare(0);
+    vec3 sum = centre * weights;
+
+    for (int ring = 1; ring <= DEPTH_OF_FIELD_RINGS; ++ring) {
+        float share = blurRingShare(ring);
+
+        for (int step = 0; step < 8 * ring; ++step) {
+            vec2 offset = blurRingOffset(ring, step) * sampled;
+            vec4 picture = textureLod(opaquePicture, (pixel + offset * texel) / screen, level);
+            float radius = frostedRadius(spread, max(picture.a - viewDistance, 0.0), viewDistance, transparentRefraction.y);
+            float weight = scatterWeight(radius / texel, length(offset), sampled) * share;
+            weights += weight;
+            sum += picture.rgb * weight;
+        }
+    }
+
+    return sum / weights;
 }
 
 #ifdef DUAL_SOURCE_BLENDING
