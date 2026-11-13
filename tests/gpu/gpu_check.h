@@ -131,6 +131,7 @@ void gpuTestAlphaMask(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestSkyVisibility(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestTransparency(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestDither(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestCameraFinish(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestOverlay(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestStars(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestClusters(GpuFunctionRunner& runner, GpuCheckReport& report);

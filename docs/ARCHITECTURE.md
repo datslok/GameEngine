@@ -3795,6 +3795,27 @@ When `hdr` changes `prepareSwapchain` waits for the GPU, rebuilds the swapchain 
 - Debug line colours are multiplied by the white level (`buildDebugLineVertices(lines, colourScale)`).
 - `getDisplayOutput()`.
 
+### Camera finish
+
+What a real camera and lens do to the light after the scene is lit (`render/gpu/camera_finish`, `CameraSettings`, `RenderSettings::camera`, F5's Camera group, keys `engine.render.camera.*`), applied in the tone mapping pass. Every effect starts neutral or off (the user's choice), and each is skipped by the shader while off, so the default picture is the same as before it.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `whiteBalance`, `tint` | 6500 K, 0 | the light that shows as 6500 K light does: its blackbody temperature (1667 to 25000 K) and Duv off the locus (within 0.05, positive greener) |
+| `contrast`, `saturation` | 1, 1 | stops about mid grey (0.18) times the contrast; each channel's distance from the pixel's luminance times the saturation |
+| `lift`, `gamma`, `gain` | 0, 1, 1 | the ASC CDL: (light x gain + lift)^(1 / gamma) |
+| `vignetting` | 0 | the share of a real lens's cos^4 falloff shown (0..1) |
+| `chromaticAberration` | 0 | pixels between red and blue at the picture's corners |
+| `filmGrain` | 0 | the grain's strength (0..1) |
+
+- **White balance** (`whiteBalanceMatrix`, built on the CPU each frame): the chosen light's chromaticity (`planckianChromaticity`, Kim et al. 2002's fit of the blackbody locus; `whiteBalanceChromaticity` moves it `tint` across the locus in CIE 1960 uv) and 6500 K light's, each as Bradford cone responses; each response is scaled by their ratio (von Kries), conjugated by sRGB to XYZ, so light of the chosen colour comes out as 6500 K light's. The identity at the neutral setting. The pass multiplies the light by it before the exposure.
+- **The grade** (`gradeColour`): after the exposure and before the curve (which then gets an exposure of 1), contrast per channel about `CAMERA_MID_GREY`, saturation about the luminance, then gain, lift and gamma; never negative. The white balance and the grade run only while `gradesColour` (any of them off neutral), so the curve's call is the old one otherwise.
+- **Natural vignetting** (`naturalVignetting`): 1 / (1 + tan^2 theta)^2, theta the angle off the lens's axis from the pixel's NDC and the tangents of the half field of view (`CameraView`: the frame camera's vertical field of view and aspect), blended in by the strength; on the light, before the curve.
+- **Chromatic aberration** (`aberrationPlace`): red read half the shift outward along the line from the centre and blue half inward, by the pixel's distance over the corner's; the scene image is bound with a linear sampler for it (texelFetch, used otherwise, ignores the sampler).
+- **Film grain** (`filmGrain`, `grainNoise`): after the curve, before the dither: (noise - 0.5) x strength x 4 l (1 - l) x peak on every channel, l the luminance over the peak (none at black or the peak), the noise `pcg3d` of the pixel and the frame (taken modulo `CAMERA_FRAME_CYCLE`), from `hash.glsl` (shared with the fog's froxel turn).
+- The record: `ToneMapUniformData` (144 bytes) gained `whiteBalance` (three rows), `grade` (contrast, saturation, lift, gamma), `lens` (gain, vignetting, aberration, the grading flag) and `view` (the half field of view's tangents, grain, frame); `packToneMapping` takes the `CameraSettings` and `CameraView` and validates them (`validateCamera`).
+- Mirrored in `camera_finish.glsl` and checked by the GPU tests (`camera_finish_gpu_test.cpp`). **Measured:** with every effect on, the tone mapping pass 0.11 ms at 1920 x 1080 on the laptop (about 0.07 off).
+
 ### Bloom
 
 Bloom (`render/gpu/bloom`, `BloomSettings`):

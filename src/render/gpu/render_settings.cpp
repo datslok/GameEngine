@@ -13,6 +13,9 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
     visitor.group("Tone mapping", [&] {
         visit(settings.toneMapping, visitor);
     });
+    visitor.group("Camera", [&] {
+        visit(settings.camera, visitor);
+    });
     visitor.group("Display", [&] {
         visit(settings.display, visitor);
     });

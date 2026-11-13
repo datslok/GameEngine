@@ -1195,7 +1195,7 @@ bool VulkanRenderer::render(const FrameDescription& description, const RenderSet
 
         // Labels begin and end inside the one rendering block, so none crosses its boundary.
         beginGpuPass(frame, GpuPass::ToneMap);
-        drawToneMap(frame, *toneMapPipeline, settings.toneMapping, bloomMix);
+        drawToneMap(frame, *toneMapPipeline, settings, description.camera, bloomMix);
         endGpuPass(frame, GpuPass::ToneMap);
 
         // Last, so they are drawn over the finished image in exactly their own colours, and the UI over them.
@@ -2520,14 +2520,16 @@ std::size_t VulkanRenderer::drawBatches(VkCommandBuffer commands, const std::vec
 }
 
 /*
-* The tone mapping pass, into the open pass: the full-screen triangle reads the finished scene texel for texel and mixes
-* in the bloom (half the screen's size, filtered). Without bloom the shader never reads it, but the slot still needs an image,
-* so the scene stands in.
+* The tone mapping pass, into the open pass: the full-screen triangle reads the finished scene texel for texel (between
+* texels, filtered, for chromatic aberration) and mixes in the bloom (half the screen's size, filtered). Without bloom the
+* shader never reads it, but the slot still needs an image, so the scene stands in. The camera's finish takes the frame's
+* field of view (vignetting) and number (film grain).
 */
-void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const ToneMappingSettings& settings,
+void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipeline, const RenderSettings& settings, const Camera& camera,
                                  const BloomComposite& bloomMix) {
     const VkCommandBuffer commands = frame.commands;
-    const ToneMapUniformData toneMapping = packToneMapping(settings, displayOutput, bloomMix);
+    const CameraView view{camera.getVerticalFov(), camera.getAspectRatio(), static_cast<std::uint32_t>(taaFrame % cameraFrameCycle)};
+    const ToneMapUniformData toneMapping = packToneMapping(settings.toneMapping, displayOutput, bloomMix, settings.camera, view);
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.get());
     frame.uniforms.push(VK_SHADER_STAGE_FRAGMENT_BIT, 0, &toneMapping, sizeof(toneMapping));
@@ -2535,7 +2537,7 @@ void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipe
 
     const VulkanImage* bloomResult = bloom->getResult();
     const std::array<SampledImage, 2> images{
-        SampledImage{finishedScene->getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        SampledImage{finishedScene->getView(), linearSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         SampledImage{bloomResult != nullptr ? bloomResult->getView() : finishedScene->getView(), linearSampler.get(),
                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
     };
@@ -2607,7 +2609,7 @@ CapturedFrame VulkanRenderer::capture(const FrameDescription& description, const
         beginRendering(frame.commands, {width, height}, &colour, nullptr);
         renderingOpen = true;
         beginGpuPass(frame, GpuPass::ToneMap);
-        drawToneMap(frame, *capturePipeline, settings.toneMapping, bloomMix);
+        drawToneMap(frame, *capturePipeline, settings, lastFrame.camera, bloomMix);
         endGpuPass(frame, GpuPass::ToneMap);
         vkCmdEndRendering(frame.commands);
         renderingOpen = false;

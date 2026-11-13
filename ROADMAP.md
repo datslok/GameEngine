@@ -309,7 +309,10 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [ ] Materials
   - Clear coat, anisotropy, subsurface scattering for skin, parallax occlusion mapping, decals
   - Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
-- [ ] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects
+- [ ] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects (all off by default, the user's choice)
+  - [x] Colour grading and lens effects: white balance, the grade, vignetting, chromatic aberration, film grain (`camera-grading`)
+  - [ ] Motion blur: McGuire 2012's reconstruction filter from the shutter angle, off by default
+  - [ ] Depth of field: a thin lens's circle of confusion from the f-number and focus, half-resolution bokeh, off by default
 - [ ] A typical GPU setup: ray tracing off, FSR or TAA in place of DLSS, the High or Medium preset, one switch or command to view it
   - Ray-traced options greyed out on GPUs without ray queries (detected at start-up)
 
