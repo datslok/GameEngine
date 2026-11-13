@@ -68,12 +68,22 @@ struct MaterialSource {
     float attenuationDistance = Material{}.attenuationDistance;
     float ior = Material{}.ior;
 
+    // A clear coat: how much, its roughness, their textures (linear, red and green channels) and its own normal map
+    // (linear) with its scale. The defaults are Material's own.
+    float clearCoat = Material{}.clearCoat;
+    TextureSource clearCoatTexture;
+    float clearCoatRoughness = Material{}.clearCoatRoughness;
+    TextureSource clearCoatRoughnessTexture;
+    TextureSource clearCoatNormalTexture;
+    float clearCoatNormalScale = Material{}.clearCoatNormalScale;
+
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
         return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet() || occlusionTexture.isSet() ||
-               emissiveTexture.isSet() || transmissionTexture.isSet() || thicknessTexture.isSet();
+               emissiveTexture.isSet() || transmissionTexture.isSet() || thicknessTexture.isSet() || clearCoatTexture.isSet() ||
+               clearCoatRoughnessTexture.isSet() || clearCoatNormalTexture.isSet();
     }
 };
 

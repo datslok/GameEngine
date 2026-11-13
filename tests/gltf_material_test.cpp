@@ -29,12 +29,12 @@ namespace {
     * Three primitives sharing one triangle: a full metallic-roughness material (factors, a metallic-roughness texture,
     * a normal map with its scale, an occlusion texture with its strength, an emissive texture, and an emissive colour
     * made brighter by KHR_materials_emissive_strength, and glass: transmission, a volume's thickness and attenuation, an
-    * index of refraction), a material with no pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
+    * index of refraction, and a clear coat with its three textures), a material with no pbrMetallicRoughness block, and no material at all. glTF's defaults for missing values are metallic 1 and roughness 1.
     */
     const char* const document = R"json(
 {
     "asset": { "version": "2.0" },
-    "extensionsUsed": ["KHR_materials_emissive_strength", "KHR_materials_transmission", "KHR_materials_volume", "KHR_materials_ior"],
+    "extensionsUsed": ["KHR_materials_emissive_strength", "KHR_materials_transmission", "KHR_materials_volume", "KHR_materials_ior", "KHR_materials_clearcoat"],
     "scene": 0,
     "scenes": [{ "nodes": [0] }],
     "nodes": [{ "mesh": 0 }],
@@ -64,7 +64,8 @@ namespace {
                 "KHR_materials_emissive_strength": { "emissiveStrength": 4.0 },
                 "KHR_materials_transmission": { "transmissionFactor": 0.6, "transmissionTexture": { "index": 0 } },
                 "KHR_materials_volume": { "thicknessFactor": 0.5, "thicknessTexture": { "index": 0 }, "attenuationDistance": 2.0, "attenuationColor": [0.5, 0.8, 1.0] },
-                "KHR_materials_ior": { "ior": 1.33 }
+                "KHR_materials_ior": { "ior": 1.33 },
+                "KHR_materials_clearcoat": { "clearcoatFactor": 0.9, "clearcoatTexture": { "index": 0 }, "clearcoatRoughnessFactor": 0.2, "clearcoatRoughnessTexture": { "index": 0 }, "clearcoatNormalTexture": { "index": 0, "scale": 0.7 } }
             }
         },
         { "emissiveFactor": [0.0, 0.0, 0.0] }
@@ -190,6 +191,9 @@ void testGltfMaterials() {
         assert(full.transmissionTexture.path == full.metallicRoughnessTexture.path);
         assert(nearlyEqual(full.thickness, 0.5f) && full.thicknessTexture.path == full.metallicRoughnessTexture.path);
         assert(nearlyEqual(full.attenuationDistance, 2.0f) && nearlyEqual(full.attenuationColour.y, 0.8f) && nearlyEqual(full.ior, 1.33f));
+        assert(nearlyEqual(full.clearCoat, 0.9f) && nearlyEqual(full.clearCoatRoughness, 0.2f) && nearlyEqual(full.clearCoatNormalScale, 0.7f));
+        assert(full.clearCoatTexture.path == full.metallicRoughnessTexture.path && full.clearCoatRoughnessTexture.path == full.metallicRoughnessTexture.path);
+        assert(full.clearCoatNormalTexture.path == full.metallicRoughnessTexture.path);
 
         const MaterialSource& withoutFactors = model.parts[1].material;
         assert(nearlyEqual(withoutFactors.metallic, 1.0f));
@@ -208,6 +212,8 @@ void testGltfMaterials() {
         assert(!withoutFactors.transmissionTexture.isSet());
         assert(withoutFactors.thickness == 0.0f && !withoutFactors.thicknessTexture.isSet() && nearlyEqual(withoutFactors.ior, 1.5f));
         assert(std::isinf(withoutFactors.attenuationDistance) && withoutFactors.attenuationColour.x == 1.0f);
+        assert(withoutFactors.clearCoat == 0.0f && withoutFactors.clearCoatRoughness == 0.0f && withoutFactors.clearCoatNormalScale == 1.0f);
+        assert(!withoutFactors.clearCoatTexture.isSet() && !withoutFactors.clearCoatRoughnessTexture.isSet() && !withoutFactors.clearCoatNormalTexture.isSet());
 
         const MaterialSource& withoutMaterial = model.parts[2].material;
         assert(nearlyEqual(withoutMaterial.metallic, 1.0f));
@@ -228,6 +234,10 @@ void testGltfMaterials() {
         assert(throwsWhenLoaded(directory, "negative_thickness.gltf", "\"thicknessFactor\": 0.5", "\"thicknessFactor\": -1.0"));
         assert(throwsWhenLoaded(directory, "zero_attenuation.gltf", "\"attenuationDistance\": 2.0", "\"attenuationDistance\": 0.0"));
         assert(throwsWhenLoaded(directory, "bright_attenuation.gltf", "[0.5, 0.8, 1.0]", "[0.5, 0.8, 1.5]"));
+
+        // A clear coat's amount and roughness are shares, 0..1.
+        assert(throwsWhenLoaded(directory, "thick_coat.gltf", "\"clearcoatFactor\": 0.9", "\"clearcoatFactor\": 1.5"));
+        assert(throwsWhenLoaded(directory, "rough_coat.gltf", "\"clearcoatRoughnessFactor\": 0.2", "\"clearcoatRoughnessFactor\": -0.2"));
     }
     catch (...) {
         std::filesystem::remove_all(directory);

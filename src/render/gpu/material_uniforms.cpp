@@ -19,7 +19,8 @@ std::uint32_t bindlessTextureSlot(TextureHandle texture) {
 * standing in for one (render/gpu/normal_mapping.h). The occlusion strength likewise goes as 0 without an occlusion
 * texture, which tells the shader to leave the light from all around as it was. A missing emissive texture needs no such
 * care: white times the emissive colour is the colour itself. An infinite attenuation distance packs as 0 (1 / infinity),
-* absorbing nothing.
+* absorbing nothing. A clear coat's normal map scale likewise goes as 0 without its texture, and a transparent
+* material's coat as none: glass is a varnish-like surface already.
 */
 GpuMaterial packMaterial(const Material& material) {
     GpuMaterial data{};
@@ -55,6 +56,16 @@ GpuMaterial packMaterial(const Material& material) {
     data.attenuation[0] = material.attenuationColour.x;
     data.attenuation[1] = material.attenuationColour.y;
     data.attenuation[2] = material.attenuationColour.z;
+
+    if (!isTransparent(material)) {
+        data.clearCoat[0] = std::clamp(material.clearCoat, 0.0f, 1.0f);
+        data.clearCoat[1] = std::clamp(material.clearCoatRoughness, 0.0f, 1.0f);
+        data.clearCoat[2] = material.clearCoatNormalTexture.isValid() ? material.clearCoatNormalScale : 0.0f;
+    }
+
+    data.clearCoatTextures[0] = bindlessTextureSlot(material.clearCoatTexture);
+    data.clearCoatTextures[1] = bindlessTextureSlot(material.clearCoatRoughnessTexture);
+    data.clearCoatTextures[2] = bindlessTextureSlot(material.clearCoatNormalTexture);
 
     return data;
 }

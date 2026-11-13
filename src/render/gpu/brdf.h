@@ -129,20 +129,64 @@ struct ShadingPoint {
     Vec3 energyCompensation;
     Vec3 specularAlbedo; // with multiple scattering
     Vec3 diffuse;        // diffuse colour already weighted by what the specular part leaves
+
+    /*
+    * A clear coat over it (addClearCoat): none until one is added. coat is how much (0..1); the coat lies on its own
+    * normal (the geometry's, not the normal map's), at its own view cosine and GGX width, and coatAlbedo is the share
+    * of light from everywhere it reflects (its amount times the table's albedo for a 4% reflector); the base's terms
+    * above already keep only the rest.
+    */
+    float coat = 0.0f;
+    Vec3 coatNormal;
+    float coatNDotV = 0.0f;
+    float coatAlpha = 0.0f;
+    float coatCompensation = 1.0f;
+    float coatAlbedo = 0.0f;
 };
 
 ShadingPoint prepareShading(const SurfaceProperties& surface, const Vec3& normal, const Vec3& toCamera, const BrdfTable& table);
+
+/*
+* A clear coat (KHR_materials_clearcoat): a thin layer of clear varnish over the surface, like car paint's lacquer or a
+* varnished floor. Light meets it first: it reflects like glass (4% head-on, nearly all at grazing, Fresnel) off facets
+* of its own roughness, a second specular lobe, white whatever the colour under it; the rest passes through and lights
+* the surface as before. amount is how much of the surface it covers (0..1), normal the way it faces: the geometry's,
+* since varnish fills the bumps a normal map draws (or the coat's own normal map).
+*/
+struct ClearCoatProperties {
+    float amount = 0.0f;
+    float roughness = 0.0f;
+    Vec3 normal{0.0f, 1.0f, 0.0f};
+};
+
+/*
+* Lays a clear coat over a prepared point. The coat's share of the light from everywhere is its amount times the
+* table's albedo for a 4% reflector at its roughness and view (with the same compensation for light lost between
+* facets as the base's); the base's diffuse and specular parts are scaled by what is left, 1 - that share, so what the
+* coat reflects is exactly what the base does not receive: a white surface coated still returns all the light. This
+* takes the share at the eye's angle rather than each light's (glTF's choice too, with Fresnel in place of the albedo),
+* so it is one number per pixel. A coat of nothing leaves the point exactly as it was, to the last bit.
+*/
+void addClearCoat(ShadingPoint& point, const ClearCoatProperties& coat, const BrdfTable& table);
+
+/*
+* Whether the reflection pass, which follows one reflection a pixel, follows the coat's rather than the base's: the
+* smoother of the two, the coat on a tie, since its mirror image is the sharper; the other layer keeps its stand-in.
+* Never without a coat.
+*/
+bool reflectsCoat(const ShadingPoint& point);
 
 struct LightResponse {
     Vec3 diffuse;
     Vec3 specular;
 };
 
-// Whether a light along toLight reaches the side of the surface the eye sees: grazing (a cosine of exactly 0) or from behind
+// Whether a light along toLight reaches the side of the surface the eye sees (either layer's, with a clear coat): grazing (a cosine of exactly 0) or from behind
 // gives nothing. Asked before a light's shadow lookups, which a light giving nothing would waste.
 bool facesLight(const ShadingPoint& point, const Vec3& toLight);
 
-// One light's reflected light towards the eye, for a light of the given radiance (irradiance when facing it) along toLight.
+// One light's reflected light towards the eye, for a light of the given radiance (irradiance when facing it) along toLight;
+// a clear coat's highlight is in the specular part, each layer lit only from in front of it.
 LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance);
 
 // The reflected light under uniform light of the given radiance from every direction.

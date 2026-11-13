@@ -588,6 +588,25 @@ namespace {
             material.ior = source->ior.ior;
         }
 
+        // A clear coat (KHR_materials_clearcoat): how much (red) and how rough (green), shares like the factors, and the
+        // coat's own normal map with its scale.
+        if (source->has_clearcoat) {
+            const cgltf_clearcoat& coat = source->clearcoat;
+            material.clearCoat = readUnitFactor(coat.clearcoat_factor, "glTF clear coat factor must be between 0 and 1");
+            material.clearCoatTexture = readTexture(coat.clearcoat_texture, images);
+            material.clearCoatRoughness = readUnitFactor(coat.clearcoat_roughness_factor, "glTF clear coat roughness must be between 0 and 1");
+            material.clearCoatRoughnessTexture = readTexture(coat.clearcoat_roughness_texture, images);
+            material.clearCoatNormalTexture = readTexture(coat.clearcoat_normal_texture, images);
+
+            if (material.clearCoatNormalTexture.isSet()) {
+                if (!std::isfinite(coat.clearcoat_normal_texture.scale)) {
+                    throw std::runtime_error("glTF clear coat normal texture scale must be finite");
+                }
+
+                material.clearCoatNormalScale = coat.clearcoat_normal_texture.scale;
+            }
+        }
+
         const float strength = source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f;
 
         if (!std::isfinite(strength) || strength < 0.0f) {

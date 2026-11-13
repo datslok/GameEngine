@@ -304,7 +304,8 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [x] Steadier volumetric fog: history read at each froxel's middle, a jitter turned per froxel (`steadier-fog`)
 - [ ] The fog's history as a time constant in seconds, as the probes', so it lags the same at any frame rate (left out of `steadier-fog`: it does not help the shimmer)
 - [ ] Materials
-  - Clear coat, anisotropy, subsurface scattering for skin, parallax occlusion mapping, decals
+  - [x] Clear coat: a varnish layer over any material, from glTF's KHR_materials_clearcoat, and the light lab's painted balls (`clear-coat`)
+  - [ ] Anisotropy, subsurface scattering for skin, parallax occlusion mapping, decals
   - Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
 - [x] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects (all off by default, the user's choice)
   - [x] Colour grading and lens effects: white balance, the grade, vignetting, chromatic aberration, film grain (`camera-grading`)

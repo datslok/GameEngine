@@ -29,9 +29,13 @@ struct GpuMaterial {
     // glass); z: 1 over its attenuation distance (0 absorbs nothing); w: its index of refraction
     float transmission[4];
     float attenuation[4];    // rgb: the colour light keeps after the attenuation distance; w: 0
+    // A clear coat (render/gpu/brdf.h, addClearCoat): x how much, 0..1 (0 none, and always on transparent materials);
+    // y its roughness, 0..1; z its normal map's scale (0 without one, so it lies on the geometry); w: 0
+    float clearCoat[4];
+    std::uint32_t clearCoatTextures[4]; // slots in the texture array: x amount, y roughness, z normal map; w: 0
 };
 
-static_assert(sizeof(GpuMaterial) == 112, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 144, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

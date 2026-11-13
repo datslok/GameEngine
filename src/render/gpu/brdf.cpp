@@ -200,41 +200,101 @@ ShadingPoint prepareShading(const SurfaceProperties& surface, const Vec3& normal
     return point;
 }
 
-bool facesLight(const ShadingPoint& point, const Vec3& toLight) {
-    return point.normal.dot(toLight) > 0.0f;
-}
-
-LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance) {
-    if (!facesLight(point, toLight)) {
-        return LightResponse{};
+void addClearCoat(ShadingPoint& point, const ClearCoatProperties& coat, const BrdfTable& table) {
+    if (!(coat.amount > 0.0f)) {
+        return;
     }
 
+    point.coat = std::min(coat.amount, 1.0f);
+    point.coatNormal = coat.normal;
+    point.coatNDotV = std::clamp(coat.normal.dot(point.toCamera), smallestViewCosine, 1.0f);
+
+    const float roughness = clampRoughness(coat.roughness);
+    point.coatAlpha = roughness * roughness;
+
+    const Vec2 entry = sampleBrdfTable(table, point.coatNDotV, roughness);
+    point.coatCompensation = 1.0f + dielectricReflectance * (1.0f / (entry.x + entry.y) - 1.0f);
+    point.coatAlbedo = point.coat * (dielectricReflectance * entry.x + entry.y) * point.coatCompensation;
+
+    const float baseShare = 1.0f - point.coatAlbedo;
+    point.energyCompensation = point.energyCompensation * baseShare;
+    point.specularAlbedo = point.specularAlbedo * baseShare;
+    point.diffuse = point.diffuse * baseShare;
+}
+
+bool reflectsCoat(const ShadingPoint& point) {
+    return point.coat > 0.0f && point.coatAlpha <= point.alpha;
+}
+
+bool facesLight(const ShadingPoint& point, const Vec3& toLight) {
+    return point.normal.dot(toLight) > 0.0f || (point.coat > 0.0f && point.coatNormal.dot(toLight) > 0.0f);
+}
+
+/*
+* Each layer is lit only from in front of itself: the base by its (normal-mapped) normal, the coat by its own. The coat's
+* highlight is the same D V F as the base's, for a 4% reflector at its own width, times its amount: white light.
+*/
+LightResponse shadeLight(const ShadingPoint& point, const Vec3& toLight, const Vec3& radiance) {
+    LightResponse response;
     const float nDotL = point.normal.dot(toLight);
 
-    LightResponse response;
-    response.diffuse = point.diffuse * radiance * nDotL;
+    if (nDotL > 0.0f) {
+        response.diffuse = point.diffuse * radiance * nDotL;
 
-    const Vec3 sum = toLight + point.toCamera;
-    const float sumLength = sum.length();
+        const Vec3 sum = toLight + point.toCamera;
+        const float sumLength = sum.length();
 
-    if (sumLength > 0.0f) {
-        const Vec3 halfway = sum / sumLength;
-        const Vec3 brdf = specularFromCosines(
-            point.f0, point.alpha, point.nDotV, nDotL, std::max(point.normal.dot(halfway), 0.0f), std::max(point.toCamera.dot(halfway), 0.0f)
-        );
-        response.specular = brdf * point.energyCompensation * radiance * (pi * nDotL);
+        if (sumLength > 0.0f) {
+            const Vec3 halfway = sum / sumLength;
+            const Vec3 brdf = specularFromCosines(
+                point.f0, point.alpha, point.nDotV, nDotL, std::max(point.normal.dot(halfway), 0.0f), std::max(point.toCamera.dot(halfway), 0.0f)
+            );
+            response.specular = brdf * point.energyCompensation * radiance * (pi * nDotL);
+        }
+    }
+
+    const float coatNDotL = point.coatNormal.dot(toLight);
+
+    if (point.coat > 0.0f && coatNDotL > 0.0f) {
+        const Vec3 sum = toLight + point.toCamera;
+        const float sumLength = sum.length();
+
+        if (sumLength > 0.0f) {
+            const Vec3 halfway = sum / sumLength;
+            const Vec3 f0{dielectricReflectance, dielectricReflectance, dielectricReflectance};
+            const Vec3 brdf = specularFromCosines(f0, point.coatAlpha, point.coatNDotV, coatNDotL, std::max(point.coatNormal.dot(halfway), 0.0f),
+                                                  std::max(point.toCamera.dot(halfway), 0.0f));
+            response.specular = response.specular + brdf * (point.coat * point.coatCompensation) * radiance * (pi * coatNDotL);
+        }
     }
 
     return response;
 }
 
+/*
+* A coat adds its albedo of the light: the same light from everywhere, or the base's mirror light (its stand-in) for the
+* probes' and the sky grid's. Only with a coat, so uncoated points add exactly what they did.
+*/
 Vec3 shadeAmbient(const ShadingPoint& point, const Vec3& ambient) {
-    return ambient * (point.diffuse + point.specularAlbedo);
+    Vec3 reflected = ambient * (point.diffuse + point.specularAlbedo);
+
+    if (point.coat > 0.0f) {
+        reflected = reflected + ambient * point.coatAlbedo;
+    }
+
+    return reflected;
 }
 
 Vec3 shadeProbeAmbient(const ShadingPoint& point, const Vec3& diffuseLight, const Vec3& specularLight) {
-    return diffuseLight * point.diffuse + specularLight * point.specularAlbedo;
+    Vec3 reflected = diffuseLight * point.diffuse + specularLight * point.specularAlbedo;
+
+    if (point.coat > 0.0f) {
+        reflected = reflected + specularLight * point.coatAlbedo;
+    }
+
+    return reflected;
 }
+
 
 /*
 * A 16-bit UNORM channel stores round(value * 65535): steps of 1.5e-5, far finer than the table's own accuracy, at half

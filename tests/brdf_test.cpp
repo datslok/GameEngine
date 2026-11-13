@@ -39,8 +39,9 @@ namespace {
     * directions of f cos, with f the shader's BRDF (shadeLight returns pi f cos for a light of 1, hence the 1 / pi).
     * The midpoint rule over cos(theta) and phi, where the solid angle element is d(cos theta) d(phi).
     */
-    Vec3 furnace(const SurfaceProperties& surface, float viewCosine, bool specularOnly = false) {
-        const ShadingPoint point = prepareShading(surface, up, viewAt(viewCosine), table());
+    Vec3 furnace(const SurfaceProperties& surface, float viewCosine, bool specularOnly = false, const ClearCoatProperties& coat = {}) {
+        ShadingPoint point = prepareShading(surface, up, viewAt(viewCosine), table());
+        addClearCoat(point, coat, table());
         constexpr int cosineSteps = 400;
         constexpr int angleSteps = 400;
         double sum[3] = {0.0, 0.0, 0.0};
@@ -435,6 +436,184 @@ namespace {
 }
 
 namespace {
+    const Vec3 white{1.0f, 1.0f, 1.0f};
+
+    bool sameVec(const Vec3& a, const Vec3& b) {
+        return a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+
+    /*
+    * A clear coat of nothing changes nothing, to the last bit: the shading point, every light's response and the
+    * ambient are exactly what they were without one, so uncoated materials draw as before.
+    */
+    void testNoCoatChangesNothing() {
+        SurfaceProperties paint;
+        paint.baseColour = Vec3{0.7f, 0.1f, 0.1f};
+        paint.roughness = 0.4f;
+        const ShadingPoint plain = prepareShading(paint, up, viewAt(0.6f), table());
+        ShadingPoint coated = plain;
+        addClearCoat(coated, ClearCoatProperties{}, table());
+
+        assert(coated.coat == 0.0f && coated.coatAlbedo == 0.0f);
+        assert(sameVec(coated.diffuse, plain.diffuse) && sameVec(coated.specularAlbedo, plain.specularAlbedo));
+        assert(sameVec(coated.energyCompensation, plain.energyCompensation));
+
+        const Vec3 toLight = Vec3{-0.5f, 0.7f, 0.2f}.normalized();
+        const LightResponse before = shadeLight(plain, toLight, white);
+        const LightResponse after = shadeLight(coated, toLight, white);
+        assert(sameVec(before.diffuse, after.diffuse) && sameVec(before.specular, after.specular));
+        assert(sameVec(shadeAmbient(plain, white), shadeAmbient(coated, white)));
+        assert(sameVec(shadeProbeAmbient(plain, white * 0.3f, white * 0.7f), shadeProbeAmbient(coated, white * 0.3f, white * 0.7f)));
+        assert(!reflectsCoat(coated));
+    }
+
+    /*
+    * The white furnace test with a clear coat: what the coat reflects is exactly what the layer under it does not
+    * receive, so a white surface under even light still returns all of it, coated fully or partly, smooth or rough,
+    * over a metal or a non-metal, from every view.
+    */
+    void testCoatedWhiteFurnace() {
+        for (float amount : {0.5f, 1.0f}) {
+            for (float coatRoughness : {0.3f, 0.6f}) {
+                for (float viewCosine : {0.2f, 0.5f, 0.9f}) {
+                    const ClearCoatProperties coat{.amount = amount, .roughness = coatRoughness, .normal = up};
+
+                    SurfaceProperties metal;
+                    metal.metallic = 1.0f;
+                    metal.roughness = 0.5f;
+                    assert(nearVec(furnace(metal, viewCosine, false, coat), white, 0.02f));
+
+                    SurfaceProperties plastic;
+                    plastic.roughness = 0.7f;
+                    assert(nearVec(furnace(plastic, viewCosine, false, coat), white, 0.02f));
+                }
+            }
+        }
+    }
+
+    /*
+    * The coat's own share: the table's albedo for a 4% reflector at the coat's roughness and view, with the same
+    * compensation for light lost between facets, times the coat's amount; the base keeps the rest of what it had. It
+    * rises towards grazing views (Fresnel), where the base dims to match; under even light the coat's lobe alone
+    * returns exactly its albedo.
+    */
+    void testCoatShare() {
+        SurfaceProperties paint;
+        paint.baseColour = Vec3{0.1f, 0.3f, 0.8f};
+        paint.roughness = 0.6f;
+        const ClearCoatProperties coat{.amount = 0.8f, .roughness = 0.3f, .normal = up};
+
+        const auto coatedAt = [&](float viewCosine) {
+            ShadingPoint point = prepareShading(paint, up, viewAt(viewCosine), table());
+            addClearCoat(point, coat, table());
+            return point;
+        };
+
+        const ShadingPoint point = coatedAt(0.7f);
+        const Vec2 entry = sampleBrdfTable(table(), 0.7f, 0.3f);
+        const float facets = entry.x + entry.y;
+        const float compensation = 1.0f + dielectricReflectance * (1.0f / facets - 1.0f);
+        assert(near(point.coatAlbedo, 0.8f * (dielectricReflectance * entry.x + entry.y) * compensation, 1e-6f));
+
+        const ShadingPoint plain = prepareShading(paint, up, viewAt(0.7f), table());
+        const float baseShare = 1.0f - point.coatAlbedo;
+        assert(nearVec(point.diffuse, plain.diffuse * baseShare, 1e-6f));
+        assert(nearVec(point.specularAlbedo, plain.specularAlbedo * baseShare, 1e-6f));
+
+        const ShadingPoint grazing = coatedAt(0.15f);
+        const ShadingPoint headOn = coatedAt(0.95f);
+        assert(grazing.coatAlbedo > 2.0f * headOn.coatAlbedo);
+        assert(headOn.coatAlbedo > 0.8f * dielectricReflectance * 0.9f && headOn.coatAlbedo < 0.8f * 0.06f);
+
+        // Under even light from everywhere the coat's lobe alone (over a black base that reflects nothing) returns its albedo.
+        SurfaceProperties black;
+        black.baseColour = Vec3{};
+        ShadingPoint blackCoated = prepareShading(black, up, viewAt(0.7f), table());
+        addClearCoat(blackCoated, coat, table());
+        const Vec3 baseAlbedo = prepareShading(black, up, viewAt(0.7f), table()).specularAlbedo;
+        const Vec3 expected = baseAlbedo * (1.0f - blackCoated.coatAlbedo) + white * blackCoated.coatAlbedo;
+        assert(nearVec(furnace(black, 0.7f, true, coat), expected, 0.01f));
+
+        // Ambient light: the coat's albedo is added to the base's, weighted by what the coat let through.
+        assert(nearVec(shadeAmbient(point, white), point.diffuse + point.specularAlbedo + white * point.coatAlbedo, 1e-6f));
+        assert(nearVec(shadeProbeAmbient(point, white * 0.5f, white * 2.0f),
+                       point.diffuse * 0.5f + (point.specularAlbedo + white * point.coatAlbedo) * 2.0f, 1e-6f));
+    }
+
+    /*
+    * The coat lies smooth on the geometry, whatever the normal map does to the layer under it: its highlight is where
+    * the light mirrors about the coat's own normal. A rough base tilted by a normal map, coated with smooth varnish, shows
+    * a sharp highlight about the coat's normal that the uncoated surface lacks; the coat's highlight is white, whatever
+    * the base's colour.
+    */
+    void testCoatIgnoresTheNormalMap() {
+        SurfaceProperties wood;
+        wood.baseColour = Vec3{0.5f, 0.3f, 0.1f};
+        wood.roughness = 0.9f;
+
+        const Vec3 bumped = Vec3{0.4f, 0.9f, 0.0f}.normalized();
+        const Vec3 toCamera = viewAt(0.8f);
+        const Vec3 mirrored{-toCamera.x, toCamera.y, 0.0f};
+
+        const ShadingPoint plain = prepareShading(wood, bumped, toCamera, table());
+        ShadingPoint varnished = plain;
+        addClearCoat(varnished, ClearCoatProperties{.amount = 1.0f, .roughness = 0.05f, .normal = up}, table());
+
+        const LightResponse without = shadeLight(plain, mirrored, white);
+        const LightResponse with = shadeLight(varnished, mirrored, white);
+        assert(with.specular.x > 20.0f * without.specular.x);
+        assert(near(with.specular.x - without.specular.x * (1.0f - varnished.coatAlbedo), with.specular.z - without.specular.z * (1.0f - varnished.coatAlbedo), 1e-3f * with.specular.x));
+
+        // Away from the coat's mirror direction its highlight fades: a light mirrored about the bumped normal instead.
+        const Vec3 aboutBump = (bumped * (2.0f * bumped.dot(toCamera)) - toCamera).normalized();
+        assert(shadeLight(varnished, aboutBump, white).specular.x < 0.1f * with.specular.x);
+    }
+
+    /*
+    * A light reaches a coated surface if it faces either layer: the coat's normal can face a light the normal map has
+    * tilted the base away from, and the coat's highlight is still there.
+    */
+    void testCoatFacesItsOwnLights() {
+        const Vec3 tilted = Vec3{0.8f, 0.6f, 0.0f}.normalized();
+        ShadingPoint point = prepareShading(SurfaceProperties{}, tilted, viewAt(0.9f), table());
+        const Vec3 toLight = Vec3{-0.7f, 0.3f, 0.0f}.normalized();
+        assert(!facesLight(point, toLight));
+
+        addClearCoat(point, ClearCoatProperties{.amount = 1.0f, .roughness = 0.5f, .normal = up}, table());
+        assert(facesLight(point, toLight));
+        const LightResponse response = shadeLight(point, toLight, white);
+        assert(response.specular.x > 0.0f && nearVec(response.diffuse, Vec3{}, 0.0f));
+
+        // From below both layers, nothing.
+        assert(!facesLight(point, Vec3{0.0f, -1.0f, 0.0f}));
+    }
+
+    /*
+    * The reflection pass follows one layer a pixel: the smoother (the coat on a tie), which shows the sharper mirror image;
+    * the other keeps its stand-in. No coat, the base. The coat's roughness is clamped as the base's is.
+    */
+    void testReflectionFollowsTheSmootherLayer() {
+        SurfaceProperties paint;
+        paint.roughness = 0.5f;
+        ShadingPoint carPaint = prepareShading(paint, up, viewAt(0.7f), table());
+        addClearCoat(carPaint, ClearCoatProperties{.amount = 1.0f, .roughness = 0.0f, .normal = up}, table());
+        assert(reflectsCoat(carPaint));
+        assert(carPaint.coatAlpha == ggxAlpha(smallestRoughness));
+
+        SurfaceProperties chrome;
+        chrome.metallic = 1.0f;
+        chrome.roughness = 0.1f;
+        ShadingPoint matteCoated = prepareShading(chrome, up, viewAt(0.7f), table());
+        addClearCoat(matteCoated, ClearCoatProperties{.amount = 1.0f, .roughness = 0.6f, .normal = up}, table());
+        assert(!reflectsCoat(matteCoated));
+
+        ShadingPoint tie = prepareShading(chrome, up, viewAt(0.7f), table());
+        addClearCoat(tie, ClearCoatProperties{.amount = 0.5f, .roughness = 0.1f, .normal = up}, table());
+        assert(reflectsCoat(tie));
+    }
+}
+
+namespace {
     /*
     * GGX's sampled facet normals: unit length, all along the normal for a mirror, spread more the rougher, and evenly
     * round the normal (their sideways parts average out). Turned round another normal, they keep their angle to it.
@@ -498,4 +677,10 @@ void testBrdf() {
     testFacesLightOnlyFromInFront();
     testAmbient();
     testGrazingViewStaysFinite();
+    testNoCoatChangesNothing();
+    testCoatedWhiteFurnace();
+    testCoatShare();
+    testCoatIgnoresTheNormalMap();
+    testCoatFacesItsOwnLights();
+    testReflectionFollowsTheSmootherLayer();
 }

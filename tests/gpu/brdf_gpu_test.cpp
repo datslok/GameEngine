@@ -173,20 +173,24 @@ namespace {
     * peaks it is the usual one.
     * Diffuse light has no such peak, which is why addLight's diffuse part keeps the plain tolerance.
     */
-    FloatTolerance specularTolerance(const ShadingPoint& point, const Vec3& toLight) {
-        const Vec3 sum = toLight + point.toCamera;
+    FloatTolerance peakTolerance(const Vec3& normal, float alpha, const Vec3& toCamera, const Vec3& toLight) {
+        const Vec3 sum = toLight + toCamera;
         const float sumLength = sum.length();
 
         if (!(sumLength > 0.0f)) {
             return transcendentalTolerance;
         }
 
-        const float nDotH = std::max(point.normal.dot(sum * (1.0f / sumLength)), 0.0f);
-        const float denominator = 1.0f - nDotH * nDotH * (1.0f - point.alpha * point.alpha);
+        const float nDotH = std::max(normal.dot(sum * (1.0f / sumLength)), 0.0f);
+        const float denominator = 1.0f - nDotH * nDotH * (1.0f - alpha * alpha);
         const float nDotHUncertainty = 4.0f * std::numeric_limits<float>::epsilon();
         FloatTolerance tolerance = transcendentalTolerance;
-        tolerance.relative += 4.0f * nDotHUncertainty / std::max(denominator, point.alpha * point.alpha);
+        tolerance.relative += 4.0f * nDotHUncertainty / std::max(denominator, alpha * alpha);
         return tolerance;
+    }
+
+    FloatTolerance specularTolerance(const ShadingPoint& point, const Vec3& toLight) {
+        return peakTolerance(point.normal, point.alpha, point.toCamera, toLight);
     }
 
     // Outputs per case: (diffuse, 0), (specular, 0), (ambient reflected under the radiance as ambient light, 0), (lit by probe
@@ -231,6 +235,75 @@ namespace {
             }
 
             report.check("facesLight", exactTolerance, facesLight(point, cases[i].toLight) ? 1.0f : 0.0f, outputs[i][0]);
+        }
+    }
+
+    /*
+    * A clear coat over the shading cases: a quarter with none (which must leave everything as it was), the rest partly
+    * or fully coated at every roughness, the coat's normal near the surface's (as a normal map tilts the base away from
+    * the geometry), sometimes facing a light the base does not. Outputs per case: (coat albedo, coat nDotV, coat alpha,
+    * coat compensation), (diffuse colour, reflects the coat), (specular albedo, faces the light), then addLight's diffuse
+    * and specular, shadeAmbient and shadeProbeAmbient as for checkAddLight. The specular part's allowance is the larger of
+    * the two lobes' peaks'.
+    */
+    void checkClearCoat(GpuFunctionRunner& runner, GpuCheckReport& report, const std::vector<ShadingCase>& cases, const BrdfTable& table) {
+        CaseRandom random{1113};
+        std::vector<GpuVec4> inputs = shadingInputs(cases, table);
+        std::vector<ClearCoatProperties> coats;
+        std::vector<GpuVec4> coated;
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            ClearCoatProperties coat;
+            coat.amount = i % 4 == 0 ? 0.0f : (i % 4 == 1 ? 1.0f : random.between(0.0f, 1.0f));
+            coat.roughness = random.between(smallestRoughness, 1.0f);
+            coat.normal = (cases[i].normal + random.direction() * 0.4f).normalized();
+            const float nDotV = std::clamp(coat.normal.dot(cases[i].toCamera), static_cast<float>(BRDF_SMALLEST_VIEW_COSINE), 1.0f);
+            const Vec2 entry = sampleBrdfTable(table, nDotV, coat.roughness);
+            coats.push_back(coat);
+
+            coated.insert(coated.end(), inputs.begin() + static_cast<std::ptrdiff_t>(i * 6), inputs.begin() + static_cast<std::ptrdiff_t>(i * 6 + 6));
+            coated.push_back(gpuVec4(coat.normal, coat.amount));
+            coated.push_back(gpuVec4(coat.roughness, entry.x, entry.y));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_CLEAR_COAT, coated, 8, 7);
+
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            ShadingPoint point = prepareShading(cases[i].surface, cases[i].normal, cases[i].toCamera, table);
+            addClearCoat(point, coats[i], table);
+            const LightResponse expected = shadeLight(point, cases[i].toLight, cases[i].radiance);
+            const GpuVec4* actual = &outputs[i * 7];
+            const Vec3 reversed{cases[i].radiance.z, cases[i].radiance.y, cases[i].radiance.x};
+
+            FloatTolerance specular = specularTolerance(point, cases[i].toLight);
+
+            if (point.coat > 0.0f) {
+                specular.relative = std::max(specular.relative, peakTolerance(point.coatNormal, point.coatAlpha, point.toCamera, cases[i].toLight).relative);
+            }
+
+            report.check("addClearCoat coatAlbedo", arithmeticTolerance, point.coatAlbedo, actual[0][0]);
+            report.check("addClearCoat diffuse", arithmeticTolerance, point.diffuse, vec3From(actual[1]));
+            report.check("addClearCoat specularAlbedo", arithmeticTolerance, point.specularAlbedo, vec3From(actual[2]));
+
+            if (point.coat > 0.0f) {
+                report.check("addClearCoat coatNDotV", arithmeticTolerance, point.coatNDotV, actual[0][1]);
+                report.check("addClearCoat coatAlpha", arithmeticTolerance, point.coatAlpha, actual[0][2]);
+                report.check("addClearCoat coatCompensation", arithmeticTolerance, point.coatCompensation, actual[0][3]);
+            }
+
+            // Decisions match exactly, away from grazing lights (as in checkFacesLight) and ties.
+            if (point.coat == 0.0f || std::abs(point.coatAlpha - point.alpha) > 1e-5f) {
+                report.check("reflectsCoat", exactTolerance, reflectsCoat(point) ? 1.0f : 0.0f, actual[1][3]);
+            }
+
+            if (std::abs(point.normal.dot(cases[i].toLight)) > 1e-6f && std::abs(point.coatNormal.dot(cases[i].toLight)) > 1e-6f) {
+                report.check("clear coat facesLight", exactTolerance, facesLight(point, cases[i].toLight) ? 1.0f : 0.0f, actual[2][3]);
+            }
+
+            report.check("clear coat addLight diffuse", arithmeticTolerance, expected.diffuse, vec3From(actual[3]));
+            report.check("clear coat addLight specular", specular, expected.specular, vec3From(actual[4]));
+            report.check("clear coat shadeAmbient", arithmeticTolerance, shadeAmbient(point, cases[i].radiance), vec3From(actual[5]));
+            report.check("clear coat shadeProbeAmbient", arithmeticTolerance, shadeProbeAmbient(point, cases[i].radiance, reversed), vec3From(actual[6]));
         }
     }
 }
@@ -281,4 +354,5 @@ void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkPrepareShading(runner, report, cases, table);
     checkAddLight(runner, report, cases, table);
     checkFacesLight(runner, report, cases, table);
+    checkClearCoat(runner, report, cases, table);
 }

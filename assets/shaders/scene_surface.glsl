@@ -753,6 +753,10 @@ void main() {
     vec3 smoothNormal = smoothLength > 0.0 ? worldNormal / smoothLength : vec3(0.0);
     vec3 normalStepAcross = dFdx(smoothNormal);
     vec3 normalStepDown = dFdy(smoothNormal);
+    // The surface textures' UV steps to the next pixel, also taken before any branch, for a clear coat's textures, read
+    // only on coated materials.
+    vec2 uvStepAcross = dFdx(textureUv);
+    vec2 uvStepDown = dFdy(textureUv);
 
     MaterialData material = materials[materialIndex];
 
@@ -831,6 +835,40 @@ void main() {
     vec3 shadingNormal = normalLength > 0.0 ? normal : toCamera;
     vec2 tableEntry = sampleBrdfTable(viewCosine(shadingNormal, toCamera), roughness);
     ShadingPoint point = prepareShading(albedo.rgb, metallic, roughness, shadingNormal, toCamera, tableEntry);
+
+#ifndef TRANSPARENT
+    // A clear coat (render/gpu/brdf.h, addClearCoat), unless switched off: its amount, roughness and normal from its
+    // textures, read only on coated materials, at the steps taken above (scaled by the bias, as the mip bias would). It
+    // lies on the geometry's normal, or its own normal map's; its roughness widened by the same anti-aliasing as the base's.
+    if (normalLength > 0.0 && textureOptions.w > 0.5 && material.clearCoat.x > 0.0) {
+        float gradientScale = exp2(mipBias);
+        vec2 across = uvStepAcross * gradientScale;
+        vec2 down = uvStepDown * gradientScale;
+        float coatAmount = material.clearCoat.x * textureGrad(textures[nonuniformEXT(material.clearCoatSlots.x)], textureUv, across, down).r;
+        float coatRoughness = clamp(material.clearCoat.y * textureGrad(textures[nonuniformEXT(material.clearCoatSlots.y)], textureUv, across, down).g,
+                                    BRDF_SMALLEST_ROUGHNESS, 1.0);
+        vec3 coatNormal = geometricNormal;
+
+        if (material.clearCoat.z != 0.0) {
+            vec3 coatTexel = textureGrad(textures[nonuniformEXT(material.clearCoatSlots.z)], textureUv, across, down).rgb;
+            vec3 coatBumped = perturbNormal(surfaceNormal, surfaceTangent, decodeNormalTexel(coatTexel, material.clearCoat.z));
+
+            if (dot(coatBumped, coatBumped) > 0.0) {
+                coatNormal = coatBumped;
+            }
+
+            if (textureOptions.y > 0.0) {
+                coatRoughness = toksvigRoughness(coatRoughness, coatTexel, material.clearCoat.z);
+            }
+        }
+
+        if (textureOptions.z > 0.0) {
+            coatRoughness = geometricRoughness(coatRoughness, normalStepAcross, normalStepDown, textureOptions.z);
+        }
+
+        addClearCoat(point, coatAmount, coatRoughness, coatNormal, sampleBrdfTable(viewCosine(coatNormal, toCamera), coatRoughness));
+    }
+#endif
 
     if (normalLength > 0.0) {
         for (int i = 0; i < counts.x; ++i) {
@@ -1010,11 +1048,19 @@ void main() {
     outputColour = vec4(ambientReflected + diffuse + specular + emissive, albedo.a);
 #endif
 
-    // A surface without a normal reflects nothing sharply: fully rough, so the stand-in stays.
+    // A surface without a normal reflects nothing sharply: fully rough, so the stand-in stays. A clear coat smoother than
+    // the layer under it (brdf.h, reflectsCoat) hands on its own reflection instead, on its own normal: grey, its albedo
+    // of the mirror light; the base's reflection keeps its stand-in in the picture.
 #ifdef REFLECTION_SURFACES
-    reflectionNormal = octahedralEncode(shadingNormal);
-    reflectionSurface = vec4(point.specularAlbedo * reflectionOcclusion, normalLength > 0.0 ? roughness : 1.0);
-    reflectionStandIn = mirrorLight * point.specularAlbedo;
+    if (reflectsCoat(point)) {
+        reflectionNormal = octahedralEncode(point.coatNormal);
+        reflectionSurface = vec4(vec3(point.coatAlbedo * reflectionOcclusion), sqrt(point.coatAlpha));
+        reflectionStandIn = mirrorLight * point.coatAlbedo;
+    } else {
+        reflectionNormal = octahedralEncode(shadingNormal);
+        reflectionSurface = vec4(point.specularAlbedo * reflectionOcclusion, normalLength > 0.0 ? roughness : 1.0);
+        reflectionStandIn = mirrorLight * point.specularAlbedo;
+    }
 
     // The sky visibility debug view keeps the reflection pass from swapping anything into its grey.
     if (skyVisibilityOptions.w > 0.5 && !captureView) {

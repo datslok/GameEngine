@@ -175,6 +175,17 @@ namespace {
             material.transmission = 1.0f;
             material.doubleSided = true;
             break;
+        case LabSurface::BallPaint:
+            // Red paint with a soft sheen, as on a painted toy or a car's body under its lacquer.
+            material.colour = Pixel{175, 20, 20};
+            material.roughness = 0.45f;
+            break;
+        case LabSurface::LacqueredPaint:
+            // The same paint under a full, smooth clear coat: car paint's sharp white highlight and mirror image over it.
+            material = surfaceMaterial(LabSurface::BallPaint);
+            material.clearCoat = 1.0f;
+            material.clearCoatRoughness = 0.03f;
+            break;
         }
         return material;
     }
@@ -442,6 +453,19 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
                                           Mat4::translation(labMirrorBallCentre.x, labMirrorBallCentre.y, labMirrorBallCentre.z) *
                                               Mat4::scaling(labMirrorBallRadius, labMirrorBallRadius, labMirrorBallRadius)});
     addStatic(std::move(mirrorBall));
+
+    // Clear coat's test pieces: the bare and the lacquered painted ball, solid, in the level's collision.
+    ModelRenderer paintedBalls;
+    const LabSurface ballSurfaces[2] = {LabSurface::BallPaint, LabSurface::LacqueredPaint};
+
+    for (std::size_t ball = 0; ball < labPaintedBallCentres.size(); ++ball) {
+        const Vec3& centre = labPaintedBallCentres[ball];
+        paintedBalls.parts.push_back(RenderPart{sphere, surfaceMaterial(ballSurfaces[ball]),
+                                                Mat4::translation(centre.x, centre.y, centre.z) *
+                                                    Mat4::scaling(labPaintedBallRadius, labPaintedBallRadius, labPaintedBallRadius)});
+    }
+
+    paintedBallsEntity = addStatic(std::move(paintedBalls));
 
     // Refraction's test pieces, as the window's glass: tinting the light through them, not in the collision.
     ModelRenderer refractors;
@@ -941,6 +965,10 @@ LightLabStainedGlassSettings& LightLabGame::getStainedGlassSettings() {
 
 Entity LightLabGame::getWindowPane() const {
     return windowPane;
+}
+
+Entity LightLabGame::getPaintedBalls() const {
+    return paintedBallsEntity;
 }
 
 Entity LightLabGame::getBottle() const {
