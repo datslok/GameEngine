@@ -42,5 +42,13 @@ void main() {
         testOutput(2, vec4(solidRefractionExit(testInput(3).xyz, testInput(4).xyz, normal.xyz, surface.y, normal.w), 0.0));
         // The smooth read's taps: the roughness as a coordinate across a level as wide as the pixels per radian.
         testOutput(3, bsplineAxis(surface.x, picture.x));
+    } else if (function == GPU_TEST_COLOURED_SHADOWS) {
+        // Inputs: (front met, double-sided, alpha, transmission), (metallic, cosine, receiver or glass depth, glass or
+        // solid depth), base colour, absorbed, the stored tint.
+        vec4 face = testInput(0);
+        vec4 depths = testInput(1);
+        testOutput(0, vec4(glassFaceTransmittance(face.x > 0.5, face.y > 0.5, face.z, face.w, depths.x, testInput(2).rgb, depths.y, testInput(3).rgb), 0.0));
+        testOutput(1, vec4(isBehindGlass(depths.z, depths.w) ? 1.0 : 0.0, glassHiddenFromLight(depths.z, depths.w) ? 1.0 : 0.0, 0.0, 0.0));
+        testOutput(2, vec4(glassShadowTint(depths.z, depths.w, testInput(4).rgb), 0.0));
     }
 }

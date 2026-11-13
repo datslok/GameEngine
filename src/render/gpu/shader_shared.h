@@ -16,4 +16,7 @@
 // Sun shadows: the steepest slope (tangent of the angle between a surface's normal and the sun) the bias grows with.
 #define MAX_SUN_BIAS_SLOPE 10.0
 
+// Coloured shadow maps: how many times smaller than the shadow atlas each way (render/gpu/shadow_map.h).
+#define GLASS_SHADOW_MAP_DIVISOR 2
+
 #endif

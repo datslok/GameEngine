@@ -43,6 +43,12 @@ namespace {
     constexpr VkFormat solidMaskFormat = VK_FORMAT_R8_UNORM;
     constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 
+    // The coloured shadow maps: the tint in packed floats (4 bytes; a light's share 0..1, fine in the dark too), the
+    // nearest glass depth in a 16-bit float (reversed-Z keeps a float's relative precision in distance: about 1/2000
+    // of the way to the light). 6 bytes a texel at a quarter of the atlas's texels.
+    constexpr VkFormat glassTintFormat = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+    constexpr VkFormat glassDepthFormat = VK_FORMAT_R16_SFLOAT;
+
     // The most textures the bindless array holds (see createSceneLayout).
     constexpr std::uint32_t maxBindlessTextures = 16384;
 
@@ -426,6 +432,25 @@ void VulkanRenderer::createPipelines() {
     reset.depthCompare = VK_COMPARE_OP_ALWAYS;
     shadowClearPipeline = std::make_unique<VulkanPipeline>(device, layouts, reset);
 
+    // The coloured shadow maps' glass (render/gpu/transparency.h): no depth target (glass hidden behind something solid
+    // is thrown away against the atlas's depth instead), each pane's share multiplied into the tint and its depth's
+    // nearest (largest, reversed-Z) kept, both sides drawn (the shader decides which faces count, as rays do). Only on
+    // GPUs whose colour targets can blend each their own way.
+    if (device.supportsIndependentBlending()) {
+        PipelineDescription glass;
+        glass.vertexShader = "assets/shaders/glass_shadow.vert.spv";
+        glass.fragmentShader = "assets/shaders/glass_shadow.frag.spv";
+        glass.sharedLayout = sceneLayout->getPipelineLayout();
+        glass.vertices = shadowCutOut.vertices;
+        glass.vertices.attributes.push_back({1, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(MeshVertex, normal))});
+        glass.dynamicCullMode = true;
+        glass.colourFormat = glassTintFormat;
+        glass.blend = BlendMode::Multiply;
+        glass.extraColourFormats = {glassDepthFormat};
+        glass.extraBlends = {BlendMode::Maximum};
+        glassShadowPipeline = std::make_unique<VulkanPipeline>(device, layouts, glass);
+    }
+
     // The velocity pass: the objects that moved, drawn again over the main pass's depth (tested, not written; GREATER
     // OR EQUAL, so their own surfaces pass), their positions (and texture coordinates, for cut-outs' holes) into the
     // velocity image. Its cut-out variant throws away the holes.
@@ -658,6 +683,55 @@ void VulkanRenderer::ensureShadowAtlas(const ShadowAtlasSize& size) {
     device.waitIdle();
     createShadowAtlas(size);
     shadowLayout = ShadowAtlasLayout{size};
+    shadowMemory.forgetAll();
+}
+
+/*
+* The coloured shadow maps are drawn into as colour targets and read by fragment and compute shaders (the main pass,
+* the fog's grid), and kept between frames like the atlas. They start cleared to no glass, a white tint and the far
+* depth, and readable; every tile is redrawn, since the new maps hold none of the glass the cached tiles had.
+*/
+void VulkanRenderer::ensureGlassShadowMaps(const ShadowAtlasSize& atlas) {
+    const ShadowAtlasSize size = glassShadowMapSize(atlas);
+
+    if (glassMapSize == size) {
+        return;
+    }
+
+    if (glassMapSize.width > 0) {
+        device.waitIdle();
+    }
+
+    const auto makeMap = [&](VkFormat format, const char* name) {
+        ImageDescription description;
+        description.format = format;
+        description.width = size.width;
+        description.height = size.height;
+        description.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        description.name = name;
+        return VulkanImage{device, description};
+    };
+
+    glassShadowTint = makeMap(glassTintFormat, "Glass shadow tint");
+    glassShadowDepth = makeMap(glassDepthFormat, "Glass shadow depth");
+
+    uploads.run([&](VkCommandBuffer commands) {
+        VkImageSubresourceRange range{};
+        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        range.levelCount = 1;
+        range.layerCount = 1;
+
+        const auto clear = [&](VulkanImage& image, const VkClearColorValue& value) {
+            image.transition(commands, ImageState::TransferDestination, ImageContents::Discard);
+            vkCmdClearColorImage(commands, image.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &value, 1, &range);
+            image.transition(commands, ImageState::SurfaceRead);
+        };
+
+        clear(glassShadowTint, VkClearColorValue{{1.0f, 1.0f, 1.0f, 1.0f}});
+        clear(glassShadowDepth, VkClearColorValue{{gpuFarDepth, 0.0f, 0.0f, 0.0f}});
+    });
+
+    glassMapSize = size;
     shadowMemory.forgetAll();
 }
 
@@ -1341,8 +1415,21 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                                        mirroredCamera(camera, *mirror), mirrorCascadesStart(camera, *mirror),
                                                                        fittedShadowDistance(mirrorShadowFit)}}
                                                                  : std::nullopt;
-    const ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows, fittedSunDistance, mirrorShadows);
+    ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows, fittedSunDistance, mirrorShadows);
     attachShadows(lights, shadows);
+
+    // Glass anywhere in the world (a window off screen still shades what is on it) tints the shadowed lights passing it
+    // (render/gpu/transparency.h): by rays while ray tracing is on, exactly, else through the coloured shadow maps, made
+    // the first time they are drawn (before the shadows are prepared: new maps redraw every tile).
+    validateTransparency(settings.transparency);
+    const bool glassInWorld =
+        std::any_of(description.draws.begin(), description.draws.end(), [](const DrawItem& draw) { return isTransparent(draw.material); });
+    const bool glassShadows = tracesRays(settings, rayTracing != nullptr) && settings.transparency.glassShadows && glassInWorld;
+    const bool colouredShadows = glassShadowPipeline && drawsColouredShadowMaps(settings.transparency, glassInWorld, glassShadows);
+
+    if (colouredShadows) {
+        ensureGlassShadowMaps(shadowLayout.size());
+    }
 
     if (!shadows.directional.empty() && shadows.directional[0].cascades > 0) {
         stats.sunShadowDistance = std::min({settings.shadows.directionalDistance, camera.getFarPlane(), fittedSunDistance});
@@ -1352,7 +1439,12 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
 
-    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()));
+    const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows);
+
+    // The shaders read a tile's coloured shadow map only where it holds glass.
+    for (std::size_t tile = 0; tile < shadows.tileData.size(); ++tile) {
+        markTileGlass(shadows.tileData[tile], shadowDraws.tileGlass[tile]);
+    }
 
     // The visible objects that moved since last frame, drawn again by the velocity pass: their entries follow the
     // shadow tiles' in the draw list.
@@ -1521,11 +1613,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         contactShadows->ensureSize(sceneSize);
     }
 
-    // Tinted shadows (render/gpu/transparency.h): while ray tracing is on and glass is anywhere in the world (a window
-    // off screen still shades what is on it), shadowed lights pass through it by rays.
-    const bool glassShadows = rays && settings.transparency.glassShadows &&
-                              std::any_of(description.draws.begin(), description.draws.end(), [](const DrawItem& draw) { return isTransparent(draw.material); });
-
     // Volumetric fog (render/gpu/volumetric_fog.h), its grid readied before the scene set points at it: the grid's camera
     // is the camera without the jitter (the froxels' own samples move instead), its samples turned every frame.
     const std::optional<Fog>& fogInAir = description.lighting.fog;
@@ -1593,6 +1680,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (!shadows.tiles.empty()) {
         beginGpuPass(frame, GpuPass::Shadows);
         drawShadows(frame, shadowDraws, sceneSet);
+
+        if (colouredShadows) {
+            drawGlassShadows(frame, shadowDraws, sceneSet);
+        }
+
         endGpuPass(frame, GpuPass::Shadows);
     }
 
@@ -2067,6 +2159,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
         skyVisibility->sampled(),
         contact.runs() ? contactShadows->sampledShadow() : sampled(*noProbesTexture),
         contact.runs() ? contactShadows->sampledLights() : sampled(*noProbesTexture),
+        glassMapSize.width > 0 ? SampledImage{glassShadowTint.getView(), linearSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+                               : sampled(*noProbesTexture),
+        glassMapSize.width > 0 ? SampledImage{glassShadowDepth.getView(), nearestSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+                               : sampled(*noProbesTexture),
     };
 
     SceneBufferViews views;
@@ -2148,16 +2244,31 @@ void VulkanRenderer::buildClusterLists(FrameContext& frame, VkDescriptorSet scen
 * listed one tile after another, from entry firstEntry of the draw list.
 */
 VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles,
-                                                               std::uint32_t firstEntry) {
+                                                               std::uint32_t firstEntry, bool colouredShadows) {
     ShadowDraws prepared;
+    prepared.tileGlass.assign(tiles.size(), false);
     std::vector<std::size_t> inReach;
+    std::vector<std::size_t> glassReached;
     const BoundingSphere* reachOfList = nullptr;
 
     const auto sameReach = [](const BoundingSphere& a, const BoundingSphere& b) {
         return a.radius == b.radius && a.centre.x == b.centre.x && a.centre.y == b.centre.y && a.centre.z == b.centre.z;
     };
 
-    for (const ShadowTile& tile : tiles) {
+    // Each batch's entries follow the draw list's so far.
+    const auto listed = [&](const std::vector<std::size_t>& draws) {
+        BatchedDraws batched = batchByMesh(description.draws, draws, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()));
+
+        for (std::size_t index : batched.order) {
+            prepared.drawList.push_back(static_cast<std::uint32_t>(index));
+        }
+
+        return batched;
+    };
+
+    for (std::size_t tileIndex = 0; tileIndex < tiles.size(); ++tileIndex) {
+        const ShadowTile& tile = tiles[tileIndex];
+
         if (tile.size == 0) {
             ++stats.shadowTilesSkipped;
             continue;
@@ -2165,27 +2276,26 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
 
         if (reachOfList == nullptr || !sameReach(*reachOfList, tile.reach)) {
             inReach = castersInReach(description.draws, tile.reach);
+            glassReached = colouredShadows ? glassInReach(description.draws, tile.reach) : std::vector<std::size_t>{};
             reachOfList = &tile.reach;
         }
 
-        const std::vector<std::size_t> casters =
-            shadowCasters(description.draws, inReach, Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero));
-        const std::uint64_t signature = shadowCasterSignature(description.draws, casters);
+        const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
+        const std::vector<std::size_t> casters = shadowCasters(description.draws, inReach, view);
+        const std::vector<std::size_t> glass = shadowCasters(description.draws, glassReached, view);
+        prepared.tileGlass[tileIndex] = !glass.empty();
+        const std::uint64_t signature = tintedShadowSignature(description.draws, casters, glass);
 
         if (shadowMemory.isCurrent(tile, signature)) {
             ++stats.shadowTilesCached;
             continue;
         }
 
-        BatchedDraws batched = batchByMesh(description.draws, casters, firstEntry + static_cast<std::uint32_t>(prepared.drawList.size()));
-
-        for (std::size_t index : batched.order) {
-            prepared.drawList.push_back(static_cast<std::uint32_t>(index));
-        }
-
+        BatchedDraws solid = listed(casters);
+        BatchedDraws panes = listed(glass);
         stats.shadowDrawn += casters.size();
         stats.shadowCulled += description.draws.size() - casters.size();
-        prepared.tiles.push_back(ShadowTileDraw{&tile, std::move(batched), signature});
+        prepared.tiles.push_back(ShadowTileDraw{&tile, std::move(solid), std::move(panes), signature});
     }
 
     return prepared;
@@ -2223,7 +2333,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         drawFullScreenTriangle(commands);
 
         // The tile's view goes to the shadow pipelines too: they share the scene's layout, so the push constants carry over.
-        const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane);
+        const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
         stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
@@ -2233,6 +2343,65 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
     vkCmdEndRendering(commands);
     renderingOpen = false;
     shadowAtlas.transition(commands, ImageState::DepthFragmentRead);
+}
+
+/*
+* The coloured shadow maps (render/gpu/transparency.h): each redrawn tile holding glass has its square reset (a white
+* tint, no glass) and its panes drawn, each multiplying its share of the light into the tint and keeping the nearest
+* glass depth. After the solid tiles: the glass shader reads the atlas's depths to leave out glass hidden behind them.
+* No pass at all when no redrawn tile holds glass.
+*
+* Barriers: the maps go from being read by last frame's fragment and compute shaders to being colour targets (their
+* contents kept: only some squares are redrawn), and back to being read before the fog's grid and the main pass.
+*/
+void VulkanRenderer::drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet) {
+    const bool anyGlass = std::any_of(shadowDraws.tiles.begin(), shadowDraws.tiles.end(),
+                                      [](const ShadowTileDraw& drawing) { return !drawing.glass.batches.empty(); });
+
+    if (!anyGlass) {
+        return;
+    }
+
+    const VkCommandBuffer commands = frame.commands;
+    glassShadowTint.transition(commands, ImageState::ColourTarget);
+    glassShadowDepth.transition(commands, ImageState::ColourTarget);
+
+    const std::array<ColourAttachment, 2> maps{ColourAttachment{glassShadowTint.getView(), VK_ATTACHMENT_LOAD_OP_LOAD},
+                                               ColourAttachment{glassShadowDepth.getView(), VK_ATTACHMENT_LOAD_OP_LOAD}};
+    beginRendering(commands, {glassMapSize.width, glassMapSize.height}, maps, nullptr);
+    renderingOpen = true;
+    bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+
+    for (const ShadowTileDraw& drawing : shadowDraws.tiles) {
+        if (drawing.glass.batches.empty()) {
+            continue;
+        }
+
+        const ShadowTile square = glassMapSquare(*drawing.tile);
+        setViewport(commands, static_cast<float>(square.x), static_cast<float>(square.y), static_cast<float>(square.size), static_cast<float>(square.size));
+
+        // The square reset to no glass: a white tint, the far depth.
+        std::array<VkClearAttachment, 2> resets{};
+        resets[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        resets[0].colorAttachment = 0;
+        resets[0].clearValue.color = VkClearColorValue{{1.0f, 1.0f, 1.0f, 1.0f}};
+        resets[1].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        resets[1].colorAttachment = 1;
+        resets[1].clearValue.color = VkClearColorValue{{gpuFarDepth, 0.0f, 0.0f, 0.0f}};
+        VkClearRect rect{};
+        rect.rect = VkRect2D{{static_cast<std::int32_t>(square.x), static_cast<std::int32_t>(square.y)}, {square.size, square.size}};
+        rect.layerCount = 1;
+        vkCmdClearAttachments(commands, static_cast<std::uint32_t>(resets.size()), resets.data(), 1, &rect);
+
+        const GpuShadowView view = packShadowView(drawing.tile->matrix, drawing.tile->clipPlane, drawing.tile->lightPlace);
+        vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
+        drawBatches(commands, drawing.glass.batches, {glassShadowPipeline->get(), glassShadowPipeline->get(), VK_CULL_MODE_NONE});
+    }
+
+    vkCmdEndRendering(commands);
+    renderingOpen = false;
+    glassShadowTint.transition(commands, ImageState::SurfaceRead);
+    glassShadowDepth.transition(commands, ImageState::SurfaceRead);
 }
 
 /*

@@ -155,7 +155,10 @@ vec3 candidateGlassTransmittance(rayQueryEXT query, vec3 direction) {
     InstanceData instance = instances[rayQueryGetIntersectionInstanceCustomIndexEXT(query, false)];
     MaterialData material = materials[instance.material.x];
 
-    if (!glassFaceCounts(rayQueryGetIntersectionFrontFaceEXT(query, false), (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u)) {
+    bool front = rayQueryGetIntersectionFrontFaceEXT(query, false);
+    bool doubleSided = (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u;
+
+    if (!glassFaceCounts(front, doubleSided)) {
         return vec3(1.0);
     }
 
@@ -172,7 +175,7 @@ vec3 candidateGlassTransmittance(rayQueryEXT query, vec3 direction) {
     // Thick glass also absorbs over its thickness (Beer's law), counted once, at the face the light enters by.
     float thickness = material.transmission.y * textureLod(textures[nonuniformEXT(material.extra.w)], surface.uv, 0.0).g * instance.handedness.y;
     vec3 absorbed = beerAttenuation(material.attenuation.rgb, material.transmission.z, thickness);
-    return glassLightTransmittance(coverage, transmission, metallic, albedo.rgb, cosine) * absorbed;
+    return glassFaceTransmittance(front, doubleSided, coverage, transmission, metallic, albedo.rgb, cosine, absorbed);
 }
 
 /*

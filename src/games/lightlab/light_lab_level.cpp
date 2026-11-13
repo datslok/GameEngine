@@ -329,6 +329,48 @@ ImageLevel chainLinkImage() {
     return image;
 }
 
+std::vector<Vec2> labBottleProfile() {
+    return {
+        {0.029f, 0.0f},   {0.032f, 0.004f}, {0.032f, 0.15f},  {0.030f, 0.165f}, {0.024f, 0.18f},  {0.017f, 0.195f},
+        {0.0135f, 0.21f}, {0.013f, 0.235f}, {0.015f, 0.238f}, {0.015f, 0.247f}, {0.012f, 0.25f},
+    };
+}
+
+/*
+* Each cell takes a colour of the palette by its place, so no two neighbours along a row or a column match (the row's
+* step through the palette is not a multiple of its length). The lead is a band of labStainedGlassLead texels centred on
+* every cell edge, the window's own edges included, dark grey and passing nothing.
+*/
+StainedGlassImages stainedGlassImages() {
+    static constexpr std::array<std::array<std::uint8_t, 3>, 6> palette{{
+        {190, 20, 30},   // ruby
+        {20, 60, 190},   // cobalt
+        {235, 170, 20},  // amber
+        {20, 150, 70},   // emerald
+        {120, 40, 160},  // violet
+        {245, 230, 150}, // pale gold
+    }};
+
+    StainedGlassImages images{ImageLevel{labStainedGlassTexels, labStainedGlassTexels, {}}, ImageLevel{labStainedGlassTexels, labStainedGlassTexels, {}}};
+    const std::uint32_t cell = labStainedGlassTexels / labStainedGlassCells;
+
+    for (std::uint32_t y = 0; y < labStainedGlassTexels; ++y) {
+        for (std::uint32_t x = 0; x < labStainedGlassTexels; ++x) {
+            const std::uint32_t alongX = (x + labStainedGlassLead / 2) % cell;
+            const std::uint32_t alongY = (y + labStainedGlassLead / 2) % cell;
+            const bool lead = alongX < labStainedGlassLead || alongY < labStainedGlassLead || x + labStainedGlassLead / 2 >= labStainedGlassTexels ||
+                              y + labStainedGlassLead / 2 >= labStainedGlassTexels;
+            const std::array<std::uint8_t, 3>& glass = palette[((x / cell) + 2 * (y / cell)) % palette.size()];
+            const std::array<std::uint8_t, 3> colour = lead ? std::array<std::uint8_t, 3>{40, 40, 42} : glass;
+            images.colour.pixels.insert(images.colour.pixels.end(), {colour[0], colour[1], colour[2], 255});
+            const std::uint8_t passes = lead ? 0 : 255;
+            images.transmission.pixels.insert(images.transmission.pixels.end(), {passes, passes, passes, 255});
+        }
+    }
+
+    return images;
+}
+
 /*
 * Seen from the east (looking west, up is +y), north (-z) is to the right, so the corners run anticlockwise from the
 * bottom south corner: the front faces east. It is double-sided, so the west sees it too.

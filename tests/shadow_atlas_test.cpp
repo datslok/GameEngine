@@ -163,6 +163,48 @@ namespace {
         assert(shadowCasterSignature(elsewhere, {0, 1}) == before);
     }
 
+    /*
+    * With coloured shadow maps a tile holds its glass too: without glass the fingerprint is the solid casters' alone (so
+    * nothing is redrawn for the feature where there is no glass); with it, moving the glass, changing its mesh or any
+    * of what its tint comes from (colour, transmission, coverage, metalness, thickness, absorption, sides, textures)
+    * changes it.
+    */
+    void testGlassSignature() {
+        std::vector<DrawItem> draws = {drawAt(0.0f, 0), drawAt(2.0f, 1), drawAt(4.0f, 2)};
+        draws[2].material.transmission = 1.0f;
+        draws[2].material.colour = Pixel{200, 60, 40};
+        const std::vector<std::size_t> solid{0, 1};
+        const std::vector<std::size_t> glass{2};
+
+        assert(tintedShadowSignature(draws, solid, {}) == shadowCasterSignature(draws, solid));
+        const std::uint64_t before = tintedShadowSignature(draws, solid, glass);
+        assert(before != shadowCasterSignature(draws, solid));
+        assert(tintedShadowSignature(draws, solid, glass) == before);
+
+        const auto changed = [&](auto change) {
+            std::vector<DrawItem> other = draws;
+            change(other[2]);
+            return tintedShadowSignature(other, solid, glass) != before;
+        };
+
+        assert(changed([](DrawItem& pane) { pane.model = Mat4::translation(4.001f, 0.0f, 0.0f); }));
+        assert(changed([](DrawItem& pane) { pane.mesh = MeshHandle{8}; }));
+        assert(changed([](DrawItem& pane) { pane.material.colour = Pixel{200, 61, 40}; }));
+        assert(changed([](DrawItem& pane) { pane.material.transmission = 0.9f; }));
+        assert(changed([](DrawItem& pane) { pane.material.opacity = 0.5f; }));
+        assert(changed([](DrawItem& pane) { pane.material.alphaMode = AlphaMode::Blend; }));
+        assert(changed([](DrawItem& pane) { pane.material.metallic = 0.2f; }));
+        assert(changed([](DrawItem& pane) { pane.material.thickness = 0.01f; }));
+        assert(changed([](DrawItem& pane) { pane.material.attenuationColour = Vec3{0.5f, 1.0f, 1.0f}; }));
+        assert(changed([](DrawItem& pane) { pane.material.attenuationDistance = 2.0f; }));
+        assert(changed([](DrawItem& pane) { pane.material.doubleSided = true; }));
+        assert(changed([](DrawItem& pane) { pane.material.texture = TextureHandle{3}; }));
+        assert(changed([](DrawItem& pane) { pane.material.transmissionTexture = TextureHandle{3}; }));
+
+        // Roughness tints nothing.
+        assert(!changed([](DrawItem& pane) { pane.material.roughness = 0.9f; }));
+    }
+
     ShadowTile tileAt(std::uint32_t x, std::uint32_t y, std::uint32_t size, float shift = 0.0f) {
         return ShadowTile{Mat4::translation(shift, 0.0f, 0.0f), x, y, size, BoundingSphere{}};
     }
@@ -271,6 +313,7 @@ void testShadowAtlas() {
     testSquaresStayPut();
     testCrumbledAtlasIsRepacked();
     testCasterSignature();
+    testGlassSignature();
     testTileMemory();
     testPlansKeepTilesBetweenFrames();
 }

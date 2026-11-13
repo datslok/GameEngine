@@ -166,10 +166,12 @@ namespace {
         float expected[16]{};
         writeColumnMajor(tile, expected);
         const Vec4 plane{0.0f, 0.0f, 1.0f, 4.998f};
-        const GpuShadowView view = packShadowView(tile, plane);
+        const GpuShadowView view = packShadowView(tile, plane, Vec4{1.0f, 2.0f, 3.0f, 1.0f});
         assert(sameFloats(view.matrix, expected, 16));
         // Followed by the plane it clips at (an image light's mirror, render/gpu/shadow_map.h).
         assert(view.clipPlane[2] == 1.0f && view.clipPlane[3] == 4.998f);
+        // And where its light is (the coloured shadow map's glass pass): a position, or with w 0 a direction.
+        assert(view.lightPlace[0] == 1.0f && view.lightPlace[1] == 2.0f && view.lightPlace[2] == 3.0f && view.lightPlace[3] == 1.0f);
     }
 
     // A capture's view (a cube face's or a mirror's) is pushed the same way, followed by the plane it clips at and the

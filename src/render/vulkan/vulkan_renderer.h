@@ -335,6 +335,14 @@ private:
     VulkanImage shadowAtlas;
     ShadowAtlasLayout shadowLayout;
     ShadowTileMemory shadowMemory;
+
+    // The coloured shadow maps (render/gpu/transparency.h): the tint the glass each light sees passes, and the nearest
+    // glass depth, at half the atlas's size (glassShadowMapSize), and the pipeline drawing the glass into them. The
+    // images exist only once a frame has drawn them (glassMapSize says their size; zero before).
+    std::unique_ptr<VulkanPipeline> glassShadowPipeline;
+    VulkanImage glassShadowTint;
+    VulkanImage glassShadowDepth;
+    ShadowAtlasSize glassMapSize{0, 0, 0};
     LightHistory lightHistory;
 
     // The local lights given contact shadow channels last frame (chooseContactLights' incumbents).
@@ -505,15 +513,20 @@ private:
     BloomComposite drawScene(FrameContext& frame, const FrameDescription& description, const RenderSettings& settings, ImDrawData* ui);
     // The shadow tiles to redraw this frame, each with its casters batched by mesh, and the shadow part of the draw list:
     // each caster's instance number, one tile after another, following the main pass's part.
+    // With coloured shadow maps a redrawn tile's glass is drawn too, into its square of the maps, after the solid casters
+    // (its entries following theirs in the draw list); tileGlass says, for every tile of the plan, whether its square
+    // holds glass, for the records the shaders read (markTileGlass).
     struct ShadowTileDraw {
         const ShadowTile* tile = nullptr;
         BatchedDraws casters;
+        BatchedDraws glass;
         std::uint64_t signature = 0;
     };
 
     struct ShadowDraws {
         std::vector<ShadowTileDraw> tiles;
         std::vector<std::uint32_t> drawList;
+        std::vector<bool> tileGlass;
     };
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
@@ -544,8 +557,15 @@ private:
     // on, and ProbeCascades.
     bool tracesProbes(const FrameDescription& description, const RenderSettings& settings) const;
     void buildClusterLists(FrameContext& frame, VkDescriptorSet sceneSet);
-    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry);
+    // colouredShadows: the frame draws the coloured shadow maps, so each tile's glass is found and drawn too.
+    ShadowDraws prepareShadowDraws(const FrameDescription& description, const std::vector<ShadowTile>& tiles, std::uint32_t firstEntry,
+                                   bool colouredShadows);
     void drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
+    void drawGlassShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet);
+
+    // The coloured shadow maps at half the atlas's size, made the first frame that draws them and again when the atlas
+    // changes size; made, they start cleared (white tint, no glass) and every tile is redrawn.
+    void ensureGlassShadowMaps(const ShadowAtlasSize& atlas);
     void drawDepthPrepass(FrameContext& frame, const BatchedDraws& mainDraws, VkDescriptorSet sceneSet);
     // sampleProbes: the frame's light probes light the surfaces (the pipelines that sample them).
     // sky: the camera's rays when the frame has an atmosphere, whose sky is drawn over the background (none: the background alone),

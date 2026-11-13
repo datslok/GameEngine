@@ -96,7 +96,7 @@ The light probes trace their rays with hardware ray tracing, so they need ray tr
 - **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
 - **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
 - **Cut-outs and double-sided materials** (glTF's alpha mask and `doubleSided`): leaves, fences and grates with holes, in shadows and ray tracing too, their mips built to keep their coverage so fences do not vanish with distance.
-- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel, with a reactive mask so TAA, FSR and DLSS do not smear it; with ray tracing on, light passing through glass takes its colour (shadows, bounce light and reflections). Thick glass (`KHR_materials_volume`, `KHR_materials_ior`) bends what is seen through it and frosted glass blurs it, more the further behind; the light lab has a glass ball and a frosted panel beside its chrome ball.
+- **Glass and blended surfaces** (glTF's alpha blend and `KHR_materials_transmission`): sorted far to near and blended over the scene, glass reflecting by Fresnel and tinting what is behind it per channel, with a reactive mask so TAA, FSR and DLSS do not smear it. Light passing through glass takes its colour: with ray tracing on by rays (shadows, bounce light and reflections), and without it through coloured shadow maps, each light's view of the glass kept at half the shadow atlas's size, which tint the shadows and the fog's shafts (Coloured shadow maps in F5 Transparency; in the light lab, turn on Stained glass to colour the sunlit room's window, or look at the green bottle on the pen table). Thick glass (`KHR_materials_volume`, `KHR_materials_ior`) bends what is seen through it and frosted glass blurs it, more the further behind; the light lab has a glass ball and a frosted panel beside its chrome ball.
 - **Frustum culling:** each view, camera or shadow, skips what it cannot see.
 
 **Shadows from every light**
@@ -402,6 +402,8 @@ The light lab is the default game (`--game lightlab`; the exe alone in the zip).
 The flashlight (F) is a fast light: its bounce is kept apart with a short memory, and switching it tells the light probes, so its bounce comes and goes with it. Shine it into the light lab's dark back room to watch its bounce light follow it.
 
 The light lab's fence torch (F5, Fence torch, off at the start) is a second flashlight fixed on the fence's first post. Walk round its beam to see the mist light up: brightest looking into the beam, faintest from behind it, which is how you see your own torch.
+
+The light lab's stained glass (F5, Stained glass, off at the start) turns the sunlit room's window into coloured panes in lead, so the sun throws coloured patches on the floor and coloured beams through the mist, with or without ray tracing.
 
 The back room's ceiling lamp (L) is a still light. Its bounce comes in at once when switched, since the switch tells the light probes round it to start afresh. Moving the clock by hand does the same for every probe.
 

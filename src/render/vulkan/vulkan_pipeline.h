@@ -61,7 +61,9 @@ enum class BlendMode {
     None,               // the new colour replaces what was there
     Additive,           // the new colour is added to it (bloom growing back up)
     PremultipliedAlpha, // the new colour over it, which shows through by one minus the new alpha (the debug UI)
-    DualSourceTransmittance // the new colour added to it, which shows through by the shader's second colour, per channel (glass)
+    DualSourceTransmittance, // the new colour added to it, which shows through by the shader's second colour, per channel (glass)
+    Multiply,           // what was there multiplied by the new colour, per channel (the coloured shadow map's tint)
+    Maximum             // the larger of the two kept, per channel (its nearest glass depth, reversed-Z)
 };
 
 // Vertices read from one buffer, each stride bytes; no attributes means the vertex shader makes its own (a full-screen
@@ -104,9 +106,11 @@ struct PipelineDescription {
     // them: the depth prepass's solid draws, beside its cut-outs marking the solid mask).
     bool colourWrites = true;
 
-    // More colour targets after the first, written by the fragment shader's outputs at locations 1, 2..., never
-    // blended (the main pass's reflection surfaces, render/gpu/screen_reflections.h).
+    // More colour targets after the first, written by the fragment shader's outputs at locations 1, 2..., not blended
+    // (the main pass's reflection surfaces, render/gpu/screen_reflections.h) unless extraBlends says otherwise for them
+    // in order (the coloured shadow map's glass depth; needs VulkanDevice::supportsIndependentBlending).
     std::vector<VkFormat> extraColourFormats;
+    std::vector<BlendMode> extraBlends;
 
     VkFormat depthFormat = VK_FORMAT_UNDEFINED; // none: no depth target
     bool depthTest = false;

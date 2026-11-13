@@ -988,6 +988,63 @@ namespace {
         }
     }
 
+    /*
+    * The glass pass needs the way to the light at each pane (for its Fresnel angle and which faces count): a local
+    * light's tiles carry its position (w 1), a sun's cascades the direction towards the sun (w 0).
+    */
+    void testTilesKnowWhereTheirLightIs() {
+        FrameLighting lighting;
+        DirectionalLight sun;
+        sun.direction = Vec3{0.0f, -2.0f, 0.0f};
+        lighting.directionalLights.push_back(sun);
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true, 10.0f));
+        lighting.pointLights.push_back(pointLightAt(Vec3{1.0f, 0.0f, 0.0f}, true, 20.0f));
+
+        const ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+        const std::size_t spotTile = maxShadowCascades;
+
+        for (std::size_t cascade = 0; cascade < spotTile; ++cascade) {
+            const Vec4& place = plan.tiles[cascade].lightPlace;
+            assert(nearlyEqual(place.x, 0.0f) && nearlyEqual(place.y, 1.0f) && nearlyEqual(place.z, 0.0f) && place.w == 0.0f);
+        }
+
+        const Vec4& spot = plan.tiles[spotTile].lightPlace;
+        assert(nearlyEqual(spot.y, 3.0f) && spot.w == 1.0f);
+
+        for (std::size_t face = spotTile + 1; face < spotTile + 7; ++face) {
+            assert(nearlyEqual(plan.tiles[face].lightPlace.x, 1.0f) && plan.tiles[face].lightPlace.w == 1.0f);
+        }
+    }
+
+    /*
+    * The coloured shadow map is the atlas at half size each way, a quarter of its texels, and every tile's square in it
+    * is the atlas's halved: tiles are powers of two from 256, so the halves are whole texels, and a tile's 0..1
+    * rectangle is the same in both, so the shader reads both at one coordinate.
+    */
+    void testGlassMapIsHalfTheAtlas() {
+        const ShadowAtlasSize atlas = shadowAtlasSizeFor(ShadowSettings{});
+        const ShadowAtlasSize half = glassShadowMapSize(atlas);
+        assert(half.width * 2 == atlas.width && half.height * 2 == atlas.height);
+
+        const ShadowTile tile{Mat4::identity(), 1024, 512, 256, BoundingSphere{}};
+        const ShadowTile square = glassMapSquare(tile);
+        assert(square.x == 512 && square.y == 256 && square.size == 128);
+        assert(static_cast<float>(square.x) / static_cast<float>(half.width) == static_cast<float>(tile.x) / static_cast<float>(atlas.width));
+    }
+
+    // Whether a tile has glass in its coloured map is a flag in the record the shader reads (offset's z), off by default.
+    void testTilesMarkTheirGlass() {
+        FrameLighting lighting;
+        lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true, 10.0f));
+        ShadowPlan plan = planShadows(lighting, makeOverviewCamera());
+        assert(!tileHasGlass(plan.tileData[0]));
+
+        markTileGlass(plan.tileData[0], true);
+        assert(tileHasGlass(plan.tileData[0]) && plan.tileData[0].offset[2] == 1.0f);
+        markTileGlass(plan.tileData[0], false);
+        assert(!tileHasGlass(plan.tileData[0]));
+    }
+
     // A tile's shader matrix, from the column-major numbers the shader reads.
     Mat4 shaderMatrix(const ShadowTileData& data) {
         Mat4 matrix;
@@ -1060,6 +1117,9 @@ void testShadowMap() {
     testShadowStrengthIsPassed();
     testShadowsAreAttachedToLights();
     testTilesKnowTheirLightsReach();
+    testTilesKnowWhereTheirLightIs();
+    testGlassMapIsHalfTheAtlas();
+    testTilesMarkTheirGlass();
     testShaderMatricesAreCameraRelative();
     testFaceFollowsTheLargestAxis();
     testEachFaceLooksAlongItsAxis();

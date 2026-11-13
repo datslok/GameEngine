@@ -43,6 +43,32 @@ bool glassFaceCounts(bool rayMeetsFront, bool doubleSided) {
     return !rayMeetsFront || doubleSided;
 }
 
+// One glass face's share of a light, for rays and coloured shadow maps: 1 for a face that does not count, else what it
+// lets through at its angle times what its thickness absorbs.
+vec3 glassFaceTransmittance(bool rayMeetsFront, bool doubleSided, float alpha, float transmission, float metallic, vec3 baseColour, float cosine,
+                            vec3 absorbed) {
+    if (!glassFaceCounts(rayMeetsFront, doubleSided)) {
+        return vec3(1.0);
+    }
+
+    return glassLightTransmittance(alpha, transmission, metallic, baseColour, cosine) * absorbed;
+}
+
+// Coloured shadow maps (reversed-Z depths from the light, 0 where there is no glass): a point takes the tint only behind
+// the nearest glass, further from the light.
+bool isBehindGlass(float receiverDepth, float glassDepth) {
+    return receiverDepth < glassDepth;
+}
+
+vec3 glassShadowTint(float receiverDepth, float glassDepth, vec3 tint) {
+    return isBehindGlass(receiverDepth, glassDepth) ? tint : vec3(1.0);
+}
+
+// Glass behind something solid seen from the light is left out of the map.
+bool glassHiddenFromLight(float glassDepth, float solidDepth) {
+    return solidDepth > glassDepth;
+}
+
 // Beer's law: what light keeps after length through a medium keeping colour after 1 / inverseDistance.
 vec3 beerAttenuation(vec3 colour, float inverseDistance, float pathLength) {
     return pow(colour, vec3(pathLength * inverseDistance));

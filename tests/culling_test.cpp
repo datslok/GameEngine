@@ -206,6 +206,38 @@ namespace {
         const Frustum face = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne);
         assert((shadowCasters(draws, std::vector<std::size_t>{1, 0, 3}, face) == std::vector<std::size_t>{0, 3}));
     }
+
+    /*
+    * The glass a light's coloured shadow map draws (render/gpu/transparency.h): the transparent draws within its reach,
+    * in draw order, by the same sphere test as the solid casters, whatever their castsShadows says (as the glass rays
+    * see every pane); opaque draws are never glass.
+    */
+    void testGlassInReach() {
+        std::vector<DrawItem> draws = {
+            drawAt(0.0f, 0.0f, -5.0f, 0),
+            drawAt(0.0f, 0.0f, -30.0f, 0),
+            drawAt(0.0f, 0.0f, -11.5f, 0),
+            drawAt(0.0f, 0.0f, -30.0f, 9),
+            drawAt(0.0f, 0.0f, -5.0f, 0),
+            drawAt(0.0f, 0.0f, -4.0f, 0),
+        };
+        attachBoundingSpheres(draws, {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
+
+        for (std::size_t i = 1; i < 5; ++i) {
+            draws[i].material.transmission = 1.0f;
+        }
+
+        draws[2].material.transmission = 0.0f;
+        draws[2].material.alphaMode = AlphaMode::Blend;
+        draws[4].castsShadows = false;
+
+        const BoundingSphere reach{Vec3{0.0f, 0.0f, 0.0f}, 10.0f};
+        assert((glassInReach(draws, reach) == std::vector<std::size_t>{2, 3, 4}));
+        assert((glassInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{1, 2, 3, 4}));
+
+        // The solid casters are the rest, as before.
+        assert((castersInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{0, 5}));
+    }
 }
 
 void testCulling() {
@@ -217,4 +249,5 @@ void testCulling() {
     testCameraSkipsWhatItCannotSee();
     testOffScreenObjectsStillCastShadows();
     testCastersOutsideTheLightsReachAreDropped();
+    testGlassInReach();
 }

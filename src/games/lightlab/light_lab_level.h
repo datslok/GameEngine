@@ -36,7 +36,8 @@ enum class LabSurface {
     ChainLink, // the fence's wire mesh: galvanised steel
     WindowGlass, // the sunlit room's window pane: clear glass
     SolidGlass, // the reflection corner's glass ball: thick glass, bending light
-    FrostedGlass // the frosted panel in front of the chrome ball: rough thin glass
+    FrostedGlass, // the frosted panel in front of the chrome ball: rough thin glass
+    BottleGlass // the bottle on the pen table: thin green glass, both walls drawn
 };
 
 struct LabBlock {
@@ -92,6 +93,14 @@ inline constexpr float labPenHalfWidth = 0.005f;
 inline constexpr float labPencilHalfWidth = 0.0035f;
 inline constexpr float labPenHalfLength = 0.07f;
 
+// A green glass bottle standing on the pen table's east half, its base's middle here: its coloured shadow beside the
+// pens' (render/gpu/transparency.h).
+inline const Vec3 labBottleBase{labTableX + 0.18f, labTableHeight, labTableZ - 0.12f};
+
+// Its profile, (radius, height) from the base up, in metres: a 25 cm bottle, 6.4 cm across, its shoulder narrowing to
+// a neck with a lip (spun round by Mesh::lathe).
+std::vector<Vec2> labBottleProfile();
+
 /*
 * The chain-link along the fence: one panel through the posts from the ground to their tops, a diamond wire mesh drawn as
 * a cut-out (render/gpu/alpha_mask.h), double-sided, so sun shadows, light probes and far mip levels all meet holes. Its
@@ -113,6 +122,23 @@ ImageLevel chainLinkImage();
 
 // The panel: a quad facing east, its texture coordinates in tiles (u north along the fence, v up).
 Mesh chainLinkPanel();
+
+/*
+* Stained glass for the sunlit room's window (LightLabStainedGlassSettings): a grid of cells of strong colours, each
+* passing its light, held in lead lines passing none, so the coloured shadow maps (render/gpu/transparency.h) throw
+* coloured patches on the floor. Two textures over the pane's face: the colour (sRGB) and the transmission (linear, in
+* red: 0 on the lead, 1 in the cells).
+*/
+inline constexpr std::uint32_t labStainedGlassTexels = 256; // each texture's side
+inline constexpr std::uint32_t labStainedGlassCells = 4;    // cells across, each way
+inline constexpr std::uint32_t labStainedGlassLead = 4;     // the lead's width in texels, between cells and round the edge
+
+struct StainedGlassImages {
+    ImageLevel colour;
+    ImageLevel transmission;
+};
+
+StainedGlassImages stainedGlassImages();
 
 /*
 * A forest of box trees (a trunk and a crown) scattered round the start at between these distances, placed by hashing

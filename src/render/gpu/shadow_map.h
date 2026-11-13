@@ -6,6 +6,7 @@
 #include "render/gpu/cascades.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/planar_reflection.h"
+#include "render/gpu/shader_shared.h"
 #include "render/gpu/shadow_atlas.h"
 #include "scene/camera.h"
 #include "scene/frame_description.h"
@@ -105,6 +106,16 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor);
 // The atlas the settings need: the usual one, or with Ultra cascades one grown by exactly their extra room.
 ShadowAtlasSize shadowAtlasSizeFor(const ShadowSettings& settings);
 
+/*
+* The coloured shadow maps (render/gpu/transparency.h): each light's view of the glass, the tint and the nearest glass
+* depth, in images beside the atlas holding the same tiles at half size each way (a quarter of the texels: about 150 MB
+* beside the 384 MB atlas). A tint is a soft wash of colour, and the shadow's own edge stays at the atlas's resolution.
+* Tiles are powers of two from 256, so every half is whole, and a tile's 0..1 rectangle is the same in both.
+*/
+inline constexpr std::uint32_t glassShadowMapDivisor = GLASS_SHADOW_MAP_DIVISOR;
+
+ShadowAtlasSize glassShadowMapSize(const ShadowAtlasSize& atlas);
+
 // The most shadowed lights of each kind; the rest still give light, without shadows.
 inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; cached tiles cost little, but each shadowed pixel pays 32 samples per light
 inline constexpr int maxShadowedSpotLights = 8;        // 1 tile each
@@ -165,7 +176,8 @@ struct MirrorShadowView {
 struct ShadowTileData {
     float matrix[16]; // column-major view-projection: the shadow pass's view, for points measured from the camera
     float offset[4];  // against acne: x normal offset per unit of distance from the light, y fixed (for a sun cascade,
-                      // its base bias towards the sun, see sunShadowBias)
+                      // its base bias towards the sun, see sunShadowBias); z 1 when the tile has glass in its coloured
+                      // shadow map (markTileGlass), so only those tiles' lookups read it
     float rect[4];    // where the tile is in the atlas, 0..1: xy corner, zw size
 
     // For soft shadows. Perspective views: x near and y far plane, to turn stored depths back into distances, and z the
@@ -176,6 +188,10 @@ struct ShadowTileData {
 
 static_assert(sizeof(ShadowTileData) == 112, "ShadowTileData must match the shader's ShadowTileData struct");
 
+// Whether a tile's coloured shadow map holds glass (offset's z): only then do the shaders read it for that tile.
+void markTileGlass(ShadowTileData& data, bool hasGlass);
+bool tileHasGlass(const ShadowTileData& data);
+
 // One shadow view: its view-projection, and the square of the atlas it is drawn into (pixels, top-left corner). Size 0
 // means no square: a point light's cube face that sees nothing on screen, which is not drawn and which the shader counts as lit.
 // reach is the sphere its light lights (centre at the light, the range as radius; negative for a directional light,
@@ -185,6 +201,9 @@ static_assert(sizeof(ShadowTileData) == 112, "ShadowTileData must match the shad
 // clipPlane (world space) cuts away what lies behind it as the tile is drawn: an image light's mirror (its window's
 // plane, lifted as planarClipPlane lifts a mirror's), since from the image the first thing seen is the wall behind the
 // glass and the mirror itself; noClipPlane for every other tile.
+//
+// lightPlace (world space) is where its light is, for the coloured shadow map's glass (its angle to the light, and which
+// faces count): a local light's position with w 1, or for a sun's cascades the direction towards the sun with w 0.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;
@@ -192,7 +211,11 @@ struct ShadowTile {
     std::uint32_t size = standardShadowTileSize;
     BoundingSphere reach;
     Vec4 clipPlane = noClipPlane();
+    Vec4 lightPlace{0.0f, 1.0f, 0.0f, 0.0f};
 };
+
+// A tile's square in the coloured shadow map: its place and size in the atlas, halved.
+ShadowTile glassMapSquare(const ShadowTile& tile);
 
 // What the shadow pass draws (one tile per view, in tile order) and what the shader reads: each light's shadow, one record
 // per light the shader gets in slot order (as packLighting gives them), and tileData for the storage buffer, in the same

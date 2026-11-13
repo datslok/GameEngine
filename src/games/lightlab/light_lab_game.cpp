@@ -167,6 +167,14 @@ namespace {
             material.roughness = 0.4f;
             material.transmission = 1.0f;
             break;
+        case LabSurface::BottleGlass:
+            // Green bottle glass, thin and smooth: each wall passes about 60% of green and a fifth of red and blue, and
+            // light crossing the bottle passes both walls (double-sided), as through a real one.
+            material.colour = Pixel{120, 205, 125};
+            material.roughness = 0.03f;
+            material.transmission = 1.0f;
+            material.doubleSided = true;
+            break;
         }
         return material;
     }
@@ -311,6 +319,10 @@ void visit(LightLabFlashlightSettings& settings, SettingsVisitor& visitor) {
     visitor.field("On", settings.on);
 }
 
+void visit(LightLabStainedGlassSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("On", settings.on);
+}
+
 float starVisibility(const Vec3& towardsSun) {
     return 1.0f - smoothStep(radiansFromDegrees(labStarsFullBelowDegrees), radiansFromDegrees(labStarsAppearBelowDegrees), sunElevation(towardsSun));
 }
@@ -404,14 +416,21 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     addStatic(blocksRenderer(cube, layout.trees));
     addStatic(blocksRenderer(cube, layout.building));
 
-    // The window's glass: drawn after the opaque scene, casting no shadow map and not part of the level's collision, so the
-    // sun still comes through (tinted by rays on GPUs with ray queries).
+    // The window's glass: drawn after the opaque scene and not part of the level's collision, so the sun still comes
+    // through, tinted by it (by rays, or through the coloured shadow maps). Clear, or stained by its setting: the stained
+    // material is the clear one with its two textures.
     ModelRenderer pane = blocksRenderer(cube, {LabBlock{labWindowPane.centre(), (labWindowPane.maximum - labWindowPane.minimum) * 0.5f, LabSurface::WindowGlass}});
-    pane.castsShadows = false;
     pane.isStatic = true;
-    const Entity glass = world.create();
-    world.add(glass, Transform{});
-    world.add(glass, std::move(pane));
+    clearGlass = pane.parts.front().material;
+    StainedGlassImages stained = stainedGlassImages();
+    stainedGlass = clearGlass;
+    stainedGlass.colour = Pixel{255, 255, 255};
+    stainedGlass.texture = assets.addTexture(ImageData{stained.colour.width, stained.colour.height, std::move(stained.colour.pixels), TextureEncoding::Srgb});
+    stainedGlass.transmissionTexture =
+        assets.addTexture(ImageData{stained.transmission.width, stained.transmission.height, std::move(stained.transmission.pixels), TextureEncoding::Linear});
+    windowPane = world.create();
+    world.add(windowPane, Transform{});
+    world.add(windowPane, std::move(pane));
     addStatic(blocksRenderer(cube, layout.street));
     addStatic(blocksRenderer(cube, layout.reflectors));
     addStatic(blocksRenderer(cube, layout.table));
@@ -424,7 +443,7 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
                                               Mat4::scaling(labMirrorBallRadius, labMirrorBallRadius, labMirrorBallRadius)});
     addStatic(std::move(mirrorBall));
 
-    // Refraction's test pieces, as the window's glass: no shadow map, not in the collision.
+    // Refraction's test pieces, as the window's glass: tinting the light through them, not in the collision.
     ModelRenderer refractors;
     refractors.parts.push_back(RenderPart{sphere, surfaceMaterial(LabSurface::SolidGlass),
                                           Mat4::translation(labGlassBallCentre.x, labGlassBallCentre.y, labGlassBallCentre.z) *
@@ -433,11 +452,20 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     refractors.parts.push_back(RenderPart{cube, surfaceMaterial(LabSurface::FrostedGlass),
                                           Mat4::translation(labFrostedPanel.centre().x, labFrostedPanel.centre().y, labFrostedPanel.centre().z) *
                                               Mat4::scaling(frostedHalf.x, frostedHalf.y, frostedHalf.z)});
-    refractors.castsShadows = false;
     refractors.isStatic = true;
     const Entity refracting = world.create();
     world.add(refracting, Transform{});
     world.add(refracting, std::move(refractors));
+
+    // The green bottle on the pen table, spun from its profile, standing at its base: glass like the window's, not in
+    // the collision.
+    ModelRenderer bottleRenderer;
+    bottleRenderer.parts.push_back(RenderPart{assets.addMesh(Mesh::lathe(labBottleProfile(), 48)), surfaceMaterial(LabSurface::BottleGlass),
+                                              Mat4::translation(labBottleBase.x, labBottleBase.y, labBottleBase.z)});
+    bottleRenderer.isStatic = true;
+    bottle = world.create();
+    world.add(bottle, Transform{});
+    world.add(bottle, std::move(bottleRenderer));
 
     // The windows, one part each in the layout's order, so switching finds each lit one's glow by its number.
     std::vector<LabBlock> panes;
@@ -680,6 +708,16 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
 
         signalProbeEvent(world, probeEventAround(ProbeEventKind::LightChange, labDeskLampPosition, labDeskLampBeam.range));
     }
+
+    // The window's glass likewise, its light into the sunlit room changing with it.
+    Material& window = world.get<ModelRenderer>(windowPane).parts.front().material;
+    const bool stainedNow = window.transmissionTexture.isValid();
+
+    if (stainedNow != stainedGlassSettings.on) {
+        window = stainedGlassSettings.on ? stainedGlass : clearGlass;
+        const Vec3 roomHalf = (labSunlitRoom.maximum - labSunlitRoom.minimum) * 0.5f;
+        signalProbeEvent(world, probeEventAround(ProbeEventKind::LightChange, labSunlitRoom.centre(), roomHalf.length()));
+    }
 }
 
 void LightLabGame::updateDaylight(World& world) {
@@ -808,6 +846,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Desk lamp", [&] {
         visit(deskLampSettings, visitor);
     });
+    visitor.group("Stained glass", [&] {
+        visit(stainedGlassSettings, visitor);
+    });
     visitor.group("Flashlight", [&] {
         visit(flashlightSettings, visitor);
     });
@@ -892,6 +933,18 @@ LightLabFlashlightSettings& LightLabGame::getFlashlightSettings() {
 
 Entity LightLabGame::getDeskLamp() const {
     return deskLamp;
+}
+
+LightLabStainedGlassSettings& LightLabGame::getStainedGlassSettings() {
+    return stainedGlassSettings;
+}
+
+Entity LightLabGame::getWindowPane() const {
+    return windowPane;
+}
+
+Entity LightLabGame::getBottle() const {
+    return bottle;
 }
 
 Entity LightLabGame::getMoon() const {

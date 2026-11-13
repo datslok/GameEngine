@@ -172,10 +172,48 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Coloured shadow maps: one face's share of a light (either side counting or not, angles from grazing to head-on,
+    * absorption), and the depth tests: behind the glass, and glass hidden behind something solid, with depths level,
+    * near and far apart and no glass at all. Inputs per case: (front met, double-sided, alpha, transmission), (metallic,
+    * cosine, receiver or glass depth, glass or solid depth), base colour, absorbed, the stored tint. Outputs: the face's
+    * share, (behind the glass, hidden from the light), the tint a receiver takes.
+    */
+    void checkColouredShadows(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{331};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 256; ++i) {
+            const float near = random.between(0.0f, 1.0f);
+            const float other = i % 6 == 0 ? near : (i % 10 == 0 ? 0.0f : random.between(0.0f, 1.0f));
+            inputs.push_back(GpuVec4{i % 2 == 0 ? 1.0f : 0.0f, i % 3 == 0 ? 1.0f : 0.0f, i % 7 == 0 ? 1.0f : random.between(0.0f, 1.0f),
+                                     random.between(0.0f, 1.0f)});
+            inputs.push_back(GpuVec4{i % 9 == 0 ? 1.0f : random.between(0.0f, 0.2f), random.between(-1.0f, 1.0f), near, other});
+            inputs.push_back(gpuVec4(randomColour(random, 1.0f), 0.0f));
+            inputs.push_back(gpuVec4(randomColour(random, 1.0f), 0.0f));
+            inputs.push_back(gpuVec4(randomColour(random, 1.0f), 0.0f));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_COLOURED_SHADOWS, inputs, 5, 3);
+
+        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
+            const GpuVec4* in = &inputs[i * 5];
+            const GpuVec4* out = &outputs[i * 3];
+            const Vec3 face = glassFaceTransmittance(in[0][0] > 0.5f, in[0][1] > 0.5f, in[0][2], in[0][3], in[1][0], vec3From(in[2]), in[1][1], vec3From(in[3]));
+            report.check("glassFaceTransmittance", transcendentalTolerance, face, vec3From(out[0]));
+            report.check("isBehindGlass", exactTolerance, isBehindGlass(in[1][2], in[1][3]) ? 1.0f : 0.0f, out[1][0]);
+            report.check("glassHiddenFromLight", exactTolerance, glassHiddenFromLight(in[1][2], in[1][3]) ? 1.0f : 0.0f, out[1][1]);
+            report.check("glassShadowTint", exactTolerance, glassShadowTint(in[1][2], in[1][3], vec3From(in[4])), vec3From(out[2]));
+        }
+    }
+}
+
 void gpuTestTransparency(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("transparency.glsl");
     checkBlend(runner, report);
     checkReactiveShare(runner, report);
     checkGlassRays(runner, report);
     checkRefraction(runner, report);
+    checkColouredShadows(runner, report);
 }

@@ -231,6 +231,62 @@ namespace {
         assert(glassFaceCounts(true, true) && glassFaceCounts(false, true));
     }
 
+    /*
+    * One glass face's share of a light, as both the rays and the coloured shadow map take it: a face that does not
+    * count passes everything; one that does passes glassLightTransmittance at its angle, times what its thickness
+    * absorbs.
+    */
+    void testGlassFaceTransmittance() {
+        const Vec3 white{1.0f, 1.0f, 1.0f};
+        const Vec3 absorbed{0.5f, 0.8f, 1.0f};
+        assert(nearVec(glassFaceTransmittance(true, false, 1.0f, 1.0f, 0.0f, tint, 0.7f, absorbed), white));
+        assert(nearVec(glassFaceTransmittance(false, false, 1.0f, 1.0f, 0.0f, tint, 0.7f, absorbed),
+                       glassLightTransmittance(1.0f, 1.0f, 0.0f, tint, 0.7f) * absorbed));
+        assert(nearVec(glassFaceTransmittance(true, true, 0.4f, 0.8f, 0.1f, tint, -0.3f, white), glassLightTransmittance(0.4f, 0.8f, 0.1f, tint, -0.3f)));
+    }
+
+    /*
+    * Coloured shadow maps store the nearest glass depth seen from the light (reversed-Z: larger is nearer the light, 0
+    * where there is no glass). A point is tinted only behind it, further from the light; a point in front of the glass,
+    * or level with it, or where there is no glass, keeps the light white.
+    */
+    void testTintBehindGlassOnly() {
+        const Vec3 white{1.0f, 1.0f, 1.0f};
+        assert(isBehindGlass(0.3f, 0.5f));
+        assert(!isBehindGlass(0.5f, 0.5f) && !isBehindGlass(0.7f, 0.5f));
+        assert(!isBehindGlass(0.3f, 0.0f) && !isBehindGlass(0.0f, 0.0f));
+
+        assert(nearVec(glassShadowTint(0.3f, 0.5f, tint), tint));
+        assert(nearVec(glassShadowTint(0.7f, 0.5f, tint), white));
+        assert(nearVec(glassShadowTint(0.3f, 0.0f, Vec3{1.0f, 1.0f, 1.0f}), white));
+    }
+
+    /*
+    * Glass behind something solid, seen from the light, is left out of the map (its fragments thrown away against the
+    * shadow atlas's depth), so it cannot tint what lies between the solid thing and the light: a basement window must
+    * not colour the sunlit floor above it. Level with the solid surface counts as seen.
+    */
+    void testGlassHiddenFromLight() {
+        assert(glassHiddenFromLight(0.3f, 0.5f));
+        assert(!glassHiddenFromLight(0.5f, 0.5f));
+        assert(!glassHiddenFromLight(0.6f, 0.5f));
+        assert(!glassHiddenFromLight(0.3f, 0.0f));
+    }
+
+    /*
+    * The coloured shadow maps are drawn while they are on and there is glass anywhere in the world, unless the glass is
+    * tinting shadowed lights by rays already (those are exact, and both would tint twice).
+    */
+    void testWhenColouredShadowMapsDraw() {
+        TransparencySettings settings;
+        assert(settings.colouredShadowMaps);
+        assert(drawsColouredShadowMaps(settings, true, false));
+        assert(!drawsColouredShadowMaps(settings, false, false));
+        assert(!drawsColouredShadowMaps(settings, true, true));
+        settings.colouredShadowMaps = false;
+        assert(!drawsColouredShadowMaps(settings, true, false));
+    }
+
     // Whether a segment (a point, a unit direction, a length) passes within a sphere.
     void testSegmentMeetsSphere() {
         const Vec3 start{0.0f, 0.0f, 0.0f};
@@ -467,6 +523,10 @@ void testTransparency() {
     testTransmittanceSharedWithBlend();
     testGlassLightTransmittance();
     testGlassFaces();
+    testGlassFaceTransmittance();
+    testTintBehindGlassOnly();
+    testGlassHiddenFromLight();
+    testWhenColouredShadowMapsDraw();
     testSegmentMeetsSphere();
     testGlassBounds();
     testBeerAttenuation();

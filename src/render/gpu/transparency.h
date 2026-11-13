@@ -58,6 +58,33 @@ Vec3 glassLightTransmittance(float alpha, float transmission, float metallic, co
 */
 bool glassFaceCounts(bool rayMeetsFront, bool doubleSided);
 
+/*
+* One glass face's share of a light, for rays and for coloured shadow maps alike: nothing changed (1) by a face that does
+* not count (glassFaceCounts), else glassLightTransmittance at its angle times absorbed, what its thickness takes away
+* (beerAttenuation, counted once, at the face the light enters by).
+*/
+Vec3 glassFaceTransmittance(bool rayMeetsFront, bool doubleSided, float alpha, float transmission, float metallic, const Vec3& baseColour, float cosine,
+                            const Vec3& absorbed);
+
+/*
+* Coloured shadow maps: glass casts no shadow in the atlas, so beside it each light's view keeps, at half size, the
+* product of the shares every glass face it sees passes (the tint) and the nearest glass depth, in the atlas's reversed-Z
+* (larger nearer the light; 0, the far depth, where there is no glass). A point is behind the glass, and takes the tint,
+* only when its own depth from the light is further than the glass's. Only the nearest glass's depth is kept, so a point
+* between two panes in a row takes both tints: rare, and the price of a single depth.
+*/
+bool isBehindGlass(float receiverDepth, float glassDepth);
+
+// The tint a point at receiverDepth takes from the map's texel: the stored tint behind the glass, white elsewhere.
+Vec3 glassShadowTint(float receiverDepth, float glassDepth, const Vec3& tint);
+
+/*
+* Whether a glass fragment drawn into the map is hidden from the light by something solid nearer it (the shadow atlas's
+* depth there, solidDepth): such glass is left out, so it cannot tint what lies between the solid thing and the light,
+* which is all a hidden pane's tint could reach that the solid thing does not shadow anyway.
+*/
+bool glassHiddenFromLight(float glassDepth, float solidDepth);
+
 // Whether the segment from a point along a unit direction for length passes within radius of centre.
 bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius);
 
@@ -227,6 +254,11 @@ struct TransparencySettings {
     // reflections' rays), by rays that see only glass. On GPUs with ray queries; ignored elsewhere.
     bool glassShadows = true;
 
+    // Without those rays (ray tracing off, or a GPU without ray queries), glass tints shadowed lights through coloured
+    // shadow maps: each light's view of the glass, at half the shadow atlas's size (render/gpu/shadow_map.h), made only
+    // while glass is in the world. The main pass and the fog's grid read them.
+    bool colouredShadowMaps = true;
+
     // Thick and frosted glass drawn by refraction (isRefractive); off blends them over the picture as thin glass.
     bool refraction = true;
 
@@ -247,6 +279,10 @@ void visit(TransparencySettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for a negative scale or a limit outside 0..1.
 void validateTransparency(const TransparencySettings& settings);
+
+// Whether this frame draws the coloured shadow maps: on, glass in the world, and not tinted by rays already (glassRays),
+// which are exact, and with both the light would be tinted twice.
+bool drawsColouredShadowMaps(const TransparencySettings& settings, bool glassInWorld, bool glassRays);
 
 /*
 * One pixel's mask: in each channel the change the transparent surfaces made, as a share of the brighter of before and

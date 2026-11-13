@@ -224,6 +224,12 @@ void VulkanDevice::selectPhysicalDevice(const std::vector<std::string>& optional
     dualSource.dualSrcBlend = VK_TRUE;
     dualSourceBlending = physicalDevice.enable_features_if_present(dualSource);
 
+    // Optional: each colour target blending its own way (the coloured shadow maps, render/gpu/transparency.h). Every
+    // desktop GPU has it; without it glass tints shadows only by rays.
+    VkPhysicalDeviceFeatures independent{};
+    independent.independentBlend = VK_TRUE;
+    independentBlending = physicalDevice.enable_features_if_present(independent);
+
     // Optional: hardware ray tracing through ray queries (any shader asks what a ray hits), with the acceleration
     // structures it searches. Without them everything ray-traced stays off.
     const std::vector<const char*> rayExtensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
@@ -415,6 +421,10 @@ bool VulkanDevice::supportsRayQueries() const {
 
 bool VulkanDevice::supportsDualSourceBlending() const {
     return dualSourceBlending;
+}
+
+bool VulkanDevice::supportsIndependentBlending() const {
+    return independentBlending;
 }
 
 bool VulkanDevice::supportsFsrFeatures() const {

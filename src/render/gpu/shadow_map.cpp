@@ -162,6 +162,12 @@ namespace {
                  float fixedOffset, const BoundingSphere& reach) {
         tile.matrix = drawMatrix;
         tile.reach = reach;
+
+        // A local light's tiles are seen from the light, the centre of its reach; the sun's cascades set theirs after.
+        if (reach.radius >= 0.0f) {
+            tile.lightPlace = Vec4{reach.centre.x, reach.centre.y, reach.centre.z, 1.0f};
+        }
+
         plan.tiles.push_back(tile);
 
         ShadowTileData data{};
@@ -200,6 +206,9 @@ namespace {
 
             addTile(plan, atlas, request.tiles[index], box.matrix, box.matrix * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
                     settings.normalOffsetTexels * box.texelSize, BoundingSphere{});
+
+            const Vec3 towardsSun = light.direction.normalized() * -1.0f;
+            plan.tiles.back().lightPlace = Vec4{towardsSun.x, towardsSun.y, towardsSun.z, 0.0f};
 
             float* lens = plan.tileData.back().lens;
             lens[1] = box.depthRange;
@@ -485,6 +494,26 @@ std::uint32_t cascadeTilePixels(CascadeResolution resolution) {
 
 ShadowAtlasSize shadowAtlasSizeFor(const ShadowSettings& settings) {
     return atlasForCascades(cascadeTilePixels(settings.cascadeResolution));
+}
+
+ShadowAtlasSize glassShadowMapSize(const ShadowAtlasSize& atlas) {
+    return ShadowAtlasSize{atlas.width / glassShadowMapDivisor, atlas.height / glassShadowMapDivisor, atlas.largestSquare / glassShadowMapDivisor};
+}
+
+ShadowTile glassMapSquare(const ShadowTile& tile) {
+    ShadowTile square = tile;
+    square.x = tile.x / glassShadowMapDivisor;
+    square.y = tile.y / glassShadowMapDivisor;
+    square.size = tile.size / glassShadowMapDivisor;
+    return square;
+}
+
+void markTileGlass(ShadowTileData& data, bool hasGlass) {
+    data.offset[2] = hasGlass ? 1.0f : 0.0f;
+}
+
+bool tileHasGlass(const ShadowTileData& data) {
+    return data.offset[2] > 0.5f;
 }
 
 namespace {

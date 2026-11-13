@@ -306,30 +306,35 @@ vec3 offsetForShadow(int tile, vec3 normal, float distanceToLight) {
 * How much light reaches a point according to one tile: 1 lit, 0 blocked, in between at a shadow's soft edge.
 * The point is projected exactly as the shadow pass drew the scene, and its depth is compared with what the light saw
 * there. Nine nearby comparisons are averaged (percentage-closer filtering) so edges are not jagged.
-* Points outside the tile's view (beyond a directional light's shadow box) count as lit.
+* Points outside the tile's view (beyond a directional light's shadow box) count as lit. Where the tile's coloured shadow
+* map holds glass, each comparison is tinted by the glass in front of the point there (glassTintAt), so the tint's edge
+* is as soft as the shadow's; the answer is then a colour.
 */
-float shadowFromTile(int tile, vec3 position) {
+vec3 shadowFromTile(int tile, vec3 position) {
     // A cube face the camera cannot see got no square in the atlas (an empty rectangle).
     if (shadowTiles[tile].rect.z <= 0.0) {
-        return 1.0;
+        return vec3(1.0);
     }
 
     vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
     vec3 projected = clip.xyz / clip.w;
 
     if (clip.w <= 0.0 || any(greaterThan(abs(projected.xy), vec2(1.0))) || projected.z < 0.0 || projected.z > 1.0) {
-        return 1.0;
+        return vec3(1.0);
     }
 
     // From -1..1 across the tile to 0..1 within it (texture rows run top to bottom), then to the tile's place in the atlas.
     vec2 withinTile = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
     vec2 atlasUv = shadowTiles[tile].rect.xy + withinTile * shadowTiles[tile].rect.zw;
+    bool glass = tileHasGlass(tile);
 
-    float lit = 0.0;
+    vec3 lit = vec3(0.0);
 
     for (int x = -1; x <= 1; ++x) {
         for (int y = -1; y <= 1; ++y) {
-            lit += texture(shadowAtlas, vec3(atlasUv + vec2(x, y) * atlasTexel.xy, projected.z));
+            vec2 uv = atlasUv + vec2(x, y) * atlasTexel.xy;
+            float passes = texture(shadowAtlas, vec3(uv, projected.z));
+            lit += glass ? passes * glassTintAt(uv, projected.z) : vec3(passes);
         }
     }
 
@@ -364,10 +369,12 @@ vec3 atlasPoint(int tile, vec3 position) {
 * further from the light, and shadow itself. So each sample compares against the surface's own plane at that spot
 * (receiver plane depth bias), worked out from how the point moves in the tile from one screen pixel to the next.
 * The sample pattern is turned by a different angle in every pixel, which trades banding for fine grain.
+* Glass in the tile's coloured shadow map is a blocker too for the search (its tint's edge as soft as a solid edge at its
+* distance), and each comparison of the filter is tinted by the glass in front of the point there.
 */
-float softShadowFromTile(int tile, vec3 position, float emitterSize) {
+vec3 softShadowFromTile(int tile, vec3 position, float emitterSize) {
     if (shadowTiles[tile].rect.z <= 0.0) {
-        return 1.0;
+        return vec3(1.0);
     }
 
     vec4 lens = shadowTiles[tile].lens;
@@ -381,8 +388,10 @@ float softShadowFromTile(int tile, vec3 position, float emitterSize) {
     vec3 projected = clip.xyz / clip.w;
 
     if (clip.w <= 0.0 || any(greaterThan(abs(projected.xy), vec2(1.0))) || projected.z < 0.0 || projected.z > 1.0) {
-        return 1.0;
+        return vec3(1.0);
     }
+
+    bool glass = tileHasGlass(tile);
 
     vec3 here = atlasPoint(tile, position);
 
@@ -411,9 +420,19 @@ float softShadowFromTile(int tile, vec3 position, float emitterSize) {
 
     for (int i = 0; i < 16; ++i) {
         vec2 uv = clamp(here.xy + turn * poissonDisc[i] * searchRadius * atlasTexel.xy, lowest, highest);
+        float receiver = here.z + dot(depthSlope, uv - here.xy);
         float stored = textureLod(shadowDepths, uv, 0.0).r;
 
-        if (stored > here.z + dot(depthSlope, uv - here.xy)) {
+        // The nearer of the solid surface and the glass in front of the point, if either is in front.
+        if (glass) {
+            float glassDepth = textureLod(glassDepths, uv, 0.0).r;
+
+            if (isBehindGlass(receiver, glassDepth) && !(stored > receiver && stored > glassDepth)) {
+                stored = glassDepth;
+            }
+        }
+
+        if (stored > receiver) {
             blockerDistances += box ? boxShadowDistance(stored, lens.y) : linearShadowDepth(stored, lens.x, lens.y);
             blockers += 1.0;
         }
@@ -421,17 +440,19 @@ float softShadowFromTile(int tile, vec3 position, float emitterSize) {
 
     // Nothing in the way of any part of the emitter.
     if (blockers == 0.0) {
-        return 1.0;
+        return vec3(1.0);
     }
 
     float blockerDistance = blockerDistances / blockers;
     float filterRadius = box ? sunPenumbraTexels(emitterSize, receiverDistance, blockerDistance, lens.z)
                              : penumbraTexels(emitterSize, receiverDistance, blockerDistance, lens.z);
-    float lit = 0.0;
+    vec3 lit = vec3(0.0);
 
     for (int i = 0; i < 16; ++i) {
         vec2 uv = clamp(here.xy + turn * poissonDisc[i] * filterRadius * atlasTexel.xy, lowest, highest);
-        lit += texture(shadowAtlas, vec3(uv, here.z + dot(depthSlope, uv - here.xy)));
+        float receiver = here.z + dot(depthSlope, uv - here.xy);
+        float passes = texture(shadowAtlas, vec3(uv, receiver));
+        lit += glass ? passes * glassTintAt(uv, receiver) : vec3(passes);
     }
 
     return lit / 16.0;
@@ -453,7 +474,7 @@ float sunCascadeEdge(int tile, vec3 position) {
 * cascade's edge, or held by no box) is left to the caller: the row gives its own shadow, and how much of the answer
 * that is (ownShare); the rest comes from beyond the row.
 */
-float sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius, out float ownShare) {
+vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius, out float ownShare) {
     ownShare = 1.0;
     float band = cascadeOptions.x;
     bool dither = cascadeOptions.y != 0.0;
@@ -495,7 +516,7 @@ float sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, floa
             }
 
             ownShare = last ? 0.0 : 1.0;
-            return last ? 0.0 : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
+            return last ? vec3(0.0) : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
         }
 
         if (last) {
@@ -507,12 +528,12 @@ float sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, floa
     }
 
     ownShare = 0.0;
-    return 0.0;
+    return vec3(0.0);
 }
 
 // A row's shadow with plain sunlight past it, as mix(beyond, own, share) always gave it.
-float sunRowOrLit(float own, float ownShare, vec3 normal, vec3 toLight) {
-    return ownShare >= 1.0 ? own : mix(sunBeyondCascades(normal, toLight), own, ownShare);
+vec3 sunRowOrLit(vec3 own, float ownShare, vec3 normal, vec3 toLight) {
+    return ownShare >= 1.0 ? own : mix(vec3(sunBeyondCascades(normal, toLight)), own, ownShare);
 }
 
 /*
@@ -521,21 +542,21 @@ float sunRowOrLit(float own, float ownShare, vec3 normal, vec3 toLight) {
 * last cascade fades into the mirror's rather than into a band of sunlight. Without a mirror, plain sunlight lies past
 * the camera's, as always.
 */
-float sunShadow(int firstTile, int cascades, int mirrorFirstTile, int mirrorCascades, vec3 normal, vec3 toLight, float tanAngularRadius) {
+vec3 sunShadow(int firstTile, int cascades, int mirrorFirstTile, int mirrorCascades, vec3 normal, vec3 toLight, float tanAngularRadius) {
     float ownShare;
-    float own = sunCascadeRow(firstTile, cascades, normal, toLight, tanAngularRadius, ownShare);
+    vec3 own = sunCascadeRow(firstTile, cascades, normal, toLight, tanAngularRadius, ownShare);
 
     if (ownShare >= 1.0 || mirrorCascades <= 0) {
         return sunRowOrLit(own, ownShare, normal, toLight);
     }
 
     float mirrorShare;
-    float mirrored = sunCascadeRow(mirrorFirstTile, mirrorCascades, normal, toLight, tanAngularRadius, mirrorShare);
+    vec3 mirrored = sunCascadeRow(mirrorFirstTile, mirrorCascades, normal, toLight, tanAngularRadius, mirrorShare);
     return mix(sunRowOrLit(mirrored, mirrorShare, normal, toLight), own, ownShare);
 }
 
 // A point light has six tiles in a row, one per cube face; the face is picked from the direction to the point.
-float pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emitterRadius) {
+vec3 pointLightShadow(int firstTile, vec3 lightPosition, vec3 normal, float emitterRadius) {
     vec3 position = offsetForShadow(firstTile, normal, length(relativePosition - lightPosition));
     return softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, emitterRadius);
 }
@@ -583,7 +604,7 @@ void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 d
     int firstTile = points[i].firstShadowTile;
 
     if (firstTile >= 0) {
-        radiance *= mix(1.0, pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius) * lightContactShadow(i),
+        radiance *= mix(vec3(1.0), pointLightShadow(firstTile, points[i].positionRange.xyz, geometricNormal, points[i].emitterRadius) * lightContactShadow(i),
                         points[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         // To the bulb's surface, not its centre, so glass round the bulb itself does not tint its own light.
@@ -601,18 +622,18 @@ void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 d
 * at the point of reflection, moved off the mirror towards the light by the tile's normal offset. 1 for a source without
 * a shadow.
 */
-float imageSourceShadow(int source, vec3 crossing, vec3 mirrorNormal) {
+vec3 imageSourceShadow(int source, vec3 crossing, vec3 mirrorNormal) {
     if (source > 0) {
         int slot = source - 1;
         int tile = spots[slot].shadowTile;
 
         if (tile < 0) {
-            return 1.0;
+            return vec3(1.0);
         }
 
         float distance = length(spots[slot].positionRange.xyz - crossing);
         vec3 position = crossing + mirrorNormal * (shadowTiles[tile].offset.x * distance + shadowTiles[tile].offset.y);
-        return mix(1.0, softShadowFromTile(tile, position, spots[slot].emitterRadius), spots[slot].shadowStrength);
+        return mix(vec3(1.0), softShadowFromTile(tile, position, spots[slot].emitterRadius), spots[slot].shadowStrength);
     }
 
     if (source < 0) {
@@ -620,17 +641,17 @@ float imageSourceShadow(int source, vec3 crossing, vec3 mirrorNormal) {
         int firstTile = points[slot].firstShadowTile;
 
         if (firstTile < 0) {
-            return 1.0;
+            return vec3(1.0);
         }
 
         vec3 lightPosition = points[slot].positionRange.xyz;
         float distance = length(lightPosition - crossing);
         vec3 position = crossing + mirrorNormal * (shadowTiles[firstTile].offset.x * distance + shadowTiles[firstTile].offset.y);
-        return mix(1.0, softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, points[slot].emitterRadius),
+        return mix(vec3(1.0), softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, points[slot].emitterRadius),
                    points[slot].shadowStrength);
     }
 
-    return 1.0;
+    return vec3(1.0);
 }
 
 /*
@@ -656,7 +677,7 @@ void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 di
         return;
     }
 
-    float source = 1.0;
+    vec3 source = vec3(1.0);
     float glassReach = max(distance - spots[i].emitterRadius, 0.0);
     bool image = any(notEqual(spots[i].windowPlane.xyz, vec3(0.0)));
 
@@ -671,17 +692,17 @@ void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 di
         source = imageSourceShadow(spots[i].windowSource, crossing, spots[i].windowPlane.xyz);
         glassReach = length(crossing - relativePosition);
 
-        if (source <= 0.0) {
+        if (all(lessThanEqual(source, vec3(0.0)))) {
             return;
         }
     }
 
-    vec3 radiance = spots[i].radianceCosInner.rgb * (distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone * source);
+    vec3 radiance = spots[i].radianceCosInner.rgb * (distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone) * source;
     int tile = spots[i].shadowTile;
 
     if (tile >= 0) {
-        radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius) *
-                                 (image ? 1.0 : lightContactShadow(CONTACT_SPOT_SLOT_BASE + i)), spots[i].shadowStrength);
+        radiance *= mix(vec3(1.0), softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius) *
+                                       (image ? 1.0 : lightContactShadow(CONTACT_SPOT_SLOT_BASE + i)), spots[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         if (any(greaterThan(radiance, vec3(0.0)))) {
             radiance *= mix(vec3(1.0), glassShadow(toLight, glassReach), spots[i].shadowStrength);
