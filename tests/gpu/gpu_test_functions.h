@@ -191,4 +191,7 @@
 #define GPU_TEST_CAMERA_GRADE 0
 #define GPU_TEST_CAMERA_LENS 1
 
+// motion_blur_test.comp
+#define GPU_TEST_MOTION_BLUR 0
+
 #endif

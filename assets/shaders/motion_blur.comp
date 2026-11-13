@@ -1,0 +1,58 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Motion blur's gather (render/gpu/motion_blur.h, motionBlurAt mirrors it), one invocation per output pixel: a
+* neighbourhood slower than MOTION_BLUR_LEAST_MOTION is copied; otherwise the pixel (weighed by one over its own speed)
+* and MOTION_BLUR_SAMPLES samples along the neighbourhood's longest half-blur, offset alike by the pixel's noise, each
+* weighed by depth and reach (motionBlurSampleWeight), so moving things in front smear over what is behind and still
+* things in front keep their edges.
+*/
+#include "dither.glsl"
+#include "motion_blur.glsl"
+
+layout(local_size_x = MOTION_BLUR_GROUP, local_size_y = MOTION_BLUR_GROUP) in;
+
+layout(set = 0, binding = 0) uniform sampler2D picture;                    // the finished picture, exact texels
+layout(set = 0, binding = 1) uniform sampler2D prepared;                   // xy the half-blur, z the view depth
+layout(set = 0, binding = 2) uniform sampler2D neighbours;                 // each tile's neighbourhood's longest half-blur
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D blurred;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = textureSize(picture, 0);
+
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+
+    vec4 colour = texelFetch(picture, pixel, 0);
+    vec2 neighbourMax = texelFetch(neighbours, pixel / MOTION_BLUR_TILE, 0).xy;
+    float least = float(MOTION_BLUR_LEAST_MOTION);
+
+    if (length(neighbourMax) <= least) {
+        imageStore(blurred, pixel, colour);
+        return;
+    }
+
+    vec4 centre = texelFetch(prepared, pixel, 0);
+    float pixelSpeed = max(length(centre.xy), least);
+    float weights = 1.0 / pixelSpeed;
+    vec3 sum = colour.rgb * weights;
+    vec2 place = vec2(pixel) + 0.5;
+    float noise = interleavedGradientNoise(place);
+
+    for (int index = 0; index < MOTION_BLUR_SAMPLES; ++index) {
+        if (index == (MOTION_BLUR_SAMPLES - 1) / 2) {
+            continue;
+        }
+
+        ivec2 at = clamp(ivec2(floor(place + neighbourMax * motionBlurOffset(index, noise))), ivec2(0), size - 1);
+        vec4 sampled = texelFetch(prepared, at, 0);
+        float weight = motionBlurSampleWeight(length(vec2(at - pixel)), centre.z, sampled.z, pixelSpeed, max(length(sampled.xy), least));
+        weights += weight;
+        sum += texelFetch(picture, at, 0).rgb * weight;
+    }
+
+    imageStore(blurred, pixel, vec4(sum / weights, colour.a));
+}

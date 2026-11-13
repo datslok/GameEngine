@@ -1,0 +1,36 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Motion blur's second pass (render/gpu/motion_blur.h), one invocation per tile: the longest half-blur of the 3 x 3 tiles
+* round it, so a pixel's samples follow a fast neighbour's blur reaching into its tile (a half-blur is at most a tile).
+*/
+#include "motion_blur.glsl"
+
+layout(local_size_x = MOTION_BLUR_GROUP, local_size_y = MOTION_BLUR_GROUP) in;
+
+layout(set = 0, binding = 0) uniform sampler2D tiles;                  // each tile's longest half-blur, exact texels
+layout(set = 0, binding = 1, rg32f) uniform writeonly image2D neighbours;
+
+void main() {
+    ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 count = textureSize(tiles, 0);
+
+    if (any(greaterThanEqual(tile, count))) {
+        return;
+    }
+
+    vec2 longest = vec2(0.0);
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            ivec2 at = tile + ivec2(dx, dy);
+
+            if (all(greaterThanEqual(at, ivec2(0))) && all(lessThan(at, count))) {
+                longest = largerMotion(longest, texelFetch(tiles, at, 0).xy);
+            }
+        }
+    }
+
+    imageStore(neighbours, tile, vec4(longest, 0.0, 0.0));
+}

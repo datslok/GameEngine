@@ -58,6 +58,8 @@ const char* gpuPassName(GpuPass pass) {
         return "GLASS";
     case GpuPass::AntiAliasing:
         return "AA";
+    case GpuPass::MotionBlur:
+        return "BLUR";
     case GpuPass::EyeAdaptation:
         return "EYE";
     case GpuPass::Bloom:

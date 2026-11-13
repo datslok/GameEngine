@@ -77,6 +77,9 @@ void visit(CameraSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Vignetting", settings.vignetting, {.min = 0.0f, .max = 1.0f});
     visitor.field("Chromatic aberration", settings.chromaticAberration, {.min = 0.0f, .max = 50.0f, .sliderMin = 0.0f, .sliderMax = 8.0f, .unit = "px"});
     visitor.field("Film grain", settings.filmGrain, {.min = 0.0f, .max = 1.0f, .sliderMin = 0.0f, .sliderMax = 0.3f});
+    visitor.field("Motion blur", settings.motionBlur);
+    visitor.field("Shutter angle", settings.shutterAngle, {.min = 1.0f, .max = 360.0f, .unit = "degrees"});
+    visitor.field("Camera motion blur", settings.cameraMotionBlur);
 }
 
 void validateCamera(const CameraSettings& settings) {
@@ -90,6 +93,7 @@ void validateCamera(const CameraSettings& settings) {
     check(settings.vignetting >= 0.0f && settings.vignetting <= 1.0f, "The vignetting must be 0..1");
     check(settings.chromaticAberration >= 0.0f && settings.chromaticAberration <= 50.0f, "The chromatic aberration must be 0 to 50 pixels");
     check(settings.filmGrain >= 0.0f && settings.filmGrain <= 1.0f, "The film grain must be 0..1");
+    check(settings.shutterAngle >= 1.0f && settings.shutterAngle <= 360.0f, "The shutter angle must be 1 to 360 degrees");
 }
 
 bool gradesColour(const CameraSettings& settings) {

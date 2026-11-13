@@ -46,6 +46,16 @@ struct CameraSettings {
     float vignetting = 0.0f;
     float chromaticAberration = 0.0f;
     float filmGrain = 0.0f;
+
+    /*
+    * Motion blur (render/gpu/motion_blur.h), off by default (the user's choice): while on, and while anti-aliasing (whose
+    * velocity image it reads) is on, things moving across the picture smear over the shutter's share of the frame (180
+    * degrees: half the frame, film's usual). With the camera's motion blur off, only what moves in the world blurs, not
+    * the world while the camera turns or moves.
+    */
+    bool motionBlur = false;
+    float shutterAngle = 180.0f;
+    bool cameraMotionBlur = true;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).

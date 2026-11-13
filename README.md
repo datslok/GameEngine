@@ -124,6 +124,7 @@ The light probes trace their rays with hardware ray tracing, so they need ray tr
 
 - **Gamma-correct (linear-light) colour**, with sRGB textures and swapchain.
 - **HDR rendering:** the scene is lit in 16-bit floats, then tone mapped with an exposure and a choice of curves (AgX, ACES, Reinhard or plain clamping), so bright lights roll off smoothly instead of clipping to white.
+- **Motion blur (off by default):** a real shutter's smear (McGuire et al. 2012): the blur's length is the motion times the shutter angle's share of the frame; moving things in front smear over the background while still things keep their edges, and the camera's own motion can be left out so only moving things blur. F5's Camera group.
 - **Camera finish (all off by default):** white balance in kelvin and tint (as a camera sets it, by scaling the eye's cone responses), contrast, saturation, lift, gamma and gain, a lens's natural vignetting (cos^4 of the angle off its axis), chromatic aberration and film grain. F5's Camera group.
 - **Bloom:** a few percent of all light scattered into a soft halo, as in a camera lens. The scene is halved down a chain of levels with Jimenez's 13-tap filter and grown back with tent filters, energy-conserving, with a firefly filter.
 - **HDR output** on HDR monitors: scRGB, with paper white and peak brightness settings in nits, falling back to SDR when Windows HDR is off.
