@@ -120,6 +120,26 @@ float refractionLevel(float spread, float behindDistance, float viewDistance, fl
     return std::clamp(std::log2(std::max(pixels, 1.0f)), 0.0f, static_cast<float>(levels) - 1.0f);
 }
 
+/*
+* The coordinate in texels from the first texel's centre, its whole part i and fraction f; the B-spline's four weights
+* on texels i - 1 to i + 2; each pair's weights summed, and the bilinear read between the pair placed where its own
+* split of that sum falls.
+*/
+BsplineTaps bsplineAxis(float coordinate, float size) {
+    const float x = coordinate * size - 0.5f;
+    const float whole = std::floor(x);
+    const float f = x - whole;
+    const float w0 = (1.0f - f) * (1.0f - f) * (1.0f - f) / 6.0f;
+    const float w1 = (3.0f * f * f * f - 6.0f * f * f + 4.0f) / 6.0f;
+    const float w2 = (-3.0f * f * f * f + 3.0f * f * f + 3.0f * f + 1.0f) / 6.0f;
+    const float w3 = f * f * f / 6.0f;
+    const float firstWeight = w0 + w1;
+    const float secondWeight = w2 + w3;
+    const float firstTexel = whole - 1.0f + w1 / firstWeight;
+    const float secondTexel = whole + 1.0f + w3 / secondWeight;
+    return BsplineTaps{(firstTexel + 0.5f) / size, (secondTexel + 0.5f) / size, firstWeight, secondWeight};
+}
+
 float pixelsPerRadian(float screenHeight, float verticalFov) {
     return screenHeight / (2.0f * std::tan(verticalFov * 0.5f));
 }

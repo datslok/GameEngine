@@ -137,6 +137,7 @@ The light probes trace their rays with hardware ray tracing, so they need ray tr
   - Metallic and roughness, as factors and textures.
   - Normal maps, with the file's tangents or tangents generated with MikkTSpace as baking tools do, so the bumps look as their authors made them, mirrored pictures included.
   - Normal map filtering (Toksvig): bumps too small to see far away become extra roughness, so distant bumpy surfaces do not sparkle.
+  - Specular anti-aliasing (Tokuyoshi and Kaplanyan): a curved surface's roughness widened by how fast its normal turns from pixel to pixel, so a highlight smaller than a pixel (the sun on a mirror ball) neither sparkles nor swings in brightness as the camera moves.
   - Emissive colour, with KHR_materials_emissive_strength.
   - Optional smooth normals with a crease angle, for models that have none.
 - **An asset manager** that loads each file once and hands out typed handles.

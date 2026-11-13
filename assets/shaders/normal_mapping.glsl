@@ -40,4 +40,17 @@ float toksvigRoughness(float roughness, vec3 texel, float scale) {
     return min(sqrt(sqrt(alphaSquared)), 1.0);
 }
 
+// Geometric specular anti-aliasing (Tokuyoshi and Kaplanyan 2019; geometricRoughness in normal_mapping.cpp explains it).
+float geometricRoughness(float roughness, vec3 normalStepAcross, vec3 normalStepDown, float footprintVariance) {
+    float variance = footprintVariance * (dot(normalStepAcross, normalStepAcross) + dot(normalStepDown, normalStepDown));
+    float kernel = min(2.0 * variance, float(NORMAL_GEOMETRIC_LIMIT));
+
+    if (!(kernel > 0.0)) {
+        return roughness;
+    }
+
+    float alphaSquared = roughness * roughness * roughness * roughness + kernel;
+    return min(sqrt(sqrt(alphaSquared)), 1.0);
+}
+
 #endif

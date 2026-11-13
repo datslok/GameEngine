@@ -52,6 +52,8 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visitor.field("Clustered shading", settings.clusteredShading);
         visitor.field("Cluster heatmap", settings.clusterHeatmap);
         visitor.field("Normal map filtering", settings.normalMapFiltering);
+        visitor.field("Specular anti-aliasing", settings.specularAntiAliasing);
+        visitor.field("Specular anti-aliasing variance", settings.specularAntiAliasingVariance, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
         visitor.field("Ray tracing", settings.rayTracing);
         visitor.choice("Ray debug view", settings.rayDebugView, rayDebugViewNames);
     });

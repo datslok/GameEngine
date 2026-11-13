@@ -16,7 +16,10 @@ void main() {
     } else if (function == GPU_TEST_PERTURB_NORMAL) {
         testOutput(0, vec4(perturbNormal(testInput(0).xyz, testInput(1), testInput(2).xyz), 0.0));
     } else if (function == GPU_TEST_TOKSVIG_ROUGHNESS) {
+        // Inputs: (texel, roughness), (scale, footprint variance, the normal's step down in x and y); the step across is
+        // the texel less a half, a fifth of it.
         vec4 a = testInput(0);
-        testOutput(0, vec4(toksvigRoughness(a.w, a.xyz, testInput(1).x), 0.0, 0.0, 0.0));
+        vec4 b = testInput(1);
+        testOutput(0, vec4(toksvigRoughness(a.w, a.xyz, b.x), geometricRoughness(a.w, (a.xyz - 0.5) * 0.2, vec3(b.zw, 0.0), b.y), 0.0, 0.0));
     }
 }

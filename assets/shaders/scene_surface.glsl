@@ -172,11 +172,29 @@ layout(push_constant) uniform TransparentView {
     vec4 transparentRefraction;                // x: 1 when the picture before the glass was kept, y: pixels per radian, z: its levels
 };
 
+// The picture before the glass at a whole level of its pyramid, read through a cubic B-spline (bsplineAxis along each
+// axis, four bilinear reads), so a bright texel of a coarse level is a smooth blob, not a hard-edged square.
+vec3 smoothPictureLevel(vec2 coordinate, int level) {
+    vec2 size = vec2(textureSize(opaquePicture, level));
+    vec4 across = bsplineAxis(coordinate.x, size.x);
+    vec4 down = bsplineAxis(coordinate.y, size.y);
+    float lod = float(level);
+    vec3 top = textureLod(opaquePicture, vec2(across.x, down.x), lod).rgb * across.z + textureLod(opaquePicture, vec2(across.y, down.x), lod).rgb * across.w;
+    vec3 bottom = textureLod(opaquePicture, vec2(across.x, down.y), lod).rgb * across.z + textureLod(opaquePicture, vec2(across.y, down.y), lod).rgb * across.w;
+    return top * down.z + bottom * down.w;
+}
+
 /*
 * What refracting glass shows of the picture behind it (render/gpu/transparency.h): thick glass bends the view ray and
 * shows where it leaves (solidRefractionExit), frosted glass blurs what lies behind it, more the further behind (the
-* picture's level from transmissionSpread and refractionLevel, the distance behind from the picture's alpha). Both read
-* the picture from before the glass, so glass behind them is not seen.
+* picture's level from transmissionSpread and refractionLevel). Both read the picture from before the glass, so glass
+* behind them is not seen.
+*
+* How far behind is the distance (the picture's alpha) averaged over the blur's own area: first the level for what lies
+* right behind the pixel, then the level for the average distance read at that level, so where the background jumps
+* (a far tower beside a floor just behind the glass) the blur changes smoothly instead of in a hard line. The levels are
+* then read smoothly (smoothPictureLevel), blended between the two whole levels round the level, level 0 itself (clear
+* glass) read as before.
 */
 vec3 refractedPicture(vec3 normal, vec3 toCamera, float roughness, float ior, float thickness) {
     vec2 screen = clusterScreen.xy;
@@ -184,9 +202,22 @@ vec3 refractedPicture(vec3 normal, vec3 toCamera, float roughness, float ior, fl
     vec3 landed = clipToScreen(relativeViewProjection * vec4(exit, 1.0), screen);
     vec2 pixel = clamp(landed.xy, vec2(0.5), screen - 0.5);
     float viewDistance = dot(relativePosition, viewForward.xyz);
+    float spread = transmissionSpread(roughness, ior);
+    uint levels = uint(transparentRefraction.z);
+    vec2 coordinate = pixel / screen;
     float behind = max(texelFetch(opaquePicture, ivec2(pixel), 0).a - viewDistance, 0.0);
-    float level = refractionLevel(transmissionSpread(roughness, ior), behind, viewDistance, transparentRefraction.y, uint(transparentRefraction.z));
-    return textureLod(opaquePicture, pixel / screen, level).rgb;
+    float firstLevel = refractionLevel(spread, behind, viewDistance, transparentRefraction.y, levels);
+
+    if (firstLevel <= 0.0) {
+        return textureLod(opaquePicture, coordinate, 0.0).rgb;
+    }
+
+    float averagedBehind = max(textureLod(opaquePicture, coordinate, firstLevel).a - viewDistance, 0.0);
+    float level = refractionLevel(spread, averagedBehind, viewDistance, transparentRefraction.y, levels);
+    int lower = int(floor(level));
+    int upper = min(lower + 1, int(levels) - 1);
+    vec3 below = lower == 0 ? textureLod(opaquePicture, coordinate, 0.0).rgb : smoothPictureLevel(coordinate, lower);
+    return mix(below, smoothPictureLevel(coordinate, upper), level - float(lower));
 }
 
 #ifdef DUAL_SOURCE_BLENDING
@@ -593,6 +624,13 @@ void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
 
+    // How fast the smooth normal turns to the next pixel across and down, for geometric specular anti-aliasing: taken
+    // here, before any branch or discard, as derivatives must be (a mirrored double-sided back turns the same amount).
+    float smoothLength = length(worldNormal);
+    vec3 smoothNormal = smoothLength > 0.0 ? worldNormal / smoothLength : vec3(0.0);
+    vec3 normalStepAcross = dFdx(smoothNormal);
+    vec3 normalStepDown = dFdy(smoothNormal);
+
     MaterialData material = materials[materialIndex];
 
     // Read the textures at this fragment's interpolated UV coordinate, the mips chosen for the output's pixels rather than
@@ -630,6 +668,10 @@ void main() {
 
     if (textureOptions.y > 0.0) {
         roughness = toksvigRoughness(roughness, normalTexel, material.surfaceParameters.z);
+    }
+
+    if (textureOptions.z > 0.0) {
+        roughness = geometricRoughness(roughness, normalStepAcross, normalStepDown, textureOptions.z);
     }
 
     // Light adds up: each light adds its share to these sums.

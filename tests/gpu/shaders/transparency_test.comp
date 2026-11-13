@@ -39,5 +39,7 @@ void main() {
         testOutput(0, vec4(spread, refractionLevel(spread, surface.z, surface.w, picture.x, uint(picture.y)), 0.0, 0.0));
         testOutput(1, vec4(beerAttenuation(testInput(2).rgb, picture.z, picture.w), 0.0));
         testOutput(2, vec4(solidRefractionExit(testInput(3).xyz, testInput(4).xyz, normal.xyz, surface.y, normal.w), 0.0));
+        // The smooth read's taps: the roughness as a coordinate across a level as wide as the pixels per radian.
+        testOutput(3, bsplineAxis(surface.x, picture.x));
     }
 }

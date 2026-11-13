@@ -4,7 +4,8 @@
 /*
 * One level of screen-space reflections' colour pyramid (render/gpu/screen_reflections.h), one invocation per texel:
 * level 0 is last frame's finished picture at the render size, each level above the average of the 2x2 texels below
-* (one bilinear read between them). Rough reflections read the level as wide as their cone.
+* (one bilinear read between them). Rough reflections read the level as wide as their cone. Alpha is averaged too: the
+* picture before the glass keeps each pixel's distance there, and frosted glass reads its average over the blur's area.
 */
 #include "render/gpu/screen_reflections_shared.h"
 
@@ -27,5 +28,6 @@ void main() {
     }
 
     vec2 uv = (vec2(texel) + 0.5) / vec2(pass.target.xy);
-    imageStore(level, texel, vec4(max(textureLod(source, uv, 0.0).rgb, vec3(0.0)), 1.0));
+    vec4 averaged = textureLod(source, uv, 0.0);
+    imageStore(level, texel, vec4(max(averaged.rgb, vec3(0.0)), averaged.a));
 }

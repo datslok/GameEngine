@@ -58,6 +58,22 @@ float refractionLevel(float spread, float behindDistance, float viewDistance, fl
     return clamp(log2(max(covered * pixelsPerRadian, 1.0)), 0.0, float(levels) - 1.0);
 }
 
+// A smooth read along one axis (bsplineAxis in transparency.cpp): xy the two bilinear reads' coordinates, zw their weights.
+vec4 bsplineAxis(float coordinate, float size) {
+    float x = coordinate * size - 0.5;
+    float whole = floor(x);
+    float f = x - whole;
+    float w0 = (1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0;
+    float w1 = (3.0 * f * f * f - 6.0 * f * f + 4.0) / 6.0;
+    float w2 = (-3.0 * f * f * f + 3.0 * f * f + 3.0 * f + 1.0) / 6.0;
+    float w3 = f * f * f / 6.0;
+    float firstWeight = w0 + w1;
+    float secondWeight = w2 + w3;
+    float firstTexel = whole - 1.0 + w1 / firstWeight;
+    float secondTexel = whole + 1.0 + w3 / secondWeight;
+    return vec4((firstTexel + 0.5) / size, (secondTexel + 0.5) / size, firstWeight, secondWeight);
+}
+
 // Where the view ray leaves thick glass (Filament's solid sphere): bent entering, then the thickness times the cosine
 // to the inward normal.
 vec3 solidRefractionExit(vec3 position, vec3 toCamera, vec3 normal, float ior, float thickness) {
