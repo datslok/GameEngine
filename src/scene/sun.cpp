@@ -51,3 +51,12 @@ Vec3 directionTowardsSunOn(float latitudeDegrees, float dayOfYear, float solarHo
 float sunElevation(const Vec3& towardsSun) {
     return std::asin(std::clamp(towardsSun.y, -1.0f, 1.0f));
 }
+
+float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds) {
+    if (hoursPerSecond == 0.0f) {
+        return solarHours;
+    }
+
+    const float advanced = std::fmod(solarHours + hoursPerSecond * seconds, hoursPerDay);
+    return advanced < 0.0f ? advanced + hoursPerDay : advanced;
+}

@@ -22,6 +22,10 @@ struct MaterialData {
     vec4 attenuation;       // rgb: the colour light keeps after the attenuation distance
     vec4 coatAndHeight;     // x: a clear coat's amount, 0..1 (0 none); y: its roughness; z: its normal map's scale (0 without one); w: the height map's depth for parallax (texture units, 0 none)
     uvec4 coatAndHeightSlots; // in the texture array: x coat amount (linear, red), y coat roughness (linear, green), z coat normal map (linear), w height map (linear, red)
+    uvec4 groundLayers;     // a blended ground: each layer's material index plus one (0 none)
+    vec4 groundRepeats;     // each layer's repeats over the texture coordinates
+    uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer)
+    vec4 groundBlend;       // x: the height blend's depth
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

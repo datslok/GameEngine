@@ -3285,7 +3285,7 @@ MOBA mode uses a confined visible cursor, edge panning (`gameplay/edge_pan`, fro
 The game registry (`app/game_registry`):
 
 - `GameEntry {name, make}`: a plain function pointer making a fresh game, since golden images need one per view; the table is `constexpr`.
-- `registeredGames()`: `lightlab`, `demo`, then `clothlab`. Names are golden view names, since they name golden folders.
+- `registeredGames()`: `lightlab`, `demo`, `clothlab`, then `forest`. Names are golden view names, since they name golden folders.
 - `defaultGame()` (the first, the light lab), `findGame(name)`, `gameNames()`.
 - `parseLaunchOptions(arguments)`: `--game <name>`, `--golden-save`, `--golden-check`, any order, each once; anything else throws `std::invalid_argument` listing the choices.
 
@@ -3446,7 +3446,7 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 | sky brightness | 1 | the sky drawn and the flat ambient alike |
 | sun disc size | 5 times the real one | for looks |
 
-- Ticks advance the clock (`advanceLabClock`; `advanceSolarHours` wraps at 24 for the clock-jump check).
+- Ticks advance the clock (`advanceLabClock`; `advanceSolarHours`, in `scene/sun` since the forest shares it, wraps at 24 for the clock-jump check).
 - Every frame `updateDaylight` sets the sun's `DirectionalLight`, the `AmbientLight` and the `SkyBackground` from `daylightFor(towardsSun, settings)`.
 - It places the sun disc (`getSunDisc`: a black, emissive `Mesh::sphere` that casts no shadow and has no `PreviousTransform`) with `skyObjectPose` (`scene/sky_object`): at 0.9 of the camera's far plane along the way to the sun, scaled to `angularRadius × sunDiscScale` as the camera sees it, so it shows no parallax.
 - The disc glows `discRadiance(colour × intensity, its angular radius)`:
@@ -3504,6 +3504,26 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 - **Dragging** (`updateGrab`, in `onInput`, from last frame's camera): a left press casts `PlayerControls::pointerRay` (the crosshair while the mouse looks, the cursor in MOBA mode) at both sheets within `clothLabGrabReach` (10 m) and grabs the nearest corner of the nearest hit (`getGrabbedSheet`); while held, the hand (`getSheetGrab`) stays the grab's distance along the pointer, so turning or walking carries the cloth; a release or a pointer leaving the window lets go. While the mouse should look but is free (after Escape), the click that captures it grabs nothing. The ticks give it to the sheet (`Cloth::grab`); `onDebugDraw` draws a yellow line from the held point to the hand.
 
 **Golden view:** `stations`, from the free camera's start (0, 2.4, 6.5) towards (0, 1, -1).
+
+### The forest
+
+`ForestGame` (`games/forest/forest_game`, `--game forest`, title "Forest"): the phase 18 showcase, a lush forest with mist in its valleys, meadows and, later, a sci-fi structure. So far the land, its ground, the sun and the mist.
+
+**The land** (`games/forest/forest_terrain`), pure functions of the place, so the drawn ground, the walked ground and the paint agree:
+
+- 400 m square (`forestHalfSize` 200), drawn and walked as one 1 m grid (`forestTerrainMesh`, 160,801 vertices, smooth normals, texture coordinates 0 to 1 across the land).
+- Heights from value noise (`forestValueNoise`: hashed lattice values with a quintic fade; `forestFractalNoise`, octaves): broad hills about 100 m across (9 m), rockier knolls about 28 m across (7 m) and lumps (0.25 m), set so the clearing's centre is at 0. Hollows go about 9 m below it, hills 11 m above.
+- A level clearing round the origin (`forestClearingRadius` 25 m, blending back over 18 m), where the structure will stand.
+- A path (`forestPathPoints`) winding south from the clearing to the meadow, level across within 1.2 m of its centre line and sunk 8 cm. Along it its level is the land averaged over 12 m either way, so it cuts through knolls and over dips and stays walkable (at most about 16 degrees).
+- `forestMeadowShare`: open canopy in the clearing, the meadow (`forestMeadowCentre`, 32 m round) and wide openings where low-frequency noise is high.
+
+**The ground's paint** (`forestGroundPaint`, baked into a 512 x 512 weights texture, `forestWeightsImage`): mud on the path, mossy rock where the ground is steeper than about 23 degrees (all of it past 33), then grass where the canopy is open and leaf litter where it is closed, their edge ragged by fine noise.
+
+**The layers** (`games/forest/forest_ground`): grass (ambientCG `Grass004`, 2 m tiles), leaf litter (Poly Haven `leaves_forest_ground`, 2.5 m), mud (`brown_mud_leaves_01`, 2.5 m) and mossy rock (`mossy_rock`, 3 m), from `assets/forest` (`tools/fetch_forest_assets.py`). `findForestTextureFiles` finds each role's file (colour, normal, height, and Poly Haven's packed occlusion-roughness-metal map or ambientCG's separate roughness and occlusion); `forestLayerMaterial` loads them, or gives a plain coloured stand-in where the folder is missing (a fresh clone before the fetch; the tests, which pass a folder that does not exist).
+
+**The rest:** a sun near the equator (`ForestSunSettings`: 5 degrees north, the March equinox, 9:30 by default) through a real sky (an `Atmosphere`, its ground the leaf litter's colour); the valley mist (`ForestMistSettings`: a `Fog` 0.04 per metre at 2 m below the clearing, thinning by e every 4 m up); `ProbeCascades` for when ray tracing is on; the player starting on the path at the meadow's edge, facing north. Settings in F5 under Forest (Sun, Atmosphere, Mist, Ground's blend depth), all live. Golden views `meadow` and `clearing-dusk` (references not saved yet).
+
+**Tests:** `forest_test` (registered, the noise, the clearing, hollows and path, the mesh, the paint by place, the weights texture, layer files by role and the stand-ins, the game headless, its settings applied each frame).
 
 ## Characters
 
@@ -3996,6 +4016,23 @@ Ambient returns `ambient * (diffuse + specularAlbedo)` (plus a clear coat's albe
 **The light lab** has a low brick wall (`labBrickWall`, 1.8 by 0.9 m) beside the painted balls with a cobbled strip in front of it (`labCobbleStrip`; `LightLabGame::getBrickWall`): the block's south face a panel of bricks in running bond (`brickImages`: 22.5 by 7.5 cm with their mortar, a 1.5 cm deep groove) and the strip a panel of rounded square cobbles (`cobbleImages`: 12.5 cm, 2 cm gaps), each panel 2 mm proud (`labPanelLift`), their textures repeating every tile (`tiledPanel`, which the chain-link fence's panel now uses too).
 
 **Tests:** `parallax_test` (the frame, steps and shifts, the crossing, a flat map shifting nothing, a tilted plane's exact crossing, a brick's edge hiding the mortar from one side and not the other, self-shadowing from a low light beyond a brick, a high one and one from the open side, the fade, the settings), `height_map_test`, `material_uniforms_test`, `texture_encoding_test`, `engine_commands_test` (the settings by command), `light_lab_test` (the panel, the pictures, the wall's placement and materials); GPU cases `GPU_TEST_PARALLAX_*` in `parallax_gpu_test` (built, not run).
+
+### Blended grounds
+
+**What it is** (`render/gpu/ground_layers`, mirrored in `ground_layers.glsl`). A ground of several surfaces (grass, leaf litter, mud, mossy rock) on one mesh: `Material::groundLayers` holds up to four ordinary materials, `groundWeights` a linear RGBA texture over the mesh's texture coordinates saying how much of each covers each place (one channel a layer), and `groundRepeats` how many times each layer's own textures repeat across those coordinates.
+
+**Height blending** (as in Mishkinis 2013). Cross-fading by the painted weights alone smears where two layers meet. Instead each layer's height map decides: where they meet, the texel standing higher shows, so a border follows the textures' own shapes (moss in the cracks between stones, grass through leaf litter).
+
+- Each painted layer's share is its weight times how far its height comes within `groundBlendDepth` (0.2 by default) of the highest painted layer's, normalised (`groundBlendWeights`).
+- A layer not painted at a place never shows there, whatever its height. Equal heights keep the painted weights; a shallow depth gives crisp borders, a deep one the plain cross-fade.
+- Nothing painted gives the first layer alone; if every share is zero, the painted weights are used, normalised (8-bit weights need not add up to one).
+- A layer without a height map (or with `heightScale` 0) stands halfway, and one without a normal map lies flat: otherwise their slots' white stand-in would make them the highest and tilt every normal.
+
+**Packing.** `MaterialTable::add` adds each layer first, as a material of its own (shared with any other draw using the same), and the ground's record names them by their index plus one (`GpuMaterial::groundLayers`, 0 for none), with the repeats, the weights texture's slot and the blend depth. It throws `std::invalid_argument` for more than four layers, a layer that is layered itself, or layers without a weights texture. `GpuMaterial` is 208 bytes.
+
+**In the main pass** (`scene_surface.glsl`), after the ground's own textures: the weights at the mesh's coordinates, then each layer's colour, packed metallic and roughness, occlusion, height and normal at its repeated coordinates, blended by the shares into the surface the rest of the shader lights. A layer's normal map is read at the ground's `normalScale`. Parallax does not run on the layers.
+
+**Tests:** `ground_layers_test` (the blend's basics, the higher layer winning, uneven and empty weights, the table naming the layers, mistakes refused).
 
 ### The demo's lighting
 

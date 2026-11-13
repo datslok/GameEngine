@@ -1,0 +1,17 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs ground_layers.glsl's function on the cases ground_layers_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "ground_layers.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    if (function == GPU_TEST_GROUND_BLEND_WEIGHTS) {
+        // Inputs: painted weights, heights, (blend depth, 0, 0, 0).
+        testOutput(0, groundBlendWeights(testInput(0), testInput(1), testInput(2).x));
+    }
+}

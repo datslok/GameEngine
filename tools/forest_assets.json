@@ -1,0 +1,410 @@
+{
+  "comment": "The forest game's downloaded assets (tools/fetch_forest_assets.py), all CC0 (public domain): Poly Haven (https://polyhaven.com/license) and ambientCG (https://docs.ambientcg.com/license/). Each lands in assets/forest/<id>/, which git ignores. 'maps' names each role's file at the source; 'sha256' is filled by --record.",
+  "folder": "assets/forest",
+  "assets": [
+    {
+      "id": "fern_02",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "anthurium_botany_01",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "calathea_orbifolia_01",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "pachira_aquatica_01",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "shrub_02",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "shrub_03",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "shrub_04",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "nettle_plant",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "tree_stump_01",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "dead_tree_trunk",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "dead_tree_trunk_02",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "single_root",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "rock_moss_set_01",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "rock_moss_set_02",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "rock_07",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "rock_09",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "boulder_01",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
+      "id": "leaves_forest_ground",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "brown_mud_leaves_01",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "mossy_rock",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "bark_brown_02",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "jolcham_oak_bark_01",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "metal_plate",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "metal_plate_02",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "green_metal_rust",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Grass004",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Moss001",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "LeafSet024",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "opacity": "Opacity",
+        "normal": "NormalGL",
+        "roughness": "Roughness"
+      }
+    },
+    {
+      "id": "LeafSet019",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "opacity": "Opacity",
+        "normal": "NormalGL",
+        "roughness": "Roughness"
+      }
+    },
+    {
+      "id": "Foliage001",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "opacity": "Opacity",
+        "normal": "NormalGL",
+        "roughness": "Roughness"
+      }
+    }
+  ],
+  "sha256": {
+    "Foliage001/colour.png": "437149ad5db2b4e304c9f91e2024a1e6157fe1fcb75608f69e231f45d461caab",
+    "Foliage001/normal.png": "647f8eb593d24b9660cf4b00c5ed2328943bf8af940af46a4435e8e1a3eed610",
+    "Foliage001/opacity.png": "390a375ac002f672a6001d6089a6697f03b7c42c2bb4ffbace9648cf39ea0e0b",
+    "Foliage001/roughness.png": "997954ae76ec536c722f96f672c03a93454c2cdf03a1fdf95adc0f55ee8ff2de",
+    "Grass004/colour.png": "1c504b956e5550fedd8822e7e2135fe45f513bc1212f72ed67885de1002fabb6",
+    "Grass004/height.png": "6f843893aca0bb6a3aaa23203fbd7ef688c5326b290d7b4dc8dc43d3e29e4433",
+    "Grass004/normal.png": "a6fce3c4f2c5d486b5c993bf47b47ce9d4c1dbb04ecef424ad2c0b703715c3c6",
+    "Grass004/occlusion.png": "2b90f33cb488385e18d698b6d8e8c649116ebc7478bf7dbd5d08214884adabaf",
+    "Grass004/roughness.png": "c3bac30c64d246019e80dd6448544ac381706d43eb583e5ac875cb4f6eece6d8",
+    "LeafSet019/colour.png": "c65827e13bb755d5c3045e190b1547e2c12748c2e992376db5f0008a6c6c4b80",
+    "LeafSet019/normal.png": "3aa1ea9c7105611417320a0cc5d2cfdf93f31824aef958b5cf2dbb7a24d9af7c",
+    "LeafSet019/opacity.png": "46611bdd548ba04c96c99bc0387f96b9947f45c2d6600e5abd55047d600a526b",
+    "LeafSet019/roughness.png": "26e7b2e5af525a0555a4dfe57c05c8e6c8f23c57a6dc25954e0b25c52f732316",
+    "LeafSet024/colour.png": "659cee2823b7901e139bdafc19654b29f9061b698c836666e460d909526d26af",
+    "LeafSet024/normal.png": "044073b4f21220c75cd789a72f9cab8d10e08f97f358c9901581f1a555e058a5",
+    "LeafSet024/opacity.png": "7f3f41a9fbfe35d4fdcc5d9c13a4b1df4f2ef50a24ff1abe9172b074ce68e401",
+    "LeafSet024/roughness.png": "c58bc48e1dd6618f8e15658f5ceaeb0bc5c799aede85b7a16020b1162fdd149e",
+    "Moss001/colour.png": "f8af2f8edefe08b45c6682c4a2b25c5d817619c8e510482f733f9236da841140",
+    "Moss001/height.png": "90e80bf5a19221cc7bbbdfe994dee86a7c6ebf411b97adfa63e956a64eba0e51",
+    "Moss001/normal.png": "dfb787087657006aba470fce720f9719190ac500bec25fc00715af7d63a7e5c0",
+    "Moss001/occlusion.png": "7043fbd1a6fe838703c3e6217a44c9e74cb573ea786d14ba304946b58da0486d",
+    "Moss001/roughness.png": "46fdb7aa01489643f02f0a8f549f0c84cb527c4346590bec99ff52f77413c3a1",
+    "anthurium_botany_01/anthurium_botany_01.bin": "6a23daf128e297ad99e984bec11bdea3c6eab64e52d07cbdc948ace5a05b2e25",
+    "anthurium_botany_01/anthurium_botany_01_1k.gltf": "6b3f6b8eda6cc0edfefd6a58f6758ef6538c35b2ca2a76189383f23b246dd8c6",
+    "anthurium_botany_01/textures/anthurium_botany_01_arm_1k.jpg": "88d9ce05e4b301ae9cd5b479459262c4690a3ee2de80a8f5e18a288ff5e96bee",
+    "anthurium_botany_01/textures/anthurium_botany_01_diff_1k.jpg": "f759421f00e848d7d2915b409d98c6311cc601e4be17d4155e0852429fa4993e",
+    "anthurium_botany_01/textures/anthurium_botany_01_nor_gl_1k.jpg": "f0cf940590733a2a5a9b0db362bd093c39b28405c66b1d084aa203efe6f0d3fc",
+    "bark_brown_02/arm.jpg": "6bd86d37b3b9b40cc30a4b661e382ec41fa7463a8b1144ff44708b19fa675af1",
+    "bark_brown_02/colour.jpg": "920fa0bed0c9d78c1d530e99795113afd532d7db746de440f4a85d7c83ed0f1a",
+    "bark_brown_02/height.png": "e02b952d984561ca89e5b33e788914d9bda286a4a1914323d0557e910892be98",
+    "bark_brown_02/normal.png": "45c632c61b642759ee935a4300b71aa1e6097d2b2d8aae42376c4661ecc518eb",
+    "boulder_01/boulder_01.bin": "7f5b06503d62bd95bfe9c6b8a354a5cc8ff04a4d271a8cf87a3e3125db4232d7",
+    "boulder_01/boulder_01_1k.gltf": "51487934db898b4c24072780a451e34eca5c02e3ada24a62bbc600bbc4019e92",
+    "boulder_01/textures/boulder_01_arm_1k.jpg": "c57187c5746b6be913fa53846cb44ff78743e7ca5000f131c9627b99563c2b87",
+    "boulder_01/textures/boulder_01_diff_1k.jpg": "c38f0e918f6dc16b8d386ba3cdd89805c78320c119a1ceec85856f82b09a65b8",
+    "boulder_01/textures/boulder_01_nor_gl_1k.jpg": "0810cf6e89d89bb6eb065b4d2e2855288f5dcbd2c15c6e40ab90d462021b50aa",
+    "brown_mud_leaves_01/arm.jpg": "136cbc6870e1d4d818f739af077b0c0700536b7eb4663c3b68bdb112d1940c82",
+    "brown_mud_leaves_01/colour.jpg": "c598c555f13cd5328409fd5e2a45496a26e319e52299e3959042f1449c2f1b06",
+    "brown_mud_leaves_01/height.png": "9fa035cad924c4429fee2a510aca0e80acfd943b055f86a962a8a0a1f13be9d3",
+    "brown_mud_leaves_01/normal.png": "0c5c37348830b6a36024a114359e26aaf2f48bf2b435a5ef2d6999bcd4b530b7",
+    "calathea_orbifolia_01/calathea_orbifolia_01.bin": "df1668bcb44914abac046217bbdae9867a3702198f7c374135f2b4456df8b038",
+    "calathea_orbifolia_01/calathea_orbifolia_01_1k.gltf": "399130c01bfff6b493f885652112c3c841c3814b024a3d3c87773e0c5ab4f156",
+    "calathea_orbifolia_01/textures/calathea_orbifolia_01_arm_1k.jpg": "df4ea4dfc74a6965476200cffea69886ac26d3c089f356a7b69518149ef585e0",
+    "calathea_orbifolia_01/textures/calathea_orbifolia_01_diff_1k.jpg": "a105a093d74317a3853319a06fdc78cad2a13e353962298d2094195720b9b4a0",
+    "calathea_orbifolia_01/textures/calathea_orbifolia_01_nor_gl_1k.jpg": "52aac88c18bf42c369aad9b2b5e41dbe58b015ca2fac7ff6ed4cb21147cb49c8",
+    "dead_tree_trunk/dead_tree_trunk.bin": "c1ac6b3195246e8647a28eee2fbfdd4712a045c7cf2dcb4f5abcc2d40a446ca6",
+    "dead_tree_trunk/dead_tree_trunk_1k.gltf": "8baaf1ff66ba1f79acdceed0dc3797a882990a3abb10b18abe56762f34c26e39",
+    "dead_tree_trunk/textures/dead_tree_trunk_arm_1k.jpg": "0e0f7d64ac4ee3a7e7861a48f4bbd1ec2c026facd8f48b756f6b5d4557af3fd3",
+    "dead_tree_trunk/textures/dead_tree_trunk_diff_1k.jpg": "bc31d7d23db90d90cfb568c583914eeec11b29716b79096818b706a9e3e0216c",
+    "dead_tree_trunk/textures/dead_tree_trunk_nor_gl_1k.jpg": "b7c393204c93f0c67535ff3b5d723b26598f9dbb2b5110b74249ab88189f026f",
+    "dead_tree_trunk_02/dead_tree_trunk_02.bin": "2b1b7ca07d98396ddc1987e367dcff9734df16b62e997c14837512d134687ded",
+    "dead_tree_trunk_02/dead_tree_trunk_02_1k.gltf": "b486ab1f0c7f4972e0eec97b19de53b26a34d09f07da5f9c2a70f8621f9e574c",
+    "dead_tree_trunk_02/textures/dead_tree_trunk_02_arm_1k.jpg": "ea15561ce36572ebd0db3c997f70d68a76d4bcbfef7efb4f91c8fd3b5f766e62",
+    "dead_tree_trunk_02/textures/dead_tree_trunk_02_diff_1k.jpg": "fac23e81ab5639dcde93db605e5dd94c65e0aa2b1fb4a303f37de9afbb9af5b4",
+    "dead_tree_trunk_02/textures/dead_tree_trunk_02_nor_gl_1k.jpg": "9b26c29b89afced0ddb91dbe6f917e59038bed5ba6076dfceb8d1b4b00ca04f7",
+    "fern_02/fern_02.bin": "fe1abb762bcbbc7ad9e86925c8080437a62add257d9280e9142fdc85c226e64c",
+    "fern_02/fern_02_1k.gltf": "33974295ee19670af4877705fc7d91f33f42d6302f0d44a625e072271223031f",
+    "fern_02/textures/fern_02_arm_1k.jpg": "ebfb5d76ce9cbdaec20bcd22dce9b755f0b1b8650ef29ca13555e3e6961025d7",
+    "fern_02/textures/fern_02_diff_1k.jpg": "a828a6e7b4c01c826911e2eac4b3afc7457dab7b3b392a31c681ed88b7d50029",
+    "fern_02/textures/fern_02_nor_gl_1k.jpg": "45bce132c6e96a0864bc89ab5da51361ab3f4afa83a6669ae499ab5ca811f621",
+    "green_metal_rust/arm.jpg": "c1a48da0c5bba8f490497bbedadf4cb21d5387de8b3d49988c065e4b16805434",
+    "green_metal_rust/colour.jpg": "4509ab0cb1cf6bf9b9f970450a41f83ebd9bff178006deae568ff34b404856fc",
+    "green_metal_rust/height.png": "6485d35bc4e96cae38853194a4f8d96a50edf815df7c37aeb859b013d62c0d14",
+    "green_metal_rust/normal.png": "7d6cdd15a058eda5992643696a9d422191239364de4ab33f945bba0e6e1e2cc4",
+    "jolcham_oak_bark_01/arm.jpg": "db24dfda99d304a8f3d7660f838d76106259a00ac386709732cd3c9196b7667f",
+    "jolcham_oak_bark_01/colour.jpg": "08c26b3ea38718dfc3902d0889ac06e2ce0ae9cddb31d8988723eee1780a71c8",
+    "jolcham_oak_bark_01/height.png": "4bcd2c3a36b68a020beb25f4034c4eabf41033433212ca19de0f3bd92a1dada3",
+    "jolcham_oak_bark_01/normal.png": "0b054cfd8db2cf6a4821877587ac79868e149fa0a0d3731c9208b6fd8188633e",
+    "leaves_forest_ground/arm.jpg": "353c4b6cf159a0acd89ecc3ebf69fccc9f4876e1f0ddb07f7c38265304b0c270",
+    "leaves_forest_ground/colour.jpg": "e4aa2be8f80192378bc8aca363fc01b1f01639ebea5a87a3973c549861a01b7a",
+    "leaves_forest_ground/height.png": "989f21997f1b1303e31db4885924ef8e140baf010a67815e28a9b7fabae5f6bb",
+    "leaves_forest_ground/normal.png": "4dc285ed57423eeb3aace5030b3e9100e5840b6eb368850e51c14f2e8b5bf434",
+    "metal_plate/arm.jpg": "fc4708b6700a2cc387654b693091dd0ac0cd1797ae803d75c894e62554fbef07",
+    "metal_plate/colour.jpg": "c6b6739eac2c75ccc898e753d7833df24eafbdb9aa92fb6eabfb92abd1a680a5",
+    "metal_plate/height.png": "abc05dc9fb007d0aac92f8b785b7d24082ceda117e193a80570e134befaedd1e",
+    "metal_plate/normal.png": "d858021ebc0a2a01ec13e574bc47ed58795e129904cda2868b3fb2dfd02d6741",
+    "metal_plate_02/arm.jpg": "e099a8385d53f4a515b7e0ce94f85d88657fcac49c23979474f5394b22dd550b",
+    "metal_plate_02/colour.jpg": "6e80877d0e9d5973d96298c6091df7ace906b0a6760afc4f3592e4855f3f1d4c",
+    "metal_plate_02/height.png": "3a13ef446597def8f6785565bf615e2bcbe3e2f1f3c2d1d45bd1c0abd5643ff1",
+    "metal_plate_02/normal.png": "a39eee156a992afef4f1453010f2f2ff3c01cd6b5e0ce408259954ce25dd049f",
+    "mossy_rock/arm.jpg": "1c1b8da603c93e863ccb68a8f4fcc6ff02774b83d9a6e9422c7d4aa77397b6a3",
+    "mossy_rock/colour.jpg": "4dbf37f1b0465c9c8914213163923be159716f5b97fb6946437b6c5e143ef540",
+    "mossy_rock/height.png": "fa0d663a55bd984bfc91426b2466a6cdac2b60756abe74b31129b35abd65462e",
+    "mossy_rock/normal.png": "08b01ee4387e4bb3433f901c62acc40d4be8d6d4a481e5fb508400cb4664d82e",
+    "nettle_plant/nettle_plant.bin": "24810f9d80b5fafdd71e1599b0cc81afa3eb9b744cfa8bf388c5e9f30271ba46",
+    "nettle_plant/nettle_plant_1k.gltf": "45baafa16feb0017e6a46712e2aa7afe7841fd00905075ead8316a5fc8314b0e",
+    "nettle_plant/textures/nettle_plant_arm_1k.jpg": "8fb33e5e939b4e089f08c867bf449d9e27aa32af94990c3cad1a89dcabd44f14",
+    "nettle_plant/textures/nettle_plant_diff_1k.jpg": "7172a9971818a18a7cb7ebaa144d9d2313b83d2a6180c9582000f7260542ea7b",
+    "nettle_plant/textures/nettle_plant_nor_gl_1k.jpg": "ab5d0cdc9a487a8874b6e9a11bf67ef90319f02bbd74579576198aca90b0fa85",
+    "pachira_aquatica_01/pachira_aquatica_01.bin": "a803777635a4744cc304bd936806242d8875430cc588295c9fa2792a64747c8e",
+    "pachira_aquatica_01/pachira_aquatica_01_1k.gltf": "e73b77c0ffadd8b9fa686faabfecf37799123fe4bc756f816145a4f8c9f53364",
+    "pachira_aquatica_01/textures/pachira_aquatica_01_bark_arm_1k.jpg": "7c44f930e3a6c14acb9043e50d8244da7869f8937233c58276d1b3212a3a6960",
+    "pachira_aquatica_01/textures/pachira_aquatica_01_bark_diff_1k.jpg": "9ca175a1c105a3555c47626ebead36505c29482ea0018f4c6e9a5828ce6d7b25",
+    "pachira_aquatica_01/textures/pachira_aquatica_01_bark_nor_gl_1k.jpg": "389b0f8cc3e8bf4ee78ea12c367ff3003d69d8e83de8baf908e6f2e123d1e6a8",
+    "pachira_aquatica_01/textures/pachira_aquatica_01_leaves_arm_1k.jpg": "42824afde27e7f0111a2e673f0a7cfe0b18bc21d2201b85d9737fce48c1016a3",
+    "pachira_aquatica_01/textures/pachira_aquatica_01_leaves_diff_1k.jpg": "b3211c240dd2ea7913326e7f21f9db9d029ee487b5e59d58d0e10c8cc77d203f",
+    "pachira_aquatica_01/textures/pachira_aquatica_01_leaves_nor_gl_1k.jpg": "3a442aa75df0e6f37bb7410f8ae09927b419d2dba202943cda40f52a7194804c",
+    "rock_07/rock_07.bin": "e4a532a6d6cf4a08c288f501b790f32cba0528136a29959ce774c3cd39369e7e",
+    "rock_07/rock_07_1k.gltf": "efcc2dcaa133ff8ad5c865dc2135772e8f5dbc83fa38db2ee2cf25382436b6e6",
+    "rock_07/textures/rock_07_arm_1k.jpg": "1ed76e9a8542c76bdc6b7b018720ae1f52cd75d9f5ae719f613de3f5032cf4da",
+    "rock_07/textures/rock_07_diff_1k.jpg": "8ff1965aa1664cc4abcc0131c44ee2b97ab14d6e131d7a51429ff261eeb101c8",
+    "rock_07/textures/rock_07_nor_gl_1k.jpg": "57cb2210951aeb376164fce5f7c65f03e5599def04873b56cad0f173c275d78d",
+    "rock_09/rock_09.bin": "780c37d6fc11ca3a01c3763535ef883908b6007271a46bd446d2289ded820751",
+    "rock_09/rock_09_1k.gltf": "636e57eb0090889627da18edaec202ff9f65f83101b94f91b7da4d21dc080ab9",
+    "rock_09/textures/rock_09_arm_1k.jpg": "594e2cec49e6bb40bd9bab2649e37dcc261079456cf4d6f680f56770c19db5ea",
+    "rock_09/textures/rock_09_diff_1k.jpg": "afb7ae5ae82238d304aba589391ac6bc87f7cf1dbfe50980c21f762cfdd87efd",
+    "rock_09/textures/rock_09_nor_gl_1k.jpg": "2195b5c7da3a23af2a5f93dbb20f38bc069028509b106397bc8d2aee0bc55729",
+    "rock_moss_set_01/rock_moss_set_01.bin": "de8360e6175879aaf02c171911069cf5f1852547f9ca7f10e440085dbcc3315e",
+    "rock_moss_set_01/rock_moss_set_01_1k.gltf": "c36675aca9c6b2be7785c2534cf413b03ec82a5a2a5407a2b1c0cdb0346c9727",
+    "rock_moss_set_01/textures/rock_moss_set_01_diff_1k.jpg": "40cea65d8aa4ee73a93b04af19963834d061eee9779c3fc2c1cba76eef812ccc",
+    "rock_moss_set_01/textures/rock_moss_set_01_nor_gl_1k.jpg": "eb4aad3f207f1dc5b624d74ae240372171626a66912bd71adf7bd3e518181d6e",
+    "rock_moss_set_01/textures/rock_moss_set_01_rough_1k.jpg": "4d6ec46623abd8e2cdb855f59c7ce31873ad61b36b60e4de579e9e776a497c6b",
+    "rock_moss_set_02/rock_moss_set_02.bin": "2df9d8eaaca4207529b0f613d4886d3962d0b9ffc0cdfd2bc4bf35dbcd391cb5",
+    "rock_moss_set_02/rock_moss_set_02_1k.gltf": "c3b992a7622e94f7d8da97a47277a2a5177a513af0312a127ec908d4056c97db",
+    "rock_moss_set_02/textures/rock_moss_set_02_diff_1k.jpg": "91dd2cc77d5198b067d77e5bdb3fa8ee7b8950aeff5aec2c1ccaddb76dcca481",
+    "rock_moss_set_02/textures/rock_moss_set_02_nor_gl_1k.jpg": "dd2503789089fb72ef469efd14364d393e769c0de8781a251475cac7e0b6f51d",
+    "rock_moss_set_02/textures/rock_moss_set_02_rough_1k.jpg": "12252219a98a560940359973e83af831abdcfab0ead3f0a2a7b135a0143105f1",
+    "shrub_02/shrub_02.bin": "5c1b79da1cfdbac90599542ccd1f75ba433a3a4d356b1ea03655adb39b0e2c96",
+    "shrub_02/shrub_02_1k.gltf": "99de0a70fe88ad414615cc8d8e020617c8512e2abfe08b911b153a6fcc40d93e",
+    "shrub_02/textures/shrub_02_arm_1k.jpg": "7186bf604d5c02f873aef6de2346cc06b6fa48f47d054edbef36d2c3772c0890",
+    "shrub_02/textures/shrub_02_diff_1k.jpg": "9956eff294034d70516d867e9668428a23d782feb3d4c34061dce5e44bacd5a8",
+    "shrub_02/textures/shrub_02_nor_gl_1k.jpg": "54c24e433365d5410223b7ebd2b33042b80831f80976e10768114db5ef6911d7",
+    "shrub_03/shrub_03.bin": "bf4df21e6d2a2bc5f00b4c9142f776171fe7da00cf960001825748067af542b6",
+    "shrub_03/shrub_03_1k.gltf": "b76d7c14bc027e834e82d3f984c32b5d060e62908aa90ff9420a637ca253a8ea",
+    "shrub_03/textures/shrub_03_arm_1k.jpg": "3e2b16812a623037138eedace958210c5f3443a827bbe69663045bba5612f815",
+    "shrub_03/textures/shrub_03_diff_1k.jpg": "3cadc7aba46d3aabbd7d6d2b1d04aa32e2a7da0bc87c2d38ef3cb1ee42cb03ec",
+    "shrub_03/textures/shrub_03_nor_gl_1k.jpg": "ff856bacfce859b8a7555dd9a3b92fbd36b2e775d486be71df485afb4235d6c9",
+    "shrub_04/shrub_04.bin": "cb442c39682e54cc63f912aa78ab17a03566f947a61adbbbaaa6473166744f01",
+    "shrub_04/shrub_04_1k.gltf": "782832cbc57e96686b78c6ef9df6234c25f564f78421c8ed4bd42c3631f5aeae",
+    "shrub_04/textures/shrub_04_arm_1k.jpg": "d1085df021928b29b0f38dde7e58e9a2e304c4e8d838e390b37cf57f8aa492e8",
+    "shrub_04/textures/shrub_04_diff_1k.jpg": "0b0fa0a474753d13f3093858cea79d0de05da1e6a0c5d6e181cd351080980b6c",
+    "shrub_04/textures/shrub_04_nor_gl_1k.jpg": "200d791e0474495bfc876ba1c289dade669c6a5b124647c55bc840a875f6b51c",
+    "single_root/single_root.bin": "6e047b1b10b91b2e6f08fea2daad834e0c34c0f59145a39ce71b029bce11fa69",
+    "single_root/single_root_1k.gltf": "b88d0e4b06f710a70af3adb8dd72dea106d3b90f4d093b3e94a09c781745d92c",
+    "single_root/textures/single_root_arm_1k.jpg": "51dd1b1e84607e80120970533352b97075d0ff6a29ed1e2e1261a20c36b93ab7",
+    "single_root/textures/single_root_diff_1k.jpg": "c53c68f142215139a5784c8fa080183e3e9ae8ae2f9181b3d477fd1edd3a48b5",
+    "single_root/textures/single_root_nor_gl_1k.jpg": "508fb34ec0c000cf4feeeb2ce9c0373ec57de5608c2f7058543c3f1ffc0ab6da",
+    "tree_stump_01/textures/tree_stump_01_arm_1k.jpg": "d845cd6ab45288c546267d059ebe1f8a737e174330fe9375e5f99e753f2f95d8",
+    "tree_stump_01/textures/tree_stump_01_diff_1k.jpg": "781ebe420ac4d84f2e44b9e9937a596e3d5d90711d978a1392f8bf3771b5bf31",
+    "tree_stump_01/textures/tree_stump_01_nor_gl_1k.jpg": "425117514b0386bb6df41cb64a61a624d2596472e05777483d4021b3285e3ceb",
+    "tree_stump_01/tree_stump_01.bin": "b4d9ca70b3c908c4a638fbd6a23ed96c84055bbbf14cf44b89e31ad59fa21e0a",
+    "tree_stump_01/tree_stump_01_1k.gltf": "9c66ba87d693f35eb404acaa96e0eeff831c295b61a0a903795584cbcc3527c9"
+  }
+}
