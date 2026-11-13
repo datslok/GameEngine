@@ -57,11 +57,20 @@ struct GpuSpotLight {
     std::int32_t shadowTile = -1;
     float shadowStrength = 0.0f;
     float emitterRadius = 0.0f;
+
+    // An image light's window (PlacedSpotLight::window), measured from the camera: its plane (normal xyz, all zero for a
+    // light without one, and offset w), its middle (xyz) and its source (windowSource: a spotlight's slot plus 1, a point
+    // light's as minus that, 0 for none), its edges' unit directions with their half lengths in w.
+    float windowPlane[4]{};
+    float windowCentre[3]{};
+    std::int32_t windowSource = 0;
+    float windowAxisU[4]{};
+    float windowAxisV[4]{};
 };
 
 static_assert(sizeof(GpuDirectionalLight) == 64, "GpuDirectionalLight must match the shader's DirectionalLightData");
 static_assert(sizeof(GpuPointLight) == 48, "GpuPointLight must match the shader's PointLightData");
-static_assert(sizeof(GpuSpotLight) == 64, "GpuSpotLight must match the shader's SpotLightData");
+static_assert(sizeof(GpuSpotLight) == 128, "GpuSpotLight must match the shader's SpotLightData");
 
 // A frame's lights as the shader gets them: the ambient light and the counts (which go into the frame's uniform block,
 // gpu_scene.h), and one record per light, in slot order. Beside them, which point and spot lights are fast

@@ -49,7 +49,8 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     }
 
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +
-                               "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed);
+                               "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed) +
+                               (stats.imageLights > 0 ? "  IN MIRRORS " + std::to_string(stats.imageLights) : std::string{});
 
     return {camera, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
             exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};

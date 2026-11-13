@@ -165,7 +165,11 @@ namespace {
 
         float expected[16]{};
         writeColumnMajor(tile, expected);
-        assert(sameFloats(packShadowView(tile).matrix, expected, 16));
+        const Vec4 plane{0.0f, 0.0f, 1.0f, 4.998f};
+        const GpuShadowView view = packShadowView(tile, plane);
+        assert(sameFloats(view.matrix, expected, 16));
+        // Followed by the plane it clips at (an image light's mirror, render/gpu/shadow_map.h).
+        assert(view.clipPlane[2] == 1.0f && view.clipPlane[3] == 4.998f);
     }
 
     // A capture's view (a cube face's or a mirror's) is pushed the same way, followed by the plane it clips at and the

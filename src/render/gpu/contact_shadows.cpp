@@ -228,9 +228,13 @@ std::vector<ContactLightPick> chooseContactLights(const FrameLighting& seated, c
         consider(ContactLightKind::Point, slot, placed.position, placed.light, placed.entity);
     }
 
+    // Never an image light (a light seen in a flat mirror): the screen's depth towards its image runs into the mirror.
     for (std::size_t slot = 0; slot < seated.spotLights.size(); ++slot) {
         const PlacedSpotLight& placed = seated.spotLights[slot];
-        consider(ContactLightKind::Spot, slot, placed.position, placed.light, placed.entity);
+
+        if (!placed.window) {
+            consider(ContactLightKind::Spot, slot, placed.position, placed.light, placed.entity);
+        }
     }
 
     std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.standing > b.standing; });

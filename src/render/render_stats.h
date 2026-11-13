@@ -40,6 +40,9 @@ struct RenderStats {
     std::size_t pointLightsLit = 0;
     std::size_t pointLightsShadowed = 0;
 
+    // Image lights this frame (render/gpu/mirrored_light.h, chooseImageLights): lights seen in flat mirrors.
+    std::size_t imageLights = 0;
+
     // The light probes' states this frame (render/gpu/probe_relocation.h); all zero without probes.
     ProbeStateCounts probes;
 

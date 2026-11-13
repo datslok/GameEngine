@@ -174,8 +174,64 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Image lights' windows facing every way, with images and points on either side of the plane, inside and outside the
+    * outline. Inputs per case: (plane normal, offset), (centre), (edge u, half length), (edge v, half length), (image),
+    * (point).
+    */
+    void checkWindow(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{61};
+        std::vector<GpuVec4> inputs;
+        std::vector<LightWindow> windows;
+        std::vector<Vec3> images;
+        std::vector<Vec3> points;
+
+        for (int i = 0; i < 500; ++i) {
+            LightWindow window;
+            window.normal = random.direction();
+            window.axisU = window.normal.cross(std::abs(window.normal.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f}).normalized();
+            window.axisV = window.normal.cross(window.axisU);
+            window.centre = Vec3{random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f), random.between(-5.0f, 5.0f)};
+            window.offset = window.normal.dot(window.centre);
+            window.halfU = random.between(0.1f, 2.0f);
+            window.halfV = random.between(0.1f, 2.0f);
+            const float behind = i % 10 == 0 ? random.between(0.1f, 3.0f) : -random.between(0.1f, 6.0f);
+            const float front = i % 7 == 0 ? -random.between(0.1f, 3.0f) : random.between(0.1f, 6.0f);
+            const Vec3 image = window.centre + window.normal * behind + window.axisU * random.between(-3.0f, 3.0f) + window.axisV * random.between(-3.0f, 3.0f);
+            const Vec3 point = window.centre + window.normal * front + window.axisU * random.between(-3.0f, 3.0f) + window.axisV * random.between(-3.0f, 3.0f);
+            windows.push_back(window);
+            images.push_back(image);
+            points.push_back(point);
+            inputs.push_back(gpuVec4(window.normal, window.offset));
+            inputs.push_back(gpuVec4(window.centre));
+            inputs.push_back(gpuVec4(window.axisU, window.halfU));
+            inputs.push_back(gpuVec4(window.axisV, window.halfV));
+            inputs.push_back(gpuVec4(image));
+            inputs.push_back(gpuVec4(point));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_MIRROR_WINDOW, inputs, 6, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            Vec3 crossing = images[i];
+            const bool through = throughMirrorWindow(windows[i], images[i], points[i], crossing);
+            const Vec3 shaderCrossing{outputs[i][0], outputs[i][1], outputs[i][2]};
+            // A crossing right on the outline may fall either side by rounding; the crossing itself must agree.
+            const Vec3 fromCentre = crossing - windows[i].centre;
+            const bool onEdge = std::abs(std::abs(fromCentre.dot(windows[i].axisU)) - windows[i].halfU) < 1e-4f ||
+                                std::abs(std::abs(fromCentre.dot(windows[i].axisV)) - windows[i].halfV) < 1e-4f;
+            if (!onEdge) {
+                report.check("throughMirrorWindow", exactTolerance, through ? 1.0f : 0.0f, outputs[i][3]);
+            }
+            report.check("throughMirrorWindow crossing", FloatTolerance{.absolute = 1e-4f, .relative = 1e-5f}, crossing, shaderCrossing);
+        }
+    }
+}
+
 void gpuTestMirroredLight(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("mirrored_light.glsl");
     checkMirror(runner, report);
     checkFootprint(runner, report);
+    checkWindow(runner, report);
 }

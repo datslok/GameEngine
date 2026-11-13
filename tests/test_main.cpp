@@ -144,6 +144,7 @@ void testCameraFinish();
 void testMotionBlur();
 void testDepthOfField();
 void testFrostedGlass();
+void testImageLights();
 void testBloom();
 void testBlueNoise();
 void testTaa();
@@ -342,6 +343,7 @@ int main(int argumentCount, char** arguments) {
     testMotionBlur();
     testDepthOfField();
     testFrostedGlass();
+    testImageLights();
     testBloom();
     testBlueNoise();
     testTaa();

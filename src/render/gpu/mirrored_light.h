@@ -7,7 +7,9 @@
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/mirrored_light_shared.h"
 #include "render/gpu/upscaling.h"
+#include "scene/flat_faces.h"
 #include "scene/frame_description.h"
+#include "scene/lighting.h"
 
 #include <cstdint>
 #include <functional>
@@ -67,6 +69,11 @@ struct MirroredLightSettings {
     // Surfaces up to this roughness reflect lights, fading out over MIRROR_ROUGHNESS_FADE more; past
     // MIRROR_FOOTPRINT_ROUGHNESS each point's light comes from a footprint, which softens the reflected spot's edges.
     float mirrorRoughness = 0.25f;
+
+    // Without the ray-traced search (no ray queries, ray tracing off, or the switch above off): each light in front of a
+    // flat smooth metal face gets its image behind the glass, a spotlight shining out through the face's window
+    // (chooseImageLights), exact for a flat mirror. On by default.
+    bool imageLights = true;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
@@ -233,6 +240,44 @@ struct MirrorPair {
 */
 std::vector<MirrorPair> chooseMirrorPairs(const GpuLights& lights, std::span<const DrawItem> draws, const Vec3& cameraOrigin,
                                           const MirroredLightSettings& settings);
+
+/*
+* Image lights: for a flat mirror the light arriving by way of it is exactly a light at the source's mirror image, as far
+* behind the glass as the source is in front, shining out through the mirror's outline (its window) and dimmed by the
+* mirror's reflectance; the path's length is the image's distance, so its falloff is exact, and reflection keeps angles,
+* so a spotlight's cone carries over. Without ray tracing, each is one more spotlight in the frame (with its window), so
+* the clusters, the main pass, the captures and the fog all take it.
+*/
+
+// A flat face of a draw as a window in the world, if it is square to its mesh's axes (a box's or a sheet's face; a face
+// at a slant in its own mesh has no rectangle there and is left out).
+std::optional<LightWindow> mirrorFaceWindow(const FlatFace& face, const Mat4& model);
+
+// Whether the straight line from an image light to a point crosses the window's plane inside its outline, with the
+// image behind the plane and the point in front of it; crossing gets the point of reflection. Mirrored in GLSL.
+bool throughMirrorWindow(const LightWindow& window, const Vec3& image, const Vec3& point, Vec3& crossing);
+
+// A mirror's reflectance at normal incidence (render/gpu/brdf.h, reflectanceAtNormal: its colour for a metal).
+Vec3 mirrorReflectance(const Material& material);
+
+/*
+* The image of a spotlight (in slot sourceSlot of the frame's spotlights) or a point light in a mirror's window: at the
+* source's mirror image, its colour times the mirror's reflectance, its intensity times the roughness's fade
+* (mirrorRoughnessFade under roughnessLimit), not fast, and its glowing size widened by the facets' spread over the
+* source's distance from the mirror, so a rough mirror's shadows soften. A spotlight's beam is reflected with its cone;
+* a point light's image aims at the window's middle with a cone just taking in its corners.
+*/
+PlacedSpotLight imageOfSpotLight(const PlacedSpotLight& source, int sourceSlot, const LightWindow& window, const Material& mirror, float roughnessLimit);
+PlacedSpotLight imageOfPointLight(const PlacedPointLight& source, int sourceSlot, const LightWindow& window, const Material& mirror, float roughnessLimit);
+
+/*
+* The frame's image lights (none with settings.imageLights off): each point and spot light of lighting (slots as there)
+* in front of a flat face of a shadow-casting, not transparent, metal draw (metallic at least one half) whose roughness
+* passes the setting's limit and its fade, the face within the light's range (and a spotlight's cone), scored by the
+* light reaching the face (intensity times the face's area, its cosine to the light, over the distance squared, times
+* the mirror's reflectance), the best MIRROR_IMAGE_LIGHTS first, ties in a fixed order.
+*/
+std::vector<PlacedSpotLight> chooseImageLights(const FrameLighting& lighting, std::span<const DrawItem> draws, const MirroredLightSettings& settings);
 
 // One pair (std430): x the light's kind, y its slot, z the draw; the bounds measured from the camera.
 struct GpuMirrorPair {

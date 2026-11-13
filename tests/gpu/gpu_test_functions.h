@@ -130,6 +130,7 @@
 // mirrored_light_test.comp
 #define GPU_TEST_MIRROR 0
 #define GPU_TEST_MIRROR_FOOTPRINT 1
+#define GPU_TEST_MIRROR_WINDOW 2
 
 // ambient_occlusion_test.comp
 #define GPU_TEST_AMBIENT_OCCLUSION 0

@@ -302,14 +302,13 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 - [ ] Coloured shadow maps: glass tinting shadows on GPUs without ray tracing
   - A second atlas holding the colour the glass passes and the nearest glass's depth (half size: about 96 MB at the default 4096 cascades); a receiver behind that depth takes the colour. Soft edges from the existing filters; several panes in a row count as the nearest.
   - **Moved here from 6e** (Oct 24 2026, the user's choice): ray-traced glass shadows cover GPUs with ray queries; this waits with the other fallbacks for GPUs without them.
-- [ ] Mirrored lights without ray tracing: the image light for flat mirrors
-  - **Moved here from 6e** (Oct 24 2026, the user's choice): only GPUs without ray tracing would use it, as with the software tracer; the rest of image quality comes first.
+- [x] Mirrored lights without ray tracing: the image light for flat mirrors (`image-lights`)
 - [x] Steadier volumetric fog: history read at each froxel's middle, a jitter turned per froxel (`steadier-fog`)
 - [ ] The fog's history as a time constant in seconds, as the probes', so it lags the same at any frame rate (left out of `steadier-fog`: it does not help the shimmer)
 - [ ] Materials
   - Clear coat, anisotropy, subsurface scattering for skin, parallax occlusion mapping, decals
   - Fabric shading: a sheen term for the soft rim highlight of cloth, on top of physically based materials
-- [ ] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects (all off by default, the user's choice)
+- [x] Camera finish: motion blur from TAA's velocity image, depth of field, colour grading, lens effects (all off by default, the user's choice)
   - [x] Colour grading and lens effects: white balance, the grade, vignetting, chromatic aberration, film grain (`camera-grading`)
   - [x] Motion blur: McGuire 2012's reconstruction filter from the shutter angle, off by default (`motion-blur`)
   - [x] Depth of field: a thin lens's circle of confusion and scatter-as-gather at half resolution, off by default (`depth-of-field`)

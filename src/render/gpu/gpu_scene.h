@@ -41,11 +41,14 @@ struct GpuInstance {
 static_assert(sizeof(GpuInstance) == 160, "GpuInstance must match the shader's InstanceData struct");
 
 // A shadow tile's view-projection (column-major, world space), pushed before its casters are drawn.
+// A shadow tile's view, pushed before its draws: the view-projection (column-major, world space) and the plane its draws
+// are clipped at (ShadowTile::clipPlane, world space; noClipPlane for all but an image light's).
 struct GpuShadowView {
     float matrix[16];
+    float clipPlane[4];
 };
 
-static_assert(sizeof(GpuShadowView) == 64, "GpuShadowView must match shadow.vert's push constants");
+static_assert(sizeof(GpuShadowView) == 80, "GpuShadowView must match shadow.vert's push constants");
 
 /*
 * A capture's view (a reflection probe cube face's, or a flat mirror's), pushed before its draws: the view-projection
@@ -101,7 +104,7 @@ static_assert(sizeof(GpuFrameData) == 400, "GpuFrameData must match the shader's
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);
 
-GpuShadowView packShadowView(const Mat4& tileMatrix);
+GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane);
 
 GpuCaptureView packCaptureView(const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye = Vec3{});
 
