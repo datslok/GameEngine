@@ -1297,7 +1297,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The pile sheet,** the cloth lab's self-collision station, the mat's "sheet dropped onto itself" from the layout's plan.
   - **Checked:** the tests (release, tests first: the neighbourhood, flat sheets left alone and a fold over the next square found, the plane and the cut against the paper's equations, rounding past a plane, the cap, pinned points, contacts and friction, the crossings counter, two stacked sheets (falling through without), the strip piling on the floor, determinism, the settings reachable by key, the lab's pile, barycentric weights and segment shares); the release tests pass, the debug game builds without warnings. The user saw it work in the lab on the CPU.
 
-## Phase 16: Beautiful without ray tracing (Nov 6 2026 onwards)
+## Phase 16: Beautiful without ray tracing (Nov 6-13 2026)
 
 - `replan-beauty-first` (Nov 6 2026): the plan changed. The user: "lets put DDGI on hold for now, build all the features we need for non rtx gpus to look beautiful, and then we make ray tracing and path tracing".
   - **Why now:** since `ray-tracing-off` the default path has no bounce light at all, only the flat ambient, and most players are on that path.
@@ -1500,6 +1500,8 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **A gap closed:** the quality presets had no command (the command-line rule's); `preset [name]` now shows or sets one.
   - **Ray-traced settings tagged once:** `SettingsVisitor::needingRayQueries` wraps ray tracing and its debug view, ray-traced reflections, the mirrored lights' search and every light probe setting in their `visit()`; F5 greys them on a GPU without ray queries and `set` says they do nothing there.
   - **Checked:** the tests (release, tests first: the upscaler's fallback, exactly its settings set, the switch restoring after changes and on twice, `preset` and `typical-gpu` by command, every tagged key and no other, the "no effect" note, the launch option); the debug and release games build without warnings. **Not run:** the game (the milestone check is the user's to make with it on).
+
+- **Phase 16 closed** (Nov 13 2026, `close-phase-16`): the user checked the milestone with the typical GPU setup on, the light lab and the demo by day and at night: "it all looks great". The leftovers moved on: the sky grid's lamps (stage 3), anisotropy and skin to phase 14, sheen to phase 10 (garments), decals to phase 12 (the FPS). **The fog's history in seconds was dropped**, after working it through with the user: a fixed share a frame averages the same 10 frames at any rate, so its noise is steady and only its lag grows at low frame rates (0.32 s at 30 fps, 0.08 at 120); a time constant in seconds keeps the lag but averages only about 3 frames at 30 fps, swapping a slight trail for shimmer, the worse of the two. The engine guide gained phase 16's section (`docs/ENGINE_GUIDE.md`, Beautiful without ray tracing). Phase 17 (ray tracing and path tracing) is current.
 
 ## Tools outside the phases
 
