@@ -2,6 +2,7 @@
 
 #include "core/settings_visitor.h"
 #include "math/mat4.h"
+#include "math/vec2.h"
 #include "math/vec3.h"
 #include "render/gpu/transparency_shared.h"
 #include "render/gpu/upscaling.h"
@@ -10,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 /*
@@ -114,6 +116,37 @@ float transmissionSpread(float roughness, float ior);
 * pixelsPerRadian pixels each; log2 of that, 0 under a pixel, at most the picture's last level.
 */
 float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, std::uint32_t levels);
+
+/*
+* Frosted glass as scatter (the depth of field's gather, render/gpu/depth_of_field.h): a point behindDistance behind the
+* pane spreads its light over a disc on it of this radius in pixels, spread behind / (view + behind) radians: none right
+* behind the glass, growing towards a ceiling for the infinitely far, frostedReach. refractionLevel is log2 of the
+* disc's width.
+*/
+float frostedRadius(float spread, float behindDistance, float viewDistance, float pixelsPerRadian);
+float frostedReach(float spread, float pixelsPerRadian);
+
+// The picture's level the gather reads its samples from: the rings' spacing about a texel there (the reach over
+// DEPTH_OF_FIELD_RINGS halvings' texels), at most the last level.
+float frostedGatherLevel(float reach, std::uint32_t levels);
+
+// A point of the picture behind the pane, as the gather reads it: its light and its disc's radius (frostedRadius).
+struct FrostedSample {
+    Vec3 colour;
+    float radius = 0.0f;
+};
+
+// The picture behind the pane at an offset in pixels from the glass pixel's own place.
+using FrostedPicture = std::function<FrostedSample(Vec2 offset)>;
+
+/*
+* What frosted glass shows at a pixel (refractedPicture's gather in scene_surface.glsl): every point behind spreads over
+* its own disc, so the pixel takes the centre (what it shows by its own distance) and the depth of field's rings of
+* samples out to the reach (read at this level, radii and distances in its texels), each by its scatter weight times
+* its ring's share, and returns their weighted mean. A thing right behind the pane (a tiny, bright disc) stays sharp, and
+* a far glint's glow carries on over it instead of stopping at its outline.
+*/
+Vec3 frostedGatherAt(const FrostedSample& centre, float reach, float level, const FrostedPicture& picture);
 
 /*
 * A smooth read of a blurred picture level along one axis (Sigg and Hadwiger 2005): a cubic B-spline over four texels,

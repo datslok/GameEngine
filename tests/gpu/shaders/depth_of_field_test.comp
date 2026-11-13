@@ -25,7 +25,7 @@ void main() {
         int ring = int(d.x);
         testOutput(0, vec4(blurRadius(a.x, a.y, a.z, a.w), easeFocus(b.x, b.y, b.z, b.w), blurCoverage(c.x, c.y), blurRingShare(ring)));
         testOutput(1, vec4(blurRingOffset(ring, int(d.y)), farSampleWeight(c.x, c.z, c.y), nearSampleWeight(c.x, c.y, c.w)));
-        testOutput(2, vec4(depthOfFieldComposite(e.xyz, e.w, f.xyz, g.xyz, f.w), 0.0));
+        testOutput(2, vec4(depthOfFieldComposite(e.xyz, e.w, f.xyz, g.xyz, f.w), scatterWeight(c.x, c.y, c.w)));
 
         vec4 values[9];
         for (int index = 0; index < 9; ++index) {

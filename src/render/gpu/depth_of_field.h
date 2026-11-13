@@ -82,6 +82,11 @@ float blurRingShare(int ring);
 // is what lies behind it), so the background never spreads over a sharper thing in front.
 float farSampleWeight(float sampleRadius, float pixelRadius, float distance);
 
+// A scattering point's weight at a pixel this far away, per unit of its ring's share, out to a gather of this reach: its
+// disc's coverage of the pixel (blurCoverage), its light spread over the disc's area (reach^2 / radius^2 of the reach's,
+// the radius at least a pixel). Shared by the near layer and frosted glass (render/gpu/transparency.h).
+float scatterWeight(float radius, float distance, float reach);
+
 // A sample's weight in the near layer per unit of its ring's share, out to a gather of this reach: a near-field sample
 // covering the pixel, its light spread over its disc's area (reach^2 / radius^2 of the reach's, the radius at least a
 // pixel). Summed over the gather's samples, each times its share, it is the near field's coverage: its alpha.

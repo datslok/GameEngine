@@ -55,6 +55,7 @@ namespace {
             const Vec3 composite = depthOfFieldComposite(Vec3{in[4][0], in[4][1], in[4][2]}, in[4][3], Vec3{in[5][0], in[5][1], in[5][2]},
                                                          Vec3{in[6][0], in[6][1], in[6][2]}, in[5][3]);
             report.check("depthOfFieldComposite", arithmeticTolerance, composite, Vec3{out[2][0], out[2][1], out[2][2]});
+            report.check("scatterWeight", arithmeticTolerance, scatterWeight(in[2][0], in[2][1], in[2][3]), out[2][3]);
 
             for (int component = 0; component < 4; ++component) {
                 std::array<float, 9> values{};
