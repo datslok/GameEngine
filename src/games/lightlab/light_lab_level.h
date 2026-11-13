@@ -115,6 +115,23 @@ ImageLevel chainLinkImage();
 Mesh chainLinkPanel();
 
 /*
+* Stained glass for the sunlit room's window (LightLabStainedGlassSettings): a grid of cells of strong colours, each
+* passing its light, held in lead lines passing none, so the coloured shadow maps (render/gpu/transparency.h) throw
+* coloured patches on the floor. Two textures over the pane's face: the colour (sRGB) and the transmission (linear, in
+* red: 0 on the lead, 1 in the cells).
+*/
+inline constexpr std::uint32_t labStainedGlassTexels = 256; // each texture's side
+inline constexpr std::uint32_t labStainedGlassCells = 4;    // cells across, each way
+inline constexpr std::uint32_t labStainedGlassLead = 4;     // the lead's width in texels, between cells and round the edge
+
+struct StainedGlassImages {
+    ImageLevel colour;
+    ImageLevel transmission;
+};
+
+StainedGlassImages stainedGlassImages();
+
+/*
 * A forest of box trees (a trunk and a crown) scattered round the start at between these distances, placed by hashing
 * each tree's number, so the level is the same on every run. Trees keep out of the towers' and fence's view to the
 * north, and clear of the building.

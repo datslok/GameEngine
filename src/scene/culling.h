@@ -29,6 +29,11 @@ std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const
 // reaches everything, as for a directional light). One cheap test per caster before a point light's six face frustums.
 std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach);
 
+// The glass (transparent draws) a light can reach, by the same test: what its coloured shadow map draws
+// (render/gpu/transparency.h). Every pane tints, whatever its castsShadows says, as the glass rays tint through every
+// pane; solid casters never include glass, nor glass solid casters.
+std::vector<std::size_t> glassInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach);
+
 // The candidates (draw indices, such as castersInReach gives) inside a light view's frustum, in the candidates' order.
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,
                                        const Frustum& lightFrustum);

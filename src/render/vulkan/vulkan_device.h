@@ -70,6 +70,10 @@ public:
     // glass uses to tint what is behind it per channel.
     bool supportsDualSourceBlending() const;
 
+    // Whether a pass's colour targets may each blend their own way (independentBlend, on when the GPU has it), which the
+    // coloured shadow maps use: the tint multiplied, the glass depth's nearest kept. Without it they stay off.
+    bool supportsIndependentBlending() const;
+
     // Whether the optional device extensions it was given are on (all of them; none when one is missing).
     bool hasOptionalExtensions() const;
 
@@ -132,6 +136,7 @@ private:
     bool memoryBudget = false;
     bool rayQueries = false;
     bool dualSourceBlending = false;
+    bool independentBlending = false;
     bool fsrFeatures = false;
     bool optionalExtensions = false;
     std::uint32_t scratchAlignment = 1;

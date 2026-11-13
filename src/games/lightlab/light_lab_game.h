@@ -136,6 +136,17 @@ struct LightLabDeskLampSettings {
 
 void visit(LightLabDeskLampSettings& settings, SettingsVisitor& visitor);
 
+/*
+* Stained glass in the sunlit room's window (stainedGlassImages): coloured cells in lead in place of the clear pane, to
+* judge glass's coloured shadows by the beam on the floor and in the mist. Clear at the start (the golden views keep
+* their picture); each switch a scene event.
+*/
+struct LightLabStainedGlassSettings {
+    bool on = false;
+};
+
+void visit(LightLabStainedGlassSettings& settings, SettingsVisitor& visitor);
+
 // The player's flashlight (F), as a setting too, so the set command switches it for scripts and AIs. Off at the start.
 struct LightLabFlashlightSettings {
     bool on = false;
@@ -260,6 +271,10 @@ public:
     LightLabDeskLampSettings& getDeskLampSettings();
     LightLabFlashlightSettings& getFlashlightSettings();
     Entity getDeskLamp() const;
+    LightLabStainedGlassSettings& getStainedGlassSettings();
+
+    // The sunlit room's window pane: its ModelRenderer's one part, clear or stained glass.
+    Entity getWindowPane() const;
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -331,6 +346,13 @@ private:
     LightLabDeskLampSettings deskLampSettings;
     LightLabFlashlightSettings flashlightSettings;
     Entity deskLamp;
+
+    // Switched by its settings every frame (see LightLabStainedGlassSettings): the window's material, clear or stained
+    // (made with its textures at the start).
+    LightLabStainedGlassSettings stainedGlassSettings;
+    Entity windowPane;
+    Material clearGlass;
+    Material stainedGlass;
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;

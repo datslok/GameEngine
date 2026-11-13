@@ -17,6 +17,12 @@
 // (barring a one in 2^64 coincidence).
 std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters);
 
+// The same for a tile that also holds its glass in the coloured shadow map (render/gpu/transparency.h): the solid
+// casters' signature, then each pane's mesh, matrix, shape and everything its tint comes from (its material's colour,
+// coverage, transmission, metalness, thickness, absorption, sides and their textures). Without glass, exactly
+// shadowCasterSignature, so tiles without glass are kept as before.
+std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass);
+
 // What was last drawn into each square of the atlas.
 class ShadowTileMemory {
 public:

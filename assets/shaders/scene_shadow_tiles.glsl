@@ -26,25 +26,45 @@ layout(set = 1, binding = 7) uniform sampler2DShadow shadowAtlas;
 // things blocking a light are (a comparison only says whether something is in the way).
 layout(set = 1, binding = 8) uniform sampler2D shadowDepths;
 
+// The coloured shadow maps (render/gpu/transparency.h): at half the atlas's size, with the same tiles at the same 0..1
+// places, the tint the glass each light sees passes (filtered) and the nearest glass depth (exact texels; 0, the far
+// depth, where there is none). Read only for tiles marked as holding glass (offset's z).
+layout(set = 1, binding = 33) uniform sampler2D glassTint;
+layout(set = 1, binding = 34) uniform sampler2D glassDepths;
+
+#include "transparency.glsl"
+
+bool tileHasGlass(int tile) {
+    return shadowTiles[tile].offset.z > 0.5;
+}
+
+// The tint a point at receiverDepth (the tile's reversed-Z) takes at uv in the atlas: the glass's, behind it.
+vec3 glassTintAt(vec2 uv, float receiverDepth) {
+    return glassShadowTint(receiverDepth, textureLod(glassDepths, uv, 0.0).r, textureLod(glassTint, uv, 0.0).rgb);
+}
+
 /*
 * One comparison against a tile at a point (measured from the camera), the hardware blending the four nearest texels'
-* answers: 1 lit, 0 blocked, and lit outside the tile's view. For points in the air (the fog's grid), where the frames'
-* moving samples and last frame's light average the edges, so the main pass's wider filters would only cost.
+* answers: 1 lit, 0 blocked, and lit outside the tile's view, tinted by the glass between it and the light. For points
+* in the air (the fog's grid), where the frames' moving samples and last frame's light average the edges, so the main
+* pass's wider filters would only cost.
 */
-float shadowTap(int tile, vec3 position) {
+vec3 shadowTap(int tile, vec3 position) {
     if (shadowTiles[tile].rect.z <= 0.0) {
-        return 1.0;
+        return vec3(1.0);
     }
 
     vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
     vec3 projected = clip.xyz / clip.w;
 
     if (clip.w <= 0.0 || any(greaterThan(abs(projected.xy), vec2(1.0))) || projected.z < 0.0 || projected.z > 1.0) {
-        return 1.0;
+        return vec3(1.0);
     }
 
     vec2 withinTile = vec2(projected.x * 0.5 + 0.5, 0.5 - projected.y * 0.5);
-    return texture(shadowAtlas, vec3(shadowTiles[tile].rect.xy + withinTile * shadowTiles[tile].rect.zw, projected.z));
+    vec2 uv = shadowTiles[tile].rect.xy + withinTile * shadowTiles[tile].rect.zw;
+    float lit = texture(shadowAtlas, vec3(uv, projected.z));
+    return tileHasGlass(tile) ? lit * glassTintAt(uv, projected.z) : vec3(lit);
 }
 
 #endif

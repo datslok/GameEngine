@@ -36,7 +36,7 @@ layout(set = 2, binding = 1, rgba16f) uniform writeonly image3D lighting; // rgb
 
 // The sun's shadow at a point in the air: the finest cascade whose box holds it, moved towards the sun by the cascade's
 // own bias (cascades.h), one comparison; lit past the last.
-float sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight) {
+vec3 sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight) {
     for (int cascade = 0; cascade < cascades; ++cascade) {
         int tile = firstTile + cascade;
         vec3 biased = position + toLight * shadowTiles[tile].offset.y;
@@ -47,7 +47,7 @@ float sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight) {
         }
     }
 
-    return 1.0;
+    return vec3(1.0);
 }
 
 // One point light's light scattered towards the eye at a point in the air; nothing beyond its range.
@@ -64,8 +64,8 @@ vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection) {
     int firstTile = points[i].firstShadowTile;
 
     if (firstTile >= 0) {
-        float lit = shadowTap(firstTile + pointShadowFace(position - points[i].positionRange.xyz), position);
-        irradiance *= mix(1.0, lit, points[i].shadowStrength);
+        vec3 lit = shadowTap(firstTile + pointShadowFace(position - points[i].positionRange.xyz), position);
+        irradiance *= mix(vec3(1.0), lit, points[i].shadowStrength);
     }
 
     return fogInScattering(irradiance, offset / distance, viewDirection, frameFog.medium.w);
@@ -90,7 +90,7 @@ vec3 spotLightInAir(int i, vec3 position, vec3 viewDirection) {
 
     // An image light (a light seen in a flat mirror) lights only the air in front of its window, through it, as far as its
     // source's light reaches the mirror.
-    float source = 1.0;
+    vec3 source = vec3(1.0);
 
     if (any(notEqual(spots[i].windowPlane.xyz, vec3(0.0)))) {
         vec3 crossing;
@@ -104,18 +104,18 @@ vec3 spotLightInAir(int i, vec3 position, vec3 viewDirection) {
         vec3 off = crossing + spots[i].windowPlane.xyz * float(MIRROR_IMAGE_SHADOW_LIFT);
 
         if (spots[i].windowSource > 0 && spots[sourceSlot].shadowTile >= 0) {
-            source = mix(1.0, shadowTap(spots[sourceSlot].shadowTile, off), spots[sourceSlot].shadowStrength);
+            source = mix(vec3(1.0), shadowTap(spots[sourceSlot].shadowTile, off), spots[sourceSlot].shadowStrength);
         } else if (spots[i].windowSource < 0 && points[sourceSlot].firstShadowTile >= 0) {
-            source = mix(1.0, shadowTap(points[sourceSlot].firstShadowTile + pointShadowFace(off - points[sourceSlot].positionRange.xyz), off),
+            source = mix(vec3(1.0), shadowTap(points[sourceSlot].firstShadowTile + pointShadowFace(off - points[sourceSlot].positionRange.xyz), off),
                          points[sourceSlot].shadowStrength);
         }
     }
 
-    vec3 irradiance = spots[i].radianceCosInner.rgb * (distanceFalloff(distance, range, spots[i].sourceRadius) * cone * source);
+    vec3 irradiance = spots[i].radianceCosInner.rgb * (distanceFalloff(distance, range, spots[i].sourceRadius) * cone) * source;
     int tile = spots[i].shadowTile;
 
     if (tile >= 0) {
-        irradiance *= mix(1.0, shadowTap(tile, position), spots[i].shadowStrength);
+        irradiance *= mix(vec3(1.0), shadowTap(tile, position), spots[i].shadowStrength);
     }
 
     return fogInScattering(irradiance, toLight, viewDirection, frameFog.medium.w);

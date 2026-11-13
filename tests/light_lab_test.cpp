@@ -30,6 +30,7 @@
 #include "test_levels.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <vector>
@@ -399,8 +400,8 @@ namespace {
 
     /*
     * The window has a pane of clear glass in the middle of the wall's thickness (thin glass, KHR_materials_transmission
-    * in the engine's terms): drawn after the opaque scene, casting no shadow and not in the level's collision, so the
-    * sun still comes through.
+    * in the engine's terms): drawn after the opaque scene and not in the level's collision, so the
+    * sun still comes through (tinted by it: glass needs no castsShadows, which only solid casters read).
     */
     void testTheWindowGlass() {
         assert(labWindowPane.minimum.x > labWindow.minimum.x && labWindowPane.maximum.x < labWindow.maximum.x);
@@ -415,7 +416,7 @@ namespace {
                 if (isTransparent(part.material) && part.material.thickness == 0.0f && part.material.roughness < frostedRoughness) {
                     ++panes;
                     assert(part.material.transmission == 1.0f);
-                    assert(!renderer.castsShadows && renderer.isStatic);
+                    assert(renderer.isStatic);
                 }
             }
         });
@@ -452,11 +453,11 @@ namespace {
                     ++balls;
                     assert(part.material.transmission == 1.0f && part.material.ior > 1.0f && part.material.roughness < frostedRoughness);
                     assert(near(part.material.thickness, 2.0f, 1e-6f) && part.material.attenuationDistance > 0.0f);
-                    assert(!renderer.castsShadows);
+                    assert(renderer.isStatic);
                 } else if (isTransparent(part.material) && part.material.roughness >= frostedRoughness) {
                     ++frosted;
                     assert(part.material.transmission == 1.0f);
-                    assert(!renderer.castsShadows);
+                    assert(renderer.isStatic);
                 }
             }
         });
@@ -1053,6 +1054,57 @@ namespace {
         assert(!lab.world.has<SpotLight>(lamp));
     }
 
+    /*
+    * The stained glass: the sunlit room's window turned from clear glass to coloured panes in lead, to judge glass's
+    * coloured shadows (render/gpu/transparency.h) by the beam on the floor. Its picture: cells of differing strong
+    * colours passing light, lead lines between them passing none. Clear at the start; its setting (and so the set
+    * command) switches the window, each switch a scene event.
+    */
+    void testTheStainedGlass() {
+        const StainedGlassImages images = stainedGlassImages();
+        assert(images.colour.width == labStainedGlassTexels && images.colour.height == labStainedGlassTexels);
+        assert(images.transmission.width == labStainedGlassTexels && images.transmission.height == labStainedGlassTexels);
+
+        // Lead along the edges and between the cells passes nothing; a cell's middle passes all of it.
+        const auto passing = [&](std::uint32_t x, std::uint32_t y) { return images.transmission.pixels[(std::size_t{y} * labStainedGlassTexels + x) * 4]; };
+        const std::uint32_t cell = labStainedGlassTexels / labStainedGlassCells;
+        assert(passing(0, 0) == 0 && passing(cell, cell / 2) == 0);
+        assert(passing(cell / 2, cell / 2) == 255);
+
+        // Neighbouring cells differ in colour.
+        const auto colourAt = [&](std::uint32_t x, std::uint32_t y) {
+            const std::size_t texel = (std::size_t{y} * labStainedGlassTexels + x) * 4;
+            return std::array<std::uint8_t, 3>{images.colour.pixels[texel], images.colour.pixels[texel + 1], images.colour.pixels[texel + 2]};
+        };
+        assert(colourAt(cell / 2, cell / 2) != colourAt(cell + cell / 2, cell / 2));
+        assert(colourAt(cell / 2, cell / 2) != colourAt(cell / 2, cell + cell / 2));
+
+        Lab lab;
+        assert(!lab.game.getStainedGlassSettings().on);
+        const auto windowMaterial = [&]() { return lab.world.get<ModelRenderer>(lab.game.getWindowPane()).parts.front().material; };
+        assert(!windowMaterial().transmissionTexture.isValid());
+
+        EngineSettings engine;
+        CommandRegistry registry;
+        const SettingsWalk walk = engineAndGameSettings(engine, lab.game);
+        addSettingsCommands(registry, walk, captureSettings(walk));
+
+        Input idle;
+        idle.beginFrame();
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        clearProbeEvents(lab.world);
+        assert(registry.execute("set lightLab.stainedGlass.on true").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        const Material stained = windowMaterial();
+        assert(stained.texture.isValid() && stained.transmissionTexture.isValid() && stained.transmission == 1.0f);
+        assert(collectLighting(lab.world, 1.0f).probeEvents.size() == 1);
+        clearProbeEvents(lab.world);
+
+        assert(registry.execute("set lightLab.stainedGlass.on false").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(!windowMaterial().transmissionTexture.isValid());
+    }
+
     // The probe events signalled since the last frame, cleared as the engine does once the frame is built.
     std::vector<ProbeEvent> takeProbeEvents(Lab& lab) {
         const std::vector<ProbeEvent> events = collectLighting(lab.world, 1.0f).probeEvents;
@@ -1255,6 +1307,7 @@ void testLightLab() {
     testTheLabsFlashlight();
     testTheFenceTorch();
     testTheDeskLamp();
+    testTheStainedGlass();
     testTheBackRoomLamp();
     testTheStreetLights();
     testAClockJumpRestartsTheProbes();

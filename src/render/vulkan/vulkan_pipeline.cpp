@@ -8,6 +8,46 @@
 #include <string>
 
 namespace {
+    /*
+    * How one colour target blends: result = source x source factor (op) destination x destination factor, the same for
+    * colour and alpha. Multiply keeps destination x source (source factor zero, destination factor the source colour);
+    * Maximum keeps the larger, whose factors the GPU ignores.
+    */
+    VkPipelineColorBlendAttachmentState blendAttachment(BlendMode mode, VkColorComponentFlags writeMask) {
+        VkPipelineColorBlendAttachmentState blend{};
+        blend.colorWriteMask = writeMask;
+
+        if (mode == BlendMode::None) {
+            return blend;
+        }
+
+        blend.blendEnable = VK_TRUE;
+        blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        blend.dstColorBlendFactor = mode == BlendMode::PremultipliedAlpha ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE;
+        blend.colorBlendOp = VK_BLEND_OP_ADD;
+
+        // The shader's second colour (location 0, index 1) multiplies what is there, per channel.
+        if (mode == BlendMode::DualSourceTransmittance) {
+            blend.dstColorBlendFactor = VK_BLEND_FACTOR_SRC1_COLOR;
+        }
+
+        if (mode == BlendMode::Multiply) {
+            blend.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            blend.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_COLOR;
+        }
+
+        if (mode == BlendMode::Maximum) {
+            blend.colorBlendOp = VK_BLEND_OP_MAX;
+        }
+
+        blend.srcAlphaBlendFactor = blend.srcColorBlendFactor;
+        blend.dstAlphaBlendFactor = mode == BlendMode::DualSourceTransmittance ? VK_BLEND_FACTOR_SRC1_ALPHA
+                                    : mode == BlendMode::Multiply              ? VK_BLEND_FACTOR_SRC_ALPHA
+                                                                               : blend.dstColorBlendFactor;
+        blend.alphaBlendOp = blend.colorBlendOp;
+        return blend;
+    }
+
     enum LayoutKind {
         EmptyLayout,
         UniformLayout,
@@ -250,29 +290,12 @@ VkPipeline VulkanPipeline::build(const VulkanDevice& device, const PipelineDescr
     depthStencil.depthWriteEnable = description.depthWrite ? VK_TRUE : VK_FALSE;
     depthStencil.depthCompareOp = description.depthCompare;
 
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.colorWriteMask = description.colourWrites ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT : 0;
-
-    if (description.blend != BlendMode::None) {
-        const VkBlendFactor destination = description.blend == BlendMode::Additive ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        blend.blendEnable = VK_TRUE;
-        blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        blend.dstColorBlendFactor = destination;
-        blend.colorBlendOp = VK_BLEND_OP_ADD;
-        blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        blend.dstAlphaBlendFactor = destination;
-        blend.alphaBlendOp = VK_BLEND_OP_ADD;
-    }
-
-    // The shader's second colour (location 0, index 1) multiplies what is there, per channel.
-    if (description.blend == BlendMode::DualSourceTransmittance) {
-        blend.dstColorBlendFactor = VK_BLEND_FACTOR_SRC1_COLOR;
-        blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC1_ALPHA;
-    }
-
+    const VkColorComponentFlags writeMask =
+        description.colourWrites ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT : 0;
+    const VkPipelineColorBlendAttachmentState blend = blendAttachment(description.blend, writeMask);
     const bool hasColour = description.colourFormat != VK_FORMAT_UNDEFINED;
 
-    // The first target blends as asked; the extra targets are written as they are.
+    // The first target blends as asked; the extra targets as extraBlends says, else written as they are.
     std::vector<VkFormat> colourFormats;
     std::vector<VkPipelineColorBlendAttachmentState> blends;
 
@@ -280,11 +303,10 @@ VkPipeline VulkanPipeline::build(const VulkanDevice& device, const PipelineDescr
         colourFormats.push_back(description.colourFormat);
         blends.push_back(blend);
 
-        for (VkFormat format : description.extraColourFormats) {
-            VkPipelineColorBlendAttachmentState extra{};
-            extra.colorWriteMask = blend.colorWriteMask;
-            colourFormats.push_back(format);
-            blends.push_back(extra);
+        for (std::size_t extra = 0; extra < description.extraColourFormats.size(); ++extra) {
+            const BlendMode mode = extra < description.extraBlends.size() ? description.extraBlends[extra] : BlendMode::None;
+            colourFormats.push_back(description.extraColourFormats[extra]);
+            blends.push_back(blendAttachment(mode, writeMask));
         }
     }
 

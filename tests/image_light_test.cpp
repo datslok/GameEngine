@@ -290,7 +290,7 @@ namespace {
         assert(planarClipDistance(mirrored.clipPlane, Vec3{0.0f, 1.5f, -5.0f}) < 0.0f);
         assert(planarClipDistance(mirrored.clipPlane, Vec3{0.0f, 1.5f, -4.9f}) > 0.0f);
 
-        const GpuShadowView view = packShadowView(mirrored.matrix, mirrored.clipPlane);
+        const GpuShadowView view = packShadowView(mirrored.matrix, mirrored.clipPlane, mirrored.lightPlace);
         assert(view.clipPlane[2] == mirrored.clipPlane.z && view.clipPlane[3] == mirrored.clipPlane.w);
 
         ShadowTileMemory memory;

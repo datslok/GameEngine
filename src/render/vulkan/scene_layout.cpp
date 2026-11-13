@@ -52,6 +52,8 @@ namespace {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, fragment | compute},          // its cascades
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the sun's contact shadows
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment},            // the local lights' contact shadows
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // the coloured shadow maps' tint (compute for the fog)
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, fragment | compute},  // their nearest glass depths
     }};
 }
 
@@ -185,6 +187,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
         buffers.skyVisibilityCascades.describe(),
         VkDescriptorBufferInfo{},
         VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
+        VkDescriptorBufferInfo{},
     };
 
     const auto imageInfo = [](const SampledImage& image) { return VkDescriptorImageInfo{image.sampler, image.view, image.layout}; };
@@ -203,6 +207,8 @@ VkDescriptorSet writeSceneSet(FrameDescriptors& descriptors, const SceneLayout& 
     imageInfos[SkyVisibilityBinding] = imageInfo(images.skyVisibility);
     imageInfos[ContactShadowsBinding] = imageInfo(images.contactShadows);
     imageInfos[LightContactShadowsBinding] = imageInfo(images.lightContactShadows);
+    imageInfos[GlassTintBinding] = imageInfo(images.glassTint);
+    imageInfos[GlassDepthsBinding] = imageInfo(images.glassDepths);
 
     std::array<VkWriteDescriptorSet, SceneBindingCount> writes{};
 

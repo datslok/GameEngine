@@ -65,29 +65,40 @@ std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const
 * Two spheres touch when their centres are closer than their radii added up; squared, so there is no square root.
 * Unknown sizes are kept, as everywhere in culling.
 */
-std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach) {
-    std::vector<std::size_t> casters;
+namespace {
+    // The draws of one kind within the reach: solid shadow casters, or glass (all of it, as the glass rays see it).
+    std::vector<std::size_t> shadowDrawsInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach, bool glass) {
+        std::vector<std::size_t> casters;
 
-    for (std::size_t i = 0; i < draws.size(); ++i) {
-        const DrawItem& draw = draws[i];
+        for (std::size_t i = 0; i < draws.size(); ++i) {
+            const DrawItem& draw = draws[i];
 
-        // Glass and blended surfaces cast no shadow yet (a tinted one would need coloured shadow maps).
-        if (!draw.castsShadows || isTransparent(draw.material)) {
-            continue;
-        }
-
-        if (reach.radius >= 0.0f && draw.bounds.radius >= 0.0f) {
-            const float touching = reach.radius + draw.bounds.radius;
-
-            if ((draw.bounds.centre - reach.centre).lengthSquared() >= touching * touching) {
+            if (isTransparent(draw.material) != glass || (!glass && !draw.castsShadows)) {
                 continue;
             }
+
+            if (reach.radius >= 0.0f && draw.bounds.radius >= 0.0f) {
+                const float touching = reach.radius + draw.bounds.radius;
+
+                if ((draw.bounds.centre - reach.centre).lengthSquared() >= touching * touching) {
+                    continue;
+                }
+            }
+
+            casters.push_back(i);
         }
 
-        casters.push_back(i);
+        return casters;
     }
+}
 
-    return casters;
+// Glass and blended surfaces block no light in the atlas: they tint it, through the coloured shadow maps (glassInReach).
+std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach) {
+    return shadowDrawsInReach(draws, reach, false);
+}
+
+std::vector<std::size_t> glassInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach) {
+    return shadowDrawsInReach(draws, reach, true);
 }
 
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,

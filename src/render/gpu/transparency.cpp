@@ -32,6 +32,28 @@ bool glassFaceCounts(bool rayMeetsFront, bool doubleSided) {
     return !rayMeetsFront || doubleSided;
 }
 
+Vec3 glassFaceTransmittance(bool rayMeetsFront, bool doubleSided, float alpha, float transmission, float metallic, const Vec3& baseColour, float cosine,
+                            const Vec3& absorbed) {
+    if (!glassFaceCounts(rayMeetsFront, doubleSided)) {
+        return Vec3{1.0f, 1.0f, 1.0f};
+    }
+
+    return glassLightTransmittance(alpha, transmission, metallic, baseColour, cosine) * absorbed;
+}
+
+// Reversed-Z: further from the light is smaller. No glass (0) has nothing behind it.
+bool isBehindGlass(float receiverDepth, float glassDepth) {
+    return receiverDepth < glassDepth;
+}
+
+Vec3 glassShadowTint(float receiverDepth, float glassDepth, const Vec3& tint) {
+    return isBehindGlass(receiverDepth, glassDepth) ? tint : Vec3{1.0f, 1.0f, 1.0f};
+}
+
+bool glassHiddenFromLight(float glassDepth, float solidDepth) {
+    return solidDepth > glassDepth;
+}
+
 // The segment's nearest point to the centre: the centre's place along it, held within its ends.
 bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius) {
     const float along = std::clamp((centre - from).dot(direction), 0.0f, length);
@@ -206,6 +228,7 @@ GpuOpaquePicturePass packOpaquePicturePass(const Mat4& inverseViewProjection, Re
 
 void visit(TransparencySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Glass shadows", settings.glassShadows);
+    visitor.field("Coloured shadow maps", settings.colouredShadowMaps);
     visitor.field("Refraction", settings.refraction);
     visitor.field("Reactive mask", settings.reactiveMask);
     visitor.field("Reactive scale", settings.reactiveScale, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f});
@@ -221,6 +244,10 @@ void validateTransparency(const TransparencySettings& settings) {
     if (!(settings.reactiveLimit >= 0.0f && settings.reactiveLimit <= 1.0f)) {
         throw std::invalid_argument("The reactive mask's limit must be within 0..1");
     }
+}
+
+bool drawsColouredShadowMaps(const TransparencySettings& settings, bool glassInWorld, bool glassRays) {
+    return settings.colouredShadowMaps && glassInWorld && !glassRays;
 }
 
 /*
