@@ -62,5 +62,6 @@ struct LaunchOptions {
     std::optional<std::uint16_t> port;
     std::optional<std::vector<std::string>> send;
     bool hidden = false;
+    bool typicalGpu = false; // --typical-gpu: start in the typical GPU setup (render/gpu/typical_gpu.h)
 };
 LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments);

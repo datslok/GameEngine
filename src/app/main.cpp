@@ -58,7 +58,7 @@ namespace {
 * references, --golden-check compares with them (engine/golden.h), for the named game or else for every game; both exit
 * with 0 on success. --cloth-yardstick (or --cloth-yardstick-quick, or --cloth-yardstick-dress) measures the cloth solver (app/cloth_yardstick_run.h) instead of playing.
 * --set, --run and --port start the game with settings, a script and a port of its own; --hidden plays it in a window
-* that never shows; --send sends a command to a game already running, prints its reply and exits with 0 when it worked,
+* that never shows; --typical-gpu starts in the typical GPU setup (render/gpu/typical_gpu.h); --send sends a command to a game already running, prints its reply and exits with 0 when it worked,
 * 1 when not.
 */
 int main(int argc, char* argv[]) {
@@ -96,7 +96,12 @@ int main(int argc, char* argv[]) {
             launchSettings.push_back({"engine.commandPort", std::to_string(*options.port)});
         }
 
-        const std::vector<std::string> script = options.script ? readScript(*options.script) : std::vector<std::string>{};
+        // --typical-gpu is the typical-gpu command run before the script's first.
+        std::vector<std::string> script = options.script ? readScript(*options.script) : std::vector<std::string>{};
+
+        if (options.typicalGpu) {
+            script.insert(script.begin(), "typical-gpu on");
+        }
         Application application{title.c_str(), 1920, 1080, *game, EngineSettings{}, SavedSettings::Load, launchSettings,
                                 options.hidden ? WindowVisibility::Hidden : WindowVisibility::Shown};
         application.queueCommands(script);

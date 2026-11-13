@@ -313,8 +313,7 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
   - [x] Motion blur: McGuire 2012's reconstruction filter from the shutter angle, off by default (`motion-blur`)
   - [x] Depth of field: a thin lens's circle of confusion and scatter-as-gather at half resolution, off by default (`depth-of-field`)
   - [x] Frosted glass through the same gather: each point behind the pane spreading by its own distance behind the glass (`frosted-gather`)
-- [ ] A typical GPU setup: ray tracing off, FSR or TAA in place of DLSS, the High or Medium preset, one switch or command to view it
-  - Ray-traced options greyed out on GPUs without ray queries (detected at start-up)
+- [x] A typical GPU setup: the High preset, ray tracing off, DLSS at Quality (FSR, else TAA, where DLSS is missing), one switch, command or launch option to view it; `preset` as a command; ray-traced settings greyed out on GPUs without ray queries (`typical-gpu`)
 
 **Milestone:** with the typical GPU setup, the light lab and the demo look finished by day and at night, at a frame rate a mid-range GPU holds, with no feature that needs ray queries.
 

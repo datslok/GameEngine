@@ -1,13 +1,22 @@
 #include "engine/engine_commands.h"
 
 #include "engine/debug_views.h"
+#include "render/gpu/quality_preset.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string>
 #include <utility>
 
 namespace {
+    // Whether two words are the same but for upper and lower case ("high" is High).
+    bool sameIgnoringCase(const std::string& a, const std::string& b) {
+        return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](char x, char y) {
+            return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+        });
+    }
+
     // The fields a key names: the field itself, or every field in the group it names ("engine.render.bloom"), or all of
     // them for "all". A group's name must end at a dot, so "engine.render.bloo" names nothing.
     std::vector<SettingDescription> fieldsNamed(const std::vector<SettingDescription>& fields, const std::string& key) {
@@ -60,7 +69,22 @@ namespace {
         return named;
     }
 
-    CommandReply setCommand(const SettingsWalk& walk, const CommandArguments& arguments) {
+    // A note for a setting that does something only with hardware ray tracing, set on a GPU without it: empty otherwise.
+    std::string rayQueriesNote(const SettingsWalk& walk, const std::string& key, bool rayQueries) {
+        if (rayQueries) {
+            return {};
+        }
+
+        for (const SettingDescription& field : describeSettings(walk)) {
+            if (field.key == key && field.needsRayQueries) {
+                return " (has no effect on this GPU: it needs hardware ray tracing)";
+            }
+        }
+
+        return {};
+    }
+
+    CommandReply setCommand(const SettingsWalk& walk, const CommandArguments& arguments, bool rayQueries) {
         std::string key;
         std::string value;
 
@@ -79,9 +103,9 @@ namespace {
 
         switch (change.outcome) {
             case SettingOutcome::Set:
-                return commandOk(key + " = " + change.value);
+                return commandOk(key + " = " + change.value + rayQueriesNote(walk, key, rayQueries));
             case SettingOutcome::Clamped:
-                return commandOk(key + " = " + change.value + " (" + change.message + ")");
+                return commandOk(key + " = " + change.value + " (" + change.message + ")" + rayQueriesNote(walk, key, rayQueries));
             case SettingOutcome::Refused:
                 return commandError(change.message);
             case SettingOutcome::AtStartupOnly:
@@ -129,11 +153,11 @@ namespace {
     }
 }
 
-void addSettingsCommands(CommandRegistry& registry, SettingsWalk walk, std::vector<SettingEntry> defaults) {
+void addSettingsCommands(CommandRegistry& registry, SettingsWalk walk, std::vector<SettingEntry> defaults, std::function<bool()> rayQueries) {
     registry.add("set", "set <key> <value>",
                  "Changes a setting live, by its key in settings.cfg (\"list\" shows them), e.g. set engine.render.bloom.strength 0.1.",
-                 [walk](const CommandArguments& arguments) {
-                     return setCommand(walk, arguments);
+                 [walk, rayQueries](const CommandArguments& arguments) {
+                     return setCommand(walk, arguments, !rayQueries || rayQueries());
                  });
 
     registry.add("get", "get [key or group]", "Shows a setting's value, or every value in a group (engine.render.bloom), or all.",
@@ -239,5 +263,55 @@ void addCameraCommands(CommandRegistry& registry, Game& game, World& world) {
                      }
 
                      return cameraPose(camera);
+                 });
+}
+
+/*
+* preset names the quality preset the settings match (Custom when one was changed by hand) or sets one, by name in any
+* case. typical-gpu turns the typical GPU setup on or off, or says which, naming the upscaler it chose.
+*/
+void addRenderCommands(CommandRegistry& registry, RenderSettings& settings, TypicalGpuView& view, std::function<UpscalerSupport()> support) {
+    registry.add("preset", "preset [Low|Medium|High|Ultra]",
+                 "Shows the quality preset the render settings match (Custom when one was changed by hand), or sets one.",
+                 [&settings](const CommandArguments& arguments) {
+                     if (arguments.empty()) {
+                         const std::optional<QualityPreset> current = matchingQualityPreset(settings);
+                         return commandOk(current ? qualityPresetNames[static_cast<std::size_t>(*current)] : "Custom");
+                     }
+
+                     if (arguments.size() != 1) {
+                         return commandError("Usage: preset [Low|Medium|High|Ultra]");
+                     }
+
+                     for (std::size_t index = 0; index < qualityPresetNames.size(); ++index) {
+                         if (sameIgnoringCase(arguments.front(), qualityPresetNames[index])) {
+                             applyQualityPreset(settings, static_cast<QualityPreset>(index));
+                             return commandOk(std::string{"Quality preset "} + qualityPresetNames[index]);
+                         }
+                     }
+
+                     return commandError("No preset is called " + arguments.front() + ": give Low, Medium, High or Ultra");
+                 });
+
+    registry.add("typical-gpu", "typical-gpu [on|off]",
+                 "The engine as a mid-range PC draws it: the High preset, ray tracing off and DLSS (else FSR, else TAA) at Quality. "
+                 "Off gives back the settings it found. Alone, says whether it is on.",
+                 [&settings, &view, support](const CommandArguments& arguments) {
+                     if (arguments.empty()) {
+                         return commandOk(view.isOn() ? "Typical GPU setup on" : "Typical GPU setup off");
+                     }
+
+                     if (arguments.size() == 1 && arguments.front() == "on") {
+                         view.turnOn(settings, support());
+                         return commandOk(std::string{"Typical GPU setup on: High preset, ray tracing off, "} +
+                                          upscalerNames[static_cast<std::size_t>(settings.upscaling.upscaler)] + " at Quality");
+                     }
+
+                     if (arguments.size() == 1 && arguments.front() == "off") {
+                         view.turnOff(settings);
+                         return commandOk("Typical GPU setup off: the settings it found are back");
+                     }
+
+                     return commandError("Usage: typical-gpu [on|off]");
                  });
 }

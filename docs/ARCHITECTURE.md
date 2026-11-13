@@ -91,11 +91,11 @@ One description of every tunable value, walked by several visitors.
 
 - Its destructor stops the renderer's half first (`stopDebugUi` waits for the GPU to go idle).
 - No `imgui.ini`, keyboard navigation off (the game keeps its keys), sizes and font scaled by `SDL_GetWindowDisplayScale`.
-- `build(walk, render, requests)` returns `nullptr` while closed (nothing runs). Open, it:
+- `build(walk, render, typicalGpu, requests)` returns `nullptr` while closed (nothing runs). Open, it:
   - runs the backends' `NewFrame`s (the renderer's through `beginDebugUiFrame`);
-  - shows one window "Settings (F5)" with the quality preset combo (`Custom` when `matchingQualityPreset` finds none) and the upscaling mode combo (which sets `renderScale`; `Custom` when `matchingUpscalingMode` finds none);
+  - shows one window "Settings (F5)" with the typical GPU setup's checkbox (see Quality presets), the quality preset combo (`Custom` when `matchingQualityPreset` finds none) and the upscaling mode combo (which sets `renderScale`; `Custom` when `matchingUpscalingMode` finds none);
   - has Save and Reset buttons (reported in `DebugUiRequests`, carried out by `Application`, which sets the status line);
-  - then runs the walk through `ImGuiSettingsVisitor`. Top-level groups are collapsing headers (open), deeper ones tree nodes, each with its own ID scope. Floats and ints are sliders (`%.4g` plus unit), clamped to the hard limits after Ctrl+click typing. Start-up fields are disabled with a tooltip.
+  - then runs the walk through `ImGuiSettingsVisitor`. Top-level groups are collapsing headers (open), deeper ones tree nodes, each with its own ID scope. Floats and ints are sliders (`%.4g` plus unit), clamped to the hard limits after Ctrl+click typing. Start-up fields are disabled with a tooltip, and so, on a GPU without ray queries (`VulkanRenderer::supportsRayQueries`), are the fields `visit()` wraps in `SettingsVisitor::needingRayQueries` (ray tracing and its debug view, ray-traced reflections, the mirrored lights' search, every light probe setting), their tooltip saying why.
 
 ### Quality presets
 
@@ -113,6 +113,8 @@ The table also sets reflections (off on Low; Medium 32 steps and a 64-texel prob
 - Low: 2 cascades of 1024 left 30 cm walls with ragged sunlit edges, and 1024 saved no memory.
 - High has been the default since `gi-quality-presets`, before which Ultra was the default and High had 2048 cascades.
 - `applyQualityPreset` and `matchingQualityPreset` read the same table.
+
+**The typical GPU setup** (`render/gpu/typical_gpu`, `typical-gpu`, Nov 13 2026): the engine as a mid-range PC draws it, so phase 16's features are judged as most players will see them. `applyTypicalGpu` sets the High preset, ray tracing off and the upscaler at Quality (render scale 0.67), the upscaler `typicalUpscaler`'s: DLSS where it runs (the user's choice), else FSR, else TAA. Nothing else changes; the presets themselves never touch upscaling, and the engine's default stays Ultra with DLAA. `TypicalGpuView` is the switch: `turnOn` keeps the settings it found (the first time) and applies the setup, `turnOff` gives them back exactly. `Application` owns one; F5's checkbox (`drawTypicalGpu`), the `typical-gpu [on|off]` command and `--typical-gpu` (the command queued before a script's first) use it.
 
 ### Drawing the UI
 
@@ -147,9 +149,10 @@ The engine's text interface (`command-line-control`, Oct 29 2026): tools, script
 
 `engine/engine_commands` holds those needing no window or GPU, so the tests run them headless:
 
-- `addSettingsCommands(registry, walk, defaults)`: `set <key> <value>` (or `key=value`) through `setSetting`, replying with the new value, the clamp's reason, or an error; an unknown key gets the nearest keys, a start-up field the advice to give it with `--set` or save it. `get [key or group]` and `list [key or group]` show values, list with `describeSettings`' kind and "read only at start-up"; a group's name must end at a dot (`engine.render.bloom`, not `engine.render.bloo`); `all` or nothing means every field. `reset <key, group or all>` applies the defaults with `StartupFields::Keep`.
+- `addSettingsCommands(registry, walk, defaults, rayQueries)`: `set <key> <value>` (or `key=value`) through `setSetting`, replying with the new value, the clamp's reason, or an error (a field tagged as needing ray queries, set on a GPU without them, is set but the reply says it has no effect: `SettingDescription::needsRayQueries`); an unknown key gets the nearest keys, a start-up field the advice to give it with `--set` or save it. `get [key or group]` and `list [key or group]` show values, list with `describeSettings`' kind and "read only at start-up"; a group's name must end at a dot (`engine.render.bloom`, not `engine.render.bloo`); `all` or nothing means every field. `reset <key, group or all>` applies the defaults with `StartupFields::Keep`.
 - `SimulationControl {paused}` and `ticksThisFrame`: a paused frame runs no ticks and drops their time. `addSimulationCommands(registry, control, runTick)`: `pause`, `resume`, and `step [ticks]` (1 to `maxStepTicks`, 100,000), which pauses and runs the ticks at once through `runTick`. Stepping the demo reaches the very state of ticking it (`engine_commands_test`, `hashSimulationState`).
 - `addCameraCommands(registry, game, world)`: `camera` shows `cameraText`; `camera x y z` keeps the direction, `camera x y z tx ty tz` looks at a point, through `Game::poseCamera` (the three games call `PlayerControls::poseFreeCamera`, so the free camera takes the pose over and keeps it). Straight up or down, or at its own place, is refused (the world's up is the camera's).
+- `addRenderCommands(registry, render, typicalGpu, support)`: `preset [name]` names the preset the render settings match (Custom when changed by hand) or applies one, its name in any case; `typical-gpu [on|off]` turns the typical GPU setup on or off through the `TypicalGpuView`, or says whether it is on, naming the upscaler chosen from `support` (`VulkanRenderer::upscalerSupport`).
 
 `Application` adds the rest in `engine/application_commands.cpp`:
 
@@ -181,6 +184,7 @@ The engine's text interface (`command-line-control`, Oct 29 2026): tools, script
 - `--run <file>`: the script's lines are queued for the first frame (blank lines and `#` comments skipped).
 - `--port <port>`: the game's port (added as `engine.commandPort`) and `--send`'s.
 - `--hidden`: the game plays in a window that never shows (`WindowVisibility::Hidden`, `SDL_WINDOW_HIDDEN`), for scripts and AIs driving it with commands; screenshots come from the finished picture, so they work as usual. A launch option rather than a setting, so a saved `settings.cfg` can never start a player's game invisible. Not with `--send`, the golden images or the yardstick. Started from PowerShell, add `-WindowStyle Hidden` to `Start-Process`, or the console window still shows.
+- `--typical-gpu`: starts in the typical GPU setup, `typical-gpu on` queued before the script's first command. Not with `--send`, the golden images or the yardstick.
 - `--send <words...>`: everything after it is one command (`joinCommandWords`), sent to the game at `--port`, else `settings.cfg`'s `engine.commandPort`, else the default. It prints the reply (errors to the standard error) and exits with 0 or 1, without opening a window. Only `--port` may come before it; `--set` and `--run` do not go with the golden images or the yardstick.
 
 ## Golden images

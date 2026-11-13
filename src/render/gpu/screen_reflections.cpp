@@ -30,7 +30,9 @@ void visit(ReflectionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Planar mirrors", settings.planarMirrors, {.min = 0, .max = PLANAR_MAX_MIRRORS});
     visitor.field("Planar max roughness", settings.planarMaxRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Planar scale", settings.planarScale, {.min = 0.1f, .max = 1.0f});
-    visitor.field("Ray-traced", settings.rayTraced);
+    visitor.needingRayQueries([&] {
+        visitor.field("Ray-traced", settings.rayTraced);
+    });
     visitor.field("Show confidence", settings.showConfidence);
 }
 

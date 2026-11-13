@@ -199,7 +199,7 @@ Several games run on one engine, picked at start-up with `--game`.
 
 - **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity (on Overwatch's scale, 5 by default), grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
   - **a debug UI** (F5, Dear ImGui): a slider, checkbox or list for every setting, Save and Reset buttons, drawn over the image in its own layer so it looks right in HDR too
-  - **quality presets** Low, Medium, High and Ultra (see the table below)
+  - **quality presets** Low, Medium, High and Ultra (see the table below), and **a typical GPU setup** (a checkbox at the top of F5, `typical-gpu on`, or `--typical-gpu`): the engine as a mid-range PC draws it, the High preset with ray tracing off and DLSS at Quality (FSR, else TAA, where DLSS is missing), to judge how most players will see it, and **a typical GPU setup** (a checkbox at the top of F5, `typical-gpu on`, or `--typical-gpu`): the engine as a mid-range PC draws it, the High preset with ray tracing off and DLSS at Quality (FSR, else TAA, where DLSS is missing), to judge how most players will see it
   - **a settings file** (`settings.cfg`): only the values changed from the defaults, loaded at start-up, forgiving of hand edits
   - **tests** that every default lies within its limits
 - Numbers the shaders share with C++ are written once.
@@ -226,7 +226,7 @@ Several games run on one engine, picked at start-up with `--game`.
 | High | 4096 | 256 | 0.1 |
 | Ultra (the default) | 4096 | 256 | none |
 
-Ray tracing is not part of any preset: it is its own switch. Ultra's ray-traced reflections and mirrored lights apply only while it is on.
+Ray tracing is not part of any preset: it is its own switch. Ultra's ray-traced reflections and mirrored lights apply only while it is on. On a GPU without hardware ray tracing, its settings are greyed out in F5. On a GPU without hardware ray tracing, its settings are greyed out in F5.
 
 ## Requirements
 
@@ -325,9 +325,11 @@ The reply is printed, and the exit code is 0 when the command worked and 1 when 
 | Command | What it does |
 |---|---|
 | `help [command]` | Lists every command, or shows one |
-| `set <key> <value>` | Changes a setting live, by its key in `settings.cfg` |
+| `set <key> <value>` | Changes a setting live, by its key in `settings.cfg` (one needing hardware ray tracing still sets, but says it does nothing on a GPU without it) |
 | `get [key or group]`, `list [key or group]` | Shows values; `list` adds each setting's limits and unit |
 | `reset <key, group or all>` | Back to the defaults |
+| `preset [name]` | Shows the quality preset the settings match (Custom when changed by hand), or sets one: Low, Medium, High or Ultra |
+| `typical-gpu [on or off]` | The engine as a mid-range PC draws it: the High preset, ray tracing off and DLSS at Quality (FSR, else TAA, where DLSS is missing); off gives your settings back |
 | `save-settings` | Saves the changed settings to `settings.cfg`, as F5's Save does |
 | `pause`, `resume`, `step [ticks]` | Stops the clock, starts it, or runs exactly that many ticks |
 | `camera [x y z [tx ty tz]]` | Shows the camera, or places it looking at a point |
@@ -342,6 +344,7 @@ The same commands work from the start, too:
 - `--run script.txt` runs a file of commands, one a line, when the game starts. For example a script with `wait 600`, `screenshot build/shots/a.png` and `quit` takes a picture once the light has settled and closes the game.
 - `--port <port>` picks another port (for the game, and for `--send`).
 - `--hidden` plays the game in a window that never shows, for a script or an AI driving it with commands. Screenshots still work, since they come from the finished picture, not the screen. Stop it with `--send quit`.
+- `--typical-gpu` starts in the typical GPU setup, as `typical-gpu on` would.
 
 Commands run between frames, like key presses, so a tick never sees half a command, and `step` runs exactly the ticks playing would. The port can also be changed or the listening turned off in F5 (Engine, Command port and Command server).
 
@@ -399,7 +402,7 @@ The light lab is the default game (`--game lightlab`; the exe alone in the zip).
 | **K** | Toggle the light lab's street lights, or the demo's four floodlights over the obstacle course (on at the start) |
 | **Left mouse (held)** | Drag the cloth lab's sheet: grab it where the crosshair points (the cursor in MOBA mode), within 10 m, and pull; let go to drop or fling it |
 | **F4** | Debug view: timings, bounding boxes, colliders, culling and light counts, and video memory (listed below) |
-| **F5** | Settings window (debug UI): a slider, checkbox or list for every engine and game setting, with quality presets, Save and Reset |
+| **F5** | Settings window (debug UI): a slider, checkbox or list for every engine and game setting, with quality presets, the typical GPU setup, Save and Reset |
 
 **The lights**
 

@@ -32,7 +32,12 @@ void Application::runTick() {
 }
 
 void Application::registerCommands() {
-    addSettingsCommands(commands, allSettings(), defaultSettings);
+    addSettingsCommands(commands, allSettings(), defaultSettings, [this] {
+        return renderer.supportsRayQueries();
+    });
+    addRenderCommands(commands, settings.render, typicalGpu, [this] {
+        return renderer.upscalerSupport();
+    });
     addSimulationCommands(commands, simulation, [this] {
         runTick();
     });

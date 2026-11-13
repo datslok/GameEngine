@@ -4,6 +4,7 @@
 #include "platform/window.h"
 #include "render/vulkan/vulkan_renderer.h"
 #include "render/gpu/render_settings.h"
+#include "render/gpu/typical_gpu.h"
 
 #include <string>
 
@@ -18,8 +19,9 @@ struct DebugUiRequests {
 /*
 * The debug UI (F5): one window of sliders, checkboxes and lists, drawn with Dear ImGui from the settings' visit()
 * functions, so every field of every settings struct gets a control without any UI code of its own. Fields read only
-* at start-up are shown greyed out. Above them: the quality preset (render/gpu/quality_preset.h), and buttons to save
-* the settings or return them to their defaults.
+* at start-up are shown greyed out, and so are those needing hardware ray tracing on a GPU without it. Above them: the
+* typical GPU setup's checkbox (render/gpu/typical_gpu.h), the quality preset (render/gpu/quality_preset.h), and buttons
+* to save the settings or return them to their defaults.
 *
 * Owns the ImGui context and both of its backends (SDL events, and the renderer's drawing), so it must be destroyed before the
 * window and renderer it was given: declare it after them.
@@ -40,7 +42,7 @@ public:
     * Build this frame's UI, changing the walked settings as the player moves controls. Returns what to draw
     * (VulkanRenderer::render's ui), valid until the next build, or null while closed, when nothing is built at all.
     */
-    ImDrawData* build(const SettingsWalk& settings, RenderSettings& render, DebugUiRequests& requests);
+    ImDrawData* build(const SettingsWalk& settings, RenderSettings& render, TypicalGpuView& typicalGpu, DebugUiRequests& requests);
 
     // A line shown under the buttons: what the last save or reset did.
     void setStatus(std::string status);

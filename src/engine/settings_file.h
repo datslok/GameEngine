@@ -74,6 +74,7 @@ struct SettingDescription {
     std::string value;
     std::string kind;
     bool atStartup = false;
+    bool needsRayQueries = false; // does something only on GPUs with hardware ray tracing (SettingsVisitor::needingRayQueries)
 };
 
 // Every field a walk visits, in visiting order (the order captureSettings gives).

@@ -48,12 +48,24 @@ namespace {
             prefix.resize(outerLength);
         }
 
+        void visitNeedingRayQueries(const std::function<void()>& contents) override {
+            ++rayQueryScopes;
+            contents();
+            --rayQueryScopes;
+        }
+
+        // Whether the field being visited does something only with hardware ray tracing.
+        bool needsRayQueries() const {
+            return rayQueryScopes > 0;
+        }
+
     private:
         std::string keyOf(const char* label) const {
             return prefix + settingKey(label);
         }
 
         std::string prefix;
+        int rayQueryScopes = 0;
     };
 
     // The shortest text that reads back as exactly this float (0.04f is "0.04", not 0.0399999991).
@@ -345,18 +357,18 @@ namespace {
     protected:
         void onFloat(const std::string& key, float& value, const FloatLimits& limits) override {
             const std::string kind = numberKind("number", limits, std::isfinite(limits.min), std::isfinite(limits.max), floatText);
-            descriptions.push_back({key, floatText(value), kind, limits.applies == FieldApplies::AtStartup});
+            descriptions.push_back({key, floatText(value), kind, limits.applies == FieldApplies::AtStartup, needsRayQueries()});
         }
 
         void onInt(const std::string& key, int& value, const IntLimits& limits) override {
             const bool hasMin = limits.min != std::numeric_limits<int>::min();
             const bool hasMax = limits.max != std::numeric_limits<int>::max();
             const std::string kind = numberKind("whole number", limits, hasMin, hasMax, intText);
-            descriptions.push_back({key, intText(value), kind, limits.applies == FieldApplies::AtStartup});
+            descriptions.push_back({key, intText(value), kind, limits.applies == FieldApplies::AtStartup, needsRayQueries()});
         }
 
         void onBool(const std::string& key, bool& value, FieldApplies applies) override {
-            descriptions.push_back({key, boolText(value), "true or false", applies == FieldApplies::AtStartup});
+            descriptions.push_back({key, boolText(value), "true or false", applies == FieldApplies::AtStartup, needsRayQueries()});
         }
 
         void onChoice(const std::string& key, int& index, const char* const* names, int count, FieldApplies applies) override {
@@ -367,7 +379,7 @@ namespace {
                 kind += names[candidate];
             }
 
-            descriptions.push_back({key, names[index], kind, applies == FieldApplies::AtStartup});
+            descriptions.push_back({key, names[index], kind, applies == FieldApplies::AtStartup, needsRayQueries()});
         }
     };
 

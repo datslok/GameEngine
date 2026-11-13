@@ -120,6 +120,12 @@ public:
         visitGroup(label, contents);
     }
 
+    // Fields that do something only on GPUs with hardware ray tracing (ray queries): the debug UI greys them where they cannot
+    // work, and set says they have no effect there. Visitors that do not care just walk the contents.
+    void needingRayQueries(const std::function<void()>& contents) {
+        visitNeedingRayQueries(contents);
+    }
+
 protected:
     virtual void visitFloat(const char* label, float& value, const FloatLimits& limits) = 0;
     virtual void visitInt(const char* label, int& value, const IntLimits& limits) = 0;
@@ -129,6 +135,10 @@ protected:
     virtual void visitChoice(const char* label, int& index, const char* const* names, int count, FieldApplies applies) = 0;
 
     virtual void visitGroup(const char* label, const std::function<void()>& contents) = 0;
+
+    virtual void visitNeedingRayQueries(const std::function<void()>& contents) {
+        contents();
+    }
 
 private:
     template<typename Unsigned>
