@@ -20,7 +20,10 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visit(settings.display, visitor);
     });
     visitor.group("Global illumination", [&] {
-        visit(settings.globalIllumination, visitor);
+        // The light probes trace their rays: all of them need hardware ray tracing.
+        visitor.needingRayQueries([&] {
+            visit(settings.globalIllumination, visitor);
+        });
     });
     visitor.group("Upscaling", [&] {
         visit(settings.upscaling, visitor);
@@ -57,8 +60,10 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visitor.field("Normal map filtering", settings.normalMapFiltering);
         visitor.field("Specular anti-aliasing", settings.specularAntiAliasing);
         visitor.field("Specular anti-aliasing variance", settings.specularAntiAliasingVariance, {.min = 0.0f, .max = 4.0f, .sliderMin = 0.0f, .sliderMax = 1.0f});
-        visitor.field("Ray tracing", settings.rayTracing);
-        visitor.choice("Ray debug view", settings.rayDebugView, rayDebugViewNames);
+        visitor.needingRayQueries([&] {
+            visitor.field("Ray tracing", settings.rayTracing);
+            visitor.choice("Ray debug view", settings.rayDebugView, rayDebugViewNames);
+        });
     });
 }
 

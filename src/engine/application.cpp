@@ -251,7 +251,7 @@ ImDrawData* Application::updateDebugUi() {
 
     const SettingsWalk walk = allSettings();
     DebugUiRequests requests;
-    ImDrawData* ui = debugUi.build(walk, settings.render, requests);
+    ImDrawData* ui = debugUi.build(walk, settings.render, typicalGpu, requests);
 
     if (requests.save) {
         try {

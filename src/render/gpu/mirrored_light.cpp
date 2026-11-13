@@ -14,9 +14,12 @@
 #include <tuple>
 
 void visit(MirroredLightSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Mirrored lights", settings.enabled);
-    visitor.field("Mirrored light bounce", settings.bounce);
-    visitor.field("Mirror roughness", settings.mirrorRoughness, {.min = 0.0f, .max = 1.0f});
+    // The search for the point on a mirror traces rays; the image lights need none.
+    visitor.needingRayQueries([&] {
+        visitor.field("Mirrored lights", settings.enabled);
+        visitor.field("Mirrored light bounce", settings.bounce);
+        visitor.field("Mirror roughness", settings.mirrorRoughness, {.min = 0.0f, .max = 1.0f});
+    });
     visitor.field("Image lights", settings.imageLights);
 }
 

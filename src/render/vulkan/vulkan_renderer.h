@@ -137,6 +137,12 @@ public:
     // The GPU's name as the driver reports it, for keeping golden images per GPU.
     std::string getDeviceName() const;
 
+    // Whether the GPU has hardware ray tracing (ray queries), which ray-traced settings need.
+    bool supportsRayQueries() const;
+
+    // The vendors' upscalers this PC can run (their libraries loaded, the GPU able).
+    UpscalerSupport upscalerSupport() const;
+
     // Upload the next mesh or texture. They are numbered in upload order, which must match the AssetManager's handles.
     // Textures are RGBA, four bytes per pixel, colour (sRGB) or data (linear), with their smaller levels when those were
     // built on the CPU (a cut-out's, keeping its coverage). Between frames only.
@@ -402,7 +408,6 @@ private:
     bool fsrHistory = false;
     bool dlssHistory = false;
 
-    UpscalerSupport upscalerSupport() const;
     std::optional<ScreenDepthRange> unusedDepthRange;
     ShadowDistanceFit sunShadowFit;
     std::optional<ScreenDepthRange> unusedMirrorDepthRange;

@@ -213,6 +213,9 @@ private:
     CommandRegistry commands;
     SimulationControl simulation;
 
+    // The typical GPU setup's switch (render/gpu/typical_gpu.h): the typical-gpu command and F5's checkbox.
+    TypicalGpuView typicalGpu;
+
     // Listening while EngineSettings::commandServer is on and its port was free.
     std::optional<CommandServer> commandServer;
 

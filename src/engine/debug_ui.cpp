@@ -30,10 +30,14 @@ namespace {
         return format;
     }
 
-    // Start-up fields are greyed out for as long as this lives, with a tooltip saying why.
+    /*
+    * Start-up fields, and fields needing hardware ray tracing on a GPU without it, are greyed out for as long as this
+    * lives, with a tooltip saying why.
+    */
     class StartupFieldScope {
     public:
-        explicit StartupFieldScope(FieldApplies applies): active(applies == FieldApplies::AtStartup) {
+        StartupFieldScope(FieldApplies applies, bool missingRayQueries = false)
+            : atStartup(applies == FieldApplies::AtStartup), missingRayQueries(missingRayQueries), active(atStartup || missingRayQueries) {
             if (active) {
                 ImGui::BeginDisabled();
             }
@@ -47,7 +51,8 @@ namespace {
             ImGui::EndDisabled();
 
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Read once at start-up: change it in settings.cfg and restart");
+                ImGui::SetTooltip("%s", missingRayQueries ? "Needs a GPU with hardware ray tracing: it has no effect on this one"
+                                                          : "Read once at start-up: change it in settings.cfg and restart");
             }
         }
 
@@ -55,6 +60,8 @@ namespace {
         StartupFieldScope& operator=(const StartupFieldScope&) = delete;
 
     private:
+        bool atStartup;
+        bool missingRayQueries;
         bool active;
     };
 
@@ -64,9 +71,18 @@ namespace {
     * a value (Ctrl+click on a slider) can go past the slider's range but never past the hard limits.
     */
     class ImGuiSettingsVisitor final : public SettingsVisitor {
+    public:
+        explicit ImGuiSettingsVisitor(bool rayQueries): rayQueries(rayQueries) {}
+
     protected:
+        void visitNeedingRayQueries(const std::function<void()>& contents) override {
+            ++rayQueryScopes;
+            contents();
+            --rayQueryScopes;
+        }
+
         void visitFloat(const char* label, float& value, const FloatLimits& limits) override {
-            const StartupFieldScope scope{limits.applies};
+            const StartupFieldScope scope{limits.applies, greyRayQueries()};
             const std::string format = numberFormat("%.4g", limits.unit);
 
             if (ImGui::SliderFloat(label, &value, limits.lowestSliderValue(), limits.highestSliderValue(), format.c_str())) {
@@ -75,7 +91,7 @@ namespace {
         }
 
         void visitInt(const char* label, int& value, const IntLimits& limits) override {
-            const StartupFieldScope scope{limits.applies};
+            const StartupFieldScope scope{limits.applies, greyRayQueries()};
             const std::string format = numberFormat("%d", limits.unit);
 
             if (ImGui::SliderInt(label, &value, limits.lowestSliderValue(), limits.highestSliderValue(), format.c_str())) {
@@ -84,12 +100,12 @@ namespace {
         }
 
         void visitBool(const char* label, bool& value, FieldApplies applies) override {
-            const StartupFieldScope scope{applies};
+            const StartupFieldScope scope{applies, greyRayQueries()};
             ImGui::Checkbox(label, &value);
         }
 
         void visitChoice(const char* label, int& index, const char* const* names, int count, FieldApplies applies) override {
-            const StartupFieldScope scope{applies};
+            const StartupFieldScope scope{applies, greyRayQueries()};
             ImGui::Combo(label, &index, names, count);
         }
 
@@ -116,7 +132,32 @@ namespace {
 
     private:
         int depth = 0;
+        bool rayQueries;
+        int rayQueryScopes = 0;
+
+        // Whether the field being drawn needs hardware ray tracing this GPU lacks.
+        bool greyRayQueries() const {
+            return !rayQueries && rayQueryScopes > 0;
+        }
     };
+
+    // The typical GPU setup's checkbox (render/gpu/typical_gpu.h), which turns it on or off.
+    void drawTypicalGpu(RenderSettings& render, TypicalGpuView& view, UpscalerSupport support) {
+        bool on = view.isOn();
+
+        if (ImGui::Checkbox("Typical GPU setup", &on)) {
+            if (on) {
+                view.turnOn(render, support);
+            } else {
+                view.turnOff(render);
+            }
+        }
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("As a mid-range PC draws it: the High preset, ray tracing off and DLSS (else FSR, else TAA) at Quality. Off gives back "
+                              "the settings it found.");
+        }
+    }
 
     // The preset list, showing "Custom" when the settings match none of the presets.
     void drawQualityPreset(RenderSettings& render) {
@@ -231,7 +272,7 @@ void DebugUi::setStatus(std::string text) {
     status = std::move(text);
 }
 
-ImDrawData* DebugUi::build(const SettingsWalk& settings, RenderSettings& render, DebugUiRequests& requests) {
+ImDrawData* DebugUi::build(const SettingsWalk& settings, RenderSettings& render, TypicalGpuView& typicalGpu, DebugUiRequests& requests) {
     if (!open) {
         return nullptr;
     }
@@ -245,6 +286,7 @@ ImDrawData* DebugUi::build(const SettingsWalk& settings, RenderSettings& render,
     ImGui::SetNextWindowSize(ImVec2(460.0f * scale, 640.0f * scale), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Settings (F5)", &open)) {
+        drawTypicalGpu(render, typicalGpu, renderer.upscalerSupport());
         drawQualityPreset(render);
         drawUpscalingMode(render.upscaling);
 
@@ -258,7 +300,7 @@ ImDrawData* DebugUi::build(const SettingsWalk& settings, RenderSettings& render,
 
         ImGui::Separator();
 
-        ImGuiSettingsVisitor visitor;
+        ImGuiSettingsVisitor visitor{renderer.supportsRayQueries()};
         settings(visitor);
     }
 

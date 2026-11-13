@@ -2949,6 +2949,10 @@ std::string VulkanRenderer::getDeviceName() const {
     return device.getName();
 }
 
+bool VulkanRenderer::supportsRayQueries() const {
+    return device.supportsRayQueries();
+}
+
 /*
 * A frame has few deforming meshes, so each looks through the frame's list. Every deforming mesh shows or holds once
 * per frame, which keeps its ring of slots safe from the frames still in flight.

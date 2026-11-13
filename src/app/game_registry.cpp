@@ -148,6 +148,12 @@ LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments) {
             }
 
             options.hidden = true;
+        } else if (argument == "--typical-gpu") {
+            if (options.typicalGpu) {
+                throw std::invalid_argument("Give --typical-gpu once");
+            }
+
+            options.typicalGpu = true;
         } else if (argument == "--golden-save" || argument == "--golden-check") {
             if (options.golden) {
                 throw std::invalid_argument("Give --golden-save or --golden-check, not both");
@@ -165,7 +171,7 @@ LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments) {
         } else {
             throw std::invalid_argument("Unknown option \"" + argument + "\". Options: --game <" + gameNames() +
                                         ">, --golden-save, --golden-check, --cloth-yardstick, --cloth-yardstick-quick, --cloth-yardstick-dress, "
-                                        "--set <key=value>, --run <script>, --port <port>, --hidden, --send <command...>");
+                                        "--set <key=value>, --run <script>, --port <port>, --hidden, --typical-gpu, --send <command...>");
         }
     }
 
@@ -175,11 +181,11 @@ LaunchOptions parseLaunchOptions(const std::vector<std::string>& arguments) {
 
     // Golden images and the yardstick use the defaults, so no setting or script may change what they measure. They
     // keep their own window too.
-    if ((options.golden || options.clothYardstick) && (!options.settings.empty() || options.script || options.hidden)) {
-        throw std::invalid_argument("--set, --run and --hidden play a game: they do not go with the golden images or the cloth yardstick");
+    if ((options.golden || options.clothYardstick) && (!options.settings.empty() || options.script || options.hidden || options.typicalGpu)) {
+        throw std::invalid_argument("--set, --run, --hidden and --typical-gpu play a game: they do not go with the golden images or the cloth yardstick");
     }
 
-    if (options.send && (gameNamed || options.golden || options.clothYardstick || !options.settings.empty() || options.script || options.hidden)) {
+    if (options.send && (gameNamed || options.golden || options.clothYardstick || !options.settings.empty() || options.script || options.hidden || options.typicalGpu)) {
         throw std::invalid_argument("--send talks to a game already running: only --port may come before it");
     }
 

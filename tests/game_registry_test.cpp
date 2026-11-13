@@ -120,6 +120,14 @@ namespace {
         assert(throwsInvalidArgument({"--cloth-yardstick", "--hidden"}));
     }
 
+    // --typical-gpu starts in the typical GPU setup (render/gpu/typical_gpu.h), as if typical-gpu on were sent first.
+    void testTypicalGpuOption() {
+        assert(!parseLaunchOptions({}).typicalGpu);
+        assert(parseLaunchOptions({"--game", "lightlab", "--typical-gpu"}).typicalGpu);
+        assert(throwsInvalidArgument({"--typical-gpu", "--typical-gpu"}));
+        assert(throwsInvalidArgument({"--typical-gpu", "--send", "help"}));
+    }
+
     // Mistakes are reported, not guessed at.
     void testLaunchMistakes() {
         assert(throwsInvalidArgument({"--set"}));
@@ -157,5 +165,6 @@ void testGameRegistry() {
     testLaunchOptions();
     testCommandOptions();
     testHiddenOption();
+    testTypicalGpuOption();
     testLaunchMistakes();
 }
