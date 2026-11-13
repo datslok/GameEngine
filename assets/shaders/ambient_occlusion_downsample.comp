@@ -1,0 +1,31 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Ambient occlusion at half resolution (render/gpu/ambient_occlusion.h, AmbientOcclusionSettings::halfResolution), one
+* invocation per half-size texel, before the occlusion pass: each texel takes the depth of one pixel of its 2 x 2 block,
+* the frame's pick (aoHalfSourceTexel), copied exactly, so the passes after it see the picked pixels' own depths. Not an
+* average or the nearest of the four: a blend of two surfaces' depths is a point on neither, and the nearest of every
+* block would make thin things in front fatter.
+*/
+#include "render/gpu/ambient_occlusion_shared.h"
+
+layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depth;                // the render's depths, exact texels
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D halfDepth;
+
+layout(push_constant) uniform Pick {
+    ivec4 pick; // xy: the pick, zw: the render's size
+};
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+
+    if (any(greaterThanEqual(texel, imageSize(halfDepth)))) {
+        return;
+    }
+
+    ivec2 source = min(texel * 2 + pick.xy, pick.zw - 1);
+    imageStore(halfDepth, texel, vec4(texelFetch(depth, source, 0).r));
+}

@@ -118,11 +118,11 @@ namespace {
             inputs.push_back(GpuVec4{expected, i % 5 == 0 ? 0.0f : expected * random.between(0.9f, 1.1f), random.between(0.01f, 0.1f), static_cast<float>(i % 4)});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 7);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_AO_HISTORY, inputs, 9, 8);
 
-        for (std::size_t i = 0; i < outputs.size() / 7; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 8; ++i) {
             const GpuVec4* in = &inputs[i * 9];
-            const GpuVec4* out = &outputs[i * 7];
+            const GpuVec4* out = &outputs[i * 8];
             const Vec2 pixel{in[4][0], in[4][1]};
             const Vec2 size{in[5][0], in[5][1]};
             const AoPreviousPlace place = aoPreviousPlace(reprojections[i], pixel, in[4][2], in[4][3], size);
@@ -167,6 +167,12 @@ namespace {
             const Vec4 clipped = clipAoHistory(Vec4{in[7][0], in[7][1], in[7][2], in[7][3]}, mean, squares, 2.0f);
             report.check("clipAoHistory", transcendentalTolerance, Vec3{clipped.x, clipped.y, clipped.z}, vec3From(out[6]));
             report.check("clipAoHistory", transcendentalTolerance, clipped.w, out[6][3]);
+
+            const int pick = static_cast<int>(in[8][3]);
+            const Vec2 shift = aoHalfShift(AoTexel{pick & 1, pick >> 1});
+            const Vec2 halfPlace = aoHalfPlace(pixel, size, Vec2{std::ceil(size.x * 0.5f), std::ceil(size.y * 0.5f)}, shift);
+            report.check("aoHalfShift", exactTolerance, Vec3{shift.x, shift.y, 0.0f}, Vec3{out[7][0], out[7][1], 0.0f});
+            report.check("aoHalfPlace", arithmeticTolerance, Vec3{halfPlace.x, halfPlace.y, 0.0f}, Vec3{out[7][2], out[7][3], 0.0f});
         }
     }
 }

@@ -25,6 +25,7 @@ enum class GpuPass {
     AmbientOcclusion, // ambient occlusion from the prepass's depth (render/gpu/ambient_occlusion.h): the pass itself
     AoHistory,    // its temporal accumulation
     AoDenoise,    // its denoiser's passes
+    AoUpsample,   // at half resolution, its result brought to the render's size
     ContactShadows, // the sun's contact shadows marched through the prepass's depth (render/gpu/contact_shadows.h)
     MirroredLights, // light reflected off mirrors onto what the prepass drew (render/gpu/mirrored_light.h)
     Main,

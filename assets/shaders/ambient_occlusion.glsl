@@ -231,6 +231,16 @@ float aoTapWeight(vec2 fraction, int tap) {
     return ((tap & 1) == 1 ? fraction.x : 1.0 - fraction.x) * ((tap >> 1) == 1 ? fraction.y : 1.0 - fraction.y);
 }
 
+// Half resolution: where the picked pixel's centre lies from its half-size texel's centre, in half-size pixels.
+vec2 aoHalfShift(ivec2 pick) {
+    return vec2(pick) * 0.5 - 0.25;
+}
+
+// Half resolution: the half-grid coordinate at which a render pixel's own point lies, as the shifted inverse reads it.
+vec2 aoHalfPlace(vec2 pixel, vec2 renderSize, vec2 halfSize, vec2 shift) {
+    return pixel * halfSize / renderSize - shift;
+}
+
 // The gathered light's luminance, the one number anti-lag watches.
 float aoLuminance(vec3 light) {
     return dot(light, vec3(0.2126, 0.7152, 0.0722));

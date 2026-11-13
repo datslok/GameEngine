@@ -861,6 +861,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 | `AmbientOcclusion` | AO: the ambient occlusion pass itself (`VulkanAmbientOcclusion::occlude`) |
 | `AoHistory` | AOHISTORY: its temporal accumulation (`accumulateHistory`), only while it accumulates |
 | `AoDenoise` | AODENOISE: its denoiser's passes (`denoise`), only while it denoises |
+| `AoUpsample` | AOUPSAMPLE: at half resolution, its result brought to the render's size (`upsample`) |
 | `ContactShadows` | CONTACT: the contact shadows' march |
 | `MirroredLights` | MIRROR: light reflected off mirrors onto what the prepass drew, only while the pass runs |
 | `Main` | |
@@ -2427,6 +2428,7 @@ How much of the light from all around reaches a point past the small things next
 | `specularOcclusion` | on | the reflection dims in creases too (`specularOcclusion`) |
 | `antiLag`, `antiLagDeviations` | on, 3 | the history restarts when its fast average strays from its slow one past this many of its own noise's deviations (see Anti-lag) |
 | `historyClip` | 2 | the history is held within this frame's 3 x 3 neighbourhood mean plus or minus this many deviations before blending; 0 off (see The history clip) |
+| `halfResolution` | on | the pass, its history and its denoiser on a half-size grid, then an upsample (see Half resolution) |
 | `denoisePasses`, `denoisePlaneShare` | 2, 0.02 | the denoiser's passes (0 off, at most 5) and how far off the surface plane a tap may lie, as a share of the view depth (see The denoiser) |
 | `temporal` | on | each pixel's result averaged over the frames before (see Temporal accumulation); needs anti-aliasing |
 | `historyFrames` | 16 | the most frames the average holds (at most `AO_MAX_HISTORY_FRAMES` 64) |
@@ -2472,6 +2474,14 @@ How much of the light from all around reaches a point past the small things next
 - the reflection's stand-in by `specularOcclusion(n·v, v, roughness)` (Lagarde and de Rousiers 2014: (n·v + v)^(2^(−16 r − 1)) − 1 + v, clamped), and the specular albedo it hands the reflection pass by the same, so the better light the reflection pass swaps in stays dimmed.
 
 With it off and no baked occlusion every factor is exactly 1 and the picture is as before, bit for bit (the block runs only with the screen's occlusion on or a strength above 0). Ray hits (probe rays, traced reflections) leave baked occlusion out: a small effect on lighting that coarse, for a texture read per ray.
+
+**Half resolution** (`halfResolution`, on by default; `ao-half-resolution`): the pass, its history and its denoiser run on a grid half the render's width and height (`aoHalfSize`, rounded up), about a quarter of the cost.
+
+- Each half-size texel stands for a 2 x 2 block and takes the depth of one of its pixels, copied exactly into an R32F image (`ambient_occlusion_downsample.comp`, `aoHalfSourceTexel`): the frame's pick (`aoHalfPick`: (0, 0), (1, 1), (1, 0), (0, 1), turning with the noise frame, so the history sees all four; always the top left without anti-aliasing). Not an average or the nearest of the four: a blend of two surfaces' depths lies on neither, and the nearest of every block fattens thin things in front.
+- The passes need nothing else changed: the pass record (`packAmbientOcclusionPass`) carries the half-size grid's size and footprint, and the inverse view-projection shifted by the pick's offset from the texel's centre (`aoHalfShift`, a quarter of a half-size pixel either way; `aoShiftedInverseViewProjection`), so every texel's point is its source pixel's exactly (at an even render size; within a pixel at an odd one's far edge). The jitter goes into half-size pixels less the shift (`lens.yz`), so gathering finds each sample's own place on last frame's picture, the pick into `frame.yz`, and the picture pyramid's level bias into `lens.w` (1: the picture is at the render's size).
+- The upsample (`ambient_occlusion_upsample.comp`, mirrored by `aoUpsampleAt`, timed as AOUPSAMPLE) writes the render-size RGBA16F image the main pass reads (`VulkanAmbientOcclusion::upsampled`). Each pixel's point (its own depth, read through the shifted inverse at `aoHalfPlace`) weighs the four texels round it by their bilinear shares (`aoTapWeight`) times how near it lies to each texel's surface plane (`aoPlaneWeight` with `denoisePlaneShare`), skipping open texels; below `AO_UPSAMPLE_LEAST_WEIGHT` (0.001) in all it is on none of their surfaces and takes the texel nearest it in view depth. The sky, and pixels whose texels are all open, stay open.
+- Switching it remakes the images (the renderer waits for the GPU first); the history restarts, as its key holds the grid's size.
+- **Measured** in a hidden release copy of the light lab's start on the laptop: AO in all 3.0 ms at full size (AO 1.93, AOHISTORY 0.31, AODENOISE 0.63) and 0.92 ms at half (0.50, 0.05, 0.16, AOUPSAMPLE 0.08).
 
 **The pass** (`VulkanAmbientOcclusion::occlude`, timed as AO, right after the depth prepass, before the mirrored lights): `AO_GROUP_SIDE` (8) square groups. It reads the scene's sets 0 and 1 for the fog (as the fog's own passes do, `bindSharedSets`), and its own set 2: the pass record (`GpuAmbientOcclusionPass`: the camera-relative view-projection's inverse with the jitter, the size, the pixel footprint per metre, the radius, falloff, slices and steps, and the frame), the depth (exact texels), last frame's picture, the RGBA16F result and the geometry for the denoiser; the temporal accumulation and the denoiser follow (ccumulate, denoiseInto). Barriers: the depth from the prepass to compute reading; the images from last frame's reads to storage writes, contents discarded; each image a later pass reads to compute reading; the one the main pass reads to fragment reading. The images are made the first time the pass runs and remade with the frame's size.
 
