@@ -336,11 +336,13 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
         drawColliders(world, alpha, debugDraw);
 
         // From the previous frame: this one has not been drawn yet. At hundreds of frames a second the lag is invisible.
+        // The readout wraps to the width that frame was presented at.
+        debugDraw.setScreenWidth(static_cast<float>(renderer.getLastFrameStats().outputWidth));
         drawRenderStats(renderer.getLastFrameStats(), debugDraw);
         drawCameraReadout(camera, debugDraw);
 
         // Also from the previous window: the profiler shows a finished half second at a time.
-        drawProfile(profiler, engineProfileReadoutLine, 2, true, profileDebugColour, debugDraw);
+        drawProfile(profiler, 2, true, profileDebugColour, debugDraw);
         drawGpuProfile(gpuProfiler, debugDraw);
 
         // The cloth's passes by kind, only while some cloth runs on the GPU and only those kinds that took time; or why

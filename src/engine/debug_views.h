@@ -23,39 +23,35 @@
 // Draws whose mesh has no known bounds are skipped.
 void drawBoundingBoxes(const std::vector<DrawItem>& draws, const std::vector<Aabb>& meshBounds, DebugDraw& debug);
 
-// The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts, so a game
-// can put its own lines below the engine's (drawRenderStats uses lines 0 to 6).
+// The debug readout is lines of text down the top-left corner; this is where line `line` (0 first) starts.
 constexpr float debugReadoutTextHeight = 14.0f;
 Vec2 debugReadoutLine(int line);
 
+// The unit ending a timing readout ("... MAIN 0.91  MS"), repeated at the end of each line it wraps onto.
+inline constexpr const char* readoutUnit = "MS";
+
+/*
+* A readout's text broken into lines of at most maxCharacters (0: no limit), only between its items (two spaces apart;
+* one space is inside an item), never inside one: an item longer than the limit has a line to itself. A text ending in
+* readoutUnit ends each of its lines with it.
+*/
+std::vector<std::string> wrapReadout(const std::string& text, std::size_t maxCharacters);
+
+// How many readout characters fit across a screen that wide between the margins (at least 1), or 0 (no limit) for no width.
+std::size_t readoutCharactersFitting(float screenWidth);
+
+/*
+* Text on the readout's next free lines (DebugDraw::takeReadoutLine), wrapped to the DebugDraw's screen width, so a
+* long line never runs off the screen and what follows goes below it. The engine writes its lines first each frame,
+* then the game's onDebugDraw writes its own after them.
+*/
+void writeReadout(DebugDraw& debug, const std::string& text, const Vec3& colour);
+
 // The culling readout in the top-left corner: what the camera and the shadow views drew and skipped last frame, the
 // lights, shadow tiles, probes, video memory and exposure. renderStatsLines is its text, a line each (also the stats
-// command's), and drawRenderStats draws them.
+// command's), and drawRenderStats writes them.
 std::vector<std::string> renderStatsLines(const RenderStats& stats);
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug);
-
-// The readout lines drawRenderStats writes the light probes' states (probeStatsText), the video memory
-// (videoMemoryText) and the eye's exposure (exposureText) on.
-constexpr int probeReadoutLine = 4;
-constexpr int videoMemoryReadoutLine = 5;
-constexpr int exposureReadoutLine = 6;
-
-// The readout line drawCameraReadout writes the camera's place and direction on.
-constexpr int cameraReadoutLine = 7;
-
-// The readout line drawRenderStats leaves for the engine's timings (drawProfile).
-constexpr int engineProfileReadoutLine = 8;
-
-// The readout lines for the GPU's timings per pass (a profiler from makeGpuProfiler, gpuProfileLines): the total and
-// the scene's passes, then the picture's.
-constexpr int gpuProfileReadoutLine = 9;
-constexpr int gpuPictureReadoutLine = 10;
-
-// The readout line for the cloth's GPU time by kind of pass (a profiler from makeClothProfiler), while cloth runs there.
-constexpr int clothProfileReadoutLine = 11;
-
-// The engine's readout uses lines 0 to 11; a game's own lines start here.
-constexpr int firstGameReadoutLine = 12;
 
 // The light probes' line: how many, traced (awake ones among them), asleep, off and moved by relocation, or "PROBES -"
 // without probes.
@@ -84,17 +80,19 @@ Profiler makeGpuProfiler();
 // not measured does not count as one that took no time.
 void recordGpuTimings(Profiler& profiler, const GpuTimings& timings);
 
-// The first pass on the GPU readout's second line: the picture's passes, after the main pass drew the scene.
+// The first passes on the GPU readout's second and third lines: the screen's lighting from the prepass's depth
+// (ambient occlusion's parts, contact shadows, mirrored lights, the main pass), then the picture's passes after it.
+inline constexpr GpuPass firstLightingPass = GpuPass::ColourPyramid;
 inline constexpr GpuPass firstPicturePass = GpuPass::ProbeBalls;
 
 /*
-* A profiler from makeGpuProfiler as the readout's two lines (one did not fit a window), in milliseconds to two
-* decimals with the passes that took no time left out: the total and the scene's passes up to the main pass, then the
-* picture's after it.
+* A profiler from makeGpuProfiler as the readout's three groups (each wrapped to the screen when drawn), in milliseconds to two
+* decimals with the passes that took no time left out: the total and the scene's setup up to the depth prepass, the
+* screen's lighting up to the main pass, then the picture's after it.
 */
-std::array<std::string, 2> gpuProfileLines(const Profiler& profiler);
+std::array<std::string, 3> gpuProfileLines(const Profiler& profiler);
 
-// gpuProfileLines drawn on gpuProfileReadoutLine and gpuPictureReadoutLine.
+// gpuProfileLines written to the readout, each wrapped to the screen.
 void drawGpuProfile(const Profiler& profiler, DebugDraw& debug);
 
 // A profiler for the cloth's GPU time: "CLOTH" (all of it) as section 0, then one section per kind in ClothPass order.
@@ -112,8 +110,8 @@ void recordClothTimings(Profiler& profiler, const ClothPassTimings& timings);
 */
 std::string profileText(const Profiler& profiler, int decimals, bool withWorst, bool hideIdle = false, int firstSection = 0, int endSection = -1);
 
-// profileText drawn on one readout line.
-void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle = false);
+// profileText written to the readout, wrapped to the screen.
+void drawProfile(const Profiler& profiler, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle = false);
 
 // The cloth line while the latest frame had more cloth passes than its stamps (ClothPassTimings::overflowed).
 inline constexpr const char* clothPassesNotMeasuredText = "CLOTH PASSES NOT MEASURED: TOO MANY IN A FRAME";
@@ -121,7 +119,7 @@ inline constexpr const char* clothPassesNotMeasuredText = "CLOTH PASSES NOT MEAS
 // The readout's cloth line: clothPassesNotMeasuredText while unmeasured, else the cloth profiler's kinds that took time.
 std::string clothReadoutText(const Profiler& profiler, bool unmeasured);
 
-// clothReadoutText drawn on the cloth's readout line (clothProfileReadoutLine).
+// clothReadoutText written to the readout.
 void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debug);
 
 // Timings are drawn in this colour (linear pale green), apart from the rest of the readout.

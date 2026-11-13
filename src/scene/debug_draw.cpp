@@ -97,9 +97,22 @@ void DebugDraw::screenLine(const Vec2& from, const Vec2& to, const Vec3& colour)
     screenLines.push_back(DebugLine{Vec3{from.x, from.y, 0.0f}, Vec3{to.x, to.y, 0.0f}, colour});
 }
 
+int DebugDraw::takeReadoutLine() {
+    return nextReadoutLine++;
+}
+
+void DebugDraw::setScreenWidth(float width) {
+    screenWidth = width;
+}
+
+float DebugDraw::getScreenWidth() const {
+    return screenWidth;
+}
+
 void DebugDraw::clear() {
     lines.clear();
     screenLines.clear();
+    nextReadoutLine = 0;
 }
 
 const std::vector<DebugLine>& DebugDraw::getScreenLines() const {

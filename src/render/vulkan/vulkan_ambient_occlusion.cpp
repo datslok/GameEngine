@@ -158,12 +158,13 @@ void VulkanAmbientOcclusion::denoiseInto(VkCommandBuffer commands, FrameDescript
 /*
 * The barriers: the depth from being drawn into by the prepass to being read by compute (the main pass turns it back
 * into a depth target, keeping it); last frame's picture's pyramid, built just before (VulkanReflections::prepareColourPyramid); the images from being read by last frame's main pass (or nothing yet) to being
-* written, their old contents discarded, every pixel being written. The accumulation then reads the pass's image (see
-* accumulate). With the denoiser, the accumulation's image (or the pass's) then goes through its passes (see denoiseInto); whichever the main pass reads ends readable by fragment shaders.
+* written, their old contents discarded, every pixel being written. accumulateHistory then reads the pass's image (see
+* accumulate), and denoise sends the accumulation's image (or the pass's) through the denoiser's passes (see
+* denoiseInto); whichever the main pass reads ends readable by fragment shaders.
 */
 void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frameSet,
                                      std::uint32_t frameIndex, VulkanImage& depth,
-                                     const SampledImage* gatherPicture, const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass, bool blur,
+                                     const SampledImage* gatherPicture, const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass,
                                      bool previousCameraKnown) {
     // Whether last frame's history carries over is known here, where what it was made for is kept.
     const bool accumulates = pass.history[2] > 0.5f;
@@ -199,21 +200,27 @@ void VulkanAmbientOcclusion::occlude(VkCommandBuffer commands, FrameDescriptors&
     const std::uint32_t groupsDown = workgroupCount(size.height, AO_GROUP_SIDE);
     vkCmdDispatch(commands, groupsAcross, groupsDown, 1);
 
-    // The image the denoiser or the main pass reads: the accumulation's average while it runs, else the pass's own.
-    VulkanImage* result = &noisy;
+    // The image the denoiser or the main pass reads: the pass's own until the accumulation replaces it with its average.
+    steps = FrameSteps{&record, &depth, groupsAcross, groupsDown, key, accumulates, usable, static_cast<int>(pass.denoise[0]), &noisy};
+}
 
-    if (accumulates) {
-        accumulate(commands, descriptors, record, depthSample, usable, groupsAcross, groupsDown);
-        lastHistory = key;
-        result = &historyLight[static_cast<std::size_t>(latest)];
-    } else {
+void VulkanAmbientOcclusion::accumulateHistory(VkCommandBuffer commands, FrameDescriptors& descriptors) {
+    if (!steps.accumulates) {
         lastHistory.reset();
-    }
-
-    if (!blur) {
-        result->transition(commands, ImageState::FragmentRead);
         return;
     }
 
-    denoiseInto(commands, descriptors, record, *result, static_cast<int>(pass.denoise[0]), groupsAcross, groupsDown);
+    const SampledImage depthSample{steps.depth->getView(), nearest, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+    accumulate(commands, descriptors, *steps.record, depthSample, steps.usable, steps.groupsAcross, steps.groupsDown);
+    lastHistory = steps.key;
+    steps.result = &historyLight[static_cast<std::size_t>(latest)];
+}
+
+void VulkanAmbientOcclusion::denoise(VkCommandBuffer commands, FrameDescriptors& descriptors, bool blur) {
+    if (!blur) {
+        steps.result->transition(commands, ImageState::FragmentRead);
+        return;
+    }
+
+    denoiseInto(commands, descriptors, *steps.record, *steps.result, steps.denoisePasses, steps.groupsAcross, steps.groupsDown);
 }

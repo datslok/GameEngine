@@ -21,7 +21,10 @@ enum class GpuPass {
     Shadows,
     Fog,          // the fog's grid lit and integrated (render/gpu/volumetric_fog.h)
     DepthPrepass,
-    AmbientOcclusion, // ambient occlusion from the prepass's depth, and its blur (render/gpu/ambient_occlusion.h)
+    ColourPyramid, // last frame's picture's blurrier levels, built here while ambient occlusion gathers light from them
+    AmbientOcclusion, // ambient occlusion from the prepass's depth (render/gpu/ambient_occlusion.h): the pass itself
+    AoHistory,    // its temporal accumulation
+    AoDenoise,    // its denoiser's passes
     ContactShadows, // the sun's contact shadows marched through the prepass's depth (render/gpu/contact_shadows.h)
     MirroredLights, // light reflected off mirrors onto what the prepass drew (render/gpu/mirrored_light.h)
     Main,

@@ -41,6 +41,16 @@ public:
     // A line on the screen itself, in window pixels from the top-left corner, for overlays such as text. Not affected by the camera.
     void screenLine(const Vec2& from, const Vec2& to, const Vec3& colour);
 
+    // The text readout down the top-left corner is written a line after another, the engine's then the game's: this
+    // hands out the next free line (0 first), so a readout wrapped onto more lines pushes the rest down. clear starts
+    // again at 0.
+    int takeReadoutLine();
+
+    // The screen's width in the pixels screen lines are drawn in, for wrapping the readout; 0 (unknown) for no limit.
+    // Set by the engine each frame and kept through clear.
+    void setScreenWidth(float width);
+    float getScreenWidth() const;
+
     void clear();
     const std::vector<DebugLine>& getLines() const;
     const std::vector<DebugLine>& getScreenLines() const; // z is always 0
@@ -48,6 +58,8 @@ public:
 private:
     std::vector<DebugLine> lines;
     std::vector<DebugLine> screenLines;
+    int nextReadoutLine = 0;
+    float screenWidth = 0.0f;
 
     // A circle around centre in the plane spanned by two perpendicular unit vectors, from startAngle sweeping sweepAngle.
     void arc(const Vec3& centre, const Vec3& axisA, const Vec3& axisB, float radius, float startAngle, float sweepAngle, const Vec3& colour, int segments);

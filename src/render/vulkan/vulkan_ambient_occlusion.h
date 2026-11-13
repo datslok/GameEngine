@@ -51,17 +51,25 @@ public:
     void forgetHistory();
 
     /*
-    * Record the pass, the accumulation while the pass record says to accumulate (its history carried over when last
-    * frame's was made the same way and previousCameraKnown), and the denoiser when blur is true (with at least one
-    * pass): the depth (the prepass's, left readable by compute) and last frame's finished picture's pyramid in (every
-    * level, readable by compute), or standIn when there is none to gather from, and the blue noise tile (AO_BLUE_NOISE_SIZE
-    * a side, its three channels the pass's noises, aoNoise), the occlusion left readable by fragment
-    * shaders for the main pass. textures and frameSet are the scene's sets, written already (the fog's grid in them
-    * integrated).
+    * A frame's ambient occlusion is recorded in three calls, always all three in this order, so the renderer can time
+    * each apart (GpuPass::AmbientOcclusion, AoHistory, AoDenoise); a step with nothing to do records nothing.
+    *
+    * occlude records the pass: the depth (the prepass's, left readable by compute) and last frame's finished picture's
+    * pyramid in (every level, readable by compute), or standIn when there is none to gather from, and the blue noise
+    * tile (AO_BLUE_NOISE_SIZE a side, its three channels the pass's noises, aoNoise). textures and frameSet are the
+    * scene's sets, written already (the fog's grid in them integrated).
     */
     void occlude(VkCommandBuffer commands, FrameDescriptors& descriptors, VkDescriptorSet textures, VkDescriptorSet frameSet, std::uint32_t frameIndex,
                  VulkanImage& depth, const SampledImage* gatherPicture,
-                 const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass, bool blur, bool previousCameraKnown);
+                 const SampledImage& standIn, const SampledImage& blueNoise, const GpuAmbientOcclusionPass& pass, bool previousCameraKnown);
+
+    // The accumulation, while the pass record says to accumulate (its history carried over when last frame's was made
+    // the same way and the previous camera is known).
+    void accumulateHistory(VkCommandBuffer commands, FrameDescriptors& descriptors);
+
+    // The denoiser when blur is true (with at least one pass); the occlusion is left readable by fragment shaders for
+    // the main pass either way.
+    void denoise(VkCommandBuffer commands, FrameDescriptors& descriptors, bool blur);
 
 private:
     const VulkanDevice& device;
@@ -83,6 +91,22 @@ private:
     std::array<VulkanImage, 2> historyDepthAge;
     int latest = 0;
     std::optional<AoHistoryKey> lastHistory;
+
+    // What occlude leaves for accumulateHistory and denoise in the same frame: its pass record, depth and workgroups,
+    // whether to accumulate and whether last frame's history is usable, the denoiser's passes, and the image the
+    // denoiser or the main pass reads (the pass's own, or the accumulation's average once it has run).
+    struct FrameSteps {
+        VulkanBuffer* record = nullptr;
+        VulkanImage* depth = nullptr;
+        std::uint32_t groupsAcross = 0;
+        std::uint32_t groupsDown = 0;
+        AoHistoryKey key;
+        bool accumulates = false;
+        bool usable = false;
+        int denoisePasses = 0;
+        VulkanImage* result = nullptr;
+    };
+    FrameSteps steps;
 
     void denoiseInto(VkCommandBuffer commands, FrameDescriptors& descriptors, const VulkanBuffer& record, VulkanImage& source, int passes, std::uint32_t groupsAcross,
                      std::uint32_t groupsDown);
