@@ -1,6 +1,7 @@
 #include "render/gpu/transparency.h"
 #include "scene/frame_description.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
@@ -317,6 +318,75 @@ namespace {
         assert(near(pixelsPerRadian(1000.0f, 2.0f * std::atan(0.5f)), 1000.0f, 1e-3f));
     }
 
+    // A row of texels read as a bilinear sampler clamped to its edges reads it at uv.
+    float bilinearRead(const std::vector<float>& texels, float uv) {
+        const int count = static_cast<int>(texels.size());
+        const float x = uv * static_cast<float>(count) - 0.5f;
+        const int first = static_cast<int>(std::floor(x));
+        const float fraction = x - static_cast<float>(first);
+        const auto at = [&](int index) { return texels[static_cast<std::size_t>(std::clamp(index, 0, count - 1))]; };
+        return at(first) * (1.0f - fraction) + at(first + 1) * fraction;
+    }
+
+    // The cubic B-spline's weight at a distance in texels.
+    float cubicBspline(float distance) {
+        const float t = std::abs(distance);
+        if (t < 1.0f) {
+            return (4.0f - 6.0f * t * t + 3.0f * t * t * t) / 6.0f;
+        }
+        return t < 2.0f ? (2.0f - t) * (2.0f - t) * (2.0f - t) / 6.0f : 0.0f;
+    }
+
+    // The smooth read along one axis: two bilinear reads, weighed, at the places bsplineAxis gives.
+    float smoothRead(const std::vector<float>& texels, float uv) {
+        const BsplineTaps taps = bsplineAxis(uv, static_cast<float>(texels.size()));
+        return bilinearRead(texels, taps.first) * taps.firstWeight + bilinearRead(texels, taps.second) * taps.secondWeight;
+    }
+
+    /*
+    * Frosted glass reads the picture's blurred levels through a cubic B-spline (Sigg and Hadwiger 2005: four texels
+    * along each axis from two bilinear reads), so a bright texel shows as a smooth blob, not bilinear filtering's square
+    * with hard edges: the two reads give the B-spline's weighted sum of four texels exactly, the weights add to one, and
+    * a lone texel's read has no kinks (its slope is continuous where bilinear filtering's jumps, at the texel centres).
+    */
+    void testSmoothPictureRead() {
+        std::vector<float> texels(16);
+        for (std::size_t index = 0; index < texels.size(); ++index) {
+            texels[index] = std::fmod(static_cast<float>(index) * 0.618034f, 1.0f) * 10.0f;
+        }
+
+        for (float x = 1.5f; x <= 12.5f; x += 0.137f) {
+            const float uv = (x + 0.5f) / 16.0f;
+            float exact = 0.0f;
+            for (int index = 0; index < 16; ++index) {
+                exact += cubicBspline(x - static_cast<float>(index)) * texels[static_cast<std::size_t>(index)];
+            }
+            assert(near(smoothRead(texels, uv), exact, 1e-4f));
+            const BsplineTaps taps = bsplineAxis(uv, 16.0f);
+            assert(near(taps.firstWeight + taps.secondWeight, 1.0f, 1e-6f));
+        }
+
+        // A lone bright texel at index 8: its centre reads 2/3 of it, one texel away a sixth, two texels away nothing.
+        std::vector<float> spike(16, 0.0f);
+        spike[8] = 1.0f;
+        const auto spikeAt = [&](float offset) { return smoothRead(spike, (8.5f + offset) / 16.0f); };
+        assert(near(spikeAt(0.0f), 2.0f / 3.0f, 1e-5f));
+        assert(near(spikeAt(1.0f), 1.0f / 6.0f, 1e-5f));
+        assert(near(spikeAt(2.0f), 0.0f, 1e-5f));
+
+        // No kinks: either side of each texel centre the slope is the same (bilinear filtering's jumps by the texel's
+        // whole value there: from rising to falling at the spike, from falling to flat a texel away).
+        const float step = 1e-3f;
+        for (const float offset : {-1.0f, 0.0f, 1.0f, 2.0f}) {
+            const float before = (spikeAt(offset) - spikeAt(offset - step)) / step;
+            const float after = (spikeAt(offset + step) - spikeAt(offset)) / step;
+            assert(std::abs(after - before) < 0.02f);
+            const float bilinearBefore = (bilinearRead(spike, (8.5f + offset) / 16.0f) - bilinearRead(spike, (8.5f + offset - step) / 16.0f)) / step;
+            const float bilinearAfter = (bilinearRead(spike, (8.5f + offset + step) / 16.0f) - bilinearRead(spike, (8.5f + offset) / 16.0f)) / step;
+            assert(offset == 2.0f || std::abs(bilinearAfter - bilinearBefore) > 0.9f);
+        }
+    }
+
     /*
     * Thick glass bends the view ray where it enters (Snell's law, sin t = sin i / ior) and the ray crosses the glass to
     * where it leaves, whose picture the glass shows: as Filament's solid sphere, the ray travels the thickness times
@@ -402,6 +472,7 @@ void testTransparency() {
     testBeerAttenuation();
     testTransmissionSpread();
     testRefractionLevel();
+    testSmoothPictureRead();
     testSolidRefraction();
     testWhichGlassRefracts();
     testOpaquePicturePass();

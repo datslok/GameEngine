@@ -126,7 +126,7 @@ namespace {
     * front, Beer's absorption across colours and lengths, and thick glass's exit point at angles from head-on to grazing.
     * Inputs per case: (roughness, ior, behind, view distance), (pixels per radian, levels, inverse attenuation distance,
     * length), the kept colour, the entry point, the way to the camera, (the normal, the thickness). Outputs: (spread,
-    * level), the absorption, the exit point.
+    * level), the absorption, the exit point, the smooth read's taps.
     */
     void checkRefraction(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{317};
@@ -150,11 +150,11 @@ namespace {
             inputs.push_back(gpuVec4(normal, random.between(0.0f, 2.0f)));
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_REFRACTION, inputs, 6, 3);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_REFRACTION, inputs, 6, 4);
 
-        for (std::size_t i = 0; i < outputs.size() / 3; ++i) {
+        for (std::size_t i = 0; i < outputs.size() / 4; ++i) {
             const GpuVec4* in = &inputs[i * 6];
-            const GpuVec4* out = &outputs[i * 3];
+            const GpuVec4* out = &outputs[i * 4];
             const float spread = transmissionSpread(in[0][0], in[0][1]);
             report.check("transmissionSpread", arithmeticTolerance, spread, out[0][0]);
             report.check("refractionLevel", FloatTolerance{.absolute = 1e-4f, .relative = 1e-4f},
@@ -162,6 +162,9 @@ namespace {
             report.check("beerAttenuation", transcendentalTolerance, beerAttenuation(vec3From(in[2]), in[1][2], in[1][3]), vec3From(out[1]));
             report.check("solidRefractionExit", FloatTolerance{.absolute = 1e-5f, .relative = 1e-5f},
                          solidRefractionExit(vec3From(in[3]), vec3From(in[4]), vec3From(in[5]), in[0][1], in[5][3]), vec3From(out[2]));
+            const BsplineTaps taps = bsplineAxis(in[0][0], in[1][0]);
+            report.check("bsplineAxis", FloatTolerance{.absolute = 1e-5f, .relative = 1e-5f}, Vec3{taps.first, taps.second, taps.firstWeight}, vec3From(out[3]));
+            report.check("bsplineAxis", arithmeticTolerance, taps.secondWeight, out[3][3]);
         }
     }
 }

@@ -115,6 +115,22 @@ float transmissionSpread(float roughness, float ior);
 */
 float refractionLevel(float spread, float behindDistance, float viewDistance, float pixelsPerRadian, std::uint32_t levels);
 
+/*
+* A smooth read of a blurred picture level along one axis (Sigg and Hadwiger 2005): a cubic B-spline over four texels,
+* taken as two bilinear reads at first and second (texture coordinates, 0..1), weighed by firstWeight and secondWeight.
+* A picture read so along both axes (four bilinear reads) shows a bright texel as a smooth blob with no kinks, where a
+* single bilinear read shows a square with hard edges: frosted glass reads its coarse levels so. coordinate is the
+* texture coordinate across a level size texels wide.
+*/
+struct BsplineTaps {
+    float first = 0.0f;
+    float second = 0.0f;
+    float firstWeight = 0.0f;
+    float secondWeight = 0.0f;
+};
+
+BsplineTaps bsplineAxis(float coordinate, float size);
+
 // Pixels per radian at the screen's centre: its height over twice the tangent of half the vertical field of view.
 float pixelsPerRadian(float screenHeight, float verticalFov);
 
