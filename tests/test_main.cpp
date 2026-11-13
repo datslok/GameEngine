@@ -92,6 +92,7 @@ void testCulling();
 void testDebugText();
 void testDither();
 void testSphereMesh();
+void testLatheMesh();
 void testFirefly();
 void testSpinner();
 void testClosestPoints();
@@ -311,6 +312,7 @@ int main(int argumentCount, char** arguments) {
     testDebugText();
     testDither();
     testSphereMesh();
+    testLatheMesh();
     testFirefly();
     testSpinner();
     testClosestPoints();

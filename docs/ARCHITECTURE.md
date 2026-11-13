@@ -3051,7 +3051,7 @@ Meshes whose vertices move every tick while their triangles and UVs stay the sam
 
 **The game's side:**
 
-- `AssetManager::addDeformingMesh(mesh)`: a mesh of its own (never shared), its `DeformingTopology` built once (`isDeforming`, `getDeformingTopology`). The `Mesh` is the rest shape; `Mesh::grid(columns, rows, width, height)` makes a sheet (facing +z, rows from the bottom, UV (0, 0) bottom-left).
+- `AssetManager::addDeformingMesh(mesh)`: a mesh of its own (never shared), its `DeformingTopology` built once (`isDeforming`, `getDeformingTopology`). The `Mesh` is the rest shape; `Mesh::grid(columns, rows, width, height)` makes a sheet (facing +z, rows from the bottom, UV (0, 0) bottom-left). `Mesh::lathe(profile, segments)` spins a profile of (radius, height) points round the y axis (bottles, glasses, posts), closed by flat caps where its ends are off the axis, smooth along the profile.
 - Drawn by a `ModelRenderer` part like any mesh, its entity holding a `DeformingMesh {mesh, positions, previousPositions}`: one position per `Mesh` vertex, in the mesh's own space, written in ticks.
 - `runFixedUpdate` calls `savePreviousShapes` before each tick (as `savePreviousTransforms`), and `hashSimulationState` includes the positions.
 
@@ -3315,7 +3315,7 @@ What is in it:
 
 - **Towers** at `labTowerDistances` (5, 10, ..., 320 m), each 0.1 times its distance wide and 0.4 tall, fanned 9 degrees apart from -27 so none hides another and all look the same size from the start.
 - **A fence** of 0.1 m posts every 4 m from z = -4 to -300 at x = -6 with one 6 cm rail at 1 m, and a chain-link between them: one double-sided cut-out panel (`chainLinkPanel`, as tall as the posts) whose galvanised wire texture is made in code (`chainLinkImage`, 256 texels a 0.5 m tile, 8 diamonds a tile each way, 3 mm wire with soft edges, `chainLinkAlpha`), its mips built to keep the wire's coverage, so sun shadows, light probes and far mips all meet holes.
-- **The pen table** (`buildPenTable`, `LightLabLayout::table`, static, for contact shadows): a wooden table at (`labTableX`, `labTableZ`) = (-2.5, 2), 80 x 50 cm, 75 cm high (`labTableHeight`) on four 4 cm legs, with a red 1 cm pen along x, a white one along z, a 7 mm wooden pencil and a white pen standing on end, each 14 cm long: things a shadow map's texels miss, the afternoon sun throwing their shadows across the top.
+- **The pen table** (`buildPenTable`, `LightLabLayout::table`, static, for contact shadows): a wooden table at (`labTableX`, `labTableZ`) = (-2.5, 2), 80 x 50 cm, 75 cm high (`labTableHeight`) on four 4 cm legs, with a red 1 cm pen along x, a white one along z, a 7 mm wooden pencil and a white pen standing on end, each 14 cm long: things a shadow map's texels miss, the afternoon sun throwing their shadows across the top. Beside them a green glass bottle (`getBottle`, `labBottleBase`, 18 cm east and 12 cm south of the middle): 25 cm tall, 6.4 cm across, a `Mesh::lathe` of `labBottleProfile` in 48 segments, thin green glass (`LabSurface::BottleGlass`), double-sided so light crossing it is tinted by both walls, its coloured shadow (by rays or the coloured shadow maps) beside the pens'.
 - **400 trees** (trunk and crown, sized 0.8 to 1.3) spread evenly over the ring 40 to 380 m out.
   - Placed by hashing each attempt's number (`Fnv1aHash` then `mixBits`, never a generator's running state).
   - Skipping the view wedge to the north (34 degrees either side plus 15 m) and 15 m round the building.

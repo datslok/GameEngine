@@ -167,6 +167,14 @@ namespace {
             material.roughness = 0.4f;
             material.transmission = 1.0f;
             break;
+        case LabSurface::BottleGlass:
+            // Green bottle glass, thin and smooth: each wall passes about 60% of green and a fifth of red and blue, and
+            // light crossing the bottle passes both walls (double-sided), as through a real one.
+            material.colour = Pixel{120, 205, 125};
+            material.roughness = 0.03f;
+            material.transmission = 1.0f;
+            material.doubleSided = true;
+            break;
         }
         return material;
     }
@@ -448,6 +456,16 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
     const Entity refracting = world.create();
     world.add(refracting, Transform{});
     world.add(refracting, std::move(refractors));
+
+    // The green bottle on the pen table, spun from its profile, standing at its base: glass like the window's, not in
+    // the collision.
+    ModelRenderer bottleRenderer;
+    bottleRenderer.parts.push_back(RenderPart{assets.addMesh(Mesh::lathe(labBottleProfile(), 48)), surfaceMaterial(LabSurface::BottleGlass),
+                                              Mat4::translation(labBottleBase.x, labBottleBase.y, labBottleBase.z)});
+    bottleRenderer.isStatic = true;
+    bottle = world.create();
+    world.add(bottle, Transform{});
+    world.add(bottle, std::move(bottleRenderer));
 
     // The windows, one part each in the layout's order, so switching finds each lit one's glow by its number.
     std::vector<LabBlock> panes;
@@ -923,6 +941,10 @@ LightLabStainedGlassSettings& LightLabGame::getStainedGlassSettings() {
 
 Entity LightLabGame::getWindowPane() const {
     return windowPane;
+}
+
+Entity LightLabGame::getBottle() const {
+    return bottle;
 }
 
 Entity LightLabGame::getMoon() const {

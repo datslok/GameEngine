@@ -65,8 +65,8 @@ namespace {
 
         // The ground, the towers, fence, its chain-link, the window's glass, trees, building, the street, its windows and its bulbs' glow (static, and
         // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror), the
-        // mirror ball, refraction's glass pieces and the pen table.
-        assert(staticModels == 14);
+        // mirror ball, refraction's glass pieces, the pen table and its glass bottle.
+        assert(staticModels == 15);
         assert(others > 0);
     }
 
@@ -409,19 +409,49 @@ namespace {
         assert(labWindowPane.minimum.z == labWindow.minimum.z && labWindowPane.maximum.y == labWindow.maximum.y);
 
         Lab lab;
-        int panes = 0;
+        const ModelRenderer& window = lab.world.get<ModelRenderer>(lab.game.getWindowPane());
+        assert(window.parts.size() == 1 && window.isStatic);
+        const Material& pane = window.parts.front().material;
+        assert(isTransparent(pane) && pane.thickness == 0.0f && pane.roughness < frostedRoughness && pane.transmission == 1.0f);
+    }
 
-        lab.world.each<ModelRenderer>([&](Entity, ModelRenderer& renderer) {
-            for (const RenderPart& part : renderer.parts) {
-                if (isTransparent(part.material) && part.material.thickness == 0.0f && part.material.roughness < frostedRoughness) {
-                    ++panes;
-                    assert(part.material.transmission == 1.0f);
-                    assert(renderer.isStatic);
-                }
-            }
-        });
+    /*
+    * A green glass bottle standing on the pen table, for glass's coloured shadows (render/gpu/transparency.h) beside the
+    * pens': a surface of revolution (Mesh::lathe) from its profile, standing on the top inside its edges and clear of
+    * every pen, about a beer bottle's size; thin green glass, both walls drawn (so light through it is tinted twice, as
+    * by a real bottle's near and far walls), smooth enough not to count as frosted, so it blends rather than refracts.
+    */
+    void testTheGlassBottle() {
+        const std::vector<Vec2> profile = labBottleProfile();
+        float widest = 0.0f;
 
-        assert(panes == 1);
+        for (std::size_t point = 0; point < profile.size(); ++point) {
+            widest = std::max(widest, profile[point].x);
+            assert(point == 0 || profile[point].y > profile[point - 1].y);
+        }
+
+        assert(near(profile.front().y, 0.0f, 1e-6f));
+        assert(profile.back().y > 0.2f && profile.back().y < 0.3f && widest > 0.025f && widest < 0.04f);
+
+        const Vec3 base = labBottleBase;
+        assert(near(base.y, labTableHeight, 1e-6f));
+        assert(base.x - widest > labTableX - labTableHalfLength && base.x + widest < labTableX + labTableHalfLength);
+        assert(base.z - widest > labTableZ - labTableHalfDepth && base.z + widest < labTableZ + labTableHalfDepth);
+
+        const LightLabLayout layout = buildLightLabLayout();
+        const Aabb bottle{Vec3{base.x - widest, base.y, base.z - widest}, Vec3{base.x + widest, base.y + profile.back().y, base.z + widest}};
+
+        for (std::size_t pen = 5; pen < layout.table.size(); ++pen) {
+            assert(!overlaps(grown(bottle, 0.02f), layout.table[pen].bounds()));
+        }
+
+        Lab lab;
+        const ModelRenderer& renderer = lab.world.get<ModelRenderer>(lab.game.getBottle());
+        assert(renderer.parts.size() == 1 && renderer.isStatic);
+        const Material& glass = renderer.parts.front().material;
+        assert(isTransparent(glass) && glass.transmission == 1.0f && glass.doubleSided && glass.thickness == 0.0f);
+        assert(glass.roughness < frostedRoughness);
+        assert(glass.colour.g > glass.colour.r + 40 && glass.colour.g > glass.colour.b + 40);
     }
 
     /*
@@ -1316,6 +1346,7 @@ void testLightLab() {
     testTowersDoubleAndFanOut();
     testFence();
     testThePenTable();
+    testTheGlassBottle();
     testChainLinkPattern();
     testTheChainLinkFence();
     testTheWindowGlass();

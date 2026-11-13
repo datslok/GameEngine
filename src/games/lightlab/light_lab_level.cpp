@@ -329,6 +329,13 @@ ImageLevel chainLinkImage() {
     return image;
 }
 
+std::vector<Vec2> labBottleProfile() {
+    return {
+        {0.029f, 0.0f},   {0.032f, 0.004f}, {0.032f, 0.15f},  {0.030f, 0.165f}, {0.024f, 0.18f},  {0.017f, 0.195f},
+        {0.0135f, 0.21f}, {0.013f, 0.235f}, {0.015f, 0.238f}, {0.015f, 0.247f}, {0.012f, 0.25f},
+    };
+}
+
 /*
 * Each cell takes a colour of the palette by its place, so no two neighbours along a row or a column match (the row's
 * step through the palette is not a multiple of its length). The lead is a band of labStainedGlassLead texels centred on

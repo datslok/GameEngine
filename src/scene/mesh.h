@@ -49,6 +49,15 @@ struct Mesh {
     static Mesh sphere(int segments = 32, int rings = 16);
 
     /*
+    * A surface of revolution (bottles, glasses, vases, posts): a profile of (radius, height) points from bottom to top
+    * spun round the y axis in segments, closed by flat caps where its ends are off the axis. Vertex ring * segments +
+    * segment, at the angle 2 pi segment / segments from +z towards +x, then the bottom cap's centre and the top's. Smooth
+    * normals along the profile (each point's the mean of its two bands'), flat on the caps; u around, v up the height.
+    * Throws std::invalid_argument for fewer than 2 points or 3 segments, or a negative radius.
+    */
+    static Mesh lathe(const std::vector<Vec2>& profile, int segments = 32);
+
+    /*
     * A flat sheet of columns x rows squares, width by height, centred on the origin and facing +z, two triangles a
     * square: a cloth's rest shape. Vertex row * (columns + 1) + column, rows counted up from the bottom, UV (0, 0) at
     * the bottom-left and (1, 1) at the top-right. Throws std::invalid_argument for no squares or a size that is not

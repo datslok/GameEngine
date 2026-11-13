@@ -275,6 +275,9 @@ public:
 
     // The sunlit room's window pane: its ModelRenderer's one part, clear or stained glass.
     Entity getWindowPane() const;
+
+    // The green glass bottle on the pen table: one part, the lathe-turned bottle.
+    Entity getBottle() const;
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -353,6 +356,8 @@ private:
     Entity windowPane;
     Material clearGlass;
     Material stainedGlass;
+
+    Entity bottle;
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;

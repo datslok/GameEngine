@@ -36,7 +36,8 @@ enum class LabSurface {
     ChainLink, // the fence's wire mesh: galvanised steel
     WindowGlass, // the sunlit room's window pane: clear glass
     SolidGlass, // the reflection corner's glass ball: thick glass, bending light
-    FrostedGlass // the frosted panel in front of the chrome ball: rough thin glass
+    FrostedGlass, // the frosted panel in front of the chrome ball: rough thin glass
+    BottleGlass // the bottle on the pen table: thin green glass, both walls drawn
 };
 
 struct LabBlock {
@@ -91,6 +92,14 @@ inline constexpr float labTableLegInset = 0.05f;     // each leg's centre in fro
 inline constexpr float labPenHalfWidth = 0.005f;
 inline constexpr float labPencilHalfWidth = 0.0035f;
 inline constexpr float labPenHalfLength = 0.07f;
+
+// A green glass bottle standing on the pen table's east half, its base's middle here: its coloured shadow beside the
+// pens' (render/gpu/transparency.h).
+inline const Vec3 labBottleBase{labTableX + 0.18f, labTableHeight, labTableZ - 0.12f};
+
+// Its profile, (radius, height) from the base up, in metres: a 25 cm bottle, 6.4 cm across, its shoulder narrowing to
+// a neck with a lip (spun round by Mesh::lathe).
+std::vector<Vec2> labBottleProfile();
 
 /*
 * The chain-link along the fence: one panel through the posts from the ground to their tops, a diamond wire mesh drawn as
