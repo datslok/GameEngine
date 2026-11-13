@@ -101,9 +101,10 @@ struct AmbientOcclusionSettings {
     float historyDepthShare = 0.05f;
 
     // The denoiser while gathering or without anti-aliasing: passes of the edge-aware a-trous filter (each twice as wide,
-    // 4 reaching about 30 pixels each way; 0 off), and how far a tap may lie off the pixel's surface plane, as a share of
-    // its view depth, before it counts for little (a tap off by this much weighs 1/e).
-    int denoisePasses = 4;
+    // 2 reaching about 6 pixels each way, 4 about 30; 0 off), and how far a tap may lie off the pixel's surface plane, as
+    // a share of its view depth, before it counts for little (a tap off by this much weighs 1/e). 2 by default: the user
+    // saw no difference from 4 after the history's 16 frames, for about half the denoiser's cost.
+    int denoisePasses = 2;
     float denoisePlaneShare = 0.02f;
 
     // Anti-lag: a pixel's history restarts when its fast average (3 frames) strays from its slow one by more than this
