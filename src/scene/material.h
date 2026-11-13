@@ -4,7 +4,9 @@
 #include "math/vec3.h"
 #include "scene/asset_handles.h"
 
+#include <array>
 #include <limits>
+#include <vector>
 
 /*
 * How a surface's alpha is used (glTF's alphaMode): ignored (Opaque), a cut-out (Mask) whose texels under the cutoff are
@@ -103,6 +105,17 @@ struct Material {
     // 3% of it deep). No handle means a flat surface. Ignored on cut-outs and transparent materials.
     TextureHandle heightTexture;
     float heightScale = 0.03f;
+
+    // A blended ground (render/gpu/ground_layers.h): up to four layer materials (each an ordinary material: grass, moss,
+    // mud, rock), how much of each covers each place given by groundWeights (a linear RGBA texture over the mesh's texture
+    // coordinates, one channel a layer), each layer's textures repeating groundRepeats times across those coordinates, and
+    // where layers meet the one whose height map stands higher showing, within groundBlendDepth (0..1 of the height maps'
+    // range; deeper is a softer cross-fade). A layer's normal map is read at the ground's normalScale. No layers: an
+    // ordinary material. Layers may not be layered themselves.
+    std::vector<Material> groundLayers;
+    std::array<float, 4> groundRepeats{1.0f, 1.0f, 1.0f, 1.0f};
+    TextureHandle groundWeights;
+    float groundBlendDepth = 0.2f;
 };
 
 inline bool isCutOut(const Material& material) {

@@ -45,6 +45,7 @@ void testBrdf();
 void testParallax();
 void testHeightMap();
 void testTypicalGpu();
+void testGroundLayers();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
@@ -272,6 +273,7 @@ int main(int argumentCount, char** arguments) {
     testParallax();
     testHeightMap();
     testTypicalGpu();
+    testGroundLayers();
     testDepthPrepass();
     testTextureEncoding();
     testCoverageMips();

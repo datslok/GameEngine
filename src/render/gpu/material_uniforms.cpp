@@ -33,8 +33,8 @@ GpuMaterial packMaterial(const Material& material) {
 
     data.surface[0] = std::clamp(material.metallic, 0.0f, 1.0f);
     data.surface[1] = std::clamp(material.roughness, 0.0f, 1.0f);
-    data.surface[2] = material.normalTexture.isValid() ? material.normalScale : 0.0f;
-    data.surface[3] = material.occlusionTexture.isValid() ? std::clamp(material.occlusionStrength, 0.0f, 1.0f) : 0.0f;
+    data.surface[2] = material.normalTexture.isValid() || !material.groundLayers.empty() ? material.normalScale : 0.0f;
+    data.surface[3] = material.occlusionTexture.isValid() || !material.groundLayers.empty() ? std::clamp(material.occlusionStrength, 0.0f, 1.0f) : 0.0f;
 
     data.emissive[0] = material.emissive.x;
     data.emissive[1] = material.emissive.y;
@@ -72,6 +72,16 @@ GpuMaterial packMaterial(const Material& material) {
     data.coatAndHeightTextures[1] = bindlessTextureSlot(material.clearCoatRoughnessTexture);
     data.coatAndHeightTextures[2] = bindlessTextureSlot(material.clearCoatNormalTexture);
     data.coatAndHeightTextures[3] = bindlessTextureSlot(material.heightTexture);
+
+    // A blended ground's repeats, weights and blend depth; its layers' places are the material table's to fill.
+    if (!material.groundLayers.empty()) {
+        for (std::size_t layer = 0; layer < 4; ++layer) {
+            data.groundRepeats[layer] = material.groundRepeats[layer];
+        }
+
+        data.groundWeights[0] = bindlessTextureSlot(material.groundWeights);
+        data.groundBlend[0] = std::max(material.groundBlendDepth, 0.0f);
+    }
 
     return data;
 }

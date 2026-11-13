@@ -78,3 +78,5 @@ __pycache__/
 
 # Settings saved by the debug UI (F5)
 settings.cfg
+# The forest game's CC0 models and textures, fetched by tools/fetch_forest_assets.py (tools/forest_assets.json).
+/assets/forest/

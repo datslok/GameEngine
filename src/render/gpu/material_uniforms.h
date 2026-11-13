@@ -34,9 +34,16 @@ struct GpuMaterial {
     // depth for parallax (render/gpu/parallax.h; texture units, 0 for none, and always on cut-outs and transparent materials)
     float coatAndHeight[4];
     std::uint32_t coatAndHeightTextures[4]; // slots in the texture array: x coat amount, y coat roughness, z coat normal map, w height map
+    // A blended ground (render/gpu/ground_layers.h; MaterialTable::add fills the layers): each layer's place in the frame's
+    // material table plus one (0 none), each layer's repeats over the texture coordinates, x the weights texture's slot (0
+    // for a material without layers), x the blend depth
+    std::uint32_t groundLayers[4];
+    float groundRepeats[4];
+    std::uint32_t groundWeights[4];
+    float groundBlend[4];
 };
 
-static_assert(sizeof(GpuMaterial) == 144, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 208, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

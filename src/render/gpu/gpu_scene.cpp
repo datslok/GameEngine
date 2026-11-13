@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 
 /*
@@ -95,7 +96,23 @@ GpuFrameData makeFrameData(const GpuLights& lights, const Mat4& relativeViewProj
 * block. Two materials pack the same exactly when they shade the same.
 */
 std::uint32_t MaterialTable::add(const Material& material) {
-    const GpuMaterial packed = packMaterial(material);
+    GpuMaterial packed = packMaterial(material);
+
+    // A blended ground's layers are ordinary materials, added first (shared with any draw using the same), and named by
+    // their places plus one.
+    if (!material.groundLayers.empty()) {
+        if (material.groundLayers.size() > 4 || !material.groundWeights.isValid()) {
+            throw std::invalid_argument("A blended ground takes one to four layers and a weights texture");
+        }
+
+        for (std::size_t layer = 0; layer < material.groundLayers.size(); ++layer) {
+            if (!material.groundLayers[layer].groundLayers.empty()) {
+                throw std::invalid_argument("A blended ground's layers may not be layered themselves");
+            }
+
+            packed.groundLayers[layer] = add(material.groundLayers[layer]) + 1;
+        }
+    }
 
     Fnv1aHash hash;
     hash.addBytes(&packed, sizeof(packed));

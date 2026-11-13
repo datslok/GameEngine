@@ -20,7 +20,7 @@ Finished items are kept to one line, with their branch names so they can be foun
   - Cloth, rigid bodies, ragdolls and global illumination are built by hand: they are the point.
 - Measure before optimising, and keep graphics features that cost a lot (ray tracing, GI quality) as settings that scale down to typical GPUs.
 
-**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16 and 17 (rendering), then 7 onwards, as the phases sit in this file.
+**Order of work:** phase numbers are names, kept so the docs' references hold. After phase 6 the order is 16, 18 (a forest showcase) and 17 (rendering), then 7 onwards, as the phases sit in this file.
 
 ---
 
@@ -315,7 +315,26 @@ Everything a GPU without ray tracing needs to look finished, before any more ray
 
 ---
 
-## Phase 17: Ray tracing and path tracing ← current
+## Phase 18: A forest showcase ← current
+
+A fourth game (`--game forest`) showing everything phases 6 and 16 built in one lush scene: a damp, overgrown forest with mist in its valleys, grass meadows where the canopy opens, and a mechanical sci-fi structure in a clearing, half reclaimed by the green. Added Nov 13 2026 at the user's request, before phase 17. Realistic, not stylised: scanned CC0 plants, rocks and textures, judged with the typical GPU setup on.
+
+**Items**
+
+- [ ] Assets: a survey of CC0 sources (Poly Haven, ambientCG) with the user's picks, fetched by `tools/fetch_forest_assets.py` into git-ignored `assets/forest` (checked against SHA-256s in `tools/forest_assets.json`, about 160 MB at 1K), stand-ins when missing so tests and fresh clones work
+- [ ] Ground blending: up to four layer materials (grass, moss, leaf litter, mud, rock) painted by a weights texture, sharpened by their height maps where they meet
+- [ ] The game: noise terrain with a clearing and a path, walkable, the ground blended by slope, height and place; a sun near the equator; humid valley mist
+- [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), the scanned understorey, logs and rocks, scattered by a seeded Poisson disk
+- [ ] Grass meadows: blades merged into one mesh per 8 x 8 m patch, thinning with distance
+- [ ] The sci-fi structure: parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, a turning ring, a searchlight sweeping shafts through the mist
+- [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured
+- [ ] Golden views, tests, packaging with the downloaded assets, docs
+
+**Milestone:** with the typical GPU setup, walking from a meadow through the forest to the structure looks lush and alive (wind in the grass and leaves, light through the canopy, mist in the hollows) by day and at dusk, at a frame rate a mid-range GPU holds.
+
+---
+
+## Phase 17: Ray tracing and path tracing
 
 The top of the quality ladder, once the path without ray tracing is finished. Always optional, off by default, for GPUs with ray queries. DDGI comes off hold here if it is still wanted.
 

@@ -12,6 +12,7 @@
 #include "brdf.glsl"
 #include "normal_mapping.glsl"
 #include "parallax.glsl"
+#include "ground_layers.glsl"
 #include "lighting.glsl"
 #include "mirrored_light.glsl"
 #include "soft_shadow.glsl"
@@ -851,6 +852,54 @@ void main() {
     // without one), read here for the same reason.
     vec3 emissive = surfaceTexture(material.textureSlots.w, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).rgb * material.emissive.rgb;
     float occlusionTexel = surfaceTexture(material.extra.x, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).r;
+
+    /*
+    * A blended ground (render/gpu/ground_layers.h): in place of its own textures, its layers' (each an ordinary material
+    * in the table), each repeating at its own scale, blended by the painted weights sharpened by their height maps
+    * (groundBlendWeights). Read only on such a material, which is the same for a primitive's whole 2 x 2 quads, so the
+    * reads keep their derivatives. The normal maps' texels are blended before decoding, at the ground's own scale.
+    */
+    if (material.groundLayers.x != 0u) {
+        vec4 painted = texture(textures[nonuniformEXT(material.groundWeights.x)], textureUv, mipBias);
+        vec4 heights = vec4(0.0);
+        vec4 layerColour[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
+        vec4 layerSurface[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
+        vec3 layerNormals[4] = vec3[4](vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0));
+
+        for (int layer = 0; layer < 4; ++layer) {
+            uint index = material.groundLayers[layer];
+
+            if (index == 0u) {
+                painted[layer] = 0.0;
+                continue;
+            }
+
+            MaterialData ground = materials[index - 1u];
+            vec2 layerUv = textureUv * material.groundRepeats[layer];
+            vec3 layerPacked = texture(textures[nonuniformEXT(ground.textureSlots.y)], layerUv, mipBias).rgb;
+            layerColour[layer] = texture(textures[nonuniformEXT(ground.textureSlots.x)], layerUv, mipBias) * ground.baseColour;
+            layerSurface[layer] = vec4(clamp(ground.surfaceParameters.x * layerPacked.b, 0.0, 1.0),
+                                       clamp(ground.surfaceParameters.y * layerPacked.g, BRDF_SMALLEST_ROUGHNESS, 1.0),
+                                       texture(textures[nonuniformEXT(ground.extra.x)], layerUv, mipBias).r, 0.0);
+            heights[layer] = texture(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], layerUv, mipBias).r;
+            layerNormals[layer] = texture(textures[nonuniformEXT(ground.textureSlots.z)], layerUv, mipBias).rgb;
+        }
+
+        vec4 shares = groundBlendWeights(painted, heights, material.groundBlend.x);
+        albedo = vec4(0.0);
+        vec4 blendedSurface = vec4(0.0);
+        normalTexel = vec3(0.0);
+
+        for (int layer = 0; layer < 4; ++layer) {
+            albedo += shares[layer] * layerColour[layer];
+            blendedSurface += shares[layer] * layerSurface[layer];
+            normalTexel += shares[layer] * layerNormals[layer];
+        }
+
+        metallic = blendedSurface.x;
+        roughness = max(blendedSurface.y, BRDF_SMALLEST_ROUGHNESS);
+        occlusionTexel = blendedSurface.z;
+    }
 #ifdef TRANSPARENT
     // Glass's transmission, its texture's red channel times the factor.
     float transmission = material.transmission.x * texture(textures[nonuniformEXT(material.extra.z)], textureUv, mipBias).r;
