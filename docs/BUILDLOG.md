@@ -1503,6 +1503,15 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 
 - **Phase 16 closed** (Nov 13 2026, `close-phase-16`): the user checked the milestone with the typical GPU setup on, the light lab and the demo by day and at night: "it all looks great". The leftovers moved on: the sky grid's lamps (stage 3), anisotropy and skin to phase 14, sheen to phase 10 (garments), decals to phase 12 (the FPS). **The fog's history in seconds was dropped**, after working it through with the user: a fixed share a frame averages the same 10 frames at any rate, so its noise is steady and only its lag grows at low frame rates (0.32 s at 30 fps, 0.08 at 120); a time constant in seconds keeps the lag but averages only about 3 frames at 30 fps, swapping a slight trail for shimmer, the worse of the two. The engine guide gained phase 16's section (`docs/ENGINE_GUIDE.md`, Beautiful without ray tracing). Phase 17 (ray tracing and path tracing) is current.
 
+## Phase 18: A forest showcase (Nov 13 2026 onwards)
+
+- `forest-assets` (Nov 13 2026): the forest's scanned assets. The user asked for something lush, realistic and free (CC0), so a survey of Poly Haven and ambientCG came first, as a shortlist page; the user took the recommended set ("sounds good").
+  - **What:** 30 assets, 142 files, 157 MB at 1K. 17 Poly Haven models (ferns, plants, shrubs, nettles, a stump, dead trunks, a root, mossy rocks, boulders), 8 Poly Haven textures (forest floor, muddy leaves, mossy rock, two barks, three sci-fi metals), and 5 ambientCG sets (grass and moss grounds, three leaf and foliage atlases).
+  - **No scanned trees:** Poly Haven's are 2 to 17 million triangles each, far too heavy for a forest of them, so the engine will grow its own: generated trunks and branches in scanned bark, with ambientCG's leaf atlases on cut-out cards.
+  - **Kept out of git:** `tools/fetch_forest_assets.py` (standard library only) downloads them into git-ignored `assets/forest`, Poly Haven's through its API and ambientCG's as zips cached in `build/downloads/forest`. Each file is checked against the SHA-256 recorded in `tools/forest_assets.json` (`--record` writes them), written under a temporary name first, and fetched only when missing.
+  - **1K only:** the engine has no texture compression yet, so larger textures would cost video memory for little gain at a walking distance.
+  - **Checked:** a second run found all 30 present and matching their checksums.
+
 ## Tools outside the phases
 
 - `loading-screen` (Nov 11 2026): pipelines compiled on every core, with a loading screen. The user: "the game takes a very long time to respond after a fresh build", then "can we have a screen that says building shaders and a loading bar or something like that, rather than it just not responding for a min".

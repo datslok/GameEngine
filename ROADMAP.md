@@ -321,9 +321,9 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built in one 
 
 **Items**
 
-- [ ] Assets: a survey of CC0 sources (Poly Haven, ambientCG) with the user's picks, fetched by `tools/fetch_forest_assets.py` into git-ignored `assets/forest` (checked against SHA-256s in `tools/forest_assets.json`, about 160 MB at 1K), stand-ins when missing so tests and fresh clones work
+- [x] Assets: 30 CC0 assets fetched by `tools/fetch_forest_assets.py` (`forest-assets`)
 - [ ] Ground blending: up to four layer materials (grass, moss, leaf litter, mud, rock) painted by a weights texture, sharpened by their height maps where they meet
-- [ ] The game: noise terrain with a clearing and a path, walkable, the ground blended by slope, height and place; a sun near the equator; humid valley mist
+- [ ] The game: noise terrain with a clearing and a path, walkable, the ground blended by slope, height and place; a sun near the equator; humid valley mist; plain stand-ins where `assets/forest` is missing, so tests and fresh clones work
 - [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), the scanned understorey, logs and rocks, scattered by a seeded Poisson disk
 - [ ] Grass meadows: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The sci-fi structure: parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, a turning ring, a searchlight sweeping shafts through the mist
