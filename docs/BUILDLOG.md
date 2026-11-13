@@ -1426,6 +1426,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 
 - `ao-timings` (Nov 13 2026): ambient occlusion took 6 ms of the user's 14 ms frame at about 1440p, 3-5 times typical GTAO, with one line in F4 for four kinds of work. **Explained, then the user chose** splitting `occlude` into three calls the renderer times apart (A) over a stage hook inside it (B), matching how every other pass is timed.
   - **How:** four `GpuPass`es in its place: PYRAMID (last frame's picture's levels, only while AO gathers light), AO (the pass), AOHISTORY (the accumulation), AODENOISE (the denoiser). `VulkanAmbientOcclusion` keeps what `occlude` worked out (`FrameSteps`) for `accumulateHistory` and `denoise`, always called in that order; a step with nothing to do records nothing and reads 0, so F4 hides it.
+  - **Then the readout overflowed** (the user: the lines no longer fit the screen): the GPU's readout is now three lines, the scene's setup up to the depth prepass, the screen's lighting (AO's parts to the main pass, `firstLightingPass`) and the picture; the cloth's and the games' lines move down one.
   - **Checked:** the tests (release, tests first: the passes' order and names, and four fake stamps' parts adding up to their span); the release and debug games build without warnings. **Not run:** `make gputest` and the golden views (only on request).
 
 ## Tools outside the phases

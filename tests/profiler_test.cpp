@@ -196,8 +196,9 @@ void testProfiler() {
     }
 
     /*
-    * The GPU's readout, two lines in the order the GPU runs its passes, idle passes left out: the total and the scene
-    * (up to the main pass), then the picture after it.
+    * The GPU's readout, three lines in the order the GPU runs its passes, idle passes left out: the total and the
+    * scene's setup (up to the depth prepass), the screen's lighting from the prepass's depth (ambient occlusion's parts
+    * to the main pass), then the picture after it.
     */
     {
         Profiler profiler = makeGpuProfiler();
@@ -205,6 +206,9 @@ void testProfiler() {
         timings.valid = true;
         timings.totalSeconds = 0.010;
         timings.passSeconds[static_cast<std::size_t>(GpuPass::Shadows)] = 0.001;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::DepthPrepass)] = 0.0001;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::ColourPyramid)] = 0.0002;
+        timings.passSeconds[static_cast<std::size_t>(GpuPass::AoDenoise)] = 0.0004;
         timings.passSeconds[static_cast<std::size_t>(GpuPass::Main)] = 0.002;
         timings.passSeconds[static_cast<std::size_t>(GpuPass::AntiAliasing)] = 0.003;
         timings.passSeconds[static_cast<std::size_t>(GpuPass::ToneMap)] = 0.0005;
@@ -212,9 +216,10 @@ void testProfiler() {
         recordGpuTimings(profiler, timings);
         profiler.update(0.5);
 
-        const std::array<std::string, 2> lines = gpuProfileLines(profiler);
-        assert(lines[0] == "GPU 10.00  SHADOW 1.00  MAIN 2.00  MS");
-        assert(lines[1] == "AA 3.00  TONE 0.50  MS");
+        const std::array<std::string, 3> lines = gpuProfileLines(profiler);
+        assert(lines[0] == "GPU 10.00  SHADOW 1.00  PREPASS 0.10  MS");
+        assert(lines[1] == "PYRAMID 0.20  AODENOISE 0.40  MAIN 2.00  MS");
+        assert(lines[2] == "AA 3.00  TONE 0.50  MS");
     }
 
     // A window of no length would publish every frame and one of negative length makes no sense.

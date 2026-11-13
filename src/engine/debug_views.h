@@ -47,15 +47,16 @@ constexpr int cameraReadoutLine = 7;
 constexpr int engineProfileReadoutLine = 8;
 
 // The readout lines for the GPU's timings per pass (a profiler from makeGpuProfiler, gpuProfileLines): the total and
-// the scene's passes, then the picture's.
+// the scene's setup, then the screen's lighting, then the picture's.
 constexpr int gpuProfileReadoutLine = 9;
-constexpr int gpuPictureReadoutLine = 10;
+constexpr int gpuLightingReadoutLine = 10;
+constexpr int gpuPictureReadoutLine = 11;
 
 // The readout line for the cloth's GPU time by kind of pass (a profiler from makeClothProfiler), while cloth runs there.
-constexpr int clothProfileReadoutLine = 11;
+constexpr int clothProfileReadoutLine = 12;
 
-// The engine's readout uses lines 0 to 11; a game's own lines start here.
-constexpr int firstGameReadoutLine = 12;
+// The engine's readout uses lines 0 to 12; a game's own lines start here.
+constexpr int firstGameReadoutLine = 13;
 
 // The light probes' line: how many, traced (awake ones among them), asleep, off and moved by relocation, or "PROBES -"
 // without probes.
@@ -84,17 +85,19 @@ Profiler makeGpuProfiler();
 // not measured does not count as one that took no time.
 void recordGpuTimings(Profiler& profiler, const GpuTimings& timings);
 
-// The first pass on the GPU readout's second line: the picture's passes, after the main pass drew the scene.
+// The first passes on the GPU readout's second and third lines: the screen's lighting from the prepass's depth
+// (ambient occlusion's parts, contact shadows, mirrored lights, the main pass), then the picture's passes after it.
+inline constexpr GpuPass firstLightingPass = GpuPass::ColourPyramid;
 inline constexpr GpuPass firstPicturePass = GpuPass::ProbeBalls;
 
 /*
-* A profiler from makeGpuProfiler as the readout's two lines (one did not fit a window), in milliseconds to two
-* decimals with the passes that took no time left out: the total and the scene's passes up to the main pass, then the
-* picture's after it.
+* A profiler from makeGpuProfiler as the readout's three lines (fewer did not fit a window), in milliseconds to two
+* decimals with the passes that took no time left out: the total and the scene's setup up to the depth prepass, the
+* screen's lighting up to the main pass, then the picture's after it.
 */
-std::array<std::string, 2> gpuProfileLines(const Profiler& profiler);
+std::array<std::string, 3> gpuProfileLines(const Profiler& profiler);
 
-// gpuProfileLines drawn on gpuProfileReadoutLine and gpuPictureReadoutLine.
+// gpuProfileLines drawn on gpuProfileReadoutLine, gpuLightingReadoutLine and gpuPictureReadoutLine.
 void drawGpuProfile(const Profiler& profiler, DebugDraw& debug);
 
 // A profiler for the cloth's GPU time: "CLOTH" (all of it) as section 0, then one section per kind in ClothPass order.

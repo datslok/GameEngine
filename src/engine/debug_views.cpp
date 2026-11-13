@@ -189,16 +189,20 @@ void recordGpuTimings(Profiler& profiler, const GpuTimings& timings) {
     }
 }
 
-// Section numbers are one past their passes (section 0 is the total), so the picture's line starts one past its pass.
-std::array<std::string, 2> gpuProfileLines(const Profiler& profiler) {
-    const int split = static_cast<int>(firstPicturePass) + 1;
-    return {profileText(profiler, 2, false, true, 0, split), profileText(profiler, 2, false, true, split)};
+// Section numbers are one past their passes (section 0 is the total), so each later line starts one past its pass.
+std::array<std::string, 3> gpuProfileLines(const Profiler& profiler) {
+    const int lighting = static_cast<int>(firstLightingPass) + 1;
+    const int picture = static_cast<int>(firstPicturePass) + 1;
+    return {profileText(profiler, 2, false, true, 0, lighting), profileText(profiler, 2, false, true, lighting, picture),
+            profileText(profiler, 2, false, true, picture)};
 }
 
 void drawGpuProfile(const Profiler& profiler, DebugDraw& debug) {
-    const std::array<std::string, 2> lines = gpuProfileLines(profiler);
-    debugText(debug, debugReadoutLine(gpuProfileReadoutLine), debugReadoutTextHeight, lines[0], profileDebugColour);
-    debugText(debug, debugReadoutLine(gpuPictureReadoutLine), debugReadoutTextHeight, lines[1], profileDebugColour);
+    const std::array<std::string, 3> lines = gpuProfileLines(profiler);
+    const std::array<int, 3> readoutLines{gpuProfileReadoutLine, gpuLightingReadoutLine, gpuPictureReadoutLine};
+    for (std::size_t line = 0; line < lines.size(); ++line) {
+        debugText(debug, debugReadoutLine(readoutLines[line]), debugReadoutTextHeight, lines[line], profileDebugColour);
+    }
 }
 
 Profiler makeClothProfiler() {
