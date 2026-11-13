@@ -5,6 +5,7 @@
 #include "math/vec3.h"
 #include "render/gpu/cascades.h"
 #include "render/gpu/light_uniforms.h"
+#include "render/gpu/planar_reflection.h"
 #include "render/gpu/shadow_atlas.h"
 #include "scene/camera.h"
 #include "scene/frame_description.h"
@@ -180,12 +181,17 @@ static_assert(sizeof(ShadowTileData) == 112, "ShadowTileData must match the shad
 // reach is the sphere its light lights (centre at the light, the range as radius; negative for a directional light,
 // which reaches everywhere): nothing wholly outside it can block the light where it shines, so the shadow pass skips
 // those casters (a soft shadow's wide filter could reach them only where the light has faded to almost nothing).
+//
+// clipPlane (world space) cuts away what lies behind it as the tile is drawn: an image light's mirror (its window's
+// plane, lifted as planarClipPlane lifts a mirror's), since from the image the first thing seen is the wall behind the
+// glass and the mirror itself; noClipPlane for every other tile.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;
     std::uint32_t y = 0;
     std::uint32_t size = standardShadowTileSize;
     BoundingSphere reach;
+    Vec4 clipPlane = noClipPlane();
 };
 
 // What the shadow pass draws (one tile per view, in tile order) and what the shader reads: each light's shadow, one record

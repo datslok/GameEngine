@@ -7,6 +7,12 @@
 // The most pairs of a light and a shiny surface one frame lights through: the pass record holds this many.
 #define MIRROR_MAX_PAIRS 16
 
+// The most image lights a frame adds without ray tracing (chooseImageLights): each is a spotlight seat and a shadow tile.
+#define MIRROR_IMAGE_LIGHTS 4
+
+// How far off the mirror (metres) the fog reads an image light's source's shadow at the point of reflection.
+#define MIRROR_IMAGE_SHADOW_LIFT 0.02
+
 // The search for the point of reflection: at most this many Newton steps after the first (flat mirror) step, each
 // halved at most this many times while its point falls off the surface; done once the half vector's tilt off the
 // surface's normal (the constraint's length, the sum of two unit vectors' tangential parts) is below the tolerance.

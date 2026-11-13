@@ -938,6 +938,19 @@ namespace {
 
         lab.game.onInput(lab.world, pressF);
         assert(!lab.world.has<SpotLight>(flashlight));
+        assert(!lab.game.getFlashlightSettings().on);
+
+        // Its setting (and so the set command) switches it too, for scripts and AIs; F flips the setting.
+        EngineSettings engine;
+        CommandRegistry registry;
+        const SettingsWalk walk = engineAndGameSettings(engine, lab.game);
+        addSettingsCommands(registry, walk, captureSettings(walk));
+        assert(registry.execute("set lightLab.flashlight.on true").ok);
+        lab.game.onUpdate(lab.world, idle, 1.0f / 60.0f, 1.0f);
+        assert(lab.world.has<SpotLight>(flashlight));
+        lab.game.onInput(lab.world, pressF);
+        assert(!lab.world.has<SpotLight>(flashlight) && !lab.game.getFlashlightSettings().on);
+        assert(registry.execute("get lightLab.flashlight.on").text.find("false") != std::string::npos);
     }
 
     /*

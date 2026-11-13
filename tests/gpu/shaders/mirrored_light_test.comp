@@ -60,5 +60,10 @@ void main() {
         testOutput(3, vec4(gaussianSamplePoint(2, 4, noise.z, noise.w), gaussianSamplePoint(3, 4, noise.z, noise.w)));
         testOutput(4, vec4(roughMirroredIrradiance(intensity.rgb, vec3(0.9, 0.8, 0.7), receiver.xyz, light.xyz, surface, weight, intensity.w),
                            usesMirrorFootprint(normal.w) ? 1.0 : 0.0));
+    } else if (function == GPU_TEST_MIRROR_WINDOW) {
+        // Inputs: (plane normal, offset), (centre), (edge u, half length), (edge v, half length), (image), (point).
+        vec3 crossing;
+        bool through = throughMirrorWindow(testInput(0), testInput(1).xyz, testInput(2), testInput(3), testInput(4).xyz, testInput(5).xyz, crossing);
+        testOutput(0, vec4(crossing, through ? 1.0 : 0.0));
     }
 }

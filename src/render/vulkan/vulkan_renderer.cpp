@@ -1320,6 +1320,18 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                      : std::nullopt;
     const std::optional<MirrorPlane> mirror = lastMirror;
 
+    // Without the ray-traced search for light off mirrors, each light in front of a flat smooth metal face gets its image
+    // behind the glass (render/gpu/mirrored_light.h): one more spotlight, shining out through the face, after the frame's
+    // own. Its source's slot is the one packLighting gives it, since the drawable lights keep their order.
+    validateMirroredLights(settings.mirroredLights);
+    const bool searchesMirrors = tracesRays(settings, rayTracing != nullptr) && settings.mirroredLights.enabled && settings.depthPrepass;
+
+    if (!searchesMirrors) {
+        const std::vector<PlacedSpotLight> images = chooseImageLights(selectDrawableLights(prioritized.lighting), description.draws, settings.mirroredLights);
+        prioritized.lighting.spotLights.insert(prioritized.lighting.spotLights.end(), images.begin(), images.end());
+        stats.imageLights = images.size();
+    }
+
     GpuLights lights = packLighting(prioritized.lighting, cameraOrigin);
     ensureShadowAtlas(shadowAtlasSizeFor(settings.shadows));
     updateSunShadowFit(settings.shadows, camera);
@@ -1446,8 +1458,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // Lights reflected off mirrors (render/gpu/mirrored_light.h): each fast light with each smooth shiny surface it
     // reaches, the light found by rays from what the depth prepass drew. Its images are made the first time (nothing
-    // reads them before), and remade with the frame's size after that.
-    validateMirroredLights(settings.mirroredLights);
+    // reads them before), and remade with the frame's size after that. (Its settings were checked with the image lights.)
     const std::optional<Mat4> inverseViewProjection = inverse(relativeViewProjection);
     std::vector<MirrorPair> mirrorPairs;
 
@@ -2212,7 +2223,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         drawFullScreenTriangle(commands);
 
         // The tile's view goes to the shadow pipelines too: they share the scene's layout, so the push constants carry over.
-        const GpuShadowView view = packShadowView(tile.matrix);
+        const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
         stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});

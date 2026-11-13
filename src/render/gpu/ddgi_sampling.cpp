@@ -264,8 +264,10 @@ ProbeHitLights probeHitLights(const GpuLights& lights, const Vec3& cameraOrigin,
         }
     }
 
+    // Never an image light (a light seen in a flat mirror): probe rays' shadow rays towards its image would cross the
+    // mirror, and the ray-traced search lights mirrors' light when rays run.
     for (std::size_t i = 0; i < lights.spots.size(); ++i) {
-        if (touches(lights.spots[i].positionRange)) {
+        if (lights.spots[i].windowSource == 0 && touches(lights.spots[i].positionRange)) {
             list(i, lights.fastSpots);
             ++listed.spots;
         }

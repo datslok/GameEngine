@@ -116,6 +116,17 @@ GpuLights packLighting(const FrameLighting& lighting, const Vec3& cameraPosition
         // The falloff divides by distance^2 + radius^2, so a radius that is not positive would allow a division by zero at the light.
         slot.sourceRadius = light.sourceRadius > 0.0f ? light.sourceRadius : 1.0f;
         data.fastSpots[i] = light.fast;
+
+        if (const std::optional<LightWindow>& window = selected.spotLights[i].window) {
+            writeVector(slot.windowPlane, window->normal, window->offset - window->normal.dot(cameraPosition));
+            const Vec3 centre = window->centre - cameraPosition;
+            slot.windowCentre[0] = centre.x;
+            slot.windowCentre[1] = centre.y;
+            slot.windowCentre[2] = centre.z;
+            slot.windowSource = window->sourceIsSpot ? window->sourceSlot + 1 : -(window->sourceSlot + 1);
+            writeVector(slot.windowAxisU, window->axisU, window->halfU);
+            writeVector(slot.windowAxisV, window->axisV, window->halfV);
+        }
     }
 
     data.counts[0] = static_cast<std::int32_t>(selected.directionalLights.size());

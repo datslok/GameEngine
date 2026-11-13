@@ -31,6 +31,13 @@ struct SpotLightData {
     int shadowTile;
     float shadowStrength;
     float emitterRadius;
+    // An image light's window (render/gpu/mirrored_light.h): its plane (xyz all zero for a light without one), middle,
+    // source (a spotlight's slot plus 1, a point light's as minus that) and edges with their half lengths in w.
+    vec4 windowPlane;
+    vec3 windowCentre;
+    int windowSource;
+    vec4 windowAxisU;
+    vec4 windowAxisV;
 };
 
 layout(std430, set = 1, binding = 3) readonly buffer DirectionalLights {

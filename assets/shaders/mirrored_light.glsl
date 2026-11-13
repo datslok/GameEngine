@@ -9,6 +9,23 @@
 #include "render/gpu/mirrored_light_shared.h"
 #include "lighting.glsl"
 
+// Whether the line from an image light to a point crosses its window (render/gpu/mirrored_light.h, LightWindow: plane
+// xyz normal and w offset, middle, edges' unit directions with half lengths in w), the image behind the plane and the
+// point in front; crossing gets the point of reflection.
+bool throughMirrorWindow(vec4 plane, vec3 centre, vec4 axisU, vec4 axisV, vec3 image, vec3 point, out vec3 crossing) {
+    float imageSide = dot(plane.xyz, image) - plane.w;
+    float pointSide = dot(plane.xyz, point) - plane.w;
+    crossing = image;
+
+    if (!(imageSide < 0.0 && pointSide > 0.0)) {
+        return false;
+    }
+
+    crossing = image + (point - image) * (imageSide / (imageSide - pointSide));
+    vec3 fromCentre = crossing - centre;
+    return abs(dot(fromCentre, axisU.xyz)) <= axisU.w && abs(dot(fromCentre, axisV.xyz)) <= axisV.w;
+}
+
 struct TangentFrame {
     vec3 normal;
     vec3 tangent;

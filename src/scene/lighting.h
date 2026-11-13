@@ -24,6 +24,24 @@ struct PlacedPointLight {
     float shadowFade = 1.0f;
 };
 
+/*
+* The window an image light shines through (render/gpu/mirrored_light.h, chooseImageLights): a flat mirror's face, a
+* rectangle in the world, its plane's normal out of the mirror and offset (normal . point on it), its middle and its two
+* edges' unit directions and half lengths; and the light it is the image of, by its kind and slot in the frame's lights,
+* whose own shadow at the mirror is the light's way there.
+*/
+struct LightWindow {
+    Vec3 normal;
+    float offset = 0.0f;
+    Vec3 centre;
+    Vec3 axisU;
+    float halfU = 0.0f;
+    Vec3 axisV;
+    float halfV = 0.0f;
+    bool sourceIsSpot = false;
+    int sourceSlot = 0;
+};
+
 // A spotlight together with where it is this frame, and whose it is.
 struct PlacedSpotLight {
     Vec3 position;
@@ -33,6 +51,10 @@ struct PlacedSpotLight {
     // Like PlacedPointLight's: how far into its seat and its shadow the light is during a handover.
     float fade = 1.0f;
     float shadowFade = 1.0f;
+
+    // An image light's window (none for every light a game places): the light reaches only what lies in front of the
+    // window, through it, and its shadow is drawn clipped at the window's plane.
+    std::optional<LightWindow> window = std::nullopt;
 };
 
 // Every light the renderer needs for one frame, with no GPU types.

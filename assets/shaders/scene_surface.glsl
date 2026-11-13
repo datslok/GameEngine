@@ -12,6 +12,7 @@
 #include "brdf.glsl"
 #include "normal_mapping.glsl"
 #include "lighting.glsl"
+#include "mirrored_light.glsl"
 #include "soft_shadow.glsl"
 #include "cascades.glsl"
 #include "clusters.glsl"
@@ -595,7 +596,48 @@ void addPointLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 d
     addLight(radiance, toLight, point, diffuse, specular);
 }
 
-// One spotlight's share at this pixel: as a point light, and nothing outside its cone.
+/*
+* An image light's source's shadow where its light meets the mirror (the light's way there): the source's own tile read
+* at the point of reflection, moved off the mirror towards the light by the tile's normal offset. 1 for a source without
+* a shadow.
+*/
+float imageSourceShadow(int source, vec3 crossing, vec3 mirrorNormal) {
+    if (source > 0) {
+        int slot = source - 1;
+        int tile = spots[slot].shadowTile;
+
+        if (tile < 0) {
+            return 1.0;
+        }
+
+        float distance = length(spots[slot].positionRange.xyz - crossing);
+        vec3 position = crossing + mirrorNormal * (shadowTiles[tile].offset.x * distance + shadowTiles[tile].offset.y);
+        return mix(1.0, softShadowFromTile(tile, position, spots[slot].emitterRadius), spots[slot].shadowStrength);
+    }
+
+    if (source < 0) {
+        int slot = -source - 1;
+        int firstTile = points[slot].firstShadowTile;
+
+        if (firstTile < 0) {
+            return 1.0;
+        }
+
+        vec3 lightPosition = points[slot].positionRange.xyz;
+        float distance = length(lightPosition - crossing);
+        vec3 position = crossing + mirrorNormal * (shadowTiles[firstTile].offset.x * distance + shadowTiles[firstTile].offset.y);
+        return mix(1.0, softShadowFromTile(firstTile + pointShadowFace(position - lightPosition), position, points[slot].emitterRadius),
+                   points[slot].shadowStrength);
+    }
+
+    return 1.0;
+}
+
+/*
+* One spotlight's share at this pixel: as a point light, and nothing outside its cone. An image light (a light seen in a
+* flat mirror, render/gpu/mirrored_light.h) shines only through its window, and only as far as its source's light reaches
+* the mirror; its contact shadow is never marched (the screen's depth towards the image runs into the mirror).
+*/
 void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 diffuse, inout vec3 specular) {
     vec3 offset = spots[i].positionRange.xyz - relativePosition;
     float distance = length(offset);
@@ -614,15 +656,35 @@ void addSpotLight(int i, ShadingPoint point, vec3 geometricNormal, inout vec3 di
         return;
     }
 
-    vec3 radiance = spots[i].radianceCosInner.rgb * distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone;
+    float source = 1.0;
+    float glassReach = max(distance - spots[i].emitterRadius, 0.0);
+    bool image = any(notEqual(spots[i].windowPlane.xyz, vec3(0.0)));
+
+    if (image) {
+        vec3 crossing;
+
+        if (!throughMirrorWindow(spots[i].windowPlane, spots[i].windowCentre, spots[i].windowAxisU, spots[i].windowAxisV, spots[i].positionRange.xyz,
+                                 relativePosition, crossing)) {
+            return;
+        }
+
+        source = imageSourceShadow(spots[i].windowSource, crossing, spots[i].windowPlane.xyz);
+        glassReach = length(crossing - relativePosition);
+
+        if (source <= 0.0) {
+            return;
+        }
+    }
+
+    vec3 radiance = spots[i].radianceCosInner.rgb * (distanceFalloff(distance, spots[i].positionRange.w, spots[i].sourceRadius) * cone * source);
     int tile = spots[i].shadowTile;
 
     if (tile >= 0) {
         radiance *= mix(1.0, softShadowFromTile(tile, offsetForShadow(tile, geometricNormal, distance), spots[i].emitterRadius) *
-                                 lightContactShadow(CONTACT_SPOT_SLOT_BASE + i), spots[i].shadowStrength);
+                                 (image ? 1.0 : lightContactShadow(CONTACT_SPOT_SLOT_BASE + i)), spots[i].shadowStrength);
 #ifdef GLASS_SHADOW_RAYS
         if (any(greaterThan(radiance, vec3(0.0)))) {
-            radiance *= mix(vec3(1.0), glassShadow(toLight, max(distance - spots[i].emitterRadius, 0.0)), spots[i].shadowStrength);
+            radiance *= mix(vec3(1.0), glassShadow(toLight, glassReach), spots[i].shadowStrength);
         }
 #endif
     }

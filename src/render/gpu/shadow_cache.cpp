@@ -38,7 +38,8 @@ std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const st
 */
 bool ShadowTileMemory::isCurrent(const ShadowTile& tile, std::uint64_t signature) const {
     return std::any_of(entries.begin(), entries.end(), [&](const Entry& entry) {
-        return entry.tile.x == tile.x && entry.tile.y == tile.y && entry.tile.size == tile.size &&
+        return entry.tile.x == tile.x && entry.tile.y == tile.y && entry.tile.size == tile.size && entry.tile.clipPlane.x == tile.clipPlane.x &&
+               entry.tile.clipPlane.y == tile.clipPlane.y && entry.tile.clipPlane.z == tile.clipPlane.z && entry.tile.clipPlane.w == tile.clipPlane.w &&
                entry.signature == signature && sameMatrix(entry.tile.matrix, tile.matrix);
     });
 }

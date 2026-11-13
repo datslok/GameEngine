@@ -409,6 +409,10 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
                     perspectiveOffset(halfWidth, request.size, settings.normalOffsetTexels), 0.0f,
                     BoundingSphere{placed.position, placed.light.range});
             setLens(plan, halfWidth, placed.light.range, request.size);
+
+            if (placed.window) {
+                plan.tiles.back().clipPlane = planarClipPlane(MirrorPlane{placed.window->normal, placed.window->offset});
+            }
         }
         else {
             const PlacedPointLight& placed = selected.pointLights[request.slot];

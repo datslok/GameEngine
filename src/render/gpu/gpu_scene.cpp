@@ -23,9 +23,13 @@ GpuInstance packInstance(const DrawItem& draw, std::uint32_t material) {
 }
 
 // Column-major like every matrix the shaders read, for vkCmdPushConstants.
-GpuShadowView packShadowView(const Mat4& tileMatrix) {
+GpuShadowView packShadowView(const Mat4& tileMatrix, const Vec4& clipPlane) {
     GpuShadowView view{};
     writeColumnMajor(tileMatrix, view.matrix);
+    view.clipPlane[0] = clipPlane.x;
+    view.clipPlane[1] = clipPlane.y;
+    view.clipPlane[2] = clipPlane.z;
+    view.clipPlane[3] = clipPlane.w;
     return view;
 }
 

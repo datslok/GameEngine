@@ -307,6 +307,10 @@ void visit(LightLabDeskLampSettings& settings, SettingsVisitor& visitor) {
     visitor.field("On", settings.on);
 }
 
+void visit(LightLabFlashlightSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("On", settings.on);
+}
+
 float starVisibility(const Vec3& towardsSun) {
     return 1.0f - smoothStep(radiansFromDegrees(labStarsFullBelowDegrees), radiansFromDegrees(labStarsAppearBelowDegrees), sunElevation(towardsSun));
 }
@@ -533,6 +537,7 @@ void LightLabGame::onInput(World& world, const Input& input) {
     }
 
     if (input.wasKeyPressed(Key::F)) {
+        flashlightSettings.on = !flashlightSettings.on;
         flashlight.toggle(world);
     }
 
@@ -653,6 +658,11 @@ void LightLabGame::onUpdate(World& world, const Input& input, float frameSeconds
     updateDaylight(world);
     updateStreetLights(world);
     flashlight.place(world, flashlightInHand(controls.getCamera()));
+
+    // The flashlight follows its setting, so a set command switches it; F flips the setting and the light together.
+    if (flashlight.isOn(world) != flashlightSettings.on) {
+        flashlight.toggle(world);
+    }
 
     // The fence torch follows its settings, so the slider or a set command switches and aims it at once.
     fenceTorch.place(world, fenceTorchPose(fenceTorchSettings));
@@ -798,6 +808,9 @@ void LightLabGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Desk lamp", [&] {
         visit(deskLampSettings, visitor);
     });
+    visitor.group("Flashlight", [&] {
+        visit(flashlightSettings, visitor);
+    });
     controls.visitSettings(visitor);
 }
 
@@ -834,6 +847,7 @@ void LightLabGame::prepareGoldenView(World& world, const GoldenView& view) {
             updateStreetLights(world);
 
             if (golden.flashlightOn && !flashlight.isOn(world)) {
+                flashlightSettings.on = true;
                 flashlight.toggle(world);
             }
 
@@ -870,6 +884,10 @@ Entity LightLabGame::getFenceTorch() const {
 
 LightLabDeskLampSettings& LightLabGame::getDeskLampSettings() {
     return deskLampSettings;
+}
+
+LightLabFlashlightSettings& LightLabGame::getFlashlightSettings() {
+    return flashlightSettings;
 }
 
 Entity LightLabGame::getDeskLamp() const {
