@@ -480,7 +480,7 @@ The settings are grouped by system (light priority, shadows, bloom, tone mapping
 src/              Engine and game source, in layers (lower ones never include higher ones):
   app/            main and the game registry: picks a game by name and starts the engine
   games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground),
-                  games/clothlab (the cloth test ground) and games/forest (the forest showcase)
+                  games/clothlab (the cloth test ground) and games/forest (the jungle valley showcase)
   engine/         The main loop, the Game interface, fixed-tick updates, the debug UI, the settings file
                   and the commands (settings, pause and step, camera, screenshot, stats)
   cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area), their step,
