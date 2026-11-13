@@ -2,6 +2,7 @@
 #include "core/blue_noise.h"
 #include "render/gpu/ambient_occlusion.h"
 #include "render/gpu/camera_relative.h"
+#include "render/gpu/column_major.h"
 #include "render/gpu/gpu_depth_range.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/taa.h"
@@ -47,6 +48,7 @@ namespace {
         assert(defaults.enabled && defaults.radius == 0.5f && defaults.falloff == 0.6f);
         assert(defaults.slices == 3 && defaults.steps == 6 && defaults.multipleBounces && defaults.specularOcclusion);
         assert(defaults.thickness == 0.25f && defaults.indirect && defaults.indirectRadius == 2.0f && defaults.indirectBrightest == 8.0f);
+        assert(defaults.halfResolution);
         validateAmbientOcclusion(defaults);
 
         AmbientOcclusionSettings wrong;
@@ -1439,6 +1441,7 @@ namespace {
         AmbientOcclusionSettings settings;
         settings.slices = 2;
         settings.steps = 5;
+        settings.halfResolution = false;
         const Mat4 reprojection = Mat4::translation(4.0f, 5.0f, 6.0f);
         const GpuAmbientOcclusionPass pass = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{0.25f, -0.5f}, RenderSize{200, 100}, settings, 7, false,
                                                                       true);
@@ -1452,10 +1455,241 @@ namespace {
         assert(pass.history[0] == 16.0f && pass.history[1] == 0.05f && pass.history[2] == 1.0f && pass.history[3] == 0.0f);
         assert(pass.denoise[0] == 2.0f && pass.denoise[1] == 0.02f);
         assert(pass.antiLag[0] == 1.0f && pass.antiLag[1] == 3.0f && pass.antiLag[2] == 2.0f);
+        assert(pass.lens[3] == 0.0f && pass.frame[1] == 0 && pass.frame[2] == 0);
 
         // Gathering reaches further than occlusion alone.
         const GpuAmbientOcclusionPass gathering = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{}, RenderSize{200, 100}, settings, 7, true, false);
         assert(gathering.options[0] == 2.0f && gathering.gather[1] == 1.0f && gathering.history[2] == 0.0f);
+
+        /*
+        * At half resolution the passes run on the half-size grid: its size, the footprint of its pixels, this frame's
+        * pick (frame 7: the fourth, (0, 1)), the inverse shifted onto the picked texels, the jitter in half pixels less
+        * the shift (so unjittering finds the sample's own place), and the gathered picture's level one finer pixel up.
+        */
+        settings.halfResolution = true;
+        const GpuAmbientOcclusionPass half = packAmbientOcclusionPass(inverse, viewProjection, reprojection, Vec2{0.25f, -0.5f}, RenderSize{200, 100}, settings, 7,
+                                                                      false, true);
+        const AoTexel pick = aoHalfPick(7);
+        const Vec2 shift = aoHalfShift(pick);
+        assert(pick.x == 0 && pick.y == 1);
+        assert(half.size[0] == 100.0f && half.size[1] == 50.0f && half.size[2] == 1.0f / 100.0f && half.size[3] == 1.0f / 50.0f);
+        assert(near(half.lens[0], pixelFootprint(viewProjection, 50.0f), 1e-9f));
+        assert(half.frame[0] == 7 && half.frame[1] == pick.x && half.frame[2] == pick.y);
+        assert(half.lens[1] == 0.125f - shift.x && half.lens[2] == -0.25f - shift.y && half.lens[3] == 1.0f);
+        float shifted[16];
+        writeColumnMajor(aoShiftedInverseViewProjection(inverse, shift, RenderSize{100, 50}), shifted);
+        for (int index = 0; index < 16; ++index) {
+            assert(half.inverseViewProjection[index] == shifted[index]);
+        }
+    }
+
+    /*
+    * The half-size grid: each texel stands for a 2 x 2 block of the render's pixels (the last row or column of an odd
+    * size half a block), and takes the depth of one of the block's four, which turns with the frame so the history sees
+    * all four. Its samples then sit a quarter of a half-size pixel off the texels' centres.
+    */
+    void testHalfResolutionGrid() {
+        assert(aoHalfSize(RenderSize{2560, 1440}) == (RenderSize{1280, 720}));
+        assert(aoHalfSize(RenderSize{1281, 721}) == (RenderSize{641, 361}));
+        assert(aoHalfSize(RenderSize{1, 1}) == (RenderSize{1, 1}));
+
+        bool seen[2][2] = {};
+        for (std::uint32_t frame = 0; frame < 4; ++frame) {
+            const AoTexel pick = aoHalfPick(frame);
+            assert(pick.x >= 0 && pick.x <= 1 && pick.y >= 0 && pick.y <= 1);
+            assert(!seen[pick.x][pick.y]);
+            seen[pick.x][pick.y] = true;
+            assert(aoHalfPick(frame + 4).x == pick.x && aoHalfPick(frame + 4).y == pick.y);
+        }
+        assert(aoHalfPick(0).x == 0 && aoHalfPick(0).y == 0); // without anti-aliasing the frame stays 0: always the top left
+
+        assert(aoHalfShift(AoTexel{0, 0}).x == -0.25f && aoHalfShift(AoTexel{0, 0}).y == -0.25f);
+        assert(aoHalfShift(AoTexel{1, 0}).x == 0.25f && aoHalfShift(AoTexel{0, 1}).y == 0.25f);
+
+        // The texel's source pixel, kept on the screen at an odd size's last column and row.
+        const AoTexel inside = aoHalfSourceTexel(10, 20, AoTexel{1, 0}, RenderSize{64, 64});
+        assert(inside.x == 21 && inside.y == 40);
+        const AoTexel edge = aoHalfSourceTexel(640, 360, AoTexel{1, 1}, RenderSize{1281, 721});
+        assert(edge.x == 1280 && edge.y == 720);
+    }
+
+    /*
+    * The shifted inverse puts a half-size texel's point exactly where its source pixel's is, so every pass on the half
+    * grid works with true positions; and aoHalfPlace gives the half-grid coordinate at which any render pixel's own point
+    * lies, a source pixel's being its texel's centre.
+    */
+    void testHalfResolutionPositions() {
+        const Camera camera = makeCamera();
+        const Mat4 inverseViewProjection = *inverse(cameraRelativeViewProjection(camera));
+        const RenderSize half = aoHalfSize(screenSize);
+        const Vec2 fullSize{static_cast<float>(screenSize.width), static_cast<float>(screenSize.height)};
+        const Vec2 halfSize{static_cast<float>(half.width), static_cast<float>(half.height)};
+
+        for (std::uint32_t frame = 0; frame < 4; ++frame) {
+            const AoTexel pick = aoHalfPick(frame);
+            const Vec2 shift = aoHalfShift(pick);
+            const Mat4 shifted = aoShiftedInverseViewProjection(inverseViewProjection, shift, half);
+
+            for (const auto& [x, y] : {std::pair{0, 0}, std::pair{17, 5}, std::pair{150, 90}, std::pair{319, 179}}) {
+                const AoTexel source = aoHalfSourceTexel(x, y, pick, screenSize);
+                const Vec2 sourcePixel{source.x + 0.5f, source.y + 0.5f};
+
+                for (const float depth : {0.9f, 0.01f, 0.0005f}) {
+                    const Vec3 truePoint = positionAtPixel(inverseViewProjection, sourcePixel, depth, fullSize);
+                    const Vec3 halfPoint = positionAtPixel(shifted, Vec2{x + 0.5f, y + 0.5f}, depth, halfSize);
+                    assert(nearVec(halfPoint, truePoint, 1e-4f * (1.0f + truePoint.length())));
+                }
+
+                const Vec2 place = aoHalfPlace(sourcePixel, fullSize, halfSize, shift);
+                assert(near(place.x, x + 0.5f, 1e-4f) && near(place.y, y + 0.5f, 1e-4f));
+            }
+
+            // Any pixel, picked or not: its point from the half grid at aoHalfPlace is its own.
+            for (const auto& [px, py] : {std::pair{0, 0}, std::pair{33, 70}, std::pair{301, 2}, std::pair{639, 359}}) {
+                const Vec2 pixel{px + 0.5f, py + 0.5f};
+                const Vec3 truePoint = positionAtPixel(inverseViewProjection, pixel, 0.02f, fullSize);
+                const Vec3 halfPoint = positionAtPixel(shifted, aoHalfPlace(pixel, fullSize, halfSize, shift), 0.02f, halfSize);
+                assert(nearVec(halfPoint, truePoint, 1e-4f * (1.0f + truePoint.length())));
+            }
+        }
+    }
+
+    // The half-size pass's images as the half-size passes leave them, from the render's depths this frame.
+    struct HalfAo {
+        AoFrame frame;
+        Vec2 shift;
+        std::vector<AoGeometry> geometry;
+        std::vector<Vec4> light;
+    };
+
+    // The wall camera's half-size images: each texel's point from its source pixel, facing the camera, lit by lightAt.
+    HalfAo halfAoOf(const Camera& camera, const std::vector<float>& fullDepths, std::uint32_t frameNumber, const std::function<Vec4(const Vec3&)>& lightAt) {
+        const AoFrame full = wallFrame(camera);
+        const RenderSize half = aoHalfSize(screenSize);
+        const Vec2 halfSize{static_cast<float>(half.width), static_cast<float>(half.height)};
+        const AoTexel pick = aoHalfPick(frameNumber);
+        HalfAo result;
+        result.shift = aoHalfShift(pick);
+        result.frame = AoFrame{aoShiftedInverseViewProjection(full.inverseViewProjection, result.shift, half), half, 0.0f};
+        result.geometry.resize(half.width * half.height);
+        result.light.resize(half.width * half.height, Vec4{0.0f, 0.0f, 0.0f, 1.0f});
+
+        for (std::uint32_t y = 0; y < half.height; ++y) {
+            for (std::uint32_t x = 0; x < half.width; ++x) {
+                const AoTexel source = aoHalfSourceTexel(static_cast<int>(x), static_cast<int>(y), pick, screenSize);
+                const float depth = fullDepths[static_cast<std::size_t>(source.y) * screenSize.width + static_cast<std::size_t>(source.x)];
+
+                if (depth == gpuFarDepth) {
+                    continue;
+                }
+
+                const Vec2 pixel{x + 0.5f, y + 0.5f};
+                const Vec3 point = positionAtPixel(result.frame.inverseViewProjection, pixel, depth, halfSize);
+                result.geometry[y * half.width + x] = AoGeometry{Vec3{0.0f, 0.0f, 1.0f}, viewDistanceAtPixel(result.frame.inverseViewProjection, pixel, depth, halfSize)};
+                result.light[y * half.width + x] = lightAt(point);
+            }
+        }
+
+        return result;
+    }
+
+    Vec4 upsampled(int x, int y, const HalfAo& half, const std::vector<float>& fullDepths) {
+        const std::uint32_t halfWidth = half.frame.size.width;
+        const AoGeometryImage geometryAt = [&](int tx, int ty) { return half.geometry[static_cast<std::size_t>(ty) * halfWidth + static_cast<std::size_t>(tx)]; };
+        const AoLightImage lightAt = [&](int tx, int ty) { return half.light[static_cast<std::size_t>(ty) * halfWidth + static_cast<std::size_t>(tx)]; };
+        return aoUpsampleAt(x, y, half.frame, half.shift, screenSize, AmbientOcclusionSettings{}.denoisePlaneShare, depthImage(fullDepths), geometryAt, lightAt);
+    }
+
+    /*
+    * The upsample never mixes surfaces: a block 2 m in front of the wall, its texels' light 0.2 and the wall's 0.9, and
+    * every pixel of either, even those whose nearest texels are mostly the other's, takes its own surface's light, for
+    * each of the four picks.
+    */
+    void testUpsampleKeepsEdges() {
+        const Camera camera = wallCamera(Vec3{0.0f, 0.0f, 0.0f});
+        const float blockZ = -3.0f;
+        const std::vector<float> depths = wallDepths(camera, blockZ, 0.5f);
+        const AoFrame full = wallFrame(camera);
+        const Vec2 fullSize{static_cast<float>(screenSize.width), static_cast<float>(screenSize.height)};
+        const auto onBlock = [&](const Vec3& point) { return std::abs(point.z - blockZ) < 0.01f; };
+        int blockPixels = 0;
+
+        for (std::uint32_t frame = 0; frame < 4; ++frame) {
+            const HalfAo half = halfAoOf(camera, depths, frame, [&](const Vec3& point) {
+                const float light = onBlock(point) ? 0.2f : 0.9f;
+                return Vec4{light, light, light, light};
+            });
+
+            for (int y = 0; y < static_cast<int>(screenSize.height); y += 3) {
+                for (int x = 0; x < static_cast<int>(screenSize.width); ++x) {
+                    const float depth = depths[static_cast<std::size_t>(y) * screenSize.width + static_cast<std::size_t>(x)];
+                    const Vec3 point = positionAtPixel(full.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depth, fullSize);
+                    const float expected = onBlock(point) ? 0.2f : 0.9f;
+                    blockPixels += onBlock(point) ? 1 : 0;
+                    const Vec4 result = upsampled(x, y, half, depths);
+                    assert(near(result.x, expected, 1e-4f) && near(result.w, expected, 1e-4f));
+                }
+            }
+        }
+
+        assert(blockPixels > 1000);
+    }
+
+    // On one surface the upsample interpolates: light growing evenly across the wall comes back as the same slope.
+    void testUpsampleSmoothOnSurface() {
+        const Camera camera = wallCamera(Vec3{0.0f, 0.0f, 0.0f});
+        const std::vector<float> depths = wallDepths(camera);
+        const AoFrame full = wallFrame(camera);
+        const Vec2 fullSize{static_cast<float>(screenSize.width), static_cast<float>(screenSize.height)};
+        const auto slope = [](const Vec3& point) { return 0.5f + 0.1f * point.x + 0.05f * point.y; };
+
+        for (std::uint32_t frame = 0; frame < 4; ++frame) {
+            const HalfAo half = halfAoOf(camera, depths, frame, [&](const Vec3& point) {
+                const float light = slope(point);
+                return Vec4{light, light, light, light};
+            });
+
+            for (int y = 3; y < static_cast<int>(screenSize.height) - 3; y += 7) {
+                for (int x = 3; x < static_cast<int>(screenSize.width) - 3; x += 5) {
+                    const float depth = depths[static_cast<std::size_t>(y) * screenSize.width + static_cast<std::size_t>(x)];
+                    const Vec3 point = positionAtPixel(full.inverseViewProjection, Vec2{x + 0.5f, y + 0.5f}, depth, fullSize);
+                    const Vec4 result = upsampled(x, y, half, depths);
+                    assert(near(result.x, slope(point), 1e-4f) && near(result.w, slope(point), 1e-4f));
+                }
+            }
+        }
+    }
+
+    /*
+    * The sky stays open, a pixel whose texels are all open (too far for a radius of a pixel) stays open, and a pixel on
+    * none of its texels' planes takes the texel nearest it in depth rather than a blend of surfaces it is not on.
+    */
+    void testUpsampleSkyOpenAndFallback() {
+        const Camera camera = wallCamera(Vec3{0.0f, 0.0f, 0.0f});
+        std::vector<float> depths = wallDepths(camera);
+        depths[100 * screenSize.width + 200] = gpuFarDepth;
+        HalfAo half = halfAoOf(camera, depths, 0, [](const Vec3&) { return Vec4{0.5f, 0.5f, 0.5f, 0.5f}; });
+        const Vec4 sky = upsampled(200, 100, half, depths);
+        assert(sky.x == 0.0f && sky.y == 0.0f && sky.z == 0.0f && sky.w == 1.0f);
+
+        for (AoGeometry& texel : half.geometry) {
+            texel.viewDepth = 0.0f;
+        }
+        const Vec4 open = upsampled(300, 150, half, depths);
+        assert(open.x == 0.0f && open.w == 1.0f);
+
+        // The wall is 5 m away; the texels round pixel (300, 150) hold a block at 3 m (0.2) and another at 4 m (0.7).
+        half = halfAoOf(camera, depths, 0, [](const Vec3&) { return Vec4{}; });
+        for (int ty = 70; ty < 80; ++ty) {
+            for (int tx = 145; tx < 155; ++tx) {
+                const bool nearer = (tx + ty) % 2 == 0;
+                half.geometry[static_cast<std::size_t>(ty) * half.frame.size.width + static_cast<std::size_t>(tx)].viewDepth = nearer ? 3.0f : 4.0f;
+                const float light = nearer ? 0.2f : 0.7f;
+                half.light[static_cast<std::size_t>(ty) * half.frame.size.width + static_cast<std::size_t>(tx)] = Vec4{light, light, light, light};
+            }
+        }
+        const Vec4 fallback = upsampled(300, 150, half, depths);
+        assert(near(fallback.x, 0.7f, 1e-6f) && near(fallback.w, 0.7f, 1e-6f));
     }
 }
 
@@ -1499,4 +1733,9 @@ void testAmbientOcclusion() {
     testDenoiseStopsAtCorners();
     testDenoiseStopsAtDepthJumps();
     testPackPass();
+    testHalfResolutionGrid();
+    testHalfResolutionPositions();
+    testUpsampleKeepsEdges();
+    testUpsampleSmoothOnSurface();
+    testUpsampleSkyOpenAndFallback();
 }

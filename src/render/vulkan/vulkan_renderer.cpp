@@ -774,7 +774,7 @@ void VulkanRenderer::ensureFrameTextures(std::uint32_t width, std::uint32_t heig
     }
 
     if (ambientOcclusion->hasImages()) {
-        ambientOcclusion->ensureSize(scene);
+        ambientOcclusion->ensureSize(scene, ambientOcclusion->isHalfResolution());
     }
 
     if (contactShadows->hasImages()) {
@@ -1476,8 +1476,13 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         ambientOcclusion->forgetHistory();
     }
 
-    if (occlusion && !ambientOcclusion->hasImages()) {
-        ambientOcclusion->ensureSize(sceneSize);
+    // Made the first time, and again when half resolution is switched (the GPU may still read the old ones then).
+    if (occlusion && !ambientOcclusion->fits(sceneSize, settings.ambientOcclusion.halfResolution)) {
+        if (ambientOcclusion->hasImages()) {
+            device.waitIdle();
+        }
+
+        ambientOcclusion->ensureSize(sceneSize, settings.ambientOcclusion.halfResolution);
     }
 
     // Contact shadows (render/gpu/contact_shadows.h) for the brightest directional light, the one with the cascades, and
@@ -1608,7 +1613,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             endGpuPass(frame, GpuPass::ColourPyramid);
         }
 
-        // The pass, its history and its denoiser, each timed apart (the readout's AO, AOHISTORY and AODENOISE).
+        // The pass, its history, its denoiser and its upsample, each timed apart (the readout's AO, AOHISTORY, AODENOISE
+        // and AOUPSAMPLE); at half resolution the record carries the half-size grid and the frame's pick.
         beginGpuPass(frame, GpuPass::AmbientOcclusion);
         ambientOcclusion->occlude(frame.commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, frame.frameIndex, depth, gatherPicture ? &*gatherPicture : nullptr, sampled(*noProbesTexture), sampled(*blueNoiseTexture),
                                   packAmbientOcclusionPass(*inverseViewProjection, relativeViewProjection, reprojection, jitter, sceneSize,
@@ -1621,6 +1627,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         beginGpuPass(frame, GpuPass::AoDenoise);
         ambientOcclusion->denoise(frame.commands, frame.descriptors, occlusionBlurred);
         endGpuPass(frame, GpuPass::AoDenoise);
+        beginGpuPass(frame, GpuPass::AoUpsample);
+        ambientOcclusion->upsample(frame.commands, frame.descriptors);
+        endGpuPass(frame, GpuPass::AoUpsample);
     }
 
     if (contact.runs()) {

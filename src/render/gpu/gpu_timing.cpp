@@ -30,6 +30,8 @@ const char* gpuPassName(GpuPass pass) {
         return "AOHISTORY";
     case GpuPass::AoDenoise:
         return "AODENOISE";
+    case GpuPass::AoUpsample:
+        return "AOUPSAMPLE";
     case GpuPass::ContactShadows:
         return "CONTACT";
     case GpuPass::MirroredLights:

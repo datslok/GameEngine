@@ -60,5 +60,8 @@ void main() {
         testOutput(4, vec4(aoDepthRay(reprojection, point.xy, frame.xy), atrousKernelWeight(int(tap.w * 4.0) % 5 - 2, int(tap.w * 13.0) % 5 - 2)));
         testOutput(5, vec4(aoLuminance(current.rgb), aoLightChanged(current.x, historyLight.x, historyLight.x * historyLight.x + current.w * 0.01, 3.0) ? 1.0 : 0.0, 0.0, 0.0));
         testOutput(6, clipAoHistory(historyLight, current, current * current + vec4(tap.z), 2.0));
+        // Half resolution: the pick from the tap number (0 to 3), the pixel's place on a half-size grid.
+        vec2 shift = aoHalfShift(ivec2(int(tap.w) & 1, int(tap.w) >> 1));
+        testOutput(7, vec4(shift, aoHalfPlace(point.xy, frame.xy, ceil(frame.xy * 0.5), shift)));
     }
 }

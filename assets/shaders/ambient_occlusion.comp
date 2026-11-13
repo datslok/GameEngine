@@ -9,6 +9,10 @@
 * share and the gathered light averaged. Its noise turns
 * with the frame for temporal anti-aliasing to average (still without it, for the blur).
 *
+* At half resolution (AmbientOcclusionSettings::halfResolution) the same loop runs on the half-size grid: its depth image
+* the half-size one (ambient_occlusion_downsample.comp) and its inverse shifted onto the picked pixels, so nothing here
+* changes but the picture's level, one finer than the grid's steps.
+*
 * The picture it gathers from is seen through the frame's fog, whose glow between the camera and a surface is no light
 * the surface sends (in a dark misty room it outshines the walls, and corners, gathering the most, glowed): each sample
 * has the fog taken back off (fogRemoved), this frame's fog to its point, from the scene set (sets 0 and 1, as the fog's
@@ -27,9 +31,10 @@ layout(local_size_x = AO_GROUP_SIDE, local_size_y = AO_GROUP_SIDE) in;
 layout(std430, set = 2, binding = 0) readonly buffer Pass {
     mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
     vec4 size;                  // xy: the render size in pixels, zw: their inverses
-    vec4 lens;                  // x: a pixel's footprint per metre of view distance
+    vec4 lens;                  // x: a pixel's footprint per metre of view distance, yz: the jitter in pixels (at half resolution less
+                                // the pick's shift), w: the picture pyramid's level bias (1 at half resolution)
     vec4 options;               // x: radius, y: falloff, z: slices, w: steps
-    ivec4 frame;                // x: the frame, turning the noise
+    ivec4 frame;                // x: the frame, turning the noise, yz: the half-size texels' pick (aoHalfPick)
     mat4 reprojection;          // this frame's clip space (without the jitter) to last frame's
     vec4 gather;                // x: thickness, y: 1 while gathering, z: the brightest sample
 } pass;
@@ -164,7 +169,7 @@ void main() {
                 uint fresh = mask & ~marked;
 
                 if (gathers && fresh != 0u) {
-                    sliceLight += pictureAt(at, atDepth, position + offset, aoSampleLevel(index, steps, stepNoise, screenRadius)).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
+                    sliceLight += pictureAt(at, atDepth, position + offset, aoSampleLevel(index, steps, stepNoise, screenRadius) + pass.lens.w).rgb * (float(bitCount(fresh)) / float(AO_SECTORS));
                 }
 
                 marked |= mask;

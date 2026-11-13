@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
 
@@ -30,6 +31,7 @@ void visit(AmbientOcclusionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Occlusion history clip", settings.historyClip, {.min = 0.0f, .max = 20.0f, .sliderMin = 0.0f, .sliderMax = 6.0f});
     visitor.field("Occlusion denoise passes", settings.denoisePasses, {.min = 0, .max = AO_DENOISE_MAX_PASSES});
     visitor.field("Occlusion denoise plane share", settings.denoisePlaneShare, {.min = 0.001f, .max = 1.0f, .sliderMin = 0.002f, .sliderMax = 0.1f});
+    visitor.field("Occlusion at half resolution", settings.halfResolution);
 }
 
 // Written so not a number fails too.
@@ -418,7 +420,7 @@ AoLight ambientOcclusionAt(int x, int y, const AoFrame& frame, const AmbientOccl
                 const std::uint32_t fresh = mask & ~marked;
 
                 if (picture && fresh != 0u) {
-                    const Vec3 seen = gatheredSampleLight(picture(sx, sy, aoSampleLevel(step, settings.steps, stepNoise, screenRadius)), settings.indirectBrightest);
+                    const Vec3 seen = gatheredSampleLight(picture(sx, sy, aoSampleLevel(step, settings.steps, stepNoise, screenRadius) + frame.pictureLevelBias), settings.indirectBrightest);
                     sliceLight = sliceLight + seen * (static_cast<float>(std::popcount(fresh)) / static_cast<float>(AO_SECTORS));
                 }
 
@@ -626,11 +628,95 @@ bool aoHistoryUsable(const std::optional<AoHistoryKey>& last, const AoHistoryKey
     return previousCameraKnown && last && last->size == now.size && last->gathers == now.gathers;
 }
 
+RenderSize aoHalfSize(RenderSize render) {
+    return RenderSize{(render.width + 1) / 2, (render.height + 1) / 2};
+}
+
+// Corners first, then the other two, so two frames in a row already cover the block's diagonal.
+AoTexel aoHalfPick(std::uint32_t frame) {
+    constexpr AoTexel picks[4]{{0, 0}, {1, 1}, {1, 0}, {0, 1}};
+    return picks[frame % 4];
+}
+
+Vec2 aoHalfShift(AoTexel pick) {
+    return Vec2{static_cast<float>(pick.x) * 0.5f - 0.25f, static_cast<float>(pick.y) * 0.5f - 0.25f};
+}
+
+AoTexel aoHalfSourceTexel(int x, int y, AoTexel pick, RenderSize render) {
+    return AoTexel{std::min(2 * x + pick.x, static_cast<int>(render.width) - 1), std::min(2 * y + pick.y, static_cast<int>(render.height) - 1)};
+}
+
+/*
+* positionAtPixel reads (ndc, depth, 1) through the inverse, so moving every pixel by the shift is a translation of NDC by
+* 2 shift / size (y flipped, as pixelToNdc counts it downwards) applied before it. Exact for an even render size; at an odd
+* one the half-size grid is a little wider than the render, so a texel's point is off by up to a render pixel at the far edge.
+*/
+Mat4 aoShiftedInverseViewProjection(const Mat4& inverseViewProjection, Vec2 shift, RenderSize half) {
+    return inverseViewProjection * Mat4::translation(2.0f * shift.x / static_cast<float>(half.width), -2.0f * shift.y / static_cast<float>(half.height), 0.0f);
+}
+
+// The shifted inverse reads half-grid coordinate u at the render's NDC of u + shift on the half grid, so u = pixel x
+// half / render - shift.
+Vec2 aoHalfPlace(Vec2 pixel, Vec2 renderSize, Vec2 halfSize, Vec2 shift) {
+    return Vec2{pixel.x * halfSize.x / renderSize.x - shift.x, pixel.y * halfSize.y / renderSize.y - shift.y};
+}
+
+Vec4 aoUpsampleAt(int x, int y, const AoFrame& half, Vec2 shift, RenderSize render, float planeShare, const AoDepthImage& depthAt, const AoGeometryImage& geometry,
+                  const AoLightImage& light) {
+    const Vec4 open{0.0f, 0.0f, 0.0f, 1.0f};
+    const float depth = depthAt(x, y);
+
+    if (depth == gpuFarDepth) {
+        return open;
+    }
+
+    const int halfWidth = static_cast<int>(half.size.width);
+    const int halfHeight = static_cast<int>(half.size.height);
+    const Vec2 halfSize{static_cast<float>(halfWidth), static_cast<float>(halfHeight)};
+    const Vec2 place = aoHalfPlace(Vec2{x + 0.5f, y + 0.5f}, Vec2{static_cast<float>(render.width), static_cast<float>(render.height)}, halfSize, shift);
+    const Vec3 point = positionAtPixel(half.inverseViewProjection, place, depth, halfSize);
+    const float viewDepth = viewDistanceAtPixel(half.inverseViewProjection, place, depth, halfSize);
+    const Vec2 base{std::floor(place.x - 0.5f), std::floor(place.y - 0.5f)};
+    const Vec2 fraction{place.x - 0.5f - base.x, place.y - 0.5f - base.y};
+    Vec4 sum;
+    float weights = 0.0f;
+    Vec4 nearest = open;
+    float nearestGap = std::numeric_limits<float>::infinity();
+
+    for (int tap = 0; tap < 4; ++tap) {
+        const int tx = std::clamp(static_cast<int>(base.x) + (tap & 1), 0, halfWidth - 1);
+        const int ty = std::clamp(static_cast<int>(base.y) + (tap >> 1), 0, halfHeight - 1);
+        const AoGeometry texel = geometry(tx, ty);
+
+        if (texel.viewDepth <= 0.0f) {
+            continue;
+        }
+
+        const Vec4 texelLight = light(tx, ty);
+        const float gap = std::abs(texel.viewDepth - viewDepth);
+
+        if (gap < nearestGap) {
+            nearestGap = gap;
+            nearest = texelLight;
+        }
+
+        const Vec3 texelPoint = aoDepthRay(half.inverseViewProjection, Vec2{tx + 0.5f, ty + 0.5f}, halfSize) * texel.viewDepth;
+        const float weight = aoTapWeight(fraction, tap) * aoPlaneWeight(texel.normal, texelPoint, point, texel.viewDepth, planeShare);
+        sum = sum + texelLight * weight;
+        weights += weight;
+    }
+
+    return weights >= static_cast<float>(AO_UPSAMPLE_LEAST_WEIGHT) ? sum * (1.0f / weights) : nearest;
+}
+
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
-                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,
+                                                 RenderSize render, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,
                                                  bool accumulates) {
     GpuAmbientOcclusionPass pass{};
-    writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
+    const RenderSize size = settings.halfResolution ? aoHalfSize(render) : render;
+    const AoTexel pick = settings.halfResolution ? aoHalfPick(frame) : AoTexel{};
+    const Vec2 shift = settings.halfResolution ? aoHalfShift(pick) : Vec2{};
+    writeColumnMajor(settings.halfResolution ? aoShiftedInverseViewProjection(inverseViewProjection, shift, size) : inverseViewProjection, pass.inverseViewProjection);
     const float width = static_cast<float>(size.width);
     const float height = static_cast<float>(size.height);
     pass.size[0] = width;
@@ -638,8 +724,11 @@ GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjecti
     pass.size[2] = 1.0f / width;
     pass.size[3] = 1.0f / height;
     pass.lens[0] = pixelFootprint(viewProjection, height);
-    pass.lens[1] = jitter.x;
-    pass.lens[2] = jitter.y;
+    pass.lens[1] = jitter.x * width / static_cast<float>(render.width) - shift.x;
+    pass.lens[2] = jitter.y * height / static_cast<float>(render.height) - shift.y;
+    pass.lens[3] = std::log2(static_cast<float>(render.height) / height);
+    pass.frame[1] = pick.x;
+    pass.frame[2] = pick.y;
     pass.options[0] = gathers ? settings.indirectRadius : settings.radius;
     pass.options[1] = settings.falloff;
     pass.options[2] = static_cast<float>(settings.slices);

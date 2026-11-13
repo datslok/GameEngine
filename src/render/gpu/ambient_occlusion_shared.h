@@ -58,4 +58,9 @@
 // The passes' workgroups: 8 x 8 pixels.
 #define AO_GROUP_SIDE 8
 
+// The upsample from half resolution: below this sum of its four texels' weights (each the bilinear share times how near
+// the pixel lies to the texel's surface plane), the pixel is on none of their surfaces and takes the texel nearest it in
+// view depth instead of a blend.
+#define AO_UPSAMPLE_LEAST_WEIGHT 0.001
+
 #endif

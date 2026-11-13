@@ -118,6 +118,11 @@ struct AmbientOcclusionSettings {
     // A history the neighbourhood no longer supports (a switched-off flashlight's bounce) is gone in a frame; steady
     // noise, whose box is as wide as the noise, is left alone. 0 turns it off.
     float historyClip = 2.0f;
+
+    // The pass, its history and its denoiser at half the render's width and height (a quarter of the pixels, so about
+    // a quarter of the cost), each texel taking one pixel of its 2 x 2 block's depth (turning with the frame), then an
+    // upsample to the render's size that keeps each pixel to its own surface (aoUpsampleAt).
+    bool halfResolution = true;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
@@ -271,12 +276,14 @@ struct AoLight {
     float visibility = 1.0f;
 };
 
-// What the pass knows of the frame: the camera-relative view-projection's inverse, the render size, and a pixel's
-// footprint per metre of view distance.
+// What the pass knows of the frame: the camera-relative view-projection's inverse, the size of the grid it runs on,
+// a pixel's footprint per metre of view distance, and how many levels finer the gathered picture's pyramid is than the
+// grid (1 at half resolution, whose picture is at the render's size).
 struct AoFrame {
     Mat4 inverseViewProjection;
     RenderSize size;
     float footprint = 0.0f;
+    float pictureLevelBias = 0.0f;
 };
 
 // One pass of the denoiser at texel (x, y): rgb the light gathered, a the visibility, from the last pass's image (light).
@@ -437,6 +444,55 @@ struct GpuAmbientOcclusionPass {
 
 static_assert(sizeof(GpuAmbientOcclusionPass) == 256, "GpuAmbientOcclusionPass must match ambient_occlusion.comp's Pass");
 
+/*
+* Half resolution. The half-size grid's texel (x, y) stands for the render's pixels 2x to 2x + 1 by 2y to 2y + 1, and
+* takes the depth of one of them, the frame's pick (aoHalfPick), so its point is that pixel's exactly: the passes use the
+* inverse view-projection shifted by the pick's offset from the texel's centre (aoHalfShift, in half-size pixels), and
+* need nothing else changed. The pick turns with the frame, so the history gathers all four.
+*/
+struct AoTexel {
+    int x = 0;
+    int y = 0;
+};
+
+// The half-size grid's size: half the render's, rounded up.
+RenderSize aoHalfSize(RenderSize render);
+
+// Which pixel of each 2 x 2 block the half-size texels take this frame (frame 0: the top left), turning through all
+// four every 4 frames.
+AoTexel aoHalfPick(std::uint32_t frame);
+
+// Where the picked pixel's centre lies from its texel's centre, in half-size pixels: a quarter either way.
+Vec2 aoHalfShift(AoTexel pick);
+
+// The render pixel half-size texel (x, y) takes, kept on the screen (an odd size's last column and row).
+AoTexel aoHalfSourceTexel(int x, int y, AoTexel pick, RenderSize render);
+
+// The inverse view-projection the half-size passes use: the render's, shifted so a texel's centre maps to its source
+// pixel's centre.
+Mat4 aoShiftedInverseViewProjection(const Mat4& inverseViewProjection, Vec2 shift, RenderSize half);
+
+// The half-grid coordinate (in half-size pixels, as the shifted inverse reads them) at which a render pixel's own point
+// lies: a source pixel's is its texel's centre.
+Vec2 aoHalfPlace(Vec2 pixel, Vec2 renderSize, Vec2 halfSize, Vec2 shift);
+
+/*
+* The upsample (ambient_occlusion_upsample.comp) at render pixel (x, y): open for the sky; otherwise the four half-size
+* texels round its place (clamped to the grid), each weighted by its bilinear share (aoTapWeight) and by how near the
+* pixel's point lies to the texel's surface plane (aoPlaneWeight with planeShare), skipping open texels (view depth 0).
+* Below AO_UPSAMPLE_LEAST_WEIGHT in all, the pixel is on none of their surfaces and takes the one nearest it in view
+* depth; with every texel open, it is open. half is the half-size passes' frame (its shifted inverse and size), and
+* depthAt the render's depths.
+*/
+Vec4 aoUpsampleAt(int x, int y, const AoFrame& half, Vec2 shift, RenderSize render, float planeShare, const AoDepthImage& depthAt, const AoGeometryImage& geometry,
+                  const AoLightImage& light);
+
+/*
+* The passes' record. With settings.halfResolution its size is the half-size grid's, its inverse view-projection shifted
+* for the frame's pick (also in frame.yz), its jitter in half-size pixels less the shift (so pictureAt finds each sample's
+* own place on last frame's picture), and lens.w the picture pyramid's level bias (log2 of the render's height over the
+* grid's), since the gathered picture is at the render's size.
+*/
 GpuAmbientOcclusionPass packAmbientOcclusionPass(const Mat4& inverseViewProjection, const Mat4& viewProjection, const Mat4& reprojection, Vec2 jitter,
-                                                 RenderSize size, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,
+                                                 RenderSize render, const AmbientOcclusionSettings& settings, std::uint32_t frame, bool gathers,
                                                  bool accumulates);
