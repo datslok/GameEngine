@@ -11,6 +11,7 @@
 // The shading maths, in pure functions shared with the GPU tests (tests/gpu) and mirrored in C++ (render/gpu).
 #include "brdf.glsl"
 #include "normal_mapping.glsl"
+#include "parallax.glsl"
 #include "lighting.glsl"
 #include "mirrored_light.glsl"
 #include "soft_shadow.glsl"
@@ -743,6 +744,19 @@ int clusterLightCount() {
     return lights;
 }
 
+/*
+* A surface texture as the main pass reads it: where parallax moved the coordinates, at them with the mip of the
+* unshifted coordinates' steps (the shift jumps from pixel to pixel at a brick's edge, so its own steps would pick
+* wildly wrong mips there); otherwise as before, the mip from the neighbouring pixels with the bias.
+*/
+vec4 surfaceTexture(uint slot, vec2 uv, bool shifted, vec2 gradientAcross, vec2 gradientDown, float mipBias) {
+    if (shifted) {
+        return textureGrad(textures[nonuniformEXT(slot)], uv, gradientAcross, gradientDown);
+    }
+
+    return texture(textures[nonuniformEXT(slot)], uv, mipBias);
+}
+
 void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
@@ -753,27 +767,90 @@ void main() {
     vec3 smoothNormal = smoothLength > 0.0 ? worldNormal / smoothLength : vec3(0.0);
     vec3 normalStepAcross = dFdx(smoothNormal);
     vec3 normalStepDown = dFdy(smoothNormal);
-    // The surface textures' UV steps to the next pixel, also taken before any branch, for a clear coat's textures, read
-    // only on coated materials.
+    // The surface textures' UV steps to the next pixel, also taken before any branch: the mips of the textures read where
+    // parallax moved them, and of a clear coat's, read only on coated materials, come from these (scaled by the bias, as
+    // the mip bias would scale them).
     vec2 uvStepAcross = dFdx(textureUv);
     vec2 uvStepDown = dFdy(textureUv);
+    float mipBias = textureOptions.x;
+    vec2 gradientAcross = uvStepAcross * exp2(mipBias);
+    vec2 gradientDown = uvStepDown * exp2(mipBias);
 
     MaterialData material = materials[materialIndex];
 
-    // Read the textures at this fragment's interpolated UV coordinate, the mips chosen for the output's pixels rather than
-    // the render size's (the bias). glTF packs roughness in green and metallic in blue.
-    float mipBias = textureOptions.x;
-    vec4 albedo = texture(textures[nonuniformEXT(material.textureSlots.x)], textureUv, mipBias) * material.baseColour;
-    vec3 packedSurface = texture(textures[nonuniformEXT(material.textureSlots.y)], textureUv, mipBias).rgb;
+    // The back of a double-sided surface is shaded as the front's mirror image: its normal and tangent frame turned round.
+    // The capture's cube faces are mirror images, which swaps which side the GPU calls the front.
+    float side = facingSign(gl_FrontFacing != captureView, (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u);
+    vec3 surfaceNormal = worldNormal * side;
+    vec4 surfaceTangent = worldTangent * side;
+
+    // The camera is at the origin, so the way to it is minus the fragment's position. A capture is seen from its own
+    // eye: a mirror's picture from the camera reflected across it, so the view direction (shading, parallax, and the sky
+    // visibility grid's lookup, moved towards the viewer) is the one the mirror shows.
+#ifdef PROBE_CAPTURE
+    vec3 cameraOffset = viewerPosition - relativePosition;
+#else
+    vec3 cameraOffset = -relativePosition;
+#endif
+    float cameraDistance = length(cameraOffset);
+
+    /*
+    * Parallax occlusion mapping (render/gpu/parallax.h, mirrored by parallaxSearch): on a material with a height map,
+    * unless switched off, the view ray followed down into the height map in steps to where it first drops below the
+    * ground, the crossing refined between the last two steps; every texture is then read there. Faded out with distance,
+    * where the height map's mips no longer hold the bumps. parallaxShifted depends on the material alone, the same for a
+    * whole primitive and so for every pixel of a 2 x 2 quad, so the plain reads below keep their derivatives.
+    */
+    bool parallaxShifted = material.coatAndHeight.w > 0.0 && materialOptions.x > 0.5;
+    vec2 surfaceUv = textureUv;
+    float parallaxDepth = 0.0;
+    float parallaxHitHeight = 1.0;
+
+    if (parallaxShifted && cameraDistance > 0.0 && dot(surfaceNormal, surfaceNormal) > 0.0) {
+        parallaxDepth = material.coatAndHeight.w * parallaxFade(parallaxDepthPixels(material.coatAndHeight.w, uvStepAcross, uvStepDown));
+        uint heightSlot = material.coatAndHeightSlots.w;
+        float height = textureGrad(textures[nonuniformEXT(heightSlot)], textureUv, gradientAcross, gradientDown).r;
+
+        if (parallaxDepth > 0.0 && height < 1.0) {
+            vec3 viewTangent = toTangentFrame(cameraOffset / cameraDistance, surfaceNormal, surfaceTangent);
+            vec2 delta = parallaxDelta(viewTangent, parallaxDepth);
+            int steps = parallaxSteps(viewTangent.z, int(materialOptions.z));
+            float previousT = 0.0;
+            float previousGap = parallaxGap(0.0, height);
+            float t = 1.0;
+
+            for (int step = 1; step <= steps; ++step) {
+                t = float(step) / float(steps);
+                height = textureGrad(textures[nonuniformEXT(heightSlot)], textureUv + delta * t, gradientAcross, gradientDown).r;
+                float gap = parallaxGap(t, height);
+
+                if (gap <= 0.0) {
+                    t = previousT + (t - previousT) * parallaxCrossing(previousGap, gap);
+                    break;
+                }
+
+                previousT = t;
+                previousGap = gap;
+            }
+
+            surfaceUv = textureUv + delta * t;
+            parallaxHitHeight = 1.0 - t;
+        }
+    }
+
+    // Read the textures at this fragment's interpolated UV coordinate (or where parallax moved it), the mips chosen for the
+    // output's pixels rather than the render size's (the bias). glTF packs roughness in green and metallic in blue.
+    vec4 albedo = surfaceTexture(material.textureSlots.x, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias) * material.baseColour;
+    vec3 packedSurface = surfaceTexture(material.textureSlots.y, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).rgb;
     float metallic = clamp(material.surfaceParameters.x * packedSurface.b, 0.0, 1.0);
     float roughness = clamp(material.surfaceParameters.y * packedSurface.g, BRDF_SMALLEST_ROUGHNESS, 1.0);
     // The normal map is read here, outside any branch, so its mip comes from the neighbouring pixels' coordinates; bumps
     // its smaller mips averaged away widen the roughness (Toksvig).
-    vec3 normalTexel = texture(textures[nonuniformEXT(material.textureSlots.z)], textureUv, mipBias).rgb;
+    vec3 normalTexel = surfaceTexture(material.textureSlots.z, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).rgb;
     // The glow's pattern (white without one, so the emissive colour alone) and the baked occlusion in red (white, open,
     // without one), read here for the same reason.
-    vec3 emissive = texture(textures[nonuniformEXT(material.textureSlots.w)], textureUv, mipBias).rgb * material.emissive.rgb;
-    float occlusionTexel = texture(textures[nonuniformEXT(material.extra.x)], textureUv, mipBias).r;
+    vec3 emissive = surfaceTexture(material.textureSlots.w, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).rgb * material.emissive.rgb;
+    float occlusionTexel = surfaceTexture(material.extra.x, surfaceUv, parallaxShifted, gradientAcross, gradientDown, mipBias).r;
 #ifdef TRANSPARENT
     // Glass's transmission, its texture's red channel times the factor.
     float transmission = material.transmission.x * texture(textures[nonuniformEXT(material.extra.z)], textureUv, mipBias).r;
@@ -786,12 +863,6 @@ void main() {
     if (cutOut && isCutAway(albedo.a, material.emissive.w)) {
         discard;
     }
-
-    // The back of a double-sided surface is shaded as the front's mirror image: its normal and tangent frame turned round.
-    // The capture's cube faces are mirror images, which swaps which side the GPU calls the front.
-    float side = facingSign(gl_FrontFacing != captureView, (material.extra.y & MATERIAL_DOUBLE_SIDED) != 0u);
-    vec3 surfaceNormal = worldNormal * side;
-    vec4 surfaceTangent = worldTangent * side;
 
     if (textureOptions.y > 0.0) {
         roughness = toksvigRoughness(roughness, normalTexel, material.surfaceParameters.z);
@@ -806,15 +877,6 @@ void main() {
     vec3 specular = vec3(0.0);
 
     float normalLength = length(surfaceNormal);
-    // The camera is at the origin, so the way to it is minus the fragment's position. A capture is seen from its own
-    // eye: a mirror's picture from the camera reflected across it, so the view direction (shading, and the sky
-    // visibility grid's lookup, moved towards the viewer) is the one the mirror shows.
-#ifdef PROBE_CAPTURE
-    vec3 cameraOffset = viewerPosition - relativePosition;
-#else
-    vec3 cameraOffset = -relativePosition;
-#endif
-    float cameraDistance = length(cameraOffset);
 
     // Without a usable normal there is no way to tell which side faces a light, so only ambient applies, seen head-on.
     // The geometric normal (the triangle's own, smoothed) moves points off the surface for shadow lookups; the normal
@@ -838,27 +900,24 @@ void main() {
 
 #ifndef TRANSPARENT
     // A clear coat (render/gpu/brdf.h, addClearCoat), unless switched off: its amount, roughness and normal from its
-    // textures, read only on coated materials, at the steps taken above (scaled by the bias, as the mip bias would). It
-    // lies on the geometry's normal, or its own normal map's; its roughness widened by the same anti-aliasing as the base's.
-    if (normalLength > 0.0 && textureOptions.w > 0.5 && material.clearCoat.x > 0.0) {
-        float gradientScale = exp2(mipBias);
-        vec2 across = uvStepAcross * gradientScale;
-        vec2 down = uvStepDown * gradientScale;
-        float coatAmount = material.clearCoat.x * textureGrad(textures[nonuniformEXT(material.clearCoatSlots.x)], textureUv, across, down).r;
-        float coatRoughness = clamp(material.clearCoat.y * textureGrad(textures[nonuniformEXT(material.clearCoatSlots.y)], textureUv, across, down).g,
+    // textures, read only on coated materials (where parallax moved the others), at the steps taken above. It lies on the
+    // geometry's normal, or its own normal map's; its roughness widened by the same anti-aliasing as the base's.
+    if (normalLength > 0.0 && textureOptions.w > 0.5 && material.coatAndHeight.x > 0.0) {
+        float coatAmount = material.coatAndHeight.x * textureGrad(textures[nonuniformEXT(material.coatAndHeightSlots.x)], surfaceUv, gradientAcross, gradientDown).r;
+        float coatRoughness = clamp(material.coatAndHeight.y * textureGrad(textures[nonuniformEXT(material.coatAndHeightSlots.y)], surfaceUv, gradientAcross, gradientDown).g,
                                     BRDF_SMALLEST_ROUGHNESS, 1.0);
         vec3 coatNormal = geometricNormal;
 
-        if (material.clearCoat.z != 0.0) {
-            vec3 coatTexel = textureGrad(textures[nonuniformEXT(material.clearCoatSlots.z)], textureUv, across, down).rgb;
-            vec3 coatBumped = perturbNormal(surfaceNormal, surfaceTangent, decodeNormalTexel(coatTexel, material.clearCoat.z));
+        if (material.coatAndHeight.z != 0.0) {
+            vec3 coatTexel = textureGrad(textures[nonuniformEXT(material.coatAndHeightSlots.z)], surfaceUv, gradientAcross, gradientDown).rgb;
+            vec3 coatBumped = perturbNormal(surfaceNormal, surfaceTangent, decodeNormalTexel(coatTexel, material.coatAndHeight.z));
 
             if (dot(coatBumped, coatBumped) > 0.0) {
                 coatNormal = coatBumped;
             }
 
             if (textureOptions.y > 0.0) {
-                coatRoughness = toksvigRoughness(coatRoughness, coatTexel, material.clearCoat.z);
+                coatRoughness = toksvigRoughness(coatRoughness, coatTexel, material.coatAndHeight.z);
             }
         }
 
@@ -894,6 +953,27 @@ void main() {
                     radiance *= glassShadow(directional[i].toLight.xyz, float(PROBE_SHADOW_RAY_REACH));
                 }
 #endif
+            }
+
+            // The bumps' own shadows from the brightest directional light (render/gpu/parallax.h, mirrored by
+            // parallaxShadow): from the point the view's search found, up towards the light through the same height map
+            // to the top, the light's share the least of the samples'.
+            if (i == 0 && parallaxHitHeight < 1.0 && materialOptions.y > 0.5 && any(greaterThan(radiance, vec3(0.0)))) {
+                vec3 lightTangent = toTangentFrame(directional[i].toLight.xyz, surfaceNormal, surfaceTangent);
+
+                if (lightTangent.z > 0.0) {
+                    vec2 lightDelta = parallaxLightDelta(lightTangent, parallaxDepth);
+                    float visible = 1.0;
+
+                    for (int step = 1; step <= PARALLAX_SHADOW_STEPS; ++step) {
+                        float climbed = (1.0 - parallaxHitHeight) * float(step) / float(PARALLAX_SHADOW_STEPS);
+                        float terrain = textureGrad(textures[nonuniformEXT(material.coatAndHeightSlots.w)], surfaceUv + lightDelta * climbed,
+                                                    gradientAcross, gradientDown).r;
+                        visible = min(visible, parallaxShadowSample(terrain, parallaxHitHeight + climbed, climbed));
+                    }
+
+                    radiance *= visible;
+                }
             }
 
             addLight(radiance, directional[i].toLight.xyz, point, diffuse, specular);

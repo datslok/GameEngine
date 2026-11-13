@@ -116,6 +116,7 @@ private:
 // One function per shader library, each comparing the shader's functions with their C++ mirrors.
 void gpuTestBrdf(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestNormalMapping(GpuFunctionRunner& runner, GpuCheckReport& report);
+void gpuTestParallax(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestLighting(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestSoftShadow(GpuFunctionRunner& runner, GpuCheckReport& report);
 void gpuTestToneMapping(GpuFunctionRunner& runner, GpuCheckReport& report);

@@ -48,7 +48,7 @@ void visit(RenderSettings& settings, SettingsVisitor& visitor) {
         visit(settings.fog, visitor);
     });
     visitor.group("Materials", [&] {
-        visitor.field("Clear coat", settings.clearCoat);
+        visit(settings.materials, visitor);
     });
     visitor.group("Passes", [&] {
         visitor.field("Depth prepass", settings.depthPrepass);

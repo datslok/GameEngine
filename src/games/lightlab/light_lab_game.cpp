@@ -467,6 +467,29 @@ void LightLabGame::onInit(World& world, AssetManager& assets) {
 
     paintedBallsEntity = addStatic(std::move(paintedBalls));
 
+    // Parallax occlusion mapping's test pieces: a low brick wall (a solid block, its south face a panel of bricks with
+    // their height map) and a cobbled strip lying on the grass in front of it, their pictures made here.
+    const auto parallaxMaterial = [&](ParallaxImages images, float depth, float roughness) {
+        Material material;
+        material.roughness = roughness;
+        material.texture = assets.addTexture(ImageData{images.colour.width, images.colour.height, std::move(images.colour.pixels), TextureEncoding::Srgb});
+        material.normalTexture = assets.addTexture(ImageData{images.normal.width, images.normal.height, std::move(images.normal.pixels), TextureEncoding::Linear});
+        material.heightTexture = assets.addTexture(ImageData{images.height.width, images.height.height, std::move(images.height.pixels), TextureEncoding::Linear});
+        material.heightScale = depth;
+        return material;
+    };
+
+    ModelRenderer wall = blocksRenderer(cube, {LabBlock{labBrickWall.centre(), (labBrickWall.maximum - labBrickWall.minimum) * 0.5f, LabSurface::Brick}});
+    const Vec3 wallSize = labBrickWall.maximum - labBrickWall.minimum;
+    const Vec3 stripSize = labCobbleStrip.maximum - labCobbleStrip.minimum;
+    wall.parts.push_back(RenderPart{assets.addMesh(tiledPanel(Vec3{labBrickWall.minimum.x, 0.0f, labBrickWall.maximum.z + labPanelLift}, Vec3{wallSize.x, 0.0f, 0.0f},
+                                                              Vec3{0.0f, wallSize.y, 0.0f}, labBrickTileMetres)),
+                                    parallaxMaterial(brickImages(), labBrickDepth, 0.85f), Mat4::identity()});
+    wall.parts.push_back(RenderPart{assets.addMesh(tiledPanel(Vec3{labCobbleStrip.minimum.x, labPanelLift, labCobbleStrip.maximum.z}, Vec3{stripSize.x, 0.0f, 0.0f},
+                                                              Vec3{0.0f, 0.0f, -stripSize.z}, labCobbleTileMetres)),
+                                    parallaxMaterial(cobbleImages(), labCobbleDepth, 0.7f), Mat4::identity()});
+    brickWall = addStatic(std::move(wall));
+
     // Refraction's test pieces, as the window's glass: tinting the light through them, not in the collision.
     ModelRenderer refractors;
     refractors.parts.push_back(RenderPart{sphere, surfaceMaterial(LabSurface::SolidGlass),
@@ -965,6 +988,10 @@ LightLabStainedGlassSettings& LightLabGame::getStainedGlassSettings() {
 
 Entity LightLabGame::getWindowPane() const {
     return windowPane;
+}
+
+Entity LightLabGame::getBrickWall() const {
+    return brickWall;
 }
 
 Entity LightLabGame::getPaintedBalls() const {

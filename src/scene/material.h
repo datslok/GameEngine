@@ -96,6 +96,13 @@ struct Material {
     TextureHandle clearCoatRoughnessTexture;
     TextureHandle clearCoatNormalTexture;
     float clearCoatNormalScale = 1.0f;
+
+    // A height map for parallax occlusion mapping (render/gpu/parallax.h): a linear texture whose red channel is how high
+    // each texel stands (1 the top, at the polygon, 0 the deepest), making flat polygons seem to stand out (bricks, cobbles).
+    // heightScale is how deep the deepest lies, in texture units (a share of the texture's width: 0.03 for a mortar groove
+    // 3% of it deep). No handle means a flat surface. Ignored on cut-outs and transparent materials.
+    TextureHandle heightTexture;
+    float heightScale = 0.03f;
 };
 
 inline bool isCutOut(const Material& material) {

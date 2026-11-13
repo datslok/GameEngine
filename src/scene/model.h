@@ -77,13 +77,17 @@ struct MaterialSource {
     TextureSource clearCoatNormalTexture;
     float clearCoatNormalScale = Material{}.clearCoatNormalScale;
 
+    // A height map for parallax (linear, red channel) and its depth in texture units. The default depth is Material's own.
+    TextureSource heightTexture;
+    float heightScale = Material{}.heightScale;
+
     // For every texture of the material: they share one set of UVs.
     bool flipTextureVertically = true;
 
     bool hasTexture() const {
         return colourTexture.isSet() || metallicRoughnessTexture.isSet() || normalTexture.isSet() || occlusionTexture.isSet() ||
                emissiveTexture.isSet() || transmissionTexture.isSet() || thicknessTexture.isSet() || clearCoatTexture.isSet() ||
-               clearCoatRoughnessTexture.isSet() || clearCoatNormalTexture.isSet();
+               clearCoatRoughnessTexture.isSet() || clearCoatNormalTexture.isSet() || heightTexture.isSet();
     }
 };
 

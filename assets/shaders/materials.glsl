@@ -20,8 +20,8 @@ struct MaterialData {
     uvec4 extra;            // x: baked occlusion (linear, red channel); y: flags (MATERIAL_DOUBLE_SIDED, MATERIAL_CUT_OUT, MATERIAL_BLEND, MATERIAL_REFRACTS); z: transmission (linear, red); w: thickness (linear, green)
     vec4 transmission;      // x: glass's transmission, 0..1; y: thick glass's thickness (model units); z: 1 over its attenuation distance; w: its index of refraction
     vec4 attenuation;       // rgb: the colour light keeps after the attenuation distance
-    vec4 clearCoat;         // x: a clear coat's amount, 0..1 (0 none); y: its roughness; z: its normal map's scale (0 without one)
-    uvec4 clearCoatSlots;   // in the texture array: x amount (linear, red), y roughness (linear, green), z normal map (linear)
+    vec4 coatAndHeight;     // x: a clear coat's amount, 0..1 (0 none); y: its roughness; z: its normal map's scale (0 without one); w: the height map's depth for parallax (texture units, 0 none)
+    uvec4 coatAndHeightSlots; // in the texture array: x coat amount (linear, red), y coat roughness (linear, green), z coat normal map (linear), w height map (linear, red)
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

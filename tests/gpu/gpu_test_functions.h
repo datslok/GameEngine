@@ -22,6 +22,11 @@
 #define GPU_TEST_PERTURB_NORMAL 1
 #define GPU_TEST_TOKSVIG_ROUGHNESS 2
 
+// parallax_test.comp
+#define GPU_TEST_PARALLAX_FRAME 0
+#define GPU_TEST_PARALLAX_STEPS 1
+#define GPU_TEST_PARALLAX_SCALARS 2
+
 // lighting_test.comp
 #define GPU_TEST_DISTANCE_FALLOFF 0
 #define GPU_TEST_SPOT_CONE 1

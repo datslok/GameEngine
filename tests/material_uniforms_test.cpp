@@ -237,9 +237,9 @@ namespace {
     }
 
     /*
-    * A clear coat (KHR_materials_clearcoat): its amount and roughness in clearCoat.x and y, clamped to 0..1, its normal
+    * A clear coat (KHR_materials_clearcoat): its amount and roughness in coatAndHeight.x and y, clamped to 0..1, its normal
     * map's scale in z (0 without one, so the coat lies on the geometry), and its three textures' slots in
-    * clearCoatTextures (amount, roughness, normal). Glass is a varnish-like surface already, so a transparent material's
+    * coatAndHeightTextures (amount, roughness, normal). Glass is a varnish-like surface already, so a transparent material's
     * coat packs as none.
     */
     void testClearCoatIsPacked() {
@@ -251,24 +251,53 @@ namespace {
         lacquer.clearCoatNormalTexture = TextureHandle{4};
         lacquer.clearCoatNormalScale = 0.5f;
         const GpuMaterial packed = packMaterial(lacquer);
-        assert(nearlyEqual(packed.clearCoat, 0.8f, 1.0f, 0.5f, 0.0f));
-        assert(packed.clearCoatTextures[0] == 3 && packed.clearCoatTextures[1] == 4 && packed.clearCoatTextures[2] == 5);
+        assert(nearlyEqual(packed.coatAndHeight, 0.8f, 1.0f, 0.5f, 0.0f));
+        assert(packed.coatAndHeightTextures[0] == 3 && packed.coatAndHeightTextures[1] == 4 && packed.coatAndHeightTextures[2] == 5);
 
         Material smooth;
         smooth.clearCoat = 1.0f;
         smooth.clearCoatNormalScale = 2.0f;
         const GpuMaterial plain = packMaterial(smooth);
-        assert(nearlyEqual(plain.clearCoat, 1.0f, 0.0f, 0.0f, 0.0f));
-        assert(plain.clearCoatTextures[0] == whiteTextureSlot && plain.clearCoatTextures[2] == whiteTextureSlot);
+        assert(nearlyEqual(plain.coatAndHeight, 1.0f, 0.0f, 0.0f, 0.0f));
+        assert(plain.coatAndHeightTextures[0] == whiteTextureSlot && plain.coatAndHeightTextures[2] == whiteTextureSlot);
 
         // None by default, and none on glass.
-        assert(nearlyEqual(packMaterial(Material{}).clearCoat, 0.0f, 0.0f, 0.0f, 0.0f));
+        assert(nearlyEqual(packMaterial(Material{}).coatAndHeight, 0.0f, 0.0f, 0.0f, 0.0f));
         Material coatedGlass = lacquer;
         coatedGlass.transmission = 1.0f;
-        assert(packMaterial(coatedGlass).clearCoat[0] == 0.0f);
+        assert(packMaterial(coatedGlass).coatAndHeight[0] == 0.0f);
         Material negative;
         negative.clearCoat = -1.0f;
-        assert(packMaterial(negative).clearCoat[0] == 0.0f);
+        assert(packMaterial(negative).coatAndHeight[0] == 0.0f);
+    }
+
+    /*
+    * A height map for parallax occlusion mapping (render/gpu/parallax.h): its depth (texture units) in coatAndHeight.w,
+    * 0 without the texture, and its slot in coatAndHeightTextures.w. Cut-outs and transparent materials take none: a
+    * cut-out's holes come from the depth prepass at the unshifted place, and glass is drawn over what is behind it.
+    */
+    void testHeightIsPacked() {
+        Material bricks;
+        bricks.heightTexture = TextureHandle{6};
+        bricks.heightScale = 0.03f;
+        const GpuMaterial packed = packMaterial(bricks);
+        assert(nearlyEqual(packed.coatAndHeight[3], 0.03f) && packed.coatAndHeightTextures[3] == 7);
+
+        Material withoutTexture;
+        withoutTexture.heightScale = 0.03f;
+        assert(packMaterial(withoutTexture).coatAndHeight[3] == 0.0f && packMaterial(withoutTexture).coatAndHeightTextures[3] == whiteTextureSlot);
+
+        Material negative = bricks;
+        negative.heightScale = -0.1f;
+        assert(packMaterial(negative).coatAndHeight[3] == 0.0f);
+
+        Material leaves = bricks;
+        leaves.alphaMode = AlphaMode::Mask;
+        assert(packMaterial(leaves).coatAndHeight[3] == 0.0f);
+
+        Material glass = bricks;
+        glass.transmission = 1.0f;
+        assert(packMaterial(glass).coatAndHeight[3] == 0.0f);
     }
 }
 
@@ -287,4 +316,5 @@ void testMaterialUniforms() {
     testTransparentMaterialsArePacked();
     testThickGlassIsPacked();
     testClearCoatIsPacked();
+    testHeightIsPacked();
 }

@@ -42,6 +42,8 @@ void testDeferredChanges();
 void testDeterminism();
 void testEngineSettings();
 void testBrdf();
+void testParallax();
+void testHeightMap();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
@@ -266,6 +268,8 @@ int main(int argumentCount, char** arguments) {
     testDeterminism();
     testEngineSettings();
     testBrdf();
+    testParallax();
+    testHeightMap();
     testDepthPrepass();
     testTextureEncoding();
     testCoverageMips();

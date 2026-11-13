@@ -1,0 +1,32 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs parallax.glsl's functions on the cases parallax_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "parallax.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+
+    if (function == GPU_TEST_PARALLAX_FRAME) {
+        // Inputs: (direction, 0), (normal, 0), (tangent with its sign in w).
+        testOutput(0, vec4(toTangentFrame(a.xyz, testInput(1).xyz, testInput(2)), 0.0));
+    } else if (function == GPU_TEST_PARALLAX_STEPS) {
+        // Inputs: (view cosine, most steps, depth, 0), (direction in the surface's frame, 0).
+        vec3 direction = testInput(1).xyz;
+        testOutput(0, vec4(float(parallaxSteps(a.x, int(a.y))), parallaxDelta(direction, a.z), 0.0));
+        testOutput(1, vec4(parallaxLightDelta(direction, a.z), 0.0, 0.0));
+    } else if (function == GPU_TEST_PARALLAX_SCALARS) {
+        // Inputs: (t, height, gap above, gap below), (depth, step across, step down's x), (step down's y, terrain, ray
+        // height, climbed).
+        vec4 b = testInput(1);
+        vec4 c = testInput(2);
+        float pixels = parallaxDepthPixels(b.x, b.yz, vec2(b.w, c.x));
+        testOutput(0, vec4(parallaxGap(a.x, a.y), parallaxCrossing(a.z, a.w), pixels, parallaxFade(pixels)));
+        testOutput(1, vec4(parallaxShadowSample(c.y, c.z, c.w), 0.0, 0.0, 0.0));
+    }
+}
