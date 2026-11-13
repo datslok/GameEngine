@@ -85,7 +85,7 @@ namespace {
         wrong.historyDepthShare = std::numeric_limits<float>::quiet_NaN();
         assert(rejects(wrong));
 
-        assert(defaults.denoisePasses == 4 && defaults.denoisePlaneShare == 0.02f);
+        assert(defaults.denoisePasses == 2 && defaults.denoisePlaneShare == 0.02f);
         assert(defaults.antiLag && defaults.antiLagDeviations == 3.0f);
         wrong = {};
         wrong.antiLagDeviations = 0.0f;
@@ -1450,7 +1450,7 @@ namespace {
         assert(pass.reprojection[12] == 4.0f && pass.lens[1] == 0.25f && pass.lens[2] == -0.5f);
         assert(pass.gather[0] == 0.25f && pass.gather[1] == 0.0f && pass.gather[2] == 8.0f);
         assert(pass.history[0] == 16.0f && pass.history[1] == 0.05f && pass.history[2] == 1.0f && pass.history[3] == 0.0f);
-        assert(pass.denoise[0] == 4.0f && pass.denoise[1] == 0.02f);
+        assert(pass.denoise[0] == 2.0f && pass.denoise[1] == 0.02f);
         assert(pass.antiLag[0] == 1.0f && pass.antiLag[1] == 3.0f && pass.antiLag[2] == 2.0f);
 
         // Gathering reaches further than occlusion alone.
