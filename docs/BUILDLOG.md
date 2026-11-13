@@ -1503,7 +1503,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 
 - **Phase 16 closed** (Nov 13 2026, `close-phase-16`): the user checked the milestone with the typical GPU setup on, the light lab and the demo by day and at night: "it all looks great". The leftovers moved on: the sky grid's lamps (stage 3), anisotropy and skin to phase 14, sheen to phase 10 (garments), decals to phase 12 (the FPS). **The fog's history in seconds was dropped**, after working it through with the user: a fixed share a frame averages the same 10 frames at any rate, so its noise is steady and only its lag grows at low frame rates (0.32 s at 30 fps, 0.08 at 120); a time constant in seconds keeps the lag but averages only about 3 frames at 30 fps, swapping a slight trail for shimmer, the worse of the two. The engine guide gained phase 16's section (`docs/ENGINE_GUIDE.md`, Beautiful without ray tracing). Phase 17 (ray tracing and path tracing) is current.
 
-## Phase 18: A forest showcase (Nov 13 2026 onwards)
+## Phase 18: A jungle valley showcase (Nov 13 2026 onwards)
 
 - `forest-assets` (Nov 13 2026): the forest's scanned assets. The user asked for something lush, realistic and free (CC0), so a survey of Poly Haven and ambientCG came first, as a shortlist page; the user took the recommended set ("sounds good").
   - **What:** 30 assets, 142 files, 157 MB at 1K. 17 Poly Haven models (ferns, plants, shrubs, nettles, a stump, dead trunks, a root, mossy rocks, boulders), 8 Poly Haven textures (forest floor, muddy leaves, mossy rock, two barks, three sci-fi metals), and 5 ambientCG sets (grass and moss grounds, three leaf and foliage atlases).
@@ -1523,6 +1523,10 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Stand-ins:** plain coloured layers where `assets/forest` is missing, so a fresh clone runs and the tests need no downloads.
   - **`advanceSolarHours`** moved from the light lab to `scene/sun`, as both games' clocks use it.
   - **Checked:** the tests (release, tests first: the noise, the clearing, hollows and path, the mesh, the paint by place, the weights texture, layer files by role, the game headless, settings each frame); the debug game builds without warnings. Not run: the game itself (left to the user); golden references not saved.
+- `valley-replan` (Nov 13 2026): phase 18 re-planned from a 400 m forest to a jungle valley seen kilometres out.
+  - **How it came about:** the user asked for concept art before building the rest. The first sketches (a meadow, a forest path, a small machine in a clearing) were dropped when the user sent references (floating mountains, karst pillars, overgrown megastructures): "something large and epic, i want the scale to be felt huge". The second set (the valley from its rim, a 400 m ring sunk in the jungle, the foot of a 600 m wall, the valley at dusk, a scale diagram) set the direction, and the user asked for floating islands too.
+  - **Can the engine do it?** The light, materials, fog and image quality are there. The scale is not: no level of detail, impostors, occlusion culling or texture compression, a fog grid ending at 100 m with no aerial perspective, one 400 m terrain mesh, and cascades that grow coarse over a 5 km view.
+  - **The plan:** a rough valley first (grey pillars, islands and slabs at real size, measured on the laptop with the typical GPU setup), then the scale items in the order it shows (aerial perspective, far terrain, level of detail, impostors, occlusion culling, texture compression, distant shadows), then more assets (a survey first), the pillars and islands, trees, ground cover, the structures, wind. Level of detail and texture compression moved from phase 12, impostors and Hi-Z occlusion culling from phase 14.
 
 ## Tools outside the phases
 
