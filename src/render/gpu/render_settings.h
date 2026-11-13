@@ -89,6 +89,10 @@ struct RenderSettings {
     // (a mirror ball's sun swings 1.17 times at 0.25, 1.04 at 0.5, against 3.6 without) and softens curved highlights.
     float specularAntiAliasingVariance = static_cast<float>(NORMAL_GEOMETRIC_VARIANCE);
 
+    // Clear coats (render/gpu/brdf.h, addClearCoat): the varnish layer materials may have over them (car paint, lacquer).
+    // Off draws every material as if it had none, for comparing.
+    bool clearCoat = true;
+
     // Hardware ray tracing, every feature that traces rays at once: the light probes (all bounce light, since there is
     // no software tracer yet), ray-traced reflections, mirrored lights, glass shadows, the reflection probe's traced sun
     // and the ray debug view. Off by default, so the engine draws as on a GPU without ray queries, where it is ignored;

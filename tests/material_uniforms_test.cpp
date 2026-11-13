@@ -235,6 +235,41 @@ namespace {
         window.roughness = 0.0f;
         assert((packMaterial(window).extra[1] & MATERIAL_REFRACTS) == 0 && packMaterial(window).extra[3] == whiteTextureSlot);
     }
+
+    /*
+    * A clear coat (KHR_materials_clearcoat): its amount and roughness in clearCoat.x and y, clamped to 0..1, its normal
+    * map's scale in z (0 without one, so the coat lies on the geometry), and its three textures' slots in
+    * clearCoatTextures (amount, roughness, normal). Glass is a varnish-like surface already, so a transparent material's
+    * coat packs as none.
+    */
+    void testClearCoatIsPacked() {
+        Material lacquer;
+        lacquer.clearCoat = 0.8f;
+        lacquer.clearCoatRoughness = 1.5f;
+        lacquer.clearCoatTexture = TextureHandle{2};
+        lacquer.clearCoatRoughnessTexture = TextureHandle{3};
+        lacquer.clearCoatNormalTexture = TextureHandle{4};
+        lacquer.clearCoatNormalScale = 0.5f;
+        const GpuMaterial packed = packMaterial(lacquer);
+        assert(nearlyEqual(packed.clearCoat, 0.8f, 1.0f, 0.5f, 0.0f));
+        assert(packed.clearCoatTextures[0] == 3 && packed.clearCoatTextures[1] == 4 && packed.clearCoatTextures[2] == 5);
+
+        Material smooth;
+        smooth.clearCoat = 1.0f;
+        smooth.clearCoatNormalScale = 2.0f;
+        const GpuMaterial plain = packMaterial(smooth);
+        assert(nearlyEqual(plain.clearCoat, 1.0f, 0.0f, 0.0f, 0.0f));
+        assert(plain.clearCoatTextures[0] == whiteTextureSlot && plain.clearCoatTextures[2] == whiteTextureSlot);
+
+        // None by default, and none on glass.
+        assert(nearlyEqual(packMaterial(Material{}).clearCoat, 0.0f, 0.0f, 0.0f, 0.0f));
+        Material coatedGlass = lacquer;
+        coatedGlass.transmission = 1.0f;
+        assert(packMaterial(coatedGlass).clearCoat[0] == 0.0f);
+        Material negative;
+        negative.clearCoat = -1.0f;
+        assert(packMaterial(negative).clearCoat[0] == 0.0f);
+    }
 }
 
 void testMaterialUniforms() {
@@ -251,4 +286,5 @@ void testMaterialUniforms() {
     testCutOutsArePacked();
     testTransparentMaterialsArePacked();
     testThickGlassIsPacked();
+    testClearCoatIsPacked();
 }

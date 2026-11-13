@@ -2110,6 +2110,7 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth, frameUpscaler);
     frameData.textureOptions[1] = settings.normalMapFiltering ? 1.0f : 0.0f;
     frameData.textureOptions[2] = settings.specularAntiAliasing ? settings.specularAntiAliasingVariance : 0.0f;
+    frameData.textureOptions[3] = settings.clearCoat ? 1.0f : 0.0f;
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).

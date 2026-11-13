@@ -65,8 +65,8 @@ namespace {
 
         // The ground, the towers, fence, its chain-link, the window's glass, trees, building, the street, its windows and its bulbs' glow (static, and
         // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror), the
-        // mirror ball, refraction's glass pieces, the pen table and its glass bottle.
-        assert(staticModels == 15);
+        // mirror ball, refraction's glass pieces, the pen table, its glass bottle and the painted balls.
+        assert(staticModels == 16);
         assert(others > 0);
     }
 
@@ -415,6 +415,47 @@ namespace {
         assert(isTransparent(pane) && pane.thickness == 0.0f && pane.roughness < frostedRoughness && pane.transmission == 1.0f);
     }
 
+
+    /*
+    * Clear coat's test pieces (render/gpu/brdf.h, addClearCoat): two red painted balls on the grass between the start and
+    * the reflection corner, the same paint, one bare and one lacquered with a smooth clear coat, so the coat's sharp white
+    * highlight and its reflection show beside the bare paint's soft sheen. Both rest on the ground, clear of each other
+    * and of everything the level holds.
+    */
+    void testThePaintedBalls() {
+        const LightLabLayout layout = buildLightLabLayout();
+        std::vector<LabBlock> blocks;
+
+        for (const std::vector<LabBlock>* group : {&layout.towers, &layout.fence, &layout.trees, &layout.building, &layout.street, &layout.reflectors, &layout.table}) {
+            blocks.insert(blocks.end(), group->begin(), group->end());
+        }
+
+        const float radius = labPaintedBallRadius;
+
+        for (const Vec3& centre : labPaintedBallCentres) {
+            assert(near(centre.y, radius, 1e-6f));
+            const Aabb ball{centre - Vec3{radius, radius, radius}, centre + Vec3{radius, radius, radius}};
+
+            for (const LabBlock& block : blocks) {
+                assert(!overlaps(grown(ball, 0.1f), block.bounds()));
+            }
+
+            assert((centre - labGlassBallCentre).length() > radius + labGlassBallRadius + 0.1f);
+            assert((centre - labMirrorBallCentre).length() > radius + labMirrorBallRadius + 0.1f);
+        }
+
+        assert((labPaintedBallCentres[0] - labPaintedBallCentres[1]).length() > 2.0f * radius + 0.1f);
+
+        Lab lab;
+        const ModelRenderer& renderer = lab.world.get<ModelRenderer>(lab.game.getPaintedBalls());
+        assert(renderer.parts.size() == 2 && renderer.isStatic);
+        const Material& bare = renderer.parts[0].material;
+        const Material& lacquered = renderer.parts[1].material;
+        assert(bare.clearCoat == 0.0f && lacquered.clearCoat == 1.0f && lacquered.clearCoatRoughness < 0.1f);
+        assert(bare.colour.r == lacquered.colour.r && bare.colour.g == lacquered.colour.g && bare.colour.b == lacquered.colour.b);
+        assert(bare.roughness == lacquered.roughness && bare.metallic == lacquered.metallic && bare.roughness > 0.3f);
+        assert(bare.colour.r > 3 * bare.colour.g && !isTransparent(bare));
+    }
     /*
     * A green glass bottle standing on the pen table, for glass's coloured shadows (render/gpu/transparency.h) beside the
     * pens': a surface of revolution (Mesh::lathe) from its profile, standing on the top inside its edges and clear of
@@ -1347,6 +1388,7 @@ void testLightLab() {
     testFence();
     testThePenTable();
     testTheGlassBottle();
+    testThePaintedBalls();
     testChainLinkPattern();
     testTheChainLinkFence();
     testTheWindowGlass();

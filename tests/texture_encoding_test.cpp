@@ -85,6 +85,12 @@ namespace {
         source.attenuationDistance = 2.0f;
         source.attenuationColour = Vec3{0.5f, 0.8f, 1.0f};
         source.ior = 1.33f;
+        source.clearCoat = 0.8f;
+        source.clearCoatTexture.path = imagePath;
+        source.clearCoatRoughness = 0.1f;
+        source.clearCoatRoughnessTexture.path = imagePath;
+        source.clearCoatNormalTexture.path = imagePath;
+        source.clearCoatNormalScale = 0.5f;
         source.flipTextureVertically = false;
 
         const Material material = assets.makeMaterial(source);
@@ -107,6 +113,9 @@ namespace {
         assert(material.transmissionTexture == material.occlusionTexture);
         assert(material.thickness == 0.3f && material.thicknessTexture == material.occlusionTexture);
         assert(material.attenuationDistance == 2.0f && material.attenuationColour.y == 0.8f && material.ior == 1.33f);
+        assert(material.clearCoat == 0.8f && material.clearCoatRoughness == 0.1f && material.clearCoatNormalScale == 0.5f);
+        assert(material.clearCoatTexture == material.occlusionTexture && material.clearCoatRoughnessTexture == material.occlusionTexture);
+        assert(material.clearCoatNormalTexture == material.occlusionTexture);
 
         // One file read as numbers twice is one texture: occlusion often shares the metallic-roughness image (ORM).
         assert(material.occlusionTexture == material.normalTexture);
@@ -134,11 +143,17 @@ namespace {
         assert(material.transmission == defaults.transmission && !material.transmissionTexture.isValid());
         assert(material.thickness == defaults.thickness && !material.thicknessTexture.isValid() && material.ior == defaults.ior);
         assert(material.attenuationDistance == defaults.attenuationDistance && material.attenuationColour.z == defaults.attenuationColour.z);
+        assert(material.clearCoat == defaults.clearCoat && material.clearCoatRoughness == defaults.clearCoatRoughness && material.clearCoatNormalScale == defaults.clearCoatNormalScale);
+        assert(!material.clearCoatTexture.isValid() && !material.clearCoatRoughnessTexture.isValid() && !material.clearCoatNormalTexture.isValid());
         assert(!MaterialSource{}.hasTexture());
 
         MaterialSource thick;
         thick.thicknessTexture.path = imagePath;
         assert(thick.hasTexture());
+
+        MaterialSource coated;
+        coated.clearCoatNormalTexture.path = imagePath;
+        assert(coated.hasTexture());
 
         MaterialSource glowing;
         glowing.emissiveTexture.path = imagePath;

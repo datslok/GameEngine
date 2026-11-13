@@ -278,6 +278,9 @@ public:
 
     // The green glass bottle on the pen table: one part, the lathe-turned bottle.
     Entity getBottle() const;
+
+    // Clear coat's test pieces: the bare painted ball, then its lacquered twin, as one renderer's two parts.
+    Entity getPaintedBalls() const;
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -358,6 +361,7 @@ private:
     Material stainedGlass;
 
     Entity bottle;
+    Entity paintedBallsEntity;
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;

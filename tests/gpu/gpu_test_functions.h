@@ -15,6 +15,7 @@
 #define GPU_TEST_ADD_LIGHT 4
 #define GPU_TEST_FACES_LIGHT 5
 #define GPU_TEST_GGX_SAMPLE 6
+#define GPU_TEST_CLEAR_COAT 7
 
 // normal_mapping_test.comp
 #define GPU_TEST_DECODE_NORMAL_TEXEL 0

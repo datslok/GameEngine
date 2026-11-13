@@ -37,7 +37,9 @@ enum class LabSurface {
     WindowGlass, // the sunlit room's window pane: clear glass
     SolidGlass, // the reflection corner's glass ball: thick glass, bending light
     FrostedGlass, // the frosted panel in front of the chrome ball: rough thin glass
-    BottleGlass // the bottle on the pen table: thin green glass, both walls drawn
+    BottleGlass, // the bottle on the pen table: thin green glass, both walls drawn
+    BallPaint,   // the bare painted ball: red paint with a soft sheen
+    LacqueredPaint // its twin: the same paint under a smooth clear coat
 };
 
 struct LabBlock {
@@ -254,6 +256,11 @@ inline const Vec3 labMirrorBallCentre{5.0f, 0.04f + labMirrorBallRadius, -8.5f};
 inline constexpr float labGlassBallRadius = 0.4f;
 inline const Vec3 labGlassBallCentre{3.0f, 0.04f + labGlassBallRadius, -6.0f};
 inline const Aabb labFrostedPanel{Vec3{4.2f, 0.04f, -7.005f}, Vec3{5.8f, 1.44f, -6.995f}};
+
+// Clear coat's test pieces (render/gpu/brdf.h, addClearCoat): two red painted balls on the grass between the start and
+// the reflection corner, the same paint, the first bare and the second lacquered with a smooth clear coat.
+inline constexpr float labPaintedBallRadius = 0.3f;
+inline const std::array<Vec3, 2> labPaintedBallCentres{Vec3{0.3f, labPaintedBallRadius, -6.0f}, Vec3{1.2f, labPaintedBallRadius, -6.0f}};
 
 // A tall mirror on the sunlit room's south wall, facing the doorway from the back room across the room, so the
 // doorway and the room are seen in it (2 cm thick, standing out from the wall).

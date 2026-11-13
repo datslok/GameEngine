@@ -2752,12 +2752,13 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - an optional linear `occlusionTexture` (baked occlusion in red: how open each texel is to the light from all around, 0 buried to 1 open) with `occlusionStrength` (0..1);
 - `emissive`, with an optional sRGB `emissiveTexture` multiplying it (screens, dials, painted lights);
 - `alphaMode` (`Opaque` by default, `Mask` or `Blend`), `alphaCutoff` (0.5), `opacity` (1) and `doubleSided` (false), with `isCutOut(material)`;
-- and `transmission` (0) with an optional linear `transmissionTexture` (red), with `isTransparent(material)`: blended or transmitting.
-- It loads the colour and emissive textures as `TextureEncoding::Srgb` and the metallic-roughness, normal and occlusion ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`. Occlusion packed into the metallic-roughness image (ORM: occlusion, roughness, metallic in red, green, blue) is the same file or bytes read the same way, so it is one texture.
+- `transmission` (0) with an optional linear `transmissionTexture` (red), with `isTransparent(material)`: blended or transmitting;
+- and a clear coat (see Physically based shading, Clear coat): `clearCoat` (0) and `clearCoatRoughness` (0) with optional linear `clearCoatTexture` (red) and `clearCoatRoughnessTexture` (green), and `clearCoatNormalTexture` with `clearCoatNormalScale` (1).
+- It loads the colour and emissive textures as `TextureEncoding::Srgb` and the metallic-roughness, normal, occlusion, glass and clear coat ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`. Occlusion packed into the metallic-roughness image (ORM: occlusion, roughness, metallic in red, green, blue) is the same file or bytes read the same way, so it is one texture.
 
-**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor`, `KHR_materials_emissive_strength`, the base colour factor's alpha (as `opacity`), `alphaMode` with `alphaCutoff` (at least 0) and `doubleSided` (`readTexture` handles every texture, files and embedded alike). `BLEND` loads as `AlphaMode::Blend`; `KHR_materials_transmission` as `transmission` (0..1) and `transmissionTexture`, `KHR_materials_volume` as `thickness` (at least 0, model units), `thicknessTexture` (green), `attenuationColour` (0..1) and `attenuationDistance` (above 0; cgltf's default, the largest float, becomes infinite), and `KHR_materials_ior` as `ior` (at least 1; 1.5 without it). Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
+**The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor`, `KHR_materials_emissive_strength`, the base colour factor's alpha (as `opacity`), `alphaMode` with `alphaCutoff` (at least 0) and `doubleSided` (`readTexture` handles every texture, files and embedded alike). `BLEND` loads as `AlphaMode::Blend`; `KHR_materials_transmission` as `transmission` (0..1) and `transmissionTexture`, `KHR_materials_volume` as `thickness` (at least 0, model units), `thicknessTexture` (green), `attenuationColour` (0..1) and `attenuationDistance` (above 0; cgltf's default, the largest float, becomes infinite), and `KHR_materials_ior` as `ior` (at least 1; 1.5 without it), and `KHR_materials_clearcoat` as the clear coat (its factor and roughness 0..1, its three textures, its normal texture's scale). Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
 
-**On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (112 bytes, std430):
+**On the GPU.** `packMaterial` (`render/gpu/material_uniforms`) turns a `Material` into `GpuMaterial`, which mirrors the shader's `MaterialData` struct (144 bytes, std430):
 
 - base colour, its alpha a cut-out's or blended material's opacity (1 for opaque materials);
 - `surface` = metallic and roughness clamped to 0..1 and the normal scale (0 when there is no normal texture, so the white stand-in tilts nothing), and the occlusion strength (clamped to 0..1, and 0 when there is no occlusion texture, which tells the main pass to leave the light from all around alone);
@@ -2765,7 +2766,8 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - `textures`: the slots of the colour, metallic-roughness, normal and emissive textures in the bindless array, `bindlessTextureSlot` = handle + 1, `whiteTextureSlot` 0 for none.
 - `extra`: x the occlusion texture's slot, y the flags (`MATERIAL_DOUBLE_SIDED` 1, `MATERIAL_CUT_OUT` 2, `MATERIAL_BLEND` 4, `MATERIAL_REFRACTS` 8 for thick or frosted glass, `render/gpu/material_shared.h`)), z the transmission texture's slot, w the thickness texture's slot;
 - `transmission`: x glass's transmission (0..1), y thick glass's thickness (model units), z 1 over its attenuation distance (0 for none), w its index of refraction;
-- and `attenuation`: rgb the colour light keeps after the attenuation distance.
+- `attenuation`: rgb the colour light keeps after the attenuation distance;
+- and the clear coat: `clearCoat` x its amount, y its roughness (both clamped to 0..1, and the amount 0 on transparent materials, whose glass is a varnish-like surface already), z its normal map's scale (0 without one), and `clearCoatTextures` the amount, roughness and normal textures' slots.
 - One entry per different material in the frame's material buffer (see GPU scene).
 
 ### Cut-outs and double-sided surfaces
@@ -3922,7 +3924,7 @@ plus Lambert diffuse weighted by `1 - specular albedo`, so a white surface under
   - Integrated at start-up by `buildBrdfTable(jobs)` with GGX importance sampling along a Hammersley sequence, 4096 samples per texel, one texel a job (see Job system): 104 ms on one thread in release, 10.5 ms on 16, the same to the last bit.
   - Uploaded by `VulkanRenderer::createFixedTextures` as `R16G16_UNORM` via `brdfTableTexels`.
 
-Ambient returns `ambient * (diffuse + specularAlbedo)`, so metals are not black under ambient light.
+Ambient returns `ambient * (diffuse + specularAlbedo)` (plus a clear coat's albedo, see Clear coat), so metals are not black under ambient light.
 
 **Textures:** a material's colour, metallic-roughness, normal, occlusion and emissive textures (and glass's transmission and thickness) are read from the bindless array (set 0) by the slots in its record. The shadow atlas (compared and raw) and the BRDF table are scene set 1 bindings 7 to 9 (see GPU scene, Descriptors).
 
@@ -3940,6 +3942,29 @@ Ambient returns `ambient * (diffuse + specularAlbedo)`, so metals are not black 
 - `Vec3 * Vec3` multiplies component by component, as GLSL does.
 - Limits are 4 directional, 1024 point and 256 spotlights (`maxDirectionalLights`, `maxPointLights`, `maxSpotLights`), all seated by default. Shadows are scarcer (1 sun, 64 point and 8 spot lights), so `prioritizeLights` picks which lights get them (see Light priority).
 - The software renderer still hardcodes a light at `(-1, 2, 1)`.
+
+### Clear coat
+
+**What it is.** Many real surfaces are two layers: a base (paint, wood, metal) under a thin layer of clear varnish. Light meets the varnish first. Some reflects off it like off glass (4% head-on, nearly all at grazing: Fresnel), a sharp white highlight whatever the colour underneath; the rest passes through and lights the base as before. glTF's `KHR_materials_clearcoat` describes it, and the engine follows it (and Filament).
+
+**The maths** (`render/gpu/brdf`, `ClearCoatProperties`, `addClearCoat`, mirrored in `brdf.glsl`):
+
+- The coat is a second GGX lobe, the same D V F as the base's, for a 4% reflector at its own roughness and on its own normal, times its amount, with the same multiple-scattering compensation (`coatCompensation`).
+- Its share of the light from everywhere, `coatAlbedo`, is its amount times the specular albedo table's value for a 4% reflector at its roughness and view.
+- The base's diffuse colour, specular albedo and compensation are multiplied by `1 - coatAlbedo`: what the coat reflects is exactly what the base does not receive, so a white surface coated still returns all the light (the white furnace test). glTF dims the base by Fresnel at the view's angle instead, which is slightly off for rough coats; the table's albedo is exact and costs nothing more.
+- That share is taken once per pixel, at the eye's angle, as glTF does.
+- The coat lies on the geometry's normal, not the normal map's: varnish fills the bumps (lacquered wood's grain under a mirror-flat finish). A coat normal map of its own (`clearCoatNormalTexture`) tilts it instead.
+- Each layer is lit only from in front of itself; `facesLight` asks whether either is (the coat can face a light the normal map turns the base from).
+- Ambient light: the coat adds its albedo of the light from all around, and of the mirror light (the base's stand-in) for the probes' and the sky grid's.
+- A coat of nothing leaves the shading point, every light and the ambient exactly as they were, to the last bit, so uncoated materials draw as before.
+
+**In the main pass** (`scene_surface.glsl`, not glass's pipelines): on a coated material, while `RenderSettings::clearCoat` is on (F5 Materials, `engine.render.materials.clearCoat`, on; sent as `textureOptions.w`), the coat's three textures are read with `textureGrad` at the UV steps taken first thing (scaled by the mip bias), so uncoated pixels read nothing more. Its roughness is clamped to the smallest drawable and widened by Toksvig (with its own normal map) and geometric specular anti-aliasing, as the base's is: a smooth coat on a curved body is where highlights shimmer most. Every light goes through `addLight`, so the sun, the point and spot lights, mirrored light and the reflection probe's capture all get it.
+
+**Reflections.** The reflection pass follows one reflection a pixel; following two would double its cost. So it follows the smoother layer (`reflectsCoat`: the coat's alpha at most the base's, the coat on a tie), whose mirror image is the sharper: the main pass hands on the coat's normal, its albedo (grey) and roughness, and its stand-in (the mirror light times its albedo); the other layer's reflection stays its stand-in in the picture. Car paint gets its sharp mirror image; the paint's soft sheen under it keeps the probe's or the sky's light.
+
+**The light lab** has two red painted balls on the grass between the start and the reflection corner (`labPaintedBallCentres`, `labPaintedBallRadius` 0.3 m; `LightLabGame::getPaintedBalls`): the same paint (roughness 0.45), the first bare, the second under a full clear coat of roughness 0.03 (`LabSurface::BallPaint`, `LacqueredPaint`).
+
+**Tests:** `brdf_test` (no coat changes nothing to the bit, the coated white furnace over metal and plastic at two coat roughnesses and three views, the coat's share and the base's rest, rising towards grazing, the coat's lobe alone returning its albedo, the coat ignoring the normal map, lit from in front of either layer, which layer the reflections follow), `material_uniforms_test`, `gltf_material_test`, `texture_encoding_test` (the asset manager), `engine_commands_test` (the switch by command), `light_lab_test` (the balls); the GPU case `GPU_TEST_CLEAR_COAT` in `brdf_gpu_test` (built, not run).
 
 ### The demo's lighting
 

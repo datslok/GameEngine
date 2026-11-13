@@ -83,6 +83,19 @@ struct Material {
 
     // The index of refraction (KHR_materials_ior): how strongly light bends entering it, 1.5 for glass, 1.33 for water.
     float ior = 1.5f;
+
+    // A clear coat (KHR_materials_clearcoat): a thin layer of clear varnish over the surface, as on car paint, lacquered
+    // wood or a varnished floor (render/gpu/brdf.h, addClearCoat). clearCoat is how much of the surface it covers (0..1,
+    // 0 none), its texture's red channel (linear) multiplying it; clearCoatRoughness its own roughness (0..1, usually
+    // near 0, a smooth gloss), its texture's green channel multiplying it. The coat lies smooth on the geometry, whatever
+    // normalTexture does to the layer under it, unless it has a normal map of its own (clearCoatNormalTexture, scaled by
+    // clearCoatNormalScale). Ignored on transparent materials, whose glass is a varnish-like surface already.
+    float clearCoat = 0.0f;
+    TextureHandle clearCoatTexture;
+    float clearCoatRoughness = 0.0f;
+    TextureHandle clearCoatRoughnessTexture;
+    TextureHandle clearCoatNormalTexture;
+    float clearCoatNormalScale = 1.0f;
 };
 
 inline bool isCutOut(const Material& material) {
