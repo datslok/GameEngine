@@ -10,6 +10,7 @@
 
 // henyeyGreensteinPhase and oneMinusExp, shared with the sky.
 #include "atmosphere.glsl"
+#include "hash.glsl"
 
 // The medium as the frame's fog record holds it: x the density at the base height, y the base height, z the scale
 // height, w the anisotropy.
@@ -55,21 +56,8 @@ vec3 fogVolumePoint(vec3 coordinate, mat4 inverseViewProjection, vec3 viewForwar
     return direction * (fogSliceDepth(coordinate.z, range) / dot(direction, viewForward));
 }
 
-// PCG3D (Jarzynski and Olano 2020), core/hash.h's pcg3d: the same bits.
-uvec3 fogPcg3d(uvec3 v) {
-    v = v * 1664525u + 1013904223u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    v ^= v >> 16u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    return v;
-}
-
 vec3 fogFroxelTurn(ivec3 froxel) {
-    return vec3(fogPcg3d(uvec3(froxel)) >> 8u) * (1.0 / 16777216.0);
+    return vec3(pcg3d(uvec3(froxel)) >> 8u) * (1.0 / 16777216.0);
 }
 
 vec3 fogFroxelJitter(vec3 frameJitter, ivec3 froxel) {

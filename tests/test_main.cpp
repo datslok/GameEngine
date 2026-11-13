@@ -140,6 +140,7 @@ void testGpuClothEngine();
 void testGpuTiming();
 void testToneMapping();
 void testToneMapUniforms();
+void testCameraFinish();
 void testBloom();
 void testBlueNoise();
 void testTaa();
@@ -334,6 +335,7 @@ int main(int argumentCount, char** arguments) {
     testGpuTiming();
     testToneMapping();
     testToneMapUniforms();
+    testCameraFinish();
     testBloom();
     testBlueNoise();
     testTaa();

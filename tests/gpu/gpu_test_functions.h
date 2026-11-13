@@ -187,4 +187,8 @@
 #define GPU_TEST_CLOTH_STITCH 25
 #define GPU_TEST_CLOTH_STITCH_WIDEST 26
 
+// camera_finish_test.comp
+#define GPU_TEST_CAMERA_GRADE 0
+#define GPU_TEST_CAMERA_LENS 1
+
 #endif

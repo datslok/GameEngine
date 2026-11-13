@@ -3,6 +3,7 @@
 #include "core/settings_visitor.h"
 #include "render/gpu/ambient_occlusion.h"
 #include "render/gpu/bloom.h"
+#include "render/gpu/camera_finish.h"
 #include "render/gpu/contact_shadows.h"
 #include "render/gpu/ddgi.h"
 #include "render/gpu/display_output.h"
@@ -28,6 +29,10 @@ struct RenderSettings {
     ShadowSettings shadows;
     BloomSettings bloom;
     ToneMappingSettings toneMapping;
+
+    // The camera's finish (render/gpu/camera_finish.h): white balance, the grade and the lens, all neutral or off by
+    // default.
+    CameraSettings camera;
     DisplaySettings display;
     GlobalIlluminationSettings globalIllumination;
     TaaSettings taa;

@@ -1,0 +1,28 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs camera_finish.glsl's functions on the cases camera_finish_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "camera_finish.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    vec4 a = testInput(0);
+    vec4 b = testInput(1);
+
+    if (function == GPU_TEST_CAMERA_GRADE) {
+        // Inputs: (light, gain), (contrast, saturation, lift, gamma).
+        testOutput(0, vec4(gradeColour(a.rgb, b, a.w), 0.0));
+    } else if (function == GPU_TEST_CAMERA_LENS) {
+        // Inputs: (ndc, tangents of the half field of view), (pixel, size), (shift, strength, noise, peak),
+        // (mapped light, 0), (pixel x, pixel y, frame, 0) as whole numbers.
+        vec4 c = testInput(2);
+        vec4 d = testInput(3);
+        vec4 e = testInput(4);
+        testOutput(0, vec4(naturalVignetting(a.xy, a.zw, c.y), aberrationPlace(b.xy, b.zw, c.x), grainNoise(uvec3(e.xyz))));
+        testOutput(1, vec4(filmGrain(d.rgb, c.z, c.y, c.w), 0.0));
+    }
+}
