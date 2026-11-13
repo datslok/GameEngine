@@ -857,6 +857,11 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 | `Shadows` | |
 | `Fog` | FOG: the fog's grid lit and integrated, only with fog |
 | `DepthPrepass` | |
+| `ColourPyramid` | PYRAMID: last frame's picture's blurrier levels, built here only while ambient occlusion gathers light from them (otherwise the reflections build them, under SSR) |
+| `AmbientOcclusion` | AO: the ambient occlusion pass itself (`VulkanAmbientOcclusion::occlude`) |
+| `AoHistory` | AOHISTORY: its temporal accumulation (`accumulateHistory`), only while it accumulates |
+| `AoDenoise` | AODENOISE: its denoiser's passes (`denoise`), only while it denoises |
+| `ContactShadows` | CONTACT: the contact shadows' march |
 | `MirroredLights` | MIRROR: light reflected off mirrors onto what the prepass drew, only while the pass runs |
 | `Main` | |
 | `ProbeBalls` | the probes' debug balls |
@@ -870,7 +875,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 
 The same file has:
 
-- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, FOG, PREPASS, MIRROR, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
+- `gpuPassName`, giving the readout's short names UI, TLAS, SKY, PROBES, CLUSTERS, SHADOW, FOG, PREPASS, PYRAMID, AO, AOHISTORY, AODENOISE, CONTACT, MIRROR, MAIN, BALLS, RAYS, DEPTHS, EYE, BLOOM, TONE, LINES, OVERLAY, also used as the debug labels;
 - `gpuTimestampCount` (one stamp before the first pass and one after each);
 - `timestampTicksBetween` (the difference masked to the queue's `timestampValidBits`, so a counter that rolls over still gives the right count);
 - and `gpuTimingsFromTicks` (seconds per pass from the device's `timestampPeriod`; the passes add up to `totalSeconds`; not `valid` with zero valid bits).

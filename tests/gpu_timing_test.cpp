@@ -85,19 +85,30 @@ void testGpuTiming() {
     }
 
     // The fog's grid is lit right after the shadows, whose atlas it reads, before the depth prepass; the depth prepass is
-    // recorded after it, then ambient occlusion, contact shadows and the mirrored lights, which read its depth, right before the main pass,
+    // recorded after it, then ambient occlusion (in four parts, below), contact shadows and the mirrored lights, which read its depth, right before the main pass,
     // whose depth it fills and which shades their light.
     {
         assert(static_cast<int>(GpuPass::Shadows) + 1 == static_cast<int>(GpuPass::Fog));
         assert(static_cast<int>(GpuPass::Fog) + 1 == static_cast<int>(GpuPass::DepthPrepass));
         assert(std::string(gpuPassName(GpuPass::Fog)) == "FOG");
-        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::AmbientOcclusion));
-        assert(static_cast<int>(GpuPass::AmbientOcclusion) + 1 == static_cast<int>(GpuPass::ContactShadows));
         assert(static_cast<int>(GpuPass::ContactShadows) + 1 == static_cast<int>(GpuPass::MirroredLights));
         assert(std::string(gpuPassName(GpuPass::ContactShadows)) == "CONTACT");
         assert(std::string(gpuPassName(GpuPass::AmbientOcclusion)) == "AO");
         assert(static_cast<int>(GpuPass::MirroredLights) + 1 == static_cast<int>(GpuPass::Main));
         assert(std::string(gpuPassName(GpuPass::MirroredLights)) == "MIRROR");
+    }
+
+    // Ambient occlusion in four parts, each timed apart: last frame's picture's pyramid (built first while AO gathers
+    // light from it), the pass itself, the history it blends into, and the denoiser.
+    {
+        assert(static_cast<int>(GpuPass::DepthPrepass) + 1 == static_cast<int>(GpuPass::ColourPyramid));
+        assert(static_cast<int>(GpuPass::ColourPyramid) + 1 == static_cast<int>(GpuPass::AmbientOcclusion));
+        assert(static_cast<int>(GpuPass::AmbientOcclusion) + 1 == static_cast<int>(GpuPass::AoHistory));
+        assert(static_cast<int>(GpuPass::AoHistory) + 1 == static_cast<int>(GpuPass::AoDenoise));
+        assert(static_cast<int>(GpuPass::AoDenoise) + 1 == static_cast<int>(GpuPass::ContactShadows));
+        assert(std::string(gpuPassName(GpuPass::ColourPyramid)) == "PYRAMID");
+        assert(std::string(gpuPassName(GpuPass::AoHistory)) == "AOHISTORY");
+        assert(std::string(gpuPassName(GpuPass::AoDenoise)) == "AODENOISE");
     }
 
     // Ticks between two stamps: a plain difference while the counter has not rolled over.
@@ -119,7 +130,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 11, 8, 4, 2, 40, 17, 25, 16, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 11, 8, 4, 2, 40, 17, 25, 4, 16, 7, 3, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -135,7 +146,17 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1354 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1368 * nanosecondsPerTick * 1e-9));
+        // Ambient occlusion's four parts, each between its own stamps, add up to what its one line used to read.
+        assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.seconds(GpuPass::AoHistory), 7 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.seconds(GpuPass::AoDenoise), 3 * nanosecondsPerTick * 1e-9));
+        const std::size_t firstAoStamp = static_cast<std::size_t>(GpuPass::ColourPyramid);
+        const std::size_t lastAoStamp = static_cast<std::size_t>(GpuPass::AoDenoise) + 1;
+        assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid) + timings.seconds(GpuPass::AmbientOcclusion)
+                               + timings.seconds(GpuPass::AoHistory) + timings.seconds(GpuPass::AoDenoise),
+                           static_cast<double>(stamps[lastAoStamp] - stamps[firstAoStamp]) * nanosecondsPerTick * 1e-9));
         assert(timings.seconds(GpuPass::ToneMap) == 0.0);
         assert(nearlyEqual(timings.seconds(GpuPass::Main), 900 * nanosecondsPerTick * 1e-9));
     }

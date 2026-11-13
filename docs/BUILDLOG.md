@@ -1424,6 +1424,10 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The readout again:** a hidden debug copy's `stats` showed CLOTH, TLAS, PROBES and CLUSTERS still at 0.00: an empty pass takes nanoseconds between its timestamps, so "exactly zero" never hid it. Idle now means "shows as zero at the decimals shown".
   - **Checked:** the tests (release, tests first), the release, debug and GPU test programs build without warnings, a hidden debug copy with the desk lamp on showed no validation messages. **Not run:** `make gputest` and the golden views (only on request).
 
+- `ao-timings` (Nov 13 2026): ambient occlusion took 6 ms of the user's 14 ms frame at about 1440p, 3-5 times typical GTAO, with one line in F4 for four kinds of work. **Explained, then the user chose** splitting `occlude` into three calls the renderer times apart (A) over a stage hook inside it (B), matching how every other pass is timed.
+  - **How:** four `GpuPass`es in its place: PYRAMID (last frame's picture's levels, only while AO gathers light), AO (the pass), AOHISTORY (the accumulation), AODENOISE (the denoiser). `VulkanAmbientOcclusion` keeps what `occlude` worked out (`FrameSteps`) for `accumulateHistory` and `denoise`, always called in that order; a step with nothing to do records nothing and reads 0, so F4 hides it.
+  - **Checked:** the tests (release, tests first: the passes' order and names, and four fake stamps' parts adding up to their span); the release and debug games build without warnings. **Not run:** `make gputest` and the golden views (only on request).
+
 ## Tools outside the phases
 
 - `loading-screen` (Nov 11 2026): pipelines compiled on every core, with a loading screen. The user: "the game takes a very long time to respond after a fresh build", then "can we have a screen that says building shaders and a loading bar or something like that, rather than it just not responding for a min".
