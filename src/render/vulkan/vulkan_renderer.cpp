@@ -124,6 +124,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
     ambientOcclusion = std::make_unique<VulkanAmbientOcclusion>(device, nearestSampler.get(), framesInFlight, bindlessTextures->getLayout(),
                                                                 sceneLayout->getFrameLayout());
     contactShadows = std::make_unique<VulkanContactShadows>(device, nearestSampler.get(), framesInFlight);
+    motionBlur = std::make_unique<VulkanMotionBlur>(device, nearestSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -1780,6 +1781,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         reactiveMask->clear(frame.commands);
     }
 
+    // Motion blur needs this frame's motion: the velocity image (drawn only with anti-aliasing) and a known last camera.
+    const bool blursMotion = settings.camera.motionBlur && temporal && previousCamera.known;
+
     // The picture smoothed over frames (and upscaled), before anything reads it: by FSR or DLSS when one is the upscaler,
     // after the camera motion pass gives every pixel a motion, else by the engine's own resolve. Each drops its history
     // while another draws, and all start afresh when temporal anti-aliasing is switched on again. All are timed as AA.
@@ -1837,12 +1841,29 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.upscaler = frameUpscaler;
     stats.renderScale = appliedRenderScale(settings.upscaling);
     stats.outputWidth = frameWidth;
+    shownScene = finishedScene;
+
+    // Motion blur (render/gpu/motion_blur.h) on the finished picture, into a copy the passes below read instead; its
+    // images made the first time and on a resize (waiting for the GPU then, which may still read the old ones).
+    if (blursMotion) {
+        const RenderSize output{frameWidth, frameHeight};
+
+        if (!motionBlur->fits(output)) {
+            device.waitIdle();
+            motionBlur->ensureSize(output);
+        }
+
+        beginGpuPass(frame, GpuPass::MotionBlur);
+        shownScene = &motionBlur->blur(frame.commands, frame.descriptors, frame.frameIndex, *finishedScene, taa->getVelocity(), depth,
+                                       packMotionBlurPass(*inverseViewProjection, reprojection, sceneSize, output, settings.camera));
+        endGpuPass(frame, GpuPass::MotionBlur);
+    }
 
     // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
     // mapping. Switched off, it starts afresh when switched on again.
     if (settings.toneMapping.eyeAdaptation) {
         beginGpuPass(frame, GpuPass::EyeAdaptation);
-        eyeAdaptation->adapt(frame.commands, frame.descriptors, frame.frameIndex, *finishedScene, settings.toneMapping, description.frameSeconds,
+        eyeAdaptation->adapt(frame.commands, frame.descriptors, frame.frameIndex, *shownScene, settings.toneMapping, description.frameSeconds,
                              eyeAdaptationFresh || capturing);
         endGpuPass(frame, GpuPass::EyeAdaptation);
         eyeAdaptationFresh = false;
@@ -1854,7 +1875,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     // The scattered light, from the finished scene image, before tone mapping mixes it in.
     beginGpuPass(frame, GpuPass::Bloom);
-    const BloomComposite bloomMix = bloom->draw(frame, *finishedScene, frameWidth, frameHeight, settings.bloom);
+    const BloomComposite bloomMix = bloom->draw(frame, *shownScene, frameWidth, frameHeight, settings.bloom);
     endGpuPass(frame, GpuPass::Bloom);
     return bloomMix;
 }
@@ -2537,8 +2558,8 @@ void VulkanRenderer::drawToneMap(FrameContext& frame, const VulkanPipeline& pipe
 
     const VulkanImage* bloomResult = bloom->getResult();
     const std::array<SampledImage, 2> images{
-        SampledImage{finishedScene->getView(), linearSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        SampledImage{bloomResult != nullptr ? bloomResult->getView() : finishedScene->getView(), linearSampler.get(),
+        SampledImage{shownScene->getView(), linearSampler.get(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        SampledImage{bloomResult != nullptr ? bloomResult->getView() : shownScene->getView(), linearSampler.get(),
                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
     };
     const std::array<VkDescriptorBufferInfo, 1> buffers{eyeAdaptation->describeAdaptation()};
@@ -3043,6 +3064,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
 
     ambientOcclusion->setFramesInFlight(count);
     contactShadows->setFramesInFlight(count);
+    motionBlur->setFramesInFlight(count);
 
     // A frame in flight that is no more would never come round to read the probes' relocation it asked for.
     if (ddgi) {

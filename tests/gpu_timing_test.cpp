@@ -80,7 +80,10 @@ void testGpuTiming() {
         assert(std::string(gpuPassName(GpuPass::ReflectionProbe)) == "CUBE");
         assert(std::string(gpuPassName(GpuPass::PlanarReflection)) == "PLANAR");
         assert(std::string(gpuPassName(GpuPass::Reflections)) == "SSR");
-        assert(static_cast<int>(GpuPass::AntiAliasing) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
+        // Motion blur follows the anti-aliasing (it blurs the finished picture), before anything else reads it.
+        assert(static_cast<int>(GpuPass::AntiAliasing) + 1 == static_cast<int>(GpuPass::MotionBlur));
+        assert(static_cast<int>(GpuPass::MotionBlur) + 1 == static_cast<int>(GpuPass::EyeAdaptation));
+        assert(std::string(gpuPassName(GpuPass::MotionBlur)) == "BLUR");
         assert(std::string(gpuPassName(GpuPass::Motion)) == "MOTION" && std::string(gpuPassName(GpuPass::AntiAliasing)) == "AA");
     }
 
@@ -133,7 +136,7 @@ void testGpuTiming() {
     // add up to the total. A pass that drew nothing (two equal stamps) takes no time.
     {
         Stamps stamps{};
-        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 11, 8, 4, 2, 40, 17, 25, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 9, 120, 0, 15, 7};
+        const std::array<std::uint64_t, gpuPassCount> lengths{50, 3, 11, 8, 4, 2, 40, 17, 25, 4, 16, 7, 3, 2, 6, 14, 900, 5, 0, 12, 6, 20, 0, 10, 11, 13, 30, 3, 9, 120, 0, 15, 7};
         stamps[0] = 1'000'000;
         for (std::size_t pass = 0; pass < gpuPassCount; ++pass) {
             stamps[pass + 1] = stamps[pass] + lengths[pass];
@@ -149,7 +152,7 @@ void testGpuTiming() {
             sum += timings.passSeconds[pass];
         }
         assert(nearlyEqual(timings.totalSeconds, sum));
-        assert(nearlyEqual(timings.totalSeconds, 1370 * nanosecondsPerTick * 1e-9));
+        assert(nearlyEqual(timings.totalSeconds, 1373 * nanosecondsPerTick * 1e-9));
         // Ambient occlusion's parts, each between its own stamps, add up to what its one line used to read.
         assert(nearlyEqual(timings.seconds(GpuPass::ColourPyramid), 4 * nanosecondsPerTick * 1e-9));
         assert(nearlyEqual(timings.seconds(GpuPass::AmbientOcclusion), 16 * nanosecondsPerTick * 1e-9));

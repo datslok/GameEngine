@@ -1,0 +1,77 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Motion blur's first pass (render/gpu/motion_blur.h): a workgroup per tile of MOTION_BLUR_TILE output pixels a side,
+* each invocation preparing a square of them: the pixel's motion (the velocity texel's, or the camera's from the depth,
+* as pixelMotion picks), its half-blur in output pixels (motionBlurHalfVector) and its view depth, written to the
+* prepared image; then the tile's longest half-blur, by halving in shared memory, to the tiles image. The velocity and
+* depth images are at the render size, read at the render texel under each output pixel.
+*/
+#include "screen_reflections.glsl"
+#include "taa.glsl"
+#include "motion_blur.glsl"
+
+layout(local_size_x = MOTION_BLUR_GROUP, local_size_y = MOTION_BLUR_GROUP) in;
+
+// Must match GpuMotionBlurPass.
+layout(std430, set = 0, binding = 0) readonly buffer Pass {
+    mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
+    mat4 reprojection;          // this frame's clip space (without the jitter) to last frame's
+    vec4 renderSize;            // xy: the velocity and depth images' size, zw: its inverse
+    vec4 outputSize;            // xy: the picture's size, zw: its inverse
+    vec4 options;               // x: the shutter's share of the frame, y: 1 with the camera's motion blurred
+} pass;
+
+layout(set = 0, binding = 1) uniform sampler2D velocity;                  // render size, exact texels: NDC motion or TAA_NO_MOTION
+layout(set = 0, binding = 2) uniform sampler2D depth;                     // render size, exact texels
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D prepared; // output size: xy the half-blur, z the view depth
+layout(set = 0, binding = 4, rg32f) uniform writeonly image2D tiles;      // a texel per tile: its longest half-blur
+
+const int pixelsPerInvocation = MOTION_BLUR_TILE / MOTION_BLUR_GROUP;
+shared vec2 longest[MOTION_BLUR_GROUP * MOTION_BLUR_GROUP];
+
+void main() {
+    ivec2 tile = ivec2(gl_WorkGroupID.xy);
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    ivec2 outputPixels = ivec2(pass.outputSize.xy);
+    ivec2 render = ivec2(pass.renderSize.xy);
+    bool cameraBlur = pass.options.y > 0.5;
+    vec2 mine = vec2(0.0);
+
+    for (int dy = 0; dy < pixelsPerInvocation; ++dy) {
+        for (int dx = 0; dx < pixelsPerInvocation; ++dx) {
+            ivec2 pixel = tile * MOTION_BLUR_TILE + local * pixelsPerInvocation + ivec2(dx, dy);
+
+            if (any(greaterThanEqual(pixel, outputPixels))) {
+                continue;
+            }
+
+            ivec2 renderTexel = clamp(ivec2((vec2(pixel) + 0.5) * pass.renderSize.xy * pass.outputSize.zw), ivec2(0), render - 1);
+            vec2 renderPixel = vec2(renderTexel) + 0.5;
+            float pixelDepth = texelFetch(depth, renderTexel, 0).r;
+            vec2 camera = cameraMotion(pass.reprojection, renderPixel, pixelDepth, pass.renderSize.xy);
+            vec2 halfBlur = motionBlurHalfVector(pixelMotion(texelFetch(velocity, renderTexel, 0).xy, camera, cameraBlur), pass.outputSize.xy, pass.options.x);
+            float viewDepth = pixelDepth == float(GPU_FAR_DEPTH) ? float(MOTION_BLUR_SKY_DEPTH)
+                                                                 : viewDistanceAtPixel(pass.inverseViewProjection, renderPixel, pixelDepth, pass.renderSize.xy);
+            imageStore(prepared, pixel, vec4(halfBlur, viewDepth, 0.0));
+            mine = largerMotion(mine, halfBlur);
+        }
+    }
+
+    uint index = gl_LocalInvocationIndex;
+    longest[index] = mine;
+    barrier();
+
+    for (uint stride = (MOTION_BLUR_GROUP * MOTION_BLUR_GROUP) / 2; stride > 0u; stride /= 2u) {
+        if (index < stride) {
+            longest[index] = largerMotion(longest[index], longest[index + stride]);
+        }
+
+        barrier();
+    }
+
+    if (index == 0u) {
+        imageStore(tiles, tile, vec4(longest[0], 0.0, 0.0));
+    }
+}

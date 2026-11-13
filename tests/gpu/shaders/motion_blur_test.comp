@@ -1,0 +1,27 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs motion_blur.glsl's functions on the cases motion_blur_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "motion_blur.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    // Inputs: (velocity texel, camera motion), (output size, shutter share, camera blur 0 or 1),
+    // (distance, pixel depth, sample depth, pixel speed), (sample speed, noise, index, 0), (motion a, motion b).
+    vec4 a = testInput(0);
+    vec4 b = testInput(1);
+    vec4 c = testInput(2);
+    vec4 d = testInput(3);
+    vec4 e = testInput(4);
+
+    if (function == GPU_TEST_MOTION_BLUR) {
+        vec2 motion = pixelMotion(a.xy, a.zw, b.w > 0.5);
+        testOutput(0, vec4(motion, motionBlurHalfVector(a.xy, b.xy, b.z)));
+        testOutput(1, vec4(largerMotion(e.xy, e.zw), motionBlurCone(c.x, c.w), motionBlurCylinder(c.x, d.x)));
+        testOutput(2, vec4(motionBlurNearer(c.y, c.z), motionBlurSampleWeight(c.x, c.y, c.z, c.w, d.x), motionBlurOffset(int(d.z), d.y), 0.0));
+    }
+}

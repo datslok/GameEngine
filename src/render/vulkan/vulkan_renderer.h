@@ -49,6 +49,7 @@
 #include "render/gpu/planar_reflection.h"
 #include "render/vulkan/vulkan_ambient_occlusion.h"
 #include "render/vulkan/vulkan_contact_shadows.h"
+#include "render/vulkan/vulkan_motion_blur.h"
 #include "render/vulkan/vulkan_planar_reflection.h"
 #include "render/vulkan/vulkan_fog.h"
 #include "render/vulkan/vulkan_sky_visibility.h"
@@ -288,6 +289,10 @@ private:
     // size: temporal anti-aliasing's result, or the scene image itself while it is off. Set by drawScene.
     VulkanImage* finishedScene = nullptr;
 
+    // The picture eye adaptation, bloom and tone mapping read this frame: the finished one, or its motion-blurred copy
+    // while motion blur is on (the finished one stays sharp for next frame's reflections and gathered light).
+    VulkanImage* shownScene = nullptr;
+
     // Screen-space reflections (render/gpu/screen_reflections.h), and whether last frame's finished picture may be
     // reflected: it was smoothed (so it is not the scene image this frame draws over) and nothing was remade since.
     std::unique_ptr<VulkanReflections> reflections;
@@ -299,6 +304,7 @@ private:
     // Ambient occlusion from the depth prepass (render/gpu/ambient_occlusion.h).
     std::unique_ptr<VulkanAmbientOcclusion> ambientOcclusion;
     std::unique_ptr<VulkanContactShadows> contactShadows;
+    std::unique_ptr<VulkanMotionBlur> motionBlur;
 
     // Volumetric fog (render/gpu/volumetric_fog.h): its grid, lit after the shadows, and the picture seen through it.
     std::unique_ptr<VulkanFog> fog;

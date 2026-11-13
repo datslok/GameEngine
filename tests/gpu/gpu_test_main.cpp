@@ -36,6 +36,7 @@ int main() {
             gpuTestTransparency(runner, report);
             gpuTestDither(runner, report);
             gpuTestCameraFinish(runner, report);
+            gpuTestMotionBlur(runner, report);
             gpuTestOverlay(runner, report);
             gpuTestStars(runner, report);
             gpuTestClusters(runner, report);

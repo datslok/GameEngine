@@ -870,6 +870,7 @@ GPU timing and debug labels: `render/gpu/gpu_timing` (no graphics API, tested in
 | `DepthRange` | the screen's depths measured for the sun's cascades, a compute pass |
 | `PlanarReflection` | PLANAR: a flat mirror's picture, its blurrier levels and its depths measured, only while a mirror is chosen (see Planar reflections) |
 | `FogApply` | FOGMIX: the picture before the glass seen through the fog, only with fog (after the reflections) |
+| `MotionBlur` | BLUR: motion blur's three passes on the finished picture, while it is on (see Motion blur) |
 | `EyeAdaptation` | EYE: the scene's brightness and the adapted exposure, two compute passes, while it adapts |
 | `Bloom`, `ToneMap`, `DebugLines` | |
 | `Overlay` | the composite |
@@ -3815,6 +3816,16 @@ What a real camera and lens do to the light after the scene is lit (`render/gpu/
 - **Film grain** (`filmGrain`, `grainNoise`): after the curve, before the dither: (noise - 0.5) x strength x 4 l (1 - l) x peak on every channel, l the luminance over the peak (none at black or the peak), the noise `pcg3d` of the pixel and the frame (taken modulo `CAMERA_FRAME_CYCLE`), from `hash.glsl` (shared with the fog's froxel turn).
 - The record: `ToneMapUniformData` (144 bytes) gained `whiteBalance` (three rows), `grade` (contrast, saturation, lift, gamma), `lens` (gain, vignetting, aberration, the grading flag) and `view` (the half field of view's tangents, grain, frame); `packToneMapping` takes the `CameraSettings` and `CameraView` and validates them (`validateCamera`).
 - Mirrored in `camera_finish.glsl` and checked by the GPU tests (`camera_finish_gpu_test.cpp`). **Measured:** with every effect on, the tone mapping pass 0.11 ms at 1920 x 1080 on the laptop (about 0.07 off).
+
+### Motion blur
+
+A real shutter stays open for part of each frame, so whatever moves across the sensor smears along its path: the blur is the motion on screen over the frame times the shutter's share of it (`render/gpu/motion_blur`, `render/vulkan/vulkan_motion_blur`; McGuire et al. 2012's reconstruction filter). Its settings are in `CameraSettings` (F5's Camera group): `motionBlur` (**off by default**, the user's choice), `shutterAngle` (180 degrees: half the frame) and `cameraMotionBlur` (on: off blurs only what moves in the world, not the world while the camera turns or moves). It needs anti-aliasing (the velocity image) and a known last camera; while off, no pass runs.
+
+- **Where:** after the anti-aliasing (TAA, FSR or DLSS) at the output size, timed as BLUR, into a copy (`VulkanMotionBlur`'s `blurred`), which eye adaptation, bloom and tone mapping read through `VulkanRenderer::shownScene`. The finished picture (`finishedScene`) stays sharp, since next frame's reflections and gathered light read it as last frame's.
+- **1. Tiles** (`motion_blur_tiles.comp`, a workgroup of `MOTION_BLUR_GROUP`^2 per tile of `MOTION_BLUR_TILE` (32) pixels): each output pixel's motion from the render texel under it, the velocity image's (a moving object's whole motion) or the camera's from the depth (`cameraMotion`) where it holds `TAA_NO_MOTION` (`pixelMotion`; without the camera's blur, what the object adds to the camera's); its half-blur in output pixels, times the shutter's share, at most a tile (`motionBlurHalfVector`), and its view depth (the sky at `MOTION_BLUR_SKY_DEPTH`) into an RGBA16F prepared image; the tile's longest half-blur (`largerMotion`) by halving in shared memory, into an RG32F tiles image.
+- **2. Neighbourhoods** (`motion_blur_neighbours.comp`): each tile's longest of the 3 x 3 round it, so a fast neighbour's blur reaching into the tile is followed.
+- **3. Gather** (`motion_blur.comp`, mirrored by `motionBlurAt`): a neighbourhood no faster than `MOTION_BLUR_LEAST_MOTION` (half a pixel) is copied; otherwise the pixel, weighed by one over its speed, and `MOTION_BLUR_SAMPLES` (15) samples evenly along the neighbourhood's half-blur either way, moved alike by the pixel's interleaved gradient noise (`motionBlurOffset`), each weighed by `motionBlurSampleWeight`: in front (`motionBlurNearer`, soft over `MOTION_BLUR_DEPTH_SOFTNESS` of the depth) and its own blur reaching the pixel (`motionBlurCone`), behind and the pixel's blur reaching it, or both blurred alike (`motionBlurCylinder`, counted twice). A moving thing in front smears over the background; a still thing in front keeps its edge.
+- **Tests:** a still picture unchanged, a sliding edge a monotonic ramp across exactly the blur's reach, a still post in front of a moving background sharp to the last pixel, a moving object smearing exactly as far as its blur (half as far at half the shutter), the samples symmetric, the packing. **Measured:** 0.33 ms at 1920 x 1080 on the laptop with the camera jumping 0.6 m every frame.
 
 ### Bloom
 
