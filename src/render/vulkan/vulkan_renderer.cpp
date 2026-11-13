@@ -125,6 +125,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, JobSystem& jobs, bool validat
                                                                 sceneLayout->getFrameLayout());
     contactShadows = std::make_unique<VulkanContactShadows>(device, nearestSampler.get(), framesInFlight);
     motionBlur = std::make_unique<VulkanMotionBlur>(device, nearestSampler.get(), framesInFlight);
+    depthOfField = std::make_unique<VulkanDepthOfField>(device, nearestSampler.get(), linearSampler.get(), framesInFlight);
     planarReflection = std::make_unique<VulkanPlanarReflection>(device, linearSampler.get(), sceneColourFormat, depthFormat);
     fog = std::make_unique<VulkanFog>(device, uploads, linearSampler.get(), nearestSampler.get(), bindlessTextures->getLayout(), sceneLayout->getFrameLayout());
     skyVisibility = std::make_unique<VulkanSkyVisibility>(device, uploads, nearestSampler.get());
@@ -1843,8 +1844,30 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     stats.outputWidth = frameWidth;
     shownScene = finishedScene;
 
-    // Motion blur (render/gpu/motion_blur.h) on the finished picture, into a copy the passes below read instead; its
-    // images made the first time and on a resize (waiting for the GPU then, which may still read the old ones).
+    // Depth of field (render/gpu/depth_of_field.h) on the finished picture, into a copy the passes below read instead,
+    // its focus snapping when it starts afresh (the first frame, or switched on again) and on every frame a capture
+    // draws; its images made the first time and on a resize (waiting for the GPU then, which may still read the old).
+    if (settings.camera.depthOfField && inverseViewProjection) {
+        const RenderSize output{frameWidth, frameHeight};
+
+        if (!depthOfField->fits(output)) {
+            device.waitIdle();
+            depthOfField->ensureSize(output);
+        }
+
+        beginGpuPass(frame, GpuPass::DepthOfField);
+        shownScene = &depthOfField->blur(frame.commands, frame.descriptors, frame.frameIndex, *finishedScene, depth,
+                                         packDepthOfFieldPass(*inverseViewProjection, sceneSize, output, camera.getVerticalFov(), settings.camera,
+                                                              description.frameSeconds, depthOfFieldFresh || capturing));
+        endGpuPass(frame, GpuPass::DepthOfField);
+        depthOfFieldFresh = false;
+    } else {
+        depthOfFieldFresh = true;
+    }
+
+    // Motion blur (render/gpu/motion_blur.h) on the picture so far (after depth of field: the lens forms the picture
+    // the shutter then smears), into a copy the passes below read instead; its images made the first time and on a
+    // resize (waiting for the GPU then, which may still read the old ones).
     if (blursMotion) {
         const RenderSize output{frameWidth, frameHeight};
 
@@ -1854,7 +1877,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
         }
 
         beginGpuPass(frame, GpuPass::MotionBlur);
-        shownScene = &motionBlur->blur(frame.commands, frame.descriptors, frame.frameIndex, *finishedScene, taa->getVelocity(), depth,
+        shownScene = &motionBlur->blur(frame.commands, frame.descriptors, frame.frameIndex, *shownScene, taa->getVelocity(), depth,
                                        packMotionBlurPass(*inverseViewProjection, reprojection, sceneSize, output, settings.camera));
         endGpuPass(frame, GpuPass::MotionBlur);
     }
@@ -3066,6 +3089,7 @@ std::uint32_t VulkanRenderer::setFramesInFlight(std::uint32_t requested) {
     ambientOcclusion->setFramesInFlight(count);
     contactShadows->setFramesInFlight(count);
     motionBlur->setFramesInFlight(count);
+    depthOfField->setFramesInFlight(count);
 
     // A frame in flight that is no more would never come round to read the probes' relocation it asked for.
     if (ddgi) {

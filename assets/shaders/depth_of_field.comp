@@ -1,0 +1,68 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Depth of field's gather (render/gpu/depth_of_field.h, depthOfFieldAt mirrors it), one invocation per blur pixel:
+* scatter-as-gather (Jimenez 2014). The reach is the larger of the pixel's own blur radius and its tiles' neighbourhood's
+* longest near radius; under DEPTH_OF_FIELD_IN_FOCUS the pixel is copied. Else the pixel and DEPTH_OF_FIELD_RINGS rings
+* of samples out to the reach plus a pixel's half width, each counting only where its own disc covers the pixel and
+* weighed by its ring's share of the disc's area, into the far layer (behind, no sample reaching farther than the
+* pixel's own blur) and the near layer (in front, its coverage as alpha).
+*/
+#include "depth_of_field.glsl"
+
+layout(local_size_x = DEPTH_OF_FIELD_GROUP, local_size_y = DEPTH_OF_FIELD_GROUP) in;
+
+layout(set = 0, binding = 0) uniform sampler2D prepared;                   // rgb the light, a the blur radius, exact texels
+layout(set = 0, binding = 1) uniform sampler2D neighbours;                 // each tile's neighbourhood's longest near radius
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D farLayer;
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D nearLayer; // rgb the near field's light, a its coverage
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = textureSize(prepared, 0);
+
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+
+    vec4 centre = texelFetch(prepared, pixel, 0);
+    float nearReach = texelFetch(neighbours, pixel / DEPTH_OF_FIELD_TILE, 0).r;
+    float reach = max(abs(centre.a), nearReach);
+
+    if (reach < float(DEPTH_OF_FIELD_IN_FOCUS)) {
+        imageStore(farLayer, pixel, vec4(centre.rgb, 1.0));
+        imageStore(nearLayer, pixel, vec4(0.0));
+        return;
+    }
+
+    float sampled = reach + float(DEPTH_OF_FIELD_EDGE);
+    float centreShare = blurRingShare(0);
+    float farWeights = farSampleWeight(centre.a, centre.a, 0.0) * centreShare;
+    vec3 farSum = centre.rgb * farWeights;
+    float nearWeights = nearSampleWeight(centre.a, 0.0, sampled) * centreShare;
+    vec3 nearSum = centre.rgb * nearWeights;
+    vec2 place = vec2(pixel) + 0.5;
+
+    for (int ring = 1; ring <= DEPTH_OF_FIELD_RINGS; ++ring) {
+        float share = blurRingShare(ring);
+
+        for (int step = 0; step < 8 * ring; ++step) {
+            vec2 offset = blurRingOffset(ring, step) * sampled;
+            ivec2 at = clamp(ivec2(floor(place + offset)), ivec2(0), size - 1);
+            vec4 sampleTexel = texelFetch(prepared, at, 0);
+            float distance = length(offset);
+            float farWeight = farSampleWeight(sampleTexel.a, centre.a, distance) * share;
+            float nearWeight = nearSampleWeight(sampleTexel.a, distance, sampled) * share;
+            farWeights += farWeight;
+            farSum += sampleTexel.rgb * farWeight;
+            nearWeights += nearWeight;
+            nearSum += sampleTexel.rgb * nearWeight;
+        }
+    }
+
+    vec3 far = farWeights > 0.0 ? farSum / farWeights : centre.rgb;
+    vec4 near = nearWeights > 0.0 ? vec4(nearSum / nearWeights, min(nearWeights, 1.0)) : vec4(0.0);
+    imageStore(farLayer, pixel, vec4(far, 1.0));
+    imageStore(nearLayer, pixel, near);
+}

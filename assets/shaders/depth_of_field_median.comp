@@ -1,0 +1,37 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+/*
+* Depth of field's fifth pass (render/gpu/depth_of_field.h), one invocation per blur pixel: each layer's 3 x 3 median,
+* each channel apart (medianOfNine), so a lone bright sample the rings caught, which would show as a speck, is gone,
+* while bokeh discs, wider than a pixel or two, keep their edges (Jimenez 2014's postfilter).
+*/
+#include "depth_of_field.glsl"
+
+layout(local_size_x = DEPTH_OF_FIELD_GROUP, local_size_y = DEPTH_OF_FIELD_GROUP) in;
+
+layout(set = 0, binding = 0) uniform sampler2D farLayer;  // exact texels
+layout(set = 0, binding = 1) uniform sampler2D nearLayer; // exact texels
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D farFiltered;
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D nearFiltered;
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = textureSize(farLayer, 0);
+
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+
+    vec4 far[9];
+    vec4 near[9];
+
+    for (int index = 0; index < 9; ++index) {
+        ivec2 at = clamp(pixel + ivec2(index % 3 - 1, index / 3 - 1), ivec2(0), size - 1);
+        far[index] = texelFetch(farLayer, at, 0);
+        near[index] = texelFetch(nearLayer, at, 0);
+    }
+
+    imageStore(farFiltered, pixel, medianOfNine(far));
+    imageStore(nearFiltered, pixel, medianOfNine(near));
+}

@@ -1,0 +1,36 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Runs depth_of_field.glsl's functions on the cases depth_of_field_gpu_test.cpp sends.
+#include "gpu_test.glsl"
+#include "depth_of_field.glsl"
+
+void main() {
+    if (outsideTheCases()) {
+        return;
+    }
+
+    // Inputs: (inverse distance, inverse focus, focal length, lens scale), (current, target, seconds, time constant),
+    // (radius, distance, pixel radius, reach), (ring, step, 0, 0), (sharp, composite radius), (far, near alpha),
+    // (near colour, 0), then the median's nine values.
+    vec4 a = testInput(0);
+    vec4 b = testInput(1);
+    vec4 c = testInput(2);
+    vec4 d = testInput(3);
+    vec4 e = testInput(4);
+    vec4 f = testInput(5);
+    vec4 g = testInput(6);
+
+    if (function == GPU_TEST_DEPTH_OF_FIELD) {
+        int ring = int(d.x);
+        testOutput(0, vec4(blurRadius(a.x, a.y, a.z, a.w), easeFocus(b.x, b.y, b.z, b.w), blurCoverage(c.x, c.y), blurRingShare(ring)));
+        testOutput(1, vec4(blurRingOffset(ring, int(d.y)), farSampleWeight(c.x, c.z, c.y), nearSampleWeight(c.x, c.y, c.w)));
+        testOutput(2, vec4(depthOfFieldComposite(e.xyz, e.w, f.xyz, g.xyz, f.w), 0.0));
+
+        vec4 values[9];
+        for (int index = 0; index < 9; ++index) {
+            values[index] = testInput(7 + index);
+        }
+        testOutput(3, medianOfNine(values));
+    }
+}
