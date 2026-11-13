@@ -457,7 +457,7 @@ Debug drawing: `DebugDraw` (`scene/debug_draw`) collects `DebugLine`s (`line`, `
 - drawn, culled, shadowDrawn, shadowCulled, and point lights total, in view, lit and shadowed, shown as a third line of the debug readout;
 - then shadowTilesDrawn, shadowTilesCached and shadowTilesSkipped, a fourth line, ending with `sunShadowDistance` (SUN TO, where the sun's cascades end) when a sun is shadowed;
 - then `gpu`, the GPU timings per pass, see VulkanRenderer;
-- then `videoMemory`, on `videoMemoryReadoutLine` (5). `videoMemoryText` writes "VRAM used / budget MB  ENGINE n MB" in megabytes of 2^20 bytes, or "VRAM ENGINE n MB  NO DRIVER BUDGET" without the driver's figures.
+- then `videoMemory`, on its own readout line. `videoMemoryText` writes "VRAM used / budget MB  ENGINE n MB" in megabytes of 2^20 bytes, or "VRAM ENGINE n MB  NO DRIVER BUDGET" without the driver's figures.
 
 **Video memory.** `render/gpu/video_memory` (`HeapMemory`, `VideoMemory`, `summariseVideoMemory`) adds up the device-local heaps, so system memory the GPU can reach is left out and an integrated GPU's one heap counts.
 
@@ -893,13 +893,13 @@ The same file has:
 
 - `beginFrame` reads a complete frame's stamps after its fence with `vkGetQueryPoolResults` (64-bit, no wait; `VK_NOT_READY` skips the frame) into `unreportedGpuTimings`.
 - `drawScene` moves them into `RenderStats::gpu`, so each measured frame is reported once, as many frames late as there are in flight.
-- `Application` records them into its `gpuProfiler` (`makeGpuProfiler`: GPU (the total) as section 0, then one section per pass; `recordGpuTimings` skips invalid timings), updated with the CPU profiler and drawn on readout lines `gpuProfileReadoutLine` (9: the total and the scene's setup up to the depth prepass), `gpuLightingReadoutLine` (10: the screen's lighting from `firstLightingPass`, ambient occlusion's parts, to the main pass) and `gpuPictureReadoutLine` (11: the picture's, from `firstPicturePass` on) in the F4 view (`drawGpuProfile`, `gpuProfileLines`: fewer lines no longer fit a window), passes that took no time left out (`profileText`'s `hideIdle` over a range of sections); the `stats` command prints the same three lines.
+- `Application` records them into its `gpuProfiler` (`makeGpuProfiler`: GPU (the total) as section 0, then one section per pass; `recordGpuTimings` skips invalid timings), updated with the CPU profiler and written to the readout in three groups, each wrapped to the screen (`drawGpuProfile`, `gpuProfileLines`): the total and the scene's setup up to the depth prepass, the screen's lighting (from `firstLightingPass`, ambient occlusion's parts, to the main pass), and the picture's (from `firstPicturePass` on) in the F4 view, passes that took no time left out (`profileText`'s `hideIdle` over a range of sections); the `stats` command prints the same three lines.
 
 **The cloth's passes by kind** (`cloth-gpu-timing`; `render/gpu/cloth_timing`, tested in `cloth_timing_test`; `render/vulkan/cloth_pass_stamps`): a frame records a thousand or so cloth dispatches, too many to name one by one, so they are summed by kind (`ClothPass`: predict, stretch, bend, sweep, held, gradient, coarse step, spread, the line search's terms and total, move, finish, shape, copy).
 
 - While `VulkanRenderer::setClothPassTiming` is on (`Application` sets it while the debug view shows, since it adds a stamp a dispatch) and some cloth runs on the GPU, `runCloths` begins this frame in flight's `ClothPassStamps` (a pool of `maxClothPassStamps`, 16,384, reset whole) with a stamp before the first pass, and `VulkanCloth` marks one after each dispatch, shape pass and copy with its kind (`recordTicks`, `recordShape` and `recordReadback` take the stamps; the yardstick and the GPU tests pass none). A frame past the pool's size is not measured, and its timings say so (`ClothPassTimings::overflowed`).
 - Each stamp is at `ALL_COMMANDS`, after the barrier every cloth pass ends with, so each gap is how much later the cloth work finished because of that pass. `beginFrame` reads them after the fence; `clothPassTimingsFromTicks` credits each gap to its kind (all ticks and cloths together) into `RenderStats::cloth`.
-- `Application`'s `clothProfiler` (`makeClothProfiler`: CLOTH, then one section per kind; `recordClothTimings`) is drawn on readout line `clothProfileReadoutLine` (11) only while it has timings, its idle kinds left out (`profileText`'s `hideIdle`), so the line names only the passes the cloths' solvers ran; while the latest frame overflowed it reads `clothPassesNotMeasuredText` instead (`clothReadoutText`, `drawClothReadout`), rather than going blank.
+- `Application`'s `clothProfiler` (`makeClothProfiler`: CLOTH, then one section per kind; `recordClothTimings`) is written to the readout only while it has timings, its idle kinds left out (`profileText`'s `hideIdle`), so the line names only the passes the cloths' solvers ran; while the latest frame overflowed it reads `clothPassesNotMeasuredText` instead (`clothReadoutText`, `drawClothReadout`), rather than going blank.
 
 **Debug names:**
 
@@ -1462,7 +1462,7 @@ Relocation and probe states (`ddgi-probe-relocation`; `render/gpu/probe_relocati
 - Distances are never seeded.
 - **Measured** in the dark room model: over the first quarter second 9.6% error seeded 20% off, 13.3% from its rays alone, 24% seeded with twice or none of the light; from half a second on within half a percent.
 
-**Readout:** `countProbeStates` into `RenderStats::probes`, the F4 line `PROBES n  TRACED n  AWAKE n  ASLEEP n  OFF n  MOVED n` (`probeStatsText`, `probeReadoutLine` 4).
+**Readout:** `countProbeStates` into `RenderStats::probes`, the F4 line `PROBES n  TRACED n  AWAKE n  ASLEEP n  OFF n  MOVED n` (`probeStatsText`).
 
 **Measured in the light lab with the cascades** (the defaults, debug build, RTX 5080):
 
@@ -3216,7 +3216,7 @@ MOBA mode uses a confined visible cursor, edge panning (`gameplay/edge_pan`, fro
 
 - `pick(world, ray)`, shared with selection, raycasts the collision scene, then the static level up to that distance, and the nearer wins, so walls hide what is behind them;
 - `getHovered` is the entity, outlined in dimmed cyan; `getHoveredTriangle` the level triangle, outlined with its normal only in the F4 view;
-- with F4, readout lines 14 and 15 (`firstGameReadoutLine` + 1 and + 2, after the demo's system timings) show colliders and level triangles, tested and cells walked, and line 16 the duck's controller (grounded or airborne, slope, substeps) with its ground normal drawn at its feet;
+- with F4, readout lines after the demo's system timings (`writeReadout`, below the engine's) show colliders and level triangles, tested and cells walked, then the duck's controller (grounded or airborne, slope, substeps) with its ground normal drawn at its feet;
 - the duck's controller has radius 0.5 and `mobaUnitAcceleration` (1000) so it starts and stops within a tick.
 
 **The obstacle course** (`buildObstacleCourse`): cube parts of one entity at `obstacleCourseOrigin` (17, 0, -4) with the slab top at `obstacleCourseFloorTop`.
@@ -3547,19 +3547,9 @@ Broad phase: `UniformGrid` (`physics/uniform_grid`):
 
 ### Readout lines and profiling
 
-`debugReadoutLine(n)` and `debugReadoutTextHeight` (`engine/debug_views`) place readout lines. The engine uses 0-12, and a game starts at `firstGameReadoutLine` (13):
+`writeReadout(debug, text, colour)` (`engine/debug_views`) writes a readout line down the top-left corner: on the next free line (`DebugDraw::takeReadoutLine`, a cursor `clear` resets each frame), wrapped to the screen (`wrapReadout`, breaking only between items two spaces apart, never inside one; a text ending in `readoutUnit`, "MS", ends each of its lines with it; `readoutCharactersFitting` from `DebugDraw::getScreenWidth`, which `Application` sets each frame from `RenderStats::outputWidth`, the presented image's width). So a long line never runs off a narrow window, and everything after it moves down. `debugReadoutLine(n)` and `debugReadoutTextHeight` place line n.
 
-| Line | Constant | Shows |
-|---|---|---|
-| 4 | `probeReadoutLine` | the light probes |
-| 5 | `videoMemoryReadoutLine` | the video memory |
-| 6 | `exposureReadoutLine` | the eye's exposure |
-| 7 | `cameraReadoutLine` | the camera's position and view direction (`cameraText`, "CAMERA x y z  LOOK x y z", for setting up a golden view where a problem was seen) |
-| 8 | `engineProfileReadoutLine` | its CPU timings |
-| 9 | `gpuProfileReadoutLine` | its GPU time in all, and per pass for the scene's setup: the passes up to the depth prepass (`gpuProfileLines`, idle passes left out) |
-| 10 | `gpuLightingReadoutLine` | its GPU time per pass for the screen's lighting: from `firstLightingPass` (ambient occlusion's pyramid) to the main pass |
-| 11 | `gpuPictureReadoutLine` | its GPU time per pass for the picture: from `firstPicturePass` (the probe balls, after the main pass) on |
-| 12 | `clothProfileReadoutLine` | the GPU cloth's time by kind of pass, while cloth runs there |
+The engine writes, in order: the render stats (drawn, shadows, lights, tiles, the light probes, the video memory, the eye's exposure with the upscaler), the camera's position and view direction (`cameraText`, "CAMERA x y z  LOOK x y z", for setting up a golden view where a problem was seen), its CPU timings, its GPU timings (three groups, idle passes left out), and the GPU cloth's time by kind of pass while cloth runs there. A game's `onDebugDraw` then writes its own lines below them with `writeReadout` too.
 
 Profiling: `Profiler` (`core/profiler`, plain C++ so games and tests stay headless) has numbered sections (`addSection` once, `record(section, seconds)`).
 
@@ -3933,7 +3923,7 @@ It runs after the main pass (which leaves the scene image `SurfaceRead`, readabl
 
 `tone_map.frag` reads it the same frame (set 2 binding 2; `ToneMapUniformData::output[3]` 1 while it adapts), multiplying `ToneMappingSettings::exposure`, now a bias, by 2^exposure.
 
-- No CPU round trip: a copy per frame in flight goes to read-back memory only for the F4 readout (`exposureText`, its own line, `exposureReadoutLine` 6).
+- No CPU round trip: a copy per frame in flight goes to read-back memory only for the F4 readout (`exposureText`, its own line).
 - It snaps to its target (`GpuEyeAdaptationStep::snap`) on its first frame, when switched back on, and on every frame a capture draws, so golden images do not depend on earlier frames.
 
 **The settings** (`ToneMappingSettings`, the Tone mapping group):

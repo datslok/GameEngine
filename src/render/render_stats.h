@@ -8,6 +8,7 @@
 #include "render/gpu/video_memory.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 // What the last frame drew and what it skipped, counting each mesh once per view (each shadow tile is a view).
@@ -65,4 +66,8 @@ struct RenderStats {
     // scale it drew at.
     Upscaler upscaler = Upscaler::Off;
     float renderScale = 1.0f;
+
+    // The width of the image the frame was presented in, in the pixels screen lines are drawn in (the debug
+    // readout wraps to it); 0 before a frame was drawn.
+    std::uint32_t outputWidth = 0;
 };

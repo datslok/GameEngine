@@ -1827,6 +1827,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     stats.upscaler = frameUpscaler;
     stats.renderScale = appliedRenderScale(settings.upscaling);
+    stats.outputWidth = frameWidth;
 
     // The eye adapts to the finished scene image (before bloom, which only spreads its light), for this frame's tone
     // mapping. Switched off, it starts afresh when switched on again.

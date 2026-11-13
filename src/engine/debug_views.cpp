@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 namespace {
     const Vec3 boundingBoxColour{1.0f, 0.75f, 0.0f};
@@ -50,19 +51,15 @@ std::vector<std::string> renderStatsLines(const RenderStats& stats) {
     const std::string lights = "LIGHTS " + std::to_string(stats.pointLights) + "  IN VIEW " + std::to_string(stats.pointLightsInView) +
                                "  LIT " + std::to_string(stats.pointLightsLit) + "  SHADOWED " + std::to_string(stats.pointLightsShadowed);
 
-    std::vector<std::string> lines{camera, shadows, lights, tiles};
-    lines.resize(exposureReadoutLine + 1);
-    lines[probeReadoutLine] = probeStatsText(stats.probes);
-    lines[videoMemoryReadoutLine] = videoMemoryText(stats.videoMemory);
-    lines[exposureReadoutLine] = exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale);
-    return lines;
+    return {camera, shadows, lights, tiles, probeStatsText(stats.probes), videoMemoryText(stats.videoMemory),
+            exposureText(stats.eyeAdaptation) + "  " + upscalerText(stats.upscaler, stats.renderScale)};
 }
 
 void drawRenderStats(const RenderStats& stats, DebugDraw& debug) {
     const std::vector<std::string> lines = renderStatsLines(stats);
 
-    for (std::size_t line = 0; line < lines.size(); ++line) {
-        debugText(debug, debugReadoutLine(static_cast<int>(line)), debugReadoutTextHeight, lines[line], boundingBoxColour);
+    for (const std::string& line : lines) {
+        writeReadout(debug, line, boundingBoxColour);
     }
 }
 
@@ -96,8 +93,7 @@ std::string cameraText(const Vec3& position, const Vec3& forward) {
 }
 
 void drawCameraReadout(const Camera& camera, DebugDraw& debug) {
-    debugText(debug, debugReadoutLine(cameraReadoutLine), debugReadoutTextHeight, cameraText(camera.getPosition(), camera.getForward()),
-              boundingBoxColour);
+    writeReadout(debug, cameraText(camera.getPosition(), camera.getForward()), boundingBoxColour);
 }
 
 std::string probeStatsText(const ProbeStateCounts& counts) {
@@ -159,7 +155,7 @@ std::string profileText(const Profiler& profiler, int decimals, bool withWorst, 
         }
         line += "  ";
     }
-    return line + "MS";
+    return line + readoutUnit;
 }
 
 /*
@@ -198,10 +194,8 @@ std::array<std::string, 3> gpuProfileLines(const Profiler& profiler) {
 }
 
 void drawGpuProfile(const Profiler& profiler, DebugDraw& debug) {
-    const std::array<std::string, 3> lines = gpuProfileLines(profiler);
-    const std::array<int, 3> readoutLines{gpuProfileReadoutLine, gpuLightingReadoutLine, gpuPictureReadoutLine};
-    for (std::size_t line = 0; line < lines.size(); ++line) {
-        debugText(debug, debugReadoutLine(readoutLines[line]), debugReadoutTextHeight, lines[line], profileDebugColour);
+    for (const std::string& line : gpuProfileLines(profiler)) {
+        writeReadout(debug, line, profileDebugColour);
     }
 }
 
@@ -224,8 +218,8 @@ void recordClothTimings(Profiler& profiler, const ClothPassTimings& timings) {
     }
 }
 
-void drawProfile(const Profiler& profiler, int line, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle) {
-    debugText(debug, debugReadoutLine(line), debugReadoutTextHeight, profileText(profiler, decimals, withWorst, hideIdle), colour);
+void drawProfile(const Profiler& profiler, int decimals, bool withWorst, const Vec3& colour, DebugDraw& debug, bool hideIdle) {
+    writeReadout(debug, profileText(profiler, decimals, withWorst, hideIdle), colour);
 }
 
 std::string clothReadoutText(const Profiler& profiler, bool unmeasured) {
@@ -236,7 +230,15 @@ std::string clothReadoutText(const Profiler& profiler, bool unmeasured) {
 }
 
 void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debug) {
-    debugText(debug, debugReadoutLine(clothProfileReadoutLine), debugReadoutTextHeight, clothReadoutText(profiler, unmeasured), profileDebugColour);
+    writeReadout(debug, clothReadoutText(profiler, unmeasured), profileDebugColour);
+}
+
+namespace {
+    // The readout's margin from the window's corner, kept on the right too when wrapping.
+    constexpr float readoutMargin = 16.0f;
+
+    // Items are two spaces apart; one space is inside an item ("SUN TO 200.0 M").
+    constexpr std::string_view readoutItemGap = "  ";
 }
 
 /*
@@ -244,9 +246,68 @@ void drawClothReadout(const Profiler& profiler, bool unmeasured, DebugDraw& debu
 * lines do not touch.
 */
 Vec2 debugReadoutLine(int line) {
-    constexpr float margin = 16.0f;
     constexpr float lineSpacing = 22.0f;
-    return Vec2{margin, margin + static_cast<float>(line) * lineSpacing};
+    return Vec2{readoutMargin, readoutMargin + static_cast<float>(line) * lineSpacing};
+}
+
+/*
+* Greedy: each item goes on the current line if it (and the unit, if the text has one) still fits, else starts the
+* next line. Lines are measured with the unit, so no line runs past the limit because of it.
+*/
+std::vector<std::string> wrapReadout(const std::string& text, std::size_t maxCharacters) {
+    std::vector<std::string> items;
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t gap = text.find(readoutItemGap, start);
+        items.push_back(text.substr(start, gap == std::string::npos ? std::string::npos : gap - start));
+        if (gap == std::string::npos) {
+            break;
+        }
+        start = gap + readoutItemGap.size();
+    }
+
+    // A unit closing a text of several items ends every line instead of being an item of its own.
+    std::string unit;
+    if (items.size() > 1 && items.back() == readoutUnit) {
+        unit = std::string(readoutItemGap) + readoutUnit;
+        items.pop_back();
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    for (const std::string& item : items) {
+        const bool fits = maxCharacters == 0 || line.size() + readoutItemGap.size() + item.size() + unit.size() <= maxCharacters;
+        if (line.empty() || !fits) {
+            if (!line.empty()) {
+                lines.push_back(line + unit);
+            }
+            line = item;
+        } else {
+            line += std::string(readoutItemGap) + item;
+        }
+    }
+    lines.push_back(line + unit);
+    return lines;
+}
+
+// debugTextWidth grows by one advance a character, so the count is found by stepping until the next would not fit.
+std::size_t readoutCharactersFitting(float screenWidth) {
+    if (screenWidth <= 0.0f) {
+        return 0;
+    }
+
+    const float room = screenWidth - 2.0f * readoutMargin;
+    std::size_t characters = 1;
+    while (debugTextWidth(debugReadoutTextHeight, characters + 1) <= room) {
+        ++characters;
+    }
+    return characters;
+}
+
+void writeReadout(DebugDraw& debug, const std::string& text, const Vec3& colour) {
+    for (const std::string& line : wrapReadout(text, readoutCharactersFitting(debug.getScreenWidth()))) {
+        debugText(debug, debugReadoutLine(debug.takeReadoutLine()), debugReadoutTextHeight, line, colour);
+    }
 }
 
 /*
