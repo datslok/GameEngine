@@ -1511,6 +1511,18 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Kept out of git:** `tools/fetch_forest_assets.py` (standard library only) downloads them into git-ignored `assets/forest`, Poly Haven's through its API and ambientCG's as zips cached in `build/downloads/forest`. Each file is checked against the SHA-256 recorded in `tools/forest_assets.json` (`--record` writes them), written under a temporary name first, and fetched only when missing.
   - **1K only:** the engine has no texture compression yet, so larger textures would cost video memory for little gain at a walking distance.
   - **Checked:** a second run found all 30 present and matching their checksums.
+- **Blended grounds** (Nov 13 2026, `forest-assets`): one ground mesh painted with up to four ordinary materials by a weights texture, the user's ask ("blending is important").
+  - **Height blending** (Mishkinis 2013) over a plain cross-fade: each painted layer's weight times how far its height map comes within the blend depth of the highest painted one's, normalised. Chosen so a layer not painted at a place never shows there, whatever its height, and equal heights keep the painted weights exactly.
+  - **The layers are materials in the table,** named by index plus one, so the main pass reads them like any other material, and two grounds sharing a layer share its record.
+  - **A trap found while wiring the forest:** a layer without a normal map read the white stand-in texture, decoded as a 45-degree tilt, and one without a height map stood highest. The shader now keeps such a layer flat and halfway up.
+  - **Checked:** the tests (release, tests first), the GPU test case compiled (not run: GPU tests on request).
+- **The forest game** (Nov 13 2026, `forest-assets`): `--game forest`, the land, its ground, the sun and the mist.
+  - **The land** is pure functions of the place, so drawing, walking and paint agree, and tests can ask any point. Value noise from the engine's hash, no library.
+  - **The first land was too gentle:** nothing steeper than 33 degrees outside the path's cuttings, so no rock would show. Taller knolls (7 m over 28 m) gave about 1.4% rock.
+  - **The path then got too steep,** since it followed the land. Taking the broad hills alone as its level ramped it into the clearing by however much the knolls lift the clearing's centre. Its level is now the land averaged over 12 m either way along it (at most about 16 degrees), levelled with the clearing.
+  - **Stand-ins:** plain coloured layers where `assets/forest` is missing, so a fresh clone runs and the tests need no downloads.
+  - **`advanceSolarHours`** moved from the light lab to `scene/sun`, as both games' clocks use it.
+  - **Checked:** the tests (release, tests first: the noise, the clearing, hollows and path, the mesh, the paint by place, the weights texture, layer files by role, the game headless, settings each frame); the debug game builds without warnings. Not run: the game itself (left to the user); golden references not saved.
 
 ## Tools outside the phases
 

@@ -38,3 +38,6 @@ Vec3 directionTowardsSunOn(float latitudeDegrees, float dayOfYear, float solarHo
 
 // The sun's height above the horizon in radians (negative below it), from a unit direction towards it.
 float sunElevation(const Vec3& towardsSun);
+
+// The solar time after some seconds pass at the given speed, kept within one day (0 to 24 hours): a game's clock.
+float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);

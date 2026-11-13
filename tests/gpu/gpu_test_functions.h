@@ -27,6 +27,9 @@
 #define GPU_TEST_PARALLAX_STEPS 1
 #define GPU_TEST_PARALLAX_SCALARS 2
 
+// ground_layers_test.comp
+#define GPU_TEST_GROUND_BLEND_WEIGHTS 0
+
 // lighting_test.comp
 #define GPU_TEST_DISTANCE_FALLOFF 0
 #define GPU_TEST_SPOT_CONE 1

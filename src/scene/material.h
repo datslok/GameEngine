@@ -110,7 +110,8 @@ struct Material {
     // mud, rock), how much of each covers each place given by groundWeights (a linear RGBA texture over the mesh's texture
     // coordinates, one channel a layer), each layer's textures repeating groundRepeats times across those coordinates, and
     // where layers meet the one whose height map stands higher showing, within groundBlendDepth (0..1 of the height maps'
-    // range; deeper is a softer cross-fade). A layer's normal map is read at the ground's normalScale. No layers: an
+    // range; deeper is a softer cross-fade). A layer's normal map is read at the ground's normalScale; a layer
+    // without one lies flat, and one without a height map (or with heightScale 0) stands halfway. No layers: an
     // ordinary material. Layers may not be layered themselves.
     std::vector<Material> groundLayers;
     std::array<float, 4> groundRepeats{1.0f, 1.0f, 1.0f, 1.0f};

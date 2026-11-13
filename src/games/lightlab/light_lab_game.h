@@ -44,9 +44,6 @@ struct LightLabSunSettings {
 
 void visit(LightLabSunSettings& settings, SettingsVisitor& visitor);
 
-// The solar time after some seconds pass at the given speed, kept within one day (0 to 24 hours).
-float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds);
-
 /*
 * The clock after some seconds: the solar time moves at hoursPerSecond and carries past midnight into the next day, and
 * past the year's last day into the next year, so the moon moves on among the stars through the night.

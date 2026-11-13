@@ -2,6 +2,7 @@
 
 #include "games/clothlab/cloth_lab_game.h"
 #include "games/demo/demo_game.h"
+#include "games/forest/forest_game.h"
 #include "games/lightlab/light_lab_game.h"
 
 #include <array>
@@ -21,12 +22,17 @@ namespace {
         return std::make_unique<ClothLabGame>(ControlMode::FirstPerson, true);
     }
 
+    std::unique_ptr<Game> makeForest() {
+        return std::make_unique<ForestGame>(ControlMode::FirstPerson, true);
+    }
+
     // Adding a game is one line here. Plain function pointers: the entries capture nothing, so the table is built at
     // compile time.
-    constexpr std::array<GameEntry, 3> games{{
+    constexpr std::array<GameEntry, 4> games{{
         {"lightlab", makeLightLab},
         {"demo", makeDemo},
-        {"clothlab", makeClothLab}
+        {"clothlab", makeClothLab},
+        {"forest", makeForest}
     }};
 }
 

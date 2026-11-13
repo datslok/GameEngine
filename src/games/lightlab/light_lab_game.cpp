@@ -263,15 +263,6 @@ void visit(LightLabSunSettings& settings, SettingsVisitor& visitor) {
 }
 
 
-float advanceSolarHours(float solarHours, float hoursPerSecond, float seconds) {
-    if (hoursPerSecond == 0.0f) {
-        return solarHours;
-    }
-
-    const float advanced = std::fmod(solarHours + hoursPerSecond * seconds, hoursPerDay);
-    return advanced < 0.0f ? advanced + hoursPerDay : advanced;
-}
-
 /*
 * Whole days past midnight carry into the day of the year, and days past the year's last into the year. The clock never
 * runs backwards (its speed is at least 0), so only forward carries happen.

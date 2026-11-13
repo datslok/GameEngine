@@ -46,6 +46,7 @@ void testParallax();
 void testHeightMap();
 void testTypicalGpu();
 void testGroundLayers();
+void testForest();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
@@ -297,6 +298,7 @@ int main(int argumentCount, char** arguments) {
     testCommandSocket();
     testPlayerControls();
     testLightLab();
+    testForest();
     testFlashlight();
     testRawImagePng();
     testTangents();

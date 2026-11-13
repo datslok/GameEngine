@@ -21,6 +21,7 @@ int main() {
             gpuTestBrdf(runner, report);
             gpuTestNormalMapping(runner, report);
             gpuTestParallax(runner, report);
+            gpuTestGroundLayers(runner, report);
             gpuTestLighting(runner, report);
             gpuTestSoftShadow(runner, report);
             gpuTestToneMapping(runner, report);

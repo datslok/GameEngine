@@ -881,8 +881,12 @@ void main() {
             layerSurface[layer] = vec4(clamp(ground.surfaceParameters.x * layerPacked.b, 0.0, 1.0),
                                        clamp(ground.surfaceParameters.y * layerPacked.g, BRDF_SMALLEST_ROUGHNESS, 1.0),
                                        texture(textures[nonuniformEXT(ground.extra.x)], layerUv, mipBias).r, 0.0);
-            heights[layer] = texture(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], layerUv, mipBias).r;
-            layerNormals[layer] = texture(textures[nonuniformEXT(ground.textureSlots.z)], layerUv, mipBias).rgb;
+            // A layer without a height map stands halfway, and one without a normal map lies flat: their texture slots
+            // hold the white stand-in, which would make the layer the highest and tilt every normal.
+            float heightTexel = texture(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], layerUv, mipBias).r;
+            vec3 normalSample = texture(textures[nonuniformEXT(ground.textureSlots.z)], layerUv, mipBias).rgb;
+            heights[layer] = ground.coatAndHeight.w > 0.0 ? heightTexel : 0.5;
+            layerNormals[layer] = ground.surfaceParameters.z != 0.0 ? normalSample : vec3(0.5, 0.5, 1.0);
         }
 
         vec4 shares = groundBlendWeights(painted, heights, material.groundBlend.x);

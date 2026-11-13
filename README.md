@@ -95,6 +95,7 @@ The light probes trace their rays with hardware ray tracing, so they need ray tr
 - **Physically based materials** (glTF metallic-roughness): GGX microfacet highlights with Smith shadowing and Schlick Fresnel, Lambert diffuse, and energy compensation for light that bounces between microfacets, so nothing is lost or created at any roughness.
 - **Clear coat** (glTF's `KHR_materials_clearcoat`): a thin layer of clear varnish over any material, as on car paint or lacquered wood. It adds a sharp white highlight and mirror image over the surface under it, which gets only the light the varnish lets through, so nothing is created; it lies smooth over the base's normal map. In the light lab, two red painted balls on the grass ahead of the start, one bare and one lacquered, show the difference (Clear coat in F5 Materials switches every coat off).
 - **Parallax occlusion mapping:** surfaces with a height map (bricks, cobbles, tiles) seem to stand out of their flat polygons. Each pixel follows its view ray down into the height map to the first bump it meets, so seen at an angle a brick hides the mortar behind it, and a second walk towards the sun lets the bumps shade each other. It fades out with distance, where the bumps are too small to see. In the light lab, a low brick wall with cobbles in front stands beside the painted balls (Parallax and Parallax self-shadows in F5 Materials).
+- **Blended grounds:** one ground mesh painted with up to four surfaces (grass, leaf litter, mud, mossy rock) by a weights texture, each surface's own textures repeating at their own scale. Where two meet, the one whose height map stands higher shows, so the border follows the textures' shapes (stones poking through moss) instead of smearing (Blend depth in F5, Forest, Ground). The forest's ground is one.
 - **Emissive** (glowing) materials, with glTF's emissive textures for patterns (screens, dials, labels).
 - **Baked occlusion:** glTF's occlusion textures darken the light from all around in a model's creases, combined with the screen's ambient occlusion (the more closed of the two counts).
 - **Cut-outs and double-sided materials** (glTF's alpha mask and `doubleSided`): leaves, fences and grates with holes, in shadows and ray tracing too, their mips built to keep their coverage so fences do not vanish with distance.
@@ -195,6 +196,8 @@ Several games run on one engine, picked at start-up with `--game`.
 
 **The cloth lab** (`--game clothlab`): a plain floor under an afternoon sun, with a test station for each of the cloth milestones: a ball on a pedestal under a bar, a mat to drop sheets onto, and a wide bar to hang two fabrics side by side. A cream cotton sheet pinned under the first bar falls and settles draped over the ball. A red cotton sheet hangs from two hooks on the wide bar; slide them together with Hook gap (F5, Hooks) to bunch it into folds. Hold the left mouse button on any sheet to drag it; it slides over the ball, posts and floor with cotton's friction (the fabric in F5, Cloth). On the mat a green sheet stands on edge and falls over, folding onto itself: with Self collision on (F5, Cloth; with Cloth on GPU off, since only the CPU has it yet) its layers pile up instead of passing through each other (Pile sheet, F5's Stations, read at start-up, on by default). Big sheet (F5, Stations, read at start-up) adds a 10,000-point sheet sagging like a hammock over the mat, the solver's heaviest work, on every core; it keeps up with real time with the default isometric bending, but not with the hinge's (Bending model, F5, Cloth). Left of the drape station a mannequin stands (a 1.75 m human figure; Mannequin in F5's Stations, read at start-up, on by default), and a dress is sewn onto it: a sleeveless A-line dress to the knee, its front and back cut from a pattern sized to the mannequin (12,000 points), laid round it and sewn at the sides and shoulders in its first second, weightless, then let fall. Its shoulder straps are pinned and carried onto the shoulders as it sews, as a dress is pinned on a dress form, and the rest hangs from them on tethers; with Dress pinned at the shoulders off (F5's Stations, read at start-up) it is held up by nothing but contact with the shoulders.
 
+**The forest** (`--game forest`, being built: ROADMAP phase 18): 400 m of rolling hills under a sun near the equator, with mist pooling in the hollows. A path winds south from a level clearing to a meadow. Its ground is blended from scanned grass, leaf litter, mud and mossy rock: grass where the canopy opens, mud on the path, rock on the steep slopes. Where two meet, the one whose surface stands higher shows (stones poke through the moss). The trees, grass, structure and wind are still to come.
+
 ### Tools for building and testing
 
 - **Settings in one place:** every tunable value (simulation rate, frame cap, light and shadow tuning, bloom, tone mapping, HDR output, camera speeds and mouse sensitivity (on Overwatch's scale, 5 by default), grenade physics) lives in a settings struct owned by its system. A `visit()` next to it describes each value once (label, limits, unit), and that drives everything else:
@@ -270,6 +273,12 @@ Everything else is included in `external/`, so it needs no install: cgltf, Dear 
 
    ```sh
    python tools/fetch_streamline.py
+   ```
+
+5. Optional, for the forest (`--game forest`): fetch its scanned plants, rocks and textures (30 CC0 assets from Poly Haven and ambientCG, about 160 MB, needs a real Python). Each file is checked against its recorded checksum; running it again fetches only what is missing. Without them the forest's ground is plain colours.
+
+   ```sh
+   python tools/fetch_forest_assets.py
    ```
 
 `glslc` from the Vulkan SDK also works if it is on your `PATH`.
@@ -470,8 +479,8 @@ The settings are grouped by system (light priority, shadows, bloom, tone mapping
 ```
 src/              Engine and game source, in layers (lower ones never include higher ones):
   app/            main and the game registry: picks a game by name and starts the engine
-  games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground)
-                  and games/clothlab (the cloth test ground)
+  games/          Games built on the engine: games/demo (the demo), games/lightlab (the sunlit test ground),
+                  games/clothlab (the cloth test ground) and games/forest (the forest showcase)
   engine/         The main loop, the Game interface, fixed-tick updates, the debug UI, the settings file
                   and the commands (settings, pause and step, camera, screenshot, stats)
   cloth/          Cloth: its points (positions, velocities, inverse masses from the fabric's mass per area), their step,
@@ -532,7 +541,8 @@ docs/             ENGINE_GUIDE.md: how the engine works and why, for people lear
                   CLOTHGPU.md: research notes and the plan for cloth (roadmap phase 7), with the yardstick's numbers
                   RAGDOLLPLAN.md: plan and research notes for active ragdolls (roadmap phase 8)
                   DESTRUCTION.md: plan and research notes for destruction and flight (roadmap phase 15)
-tools/            package_demo.py (the shareable zip), fetch_streamline.py (DLSS's DLLs), make_glb_demo.py
+tools/            package_demo.py (the shareable zip), fetch_streamline.py (DLSS's DLLs), fetch_forest_assets.py
+                  (the forest's CC0 assets, listed with their checksums in forest_assets.json), make_glb_demo.py
 assets/
   models/         OBJ and glTF test models (the gallery: Khronos's CompareNormal,
                   NormalTangentTest, NormalTangentMirrorTest, WaterBottle and AlphaBlendModeTest)
