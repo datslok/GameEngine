@@ -932,7 +932,7 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `ShadowTileData` as before.
 - A draw list of `uint32` instance numbers.
 
-`GpuFrameData` (384 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
+`GpuFrameData` (416 bytes, std140 uniform buffer, vertex, fragment and compute) holds:
 
 - the camera-relative view-projection, the camera position, ambient, counts, the atlas texel size;
 - the cluster grid (`clusterTiles`, `clusterScreen`, `clusterSlicing`, `viewRight`, `viewUp`, `viewForward`, laid out as `clusters.glsl`'s `ClusterGrid`);
@@ -941,7 +941,9 @@ Records (std430, mirrored byte for byte in the shaders, each with a `static_asse
 - `textureOptions`: x the surface textures' mip bias (`textureLodBias`, see Temporal anti-aliasing, Upscaling), passed to `triangle.frag`'s three `texture()` reads;
 - `mirroredLightOptions`: x 1 while the main pass adds the mirrored light pass's images, y the frame (the TAA frame mod 1024), turning rough mirrors' samples (see Mirrored lights);
 - `ambientOcclusionOptions`: x 1 while the main pass reads ambient occlusion, y 1 with multiple bounces, z 1 with specular occlusion (see Ambient occlusion);
-- and `skyVisibilityOptions`: the cascades read (0 while the grid is not read), the ambient floor, the lookup bias, 1 for the debug view (`packSkyVisibilityOptions`, see Sky visibility).
+- `skyVisibilityOptions`: the cascades read (0 while the grid is not read), the ambient floor, the lookup bias, 1 for the debug view (`packSkyVisibilityOptions`, see Sky visibility);
+- `contactShadowOptions` and `contactLightSlots` (see Contact shadows);
+- and `materialOptions`: x 1 draws parallax occlusion mapping, y 1 self-shadows it, z its most steps (see Parallax occlusion mapping). `textureOptions` w is 1 while clear coats are drawn.
 - It is made by `makeFrameData(lights, relativeViewProjection, cameraOrigin, clusters, clusteredShading, clusterHeatmap, shadows)`; the atlas texel size comes from `shadowAtlasSizeFor(shadows)`.
 
 `GpuShadowView` (96 bytes): a tile's world view-projection, the plane it clips at and where its light is (`ShadowTile::lightPlace`: a position, w 1, or the direction towards the sun, w 0, for the coloured shadow maps' glass), the scene layout's one push constant (vertex stage).
@@ -2753,7 +2755,8 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - `emissive`, with an optional sRGB `emissiveTexture` multiplying it (screens, dials, painted lights);
 - `alphaMode` (`Opaque` by default, `Mask` or `Blend`), `alphaCutoff` (0.5), `opacity` (1) and `doubleSided` (false), with `isCutOut(material)`;
 - `transmission` (0) with an optional linear `transmissionTexture` (red), with `isTransparent(material)`: blended or transmitting;
-- and a clear coat (see Physically based shading, Clear coat): `clearCoat` (0) and `clearCoatRoughness` (0) with optional linear `clearCoatTexture` (red) and `clearCoatRoughnessTexture` (green), and `clearCoatNormalTexture` with `clearCoatNormalScale` (1).
+- a clear coat (see Physically based shading, Clear coat): `clearCoat` (0) and `clearCoatRoughness` (0) with optional linear `clearCoatTexture` (red) and `clearCoatRoughnessTexture` (green), and `clearCoatNormalTexture` with `clearCoatNormalScale` (1);
+- and a height map for parallax (see Parallax occlusion mapping): `heightTexture` (linear, red) and `heightScale` (0.03, in texture units).
 - It loads the colour and emissive textures as `TextureEncoding::Srgb` and the metallic-roughness, normal, occlusion, glass and clear coat ones as `Linear` (`AssetManager::loadTexture(TextureSource, flip, encoding)`). The encoding is part of both texture caches' keys and is stored in `ImageData::encoding`. Occlusion packed into the metallic-roughness image (ORM: occlusion, roughness, metallic in red, green, blue) is the same file or bytes read the same way, so it is one texture.
 
 **The glTF loader** reads `metallicFactor`, `roughnessFactor`, the metallic-roughness texture, the normal texture and its scale, the occlusion texture and its strength (0..1, checked like the factors), the emissive texture, `emissiveFactor`, `KHR_materials_emissive_strength`, the base colour factor's alpha (as `opacity`), `alphaMode` with `alphaCutoff` (at least 0) and `doubleSided` (`readTexture` handles every texture, files and embedded alike). `BLEND` loads as `AlphaMode::Blend`; `KHR_materials_transmission` as `transmission` (0..1) and `transmissionTexture`, `KHR_materials_volume` as `thickness` (at least 0, model units), `thicknessTexture` (green), `attenuationColour` (0..1) and `attenuationDistance` (above 0; cgltf's default, the largest float, becomes infinite), and `KHR_materials_ior` as `ior` (at least 1; 1.5 without it), and `KHR_materials_clearcoat` as the clear coat (its factor and roughness 0..1, its three textures, its normal texture's scale). Each embedded image is copied once per load (`GltfImages`, keyed by cgltf's image), so slots naming one image share its bytes and the `AssetManager`, which caches embedded images by buffer, decodes and uploads it once. A part with no material gets glTF's defaults, metallic and roughness 1.
@@ -2767,7 +2770,7 @@ Assets are append-only, so handles never go stale (add a generation like `Entity
 - `extra`: x the occlusion texture's slot, y the flags (`MATERIAL_DOUBLE_SIDED` 1, `MATERIAL_CUT_OUT` 2, `MATERIAL_BLEND` 4, `MATERIAL_REFRACTS` 8 for thick or frosted glass, `render/gpu/material_shared.h`)), z the transmission texture's slot, w the thickness texture's slot;
 - `transmission`: x glass's transmission (0..1), y thick glass's thickness (model units), z 1 over its attenuation distance (0 for none), w its index of refraction;
 - `attenuation`: rgb the colour light keeps after the attenuation distance;
-- and the clear coat: `clearCoat` x its amount, y its roughness (both clamped to 0..1, and the amount 0 on transparent materials, whose glass is a varnish-like surface already), z its normal map's scale (0 without one), and `clearCoatTextures` the amount, roughness and normal textures' slots.
+- and `coatAndHeight`: the clear coat's x amount, y roughness (both clamped to 0..1, and the amount 0 on transparent materials, whose glass is a varnish-like surface already), z normal map scale (0 without one), and w the height map's depth for parallax (0 without one, and on cut-outs and transparent materials); `coatAndHeightTextures` the coat's amount, roughness and normal textures' slots and the height map's.
 - One entry per different material in the frame's material buffer (see GPU scene).
 
 ### Cut-outs and double-sided surfaces
@@ -3958,13 +3961,37 @@ Ambient returns `ambient * (diffuse + specularAlbedo)` (plus a clear coat's albe
 - Ambient light: the coat adds its albedo of the light from all around, and of the mirror light (the base's stand-in) for the probes' and the sky grid's.
 - A coat of nothing leaves the shading point, every light and the ambient exactly as they were, to the last bit, so uncoated materials draw as before.
 
-**In the main pass** (`scene_surface.glsl`, not glass's pipelines): on a coated material, while `RenderSettings::clearCoat` is on (F5 Materials, `engine.render.materials.clearCoat`, on; sent as `textureOptions.w`), the coat's three textures are read with `textureGrad` at the UV steps taken first thing (scaled by the mip bias), so uncoated pixels read nothing more. Its roughness is clamped to the smallest drawable and widened by Toksvig (with its own normal map) and geometric specular anti-aliasing, as the base's is: a smooth coat on a curved body is where highlights shimmer most. Every light goes through `addLight`, so the sun, the point and spot lights, mirrored light and the reflection probe's capture all get it.
+**In the main pass** (`scene_surface.glsl`, not glass's pipelines): on a coated material, while `MaterialSettings::clearCoat` is on (`RenderSettings::materials`, `render/gpu/material_settings`) (F5 Materials, `engine.render.materials.clearCoat`, on; sent as `textureOptions.w`), the coat's three textures are read with `textureGrad` at the UV steps taken first thing (scaled by the mip bias), so uncoated pixels read nothing more. Its roughness is clamped to the smallest drawable and widened by Toksvig (with its own normal map) and geometric specular anti-aliasing, as the base's is: a smooth coat on a curved body is where highlights shimmer most. Every light goes through `addLight`, so the sun, the point and spot lights, mirrored light and the reflection probe's capture all get it.
 
 **Reflections.** The reflection pass follows one reflection a pixel; following two would double its cost. So it follows the smoother layer (`reflectsCoat`: the coat's alpha at most the base's, the coat on a tie), whose mirror image is the sharper: the main pass hands on the coat's normal, its albedo (grey) and roughness, and its stand-in (the mirror light times its albedo); the other layer's reflection stays its stand-in in the picture. Car paint gets its sharp mirror image; the paint's soft sheen under it keeps the probe's or the sky's light.
 
 **The light lab** has two red painted balls on the grass between the start and the reflection corner (`labPaintedBallCentres`, `labPaintedBallRadius` 0.3 m; `LightLabGame::getPaintedBalls`): the same paint (roughness 0.45), the first bare, the second under a full clear coat of roughness 0.03 (`LabSurface::BallPaint`, `LacqueredPaint`).
 
 **Tests:** `brdf_test` (no coat changes nothing to the bit, the coated white furnace over metal and plastic at two coat roughnesses and three views, the coat's share and the base's rest, rising towards grazing, the coat's lobe alone returning its albedo, the coat ignoring the normal map, lit from in front of either layer, which layer the reflections follow), `material_uniforms_test`, `gltf_material_test`, `texture_encoding_test` (the asset manager), `engine_commands_test` (the switch by command), `light_lab_test` (the balls); the GPU case `GPU_TEST_CLEAR_COAT` in `brdf_gpu_test` (built, not run).
+
+### Parallax occlusion mapping
+
+**What it is** (Tatarchuk 2006; `render/gpu/parallax`, numbers in `parallax_shared.h`, mirrored in `parallax.glsl`). A normal map only tilts the light; the surface stays flat, so nothing hides behind anything. A height map (`Material::heightTexture`, linear grey: 1 the top, at the polygon, 0 the deepest) makes each pixel follow its view ray down into the surface, as if the height map were a little landscape under the polygon, to where the ray first drops below the ground, and read every texture there. Seen at an angle the near side of a brick hides the mortar behind it.
+
+**The maths**, in the surface's own frame (`toTangentFrame`: the normal map's tangent, bitangent and normal, made orthonormal) and in texture units (`heightScale`, the deepest point's depth as a share of the texture's width, so one number fits any texture size):
+
+- A fraction t of the way down the ray is at height 1 - t, shifted sideways by `parallaxDelta` times t: the view's sideways part over its part along the normal, times the depth, away from the eye. The cosine is held at least `PARALLAX_SMALLEST_VIEW_COSINE` (0.1), so a grazing view shifts at most ten depths.
+- Steps (`parallaxSteps`): `PARALLAX_FEWEST_STEPS` (8) straight down, more towards grazing views, where the ray crosses more of the height map, up to `MaterialSettings::parallaxSteps` (32, at most `PARALLAX_MOST_STEPS` 64). Each step's t is its number over the count, so the last is exactly the bottom, which every ray reaches.
+- The first step whose gap (`parallaxGap`, the ray's height less the ground's) is zero or less ends the search, and the crossing between it and the step before is found with the ground between them taken as a straight line (`parallaxCrossing`), removing a plain search's stair steps.
+- Mips: every read (the search's and the surface textures' at the point found) uses `textureGrad` with the unshifted coordinates' steps to the next pixel, scaled by the mip bias; the shift jumps from pixel to pixel at a brick's edge, and its own steps would pick wildly wrong mips there (`surfaceTexture` in `scene_surface.glsl`). Materials without a height map keep their plain reads; the choice depends on the material alone, the same for a primitive's whole 2 x 2 quads, so the plain reads keep their derivatives.
+- Fade with distance: the depth seen head-on in pixels (`parallaxDepthPixels`, the depth over the larger step to the next pixel) scales the depth by `parallaxFade`, all of it from 2 pixels, none under half a pixel, where the height map's mips no longer hold the bumps and the shift would only shimmer.
+
+**Self-shadowing** (`MaterialSettings::parallaxSelfShadows`, on): for the brightest directional light (the sun), from the point the search found, the ray up towards it through the same height map to the top in `PARALLAX_SHADOW_STEPS` (16) steps. Each sample's share falls from 1 as the ground pokes above the ray, by `PARALLAX_SHADOW_SOFTNESS` (4) times how far it pokes over how far the ray has climbed (`parallaxShadowSample`), so a brick's edge darkens the mortar beside it, softly. The light's share is the least of the samples'.
+
+**Limits.** Silhouettes stay flat. The depth image sees the flat polygon, so ambient occlusion, contact shadows and screen reflections do too (writing the shifted depth would break the depth prepass's `EQUAL` test and early depth rejection), and shadows from other objects land on the flat polygon. Cut-outs and transparent materials take no height map (`packMaterial` packs its depth as 0): a cut-out's holes come from the prepass at the unshifted place.
+
+**Where.** The main pass (`scene_surface.glsl`, every pipeline including the reflection probe's capture) runs the search right after the material is read, before any other texture; `GpuFrameData::materialOptions` carries x on, y self-shadows, z the most steps. Settings in F5 Materials (`engine.render.materials.parallax`, `parallaxSelfShadows`, `parallaxSteps`).
+
+**Height maps and normal maps together.** `core/height_map` (`normalMapFromHeight`) works out a normal map from a height map at its depth (central differences, wrapping round the edges), so a game's generated surfaces light as their parallax shows them.
+
+**The light lab** has a low brick wall (`labBrickWall`, 1.8 by 0.9 m) beside the painted balls with a cobbled strip in front of it (`labCobbleStrip`; `LightLabGame::getBrickWall`): the block's south face a panel of bricks in running bond (`brickImages`: 22.5 by 7.5 cm with their mortar, a 1.5 cm deep groove) and the strip a panel of rounded square cobbles (`cobbleImages`: 12.5 cm, 2 cm gaps), each panel 2 mm proud (`labPanelLift`), their textures repeating every tile (`tiledPanel`, which the chain-link fence's panel now uses too).
+
+**Tests:** `parallax_test` (the frame, steps and shifts, the crossing, a flat map shifting nothing, a tilted plane's exact crossing, a brick's edge hiding the mortar from one side and not the other, self-shadowing from a low light beyond a brick, a high one and one from the open side, the fade, the settings), `height_map_test`, `material_uniforms_test`, `texture_encoding_test`, `engine_commands_test` (the settings by command), `light_lab_test` (the panel, the pictures, the wall's placement and materials); GPU cases `GPU_TEST_PARALLAX_*` in `parallax_gpu_test` (built, not run).
 
 ### The demo's lighting
 

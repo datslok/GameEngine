@@ -8,6 +8,7 @@
 #include "render/gpu/ddgi.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
+#include "render/gpu/material_settings.h"
 #include "render/gpu/mirrored_light.h"
 #include "render/gpu/normal_mapping_shared.h"
 #include "render/gpu/ray_tracing.h"
@@ -64,6 +65,9 @@ struct RenderSettings {
     // Volumetric fog (render/gpu/volumetric_fog.h): the air lit by the lights, when the frame has a Fog.
     FogSettings fog;
 
+    // What materials may draw (render/gpu/material_settings.h): clear coats and parallax occlusion mapping.
+    MaterialSettings materials;
+
     // Depth first, then shading only the nearest surface (render/gpu/depth_prepass.h). Off shades whatever passes the
     // depth test as it is drawn, for comparing the two in the GPU timings.
     bool depthPrepass = true;
@@ -88,10 +92,6 @@ struct RenderSettings {
     // Its pixel footprint's variance: Tokuyoshi and Kaplanyan's 0.25 by default; more steadies sub-pixel highlights further
     // (a mirror ball's sun swings 1.17 times at 0.25, 1.04 at 0.5, against 3.6 without) and softens curved highlights.
     float specularAntiAliasingVariance = static_cast<float>(NORMAL_GEOMETRIC_VARIANCE);
-
-    // Clear coats (render/gpu/brdf.h, addClearCoat): the varnish layer materials may have over them (car paint, lacquer).
-    // Off draws every material as if it had none, for comparing.
-    bool clearCoat = true;
 
     // Hardware ray tracing, every feature that traces rays at once: the light probes (all bounce light, since there is
     // no software tracer yet), ray-traced reflections, mirrored lights, glass shadows, the reflection probe's traced sun

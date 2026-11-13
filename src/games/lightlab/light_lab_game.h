@@ -281,6 +281,9 @@ public:
 
     // Clear coat's test pieces: the bare painted ball, then its lacquered twin, as one renderer's two parts.
     Entity getPaintedBalls() const;
+
+    // Parallax occlusion mapping's test pieces: the wall's block, its bricks' panel and the cobbled strip, as one renderer's three parts.
+    Entity getBrickWall() const;
     Entity getSun() const;
     Entity getMoon() const;
 
@@ -362,6 +365,7 @@ private:
 
     Entity bottle;
     Entity paintedBallsEntity;
+    Entity brickWall;
 
     // L toggles it (off at the start): for seeing how a still light's bounce comes and goes.
     Entity lamp;

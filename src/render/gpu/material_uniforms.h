@@ -30,9 +30,10 @@ struct GpuMaterial {
     float transmission[4];
     float attenuation[4];    // rgb: the colour light keeps after the attenuation distance; w: 0
     // A clear coat (render/gpu/brdf.h, addClearCoat): x how much, 0..1 (0 none, and always on transparent materials);
-    // y its roughness, 0..1; z its normal map's scale (0 without one, so it lies on the geometry); w: 0
-    float clearCoat[4];
-    std::uint32_t clearCoatTextures[4]; // slots in the texture array: x amount, y roughness, z normal map; w: 0
+    // y its roughness, 0..1; z its normal map's scale (0 without one, so it lies on the geometry); and w the height map's
+    // depth for parallax (render/gpu/parallax.h; texture units, 0 for none, and always on cut-outs and transparent materials)
+    float coatAndHeight[4];
+    std::uint32_t coatAndHeightTextures[4]; // slots in the texture array: x coat amount, y coat roughness, z coat normal map, w height map
 };
 
 static_assert(sizeof(GpuMaterial) == 144, "GpuMaterial must match the shader's MaterialData struct");

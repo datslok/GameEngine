@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/coverage_mips.h"
+#include "core/height_map.h"
 #include "math/aabb.h"
 #include "math/vec3.h"
 #include "scene/mesh.h"
@@ -261,6 +262,46 @@ inline const Aabb labFrostedPanel{Vec3{4.2f, 0.04f, -7.005f}, Vec3{5.8f, 1.44f, 
 // the reflection corner, the same paint, the first bare and the second lacquered with a smooth clear coat.
 inline constexpr float labPaintedBallRadius = 0.3f;
 inline const std::array<Vec3, 2> labPaintedBallCentres{Vec3{0.3f, labPaintedBallRadius, -6.0f}, Vec3{1.2f, labPaintedBallRadius, -6.0f}};
+
+/*
+* A flat panel of any size whose texture repeats every tileMetres: from its corner along its two sides, counterclockwise
+* seen from the front, which faces along alongU crossed with alongV; UV (0, 0) at the corner, counting tiles along each
+* side, so a texture keeps its size in metres whatever the panel's.
+*/
+Mesh tiledPanel(const Vec3& corner, const Vec3& alongU, const Vec3& alongV, float tileMetres);
+
+/*
+* Parallax occlusion mapping's test pieces (render/gpu/parallax.h): a low brick wall beside the painted balls with a
+* cobbled strip in front of it. Their pictures are made here: a colour (sRGB), a height map (linear grey: the brick's
+* or cobble's top 255, the mortar 0) and the normal map worked out from it at its depth (core/height_map.h), so their
+* lighting and parallax agree. The bricks are laid in running bond, each course shifted half a brick; the cobbles are
+* domes in a square grid. Each picture repeats every tile.
+*/
+inline constexpr std::uint32_t labSurfaceTexels = 256;  // each picture's side
+inline constexpr std::uint32_t labBricksAcross = 2;     // bricks across a tile
+inline constexpr std::uint32_t labBrickCourses = 6;     // courses up a tile
+inline constexpr std::uint32_t labMortarTexels = 6;     // the mortar's width, round each brick
+inline constexpr float labBrickTileMetres = 0.45f;      // so a brick is 22.5 by 7.5 cm with its mortar
+inline constexpr float labBrickDepth = 0.015f / labBrickTileMetres; // the mortar 1.5 cm deep, in tiles
+inline constexpr std::uint32_t labCobblesAcross = 4;    // cobbles across a tile, each way
+inline constexpr float labCobbleTileMetres = 0.5f;      // so a cobble is 12.5 cm across with its gap
+inline constexpr float labCobbleDepth = 0.02f / labCobbleTileMetres; // the gaps 2 cm deep, in tiles
+
+struct ParallaxImages {
+    ImageLevel colour;
+    ImageLevel height;
+    ImageLevel normal;
+};
+
+ParallaxImages brickImages();
+ParallaxImages cobbleImages();
+
+// The wall (a solid block, its south face bricked) and the cobbled strip lying on the grass along its south side.
+inline const Aabb labBrickWall{Vec3{-3.2f, 0.0f, -7.25f}, Vec3{-1.4f, 0.9f, -7.0f}};
+inline const Aabb labCobbleStrip{Vec3{-3.2f, 0.0f, -7.0f}, Vec3{-1.4f, 0.0f, -5.8f}};
+
+// How far the bricks' and cobbles' panels stand off the block and the grass, so they never fight over depth.
+inline constexpr float labPanelLift = 0.002f;
 
 // A tall mirror on the sunlit room's south wall, facing the doorway from the back room across the room, so the
 // doorway and the room are seen in it (2 cm thick, standing out from the wall).

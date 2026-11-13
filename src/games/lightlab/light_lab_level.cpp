@@ -371,36 +371,129 @@ StainedGlassImages stainedGlassImages() {
     return images;
 }
 
-/*
-* Seen from the east (looking west, up is +y), north (-z) is to the right, so the corners run anticlockwise from the
-* bottom south corner: the front faces east. It is double-sided, so the west sees it too.
-*/
-Mesh chainLinkPanel() {
+Mesh tiledPanel(const Vec3& corner, const Vec3& alongU, const Vec3& alongV, float tileMetres) {
     Mesh panel;
-    panel.vertices = {
-        Vec4{labFenceX, 0.0f, labFirstPostZ, 1.0f},
-        Vec4{labFenceX, 0.0f, labLastPostZ, 1.0f},
-        Vec4{labFenceX, labPostHeight, labLastPostZ, 1.0f},
-        Vec4{labFenceX, labPostHeight, labFirstPostZ, 1.0f}
-    };
+    const Vec3 corners[4] = {corner, corner + alongU, corner + alongU + alongV, corner + alongV};
+    const Vec2 tiles{alongU.length() / tileMetres, alongV.length() / tileMetres};
+    const Vec2 uvs[4] = {Vec2{0.0f, 0.0f}, Vec2{tiles.x, 0.0f}, Vec2{tiles.x, tiles.y}, Vec2{0.0f, tiles.y}};
+    const Vec3 facing = alongU.cross(alongV).normalized();
 
-    const auto uvOf = [](const Vec4& corner) {
-        return Vec2{(labFirstPostZ - corner.z) / labChainLinkTileMetres, corner.y / labChainLinkTileMetres};
-    };
+    for (const Vec3& point : corners) {
+        panel.vertices.push_back(Vec4{point.x, point.y, point.z, 1.0f});
+    }
 
-    for (const std::array<std::size_t, 3>& corners : {std::array<std::size_t, 3>{0, 1, 2}, std::array<std::size_t, 3>{0, 2, 3}}) {
+    for (const std::array<std::size_t, 3>& indices : {std::array<std::size_t, 3>{0, 1, 2}, std::array<std::size_t, 3>{0, 2, 3}}) {
         Triangle triangle{};
-        triangle.first = corners[0];
-        triangle.second = corners[1];
-        triangle.third = corners[2];
+        triangle.first = indices[0];
+        triangle.second = indices[1];
+        triangle.third = indices[2];
 
-        for (std::size_t corner = 0; corner < 3; ++corner) {
-            triangle.normals[corner] = Vec3{1.0f, 0.0f, 0.0f};
-            triangle.uvs[corner] = uvOf(panel.vertices[corners[corner]]);
+        for (std::size_t at = 0; at < 3; ++at) {
+            triangle.normals[at] = facing;
+            triangle.uvs[at] = uvs[indices[at]];
         }
 
         panel.triangles.push_back(triangle);
     }
 
     return panel;
+}
+
+/*
+* Seen from the east (looking west, up is +y), north (-z) is to the right, so the panel runs north along the fence and
+* up: its front faces east. It is double-sided, so the west sees it too.
+*/
+Mesh chainLinkPanel() {
+    return tiledPanel(Vec3{labFenceX, 0.0f, labFirstPostZ}, Vec3{0.0f, 0.0f, labLastPostZ - labFirstPostZ}, Vec3{0.0f, labPostHeight, 0.0f},
+                      labChainLinkTileMetres);
+}
+
+namespace {
+    // A texel's place within its cell along one axis, in texels from the cell's start, and which cell it is in: cells
+    // `count` to the picture's side, the axis shifted by `shift` cells first (running bond's half brick).
+    struct CellPlace {
+        int cell = 0;
+        float within = 0.0f;
+        float size = 0.0f;
+    };
+
+    CellPlace cellPlace(std::uint32_t texel, std::uint32_t count, float shift) {
+        const float place = (static_cast<float>(texel) + 0.5f) / static_cast<float>(labSurfaceTexels) * static_cast<float>(count) + shift;
+        const float cell = std::floor(place);
+        const float size = static_cast<float>(labSurfaceTexels) / static_cast<float>(count);
+        return CellPlace{static_cast<int>(cell), (place - cell) * size, size};
+    }
+
+    void addGrey(ImageLevel& image, std::uint8_t value) {
+        image.pixels.insert(image.pixels.end(), {value, value, value, 255});
+    }
+
+    std::uint8_t heightByte(float height) {
+        return static_cast<std::uint8_t>(std::lround(std::clamp(height, 0.0f, 1.0f) * 255.0f));
+    }
+}
+
+/*
+* Each brick is flat on top, falling over a two-texel bevel to the mortar at its edges, so the normal map shows a narrow
+* rounded edge; its colour varies a little from brick to brick (hashed from its course and place, wrapping with the tile).
+*/
+ParallaxImages brickImages() {
+    constexpr float bevel = 2.0f;
+    constexpr float halfMortar = static_cast<float>(labMortarTexels) * 0.5f;
+    ParallaxImages images{ImageLevel{labSurfaceTexels, labSurfaceTexels, {}}, ImageLevel{labSurfaceTexels, labSurfaceTexels, {}}, {}};
+
+    for (std::uint32_t y = 0; y < labSurfaceTexels; ++y) {
+        const CellPlace course = cellPlace(y, labBrickCourses, 0.0f);
+
+        for (std::uint32_t x = 0; x < labSurfaceTexels; ++x) {
+            const CellPlace brick = cellPlace(x, labBricksAcross, course.cell % 2 == 1 ? 0.5f : 0.0f);
+            const float inside = std::min({brick.within - halfMortar, brick.size - halfMortar - brick.within, course.within - halfMortar,
+                                           course.size - halfMortar - course.within});
+            const float height = inside < 0.0f ? 0.0f : std::min(1.0f, (inside + 0.5f) / bevel);
+            addGrey(images.height, heightByte(height));
+
+            const std::uint32_t brickNumber = static_cast<std::uint32_t>(course.cell) * 16u +
+                                              static_cast<std::uint32_t>(brick.cell % static_cast<int>(labBricksAcross));
+            const float shade = 0.85f + 0.3f * hashedFraction(brickNumber, 7);
+            const std::array<float, 3> colour = inside < 0.0f ? std::array<float, 3>{172.0f, 166.0f, 156.0f}
+                                                              : std::array<float, 3>{150.0f * shade, 62.0f * shade, 46.0f * shade};
+            images.colour.pixels.insert(images.colour.pixels.end(), {static_cast<std::uint8_t>(std::min(colour[0], 255.0f)),
+                                                                     static_cast<std::uint8_t>(std::min(colour[1], 255.0f)),
+                                                                     static_cast<std::uint8_t>(std::min(colour[2], 255.0f)), 255});
+        }
+    }
+
+    images.normal = normalMapFromHeight(images.height, labBrickDepth);
+    return images;
+}
+
+/*
+* Each cobble a squarish dome (its distance from its middle measured as a fourth-power norm, so its outline is a rounded
+* square), flat-topped and falling steeply at its edges into the gaps between, its grey varying from cobble to cobble.
+*/
+ParallaxImages cobbleImages() {
+    constexpr float gap = 6.0f;
+    ParallaxImages images{ImageLevel{labSurfaceTexels, labSurfaceTexels, {}}, ImageLevel{labSurfaceTexels, labSurfaceTexels, {}}, {}};
+
+    for (std::uint32_t y = 0; y < labSurfaceTexels; ++y) {
+        const CellPlace row = cellPlace(y, labCobblesAcross, 0.0f);
+
+        for (std::uint32_t x = 0; x < labSurfaceTexels; ++x) {
+            const CellPlace column = cellPlace(x, labCobblesAcross, 0.0f);
+            const float radius = column.size * 0.5f - gap * 0.5f;
+            const float across = std::fabs(column.within - column.size * 0.5f) / radius;
+            const float down = std::fabs(row.within - row.size * 0.5f) / radius;
+            const float distance = std::sqrt(std::sqrt(across * across * across * across + down * down * down * down));
+            const float height = distance < 1.0f ? std::sqrt(1.0f - distance * distance * distance * distance) : 0.0f;
+            addGrey(images.height, heightByte(height));
+
+            const std::uint32_t cobbleNumber = static_cast<std::uint32_t>(row.cell) * 16u + static_cast<std::uint32_t>(column.cell);
+            const float grey = distance < 1.0f ? 115.0f + 45.0f * hashedFraction(cobbleNumber, 11) : 70.0f;
+            images.colour.pixels.insert(images.colour.pixels.end(), {static_cast<std::uint8_t>(grey), static_cast<std::uint8_t>(grey * 0.97f),
+                                                                     static_cast<std::uint8_t>(grey * 0.92f), 255});
+        }
+    }
+
+    images.normal = normalMapFromHeight(images.height, labCobbleDepth);
+    return images;
 }

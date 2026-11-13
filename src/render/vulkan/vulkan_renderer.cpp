@@ -12,6 +12,7 @@
 #include "render/gpu/depth_prepass.h"
 #include "render/gpu/material_shared.h"
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/parallax.h"
 #include "render/gpu/shadow_cache.h"
 #include "render/gpu/taa.h"
 #include "render/gpu/tone_map_uniforms.h"
@@ -2110,7 +2111,10 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     frameData.textureOptions[0] = textureLodBias(sceneSize, frameWidth, frameUpscaler);
     frameData.textureOptions[1] = settings.normalMapFiltering ? 1.0f : 0.0f;
     frameData.textureOptions[2] = settings.specularAntiAliasing ? settings.specularAntiAliasingVariance : 0.0f;
-    frameData.textureOptions[3] = settings.clearCoat ? 1.0f : 0.0f;
+    frameData.textureOptions[3] = settings.materials.clearCoat ? 1.0f : 0.0f;
+    frameData.materialOptions[0] = settings.materials.parallax ? 1.0f : 0.0f;
+    frameData.materialOptions[1] = settings.materials.parallaxSelfShadows ? 1.0f : 0.0f;
+    frameData.materialOptions[2] = static_cast<float>(std::clamp(settings.materials.parallaxSteps, parallaxFewestSteps, parallaxMostSteps));
     frameData.mirroredLightOptions[0] = mirrorLight ? 1 : 0;
     // The frame, so rough mirrors' footprints are sampled differently each frame for temporal anti-aliasing to average
     // (kept small: the shaders turn it into a float offset of the noise).

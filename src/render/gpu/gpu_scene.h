@@ -99,9 +99,10 @@ struct GpuFrameData {
     float skyVisibilityOptions[4]; // the sky visibility grid (render/gpu/sky_visibility.h, packSkyVisibilityOptions): x its cascades read (0: not read), y the ambient floor, z the lookup bias, w 1 for its debug view
     float contactShadowOptions[4]; // x: 1 when the main pass reads the sun's contact shadows (render/gpu/contact_shadows.h), y: 1 when it reads the local lights'
     std::int32_t contactLightSlots[4]; // the local lights with a contact shadow channel, by channel: a point light's slot, a spotlight's CONTACT_SPOT_SLOT_BASE past its slot, -1 none
+    float materialOptions[4]; // parallax occlusion mapping (render/gpu/parallax.h): x 1 draws it, y 1 self-shadows from the sun, z the most steps
 };
 
-static_assert(sizeof(GpuFrameData) == 400, "GpuFrameData must match the shader's FrameData block");
+static_assert(sizeof(GpuFrameData) == 416, "GpuFrameData must match the shader's FrameData block");
 
 // One object's instance, with the number its material got in the frame's MaterialTable.
 GpuInstance packInstance(const DrawItem& draw, std::uint32_t material);

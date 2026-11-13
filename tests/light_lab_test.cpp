@@ -1,5 +1,6 @@
 #include "core/command_registry.h"
 #include "core/coverage_mips.h"
+#include "core/height_map.h"
 #include "engine/engine_commands.h"
 #include "engine/engine_settings.h"
 #include "engine/golden.h"
@@ -65,8 +66,8 @@ namespace {
 
         // The ground, the towers, fence, its chain-link, the window's glass, trees, building, the street, its windows and its bulbs' glow (static, and
         // visual only, so they neither block nor wake the probes), the reflectors (the polished slab and the mirror), the
-        // mirror ball, refraction's glass pieces, the pen table, its glass bottle and the painted balls.
-        assert(staticModels == 16);
+        // mirror ball, refraction's glass pieces, the pen table, its glass bottle, the painted balls and the brick wall.
+        assert(staticModels == 17);
         assert(others > 0);
     }
 
@@ -416,6 +417,101 @@ namespace {
     }
 
 
+
+    /*
+    * A panel of any size whose texture repeats every tileMetres: its corner, then along its two sides counterclockwise
+    * seen from the front, which faces along their cross product; UV (0, 0) at the corner, counting tiles along each side.
+    */
+    void testTiledPanel() {
+        const Mesh panel = tiledPanel(Vec3{1.0f, 0.0f, 2.0f}, Vec3{3.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.5f, 0.0f}, 0.5f);
+        assert(panel.vertices.size() == 4 && panel.triangles.size() == 2);
+        Vec2 largest{};
+
+        for (const Triangle& triangle : panel.triangles) {
+            assert(faceNormal(panel.vertices[triangle.first], panel.vertices[triangle.second], panel.vertices[triangle.third]).z > 0.99f);
+
+            for (std::size_t corner = 0; corner < 3; ++corner) {
+                assert(triangle.normals[corner].has_value() && triangle.normals[corner]->z == 1.0f);
+                largest.x = std::max(largest.x, triangle.uvs[corner]->x);
+                largest.y = std::max(largest.y, triangle.uvs[corner]->y);
+            }
+        }
+
+        assert(near(largest.x, 6.0f, 1e-5f) && near(largest.y, 3.0f, 1e-5f));
+    }
+
+    // The byte a single-channel (grey) image holds at a texel.
+    std::uint8_t texel(const ImageLevel& image, std::uint32_t x, std::uint32_t y) {
+        return image.pixels[(static_cast<std::size_t>(y) * image.width + x) * 4];
+    }
+
+    /*
+    * Parallax occlusion mapping's test pieces (render/gpu/parallax.h): the bricks' and cobbles' pictures, made here. Each
+    * a colour, a height map (the brick or cobble's top 255, the mortar 0, recessed) and the normal map worked out from
+    * it at its depth, so their lighting agrees with their parallax. The bricks are laid in running bond: each course
+    * shifted half a brick from the one below.
+    */
+    void testBrickAndCobbleImages() {
+        const ParallaxImages bricks = brickImages();
+        const std::uint32_t size = labSurfaceTexels;
+        assert(bricks.colour.width == size && bricks.height.width == size && bricks.normal.width == size);
+
+        const std::uint32_t brickWide = size / labBricksAcross;
+        const std::uint32_t course = size / labBrickCourses;
+        // The middle of the first brick of the bottom course is its top; the mortar round it is recessed.
+        assert(texel(bricks.height, brickWide / 2, course / 2) == 255);
+        assert(texel(bricks.height, 0, course / 2) == 0 && texel(bricks.height, brickWide / 2, 0) == 0);
+        // Running bond: where the bottom course has mortar between bricks, the next has a brick's middle.
+        assert(texel(bricks.height, brickWide, course / 2) == 0 && texel(bricks.height, brickWide, course + course / 2) == 255);
+        // Brick red against grey mortar.
+        const std::size_t brickTexel = (static_cast<std::size_t>(course / 2) * size + brickWide / 2) * 4;
+        assert(bricks.colour.pixels[brickTexel] > bricks.colour.pixels[brickTexel + 2] + 40);
+        assert(bricks.normal.pixels == normalMapFromHeight(bricks.height, labBrickDepth).pixels);
+
+        const ParallaxImages cobbles = cobbleImages();
+        const std::uint32_t cobble = size / labCobblesAcross;
+        assert(texel(cobbles.height, cobble / 2, cobble / 2) == 255 && texel(cobbles.height, 0, 0) == 0);
+        assert(texel(cobbles.height, cobble / 2 + cobble / 4, cobble / 2) < 255 && texel(cobbles.height, cobble / 2 + cobble / 4, cobble / 2) > 0);
+        assert(cobbles.normal.pixels == normalMapFromHeight(cobbles.height, labCobbleDepth).pixels);
+    }
+
+    /*
+    * A low brick wall beside the painted balls with a cobbled strip in front of it: the wall a solid block with the
+    * bricks' panel on its south face, the cobbles a panel lying on the grass; both panels with their height and normal
+    * maps at their depths. All of it clear of the level and the balls, and static.
+    */
+    void testTheBrickWall() {
+        const LightLabLayout layout = buildLightLabLayout();
+        std::vector<LabBlock> blocks;
+
+        for (const std::vector<LabBlock>* group : {&layout.towers, &layout.fence, &layout.trees, &layout.building, &layout.street, &layout.reflectors, &layout.table}) {
+            blocks.insert(blocks.end(), group->begin(), group->end());
+        }
+
+        const Aabb strip{Vec3{labCobbleStrip.minimum.x, 0.0f, labCobbleStrip.minimum.z}, Vec3{labCobbleStrip.maximum.x, 0.1f, labCobbleStrip.maximum.z}};
+
+        for (const LabBlock& block : blocks) {
+            assert(!overlaps(grown(labBrickWall, 0.1f), block.bounds()) && !overlaps(strip, block.bounds()));
+        }
+
+        assert(near(labBrickWall.minimum.y, 0.0f, 0.0f) && labBrickWall.maximum.y > 0.5f && labBrickWall.maximum.y < 1.5f);
+        assert(labCobbleStrip.minimum.z >= labBrickWall.maximum.z && labCobbleStrip.minimum.x == labBrickWall.minimum.x);
+
+        for (const Vec3& centre : labPaintedBallCentres) {
+            const Aabb ball{centre - Vec3{labPaintedBallRadius, labPaintedBallRadius, labPaintedBallRadius}, centre + Vec3{labPaintedBallRadius, labPaintedBallRadius, labPaintedBallRadius}};
+            assert(!overlaps(grown(ball, 0.2f), labBrickWall) && !overlaps(grown(ball, 0.2f), strip));
+        }
+
+        Lab lab;
+        const ModelRenderer& renderer = lab.world.get<ModelRenderer>(lab.game.getBrickWall());
+        assert(renderer.parts.size() == 3 && renderer.isStatic);
+        const Material& bricks = renderer.parts[1].material;
+        const Material& cobbles = renderer.parts[2].material;
+        assert(bricks.heightTexture.isValid() && bricks.normalTexture.isValid() && bricks.texture.isValid() && bricks.heightScale == labBrickDepth);
+        assert(cobbles.heightTexture.isValid() && cobbles.normalTexture.isValid() && cobbles.heightScale == labCobbleDepth);
+        assert(lab.assets.getTexture(bricks.heightTexture).encoding == TextureEncoding::Linear);
+        assert(lab.assets.getTexture(bricks.normalTexture).encoding == TextureEncoding::Linear);
+    }
     /*
     * Clear coat's test pieces (render/gpu/brdf.h, addClearCoat): two red painted balls on the grass between the start and
     * the reflection corner, the same paint, one bare and one lacquered with a smooth clear coat, so the coat's sharp white
@@ -1389,6 +1485,9 @@ void testLightLab() {
     testThePenTable();
     testTheGlassBottle();
     testThePaintedBalls();
+    testTiledPanel();
+    testBrickAndCobbleImages();
+    testTheBrickWall();
     testChainLinkPattern();
     testTheChainLinkFence();
     testTheWindowGlass();

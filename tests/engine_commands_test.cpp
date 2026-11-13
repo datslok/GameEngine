@@ -40,10 +40,13 @@ namespace {
         assert(setup.registry.execute("set engine.render.bloom.strength 0.1").ok);
         assert(setup.settings.render.bloom.strength == 0.1f);
 
-        // Clear coat, on by default, switched off from the command line.
-        assert(setup.settings.render.clearCoat);
+        // The materials' switches (clear coat, parallax), on by default, switched off from the command line.
+        assert(setup.settings.render.materials.clearCoat);
         assert(setup.registry.execute("set engine.render.materials.clearCoat false").ok);
-        assert(!setup.settings.render.clearCoat);
+        assert(!setup.settings.render.materials.clearCoat);
+        assert(setup.registry.execute("set engine.render.materials.parallax false").ok && !setup.settings.render.materials.parallax);
+        assert(setup.registry.execute("set engine.render.materials.parallaxSelfShadows false").ok && !setup.settings.render.materials.parallaxSelfShadows);
+        assert(setup.registry.execute("set engine.render.materials.parallaxSteps 16").ok && setup.settings.render.materials.parallaxSteps == 16);
 
         assert(setup.registry.execute("set engine.clothOnGPU false").ok);
         assert(!setup.settings.clothOnGpu);

@@ -91,6 +91,8 @@ namespace {
         source.clearCoatRoughnessTexture.path = imagePath;
         source.clearCoatNormalTexture.path = imagePath;
         source.clearCoatNormalScale = 0.5f;
+        source.heightTexture.path = imagePath;
+        source.heightScale = 0.03f;
         source.flipTextureVertically = false;
 
         const Material material = assets.makeMaterial(source);
@@ -116,6 +118,7 @@ namespace {
         assert(material.clearCoat == 0.8f && material.clearCoatRoughness == 0.1f && material.clearCoatNormalScale == 0.5f);
         assert(material.clearCoatTexture == material.occlusionTexture && material.clearCoatRoughnessTexture == material.occlusionTexture);
         assert(material.clearCoatNormalTexture == material.occlusionTexture);
+        assert(material.heightTexture == material.occlusionTexture && material.heightScale == 0.03f);
 
         // One file read as numbers twice is one texture: occlusion often shares the metallic-roughness image (ORM).
         assert(material.occlusionTexture == material.normalTexture);
@@ -145,6 +148,7 @@ namespace {
         assert(material.attenuationDistance == defaults.attenuationDistance && material.attenuationColour.z == defaults.attenuationColour.z);
         assert(material.clearCoat == defaults.clearCoat && material.clearCoatRoughness == defaults.clearCoatRoughness && material.clearCoatNormalScale == defaults.clearCoatNormalScale);
         assert(!material.clearCoatTexture.isValid() && !material.clearCoatRoughnessTexture.isValid() && !material.clearCoatNormalTexture.isValid());
+        assert(!material.heightTexture.isValid() && material.heightScale == defaults.heightScale);
         assert(!MaterialSource{}.hasTexture());
 
         MaterialSource thick;
@@ -153,6 +157,7 @@ namespace {
 
         MaterialSource coated;
         coated.clearCoatNormalTexture.path = imagePath;
+        coated.heightTexture.path = imagePath;
         assert(coated.hasTexture());
 
         MaterialSource glowing;
