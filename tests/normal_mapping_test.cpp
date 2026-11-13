@@ -1,7 +1,9 @@
 #include "math/angles.h"
 #include "math/mat4.h"
+#include "render/gpu/brdf.h"
 #include "render/gpu/normal_mapping.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 
@@ -185,6 +187,76 @@ namespace {
         const float doubled = toksvigRoughness(0.25f, averagedTiltTexel(0.6f), 2.0f);
         assert(0.25f < half && half < full && full < doubled);
     }
+
+    // A flat surface (the normal the same in the next pixels) keeps its roughness exactly.
+    void testGeometricKeepsFlatSurfaces() {
+        const float variance = static_cast<float>(NORMAL_GEOMETRIC_VARIANCE);
+        assert(geometricRoughness(0.3f, Vec3{}, Vec3{}, variance) == 0.3f);
+        assert(geometricRoughness(0.045f, Vec3{}, Vec3{}, variance) == 0.045f);
+        assert(geometricRoughness(0.3f, Vec3{0.2f, 0.0f, 0.0f}, Vec3{}, 0.0f) == 0.3f); // a variance of 0 is off
+    }
+
+    /*
+    * Tokuyoshi and Kaplanyan 2019: the normal's change to the next pixel across and down, its variance over a pixel
+    * (NORMAL_GEOMETRIC_VARIANCE times their squared lengths), adds twice over to alpha squared, at most
+    * NORMAL_GEOMETRIC_LIMIT; never past 1.
+    */
+    void testGeometricWidensCurvedSurfaces() {
+        const float roughness = 0.2f;
+        const Vec3 across{0.1f, 0.0f, 0.0f};
+        const Vec3 down{0.0f, 0.05f, 0.0f};
+        const float variance = static_cast<float>(NORMAL_GEOMETRIC_VARIANCE);
+        const float kernel = 2.0f * variance * (0.01f + 0.0025f);
+        const float expected = std::sqrt(std::sqrt(std::pow(roughness, 4.0f) + kernel));
+        assert(std::abs(geometricRoughness(roughness, across, down, variance) - expected) < 1e-6f);
+
+        const float capped = std::sqrt(std::sqrt(std::pow(roughness, 4.0f) + static_cast<float>(NORMAL_GEOMETRIC_LIMIT)));
+        assert(std::abs(geometricRoughness(roughness, Vec3{2.0f, 0.0f, 0.0f}, Vec3{0.0f, 2.0f, 0.0f}, variance) - capped) < 1e-6f);
+        assert(geometricRoughness(0.99f, Vec3{2.0f, 0.0f, 0.0f}, Vec3{}, variance) <= 1.0f);
+        assert(geometricRoughness(0.2f, across * 2.0f, Vec3{}, variance) > geometricRoughness(0.2f, across, Vec3{}, variance));
+        assert(geometricRoughness(0.2f, across, Vec3{}, 0.5f) > geometricRoughness(0.2f, across, Vec3{}, variance));
+    }
+
+    /*
+    * Why: a mirror ball's sun highlight (the smallest roughness, a lobe about 0.002 radians wide) is narrower than a
+    * pixel, so the light pixel centres catch from it swings as the picture slides by a fraction of a pixel. A row of
+    * pixels 2.5 mm apart across a ball of radius 0.5 m, the sun 35 degrees off the view, slid in twentieths of a pixel:
+    * the summed highlight (GGX's distribution at each pixel's normal) swings 3.6 times at the raw roughness; with each
+    * pixel's roughness widened by its normal's change to the next pixel, 1.17 times at the paper's variance (0.25) and
+    * 1.04 at 0.5.
+    */
+    void testGeometricSteadiesASubPixelHighlight() {
+        const float radius = 0.5f;
+        const float spacing = 0.0025f;
+        const Vec3 view{0.0f, 0.0f, 1.0f};
+        const Vec3 light = Vec3{std::sin(0.6f), 0.0f, std::cos(0.6f)};
+        const Vec3 half = (view + light).normalized();
+        const auto normalAt = [&](float x) { return Vec3{x / radius, 0.0f, std::sqrt(1.0f - (x / radius) * (x / radius))}; };
+        const auto summed = [&](float offset, float variance) {
+            float sum = 0.0f;
+            for (int pixel = -120; pixel <= 120; ++pixel) {
+                const float x = (static_cast<float>(pixel) + offset) * spacing;
+                const Vec3 normal = normalAt(x);
+                const float roughness = geometricRoughness(0.045f, normalAt(x + spacing) - normal, Vec3{}, variance);
+                sum += ggxDistribution(std::max(normal.dot(half), 0.0f), roughness * roughness);
+            }
+            return sum;
+        };
+
+        const auto swing = [&](float variance) {
+            float least = 1e30f;
+            float most = 0.0f;
+            for (int step = 0; step < 20; ++step) {
+                const float value = summed(static_cast<float>(step) / 20.0f, variance);
+                least = std::min(least, value);
+                most = std::max(most, value);
+            }
+            return most / least;
+        };
+        assert(swing(0.0f) > 3.0f);
+        assert(swing(static_cast<float>(NORMAL_GEOMETRIC_VARIANCE)) < 1.2f);
+        assert(swing(0.5f) < 1.05f);
+    }
 }
 
 void testNormalMapping() {
@@ -203,4 +275,7 @@ void testNormalMapping() {
     testToksvigShorterIsRougher();
     testToksvigStaysInRange();
     testToksvigFollowsTheScale();
+    testGeometricKeepsFlatSurfaces();
+    testGeometricWidensCurvedSurfaces();
+    testGeometricSteadiesASubPixelHighlight();
 }

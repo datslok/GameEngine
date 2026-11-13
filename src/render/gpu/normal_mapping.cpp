@@ -46,6 +46,18 @@ float toksvigRoughness(float roughness, const Vec3& texel, float scale) {
     return std::min(std::sqrt(std::sqrt(alphaSquared)), 1.0f);
 }
 
+float geometricRoughness(float roughness, const Vec3& normalStepAcross, const Vec3& normalStepDown, float footprintVariance) {
+    const float variance = footprintVariance * (normalStepAcross.dot(normalStepAcross) + normalStepDown.dot(normalStepDown));
+    const float kernel = std::min(2.0f * variance, static_cast<float>(NORMAL_GEOMETRIC_LIMIT));
+
+    if (!(kernel > 0.0f)) {
+        return roughness;
+    }
+
+    const float alphaSquared = roughness * roughness * roughness * roughness + kernel;
+    return std::min(std::sqrt(std::sqrt(alphaSquared)), 1.0f);
+}
+
 Vec4 transformTangent(const Mat4& model, const Vec4& tangent) {
     const Vec3 moved = transformDirection(model, Vec3{tangent.x, tangent.y, tangent.z});
     const float length = moved.length();

@@ -9,6 +9,7 @@
 #include "render/gpu/display_output.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/mirrored_light.h"
+#include "render/gpu/normal_mapping_shared.h"
 #include "render/gpu/ray_tracing.h"
 #include "render/gpu/screen_reflections.h"
 #include "render/gpu/shadow_map.h"
@@ -78,6 +79,15 @@ struct RenderSettings {
     // Normal map filtering (render/gpu/normal_mapping.h, toksvigRoughness): bumps a normal map's smaller mips average away
     // become extra roughness, so distant bumpy surfaces do not sparkle. Off shows the raw mips, for comparing.
     bool normalMapFiltering = true;
+
+    // Geometric specular anti-aliasing (render/gpu/normal_mapping.h, geometricRoughness): a curved surface's roughness
+    // widened by how fast its normal turns from pixel to pixel, so highlights narrower than a pixel (the sun on a mirror
+    // ball) neither sparkle nor swing in brightness as the camera moves. Off shows the raw highlights, for comparing.
+    bool specularAntiAliasing = true;
+
+    // Its pixel footprint's variance: Tokuyoshi and Kaplanyan's 0.25 by default; more steadies sub-pixel highlights further
+    // (a mirror ball's sun swings 1.17 times at 0.25, 1.04 at 0.5, against 3.6 without) and softens curved highlights.
+    float specularAntiAliasingVariance = static_cast<float>(NORMAL_GEOMETRIC_VARIANCE);
 
     // Hardware ray tracing, every feature that traces rays at once: the light probes (all bounce light, since there is
     // no software tracer yet), ray-traced reflections, mirrored lights, glass shadows, the reflection probe's traced sun

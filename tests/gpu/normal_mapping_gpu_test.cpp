@@ -71,7 +71,7 @@ namespace {
             for (int i = 0; i < 60; ++i) {
                 const Vec3 direction = random.direction() * random.between(0.0f, 1.01f);
                 inputs.push_back(gpuVec4(direction * 0.5f + Vec3{0.5f, 0.5f, 0.5f}, random.between(0.045f, 1.0f)));
-                inputs.push_back(gpuVec4(Vec3{scale, 0.0f, 0.0f}));
+                inputs.push_back(GpuVec4{scale, random.between(0.0f, 1.0f), random.between(-0.1f, 0.1f), random.between(-0.1f, 0.1f)});
             }
         }
 
@@ -83,6 +83,8 @@ namespace {
         for (std::size_t i = 0; i < outputs.size(); ++i) {
             const GpuVec4* in = &inputs[i * 2];
             report.check("toksvigRoughness", arithmeticTolerance, toksvigRoughness(in[0][3], vec3From(in[0]), in[1][0]), outputs[i][0]);
+            const Vec3 across = (vec3From(in[0]) - Vec3{0.5f, 0.5f, 0.5f}) * 0.2f;
+            report.check("geometricRoughness", arithmeticTolerance, geometricRoughness(in[0][3], across, Vec3{in[1][2], in[1][3], 0.0f}, in[1][1]), outputs[i][1]);
         }
     }
 }

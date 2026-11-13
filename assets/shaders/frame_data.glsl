@@ -20,7 +20,7 @@ layout(std140, set = 1, binding = 0) uniform FrameData {
     vec4 probeShading;           // x: the light probes' self-shadow bias setting, y: the share of probe light a probe ray's hit passes on
     ivec4 probeAtlas;            // xy: the probe atlases' columns and rows, w: how many cascades
     ivec4 probeLights;           // x: point lights listed for probe rays' hits, y: spotlights, z: how many each hit keeps
-    vec4 textureOptions;         // x: the surface textures' mip bias, sharper while the frame is drawn below the output's size, y: 1 filters normal maps (Toksvig)
+    vec4 textureOptions;         // x: the surface textures' mip bias, sharper while the frame is drawn below the output's size, y: 1 filters normal maps (Toksvig), z: geometric specular anti-aliasing's footprint variance (0 off)
     ivec4 mirroredLightOptions;  // x: 1 when the main pass adds the light mirrors reflect (mirrored_light.comp), y: the frame, turning rough mirrors' samples
     ivec4 ambientOcclusionOptions; // x: 1 when the main pass reads ambient occlusion (ambient_occlusion.comp), y: 1 with multiple bounces, z: 1 with specular occlusion
     vec4 skyVisibilityOptions;   // the sky visibility grid (sky_visibility.glsl): x its cascades read (0: not read), y the ambient floor, z the lookup bias, w 1 for its debug view

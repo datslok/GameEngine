@@ -624,6 +624,13 @@ void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
 
+    // How fast the smooth normal turns to the next pixel across and down, for geometric specular anti-aliasing: taken
+    // here, before any branch or discard, as derivatives must be (a mirrored double-sided back turns the same amount).
+    float smoothLength = length(worldNormal);
+    vec3 smoothNormal = smoothLength > 0.0 ? worldNormal / smoothLength : vec3(0.0);
+    vec3 normalStepAcross = dFdx(smoothNormal);
+    vec3 normalStepDown = dFdy(smoothNormal);
+
     MaterialData material = materials[materialIndex];
 
     // Read the textures at this fragment's interpolated UV coordinate, the mips chosen for the output's pixels rather than
@@ -661,6 +668,10 @@ void main() {
 
     if (textureOptions.y > 0.0) {
         roughness = toksvigRoughness(roughness, normalTexel, material.surfaceParameters.z);
+    }
+
+    if (textureOptions.z > 0.0) {
+        roughness = geometricRoughness(roughness, normalStepAcross, normalStepDown, textureOptions.z);
     }
 
     // Light adds up: each light adds its share to these sums.

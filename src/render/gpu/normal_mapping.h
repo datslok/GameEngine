@@ -32,6 +32,16 @@ Vec3 perturbNormal(const Vec3& normal, const Vec4& tangent, const Vec3& tangentS
 float toksvigRoughness(float roughness, const Vec3& texel, float scale);
 
 /*
+* Geometric specular anti-aliasing (Tokuyoshi and Kaplanyan 2019): a pixel on a curved surface covers a range of
+* normals, and the light it should show is the highlight averaged over them, a wider lobe. The normal's change to the next
+* pixel across and down (screen-space derivatives of the smooth vertex normal), times the footprint's variance (the
+* paper's NORMAL_GEOMETRIC_VARIANCE by default; more is steadier and softer), is that range's variance; twice it (at most NORMAL_GEOMETRIC_LIMIT) adds to alpha squared, as Toksvig's spread does. A flat
+* surface keeps its roughness exactly; a highlight narrower than a pixel (the sun on a mirror ball) widens to about one,
+* so the light the pixels catch from it no longer swings as the picture moves. At most 1.
+*/
+float geometricRoughness(float roughness, const Vec3& normalStepAcross, const Vec3& normalStepDown, float footprintVariance);
+
+/*
 * A vertex tangent carried into the world: the model matrix moves it (it lies in the surface, like an edge), normalised
 * like the vertex normal, and its sign multiplied by the matrix's handedness so a mirrored object's bumps stay bumps.
 */
