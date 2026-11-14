@@ -7,7 +7,7 @@ Usage (from anywhere):
 
 Every asset is CC0 (public domain): scanned plants, rocks, logs and textures from Poly Haven and leaf atlases and ground
 materials from ambientCG. The list, each asset's source and the maps the engine reads are in tools/forest_assets.json;
-the repository keeps only that list, so it stays small (the files are about 150 MB). Without them the forest game runs
+the repository keeps only that list, so it stays small (the files are about 270 MB). Without them the forest game runs
 with simple stand-ins.
 
 - Poly Haven: its public API (api.polyhaven.com/files/<id>) gives each file's address and MD5. A model is its glTF

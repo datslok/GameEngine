@@ -1555,6 +1555,13 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Changes elsewhere:** the light lab sees 1 km, so it now has far shadows past 200 m (its golden images will differ; not re-saved). The demo (100 m) and the cloth lab (200 m) are unchanged.
   - **Checked:** the tests (release, tests first); the debug and release games build without warnings. Not run: the game (the user's look).
   - **The user's answer** (Nov 14 2026): "great". Merged.
+- `more-assets` (Nov 14 2026): 15 more CC0 assets for the pillars, the structures and the jungle. A survey of Poly Haven and ambientCG again, as a shortlist page with a recommended set of 13; the user took it and added `Rock051` and `Concrete042C`.
+  - **What:** 1 Poly Haven model (`potted_plant_02`, arrow-shaped leaves, 70k triangles; its pot is a material of its own, to be left out), 5 Poly Haven textures and 9 ambientCG sets. Now 45 assets, 215 files, about 270 MB at 1K.
+  - **Rock for 300 m pillars:** the mossy rock is a 3 m pattern, mush on a 300 m column. Two layered rocks for close up (`cliff_side`, red-brown strata, 1.8 m; `Rock061`, grey-brown layers; `Rock051`, slanted strata) and two scanned from the air for a coarser layer over them (`marble_cliff_03`, 5.7 m; `aerial_rocks_02`, 50 m), so a pillar keeps structure from the rim.
+  - **Structures:** cast concrete with formwork joints (`Concrete028`, a scale cue on the Monolith), concrete poured in layers (`concrete_layers_02`), concrete broken open to rebar (`Concrete042C`), ribbed louvre panels (`painted_metal_shutter`), black powder-coated steel (`Metal027`), chipped teal paint (`PaintedMetal006`) and see-through grating (`Fence007A`, for the cut-outs). The metals keep ambientCG's metalness map, a new role beside colour, normal, roughness, occlusion, opacity and height; `Rock051`'s is left out, since a rock has no metal.
+  - **Green:** scanned ivy leaves for the vines (`LeafSet017`) and one large leaf (`Leaf001`) for broad-leaved plants grown on generated stems.
+  - **Not found:** neither library has hanging moss, palms, bananas or tree ferns at scan quality, and the free low-poly sets would clash with the scans. Moss and those plants will be generated (ROADMAP, the islands and the forest).
+  - **Checked:** `--record` added only new checksums (the first 30 assets' unchanged), and a second run found all 45 present and matching.
 
 ## Tools outside the phases
 

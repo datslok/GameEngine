@@ -105,6 +105,12 @@
       "resolution": "1k"
     },
     {
+      "id": "potted_plant_02",
+      "source": "polyhaven",
+      "kind": "model",
+      "resolution": "1k"
+    },
+    {
       "id": "leaves_forest_ground",
       "source": "polyhaven",
       "kind": "texture",
@@ -261,9 +267,202 @@
         "normal": "NormalGL",
         "roughness": "Roughness"
       }
+    },
+    {
+      "id": "cliff_side",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "marble_cliff_03",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "aerial_rocks_02",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "concrete_layers_02",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "painted_metal_shutter",
+      "source": "polyhaven",
+      "kind": "texture",
+      "resolution": "1k",
+      "maps": {
+        "colour": "Diffuse",
+        "normal": "nor_gl",
+        "arm": "arm",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Rock061",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Rock051",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Concrete028",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Concrete042C",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement",
+        "metalness": "Metalness"
+      }
+    },
+    {
+      "id": "PaintedMetal006",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "occlusion": "AmbientOcclusion",
+        "height": "Displacement",
+        "metalness": "Metalness"
+      }
+    },
+    {
+      "id": "Metal027",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "metalness": "Metalness",
+        "height": "Displacement"
+      }
+    },
+    {
+      "id": "Fence007A",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "opacity": "Opacity",
+        "normal": "NormalGL",
+        "roughness": "Roughness",
+        "metalness": "Metalness"
+      }
+    },
+    {
+      "id": "LeafSet017",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "opacity": "Opacity",
+        "normal": "NormalGL",
+        "roughness": "Roughness"
+      }
+    },
+    {
+      "id": "Leaf001",
+      "source": "ambientcg",
+      "kind": "texture",
+      "resolution": "1K-PNG",
+      "maps": {
+        "colour": "Color",
+        "opacity": "Opacity",
+        "normal": "NormalGL",
+        "roughness": "Roughness"
+      }
     }
   ],
   "sha256": {
+    "Concrete028/colour.png": "d0e4720ffa3ddd4bdf92dc27bd6f0b45b266c463949c77978f13e33e1bfd3c39",
+    "Concrete028/height.png": "6a1c2bd9e277ba95a470e2218585755055d46e87058c7561a9bce2f44495e9b0",
+    "Concrete028/normal.png": "64b7f9ee11b37dd31fe8feb0de049be90166ebeee378d63eb0b2b3451629fd47",
+    "Concrete028/occlusion.png": "1754839671fbb6956084c0c9734eb2f4e3ec1f3a5130815f2dfda87ee8c10880",
+    "Concrete028/roughness.png": "125a087b40300e9b33218718ee6ae9d0fab6aec563c6db17c5a3017282e63a20",
+    "Concrete042C/colour.png": "f3d0e1d47cdb5167a54f0652f4bdc3f22331f85da4313cd20c97365e2759eb3a",
+    "Concrete042C/height.png": "07d83ed69aac3e859f87474cf6ab722796ea66ac5d146e8108ba515ecef62409",
+    "Concrete042C/metalness.png": "e1df67caac886b9d21bfb06fcebb9c73c453c6f271d5635de8afa9a8177ec03a",
+    "Concrete042C/normal.png": "e2219a8b31e674520035ea76a3e0bcae181c9e7ebe73d3794eae7f8f4ef718c8",
+    "Concrete042C/occlusion.png": "15c9c7f949bb17a0aaf963e8683fc07380ff2ec62748c17b34273bb063ddec7a",
+    "Concrete042C/roughness.png": "3f91d129eeac9ab984fc62360cd379efb05fcedf1e0f6505cc378ce37b050148",
+    "Fence007A/colour.png": "6577f3ea44e5b05908cfef7d14d549c1a2609b8e9d8784d60e932a1d55b4577a",
+    "Fence007A/metalness.png": "ceafea65c0e666e17df1a877a383140c3e2bf7575ce39f60c040b77da41e1f99",
+    "Fence007A/normal.png": "eda4bafe71227e9f90cbaae4e015178b6be50183b9e4864e7ca86938c27883dc",
+    "Fence007A/opacity.png": "a4bf476edfa67bb3dd300be66b01ee166b29a8468bea191f91c28e4ef3af0fc2",
+    "Fence007A/roughness.png": "7e9f7f088b5a9c01e240aad7e1d783dba6e8cc208a50f557c8e9dfc412362013",
     "Foliage001/colour.png": "437149ad5db2b4e304c9f91e2024a1e6157fe1fcb75608f69e231f45d461caab",
     "Foliage001/normal.png": "647f8eb593d24b9660cf4b00c5ed2328943bf8af940af46a4435e8e1a3eed610",
     "Foliage001/opacity.png": "390a375ac002f672a6001d6089a6697f03b7c42c2bb4ffbace9648cf39ea0e0b",
@@ -273,6 +472,14 @@
     "Grass004/normal.png": "a6fce3c4f2c5d486b5c993bf47b47ce9d4c1dbb04ecef424ad2c0b703715c3c6",
     "Grass004/occlusion.png": "2b90f33cb488385e18d698b6d8e8c649116ebc7478bf7dbd5d08214884adabaf",
     "Grass004/roughness.png": "c3bac30c64d246019e80dd6448544ac381706d43eb583e5ac875cb4f6eece6d8",
+    "Leaf001/colour.png": "89342a7d2a53cb1802f99b38fcfb54e71fbdae6a836832704c3951ff30c6dcdb",
+    "Leaf001/normal.png": "b9e5676eac99faa539625d9f2f696f3b0954db461cb18edebab79a82559e4373",
+    "Leaf001/opacity.png": "63e4a18796d68eb2a3411571d534a75d8cd4e7c1e125ecf0b036df3bc11eaa7f",
+    "Leaf001/roughness.png": "37624a158f0ac214e53049836060c41ab905abf2e62b9a6c6e36715f8ab3c829",
+    "LeafSet017/colour.png": "4ef153d31bce1b471a518679d24082377e3385c12ecf6121d3a9e4c9d4ddac03",
+    "LeafSet017/normal.png": "376f75d7d94f5c8e141d8d43f4518331cf4587194eb5040db53c6f8b409f8abd",
+    "LeafSet017/opacity.png": "e7f462a21c3d4f04d18a663e7f3f66f739219452561aabf221653f69aef27941",
+    "LeafSet017/roughness.png": "dfa1729618dd4dd7ab4af597d6d3ed74e0dd18e047dd7dff0886b8d6f18ebac1",
     "LeafSet019/colour.png": "c65827e13bb755d5c3045e190b1547e2c12748c2e992376db5f0008a6c6c4b80",
     "LeafSet019/normal.png": "3aa1ea9c7105611417320a0cc5d2cfdf93f31824aef958b5cf2dbb7a24d9af7c",
     "LeafSet019/opacity.png": "46611bdd548ba04c96c99bc0387f96b9947f45c2d6600e5abd55047d600a526b",
@@ -281,11 +488,36 @@
     "LeafSet024/normal.png": "044073b4f21220c75cd789a72f9cab8d10e08f97f358c9901581f1a555e058a5",
     "LeafSet024/opacity.png": "7f3f41a9fbfe35d4fdcc5d9c13a4b1df4f2ef50a24ff1abe9172b074ce68e401",
     "LeafSet024/roughness.png": "c58bc48e1dd6618f8e15658f5ceaeb0bc5c799aede85b7a16020b1162fdd149e",
+    "Metal027/colour.png": "90b49e90d89195a5473e100bdc57b8f308f9a30aeccb79b1c9a6a7ca1be48dee",
+    "Metal027/height.png": "b0daa1b09ad46787057db69ce38db743a787aa7137886e23c45d9e7f7581e290",
+    "Metal027/metalness.png": "c6f48625999cfb8df48970dfed337966d2f2c93f76d28613d9bc7da66ae65c52",
+    "Metal027/normal.png": "016fedf95c449e5596097462a486f917c38eb1213b20b4ca48fd8c498f15cc21",
+    "Metal027/roughness.png": "211fc2fd2f232240688fda3430496e593754f8616baf0460c0de5c4dd11e6d46",
     "Moss001/colour.png": "f8af2f8edefe08b45c6682c4a2b25c5d817619c8e510482f733f9236da841140",
     "Moss001/height.png": "90e80bf5a19221cc7bbbdfe994dee86a7c6ebf411b97adfa63e956a64eba0e51",
     "Moss001/normal.png": "dfb787087657006aba470fce720f9719190ac500bec25fc00715af7d63a7e5c0",
     "Moss001/occlusion.png": "7043fbd1a6fe838703c3e6217a44c9e74cb573ea786d14ba304946b58da0486d",
     "Moss001/roughness.png": "46fdb7aa01489643f02f0a8f549f0c84cb527c4346590bec99ff52f77413c3a1",
+    "PaintedMetal006/colour.png": "e4744920cf390fb5164ede99d118a01c5e25c9de8b8275edb88e0c4b2ef701b3",
+    "PaintedMetal006/height.png": "b45def71c35faabff3cff0ceb6f79051529922b1e081f196d247097431fec702",
+    "PaintedMetal006/metalness.png": "cdb67ad3d92fab78de31d6d50d03e4e4f195cb4c56cbb334ad77a81e87dfbacc",
+    "PaintedMetal006/normal.png": "9deac70e489ed3d866aeea89f540ab8a9a1ddecd99186a4256749c7b27dff112",
+    "PaintedMetal006/occlusion.png": "b4f85e06929cb996ec4c2621df5839bacb335adb98d29ef2e411d1afc40ff5d4",
+    "PaintedMetal006/roughness.png": "5cd7f9ec59689914aa03137a4887dfd9d2a146afb1710a1d0d1aa3b725d0cdd4",
+    "Rock051/colour.png": "55a048f4df99913cd699c701f1bc1b4a1f532bb4988f96814788c6b7823229e9",
+    "Rock051/height.png": "a90453a88a72df359896fb4d2a00bcedc58b03c3d20fabca08f7e65ac96855c7",
+    "Rock051/normal.png": "7cd3b97604164617077768cf84da7a187981cc5a7eea95889a75e1070402697d",
+    "Rock051/occlusion.png": "56846a507dc54da2dc9f48de5f5fb91932a6e09a8b572a622ffa4d7f09e10278",
+    "Rock051/roughness.png": "058df4b55f335c4a948e0ef2e2d16cad9725b15abe225d196f4b3cc2f1d59b75",
+    "Rock061/colour.png": "fbf1676fdaa9dfc4851a30b055991875638257ffc80fcfb55863c7772db3b12b",
+    "Rock061/height.png": "3ec9df9ae5b4ab0ea26dad52fc1cdca46f589b4f282f54a45a24530ced97200b",
+    "Rock061/normal.png": "3086f79d2ad21b421fa83934ab2d40c74408a7f463949f1e9e7ad214c81dcb8d",
+    "Rock061/occlusion.png": "48f341828f14e64e5d9462da71f4c53793b7d32f7aa2c956d6eaf6e9ee4456ae",
+    "Rock061/roughness.png": "cdeaa57a13ab3f0cbe67dc421b42bc576fdcda05dc60aabf9356558284944e66",
+    "aerial_rocks_02/arm.jpg": "de3ffa2b107d3b9144979a1f683028c74ec86823b2b8eefe16bf5bb9a655ad0c",
+    "aerial_rocks_02/colour.jpg": "708373b2af7fd07ac8de1500556006aaf904c41a99985a849cacc78874f38eac",
+    "aerial_rocks_02/height.png": "dc01129a11b11041f8c735c6e2b4121c2d587765ad74d3e818ab1e4f60509f7a",
+    "aerial_rocks_02/normal.png": "2474a9b854be47460adcfaae3945ca41e5b048e7b3d046c45c82fa3398877aa3",
     "anthurium_botany_01/anthurium_botany_01.bin": "6a23daf128e297ad99e984bec11bdea3c6eab64e52d07cbdc948ace5a05b2e25",
     "anthurium_botany_01/anthurium_botany_01_1k.gltf": "6b3f6b8eda6cc0edfefd6a58f6758ef6538c35b2ca2a76189383f23b246dd8c6",
     "anthurium_botany_01/textures/anthurium_botany_01_arm_1k.jpg": "88d9ce05e4b301ae9cd5b479459262c4690a3ee2de80a8f5e18a288ff5e96bee",
@@ -309,6 +541,14 @@
     "calathea_orbifolia_01/textures/calathea_orbifolia_01_arm_1k.jpg": "df4ea4dfc74a6965476200cffea69886ac26d3c089f356a7b69518149ef585e0",
     "calathea_orbifolia_01/textures/calathea_orbifolia_01_diff_1k.jpg": "a105a093d74317a3853319a06fdc78cad2a13e353962298d2094195720b9b4a0",
     "calathea_orbifolia_01/textures/calathea_orbifolia_01_nor_gl_1k.jpg": "52aac88c18bf42c369aad9b2b5e41dbe58b015ca2fac7ff6ed4cb21147cb49c8",
+    "cliff_side/arm.jpg": "6ec77eadb99d00a0a0e68ae40b09e4cc4931941ada1114e5a4d9dd94e8a046dd",
+    "cliff_side/colour.jpg": "5c6858541108fc34e5726ecf4d8d942d6301155c489e7341619260f2909570c5",
+    "cliff_side/height.png": "2861630bab9f8a17014915ff624be83281185b04ff3f4b64a123db60d5e160d3",
+    "cliff_side/normal.png": "a55291598da38138d516c3701ff67a7ce30d4979930d30d6ab3c5e8667432f7e",
+    "concrete_layers_02/arm.jpg": "ceb9ecc305b5d8da143b239aec678d0671fa0cd46d008913fd3ba9105edca7e6",
+    "concrete_layers_02/colour.jpg": "cca314fbb793e3928111912f1d6d4d79edf4420402e56019d70fec0bdc2efca5",
+    "concrete_layers_02/height.png": "609d2875b439e32b5aa8e1311bfce11338e453b43b4998c179482b2119124120",
+    "concrete_layers_02/normal.png": "5ad35828ace251186981acc0027423309d7a5957113a7c082baa4569f7ae5a63",
     "dead_tree_trunk/dead_tree_trunk.bin": "c1ac6b3195246e8647a28eee2fbfdd4712a045c7cf2dcb4f5abcc2d40a446ca6",
     "dead_tree_trunk/dead_tree_trunk_1k.gltf": "8baaf1ff66ba1f79acdceed0dc3797a882990a3abb10b18abe56762f34c26e39",
     "dead_tree_trunk/textures/dead_tree_trunk_arm_1k.jpg": "0e0f7d64ac4ee3a7e7861a48f4bbd1ec2c026facd8f48b756f6b5d4557af3fd3",
@@ -336,6 +576,10 @@
     "leaves_forest_ground/colour.jpg": "e4aa2be8f80192378bc8aca363fc01b1f01639ebea5a87a3973c549861a01b7a",
     "leaves_forest_ground/height.png": "989f21997f1b1303e31db4885924ef8e140baf010a67815e28a9b7fabae5f6bb",
     "leaves_forest_ground/normal.png": "4dc285ed57423eeb3aace5030b3e9100e5840b6eb368850e51c14f2e8b5bf434",
+    "marble_cliff_03/arm.jpg": "1d68345409829b31e2bb350d24cbcd21bf85f9c7442da9304964446b8790ebba",
+    "marble_cliff_03/colour.jpg": "af005bfb00bef4d4864ac9a56ba0d441d65b414a8c4a0136f29dd613ffdad329",
+    "marble_cliff_03/height.png": "c0452d313e05a9cf8da1f7a390f3a0fa619c3849b733a60438cc1c6c9ebca411",
+    "marble_cliff_03/normal.png": "639b8848fe3777955957e1dd821ec8f5d4297a96d63c3f69ede54d6f1934e7a1",
     "metal_plate/arm.jpg": "fc4708b6700a2cc387654b693091dd0ac0cd1797ae803d75c894e62554fbef07",
     "metal_plate/colour.jpg": "c6b6739eac2c75ccc898e753d7833df24eafbdb9aa92fb6eabfb92abd1a680a5",
     "metal_plate/height.png": "abc05dc9fb007d0aac92f8b785b7d24082ceda117e193a80570e134befaedd1e",
@@ -361,6 +605,18 @@
     "pachira_aquatica_01/textures/pachira_aquatica_01_leaves_arm_1k.jpg": "42824afde27e7f0111a2e673f0a7cfe0b18bc21d2201b85d9737fce48c1016a3",
     "pachira_aquatica_01/textures/pachira_aquatica_01_leaves_diff_1k.jpg": "b3211c240dd2ea7913326e7f21f9db9d029ee487b5e59d58d0e10c8cc77d203f",
     "pachira_aquatica_01/textures/pachira_aquatica_01_leaves_nor_gl_1k.jpg": "3a442aa75df0e6f37bb7410f8ae09927b419d2dba202943cda40f52a7194804c",
+    "painted_metal_shutter/arm.jpg": "26a49a8b60dd2e1fdb325c1488d55d2e6e7362f4505e400ac2243bf0ec67ca56",
+    "painted_metal_shutter/colour.jpg": "278394aabcb5a5bd560d9904358682acc5af23666b22bd1f12558789da4aa4d2",
+    "painted_metal_shutter/height.png": "60bff9075206f3d968eb6d17962f01ea0bce4673de531fad72f1c9cf43bf78a5",
+    "painted_metal_shutter/normal.png": "646dd07ea78a4c169753aaa58140e3b3aecae809d096e7726f7ae56dfa591233",
+    "potted_plant_02/potted_plant_02.bin": "9c9812482c78a59789ed32fa842b4cbd9365e09c900c31ebb998e5efe627fe97",
+    "potted_plant_02/potted_plant_02_1k.gltf": "c533dcce0d1aa4379eb7db04601a04983f8df2422b28578de922655a416e64a9",
+    "potted_plant_02/textures/potted_plant_02_leaves_diff_1k.jpg": "3643dce6e6c0a9f40129bd837ec1a11802e8f43ea43cb29e58219d82e0ac632b",
+    "potted_plant_02/textures/potted_plant_02_leaves_nor_gl_1k.jpg": "e0fe090ff7a511729c9bbe59df7288b400430fdab178529443dec75e0f06007d",
+    "potted_plant_02/textures/potted_plant_02_leaves_rough_1k.jpg": "ac8959f70c0e91e77f3cd6fd3f73578b8aed64ac6c33fc34ac027a4e88276960",
+    "potted_plant_02/textures/potted_plant_02_pot_diff_1k.jpg": "684949bf24821d7e951d46915366b5a388d2e4ccaaa9d5284e718c83604705e9",
+    "potted_plant_02/textures/potted_plant_02_pot_nor_gl_1k.jpg": "981a68721c8b7b9ac26b96d0210334599d5e8f529362f505082c071a0a58e86c",
+    "potted_plant_02/textures/potted_plant_02_pot_rough_1k.jpg": "4e92ad8ee0f098050785d9a025e2c5a7d55bc7a7f7e1916cc7627fc7824a938f",
     "rock_07/rock_07.bin": "e4a532a6d6cf4a08c288f501b790f32cba0528136a29959ce774c3cd39369e7e",
     "rock_07/rock_07_1k.gltf": "efcc2dcaa133ff8ad5c865dc2135772e8f5dbc83fa38db2ee2cf25382436b6e6",
     "rock_07/textures/rock_07_arm_1k.jpg": "1ed76e9a8542c76bdc6b7b018720ae1f52cd75d9f5ae719f613de3f5032cf4da",
