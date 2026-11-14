@@ -2572,6 +2572,7 @@ How much of the sky each point round the camera sees, so the flat ambient light 
 
 - Each cascade is a window of 48 x 24 x 48 points (`SKY_VISIBILITY_ACROSS`, `_HIGH`) on a lattice fixed in the world, offset a quarter of the densest spacing so no point lies on a floor, kept as a circular buffer, so a move bakes only the plane it brings in.
 - `cascades` 2 (at most 4), `spacing` 0.5 m, doubling each cascade: the densest reaches about 11 m round the camera and 5 m up and down, the next (1 m apart) twice that; past the last, the open sky as before. 110,592 points.
+- Each cascade hands over to the next over `cascadeBlend` (0.5) of its reach along each axis, never less than one spacing (`skyVisibilityCascades` widens the probes' `weightFade`): the densest at full weight out to about 5.4 m, gone at 10.8 m. Over one spacing, lumpy ground showed a line about 10 m round the camera, the 0.5 m cascade following the ground's bumps and the 1 m one smoothing them away.
 - The GPU's copy is one RGBA32_UINT 3D image of 144 x 24 x 192 (room for four cascades, 10.6 MB, cleared to "not baked" at start), one cascade after another along z, each point three texels along x (`SKY_CELL_TEXELS`). Each point is a `GpuSkyCell` of 48 bytes: a and b as halves, the reach along the six axis directions in bytes, and the state (not baked, baked, buried); then the bounce's red, green and blue bands as halves.
 
 **The bake** (on the CPU, on every core):
@@ -2605,7 +2606,7 @@ Unbaked and buried points are left out; a cascade with none left adds nothing. W
 - The debug view (`debugView`) draws the light from all around facing each surface (sky and bounce, per channel, as a share of the flat ambient), with the reflection pass kept out of it.
 - The sun past its cascades (`sunBeyondCascades` without ray tracing): where the grid reaches, the sky a point sees towards the sun (`skySeenAlong`) stands in for its shadow. The reflection probe's capture sees behind the camera, where the cascades do not reach, and lit the dark rooms there in full sun: the mirrors not drawn as planar ones showed a white room, and switched as the planar mirror moved from one to the other. Beyond the grid it reads as open sky, so far ground stays sunlit.
 
-**Settings** (`SkyVisibilitySettings`, `RenderSettings::skyVisibility`, F5 Sky visibility, `engine.render.skyVisibility.*`): `enabled` (on; off on the Low preset), `ambientFloor`, `spacing`, `cascades`, `rays`, `quickRays`, `deepRays`, `deepOpenRays`, `rayLength`, `lookupBias`, `bakeMilliseconds`, `backgroundBake`, `backgroundShare`, `storeMegabytes`, `debugView`. Changing the ones that shape the grid bakes it again.
+**Settings** (`SkyVisibilitySettings`, `RenderSettings::skyVisibility`, F5 Sky visibility, `engine.render.skyVisibility.*`): `enabled` (on; off on the Low preset), `ambientFloor`, `spacing`, `cascades`, `cascadeBlend` (live), `rays`, `quickRays`, `deepRays`, `deepOpenRays`, `rayLength`, `lookupBias`, `bakeMilliseconds`, `backgroundBake`, `backgroundShare`, `storeMegabytes`, `debugView`. Changing the ones that shape the grid bakes it again.
 
 **Tests:**
 
