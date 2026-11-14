@@ -333,6 +333,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] The ground's paint without squares: a texture per ring, turned noise, cubic reads (`ground-paint`)
 - [x] Distant shadows: the sun's far shadow map, 5 km round the camera (`far-shadows`)
 - [x] More assets: 15 more CC0 assets, layered rock, concrete, panels, painted metal, grating, ivy, a broad-leaved plant and a leaf (`more-assets`)
+- [x] The far mist in the pillars' shadows: the fog past the grid shaded by the sun's shadows along each pixel's ray (`fog-far-shadows`)
 - [ ] The pillars and floating islands, generated
   - [x] The rock: projected scanned sandstone painted by one layer cake of beds for the valley, streaks, moss facing up (`rock-strata`)
   - [x] Carved shapes: each pillar and island its own mesh in metres, ledges, joints, a broken top (`rock-strata`)

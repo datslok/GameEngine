@@ -45,6 +45,7 @@ namespace {
         const FogSettings defaults;
         assert(defaults.enabled && defaults.range == 100.0f && defaults.historyWeight == 0.9f && defaults.probeLight);
         assert(defaults.gridWidth == 160 && defaults.gridHeight == 90 && defaults.slices == 64);
+        assert(defaults.farShadowSteps == 16);
         validateFog(defaults);
 
         FogSettings wrong;
@@ -61,6 +62,12 @@ namespace {
         assert(rejects(wrong));
         wrong = {};
         wrong.historyWeight = 1.0f;
+        assert(rejects(wrong));
+        wrong = {};
+        wrong.farShadowSteps = -1;
+        assert(rejects(wrong));
+        wrong = {};
+        wrong.farShadowSteps = FOG_MAX_FAR_SHADOW_STEPS + 1;
         assert(rejects(wrong));
     }
 
@@ -528,6 +535,82 @@ namespace {
         assert(none.transmittance == 1.0f && none.light.x == 0.0f);
     }
 
+    /*
+    * The far fog's shadow samples: the distance along a ray past the grid at which a share of the light the fog there
+    * scatters towards the eye (the closed form's 1 - exp(-depth)) has been gathered, so equal shares give samples each
+    * carrying the same weight. The depth to the sample is then exactly -ln(1 - share (1 - exp(-total))); share 0 is the
+    * start and 1 the end; rising, falling, level and nearly level rays; no fog spreads the samples evenly.
+    */
+    void testFarShadowSamples() {
+        Fog fog;
+        fog.density = 0.002f;
+        fog.scaleHeight = 300.0f;
+
+        for (float directionY : {0.0f, 1e-6f, -1e-6f, 0.05f, 0.4f, -0.1f, -0.6f}) {
+            const float start = 100.0f;
+            const float end = 4000.0f;
+            const float total = fogOpticalDepth(fog, 20.0f, directionY, start, end);
+            float last = start;
+
+            // Share 1 is checked below: down a steep ray 1 - exp(-total) rounds to 1, and its depth is the end's.
+            for (float share : {0.0f, 0.1f, 0.25f, 0.5f, 0.75f, 0.9f}) {
+                const float distance = fogFarSampleDistance(fog, 20.0f, directionY, start, end, share);
+                assert(distance >= start && distance <= end && distance >= last);
+                last = distance;
+                const float wanted = -std::log(1.0f - share * (1.0f - std::exp(-total)));
+                const float reached = fogOpticalDepth(fog, 20.0f, directionY, start, distance);
+                assert(near(reached, wanted, 2e-3f * wanted + 1e-5f));
+            }
+
+            assert(fogFarSampleDistance(fog, 20.0f, directionY, start, end, 0.0f) == start);
+            assert(near(fogFarSampleDistance(fog, 20.0f, directionY, start, end, 1.0f), end, 1e-3f * end));
+        }
+
+        Fog clear;
+        clear.density = 0.0f;
+        assert(near(fogFarSampleDistance(clear, 0.0f, 0.2f, 100.0f, 300.0f, 0.25f), 150.0f, 1e-3f));
+        assert(fogFarSampleDistance(fog, 0.0f, 0.2f, 300.0f, 100.0f, 0.5f) == 300.0f);
+    }
+
+    /*
+    * What the samples are for: the share of the far fog's light that is sunlit, as the mean of the sun's shadow at
+    * stratified samples. A pillar's shadow covering the ray from 400 to 1500 m: the exact share is the light gathered
+    * outside it over all of it, and 32 jittered samples come within a sample's share of it, which an even spacing in
+    * metres would not (most of the light comes from the nearer, denser part).
+    */
+    void testFarShadowShare() {
+        Fog fog;
+        fog.density = 0.002f;
+        fog.scaleHeight = 300.0f;
+        const float height = 20.0f;
+        const float directionY = 0.02f;
+        const float start = 100.0f;
+        const float end = 4000.0f;
+        const auto gathered = [&](float from, float to) {
+            return 1.0f - std::exp(-fogOpticalDepth(fog, height, directionY, from, to));
+        };
+        // Light from a stretch reaches the eye through the fog in front of it, back to the start.
+        const auto lightOf = [&](float from, float to) {
+            return std::exp(-fogOpticalDepth(fog, height, directionY, start, from)) * gathered(from, to);
+        };
+        const float exact = (lightOf(start, 400.0f) + lightOf(1500.0f, end)) / gathered(start, end);
+
+        const int steps = 32;
+        float lit = 0.0f;
+        float evenLit = 0.0f;
+
+        for (int k = 0; k < steps; ++k) {
+            const float share = (static_cast<float>(k) + 0.37f) / static_cast<float>(steps);
+            const float distance = fogFarSampleDistance(fog, height, directionY, start, end, share);
+            lit += (distance < 400.0f || distance > 1500.0f) ? 1.0f : 0.0f;
+            const float even = start + share * (end - start);
+            evenLit += (even < 400.0f || even > 1500.0f) ? 1.0f : 0.0f;
+        }
+
+        assert(std::abs(lit / steps - exact) <= 1.0f / steps);
+        assert(std::abs(evenLit / steps - exact) > 2.0f / steps);
+    }
+
     // A probe's weight for a point in the air: no surface faces it, so only its visibility and nearness count.
     void testProbeAirWeight() {
         const Vec2 seesPast{5.0f, 25.0f};
@@ -568,6 +651,9 @@ namespace {
         FogSettings noProbeLight;
         noProbeLight.probeLight = false;
         assert(packFog(&fog, noProbeLight, viewProjection, viewProjection, true, true, 3, 500.0f).options[2] == 0.0f);
+        // The picture pass: the render size, the far shadow's steps and the frame, which turns each pixel's samples.
+        const GpuFogPicturePass picture = packFogPicturePass(viewProjection, RenderSize{1920, 1080}, 16, 5);
+        assert(picture.size[0] == 1920.0f && picture.size[1] == 1080.0f && picture.size[2] == 16.0f && picture.size[3] == 5.0f);
     }
 
     // A Fog component reaches the frame's lighting (the first, if several).
@@ -605,6 +691,8 @@ void testVolumetricFog() {
     testColumn();
     testFogToASurface();
     testBeyondTheGrid();
+    testFarShadowSamples();
+    testFarShadowShare();
     testProbeAirWeight();
     testPacking();
     testCollected();

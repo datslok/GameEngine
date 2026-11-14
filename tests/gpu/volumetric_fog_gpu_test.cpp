@@ -31,7 +31,7 @@ namespace {
     /*
     * Thin and thick fog, low and high bases, rays level, rising, falling and nearly level, short and long, ending before
     * they start. Inputs per case: (density, base height, scale height, anisotropy), (origin height, direction y, start,
-    * end), (source, height).
+    * end), (source, height), (the far shadow sample's share, 0, 0, 0).
     */
     void checkMedium(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{211};
@@ -43,12 +43,13 @@ namespace {
             inputs.push_back(GpuVec4{random.between(0.0f, 0.2f), random.between(-10.0f, 30.0f), random.between(1.0f, 100.0f), random.between(-0.9f, 0.9f)});
             inputs.push_back(GpuVec4{random.between(-5.0f, 40.0f), directionY, start, start + random.between(-10.0f, 600.0f)});
             inputs.push_back(gpuVec4(Vec3{random.between(0.0f, 4.0f), random.between(0.0f, 4.0f), random.between(0.0f, 4.0f)}, random.between(-20.0f, 80.0f)));
+            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), 0.0f, 0.0f, 0.0f});
         }
 
-        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIUM, inputs, 3, 2);
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_FOG_MEDIUM, inputs, 4, 2);
 
         for (std::size_t i = 0; i < outputs.size() / 2; ++i) {
-            const GpuVec4* in = &inputs[i * 3];
+            const GpuVec4* in = &inputs[i * 4];
             const GpuVec4* out = &outputs[i * 2];
             const Fog fog = fogFrom(in[0]);
             const FogIntegration beyond = fogBeyondGrid(fog, vec3From(in[2]), in[1][0], in[1][1], in[1][2], in[1][3]);
@@ -57,6 +58,7 @@ namespace {
             report.check("fogOpticalDepth", transcendentalTolerance, fogOpticalDepth(fog, in[1][0], in[1][1], in[1][2], in[1][3]), out[0][1]);
             report.check("fogBeyondGrid", transcendentalTolerance, beyond.transmittance, out[0][2]);
             report.check("fogBeyondGrid", transcendentalTolerance, beyond.light, vec3From(out[1]));
+            report.check("fogFarSampleDistance", transcendentalTolerance, fogFarSampleDistance(fog, in[1][0], in[1][1], in[1][2], in[1][3], in[3][0]), out[1][3]);
         }
     }
 

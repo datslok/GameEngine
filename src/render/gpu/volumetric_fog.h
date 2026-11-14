@@ -55,12 +55,20 @@ struct FogSettings {
 
     // The light from all around read from the light probes (when the frame has them), else the flat ambient.
     bool probeLight = true;
+
+    // Samples of the sun's shadow each pixel takes along the fog past the grid (0 to FOG_MAX_FAR_SHADOW_STEPS; 0 leaves
+    // that fog sunlit throughout, as before): each carries an equal share of the light the fog there scatters
+    // (fogFarSampleDistance), turned per pixel and frame for the anti-aliasing to average. Without them the mist between
+    // the camera and a pillar hundreds of metres away, in its shadow, was lit as brightly as open air towards the sun
+    // (the user's look at the forest, Nov 14 2026). Only the picture pass reads them; glass sees that fog unshadowed.
+    int farShadowSteps = 16;
 };
 
 // Its fields, for the debug UI and the settings file (core/settings_visitor.h).
 void visit(FogSettings& settings, SettingsVisitor& visitor);
 
-// Throws std::invalid_argument for a range, grid size, slice count or history weight outside volumetric_fog_shared.h's limits.
+// Throws std::invalid_argument for a range, grid size, slice count, history weight or far shadow steps outside
+// volumetric_fog_shared.h's limits.
 void validateFog(const FogSettings& settings);
 
 // The fog's extinction per metre at a height: the density at the base height, falling by e every scale height.
@@ -223,6 +231,16 @@ std::vector<FogIntegration> integrateFogColumn(std::span<const Vec4> lighting, f
 FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHeight, float directionY, float start, float end);
 
 /*
+* Where along a ray past the grid (from start to end metres) share (0..1) of the light the fog there scatters towards the
+* eye has been gathered: the light from a stretch is its own 1 - exp(-depth) through the fog in front of it, so in all
+* 1 - exp(-total), and share of it is reached at the depth -ln(1 - share (1 - exp(-total))), turned into metres by the
+* closed form's inverse (the density at start k, the exponent's change per metre a: -ln(1 - a depth / k) / a, its
+* series near a = 0). Equal shares give samples of equal weight, so the mean of the sun's shadow at them is the share
+* of that light which is sunlit. Without fog the samples spread evenly; start when end is not past it.
+*/
+float fogFarSampleDistance(const Fog& fog, float originHeight, float directionY, float start, float end, float share);
+
+/*
 * The frame's fog for every pass that reads it (std430, scene set 1 binding 27): the grid's camera (camera-relative,
 * without the jitter), its inverse and last frame's (taking this frame's camera-relative points), the grid (froxels
 * across, down, slices, range), the medium (density, base height, scale height, anisotropy), the albedo with the
@@ -249,7 +267,7 @@ GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProj
                bool probesRead, std::uint64_t frame, float cameraFar);
 
 // The picture pass's push constants (fog_apply.comp): the camera-relative view-projection's inverse as the frame was
-// drawn (jitter included), and the render size.
+// drawn (jitter included), and the render size, the far shadow's steps and the frame (turning each pixel's samples).
 struct GpuFogPicturePass {
     float inverseViewProjection[16];
     float size[4];
@@ -257,4 +275,4 @@ struct GpuFogPicturePass {
 
 static_assert(sizeof(GpuFogPicturePass) == 80, "GpuFogPicturePass must match fog_apply.comp's Pass");
 
-GpuFogPicturePass packFogPicturePass(const Mat4& inverseViewProjection, RenderSize size);
+GpuFogPicturePass packFogPicturePass(const Mat4& inverseViewProjection, RenderSize size, int farShadowSteps, int frame);

@@ -175,4 +175,28 @@ FogIntegration fogBeyondGrid(vec4 medium, vec3 source, float originHeight, float
     return FogIntegration(source * oneMinusExp(depth), exp(-depth));
 }
 
+float fogFarSampleDistance(vec4 medium, float originHeight, float directionY, float start, float end, float share) {
+    if (!(end > start)) {
+        return start;
+    }
+
+    float rayLength = end - start;
+    float total = fogOpticalDepth(medium, originHeight, directionY, start, end);
+    float density = fogDensity(medium, originHeight + directionY * start);
+
+    if (!(total > 0.0) || !(density > 0.0)) {
+        return start + share * rayLength;
+    }
+
+    float depth = -log(1.0 - share * oneMinusExp(total));
+
+    if (!(depth < total)) {
+        return end;
+    }
+
+    float x = directionY / medium.z * depth / density;
+    float stretch = abs(x) < 1e-3 ? 1.0 + x * (0.5 + x / 3.0) : -log(max(1.0 - x, 1e-30)) / x;
+    return clamp(start + depth / density * stretch, start, end);
+}
+
 #endif
