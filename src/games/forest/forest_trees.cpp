@@ -14,6 +14,12 @@ namespace {
     constexpr std::uint64_t treePlaceSeed = 0x5452'4545ull;
     constexpr int triesPerTree = 60;
 
+    // Clumps: 75-125% of the setting's radius, 55-100% of the way out, and how many tries each gets.
+    constexpr float smallestClump = 0.75f;
+    constexpr float clumpSizeRange = 0.5f;
+    constexpr float innermostClump = 0.55f;
+    constexpr int triesPerClump = 40;
+
     // The smallest and largest tree against its variant.
     constexpr float smallestTree = 0.85f;
     constexpr float treeSizeRange = 0.3f;
@@ -168,26 +174,41 @@ std::vector<Vec3> crownAttractors(const CrownEnvelope& crown, int count, std::ui
     return points;
 }
 
+int appendTrunk(std::vector<TreeNode>& nodes, int parent, const Vec3& base, float rise, const Vec3& lean, float step) {
+    if (rise <= 0.0f) {
+        return parent;
+    }
+
+    // The curve's speed, |(rise, 2 lean s)|, is at most |(rise, 2 lean)|, so that over the steps keeps every step within
+    // a step.
+    const float longest = std::sqrt(rise * rise + 4.0f * lean.lengthSquared());
+    const int steps = static_cast<int>(std::ceil(longest / step));
+    int last = parent;
+
+    for (int index = 1; index <= steps; ++index) {
+        const float share = static_cast<float>(index) / static_cast<float>(steps);
+        nodes.push_back(TreeNode{base + up * (rise * share) + lean * (share * share), last});
+        last = static_cast<int>(nodes.size() - 1);
+    }
+
+    return last;
+}
+
+std::vector<TreeNode> growTree(const Vec3& base, const CrownEnvelope& crown, const std::vector<Vec3>& attractors, const TreeGrowth& growth,
+                               const Vec3& lean) {
+    std::vector<TreeNode> nodes{TreeNode{base, -1}};
+    appendTrunk(nodes, 0, base, crown.centre.y - crown.halfHeight - base.y, lean, growth.step);
+    return coloniseTree(std::move(nodes), crown, attractors, growth);
+}
+
 /*
 * Runions et al.'s order: each round every live attractor finds its nearest node; one already within the kill distance
 * is used up, one within the influence distance pulls that node by its unit direction. Every pulled node then grows a
-* child one step along the sum of its pulls. Attractors and nodes are walked in index order and children appended in
-* their parents' order, so the tree is the same on every run.
+* child one step along the sum of its pulls (bent down by gravity). Attractors and nodes are walked in index order and
+* children appended in their parents' order, so the tree is the same on every run.
 */
-std::vector<TreeNode> growTree(const Vec3& base, const CrownEnvelope& crown, const std::vector<Vec3>& attractors, const TreeGrowth& growth) {
-    std::vector<TreeNode> nodes{TreeNode{base, -1}};
-
-    // The straight trunk up to the crown's bottom, in equal steps of at most a step.
-    const float rise = crown.centre.y - crown.halfHeight - base.y;
-
-    if (rise > 0.0f) {
-        const int steps = static_cast<int>(std::ceil(rise / growth.step));
-
-        for (int step = 1; step <= steps; ++step) {
-            nodes.push_back(TreeNode{base + up * (rise * static_cast<float>(step) / static_cast<float>(steps)), step - 1});
-        }
-    }
-
+std::vector<TreeNode> coloniseTree(std::vector<TreeNode> nodes, const CrownEnvelope& crown, const std::vector<Vec3>& attractors,
+                                   const TreeGrowth& growth) {
     NodeGrid grid(crown, growth.influence, growth.influence + growth.step);
 
     for (int node = 0; node < static_cast<int>(nodes.size()); ++node) {
@@ -238,7 +259,13 @@ std::vector<TreeNode> growTree(const Vec3& base, const CrownEnvelope& crown, con
                 continue;
             }
 
-            const Vec3 child = nodes[node].position + pulls[node].normalized() * growth.step;
+            Vec3 direction = pulls[node].normalized();
+
+            if (growth.gravity != 0.0f) {
+                direction = (direction + down * growth.gravity).normalized();
+            }
+
+            const Vec3 child = nodes[node].position + direction * growth.step;
             float distance = 0.0f;
 
             if (grid.nearest(nodes, child, tooClose, distance) >= 0) {
@@ -252,6 +279,141 @@ std::vector<TreeNode> growTree(const Vec3& base, const CrownEnvelope& crown, con
 
         if (!grew) {
             break;
+        }
+    }
+
+    return nodes;
+}
+
+/*
+* Each clump's centre is a random direction pushed 55-100% of the way out of the envelope shrunk by the clump's own
+* radius, so the clumps sit in the crown's outer part, where the light is. Sorted by their angle round the trunk and
+* cut into equal runs, one run a limb, every limb gets clumps on its own side.
+*/
+std::vector<TreeClump> treeClumps(const CrownEnvelope& crown, int count, float radius, int limbs, std::uint32_t seed) {
+    std::vector<TreeClump> clumps;
+    const int tries = std::max(count, 0) * triesPerClump;
+
+    for (int attempt = 0; attempt < tries && static_cast<int>(clumps.size()) < count; ++attempt) {
+        const std::uint64_t base = static_cast<std::uint64_t>(attempt) * 8u;
+        const float size = radius * (smallestClump + clumpSizeRange * forestUnitRandom(seed, base));
+        const float out = innermostClump + (1.0f - innermostClump) * forestUnitRandom(seed, base + 1);
+        const Vec3 direction = randomDirection(seed, base + 2);
+        const float across = std::max(crown.radius - size, 0.0f);
+        const float upDown = std::max(crown.halfHeight - size, 0.0f);
+        const Vec3 centre = crown.centre + Vec3{direction.x * across, direction.y * upDown, direction.z * across} * out;
+
+        const bool crowded = std::any_of(clumps.begin(), clumps.end(), [&](const TreeClump& other) {
+            return (centre - other.centre).length() < clumpSpacing * (size + other.radius);
+        });
+
+        if (!crowded) {
+            clumps.push_back(TreeClump{centre, size, 0});
+        }
+    }
+
+    std::vector<std::size_t> byAngle(clumps.size());
+
+    for (std::size_t i = 0; i < byAngle.size(); ++i) {
+        byAngle[i] = i;
+    }
+
+    const auto angle = [&](std::size_t i) {
+        return std::atan2(clumps[i].centre.z - crown.centre.z, clumps[i].centre.x - crown.centre.x);
+    };
+    std::stable_sort(byAngle.begin(), byAngle.end(), [&](std::size_t a, std::size_t b) { return angle(a) < angle(b); });
+    const std::size_t limbCount = static_cast<std::size_t>(std::clamp(limbs, 1, std::max(static_cast<int>(clumps.size()), 1)));
+
+    for (std::size_t k = 0; k < byAngle.size(); ++k) {
+        clumps[byAngle[k]].limb = static_cast<int>(k * limbCount / byAngle.size());
+    }
+
+    return clumps;
+}
+
+std::vector<Vec3> clumpAttractors(const std::vector<TreeClump>& clumps, int count, std::uint32_t seed) {
+    std::vector<Vec3> points;
+
+    if (clumps.empty() || count <= 0) {
+        return points;
+    }
+
+    double volume = 0.0;
+
+    for (const TreeClump& clump : clumps) {
+        volume += std::pow(static_cast<double>(clump.radius), 3.0);
+    }
+
+    std::vector<int> shares(clumps.size());
+    int given = 0;
+
+    for (std::size_t i = 0; i < clumps.size(); ++i) {
+        shares[i] = static_cast<int>(static_cast<double>(count) * std::pow(static_cast<double>(clumps[i].radius), 3.0) / volume);
+        given += shares[i];
+    }
+
+    for (std::size_t i = 0; given < count; i = (i + 1) % clumps.size()) {
+        ++shares[i];
+        ++given;
+    }
+
+    points.reserve(static_cast<std::size_t>(count));
+    std::uint64_t attempt = 0;
+
+    for (std::size_t i = 0; i < clumps.size(); ++i) {
+        const TreeClump& clump = clumps[i];
+
+        for (int kept = 0; kept < shares[i]; ++attempt) {
+            const Vec3 offset{2.0f * forestUnitRandom(seed, 3 * attempt) - 1.0f, 2.0f * forestUnitRandom(seed, 3 * attempt + 1) - 1.0f,
+                              2.0f * forestUnitRandom(seed, 3 * attempt + 2) - 1.0f};
+
+            if (offset.lengthSquared() <= 1.0f) {
+                points.push_back(clump.centre + offset * clump.radius);
+                ++kept;
+            }
+        }
+    }
+
+    return points;
+}
+
+/*
+* Each limb steers for its target, its direction the unit way there plus a sideways wander from smooth noise along its
+* length (each limb its own), so it kinks as real limbs do rather than running straight. A limb that has not arrived in
+* three times its straight distance stops anyway.
+*/
+std::vector<TreeNode> growScaffold(const Vec3& base, const Vec3& fork, const std::vector<Vec3>& targets, float stopMetres, float step,
+                                   std::uint32_t seed) {
+    std::vector<TreeNode> nodes{TreeNode{base, -1}};
+    const Vec3 lean{fork.x - base.x, 0.0f, fork.z - base.z};
+    const int forkNode = appendTrunk(nodes, 0, base, fork.y - base.y, lean, step);
+
+    for (std::size_t limb = 0; limb < targets.size(); ++limb) {
+        const Vec3& target = targets[limb];
+        const std::uint32_t limbSeed = forestShapeSeed(seed, static_cast<std::uint32_t>(limb) + 1);
+        const int most = static_cast<int>(std::ceil(3.0f * (target - fork).length() / step)) + 1;
+        int last = forkNode;
+        float along = 0.0f;
+
+        for (int index = 0; index < most; ++index) {
+            const Vec3 at = nodes[static_cast<std::size_t>(last)].position;
+            const Vec3 toTarget = target - at;
+            const float distance = toTarget.length();
+
+            if (distance <= stopMetres) {
+                break;
+            }
+
+            const Vec3 way = toTarget / distance;
+            const Vec3 across = squareTo(way);
+            const Vec3 second = way.cross(across);
+            const float wanderAt = along / limbWanderMetres;
+            const Vec3 wander = across * (2.0f * forestValueNoise(wanderAt, 0.5f, forestShapeSeed(limbSeed, 1)) - 1.0f) +
+                                second * (2.0f * forestValueNoise(wanderAt, 0.5f, forestShapeSeed(limbSeed, 2)) - 1.0f);
+            const Vec3 direction = (way + wander * limbWander).normalized();
+            nodes.push_back(TreeNode{at + direction * step, last});
+            last = static_cast<int>(nodes.size() - 1);
+            along += step;
         }
     }
 
@@ -347,22 +509,32 @@ int tubeSides(float radius) {
     return std::clamp(sides, fewestTubeSides, mostTubeSides);
 }
 
-void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const CrownEnvelope& crown, int leavesPerTip, float size,
-                      std::uint32_t seed) {
-    if (leavesPerTip <= 0 || size <= 0.0f) {
+std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius) {
+    std::vector<bool> leafy(radii.size(), false);
+
+    for (std::size_t node = 1; node < radii.size(); ++node) {
+        leafy[node] = radii[node] <= leafyRadius;
+    }
+
+    return leafy;
+}
+
+void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
+                      float leafyRadius, int leavesPerNode, float size, std::uint32_t seed) {
+    if (leavesPerNode <= 0 || size <= 0.0f) {
         return;
     }
 
-    const std::vector<bool> tips = treeTips(nodes);
+    const std::vector<bool> leafy = leafyNodes(radii, leafyRadius);
     constexpr int cells = treeLeafColumns * treeLeafRows;
 
     for (std::size_t node = 0; node < nodes.size(); ++node) {
-        if (!tips[node]) {
+        if (!leafy[node]) {
             continue;
         }
 
-        for (int leaf = 0; leaf < leavesPerTip; ++leaf) {
-            const std::uint64_t base = (static_cast<std::uint64_t>(node) * static_cast<std::uint64_t>(leavesPerTip) + static_cast<std::uint64_t>(leaf)) * 8;
+        for (int leaf = 0; leaf < leavesPerNode; ++leaf) {
+            const std::uint64_t base = (static_cast<std::uint64_t>(node) * static_cast<std::uint64_t>(leavesPerNode) + static_cast<std::uint64_t>(leaf)) * 8;
             const Vec3 stem = nodes[node].position + randomDirection(seed, base) * (leafStray * size * forestUnitRandom(seed, base + 2));
             const Vec3 out = crownOutward(crown, stem);
 
@@ -383,36 +555,96 @@ void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, con
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Trees", settings.count, {.min = 0, .max = 500, .sliderMax = 50, .applies = FieldApplies::AtStartup});
     visitor.field("Variants", settings.variants, {.min = 1, .max = 32, .sliderMax = 8, .applies = FieldApplies::AtStartup});
-    visitor.field("Crown height", settings.crownHeight, {.min = 2.0f, .max = 100.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Height", settings.height, {.min = 2.0f, .max = 120.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Fork height", settings.forkHeight, {.min = 0.5f, .max = 100.0f, .sliderMax = 30.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Crown radius", settings.crownRadius, {.min = 1.0f, .max = 50.0f, .sliderMax = 30.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Crown half depth", settings.crownHalfHeight, {.min = 0.5f, .max = 30.0f, .sliderMax = 15.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Limbs", settings.limbs, {.min = 1, .max = 12, .sliderMax = 8, .applies = FieldApplies::AtStartup});
+    visitor.field("Clumps", settings.clumps, {.min = 1, .max = 60, .sliderMax = 20, .applies = FieldApplies::AtStartup});
+    visitor.field("Clump radius", settings.clumpRadius, {.min = 0.3f, .max = 20.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Attractors", settings.attractors, {.min = 10, .max = 50000, .sliderMax = 10000, .applies = FieldApplies::AtStartup});
     visitor.field("Twig radius", settings.twigRadius, {.min = 0.002f, .max = 0.2f, .sliderMax = 0.05f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Buttresses", settings.buttress, {.min = 0.0f, .max = 5.0f, .sliderMax = 3.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Lean", settings.lean, {.min = 0.0f, .max = 20.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leaf size", settings.leafSize, {.min = 0.05f, .max = 5.0f, .sliderMax = 2.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Leaves per tip", settings.leavesPerTip, {.min = 0, .max = 20, .sliderMax = 8, .applies = FieldApplies::AtStartup});
+    visitor.field("Leafy radius", settings.leafyRadius, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.15f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Leaves per node", settings.leavesPerNode, {.min = 0, .max = 20, .sliderMax = 8, .applies = FieldApplies::AtStartup});
 }
 
+// A fork above the top is taken as a fork just under it, so the crown keeps some depth.
 CrownEnvelope treeCrown(const ForestTreeSettings& settings) {
-    return CrownEnvelope{.centre = Vec3{0.0f, settings.crownHeight, 0.0f}, .radius = settings.crownRadius, .halfHeight = settings.crownHalfHeight};
+    const float fork = std::min(settings.forkHeight, settings.height - 1.0f);
+    return CrownEnvelope{.centre = Vec3{0.0f, 0.5f * (fork + settings.height), 0.0f}, .radius = settings.crownRadius,
+                         .halfHeight = 0.5f * (settings.height - fork)};
+}
+
+TreeVariantShape treeVariantShape(const ForestTreeSettings& settings, std::uint32_t seed) {
+    const std::uint32_t shapeSeed = forestShapeSeed(seed, 4);
+    const float lean = settings.lean * (leastLeanShare + (1.0f - leastLeanShare) * forestUnitRandom(shapeSeed, 1));
+    const float turn = fullTurnRadians * forestUnitRandom(shapeSeed, 2);
+    const int moreOrFewer = std::min(static_cast<int>(3.0f * forestUnitRandom(shapeSeed, 3)), 2) - 1;
+    return TreeVariantShape{.crown = treeCrown(settings), .lean = Vec3{lean * std::cos(turn), 0.0f, lean * std::sin(turn)},
+                            .limbs = std::max(settings.limbs + moreOrFewer, 2)};
 }
 
 /*
-* Each chain one tube: the trunk's lobed into buttresses with sides enough for their thin fins, every other as many
-* sides as its thickest (first) radius asks for. A side chain's first point is its parent's node at the chain's own
-* radius, so the branch starts inside the limb it leaves.
+* The scaffold first, each limb aimed at the middle of its clumps and stopping a clump's radius short of it, then space
+* colonisation from every node of it into the clumps. Each chain one tube: the trunk's lobed into buttresses with sides
+* enough for their thin fins, every other as many sides as its thickest (first) radius asks for. A side chain's first
+* point is its parent's node at the chain's own radius, so the branch starts inside the limb it leaves.
 */
 TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres) {
-    const CrownEnvelope crown = treeCrown(settings);
+    const TreeVariantShape shape = treeVariantShape(settings, seed);
+    const CrownEnvelope& crown = shape.crown;
+    const Vec3 base{0.0f, -treeSinkMetres, 0.0f};
+    const float forkHeight = crown.centre.y - crown.halfHeight;
+    const Vec3 fork = Vec3{0.0f, forkHeight, 0.0f} + shape.lean;
+    const std::vector<TreeClump> clumps = treeClumps(crown, settings.clumps, settings.clumpRadius, shape.limbs, forestShapeSeed(seed, 5));
+
+    // Each limb's target: the middle of its clumps.
+    std::vector<Vec3> targets;
+
+    for (const TreeClump& clump : clumps) {
+        if (clump.limb >= static_cast<int>(targets.size())) {
+            targets.resize(static_cast<std::size_t>(clump.limb) + 1, Vec3{0.0f, 0.0f, 0.0f});
+        }
+    }
+
+    std::vector<int> clumpsOf(targets.size(), 0);
+
+    for (const TreeClump& clump : clumps) {
+        targets[static_cast<std::size_t>(clump.limb)] = targets[static_cast<std::size_t>(clump.limb)] + clump.centre;
+        ++clumpsOf[static_cast<std::size_t>(clump.limb)];
+    }
+
+    for (std::size_t limb = 0; limb < targets.size(); ++limb) {
+        targets[limb] = targets[limb] / static_cast<float>(std::max(clumpsOf[limb], 1));
+    }
+
+    TreeGrowth growth;
+    growth.gravity = treeGravity;
     const std::vector<TreeNode> nodes =
-        growTree(Vec3{0.0f, -treeSinkMetres, 0.0f}, crown, crownAttractors(crown, settings.attractors, forestShapeSeed(seed, 1)), TreeGrowth{});
-    const std::vector<float> radii = leonardoRadii(nodes, settings.twigRadius, leonardoExponent);
+        coloniseTree(growScaffold(base, fork, targets, settings.clumpRadius, growth.step, forestShapeSeed(seed, 6)), crown,
+                     clumpAttractors(clumps, settings.attractors, forestShapeSeed(seed, 1)), growth);
+    std::vector<float> radii = leonardoRadii(nodes, settings.twigRadius, leonardoExponent);
     const std::vector<bool> tips = treeTips(nodes);
     const std::vector<std::vector<int>> chains = branchChains(nodes, radii);
 
     TreeMeshes meshes;
     meshes.tipCount = static_cast<int>(std::count(tips.begin(), tips.end(), true));
     meshes.trunkRadius = radii.front();
+
+    // The trunk (the leading run of nodes up to the fork) tapers: Leonardo's rule alone keeps an unbranched trunk one
+    // thickness all the way up, a pole; real trunks thicken towards the foot, carrying the weight above.
+    const float rise = forkHeight - base.y;
+
+    for (std::size_t node = 0; node < nodes.size() && rise > 0.0f; ++node) {
+        if (node > 0 && (nodes[node].parent != static_cast<int>(node) - 1 || nodes[node].position.y > forkHeight + 1e-4f)) {
+            break;
+        }
+
+        const float share = std::clamp((nodes[node].position.y - base.y) / rise, 0.0f, 1.0f);
+        radii[node] *= 1.0f + trunkTaper * (1.0f - share);
+    }
 
     for (std::size_t index = 0; index < chains.size(); ++index) {
         const std::vector<int>& chain = chains[index];
@@ -442,7 +674,9 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
         appendTube(meshes.bark, strand, sides, barkTileMetres, options);
     }
 
-    appendTreeLeaves(meshes.leaves, nodes, crown, settings.leavesPerTip, settings.leafSize, forestShapeSeed(seed, 3));
+    const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
+    meshes.leafyCount = static_cast<int>(std::count(leafy.begin(), leafy.end(), true));
+    appendTreeLeaves(meshes.leaves, nodes, radii, crown, settings.leafyRadius, settings.leavesPerNode, settings.leafSize, forestShapeSeed(seed, 3));
     return meshes;
 }
 
@@ -507,11 +741,12 @@ bool blocksSight(const Vec3& centre, float radius, const std::vector<SightLine>&
 }
 
 Vec3 placedCrownCentre(const TreePlacement& tree, const ForestTreeSettings& settings) {
-    return tree.foot + up * (settings.crownHeight * tree.scale);
+    return tree.foot + up * (treeCrown(settings).centre.y * tree.scale);
 }
 
 float placedCrownRadius(const TreePlacement& tree, const ForestTreeSettings& settings) {
-    return std::max(settings.crownRadius, settings.crownHalfHeight) * tree.scale;
+    const CrownEnvelope crown = treeCrown(settings);
+    return std::max(crown.radius, crown.halfHeight) * tree.scale;
 }
 
 std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const std::vector<PillarPlacement>& pillars,

@@ -79,6 +79,8 @@ Software renderer (reference path, used only by tests): `Renderer`, `Display`, `
 
 `ROADMAP.md` is the single source of truth for planned work, grouped into phases with milestones. Tick items off there (`- [x]`) as part of the feature branch that completes them, cutting each finished item to one line (its name and branch); its story (why, what was decided, measured, tried and dropped) goes into `docs/BUILDLOG.md` in the same branch, and how it works into `docs/ARCHITECTURE.md`. Keep `docs/ARCHITECTURE.md` in sync with the code, and update this file's summary when a rule or the big picture changes.
 
+**Rule (the user's, Nov 14 2026): research before making anything new.** When the user asks for something new, first research how shipped games, engines and papers do it (sources and numbers), save it as a doc in `docs/` when substantial (as `docs/TREES.md`), explain the plan from it, and only build after the user's go.
+
 Documentation habits (part of the work, not optional):
 
 - **Every feature branch:** update `README.md` where it changed (the Features list, project layout, controls).

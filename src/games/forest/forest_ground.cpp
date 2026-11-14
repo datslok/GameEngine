@@ -95,7 +95,7 @@ Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolde
     return material;
 }
 
-Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder) {
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder, Pixel tint) {
     const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / leafFolder).string());
     Material material;
     material.alphaMode = AlphaMode::Mask;
@@ -121,6 +121,7 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
     }
 
     material.texture = assets.addTexture(std::move(colour), forestLeafCutoff);
+    material.colour = tint;
     material.roughness = 1.0f;
     material.metallic = 0.0f;
 

@@ -24,7 +24,10 @@ inline JobSystem& forestTestJobs() {
 
 /*
 * A fresh valley, initialised headless with its stand-in ground (an asset folder that does not exist), its coarsest
-* ground and fewer shapes by default, so the tests neither need the downloaded assets nor spend long building it.
+* ground and fewer shapes by default, so the tests neither need the downloaded assets nor spend long building it. Its
+* trees are two sparse variants (a few hundred attractors each, where the game grows four of 2500): placed exactly as
+* the game's, since the crowns' sizes are the same, but grown in a fraction of the time (forest_trees_test grows full
+* ones).
 */
 struct TestForest {
     World world;
@@ -33,6 +36,8 @@ struct TestForest {
 
     explicit TestForest(ForestValleySettings valley = ForestValleySettings{.groundCoarseness = 2, .pillarCount = 40, .islandCount = 8}) {
         game.getValleySettings() = valley;
+        game.getTreeSettings().attractors = 300;
+        game.getTreeSettings().variants = 2;
         game.useJobs(forestTestJobs());
         game.onInit(world, assets);
     }

@@ -39,12 +39,17 @@ Vec3 crownOutward(const CrownEnvelope& crown, const Vec3& point);
 // count points spread evenly through the envelope's volume (random, by rejection from its box), the same for a seed.
 std::vector<Vec3> crownAttractors(const CrownEnvelope& crown, int count, std::uint32_t seed);
 
-// How the branches grow, in metres: each step, how far a point pulls from and how near uses it up, and a cap on rounds.
+/*
+* How the branches grow, in metres: each step, how far a point pulls from and how near uses it up, and a cap on rounds.
+* gravity is tropism (Palubicki et al. 2009): each step's direction is the pulls' unit direction plus gravity times down,
+* made unit again, so branches droop and crook against their pull towards the light.
+*/
 struct TreeGrowth {
     float step = 0.5f;
     float influence = 4.0f;
     float kill = 1.0f;
     int maxRounds = 300;
+    float gravity = 0.0f;
 };
 
 // A node of a tree's skeleton: where it is and its parent's index (-1 for the root).
@@ -54,12 +59,61 @@ struct TreeNode {
 };
 
 /*
-* A tree's skeleton grown into a crown: a straight trunk from base up to the envelope's bottom in steps of at most the
-* growth's step, then space colonisation towards the attractors until they are used up, none pulls any more, or the
-* rounds run out. A tip never grows a node onto another (closer than a tenth of a step), which would repeat forever
-* when two pulls balance. Parents always come before their children.
+* Space colonisation from a skeleton already started (parents before children): rounds of growth towards the
+* attractors until they are used up, none pulls any more, or the rounds run out. A tip never grows a node onto another
+* (closer than a tenth of a step), which would repeat forever when two pulls balance. bounds is where the attractors lie
+* (the nearest-node grid covers it). Parents always come before their children.
 */
-std::vector<TreeNode> growTree(const Vec3& base, const CrownEnvelope& crown, const std::vector<Vec3>& attractors, const TreeGrowth& growth);
+std::vector<TreeNode> coloniseTree(std::vector<TreeNode> nodes, const CrownEnvelope& bounds, const std::vector<Vec3>& attractors,
+                                   const TreeGrowth& growth);
+
+/*
+* A trunk appended to nodes from base, rising rise metres, in equal shares of the way up with every step at most step:
+* it bends by lean (a level offset at its top) as base + up rise s + lean s^2 at a share s of the way up, straight at
+* the foot, as a trunk grown towards light leans more the higher it gets. Returns the top's index.
+*/
+int appendTrunk(std::vector<TreeNode>& nodes, int parent, const Vec3& base, float rise, const Vec3& lean, float step);
+
+/*
+* A tree's skeleton grown into one crown: a trunk from base up to the envelope's bottom (appendTrunk), then space
+* colonisation (coloniseTree) towards the attractors.
+*/
+std::vector<TreeNode> growTree(const Vec3& base, const CrownEnvelope& crown, const std::vector<Vec3>& attractors, const TreeGrowth& growth,
+                               const Vec3& lean = Vec3{0.0f, 0.0f, 0.0f});
+
+/*
+* A clump of foliage: a sphere the crown's attractors fill, and the scaffold limb that grows into it. A crown of
+* separate clumps (rather than one envelope filled evenly) leaves gaps and depth between them, as real crowns have.
+*/
+struct TreeClump {
+    Vec3 centre;
+    float radius = 0.0f;
+    int limb = 0;
+};
+
+// How far apart clumps' centres stay, as a share of their radii's sum: a little overlap, gaps between most.
+inline constexpr float clumpSpacing = 0.9f;
+
+/*
+* count clumps in the crown by dart throwing, each 75-125% of radius, their centres in the outer part of the envelope
+* shrunk by their own radius (55-100% of the way out from its centre), clumpSpacing apart; fewer if the tries run out.
+* Then shared among the limbs by their direction round the trunk, in turn, so every limb has one when there are as many
+* clumps as limbs (each clump a limb of its own when there are fewer).
+*/
+std::vector<TreeClump> treeClumps(const CrownEnvelope& crown, int count, float radius, int limbs, std::uint32_t seed);
+
+// count attractors spread evenly through the clumps (each clump's share by its volume, the rest to the first ones).
+std::vector<Vec3> clumpAttractors(const std::vector<TreeClump>& clumps, int count, std::uint32_t seed);
+
+/*
+* The scaffold: a trunk from base to fork (appendTrunk, leaning to the fork's level offset), then one limb a target, each
+* leaving the fork's node and walking towards its target in steps of step, kinked sideways by smooth noise of its own,
+* until it is within stopMetres of it (space colonisation grows on from there).
+*/
+inline constexpr float limbWander = 0.45f;          // the sideways kink, as a share of the step's pull
+inline constexpr float limbWanderMetres = 3.0f;     // over how many metres the kink changes
+std::vector<TreeNode> growScaffold(const Vec3& base, const Vec3& fork, const std::vector<Vec3>& targets, float stopMetres, float step,
+                                   std::uint32_t seed);
 
 /*
 * Each node's radius by Leonardo's rule (the pipe model): a parent's cross-section carries its children's,
@@ -82,8 +136,9 @@ std::vector<std::vector<int>> branchChains(const std::vector<TreeNode>& nodes, c
 int tubeSides(float radius);
 
 /*
-* Leaf cards at the tips, appended to mesh: leavesPerTip cards round each tip, each size metres a side showing one leaf
-* of a 3 x 3 atlas (LeafSet024), its stem near the tip and the leaf reaching out and down from it. Each card's front
+* Leaf cards along the twigs, appended to mesh: leavesPerNode cards round every node at most leafyRadius thick (the last
+* metre or two of every twig, as real foliage is spread, not only the tips), each size metres a side showing one leaf
+* of a 3 x 3 atlas (LeafSet024), its stem near the node and the leaf reaching out and down from it. Each card's front
 * faces out of the crown (its normal a random turn from crownOutward, never past square to it), and its vertex normals
 * lean further towards crownOutward (crownNormalBend), so the canopy shades as one rounded mass, lit on the sun's side,
 * rather than as thousands of flat cards facing every way. Tangent across the leaf (+u), bitangent stem to tip (+v).
@@ -91,57 +146,89 @@ int tubeSides(float radius);
 inline constexpr int treeLeafColumns = 3;
 inline constexpr int treeLeafRows = 3;
 inline constexpr float crownNormalBend = 0.6f;
-void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const CrownEnvelope& crown, int leavesPerTip, float size, std::uint32_t seed);
+void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
+                      float leafyRadius, int leavesPerNode, float size, std::uint32_t seed);
+
+// The nodes appendTreeLeaves dresses: every one but the root at most leafyRadius thick.
+std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius);
 
 // The trees (F5 Forest, Trees; read at start-up: they are grown once).
 struct ForestTreeSettings {
-    // How many emergents stand between the Ring and the clearing, and how many different shapes they are grown in.
+    // How many trees stand between the Ring and the clearing, and how many different shapes they are grown in.
     int count = 12;
     int variants = 4;
 
-    // The crown's centre above the ground, its radius across and half its depth (metres).
-    float crownHeight = 32.0f;
-    float crownRadius = 14.0f;
-    float crownHalfHeight = 5.0f;
+    // The tree's top and where its trunk forks into limbs, above the ground, and the crown's radius across (metres):
+    // a canopy tree forking low, as figs and rain trees do (docs/TREES.md, Part 1). The crown fills the space between
+    // the fork and the top.
+    float height = 30.0f;
+    float forkHeight = 9.0f;
+    float crownRadius = 13.0f;
 
-    // How many attractors fill a crown: more grow more, finer branches.
+    // How many scaffold limbs leave the fork (each variant one fewer to one more), and how many clumps of foliage of
+    // about what radius they grow into.
+    int limbs = 4;
+    int clumps = 9;
+    float clumpRadius = 3.5f;
+
+    // How many attractors fill the clumps: more grow more, finer branches.
     int attractors = 2500;
 
-    // The tips' radius (metres), from which Leonardo's rule makes the trunk.
-    float twigRadius = 0.02f;
+    // The tips' radius (metres), from which Leonardo's rule makes the limbs and trunk.
+    float twigRadius = 0.035f;
 
     // How far the buttresses stand out at the ground, as a share of the trunk's radius (0: none).
     float buttress = 1.5f;
 
-    // A leaf card's size and how many sit round each tip.
-    float leafSize = 0.7f;
-    int leavesPerTip = 3;
+    // How far the most leaning variant's fork stands off its foot (metres); each leans 30-100% of it its own way.
+    float lean = 2.0f;
+
+    // A leaf card's size, how thick a branch may be and still carry leaves, and how many sit round each such node
+    // (nodes are half a metre apart).
+    float leafSize = 0.9f;
+    float leafyRadius = 0.06f;
+    int leavesPerNode = 2;
 };
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
 
-// The fixed parts of a tree's shape.
-inline constexpr float leonardoExponent = 2.0f;
+// The fixed parts of a tree's shape. Leonardo's n of 2.5 keeps the limbs thick against the twigs (measured trees: 2-3).
+inline constexpr float leonardoExponent = 2.5f;
 inline constexpr float treeSinkMetres = 1.0f;     // the trunk starts this far under the ground
 inline constexpr int buttressCount = 5;
 inline constexpr float buttressHeightMetres = 1.5f; // the buttresses fall away by e every this many metres up
 inline constexpr float buttressSharpness = 24.0f;   // cos^p: higher is thinner fins
 inline constexpr int lobedTrunkSides = 64;
+inline constexpr float trunkTaper = 0.5f;           // the trunk at its foot is this much thicker than at the fork
+inline constexpr float leastLeanShare = 0.3f;       // each variant leans 30-100% of the setting
+inline constexpr float treeGravity = 0.2f;          // the trees' tropism (TreeGrowth::gravity)
 
 // A grown tree in its own frame (its foot at the origin on the ground, the trunk up y): bark and leaves.
 struct TreeMeshes {
     IndexedMesh bark;
     IndexedMesh leaves;
     int tipCount = 0;
-    float trunkRadius = 0.0f;
+    int leafyCount = 0;
+    float trunkRadius = 0.0f; // Leonardo's, at the fork; the foot is trunkTaper thicker
 };
 
-// The crown a tree of these settings grows into, in its own frame.
+// The crown a tree of these settings grows into, in its own frame: from the fork to the top, crownRadius across.
 CrownEnvelope treeCrown(const ForestTreeSettings& settings);
 
+// One variant's own shape from its seed: its crown (the settings'), its fork's lean (30-100% of the setting, any way
+// round) and its limbs (the setting's, one fewer or one more, two at least).
+struct TreeVariantShape {
+    CrownEnvelope crown;
+    Vec3 lean;
+    int limbs = 0;
+};
+TreeVariantShape treeVariantShape(const ForestTreeSettings& settings, std::uint32_t seed);
+
 /*
-* One variant grown and built: its skeleton, radii, the bark tubes (the trunk's lobed into buttresses, every tube whole
-* bark tiles of barkTileMetres round) and its leaves. The same seed grows the same tree.
+* One variant grown and built: its clumps, its scaffold (the trunk to the fork, a limb towards each limb's clumps),
+* space colonisation from it into the clumps' attractors with the trees' gravity, the radii, the bark tubes (the trunk's
+* lobed into buttresses and tapering from the foot to the fork, every tube whole bark tiles of barkTileMetres round)
+* and its leaves. The same seed grows the same tree.
 */
 TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres);
 

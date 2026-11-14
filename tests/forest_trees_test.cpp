@@ -135,6 +135,204 @@ namespace {
         }
 
         assert(sameNodes(nodes, smallTree(5u)) && !sameNodes(nodes, smallTree(6u)));
+
+        // A leaning trunk follows base + up rise s + lean s^2, straight at the foot, its steps still at most a step.
+        const Vec3 lean{2.0f, 0.0f, -1.0f};
+        const std::vector<TreeNode> leaning = growTree(smallBase, smallCrown, attractors, growth, lean);
+        const float rise = crownBottom - smallBase.y;
+        bool reachedTop = false;
+
+        for (std::size_t i = 1; i < leaning.size(); ++i) {
+            const Vec3& at = leaning[i].position;
+            assert((at - leaning[static_cast<std::size_t>(leaning[i].parent)].position).length() <= growth.step + 1e-4f);
+
+            if (at.y < crownBottom - 1.0f) {
+                const float share = (at.y - smallBase.y) / rise;
+                assert(near(at.x, lean.x * share * share, 1e-4f) && near(at.z, lean.z * share * share, 1e-4f));
+            }
+
+            reachedTop = reachedTop || (at - (smallBase + Vec3{0.0f, rise, 0.0f} + lean)).length() < 1e-4f;
+        }
+
+        assert(reachedTop);
+    }
+
+    /*
+    * Gravity in the growth: each step still exactly a step, the branches hanging lower than without it.
+    */
+    void testGravityDrooping() {
+        const std::vector<Vec3> attractors = crownAttractors(smallCrown, 400, 5u);
+        const std::vector<TreeNode> straight = growTree(smallBase, smallCrown, attractors, TreeGrowth{});
+        TreeGrowth heavy;
+        heavy.gravity = 0.5f;
+        const std::vector<TreeNode> drooping = growTree(smallBase, smallCrown, attractors, heavy);
+        const float crownBottom = smallCrown.centre.y - smallCrown.halfHeight;
+        const auto meanCrownHeight = [&](const std::vector<TreeNode>& nodes) {
+            double sum = 0.0;
+            int count = 0;
+
+            for (std::size_t i = 1; i < nodes.size(); ++i) {
+                const float step = (nodes[i].position - nodes[static_cast<std::size_t>(nodes[i].parent)].position).length();
+                assert(step <= heavy.step + 1e-4f);
+
+                if (nodes[i].position.y > crownBottom - 1.0f) {
+                    sum += nodes[i].position.y;
+                    ++count;
+                }
+            }
+
+            return sum / count;
+        };
+
+        assert(meanCrownHeight(drooping) < meanCrownHeight(straight));
+    }
+
+    /*
+    * A variant's own shape: the settings' crown from the fork to the top, its lean 30-100% of the setting and level, its
+    * limbs one fewer to one more than the setting (two at least); the same seed the same shape, others different.
+    */
+    void testVariantShapes() {
+        const ForestTreeSettings settings;
+        const CrownEnvelope crown = treeCrown(settings);
+        assert(near(crown.centre.y, 0.5f * (settings.forkHeight + settings.height), 1e-5f));
+        assert(near(crown.halfHeight, 0.5f * (settings.height - settings.forkHeight), 1e-5f) && crown.radius == settings.crownRadius);
+        std::set<int> limbCounts;
+
+        for (std::uint32_t seed = 1; seed <= 40; ++seed) {
+            const TreeVariantShape shape = treeVariantShape(settings, seed);
+            assert(shape.crown.radius == crown.radius && shape.crown.centre.y == crown.centre.y && shape.crown.halfHeight == crown.halfHeight);
+            assert(shape.lean.y == 0.0f);
+            const float lean = horizontal(shape.lean);
+            assert(lean >= leastLeanShare * settings.lean - 1e-4f && lean <= settings.lean + 1e-4f);
+            assert(shape.limbs >= std::max(settings.limbs - 1, 2) && shape.limbs <= settings.limbs + 1);
+            limbCounts.insert(shape.limbs);
+        }
+
+        assert(limbCounts.size() == 3);
+        assert(treeVariantShape(settings, 7u).lean.x == treeVariantShape(settings, 7u).lean.x);
+        assert(treeVariantShape(settings, 7u).lean.x != treeVariantShape(settings, 8u).lean.x);
+    }
+
+    /*
+    * The clumps: as many as asked (room allowing), each 75-125% of the clump radius, their centres inside the crown and
+    * far enough apart to leave gaps, every limb given at least one, the clumps going round the trunk limb by limb; the
+    * same seed the same clumps.
+    */
+    void testClumps() {
+        const CrownEnvelope crown{.centre = Vec3{0.0f, 20.0f, 0.0f}, .radius = 13.0f, .halfHeight = 10.0f};
+        const std::vector<TreeClump> clumps = treeClumps(crown, 9, 3.5f, 4, 11u);
+        assert(clumps.size() == 9);
+        std::vector<int> perLimb(4, 0);
+
+        for (std::size_t i = 0; i < clumps.size(); ++i) {
+            const TreeClump& clump = clumps[i];
+            assert(insideCrown(crown, clump.centre));
+            assert(clump.radius >= 0.75f * 3.5f - 1e-4f && clump.radius <= 1.25f * 3.5f + 1e-4f);
+            assert(clump.limb >= 0 && clump.limb < 4);
+            ++perLimb[static_cast<std::size_t>(clump.limb)];
+
+            for (std::size_t j = 0; j < i; ++j) {
+                assert((clump.centre - clumps[j].centre).length() >= clumpSpacing * (clump.radius + clumps[j].radius) - 1e-4f);
+            }
+        }
+
+        assert(std::all_of(perLimb.begin(), perLimb.end(), [](int count) { return count >= 1; }));
+
+        // Fewer clumps than limbs: each clump a limb of its own.
+        const std::vector<TreeClump> few = treeClumps(crown, 2, 3.5f, 4, 11u);
+        assert(few.size() == 2 && few[0].limb != few[1].limb);
+
+        const std::vector<TreeClump> again = treeClumps(crown, 9, 3.5f, 4, 11u);
+        assert((again[4].centre - clumps[4].centre).lengthSquared() == 0.0f);
+    }
+
+    /*
+    * The attractors fill the clumps and nothing else, so the gaps between them stay empty: exactly as many as asked,
+    * every one inside a clump, every clump with some, the bigger ones with more.
+    */
+    void testClumpAttractors() {
+        const std::vector<TreeClump> clumps{{Vec3{0.0f, 10.0f, 0.0f}, 1.0f, 0}, {Vec3{6.0f, 10.0f, 0.0f}, 2.0f, 1}};
+        const std::vector<Vec3> points = clumpAttractors(clumps, 900, 3u);
+        assert(points.size() == 900);
+        int inFirst = 0;
+        int inSecond = 0;
+
+        for (const Vec3& point : points) {
+            const bool first = (point - clumps[0].centre).length() <= clumps[0].radius + 1e-4f;
+            const bool second = (point - clumps[1].centre).length() <= clumps[1].radius + 1e-4f;
+            assert(first || second);
+            inFirst += first ? 1 : 0;
+            inSecond += second ? 1 : 0;
+        }
+
+        // By volume, 1 : 8.
+        assert(inFirst == 100 && inSecond == 800);
+    }
+
+    /*
+    * The scaffold: the trunk up to the fork (leaning to it), then one limb a target, each leaving the fork's node and
+    * walking, kinked, until it is within stopMetres of its target; every step at most a step; the same seed the same.
+    */
+    void testScaffold() {
+        const Vec3 base{0.0f, -1.0f, 0.0f};
+        const Vec3 fork{1.0f, 9.0f, 0.5f};
+        const std::vector<Vec3> targets{Vec3{8.0f, 18.0f, 0.0f}, Vec3{-7.0f, 20.0f, 3.0f}, Vec3{0.0f, 17.0f, -9.0f}};
+        const std::vector<TreeNode> nodes = growScaffold(base, fork, targets, 3.0f, 0.5f, 5u);
+        assert((nodes[0].position - base).lengthSquared() == 0.0f && nodes[0].parent == -1);
+
+        int forkNode = -1;
+
+        for (std::size_t i = 1; i < nodes.size(); ++i) {
+            assert(nodes[i].parent >= 0 && static_cast<std::size_t>(nodes[i].parent) < i);
+            assert((nodes[i].position - nodes[static_cast<std::size_t>(nodes[i].parent)].position).length() <= 0.5f + 1e-4f);
+
+            if ((nodes[i].position - fork).length() < 1e-4f) {
+                forkNode = static_cast<int>(i);
+            }
+        }
+
+        assert(forkNode > 0);
+        const std::vector<bool> tips = treeTips(nodes);
+        int limbs = 0;
+
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            limbs += nodes[i].parent == forkNode ? 1 : 0;
+        }
+
+        assert(limbs == 3 && std::count(tips.begin(), tips.end(), true) == 3);
+
+        // Each limb ends near its own target, kinked on the way (not a straight line from the fork).
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            if (!tips[i]) {
+                continue;
+            }
+
+            float nearestTarget = 1e9f;
+
+            for (const Vec3& target : targets) {
+                nearestTarget = std::min(nearestTarget, (nodes[i].position - target).length());
+            }
+
+            assert(nearestTarget <= 3.0f + 1e-4f);
+        }
+
+        float furthestOffLine = 0.0f;
+
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            if (static_cast<int>(i) > forkNode) {
+                // Off the straight line from the fork to the nearest target.
+                float offLine = 1e9f;
+
+                for (const Vec3& target : targets) {
+                    offLine = std::min(offLine, (nodes[i].position - closestPointOnSegment(nodes[i].position, fork, target)).length());
+                }
+
+                furthestOffLine = std::max(furthestOffLine, offLine);
+            }
+        }
+
+        assert(furthestOffLine > 0.3f);
+        assert(sameNodes(nodes, growScaffold(base, fork, targets, 3.0f, 0.5f, 5u)));
     }
 
     /*
@@ -158,7 +356,7 @@ namespace {
         int tipCount = 0;
 
         for (std::size_t i = 1; i < nodes.size(); ++i) {
-            sums[static_cast<std::size_t>(nodes[i].parent)] += std::pow(static_cast<double>(grown[i]), 2.0);
+            sums[static_cast<std::size_t>(nodes[i].parent)] += std::pow(static_cast<double>(grown[i]), static_cast<double>(leonardoExponent));
         }
 
         for (std::size_t i = 0; i < nodes.size(); ++i) {
@@ -166,11 +364,11 @@ namespace {
                 ++tipCount;
                 assert(grown[i] == 0.02f);
             } else {
-                assert(std::fabs(std::pow(static_cast<double>(grown[i]), 2.0) - sums[i]) <= 1e-4 * sums[i]);
+                assert(std::fabs(std::pow(static_cast<double>(grown[i]), static_cast<double>(leonardoExponent)) - sums[i]) <= 1e-4 * sums[i]);
             }
         }
 
-        assert(tipCount > 20 && near(grown[0], 0.02f * std::sqrt(static_cast<float>(tipCount)), 1e-3f * grown[0]));
+        assert(tipCount > 20 && near(grown[0], 0.02f * std::pow(static_cast<float>(tipCount), 1.0f / leonardoExponent), 1e-3f * grown[0]));
     }
 
     /*
@@ -278,16 +476,39 @@ namespace {
     }
 
     /*
-    * Leaves at the tips: leavesPerTip cards each, every card's front facing out of the crown, its corners' normals
-    * leaning further out, its picture one of the atlas's nine leaves, its stem near a tip.
+    * The leafy nodes: every node but the root no thicker than the leafy radius, so every tip and the twigs' last
+    * stretches; more of them than tips.
+    */
+    void testLeafyNodes() {
+        const std::vector<float> radii{0.5f, 0.04f, 0.02f, 0.05f, 0.041f};
+        const std::vector<bool> leafy = leafyNodes(radii, 0.04f);
+        assert(!leafy[0] && leafy[1] && leafy[2] && !leafy[3] && !leafy[4]);
+        assert(!leafyNodes(std::vector<float>{0.02f}, 0.04f)[0]); // a root alone is no twig
+
+        const std::vector<TreeNode> nodes = smallTree(5u);
+        const std::vector<float> grown = leonardoRadii(nodes, 0.02f, leonardoExponent);
+        const std::vector<bool> tips = treeTips(nodes);
+        const std::vector<bool> grownLeafy = leafyNodes(grown, 0.04f);
+
+        for (std::size_t node = 1; node < nodes.size(); ++node) {
+            assert(!tips[node] || grownLeafy[node]);
+        }
+
+        assert(std::count(grownLeafy.begin(), grownLeafy.end(), true) > std::count(tips.begin(), tips.end(), true));
+    }
+
+    /*
+    * Leaves along the twigs: leavesPerNode cards round every leafy node, every card's front facing out of the crown,
+    * its corners' normals leaning further out, its picture one of the atlas's nine leaves, its stem near a leafy node.
     */
     void testLeavesFaceOutOfTheCrown() {
         const std::vector<TreeNode> nodes = smallTree(5u);
-        const std::vector<bool> tips = treeTips(nodes);
-        const std::size_t tipCount = static_cast<std::size_t>(std::count(tips.begin(), tips.end(), true));
+        const std::vector<float> radii = leonardoRadii(nodes, 0.02f, leonardoExponent);
+        const std::vector<bool> tips = leafyNodes(radii, 0.04f);
+        const std::size_t leafyCount = static_cast<std::size_t>(std::count(tips.begin(), tips.end(), true));
         IndexedMesh leaves;
-        appendTreeLeaves(leaves, nodes, smallCrown, 3, 0.7f, 4u);
-        const std::size_t cards = tipCount * 3;
+        appendTreeLeaves(leaves, nodes, radii, smallCrown, 0.04f, 3, 0.7f, 4u);
+        const std::size_t cards = leafyCount * 3;
         assert(leaves.vertices.size() == cards * 4 && leaves.indices.size() == cards * 6);
         assert(trianglesFaceTheirNormals(leaves));
         std::set<int> cellsUsed;
@@ -328,9 +549,12 @@ namespace {
 
     ForestTreeSettings smallSettings() {
         ForestTreeSettings settings;
-        settings.crownHeight = 12.0f;
+        settings.height = 14.0f;
+        settings.forkHeight = 5.0f;
         settings.crownRadius = 5.0f;
-        settings.crownHalfHeight = 2.0f;
+        settings.limbs = 3;
+        settings.clumps = 5;
+        settings.clumpRadius = 1.5f;
         settings.attractors = 400;
         return settings;
     }
@@ -342,12 +566,12 @@ namespace {
     void testATreeIsBuilt() {
         const ForestTreeSettings settings = smallSettings();
         const CrownEnvelope crown = treeCrown(settings);
-        assert(crown.centre.x == 0.0f && crown.centre.y == 12.0f && crown.radius == 5.0f && crown.halfHeight == 2.0f);
+        assert(crown.centre.x == 0.0f && crown.centre.y == 9.5f && crown.radius == 5.0f && crown.halfHeight == 4.5f);
 
         const TreeMeshes tree = growTreeMeshes(settings, 21u, 1.5f);
-        assert(tree.tipCount > 20 && !tree.bark.vertices.empty());
-        assert(tree.leaves.vertices.size() == static_cast<std::size_t>(tree.tipCount * settings.leavesPerTip * 4));
-        assert(near(tree.trunkRadius, settings.twigRadius * std::sqrt(static_cast<float>(tree.tipCount)), 1e-3f * tree.trunkRadius));
+        assert(tree.tipCount > 20 && tree.leafyCount > tree.tipCount && !tree.bark.vertices.empty());
+        assert(tree.leaves.vertices.size() == static_cast<std::size_t>(tree.leafyCount * settings.leavesPerNode * 4));
+        assert(near(tree.trunkRadius, settings.twigRadius * std::pow(static_cast<float>(tree.tipCount), 1.0f / leonardoExponent), 1e-3f * tree.trunkRadius));
         assert(trianglesFaceTheirNormals(tree.bark));
 
         float lowest = 1e9f;
@@ -361,8 +585,32 @@ namespace {
             }
         }
 
-        assert(near(lowest, -treeSinkMetres, 1e-3f));
+        // Within a centimetre: a leaning trunk's bottom ring tilts a little, square to the curve.
+        assert(near(lowest, -treeSinkMetres, 1e-2f));
         assert(widestAtGround > tree.trunkRadius * (1.0f + 0.5f * settings.buttress));
+
+        // Without buttresses the trunk tapers: at the foot trunkTaper thicker than Leonardo's radius, halfway to the fork
+        // half that, at the fork Leonardo's own (the fork's ring is tilted towards a limb, so it is measured halfway).
+        ForestTreeSettings plain = settings;
+        plain.buttress = 0.0f;
+        plain.lean = 0.0f;
+        const TreeMeshes tapered = growTreeMeshes(plain, 21u, 1.5f);
+        const float halfway = 0.5f * (plain.forkHeight - treeSinkMetres);
+        float atFoot = 0.0f;
+        float atHalfway = 0.0f;
+
+        for (const MeshVertex& vertex : tapered.bark.vertices) {
+            if (std::fabs(vertex.position.y + treeSinkMetres) < 1e-4f) {
+                atFoot = std::max(atFoot, horizontal(vertex.position));
+            }
+
+            if (std::fabs(vertex.position.y - halfway) < 1e-4f) {
+                atHalfway = std::max(atHalfway, horizontal(vertex.position));
+            }
+        }
+
+        assert(near(atFoot, tapered.trunkRadius * (1.0f + trunkTaper), 1e-3f));
+        assert(near(atHalfway, tapered.trunkRadius * (1.0f + 0.5f * trunkTaper), 1e-3f));
 
         const TreeMeshes again = growTreeMeshes(settings, 21u, 1.5f);
         assert(again.bark.vertices.size() == tree.bark.vertices.size() && again.leaves.vertices.size() == tree.leaves.vertices.size());
@@ -434,7 +682,7 @@ namespace {
 
             const float radius = placedCrownRadius(tree, settings);
             assert(near(radius, settings.crownRadius * tree.scale, 1e-4f));
-            assert(near(placedCrownCentre(tree, settings).y, tree.foot.y + settings.crownHeight * tree.scale, 1e-3f));
+            assert(near(placedCrownCentre(tree, settings).y, tree.foot.y + treeCrown(settings).centre.y * tree.scale, 1e-3f));
             assert(!blocksSight(placedCrownCentre(tree, settings), radius, lines));
 
             for (std::size_t j = 0; j < i; ++j) {
@@ -455,7 +703,7 @@ namespace {
         std::vector<SightLine> wall;
 
         for (float z = treeNorthmost - 20.0f; z <= treeSouthmost + 20.0f; z += 4.0f) {
-            wall.push_back(SightLine{Vec3{-400.0f, settings.crownHeight, z}, Vec3{400.0f, settings.crownHeight, z}});
+            wall.push_back(SightLine{Vec3{-400.0f, treeCrown(settings).centre.y, z}, Vec3{400.0f, treeCrown(settings).centre.y, z}});
         }
 
         assert(placeTrees(settings, pillars, wall).empty());
@@ -463,11 +711,11 @@ namespace {
 
     void testTheSettings() {
         const ForestTreeSettings settings;
-        assert(settings.count == 12 && settings.variants == 4 && settings.crownRadius == 14.0f && settings.leavesPerTip == 3);
+        assert(settings.count == 12 && settings.variants == 4 && settings.crownRadius == 13.0f && settings.limbs == 4 && settings.clumps == 9);
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 10 && counter.live == 0);
+        assert(counter.fields == 15 && counter.live == 0);
     }
 
     /*
@@ -507,10 +755,16 @@ namespace {
 void testForestTrees() {
     testAttractorsFillTheCrown();
     testATreeGrowsIntoItsCrown();
+    testGravityDrooping();
+    testVariantShapes();
+    testClumps();
+    testClumpAttractors();
+    testScaffold();
     testLeonardosRule();
     testBranchChains();
     testTubeSides();
     testButtressLobes();
+    testLeafyNodes();
     testLeavesFaceOutOfTheCrown();
     testATreeIsBuilt();
     testSightLines();

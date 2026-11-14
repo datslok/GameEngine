@@ -410,7 +410,7 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     }
 
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
-    const Material leaf = forestLeafMaterial(assets, assetFolder, forestTreeLeafFolder);
+    const Material leaf = forestLeafMaterial(assets, assetFolder, forestTreeLeafFolder, forestTreeLeafTint);
 
     for (const TreePlacement& tree : treePlacements) {
         const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),
