@@ -49,6 +49,31 @@ namespace {
         assert(near(driftingRockPose(rock, 10.0).position.y, 400.0f + 3.0f * std::sin(0.7f + 0.25f * fullTurnRadians), 1e-3f));
     }
 
+    /*
+    * Orbiting: carried round the vertical through its orbit's centre at orbitSpeed radians a second, as a wheel turns
+    * (its level distance from the centre kept, its facing turned with it), still bobbing; a quarter turn after
+    * (pi / 2) / orbitSpeed seconds.
+    */
+    void testARockOrbits() {
+        DriftingRock rock = testRock();
+        rock.orbitCentre = Vec3{10.0f, 0.0f, 20.0f};
+        rock.orbitSpeed = 0.05f;
+        const float radius = 50.0f;
+
+        for (double seconds : {0.0, 3.0, 17.5, 200.0}) {
+            const Transform pose = driftingRockPose(rock, seconds);
+            assert(near(Vec2{pose.position.x - 10.0f, pose.position.z - 20.0f}.length(), radius, 1e-2f));
+            assert(pose.position.y == driftingRockPose(testRock(), seconds).position.y);
+        }
+
+        // From straight north of the centre, a quarter turn about +y (anticlockwise seen from above) goes west.
+        const Transform quarter = driftingRockPose(rock, 0.25 * fullTurnRadians / 0.05);
+        assert(near(quarter.position.x, 10.0f - radius, 1e-2f) && near(quarter.position.z, 20.0f, 1e-2f));
+        const Vec3 east = quarter.rotation.rotate(Vec3{1.0f, 0.0f, 0.0f});
+        const float facing = wrapAngle(1.1f + 0.02f * static_cast<float>(0.25 * fullTurnRadians / 0.05) + 0.25f * fullTurnRadians);
+        assert(near(wrapAngle(std::atan2(-east.z, east.x)), facing, 1e-3f));
+    }
+
     // The rocks of one shape stay apart however they bob: their rests further apart than their sizes and both bobs.
     void assertApart(const std::vector<DriftingRock>& rocks) {
         for (std::size_t a = 0; a < rocks.size(); ++a) {
@@ -78,7 +103,12 @@ namespace {
             assert(rock.rest.y <= island.rim.y && rock.rest.y >= island.rim.y - 0.6f * island.radius - 1e-3f);
             assert(rock.size >= 0.1f * settings.largestRock - 1e-4f && rock.size <= settings.largestRock + 1e-4f);
             assert(rock.bobMetres == settings.bobMetres && rock.bobSeconds >= 0.5f * settings.bobSeconds && rock.bobSeconds <= 1.5f * settings.bobSeconds);
+            // The ring turns as a whole round the island, about orbitMetresPerSecond along its middle.
+            assert(rock.orbitCentre.x == island.rim.x && rock.orbitCentre.z == island.rim.z && rock.orbitSpeed == rocks.front().orbitSpeed);
         }
+
+        const float middle = island.radius * 1.65f + 0.5f * settings.largestRock;
+        assert(near(std::abs(rocks.front().orbitSpeed) * middle, settings.orbitMetresPerSecond, 0.05f * settings.orbitMetresPerSecond));
 
         const std::vector<DriftingRock> again = islandRocks(island, settings);
         assert(again.size() == rocks.size() && again.back().rest.x == rocks.back().rest.x && again.back().phase == rocks.back().phase);
@@ -179,13 +209,38 @@ namespace {
         }
     };
 
-    // Six settings; only whether they drift is live (to compare the cost of their moving shadows), the rest at start-up.
+    // Seven settings; only whether they drift is live (to compare the cost of their moving shadows), the rest at start-up.
+    // Bobbing 12 m over 15 s and orbiting 3 m/s: slower drift could not be seen (0.05 degrees a second at 500 m).
     void testTheSettings() {
         ForestDriftSettings settings;
-        assert(settings.moving);
+        assert(settings.moving && settings.bobMetres == 12.0f && settings.bobSeconds == 15.0f && settings.orbitMetresPerSecond == 3.0f);
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 6 && counter.live == 1);
+        assert(counter.fields == 7 && counter.live == 1);
+    }
+
+    /*
+    * The valley's rocks keep clear of every other shape all the way round their orbits (a pillar's or island's axis no
+    * nearer the orbit's circle than its clearance), and rings round different shapes never meet where their heights do.
+    */
+    void testOrbitsStayClear() {
+        const std::vector<PillarPlacement> pillars{
+            PillarPlacement{.foot = Vec3{0.0f, 0.0f, 0.0f}, .radius = 25.0f, .height = 300.0f, .turnRadians = 0.0f, .seed = 3u},
+            PillarPlacement{.foot = Vec3{120.0f, 0.0f, 0.0f}, .radius = 20.0f, .height = 280.0f, .turnRadians = 0.0f, .seed = 4u}};
+        const std::vector<IslandPlacement> islands{IslandPlacement{.rim = Vec3{60.0f, 450.0f, 150.0f}, .radius = 70.0f, .turnRadians = 0.0f, .seed = 5u}};
+        ForestDriftSettings settings;
+        settings.pillarShare = 1.0f;
+        const std::vector<DriftingRock> rocks = valleyRocks(pillars, islands, settings);
+        assert(!rocks.empty());
+
+        for (const DriftingRock& rock : rocks) {
+            const float ring = Vec2{rock.rest.x - rock.orbitCentre.x, rock.rest.z - rock.orbitCentre.z}.length();
+
+            for (const PillarPlacement& pillar : pillars) {
+                const float toAxis = Vec2{pillar.foot.x - rock.orbitCentre.x, pillar.foot.z - rock.orbitCentre.z}.length();
+                assert(std::abs(toAxis - ring) >= 1.6f * pillar.radius + rock.size || rock.rest.y - rock.size - rock.bobMetres >= pillar.foot.y + pillar.height);
+            }
+        }
     }
 
     /*
@@ -215,10 +270,12 @@ namespace {
 
 void testDriftingRocks() {
     testARockBobsAndTurns();
+    testARockOrbits();
     testRocksFloatRoundAnIsland();
     testSomePillarsHaveRocks();
     testARockIsASmallIsland();
     testTheSystemMovesThem();
     testTheSettings();
+    testOrbitsStayClear();
     testTheGameFloatsThem();
 }

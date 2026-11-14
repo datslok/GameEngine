@@ -103,9 +103,10 @@ struct ShadowSettings {
     // While its casters only move (the same meshes, in the same order), the far shadow map is redrawn at most this often
     // (seconds; 0: for any move, as the cascades always are). Rocks drifting slowly round the forest's islands redrew it,
     // every caster over 5 km, each frame (2.3 ms of 18.5 on the RTX 4070 Laptop, Nov 14 2026); a metre a second at most,
-    // their shadows lag under half a 2.7 m texel, hundreds of metres off. Redrawing only after a caster had moved half a
-    // texel did not help: with hundreds of rocks bobbing out of step, one crossed a step nearly every frame.
-    float farShadowRefreshSeconds = 1.0f;
+    // their shadows lag about a texel at the 6 m/s they reach bobbing and orbiting, hundreds of metres off. Redrawing only
+    // after a caster had moved half a texel did not help: with hundreds of rocks bobbing out of step, one crossed a step
+    // nearly every frame.
+    float farShadowRefreshSeconds = 0.5f;
 
     // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
     // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the

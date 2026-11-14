@@ -55,6 +55,41 @@ namespace {
         return Vec2{a.x - b.x, a.z - b.z}.length();
     }
 
+    // The radius of a rock's orbit: its rest's level distance from the orbit's centre (0 when it does not orbit).
+    float orbitRadius(const DriftingRock& rock) {
+        return rock.orbitSpeed == 0.0f ? 0.0f : levelDistance(rock.rest, rock.orbitCentre);
+    }
+
+    // Where its orbit's axis stands (its rest when it does not orbit).
+    Vec3 orbitAxis(const DriftingRock& rock) {
+        return rock.orbitSpeed == 0.0f ? rock.rest : rock.orbitCentre;
+    }
+
+    // The nearest a rock comes, level, to a vertical line through point, anywhere round its orbit.
+    float nearestToAxis(const DriftingRock& rock, const Vec3& point) {
+        return std::abs(levelDistance(orbitAxis(rock), point) - orbitRadius(rock));
+    }
+
+    // The nearest two rocks' orbits come, level: two circles (a point for a rock that does not orbit).
+    float nearestOrbits(const DriftingRock& a, const DriftingRock& b) {
+        const float apart = levelDistance(orbitAxis(a), orbitAxis(b));
+        const float ra = orbitRadius(a);
+        const float rb = orbitRadius(b);
+        return std::max({apart - ra - rb, std::abs(ra - rb) - apart, 0.0f});
+    }
+
+    // Rocks of the same ring keep their distances (the ring turns as a whole); of different rings, their orbits must
+    // never bring them together where their heights (with their bobs) overlap.
+    bool ringsClear(const DriftingRock& a, const DriftingRock& b) {
+        const bool sameRing = a.orbitSpeed == b.orbitSpeed && a.orbitCentre.x == b.orbitCentre.x && a.orbitCentre.z == b.orbitCentre.z;
+
+        if (sameRing) {
+            return (a.rest - b.rest).length() >= a.size + b.size + a.bobMetres + b.bobMetres;
+        }
+
+        return nearestOrbits(a, b) >= a.size + b.size || std::abs(a.rest.y - b.rest.y) >= a.size + b.size + a.bobMetres + b.bobMetres;
+    }
+
     /*
     * Rocks round a centre by dart throwing: place(dart) gives a candidate's place and size from its random numbers (a
     * dart's own seed); kept only clear of those kept.
@@ -75,15 +110,28 @@ namespace {
 
         return rocks;
     }
+
+    // A ring's orbit round a centre, each ring its own way round (from its seed), every rock at the same rate.
+    void setOrbit(std::vector<DriftingRock>& rocks, const Vec3& centre, float speed, std::uint32_t seed) {
+        const float turning = forestUnitRandom(seed, 7) < 0.5f ? -speed : speed;
+
+        for (DriftingRock& rock : rocks) {
+            rock.orbitCentre = centre;
+            rock.orbitSpeed = turning;
+        }
+    }
 }
 
 Transform driftingRockPose(const DriftingRock& rock, double seconds) {
     // In doubles and wrapped, so a long run's time keeps its precision.
     const double bobs = seconds / static_cast<double>(rock.bobSeconds);
     const float bobAngle = static_cast<float>(static_cast<double>(fullTurnRadians) * (bobs - std::floor(bobs))) + rock.phase;
-    const double turned = static_cast<double>(rock.turnRadians) + static_cast<double>(rock.turnSpeed) * seconds;
+    const double orbited = std::fmod(static_cast<double>(rock.orbitSpeed) * seconds, static_cast<double>(fullTurnRadians));
+    const double turned = static_cast<double>(rock.turnRadians) + static_cast<double>(rock.turnSpeed) * seconds + orbited;
     const float turn = wrapAngle(static_cast<float>(std::fmod(turned, static_cast<double>(fullTurnRadians))));
-    return Transform{.position = rock.rest + up * (rock.bobMetres * std::sin(bobAngle)), .rotation = Quat::fromAxisAngle(up, turn),
+    const Vec3 centre{rock.orbitCentre.x, rock.rest.y, rock.orbitCentre.z};
+    const Vec3 carried = centre + Quat::fromAxisAngle(up, static_cast<float>(orbited)).rotate(rock.rest - centre);
+    return Transform{.position = carried + up * (rock.bobMetres * std::sin(bobAngle)), .rotation = Quat::fromAxisAngle(up, turn),
                      .scale = Vec3{1.0f, 1.0f, 1.0f}};
 }
 
@@ -100,17 +148,22 @@ void visit(ForestDriftSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Largest rock", settings.largestRock, {.min = 1.0f, .max = 100.0f, .sliderMax = 40.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Bob", settings.bobMetres, {.min = 0.0f, .max = 50.0f, .sliderMax = 10.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Bob time", settings.bobSeconds, {.min = 1.0f, .max = 600.0f, .sliderMax = 120.0f, .unit = "s", .applies = FieldApplies::AtStartup});
+    visitor.field("Orbit speed", settings.orbitMetresPerSecond, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f, .unit = "m/s", .applies = FieldApplies::AtStartup});
     visitor.field("Rocks drift", settings.moving);
 }
 
 std::vector<DriftingRock> islandRocks(const IslandPlacement& island, const ForestDriftSettings& settings) {
     const int count = std::max(0, static_cast<int>(std::lround(settings.islandRocksPerTenMetres * island.radius / 10.0f)));
-    return throwRocks(count, forestShapeSeed(island.seed, 40), settings, [&](std::uint32_t seed, float size) {
-        const float angle = fullTurnRadians * forestUnitRandom(seed, 11);
-        const float out = island.radius * (islandRingInner + islandRingWidth * forestUnitRandom(seed, 12)) + size;
-        const float below = islandRingDepth * island.radius * forestUnitRandom(seed, 13);
+    const std::uint32_t seed = forestShapeSeed(island.seed, 40);
+    const float middle = island.radius * (islandRingInner + 0.5f * islandRingWidth) + 0.5f * settings.largestRock;
+    std::vector<DriftingRock> rocks = throwRocks(count, seed, settings, [&](std::uint32_t dartSeed, float size) {
+        const float angle = fullTurnRadians * forestUnitRandom(dartSeed, 11);
+        const float out = island.radius * (islandRingInner + islandRingWidth * forestUnitRandom(dartSeed, 12)) + size;
+        const float below = islandRingDepth * island.radius * forestUnitRandom(dartSeed, 13);
         return island.rim + Vec3{out * std::sin(angle), -below, out * std::cos(angle)};
     });
+    setOrbit(rocks, island.rim, settings.orbitMetresPerSecond / middle, seed);
+    return rocks;
 }
 
 std::vector<DriftingRock> pillarRocks(const PillarPlacement& pillar, const ForestDriftSettings& settings) {
@@ -121,12 +174,15 @@ std::vector<DriftingRock> pillarRocks(const PillarPlacement& pillar, const Fores
     }
 
     const int count = 1 + std::min(static_cast<int>(forestUnitRandom(seed, 1) * mostPillarRocks), mostPillarRocks - 1);
-    return throwRocks(count, seed, settings, [&](std::uint32_t dartSeed, float size) {
+    const float middle = pillar.radius * (pillarRingInner + 0.5f * pillarRingWidth) + 0.5f * settings.largestRock;
+    std::vector<DriftingRock> rocks = throwRocks(count, seed, settings, [&](std::uint32_t dartSeed, float size) {
         const float angle = fullTurnRadians * forestUnitRandom(dartSeed, 11);
         const float out = pillar.radius * (pillarRingInner + pillarRingWidth * forestUnitRandom(dartSeed, 12)) + size;
         const float rise = pillar.height * (pillarLowest + pillarHighestExtra * forestUnitRandom(dartSeed, 13));
         return pillar.foot + Vec3{out * std::sin(angle), rise, out * std::cos(angle)};
     });
+    setOrbit(rocks, pillar.foot, settings.orbitMetresPerSecond / middle, seed);
+    return rocks;
 }
 
 std::vector<DriftingRock> valleyRocks(const std::vector<PillarPlacement>& pillars, const std::vector<IslandPlacement>& islands,
@@ -148,14 +204,17 @@ std::vector<DriftingRock> valleyRocks(const std::vector<PillarPlacement>& pillar
     for (const DriftingRock& rock : candidates) {
         const float reach = rock.size + rock.bobMetres;
         const bool touchesPillar = std::any_of(pillars.begin(), pillars.end(), [&](const PillarPlacement& pillar) {
-            return levelDistance(rock.rest, pillar.foot) < pillarClear * pillar.radius + rock.size && rock.rest.y - reach < pillar.foot.y + pillar.height;
+            return nearestToAxis(rock, pillar.foot) < pillarClear * pillar.radius + rock.size && rock.rest.y - reach < pillar.foot.y + pillar.height;
         });
         const bool touchesIsland = std::any_of(islands.begin(), islands.end(), [&](const IslandPlacement& island) {
-            return levelDistance(rock.rest, island.rim) < islandClear * island.radius + rock.size &&
+            return nearestToAxis(rock, island.rim) < islandClear * island.radius + rock.size &&
                    rock.rest.y + reach > island.rim.y - islandTipDepth * island.radius && rock.rest.y - reach < island.rim.y + islandDomeClear * island.radius;
         });
+        const bool touchesRock = std::any_of(kept.begin(), kept.end(), [&](const DriftingRock& other) {
+            return !ringsClear(rock, other);
+        });
 
-        if (!touchesPillar && !touchesIsland && clearOf(rock, kept)) {
+        if (!touchesPillar && !touchesIsland && !touchesRock) {
             kept.push_back(rock);
         }
     }
