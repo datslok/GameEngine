@@ -207,6 +207,35 @@ namespace {
         assert(std::abs(y * 2.0f - std::round(y * 2.0f)) > 0.01f);
     }
 
+    // Each cascade hands over to the next over cascadeBlend of its reach (the outer half by default), not over one point
+    // spacing, where lumpy ground showed a line round the camera (the user's look at the forest); 0 keeps one spacing.
+    void testTheCascadesBlendOverHalfTheirReach() {
+        SkyVisibilitySettings settings;
+        assert(settings.cascadeBlend == 0.5f);
+        const Vec3 centre{10.3f, 1.7f, -4.2f};
+
+        for (const ProbeCascade& cascade : skyVisibilityCascades(centre, settings)) {
+            const float reach = cascade.weightReach.x;
+            assert(std::abs(cascade.weightFade.x - 0.5f * reach) < 1e-4f);
+            assert(std::abs(cascade.weightFade.y - 0.5f * cascade.weightReach.y) < 1e-4f);
+            assert(probeCascadeWeight(cascade, centre) == 1.0f);
+            assert(probeCascadeWeight(cascade, centre + Vec3{0.45f * reach, 0.0f, 0.0f}) == 1.0f);
+            assert(std::abs(probeCascadeWeight(cascade, centre + Vec3{0.75f * reach, 0.0f, 0.0f}) - 0.5f) < 1e-3f);
+            assert(probeCascadeWeight(cascade, centre + Vec3{0.0f, 0.0f, 1.01f * reach}) == 0.0f);
+        }
+
+        settings.cascadeBlend = 0.0f;
+
+        for (const ProbeCascade& cascade : skyVisibilityCascades(centre, settings)) {
+            assert(cascade.weightFade.x == cascade.volume.spacing.x * probeCascadeFadeCells);
+        }
+
+        settings.cascadeBlend = 1.2f;
+        assert(rejects(settings));
+        settings.cascadeBlend = -0.1f;
+        assert(rejects(settings));
+    }
+
     // One cascade's points with every one set by place(lattice point's world position) and the cascade itself.
     template <typename Place>
     std::vector<SkyCell> placedCells(const std::vector<ProbeCascade>& cascades, int count, Place place) {
@@ -1364,6 +1393,7 @@ void testSkyVisibility() {
     testACornerSeesWithinItsReach();
     testAPointPacksForTheShaders();
     testTheCascadesNestRoundTheCamera();
+    testTheCascadesBlendOverHalfTheirReach();
     testReadingTheGrid();
     testPointsInWallsOrBehindThemAreLeftOut();
     testAFloorReadsWhatIsAboveIt();

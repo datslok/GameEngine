@@ -100,6 +100,7 @@ void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Ambient floor", settings.ambientFloor, {.min = 0.0f, .max = 1.0f, .sliderMin = 0.0f, .sliderMax = 0.2f});
     visitor.field("Spacing", settings.spacing, {.min = 0.05f, .max = 16.0f, .sliderMin = 0.25f, .sliderMax = 2.0f, .unit = "m"});
     visitor.field("Cascades", settings.cascades, {.min = 1, .max = maxSkyVisibilityCascades});
+    visitor.field("Cascade blend", settings.cascadeBlend, {.min = 0.0f, .max = 1.0f});
     visitor.field("Rays", settings.rays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
     visitor.field("Quick rays", settings.quickRays, {.min = 1, .max = 1024, .sliderMin = 8, .sliderMax = 256});
     visitor.field("Deep rays", settings.deepRays, {.min = 0, .max = 16384, .sliderMin = 0, .sliderMax = 4096});
@@ -125,6 +126,10 @@ void validateSkyVisibility(const SkyVisibilitySettings& settings) {
 
     if (!(settings.bakeMilliseconds >= 0.0f) || !(settings.lookupBias >= 0.0f) || !(settings.storeMegabytes >= 0.0f)) {
         throw std::invalid_argument("Sky visibility needs a bake time, a lookup bias and a store of at least 0");
+    }
+
+    if (!(settings.cascadeBlend >= 0.0f && settings.cascadeBlend <= 1.0f)) {
+        throw std::invalid_argument("Sky visibility's cascade blend must be 0 to 1");
     }
 
     if (!(settings.backgroundShare >= 0.0f && settings.backgroundShare <= 1.0f)) {
@@ -278,7 +283,11 @@ std::vector<ProbeCascade> skyVisibilityCascades(const Vec3& centre, const SkyVis
     cascades.reserve(static_cast<std::size_t>(count));
 
     for (int c = 0; c < count; ++c) {
-        cascades.push_back(probeWindow(centre, skyVisibilitySpacing(settings, c), skyVisibilityCounts, settings.lookupBias, c * perCascade, latticeOffset));
+        ProbeCascade cascade = probeWindow(centre, skyVisibilitySpacing(settings, c), skyVisibilityCounts, settings.lookupBias, c * perCascade, latticeOffset);
+        const float blend = std::clamp(settings.cascadeBlend, 0.0f, 1.0f);
+        cascade.weightFade = Vec3{std::max(cascade.weightFade.x, blend * cascade.weightReach.x), std::max(cascade.weightFade.y, blend * cascade.weightReach.y),
+                                  std::max(cascade.weightFade.z, blend * cascade.weightReach.z)};
+        cascades.push_back(cascade);
     }
 
     return cascades;

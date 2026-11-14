@@ -55,6 +55,12 @@ struct SkyVisibilitySettings {
     // How many cascades (1 to maxSkyVisibilityCascades); past the last, the sky is taken as open, as today.
     int cascades = 2;
 
+    // The share of each cascade's reach over which it hands over to the next (or, the last, to the open field), 0..1;
+    // never less than one point spacing. 0.5: over one spacing, lumpy ground showed a line round the camera where the
+    // 0.5 m cascade gave way to the 1 m one, which smooths the ground's own bumps away (the user's look at the forest,
+    // Nov 14 2026). Read live; changing it bakes nothing.
+    float cascadeBlend = 0.5f;
+
     // Rays a point (on a Fibonacci sphere) and how far each looks (metres): a ray running that far counts as open. 256:
     // at 64, neighbouring points' measurements differed by up to half (9 rays through a window against 6), and the floor
     // blending between them showed soft blobs the grid's size; the bake's frame budget keeps the frame rate as it was.
@@ -105,7 +111,7 @@ struct SkyVisibilitySettings {
 void visit(SkyVisibilitySettings& settings, SettingsVisitor& visitor);
 
 // Throws std::invalid_argument for an ambient floor outside 0..1, a spacing or ray length not above 0, a negative bake
-// time, lookup bias or store, cascades outside 1..maxSkyVisibilityCascades, rays or quick rays below 1, deep rays below
+// time, lookup bias or store, a cascade blend outside 0..1, cascades outside 1..maxSkyVisibilityCascades, rays or quick rays below 1, deep rays below
 // 0 or a deep threshold below 1.
 void validateSkyVisibility(const SkyVisibilitySettings& settings);
 
@@ -217,7 +223,8 @@ float skyVisibilitySpacing(const SkyVisibilitySettings& settings, int cascade);
 /*
 * The cascades round centre, densest first, each a window of skyVisibilityCounts points (probeWindow) on a lattice
 * offset probeLatticeOffsetShare of the densest spacing from the world's origin (so no point lies on a floor at a whole
-* or half metre), their points numbered one cascade after another.
+* or half metre), their points numbered one cascade after another; each fading out over settings.cascadeBlend of its
+* reach along each axis (at least the probes' one spacing).
 */
 std::vector<ProbeCascade> skyVisibilityCascades(const Vec3& centre, const SkyVisibilitySettings& settings);
 
