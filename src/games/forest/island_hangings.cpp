@@ -44,11 +44,10 @@ namespace {
 
     const Vec3 down{0.0f, -1.0f, 0.0f};
 
-    // Any unit direction square to a unit direction.
-    Vec3 squareTo(const Vec3& direction) {
-        const Vec3 side = std::fabs(direction.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
-        return (side - direction * side.dot(direction)).normalized();
-    }
+    // A buttress's angle may stray this share of the spacing either way from even, and its height is 60-100% of the
+    // amplitude.
+    constexpr float lobeAngleJitter = 0.15f;
+    constexpr float lowestLobeShare = 0.6f;
 
     // The strand's direction at point i: across its neighbours (one-sided at the ends).
     Vec3 strandDirection(const HangingStrand& strand, std::size_t i) {
@@ -56,6 +55,11 @@ namespace {
         const Vec3 across = strand.points[std::min(i + 1, last)] - strand.points[i == 0 ? 0 : i - 1];
         return across.lengthSquared() > 1e-12f ? across.normalized() : down;
     }
+}
+
+Vec3 squareTo(const Vec3& direction) {
+    const Vec3 side = std::fabs(direction.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+    return (side - direction * side.dot(direction)).normalized();
 }
 
 Vec3 levelOutward(const Vec3& direction) {
@@ -109,13 +113,34 @@ HangingStrand hangingStrand(const Vec3& anchor, const Vec3& outward, float lengt
     return strand;
 }
 
-void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float tileMetres) {
+float lobedRadius(float radius, float angle, float height, const TubeLobes& lobes) {
+    if (lobes.count <= 0 || lobes.amplitude == 0.0f) {
+        return radius;
+    }
+
+    const float fade = std::exp(-std::max(height - lobes.groundHeight, 0.0f) / lobes.heightMetres);
+    const float spacing = fullTurnRadians / static_cast<float>(lobes.count);
+    float standing = 0.0f;
+
+    for (int lobe = 0; lobe < lobes.count; ++lobe) {
+        const std::uint64_t index = 2 * static_cast<std::uint64_t>(lobe);
+        const float lobeAngle = (static_cast<float>(lobe) + 2.0f * lobeAngleJitter * (forestUnitRandom(lobes.seed, index) - 0.5f)) * spacing;
+        const float share = lowestLobeShare + (1.0f - lowestLobeShare) * forestUnitRandom(lobes.seed, index + 1);
+        standing += share * std::pow(std::max(std::cos(angle - lobeAngle), 0.0f), lobes.sharpness);
+    }
+
+    return radius * (1.0f + lobes.amplitude * fade * standing);
+}
+
+void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float tileMetres, const TubeOptions& options) {
     if (strand.points.size() < 2 || sides < 3) {
         return;
     }
 
     const std::uint32_t first = static_cast<std::uint32_t>(mesh.vertices.size());
     const std::uint32_t ringSize = static_cast<std::uint32_t>(sides) + 1;
+    const bool lobed = options.lobes.count > 0 && options.lobes.amplitude != 0.0f;
+    const float tilesRound = options.wholeTilesRound ? std::max(1.0f, std::round(fullTurnRadians * strand.radii.front() / tileMetres)) : 1.0f;
     Vec3 across = squareTo(strandDirection(strand, 0));
     float travelled = 0.0f;
 
@@ -135,9 +160,41 @@ void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float
             const float angle = fullTurnRadians * static_cast<float>(side) / static_cast<float>(sides);
             const Vec3 normal = across * std::cos(angle) + second * std::sin(angle);
             const Vec3 round = second * std::cos(angle) - across * std::sin(angle);
-            mesh.vertices.push_back(MeshVertex{strand.points[i] + normal * strand.radii[i], normal,
-                                               Vec2{static_cast<float>(side) / static_cast<float>(sides), travelled / tileMetres},
+            const float radius = lobed ? lobedRadius(strand.radii[i], angle, strand.points[i].y, options.lobes) : strand.radii[i];
+            mesh.vertices.push_back(MeshVertex{strand.points[i] + normal * radius, normal,
+                                               Vec2{tilesRound * static_cast<float>(side) / static_cast<float>(sides), travelled / tileMetres},
                                                Vec4{round.x, round.y, round.z, 1.0f}});
+        }
+    }
+
+    // A lobed surface is no longer round: its normals and tangents come from its own differences round and along it,
+    // round x along facing out as before.
+    if (lobed) {
+        const std::size_t rings = strand.points.size();
+        const auto at = [&](std::size_t ring, int side) -> const Vec3& {
+            return mesh.vertices[first + ring * ringSize + static_cast<std::size_t>(side)].position;
+        };
+
+        for (std::size_t ring = 0; ring < rings; ++ring) {
+            for (int side = 0; side <= sides; ++side) {
+                // The seam's two copies share a place, so the neighbours round it wrap past it.
+                const int before = side == 0 ? sides - 1 : side - 1;
+                const int after = side == sides ? 1 : side + 1;
+                const Vec3 round = at(ring, after) - at(ring, before);
+                const Vec3 along = at(std::min(ring + 1, rings - 1), side) - at(ring == 0 ? 0 : ring - 1, side);
+                const Vec3 normal = round.cross(along);
+                MeshVertex& vertex = mesh.vertices[first + ring * ringSize + static_cast<std::size_t>(side)];
+
+                if (normal.lengthSquared() > 1e-20f) {
+                    vertex.normal = normal.normalized();
+                    const Vec3 tangent = round - vertex.normal * round.dot(vertex.normal);
+
+                    if (tangent.lengthSquared() > 1e-20f) {
+                        const Vec3 unit = tangent.normalized();
+                        vertex.tangent = Vec4{unit.x, unit.y, unit.z, 1.0f};
+                    }
+                }
+            }
         }
     }
 
@@ -151,6 +208,30 @@ void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float
             mesh.indices.insert(mesh.indices.end(), {a, b, c, b, d, c});
         }
     }
+}
+
+AtlasCell atlasCell(int cell, int columns, int rows) {
+    const float u0 = static_cast<float>(cell % columns) / static_cast<float>(columns);
+    const float v0 = static_cast<float>(cell / columns) / static_cast<float>(rows);
+    return AtlasCell{Vec2{u0, v0}, Vec2{u0 + 1.0f / static_cast<float>(columns), v0 + 1.0f / static_cast<float>(rows)}};
+}
+
+// side = towardsTip x facing, so the corners (the stem's left, its right, the tip's right, its left) turn
+// counterclockwise seen from the front: side x towardsTip = facing.
+void appendLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
+                    float width, const Vec2& uvMin, const Vec2& uvMax) {
+    const Vec3 side = towardsTip.cross(facing);
+    const Vec3 square = side - normal * side.dot(normal);
+    const Vec3 across = square.lengthSquared() > 1e-12f ? square.normalized() : side;
+    const Vec3 halfSide = side * (0.5f * width);
+    const Vec3 tip = stem + towardsTip * length;
+    const Vec4 tangent{across.x, across.y, across.z, 1.0f};
+    const std::uint32_t corner = static_cast<std::uint32_t>(mesh.vertices.size());
+    mesh.vertices.push_back(MeshVertex{stem - halfSide, normal, Vec2{uvMin.x, uvMin.y}, tangent});
+    mesh.vertices.push_back(MeshVertex{stem + halfSide, normal, Vec2{uvMax.x, uvMin.y}, tangent});
+    mesh.vertices.push_back(MeshVertex{tip + halfSide, normal, Vec2{uvMax.x, uvMax.y}, tangent});
+    mesh.vertices.push_back(MeshVertex{tip - halfSide, normal, Vec2{uvMin.x, uvMax.y}, tangent});
+    mesh.indices.insert(mesh.indices.end(), {corner, corner + 1, corner + 2, corner, corner + 2, corner + 3});
 }
 
 void appendLeafCards(IndexedMesh& mesh, const HangingStrand& vine, float spacing, float size, std::uint32_t seed) {
@@ -195,21 +276,8 @@ void appendLeafCards(IndexedMesh& mesh, const HangingStrand& vine, float spacing
         const Vec3 normal = side.cross(out);
 
         const int cell = std::min(static_cast<int>(forestUnitRandom(seed, 4 * card + 2) * static_cast<float>(leafColumns * leafRows)), leafColumns * leafRows - 1);
-        const float u0 = static_cast<float>(cell % leafColumns) / static_cast<float>(leafColumns);
-        const float u1 = u0 + 1.0f / static_cast<float>(leafColumns);
-        const float v0 = static_cast<float>(cell / leafColumns) / static_cast<float>(leafRows);
-        const float v1 = v0 + 1.0f / static_cast<float>(leafRows);
-
-        const Vec3 stem = point + radial * radius;
-        const Vec3 tip = stem + out * size;
-        const Vec3 halfSide = side * (0.5f * width);
-        const Vec4 tangent{side.x, side.y, side.z, 1.0f};
-        const std::uint32_t corner = static_cast<std::uint32_t>(mesh.vertices.size());
-        mesh.vertices.push_back(MeshVertex{stem - halfSide, normal, Vec2{u0, v0}, tangent});
-        mesh.vertices.push_back(MeshVertex{stem + halfSide, normal, Vec2{u1, v0}, tangent});
-        mesh.vertices.push_back(MeshVertex{tip + halfSide, normal, Vec2{u1, v1}, tangent});
-        mesh.vertices.push_back(MeshVertex{tip - halfSide, normal, Vec2{u0, v1}, tangent});
-        mesh.indices.insert(mesh.indices.end(), {corner, corner + 1, corner + 2, corner, corner + 2, corner + 3});
+        const AtlasCell picture = atlasCell(cell, leafColumns, leafRows);
+        appendLeafCard(mesh, point + radial * radius, out, normal, normal, size, width, picture.uvMin, picture.uvMax);
     }
 }
 

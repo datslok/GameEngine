@@ -741,6 +741,20 @@ namespace {
     }
 
     /*
+    * The start among the trees (a start-up setting, for looking at them): the player just south of the tree with the
+    * most others round it, facing it (north), where forestTreesStart says.
+    */
+    void testTheStartAmongTheTrees() {
+        ForestValleySettings valley{.groundCoarseness = 2, .pillarCount = 40, .islandCount = 8};
+        valley.start = ForestStart::Trees;
+        Forest forest{valley};
+        const Vec3 start = forest.world.get<Transform>(forest.game.getControls().getFirstPersonBody()).position;
+        const Vec2 expected = forestTreesStart(forest.game.getTreePlacements());
+        assert((Vec2{start.x, start.z} - expected).length() < 0.01f);
+        assert(ForestValleySettings{}.start == ForestStart::Rim);
+    }
+
+    /*
     * The valley's layer cake: beds touching from its bottom to its top; soft sandstone beds 15 to 60 m thick, each a tone
     * between the two sandstone tints and a neighbouring soft bed's tone at least 0.3 apart, so each shows; hard beds of
     * blocks 5 to 15 m thick, about a fifth of them and never two together; the same every run; the bed at a height its own.
@@ -970,6 +984,7 @@ void testForest() {
     testCoarsePaintBlendsSofter();
     testLayerFilesAreFoundByRole();
     testTheGameBuildsTheValley();
+    testTheStartAmongTheTrees();
     testTheStrataAreOneCake();
     testTheStrataStripHoldsTheBeds();
     testTheWarpRepeatsSeamlessly();

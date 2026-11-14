@@ -5,6 +5,8 @@
 #include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
 
+#include "test_jobs.h"
+
 #include <algorithm>
 #include <cassert>
 #include <memory>
@@ -13,13 +15,18 @@
 #include <vector>
 
 namespace {
-    // A golden view as the capture runs it: a fresh game in a fresh world, set up and simulated to the view's time.
+    /*
+    * A golden view as the capture runs it: a fresh game in a fresh world, set up and simulated to the view's time, on the
+    * run's job system as the engine gives a game its own (on one thread the forest's eight builds here took most of the
+    * whole suite's time).
+    */
     struct PreparedView {
         World world;
         AssetManager assets;
         std::unique_ptr<Game> game;
 
         PreparedView(const GameEntry& entry, const GoldenView& view): game(entry.make()) {
+            game->useJobs(testJobs());
             game->onInit(world, assets);
             advanceToGoldenView(*game, world, view, EngineSettings{}.ticksPerSecond);
         }
@@ -84,22 +91,45 @@ namespace {
     }
 
     /*
-    * The point of a golden image: the same view gives the same picture every time. Two fresh runs of each view reach the
-    * same simulation state and the same camera pose, and the pose holds still through further frames without input.
+    * The view of each game built a second time to compare: the one where the most goes on (the forest's clock moved to
+    * dusk, the light lab's flashlight switched on, the demo's lamp field after the longest simulation), else a game's
+    * longest. Building every view twice cost half this test's time (the forest's full valley eight times); the
+    * simulation's own determinism is checked by testDeterminism.
+    */
+    const GoldenView& viewBuiltTwice(const GameEntry& entry, const std::vector<GoldenView>& views) {
+        const std::string game = entry.name;
+        const char* chosen = game == "forest" ? "rim-dusk" : game == "lightlab" ? "flashlight" : game == "demo" ? "lamp-field" : nullptr;
+
+        if (chosen != nullptr) {
+            return viewNamed(views, chosen);
+        }
+
+        return *std::max_element(views.begin(), views.end(),
+                                 [](const GoldenView& a, const GoldenView& b) { return a.simulationSeconds < b.simulationSeconds; });
+    }
+
+    /*
+    * The point of a golden image: the same view gives the same picture every time. Every view's pose holds still through
+    * further frames without input, and two fresh runs of each game's chosen view (viewBuiltTwice) reach the same
+    * simulation state and the same camera pose.
     */
     void testViewsAreDeterministic() {
         for (const GameEntry& entry : registeredGames()) {
-            for (const GoldenView& view : viewsOf(entry)) {
+            const std::vector<GoldenView> views = viewsOf(entry);
+            const GoldenView& twice = viewBuiltTwice(entry, views);
+
+            for (const GoldenView& view : views) {
                 PreparedView first{entry, view};
-                PreparedView second{entry, view};
-
-                assert(hashSimulationState(first.world) == hashSimulationState(second.world));
-
                 const Vec3 position = first.game->getCamera().getPosition();
                 const Vec3 forward = first.game->getCamera().getForward();
-                assert(position.x == second.game->getCamera().getPosition().x);
-                assert(position.y == second.game->getCamera().getPosition().y);
-                assert(position.z == second.game->getCamera().getPosition().z);
+
+                if (&view == &twice) {
+                    PreparedView second{entry, view};
+                    assert(hashSimulationState(first.world) == hashSimulationState(second.world));
+                    assert(position.x == second.game->getCamera().getPosition().x);
+                    assert(position.y == second.game->getCamera().getPosition().y);
+                    assert(position.z == second.game->getCamera().getPosition().z);
+                }
 
                 first.game->onUpdate(first.world, Input{}, 1.0f / 120.0f, 1.0f);
                 assert(first.game->getCamera().getPosition().x == position.x);

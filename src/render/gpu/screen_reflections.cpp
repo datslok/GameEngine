@@ -27,6 +27,7 @@ void visit(ReflectionSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Edge fade", settings.edgeFade, {.min = 0.01f, .max = 1.0f});
     visitor.field("Probe size", settings.probeSize, {.min = 16, .max = 1024, .sliderMin = 64, .sliderMax = 512, .unit = "texels"});
     visitor.field("Probe far", settings.probeFar, {.min = 1.0f, .max = 5000.0f, .sliderMax = 1000.0f, .unit = "m"});
+    visitor.field("Probe faces per frame", settings.probeFacesPerFrame, {.min = 1, .max = 6});
     visitor.field("Planar mirrors", settings.planarMirrors, {.min = 0, .max = PLANAR_MAX_MIRRORS});
     visitor.field("Planar max roughness", settings.planarMaxRoughness, {.min = 0.0f, .max = 1.0f});
     visitor.field("Planar scale", settings.planarScale, {.min = 0.1f, .max = 1.0f});
@@ -68,6 +69,10 @@ void validateReflections(const ReflectionSettings& settings) {
 
     if (!(settings.probeFar > static_cast<float>(PROBE_NEAR))) {
         throw std::invalid_argument("The reflection probe must reach further than its near plane");
+    }
+
+    if (settings.probeFacesPerFrame < 1 || settings.probeFacesPerFrame > 6) {
+        throw std::invalid_argument("The reflection probe draws 1 to 6 of its faces a frame");
     }
 }
 

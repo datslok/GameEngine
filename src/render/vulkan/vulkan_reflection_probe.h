@@ -18,7 +18,7 @@ class VulkanDevice;
 /*
 * The reflection probe's cubes on the GPU (render/gpu/reflection_probe.h): the capture (six faces of light, with mips,
 * and their depths) the renderer draws into, then the distances and the prefiltered light the reflection pass reads.
-* One probe, recaptured every frame where the camera is.
+* One probe, recaptured where the camera is, a few faces a frame (render/gpu/reflection_probe.h, probeCaptureStep).
 */
 class VulkanReflectionProbe {
 public:
@@ -30,8 +30,11 @@ public:
     void ensureSize(std::uint32_t size);
     std::uint32_t getSize() const;
 
-    // The capture's faces made ready to be drawn into, their old contents discarded.
-    void beginCapture(VkCommandBuffer commands);
+    /*
+    * The capture's faces made ready to be drawn into: their old contents discarded at a cycle's start (every face is
+    * drawn again before the next finish), kept while a cycle spread over frames is part drawn.
+    */
+    void beginCapture(VkCommandBuffer commands, bool startsCycle);
 
     // A face's targets: its light, cleared to the background, and its depth, cleared to the far depth.
     ColourAttachment faceColour(int face, const Vec3& background) const;

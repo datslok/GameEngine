@@ -177,38 +177,6 @@ namespace {
         assert(world.get<Transform>(entity).position.y == driftingRockPose(testRock(), 0.0).position.y);
     }
 
-    // Counts the fields a visit names, and how many apply every frame.
-    class FieldCounter : public SettingsVisitor {
-    public:
-        int fields = 0;
-        int live = 0;
-
-    protected:
-        void visitFloat(const char*, float&, const FloatLimits& limits) override {
-            ++fields;
-            live += limits.applies == FieldApplies::EveryFrame ? 1 : 0;
-        }
-
-        void visitInt(const char*, int&, const IntLimits& limits) override {
-            ++fields;
-            live += limits.applies == FieldApplies::EveryFrame ? 1 : 0;
-        }
-
-        void visitBool(const char*, bool&, FieldApplies applies) override {
-            ++fields;
-            live += applies == FieldApplies::EveryFrame ? 1 : 0;
-        }
-
-        void visitChoice(const char*, int&, const char* const*, int, FieldApplies applies) override {
-            ++fields;
-            live += applies == FieldApplies::EveryFrame ? 1 : 0;
-        }
-
-        void visitGroup(const char*, const std::function<void()>& contents) override {
-            contents();
-        }
-    };
-
     // Seven settings; only whether they drift is live (to compare the cost of their moving shadows), the rest at start-up.
     // Bobbing 12 m over 15 s and orbiting 3 m/s: slower drift could not be seen (0.05 degrees a second at 500 m).
     void testTheSettings() {

@@ -78,14 +78,40 @@ inline constexpr ForestGroundLayer forestBarkLayer{"bark_brown_02", 2.0f, Pixel{
 // The vines' ivy leaves: ambientCG's LeafSet017, six leaves in an atlas.
 inline constexpr const char* forestIvyFolder = "LeafSet017";
 
+// The trees' bark (Poly Haven's oak bark, a tile 1.5 m round the trunk) and leaves (ambientCG's LeafSet024, nine
+// beech-like leaves in a 3 x 3 atlas).
+inline constexpr ForestGroundLayer forestTreeBarkLayer{"jolcham_oak_bark_01", 1.5f, Pixel{92, 78, 64}, 0.9f};
+inline constexpr const char* forestTreeLeafFolder = "LeafSet024";
+
+// The scan's leaves are a light spring green; a rainforest's are darker and deeper. This multiplies their colour (sRGB,
+// as colour pickers give it): about a quarter of the light, a little greener.
+inline constexpr Pixel forestTreeLeafTint{140, 150, 125};
+
+// LeafSet024's grid of leaves.
+inline constexpr int forestTreeLeafColumns = 3;
+inline constexpr int forestTreeLeafRows = 3;
+
+// The leaves' plain colour without the scans.
+inline constexpr Pixel forestLeafStandIn{70, 105, 50};
+
 // A leaf's alpha under this is a hole.
 inline constexpr float forestLeafCutoff = 0.5f;
 
 /*
-* The ivy's material: a double-sided cut-out, its colour with the opacity map in its alpha (made here, its mips keeping
-* the leaves' coverage), its normal and roughness maps; without the files, a plain green cut-out with no holes.
+* A leaf atlas's material (the ivy's by default): a double-sided cut-out, its colour with the opacity map in its alpha
+* (made here, its mips keeping the leaves' coverage) multiplied by tint, its normal and roughness maps; without the
+* files, a plain green cut-out with no holes.
 */
-Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder);
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder = forestIvyFolder,
+                            Pixel tint = Pixel{255, 255, 255});
+
+/*
+* The trees' leaf clusters' material (games/forest/leaf_clusters.h): twigs of LeafSet024's leaves (or the stand-in
+* leaf without the scan) composed at start-up into a 2 x 2 atlas of cellTexels a cell, its colour (tinted), normal and
+* roughness maps; a double-sided cut-out, its mips keeping the leaves' coverage. leafShare is a leaf's length on a
+* cluster as a share of the cell.
+*/
+Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare);
 
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";

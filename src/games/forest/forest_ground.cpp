@@ -2,6 +2,7 @@
 
 #include "assets/image_loader.h"
 #include "games/forest/hanging_moss.h"
+#include "games/forest/leaf_clusters.h"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,10 @@ namespace {
     // A height map only needs a depth to count for the blend (render/gpu/ground_layers.h); this is also its parallax
     // depth were the layer used alone, as a share of its texture's width.
     constexpr float layerHeightScale = 0.02f;
+
+    // The stand-in leaf's texels a cell, and the clusters' seed.
+    constexpr int standInLeafTexels = 128;
+    constexpr std::uint32_t forestClusterSeed = 0x434c5553u;
 
     std::string findRole(const std::filesystem::path& folder, const char* role) {
         for (const char* extension : {".png", ".jpg"}) {
@@ -95,32 +100,45 @@ Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolde
     return material;
 }
 
-Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder) {
-    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestIvyFolder).string());
-    Material material;
-    material.alphaMode = AlphaMode::Mask;
-    material.alphaCutoff = forestLeafCutoff;
-    material.doubleSided = true;
+namespace {
+    // A leaf atlas's colour with its opacity map's red (a grey image's every channel) in the alpha.
+    ImageData colourWithOpacity(const ForestTextureFiles& files) {
+        ImageData colour = loadImage(files.colour);
+        const ImageData opacity = loadImage(files.opacity);
+
+        if (opacity.width != colour.width || opacity.height != colour.height) {
+            throw std::runtime_error("A leaf atlas's opacity map is not the size of its colour map: " + files.opacity);
+        }
+
+        for (std::size_t texel = 0; texel < colour.pixels.size() / 4; ++texel) {
+            colour.pixels[texel * 4 + 3] = opacity.pixels[texel * 4];
+        }
+
+        return colour;
+    }
+
+    // A double-sided cut-out at the leaves' cutoff, as every leaf material is.
+    Material leafCutOut() {
+        Material material;
+        material.alphaMode = AlphaMode::Mask;
+        material.alphaCutoff = forestLeafCutoff;
+        material.doubleSided = true;
+        return material;
+    }
+}
+
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder, Pixel tint) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / leafFolder).string());
+    Material material = leafCutOut();
 
     if (files.colour.empty() || files.opacity.empty()) {
-        material.colour = Pixel{70, 105, 50};
+        material.colour = forestLeafStandIn;
         material.roughness = 0.6f;
         return material;
     }
 
-    ImageData colour = loadImage(files.colour);
-    const ImageData opacity = loadImage(files.opacity);
-
-    if (opacity.width != colour.width || opacity.height != colour.height) {
-        throw std::runtime_error("The ivy's opacity map is not the size of its colour map: " + files.opacity);
-    }
-
-    // The opacity's red (a grey image's every channel) into the colour's alpha.
-    for (std::size_t texel = 0; texel < colour.pixels.size() / 4; ++texel) {
-        colour.pixels[texel * 4 + 3] = opacity.pixels[texel * 4];
-    }
-
-    material.texture = assets.addTexture(std::move(colour), forestLeafCutoff);
+    material.texture = assets.addTexture(colourWithOpacity(files), forestLeafCutoff);
+    material.colour = tint;
     material.roughness = 1.0f;
     material.metallic = 0.0f;
 
@@ -132,6 +150,38 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
         material.metallicRoughnessTexture = assets.loadTexture(files.roughness, true, TextureEncoding::Linear);
     }
 
+    return material;
+}
+
+/*
+* The scan's normal and roughness maps must match its colour's size, as the clusters sample them at the same places; a
+* scan missing either, or the whole folder, falls back to the stand-in leaf, so the trees always have clusters.
+*/
+Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestTreeLeafFolder).string());
+    LeafAtlas source;
+
+    if (!files.colour.empty() && !files.opacity.empty() && !files.normal.empty() && !files.roughness.empty()) {
+        source = LeafAtlas{colourWithOpacity(files), loadImage(files.normal), loadImage(files.roughness), forestTreeLeafColumns, forestTreeLeafRows};
+        source.normal.encoding = TextureEncoding::Linear;
+        source.roughness.encoding = TextureEncoding::Linear;
+
+        if (source.normal.width != source.colour.width || source.roughness.width != source.colour.width ||
+            source.normal.height != source.colour.height || source.roughness.height != source.colour.height) {
+            throw std::runtime_error("A leaf atlas's normal or roughness map is not the size of its colour map: " + files.colour);
+        }
+    } else {
+        source = standInLeafAtlas(standInLeafTexels, forestTreeLeafColumns, forestTreeLeafRows, forestLeafStandIn);
+    }
+
+    LeafAtlas clusters = composeLeafClusters(source, cellTexels, leafShare, forestClusterSeed);
+    Material material = leafCutOut();
+    material.texture = assets.addTexture(std::move(clusters.colour), forestLeafCutoff);
+    material.normalTexture = assets.addTexture(std::move(clusters.normal));
+    material.metallicRoughnessTexture = assets.addTexture(std::move(clusters.roughness));
+    material.colour = tint;
+    material.roughness = 1.0f;
+    material.metallic = 0.0f;
     return material;
 }
 

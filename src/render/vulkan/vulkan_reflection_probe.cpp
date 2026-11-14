@@ -126,10 +126,15 @@ std::uint32_t VulkanReflectionProbe::getSize() const {
     return size;
 }
 
-// The barriers: from being read by last frame's passes (or nothing yet) to being drawn into, the old contents discarded.
-void VulkanReflectionProbe::beginCapture(VkCommandBuffer commands) {
-    capture.transition(commands, ImageState::ColourTarget, ImageContents::Discard);
-    depth.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
+/*
+* The barriers: from being read by the last finish's passes (or nothing yet) to being drawn into, the old contents
+* discarded at a cycle's start; within a cycle the images are still targets from the faces drawn in earlier frames, and
+* those faces are kept.
+*/
+void VulkanReflectionProbe::beginCapture(VkCommandBuffer commands, bool startsCycle) {
+    const ImageContents contents = startsCycle ? ImageContents::Discard : ImageContents::Keep;
+    capture.transition(commands, ImageState::ColourTarget, contents);
+    depth.transition(commands, ImageState::DepthTarget, contents);
 }
 
 ColourAttachment VulkanReflectionProbe::faceColour(int face, const Vec3& background) const {

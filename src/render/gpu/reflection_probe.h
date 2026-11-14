@@ -58,6 +58,24 @@ Mat4 cubeFaceViewProjection(int face, float nearPlane, float farPlane);
 // A face's camera rays, for drawing the sky over its background (sky.frag), from origin on a square of this size.
 GpuRayDebugView packCubeFaceRays(int face, const Vec3& origin, std::uint32_t size);
 
+/*
+* The probe's capture spread over frames (ReflectionSettings::probeFacesPerFrame): each frame draws a few faces, all of a
+* cycle from the place it started at, and the capture's mips, distances and prefiltered light are made once its sixth
+* face is drawn, so the reflections read the last finished capture meanwhile. Redrawing every face every frame cost more
+* than all the trees of the forest (2.4 ms of a 16.7 ms frame, the RTX 4070 Laptop, Nov 14 2026).
+*/
+struct ProbeCaptureStep {
+    int firstFace = 0;
+    int faceCount = 0;
+    bool startsCycle = false;   // take the cycle's origin now, and the old faces may be discarded
+    bool finishesCycle = false; // make the mips, distances and prefiltered light after drawing
+    int nextFace = 0;
+};
+
+// This frame's faces from where the cycle is (nextFace) and how many a frame (held within 1 and 6); restart (nothing
+// captured yet, or a new size) draws all six at once.
+ProbeCaptureStep probeCaptureStep(int nextFace, int facesPerFrame, bool restart);
+
 // The distance from the probe to what a texel saw, from its depth along the face's axis (view distance) and its unit
 // direction: the axis distance over the direction's largest component.
 float probeRadialDistance(float viewDistance, const Vec3& unitDirection);

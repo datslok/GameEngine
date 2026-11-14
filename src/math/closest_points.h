@@ -25,6 +25,10 @@ struct ClosestPoints {
 // The point on the segment from a to b nearest to point. A segment with a == b is just that point.
 Vec3 closestPointOnSegment(const Vec3& point, const Vec3& a, const Vec3& b);
 
+// Whether the segment from a point along a unit direction for length passes within radius of centre (mirrored in
+// transparency.glsl for the glass rays; the forest's sight lines use it too).
+bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius);
+
 // The point inside or on the box nearest to point: the point itself when it is inside.
 Vec3 closestPointInBox(const Vec3& point, const Aabb& box);
 
