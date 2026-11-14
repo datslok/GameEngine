@@ -430,6 +430,11 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             plan.tiles.back().smallestCaster = farShadowSmallestCaster(box.texelSize);
             plan.tiles.back().separateMovers = true;
             plan.directional[request.slot].cascades += 1;
+
+            if (settings.distantOccluders) {
+                plan.directional[request.slot].farTile = firstTile;
+                plan.directional[request.slot].distantReach = settings.directionalCasterReach;
+            }
         }
         else if (request.kind == ShadowKind::Mirror) {
             // The mirror's view from the glass to its farthest surface (never past the shadow distance), the same way.
@@ -501,6 +506,8 @@ void attachShadows(GpuLights& lights, const ShadowPlan& plan) {
         lights.directional[slot].tanAngularRadius = plan.directional[slot].emitterRadius;
         lights.directional[slot].mirrorShadowTile = plan.directional[slot].mirrorFirstTile;
         lights.directional[slot].mirrorCascadeCount = plan.directional[slot].mirrorCascades;
+        lights.directional[slot].farShadowTile = plan.directional[slot].farTile;
+        lights.directional[slot].distantOccluderReach = plan.directional[slot].distantReach;
     }
 
     for (std::size_t slot = 0; slot < plan.spots.size(); ++slot) {
@@ -573,5 +580,6 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Mirror cascade resolution", settings.mirrorCascadeResolution, cascadeResolutionNames);
     visitor.field("Far shadow distance", settings.farShadowDistance, {.min = 0.0f, .max = 100000.0f, .sliderMax = 20000.0f, .unit = "m (0 off)"});
     visitor.choice("Far shadow resolution", settings.farShadowResolution, cascadeResolutionNames);
+    visitor.field("Distant occluders", settings.distantOccluders);
     visitor.field("Normal offset", settings.normalOffsetTexels, {.min = 0.0f, .sliderMax = 6.0f, .unit = "texels"});
 }

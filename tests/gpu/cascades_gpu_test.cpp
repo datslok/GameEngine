@@ -44,6 +44,38 @@ namespace {
         }
     }
 
+    // Points kilometres from the camera moved up to 2 km towards suns all round, and pairs of shadows (glass tints):
+    // (point, reach), (towards the sun), (the cascade's shadow), (the distant blockers').
+    void checkDistantOccluders(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{24};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 300; ++i) {
+            const Vec3 toLight = Vec3{random.between(-1.0f, 1.0f), random.between(0.05f, 1.0f), random.between(-1.0f, 1.0f)}.normalized();
+            inputs.push_back(gpuVec4(random.between(-3000.0f, 3000.0f), random.between(-50.0f, 800.0f), random.between(-3000.0f, 3000.0f),
+                                     random.between(0.0f, 2000.0f)));
+            inputs.push_back(gpuVec4(toLight.x, toLight.y, toLight.z));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+            inputs.push_back(gpuVec4(random.between(0.0f, 1.0f), random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)));
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_DISTANT_OCCLUDERS, inputs, 4, 2);
+
+        for (std::size_t i = 0; i < inputs.size() / 4; ++i) {
+            const GpuVec4& point = inputs[4 * i];
+            const GpuVec4& toLight = inputs[4 * i + 1];
+            const GpuVec4& cascade = inputs[4 * i + 2];
+            const GpuVec4& distant = inputs[4 * i + 3];
+            const Vec3 moved = distantOccluderPoint(Vec3{point[0], point[1], point[2]}, Vec3{toLight[0], toLight[1], toLight[2]}, point[3]);
+            const Vec3 darker = withDistantOccluders(Vec3{cascade[0], cascade[1], cascade[2]}, Vec3{distant[0], distant[1], distant[2]});
+
+            for (int axis = 0; axis < 3; ++axis) {
+                report.check("distantOccluderPoint", arithmeticTolerance, moved[axis], outputs[2 * i][static_cast<std::size_t>(axis)]);
+                report.check("withDistantOccluders", exactTolerance, darker[axis], outputs[2 * i + 1][static_cast<std::size_t>(axis)]);
+            }
+        }
+    }
+
     // Edges either side of the band, bands down to none: (edge distance, band, weight, noise).
     void checkBlendAndDither(GpuFunctionRunner& runner, GpuCheckReport& report) {
         CaseRandom random{22};
@@ -69,4 +101,5 @@ void gpuTestCascades(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkEdgeDistance(runner, report);
     checkBlendAndDither(runner, report);
     checkSunBias(runner, report);
+    checkDistantOccluders(runner, report);
 }

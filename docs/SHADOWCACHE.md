@@ -65,3 +65,36 @@ No source compares the two head to head.
 - With the sun moving (a running clock), the still copy goes stale every frame anyway and the tile is redrawn whole, as now.
 
 **Virtual shadow maps** (phase 14) would replace the cascades and the far map; see ROADMAP.md for what they need and why they wait.
+
+# Distant occluders in the near cascades: research
+
+Gathered on Nov 14, 2026, after the user saw the floating islands (400-700 m up) shadow the Monolith when looking towards the sun but not when looking at it.
+
+## The problem
+
+- Each cascade's box takes casters only `directionalCasterReach` (200 m) towards the sun past its sphere.
+- An island 500 m up is outside every cascade's box, so a point the cascades hold is lit under it; the same point read from the far shadow map (5 km, which holds the island) is shadowed.
+- A reach of 2000 m fixed it, but the islands were then drawn into every cascade: shadows went from about 2 to 6 ms (the user's overlay). Rejected as a default.
+
+## What engines do
+
+| Approach | Who | Notes | Source |
+|---|---|---|---|
+| No limit towards the sun, casters clamped onto the near plane (pancaking, depth clamp) | Unity, common practice | right, but every tall caster is drawn into every cascade: our 2000 m test's cost | [Unity](https://docs.unity3d.com/2019.2/Documentation/Manual/DirLightShadows.html), [GameDev.net](https://gamedev.net/forums/topic/639036-shadow-mapping-and-high-up-objects/5034143/) |
+| Pancaked depth breaks blocker-distance soft shadows (PCSS): a clamped caster looks as near as the plane | VulkanSceneGraph | why a far caster's penumbra cannot come from a pancaked cascade | [discussion](https://github.com/vsg-dev/VulkanSceneGraph/discussions/991) |
+| Far cascades for flagged casters (landscape) **past** the dynamic shadow distance, not inside it | Unreal 4/5 (`bCastFarShadow`, `FarShadowDistance`) | no compositing into the near cascades | [Epic](https://docs.unrealengine.com/4.27/en-US/API/Runtime/Engine/Components/UDirectionalLightComponent/FarShadowDistance/index.html) |
+| Ray-traced distance field shadows past the cascades | Unreal 4/5 | again only past the near range; with virtual shadow maps both are used | [Epic](https://dev.epicgames.com/documentation/unreal-engine/using-distance-field-shadows-in-unreal-engine) |
+| One virtual map covering everything, pages cached | Unreal 5 virtual shadow maps | no reach problem at all: the real cure (our phase 14) | [Epic](https://dev.epicgames.com/documentation/unreal-engine/virtual-shadow-maps-in-unreal-engine) |
+| Cached far maps, movers in the cascades | CryEngine 3, Cyberpunk 2077 | see the first half of this doc | |
+
+No source found describes reading a coarse map's distant blockers inside the near cascades. The idea is this doc's own, built from parts the sources do describe (two maps combined by a minimum, way (b) above).
+
+## The plan: one tap of the far map, distant blockers only
+
+- Where a near cascade shades a point, also take **one hardware-filtered comparison** of the far map (the row's last tile), with the reference depth moved `directionalCasterReach` towards the sun.
+- So only blockers more than the reach towards the sun count: exactly the casters a cascade may have left out. Nearer ones, already in the cascade, are skipped, and so is the far map's own coarse self-shadowing (its 2.7 m texels would otherwise darken every slope).
+- The two are combined by a **minimum**, not a product: a caster within the cascade's box but further than the reach (a point deep inside the sphere) is in both, and the minimum does not darken it twice.
+- **Softness:** the sun's disc blurs a shadow by about a hundredth of the caster's height (5 m under an island 500 m up), wider than the far map's 2.7 m texels, so one bilinear comparison is near enough; more taps if edges show.
+- **Readers:** the main pass (`sunCascadeRow`), the fog (`sunShadowInAir`), the reflection probe's capture (the same shader library).
+- **Cost:** one texture read per pixel in the cascades, about 0.1-0.3 ms (to be measured). No extra drawing: the far map is drawn already.
+- **Limits:** a caster under two far texels (5.4 m) is not in the far map, so small things more than 200 m up cast nothing in the cascades (as now). With the far map off, nothing changes.

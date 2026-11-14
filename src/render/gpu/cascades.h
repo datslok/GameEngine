@@ -145,3 +145,16 @@ inline constexpr float maxSunBiasSlope = static_cast<float>(MAX_SUN_BIAS_SLOPE);
 * nDotL is the cosine of that angle.
 */
 float sunShadowBias(float baseOffset, float nDotL);
+
+/*
+* Distant occluders (docs/SHADOWCACHE.md): a cascade takes casters only ShadowSettings::directionalCasterReach towards the
+* sun past its box, so an island 600 m up casts nothing into it, while the far shadow map holds it. Where a cascade shades
+* a point, the shader also takes one comparison of the far map from the point moved that reach towards the sun: moving
+* along the sun's rays changes only its depth there, so only blockers further than the reach count, which are the ones
+* the cascade may have left out, and never the far map's coarse texels' own self-shadowing.
+*/
+Vec3 distantOccluderPoint(const Vec3& position, const Vec3& toLight, float reach);
+
+// The cascade's shadow with the distant blockers': the darker of the two, colour by colour, not their product, since a
+// caster further than the reach can still be inside the cascade's box (for a point deep inside it) and in both.
+Vec3 withDistantOccluders(const Vec3& cascadeShadow, const Vec3& distantShadow);

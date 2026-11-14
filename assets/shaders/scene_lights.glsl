@@ -13,6 +13,8 @@ struct DirectionalLightData {
     float tanAngularRadius; // its size as seen from the ground, for soft shadows
     int mirrorShadowTile;   // the first of its cascades for a flat mirror's picture, tried where none of its own holds a point
     int mirrorCascadeCount;
+    int farShadowTile;          // its far shadow map's tile, read inside its cascades for distant occluders (-1 none)
+    float distantOccluderReach; // how far towards the sun that tap's point moves (the cascades' caster reach)
 };
 
 struct PointLightData {
