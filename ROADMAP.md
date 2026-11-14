@@ -335,14 +335,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] More assets: 15 more CC0 assets, layered rock, concrete, panels, painted metal, grating, ivy, a broad-leaved plant and a leaf (`more-assets`)
 - [x] The far mist in the pillars' shadows: the fog past the grid shaded by the sun's shadows along each pixel's ray (`fog-far-shadows`)
 - [x] The sky visibility grid's cascades blended over half their reach, no line round the camera on lumpy ground (`sky-cascade-blend`)
-- [ ] The pillars and floating islands, generated
-  - [x] The rock: projected scanned sandstone painted by one layer cake of beds for the valley, streaks, moss facing up (`rock-strata`)
-  - [x] Carved shapes: each pillar and island its own mesh in metres, ledges, joints, a broken top (`rock-strata`)
-  - [x] Textures without a visible repeat: hex tiling on the rock and the ground, tone variation (`rock-strata`)
-  - [x] Roots and vines hanging under the islands: bark tubes, ivy leaves on cut-out cards (`island-roots`)
-  - [x] Hanging moss: a strand texture the game draws on crossed cut-out cards, from root tips, the islands' undersides and the pillars' ledges (`hanging-moss`)
-  - [ ] Smaller rocks drifting round the islands and some pillars, bobbing and orbiting slowly, shaped as the islands are, casting shadows into the far shadow map for shafts through the mist (the user's choice, Nov 14 2026: its cost to be measured) (`drifting-rocks`, waiting for the user's look)
-  - The pillars' and islands' crowns of trees moved to the forest item (Nov 14 2026), so one generator grows them all.
+- [x] The pillars and floating islands: carved strata rock without visible repeats, roots and vines, hanging moss, drifting rocks (`rock-strata`, `island-roots`, `hanging-moss`, `drifting-rocks`; the crowns moved to the forest item)
 - [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), on the valley floor and as crowns on the pillars' tops and the islands, the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The structures, half reclaimed
