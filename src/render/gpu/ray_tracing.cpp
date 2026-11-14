@@ -4,6 +4,11 @@
 #include <stdexcept>
 
 std::uint32_t rayMaskFor(const DrawItem& draw) {
+    // A shadow map's stand-in is no surface: kept in the list (instances are numbered by draw), met by no ray.
+    if (draw.shadowOnly) {
+        return 0u;
+    }
+
     if (isTransparent(draw.material)) {
         return glassRayMask;
     }

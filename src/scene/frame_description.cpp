@@ -43,6 +43,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             const Mat4 model = entityMatrix * part.localTransform;
             frame.draws.push_back(DrawItem{part.mesh, model, part.material, modelRenderer.castsShadows, modelRenderer.isStatic, BoundingSphere{},
                                            history != nullptr ? history->previous(entity, index) : std::nullopt});
+            frame.draws.back().shadowOnly = modelRenderer.shadowOnly;
 
             if (history != nullptr) {
                 history->remember(entity, index, model);

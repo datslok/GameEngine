@@ -161,9 +161,12 @@ public:
     ForestDriftSettings& getDriftSettings();
     // The rocks drifting round the islands and some pillars.
     const std::vector<Entity>& getDriftingRocks() const;
+    // The canopy trees' settings and places, and the emergents' (docs/JUNGLE.md).
     ForestTreeSettings& getTreeSettings();
     const std::vector<TreePlacement>& getTreePlacements() const;
-    // Each tree's bark and then its leaves, tree by tree.
+    ForestTreeSettings& getEmergentSettings();
+    const std::vector<TreePlacement>& getEmergentPlacements() const;
+    // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, then the emergents.
     const std::vector<Entity>& getTrees() const;
 
 private:
@@ -176,8 +179,13 @@ private:
     // The pillars, islands, the Ring, the Monolith and the far towers.
     void buildShapes(World& world, AssetManager& assets);
 
-    // The emergent trees between the Ring and the clearing: a few variants grown, each placed many times.
+    // The trees between the Ring and the clearing: the emergents placed first and the canopy trees round them, each
+    // species a few variants grown, each placed many times.
     void buildTrees(World& world, AssetManager& assets);
+
+    // One species' variants grown and its placed trees added, bark then leaves, with its leaf material.
+    void plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
+                    std::uint32_t variantSeed, const Material& leaf);
 
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
@@ -192,6 +200,7 @@ private:
     ForestMossSettings mossSettings;
     ForestDriftSettings driftSettings;
     ForestTreeSettings treeSettings;
+    ForestTreeSettings emergentSettings = emergentTreeSettings();
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -207,6 +216,7 @@ private:
     std::vector<Entity> mossEntities;
     std::vector<Entity> driftingRocks;
     std::vector<TreePlacement> treePlacements;
+    std::vector<TreePlacement> emergentPlacements;
     std::vector<Entity> trees;
     Entity ring;
     std::vector<Entity> monolith;

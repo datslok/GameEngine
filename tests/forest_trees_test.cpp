@@ -621,6 +621,26 @@ namespace {
         assert(near(tree.trunkRadius, settings.twigRadius * std::pow(static_cast<float>(tree.tipCount), 1.0f / leonardoExponent), 1e-3f * tree.trunkRadius));
         assert(trianglesFaceTheirNormals(tree.bark));
 
+        /*
+        * The shadow leaves (the shadow passes' stand-in, drawn into shadows only): shadowCardsPerNode cards at the same
+        * nodes and shadowFillCards in each clump, each shadowCardScale times as big, so a fraction of the cards (the
+        * cost of turning the camera, which redraws the sun's cascades) cast most of the leaves' cover.
+        */
+        assert(tree.shadowCardCount > 0 && tree.shadowLeaves.vertices.size() == static_cast<std::size_t>(tree.shadowCardCount) * 4);
+        assert(3 * tree.shadowCardCount <= tree.cardCount);
+        const auto cardArea = [](const IndexedMesh& mesh) {
+            float area = 0.0f;
+
+            for (std::size_t index = 0; index + 2 < mesh.indices.size(); index += 3) {
+                const Vec3& a = mesh.vertices[mesh.indices[index]].position;
+                area += 0.5f * (mesh.vertices[mesh.indices[index + 1]].position - a).cross(mesh.vertices[mesh.indices[index + 2]].position - a).length();
+            }
+
+            return area;
+        };
+        const float coverShare = cardArea(tree.shadowLeaves) / cardArea(tree.leaves);
+        assert(coverShare > 0.4f && coverShare < 1.0f);
+
         float lowest = 1e9f;
         float widestAtGround = 0.0f;
 
@@ -706,7 +726,7 @@ namespace {
     }
 
     /*
-    * The emergents' places: within their stretch of the floor, clear of the path, each other and the pillars, sized
+    * The canopy trees' places: within their stretch of the floor, clear of the path, each other and the pillars, sized
     * and turned at random, standing on the lowest ground round the trunk, blocking no sight line, the same every run;
     * where every place would block a line, none is planted.
     */
@@ -714,7 +734,7 @@ namespace {
         const ForestTreeSettings settings;
         const std::vector<PillarPlacement> pillars = placePillars(ValleyLayout{});
         const std::vector<SightLine> lines = forestSightLines();
-        const std::vector<TreePlacement> trees = placeTrees(settings, pillars, lines);
+        const std::vector<TreePlacement> trees = placeTrees(settings, pillars, lines, {}, canopyPlaceSeed);
         assert(trees.size() >= 8 && trees.size() <= static_cast<std::size_t>(settings.count));
         std::set<int> variants;
 
@@ -743,7 +763,7 @@ namespace {
         }
 
         assert(variants.size() >= 2);
-        const std::vector<TreePlacement> again = placeTrees(settings, pillars, lines);
+        const std::vector<TreePlacement> again = placeTrees(settings, pillars, lines, {}, canopyPlaceSeed);
         assert(again.size() == trees.size() && again.back().foot.x == trees.back().foot.x && again.back().turnRadians == trees.back().turnRadians);
 
         // A wall of sight lines at crown height across the whole stretch leaves no room.
@@ -753,7 +773,7 @@ namespace {
             wall.push_back(SightLine{Vec3{-400.0f, treeCrown(settings).centre.y, z}, Vec3{400.0f, treeCrown(settings).centre.y, z}});
         }
 
-        assert(placeTrees(settings, pillars, wall).empty());
+        assert(placeTrees(settings, pillars, wall, {}, canopyPlaceSeed).empty());
     }
 
     /*
@@ -773,13 +793,90 @@ namespace {
         assert(near(none.y, -100.0f, 1e-4f) && forestPathDistance(none.x, none.y) < 0.1f);
     }
 
+    /*
+    * The canopy trees at the canopy's top (20-40 m, docs/JUNGLE.md), forking low, their leaves real-sized (15-25 cm, the
+    * user's choice after the 30-40 cm ones made the trees read small), on cards that keep the clusters' twigs as full as
+    * before (the leaf's share of a card unchanged).
+    */
     void testTheSettings() {
         const ForestTreeSettings settings;
-        assert(settings.count == 12 && settings.variants == 4 && settings.crownRadius == 13.0f && settings.limbs == 4 && settings.clumps == 12 && settings.clusterSize == 2.0f);
+        assert(settings.height >= 35.0f && settings.height <= 40.0f && settings.forkHeight < 0.4f * settings.height);
+        assert(settings.count >= 20 && settings.variants == 4 && settings.limbs == 4);
+        assert(settings.leafLength >= 0.15f && settings.leafLength <= 0.25f);
+        assert(settings.leafLength / settings.clusterSize >= 0.2f);
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 19 && counter.live == 0);
+        assert(counter.fields == 22 && counter.live == 0);
+        assert(settings.shadowCardsPerNode >= 1 && settings.shadowCardsPerNode < settings.cardsPerNode && settings.shadowCardScale > 1.0f);
+    }
+
+    /*
+    * The emergents (docs/JUNGLE.md): 50-60 m, a clear trunk to over 60% of their height, a crown about half their height
+    * across, a few of them, leaves as the canopy trees' so both share one clusters' texture.
+    */
+    void testTheEmergentSettings() {
+        const ForestTreeSettings emergent = emergentTreeSettings();
+        const ForestTreeSettings canopy;
+        assert(emergent.height >= 50.0f && emergent.height <= 60.0f && emergent.forkHeight >= 0.6f * emergent.height);
+        assert(2.0f * emergent.crownRadius >= 0.45f * emergent.height && 2.0f * emergent.crownRadius <= 0.55f * emergent.height);
+        assert(emergent.count >= 3 && emergent.count <= 8 && emergent.count < canopy.count);
+        assert(emergent.leafLength == canopy.leafLength && emergent.clusterSize == canopy.clusterSize && emergent.clusterTexels == canopy.clusterTexels);
+    }
+
+    /*
+    * An emergent grown: its bark reaching its height (within a little either way: the crown's tips), and no leaves on the
+    * clear trunk, none lower than halfway up.
+    */
+    void testAnEmergentIsBuilt() {
+        ForestTreeSettings settings = emergentTreeSettings();
+        settings.attractors = 400;
+        const TreeMeshes tree = growTreeMeshes(settings, 23u, 1.5f);
+        float barkTop = -1e9f;
+        float lowestLeaf = 1e9f;
+
+        for (const MeshVertex& vertex : tree.bark.vertices) {
+            barkTop = std::max(barkTop, vertex.position.y);
+        }
+
+        for (const MeshVertex& vertex : tree.leaves.vertices) {
+            lowestLeaf = std::min(lowestLeaf, vertex.position.y);
+        }
+
+        assert(barkTop > 0.85f * settings.height && barkTop < 1.05f * settings.height);
+        assert(lowestLeaf > 0.5f * settings.height);
+    }
+
+    /*
+    * The canopy trees are placed after the emergents and keep clear of them: no canopy trunk inside an emergent's crown,
+    * as none is inside another canopy tree's. Each species throws its own darts.
+    */
+    void testCanopyTreesKeepClearOfEmergents() {
+        const std::vector<PillarPlacement> pillars = placePillars(ValleyLayout{});
+        const std::vector<SightLine> lines = forestSightLines();
+        const ForestTreeSettings emergentSettings = emergentTreeSettings();
+        const ForestTreeSettings canopySettings;
+        const std::vector<TreePlacement> emergents = placeTrees(emergentSettings, pillars, lines, {}, emergentPlaceSeed);
+        assert(!emergents.empty());
+        const std::vector<StandingCrown> standing = standingCrowns(emergents, emergentSettings);
+        assert(standing.size() == emergents.size());
+        assert(near(standing.front().radius, placedCrownRadius(emergents.front(), emergentSettings), 1e-5f));
+
+        const std::vector<TreePlacement> canopy = placeTrees(canopySettings, pillars, lines, standing, canopyPlaceSeed);
+        const std::vector<TreePlacement> alone = placeTrees(canopySettings, pillars, lines, {}, canopyPlaceSeed);
+        assert(!canopy.empty());
+        bool differs = canopy.size() != alone.size();
+
+        for (std::size_t i = 0; i < canopy.size(); ++i) {
+            for (const StandingCrown& crown : standing) {
+                assert((Vec2{canopy[i].foot.x, canopy[i].foot.z} - crown.foot).length() >= crown.radius);
+            }
+
+            differs = differs || canopy[i].foot.x != alone[i].foot.x;
+        }
+
+        assert(differs);
+        assert(placeTrees(emergentSettings, pillars, lines, {}, canopyPlaceSeed).front().foot.x != emergents.front().foot.x);
     }
 
     /*
@@ -794,12 +891,20 @@ namespace {
 
         const std::vector<TreePlacement>& placed = game.getTreePlacements();
         const std::vector<Entity>& trees = game.getTrees();
-        assert(!placed.empty() && trees.size() == 2 * placed.size());
+        assert(!placed.empty() && trees.size() > 3 * placed.size());
         std::set<std::uint32_t> barkMeshes;
 
         for (std::size_t tree = 0; tree < placed.size(); ++tree) {
-            const Entity bark = trees[2 * tree];
-            const Entity leaves = trees[2 * tree + 1];
+            const Entity bark = trees[3 * tree];
+            const Entity leaves = trees[3 * tree + 1];
+            const Entity shadowLeaves = trees[3 * tree + 2];
+
+            // The leaves seen cast no shadow; their stand-in casts it and is never seen, placed as they are.
+            assert(!world.get<ModelRenderer>(leaves).castsShadows && !world.get<ModelRenderer>(leaves).shadowOnly);
+            assert(world.get<ModelRenderer>(shadowLeaves).castsShadows && world.get<ModelRenderer>(shadowLeaves).shadowOnly);
+            assert(world.get<ModelRenderer>(bark).castsShadows && !world.get<ModelRenderer>(bark).shadowOnly);
+            assert(world.get<Transform>(shadowLeaves).position.x == placed[tree].foot.x && world.get<Transform>(shadowLeaves).scale.z == placed[tree].scale);
+            assert(isCutOut(world.get<ModelRenderer>(shadowLeaves).parts.front().material));
             const Transform& pose = world.get<Transform>(bark);
             assert(pose.position.x == placed[tree].foot.x && pose.position.y == placed[tree].foot.y && pose.scale.x == placed[tree].scale);
             assert(world.get<Transform>(leaves).position.z == placed[tree].foot.z && world.get<Transform>(leaves).scale.y == placed[tree].scale);
@@ -813,6 +918,15 @@ namespace {
         }
 
         assert(barkMeshes.size() <= static_cast<std::size_t>(game.getTreeSettings().variants));
+
+        // The emergents after them, the same way, each its bark and its leaves.
+        const std::vector<TreePlacement>& emergents = game.getEmergentPlacements();
+        assert(!emergents.empty() && trees.size() == 3 * (placed.size() + emergents.size()));
+
+        for (std::size_t tree = 0; tree < emergents.size(); ++tree) {
+            const Transform& pose = world.get<Transform>(trees[3 * (placed.size() + tree)]);
+            assert(pose.position.x == emergents[tree].foot.x && pose.scale.x == emergents[tree].scale);
+        }
     }
 }
 
@@ -837,5 +951,8 @@ void testForestTrees() {
     testTreesArePlaced();
     testTheStartAmongTheTrees();
     testTheSettings();
+    testTheEmergentSettings();
+    testAnEmergentIsBuilt();
+    testCanopyTreesKeepClearOfEmergents();
     testTheGamePlantsThem();
 }

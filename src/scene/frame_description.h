@@ -43,6 +43,9 @@ struct DrawItem {
     // (motion vectors for temporal anti-aliasing). None on its first frame, or without a history: treated as not moving.
     std::optional<Mat4> previousModel;
 
+    // Drawn into shadow maps only (ModelRenderer::shadowOnly): no camera view picks it (visibleDraws), no ray meets it.
+    bool shadowOnly = false;
+
     // The mesh's flat faces (scene/flat_faces.h, attachFlatFaces), held by the engine, which planar reflections choose from.
     std::span<const FlatFace> flatFaces{};
 

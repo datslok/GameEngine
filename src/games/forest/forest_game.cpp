@@ -32,6 +32,7 @@ namespace {
 
     // The trees' variants' seeds.
     constexpr std::uint32_t treeVariantSeed = 0x4752'4f57u;
+    constexpr std::uint32_t emergentVariantSeed = 0x454d'4752u;
 
     // The day's hours for the golden views: mid-morning (the sun low in the east, light across the valley), and dusk.
     constexpr float morningHours = 9.5f;
@@ -391,41 +392,63 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 
 /*
 * The variants are grown on every core, each into its own slot, and drawn only. Every tree of a variant shares its two
-* meshes, so the GPU draws all of them in one instanced draw each; each is turned and scaled by its Transform. Not
+* meshes, so the GPU draws all of them in one instanced draw each; each is turned and scaled by its Transform. The
+* leaves seen cast no shadow: their shadow leaves, fewer and bigger cards drawn into shadows only, cast it. Not
 * static yet: the trunks and leaves join the sky visibility grid's rays with the forest floor.
 */
 void ForestGame::buildTrees(World& world, AssetManager& assets) {
-    treePlacements = placeTrees(treeSettings, pillars, forestSightLines());
+    const std::vector<SightLine> sightLines = forestSightLines();
+    emergentPlacements = placeTrees(emergentSettings, pillars, sightLines, {}, emergentPlaceSeed);
+    treePlacements = placeTrees(treeSettings, pillars, sightLines, standingCrowns(emergentPlacements, emergentSettings), canopyPlaceSeed);
 
-    if (treePlacements.empty()) {
+    if (treePlacements.empty() && emergentPlacements.empty()) {
         return;
     }
 
-    const std::size_t variants = static_cast<std::size_t>(std::max(treeSettings.variants, 1));
+    // Both species' leaves from one clusters' texture while their leaves and texels match (the defaults).
+    const auto leafFor = [&](const ForestTreeSettings& settings) {
+        return forestLeafClusterMaterial(assets, assetFolder, forestTreeLeafTint, settings.clusterTexels, settings.leafLength / settings.clusterSize);
+    };
+    const Material canopyLeaf = leafFor(treeSettings);
+    const bool sameLeaves = emergentSettings.clusterTexels == treeSettings.clusterTexels &&
+                            emergentSettings.leafLength / emergentSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
+    plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf);
+    plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings));
+}
+
+void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
+                            std::uint32_t variantSeed, const Material& leaf) {
+    if (placements.empty()) {
+        return;
+    }
+
+    const std::size_t variants = static_cast<std::size_t>(std::max(settings.variants, 1));
     std::vector<TreeMeshes> grown(variants);
     getJobs().parallelFor(variants, 1, [&](std::size_t variant) {
-        grown[variant] = growTreeMeshes(treeSettings, forestShapeSeed(treeVariantSeed, static_cast<std::uint32_t>(variant) + 1),
-                                        forestTreeBarkLayer.tileMetres);
+        grown[variant] = growTreeMeshes(settings, forestShapeSeed(variantSeed, static_cast<std::uint32_t>(variant) + 1), forestTreeBarkLayer.tileMetres);
     });
 
     std::vector<MeshHandle> barkMeshes;
     std::vector<MeshHandle> leafMeshes;
+    std::vector<MeshHandle> shadowLeafMeshes;
 
     for (TreeMeshes& variant : grown) {
         barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
         leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
+        shadowLeafMeshes.push_back(assets.addDrawnMesh(std::move(variant.shadowLeaves)));
     }
 
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
-    const Material leaf = forestLeafClusterMaterial(assets, assetFolder, forestTreeLeafTint, treeSettings.clusterTexels,
-                                                     treeSettings.leafLength / treeSettings.clusterSize);
 
-    for (const TreePlacement& tree : treePlacements) {
+    for (const TreePlacement& tree : placements) {
         const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),
                              .scale = Vec3{tree.scale, tree.scale, tree.scale}};
         const std::size_t variant = static_cast<std::size_t>(tree.variant);
         trees.push_back(addShape(world, barkMeshes[variant], bark, pose));
         trees.push_back(addShape(world, leafMeshes[variant], leaf, pose));
+        world.get<ModelRenderer>(trees.back()).castsShadows = false;
+        trees.push_back(addShape(world, shadowLeafMeshes[variant], leaf, pose));
+        world.get<ModelRenderer>(trees.back()).shadowOnly = true;
     }
 }
 
@@ -556,8 +579,11 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Drifting rocks", [&] {
         visit(driftSettings, visitor);
     });
-    visitor.group("Trees", [&] {
+    visitor.group("Canopy trees", [&] {
         visit(treeSettings, visitor);
+    });
+    visitor.group("Emergent trees", [&] {
+        visit(emergentSettings, visitor);
     });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
@@ -703,6 +729,14 @@ ForestTreeSettings& ForestGame::getTreeSettings() {
 
 const std::vector<TreePlacement>& ForestGame::getTreePlacements() const {
     return treePlacements;
+}
+
+ForestTreeSettings& ForestGame::getEmergentSettings() {
+    return emergentSettings;
+}
+
+const std::vector<TreePlacement>& ForestGame::getEmergentPlacements() const {
+    return emergentPlacements;
 }
 
 const std::vector<Entity>& ForestGame::getTrees() const {
