@@ -1554,6 +1554,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The atlas did not grow:** the far tile takes one of the two 4096 squares beside Ultra's cascades. So that lamps keep their shadows (the light lab's street), it gives way first when the atlas is short, down to 1024.
   - **Changes elsewhere:** the light lab sees 1 km, so it now has far shadows past 200 m (its golden images will differ; not re-saved). The demo (100 m) and the cloth lab (200 m) are unchanged.
   - **Checked:** the tests (release, tests first); the debug and release games build without warnings. Not run: the game (the user's look).
+  - **The user's answer** (Nov 14 2026): "great". Merged.
 
 ## Tools outside the phases
 
