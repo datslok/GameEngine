@@ -1,0 +1,3 @@
+meshoptimizer v0.22 (commit 4affad0, Oct 24 2024), https://github.com/zeux/meshoptimizer
+src/*.cpp, src/meshoptimizer.h and the licence (MIT), unmodified. Used to simplify scanned meshes (the forest's understorey plants).
+To update: copy src/ from a newer tag and note it here.

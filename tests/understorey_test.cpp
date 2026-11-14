@@ -1,0 +1,187 @@
+#include "games/forest/understorey.h"
+#include "games/forest/forest_game.h"
+#include "games/forest/forest_terrain.h"
+#include "games/forest/forest_trees.h"
+#include "assets/asset_manager.h"
+#include "ecs/world.h"
+#include "scene/model_renderer.h"
+
+#include "forest_helpers.h"
+#include "test_levels.h"
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cmath>
+#include <vector>
+
+namespace {
+    // A few trunks along the path's stretch, to keep clear of.
+    std::vector<StandingCrown> someTrunks() {
+        std::vector<StandingCrown> trunks;
+
+        for (float z = -200.0f; z <= -50.0f; z += 25.0f) {
+            trunks.push_back(StandingCrown{Vec2{valleyAxis(z) + 20.0f, z}, 1.0f});
+        }
+
+        return trunks;
+    }
+
+    /*
+    * The understorey's places (docs/JUNGLE.md, The understorey): on the trees' stretch of the floor, clear of the path
+    * and every trunk, on the ground, no plant blocking a sight line; every kind, each scaled within its range; thick
+    * near the path and thinning away from it; the same every run.
+    */
+    void testTheUnderstoreyIsPlaced() {
+        const ForestUnderstoreySettings settings;
+        const std::vector<StandingCrown> trunks = someTrunks();
+        const std::vector<SightLine> lines = forestSightLines();
+        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, trunks, lines);
+        assert(plants.size() > 1000);
+        std::array<int, understoreyKindCount> kinds{};
+        float nearCount = 0.0f;
+        float farCount = 0.0f;
+
+        for (const UnderstoreyPlacement& plant : plants) {
+            assert(plant.foot.z >= treeNorthmost && plant.foot.z <= treeSouthmost);
+            assert(std::fabs(plant.foot.x - valleyAxis(plant.foot.z)) <= treeSpread);
+            const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
+            assert(fromPath >= settings.pathClearance);
+            assert(near(plant.foot.y, forestHeight(plant.foot.x, plant.foot.z) - understoreySinkMetres, 1e-4f));
+            assert(plant.variantPick >= 0.0f && plant.variantPick < 1.0f);
+
+            for (const StandingCrown& trunk : trunks) {
+                assert((Vec2{plant.foot.x, plant.foot.z} - trunk.foot).length() >= trunk.radius + settings.trunkClearance);
+            }
+
+            assert(plant.scale >= 1.0f - understoreyScaleSpread - 1e-5f && plant.scale <= 1.0f + understoreyScaleSpread + 1e-5f);
+            assert(!blocksSight(understoreyCentre(settings, plant), understoreyRadius(settings, plant), lines));
+            ++kinds[static_cast<std::size_t>(plant.kind)];
+            nearCount += fromPath < settings.nearPathMetres ? 1.0f : 0.0f;
+            farCount += fromPath > settings.farPathMetres ? 1.0f : 0.0f;
+        }
+
+        for (int count : kinds) {
+            assert(count > 100);
+        }
+
+        // Thicker near the path: there the plants per grid cell are near one; far out, about farShare of that.
+        assert(nearCount > 0.0f && farCount > 0.0f);
+
+        const std::vector<UnderstoreyPlacement> again = placeUnderstorey(settings, trunks, lines);
+        assert(again.size() == plants.size() && again.back().foot.x == plants.back().foot.x && again.back().kind == plants.back().kind);
+    }
+
+    // The near share is all of the grid's cells there, the far one farShare of them: compared per square metre on a wide
+    // stretch with no trunks or sight lines.
+    void testTheUnderstoreyThinsAwayFromThePath() {
+        const ForestUnderstoreySettings settings;
+        const std::vector<UnderstoreyPlacement> plants = placeUnderstorey(settings, {}, {});
+        int near = 0;
+        int far = 0;
+
+        for (const UnderstoreyPlacement& plant : plants) {
+            const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
+            near += fromPath >= settings.pathClearance + settings.spacing && fromPath < settings.nearPathMetres ? 1 : 0;
+            far += fromPath > settings.farPathMetres ? 1 : 0;
+        }
+
+        // Cells near the path are all kept, far ones about farShare of them; both
+        // bands' areas are measured by the grid's own cells, counted with nothing kept out.
+        ForestUnderstoreySettings everything = settings;
+        everything.farShare = 1.0f;
+        int nearCells = 0;
+        int farCells = 0;
+
+        for (const UnderstoreyPlacement& plant : placeUnderstorey(everything, {}, {})) {
+            const float fromPath = forestPathDistance(plant.foot.x, plant.foot.z);
+            nearCells += fromPath >= settings.pathClearance + settings.spacing && fromPath < settings.nearPathMetres ? 1 : 0;
+            farCells += fromPath > settings.farPathMetres ? 1 : 0;
+        }
+
+        const float nearShare = static_cast<float>(near) / static_cast<float>(nearCells);
+        const float farShare = static_cast<float>(far) / static_cast<float>(farCells);
+        assert(nearShare > 0.95f && farShare > settings.farShare - 0.1f && farShare < settings.farShare + 0.1f);
+    }
+
+    /*
+    * A kind's scale against its scan: its tallest plant brought to the kind's height, the others scaled alike, so they
+    * stay smaller.
+    */
+    void testAKindsTallestPlantSetsItsScale() {
+        IndexedMesh tall = buildIndexedMesh(Mesh::grid(2, 2, 1.0f, 0.4f));
+        IndexedMesh small = buildIndexedMesh(Mesh::grid(2, 2, 1.0f, 0.1f));
+        const std::vector<IndexedMesh> plants{footedPlant(small), footedPlant(tall)};
+        assert(near(understoreyKindScale(plants, 1.6f), 4.0f, 1e-5f));
+        assert(understoreyKindScale({}, 1.6f) == 1.0f);
+    }
+
+    // A scanned plant stood on its foot: its lowest point at the ground, centred over the origin.
+    void testAPlantStandsOnItsFoot() {
+        IndexedMesh plant = buildIndexedMesh(Mesh::grid(4, 4, 1.0f, 2.0f));
+
+        for (MeshVertex& vertex : plant.vertices) {
+            vertex.position = vertex.position + Vec3{3.0f, 5.0f, -2.0f};
+        }
+
+        const IndexedMesh stood = footedPlant(plant);
+        const Aabb bounds = indexedMeshBounds(stood);
+        assert(near(bounds.minimum.y, 0.0f, 1e-5f) && near(bounds.maximum.y, 2.0f, 1e-5f));
+        assert(near(bounds.minimum.x + bounds.maximum.x, 0.0f, 1e-5f) && near(bounds.minimum.z + bounds.maximum.z, 0.0f, 1e-5f));
+    }
+
+    /*
+    * Its settings: every field named once, all read at start-up. Each kind's tallest plant is a jungle plant's height
+    * (1-2 m: the scans are house plants 0.2-0.5 m tall).
+    */
+    void testTheUnderstoreySettings() {
+        ForestUnderstoreySettings settings;
+        assert(settings.keepShare > settings.shadowKeepShare && settings.farShare < 1.0f);
+
+        for (int kind = 0; kind < understoreyKindCount; ++kind) {
+            const float height = understoreyHeight(settings, static_cast<UnderstoreyKind>(kind));
+            assert(height >= 1.0f && height <= 2.0f);
+        }
+
+        FieldCounter counter;
+        visit(settings, counter);
+        assert(counter.fields == 13 && counter.live == 0);
+    }
+
+    /*
+    * The game plants them (stand-ins without the scans): each plant its leaves, seen and casting no shadow, and its
+    * shadow's stand-in, drawn into shadows only, placed, turned and scaled as its placement says; clear of every tree's
+    * trunk.
+    */
+    void testTheGamePlantsTheUnderstorey() {
+        TestForest forest;
+        World& world = forest.world;
+        ForestGame& game = forest.game;
+        const std::vector<UnderstoreyPlacement>& placed = game.getUnderstoreyPlacements();
+        const std::vector<Entity>& plants = game.getUnderstorey();
+        assert(!placed.empty() && plants.size() == 2 * placed.size());
+
+        for (std::size_t plant = 0; plant < placed.size(); plant += 97) {
+            const ModelRenderer& leaves = world.get<ModelRenderer>(plants[2 * plant]);
+            const ModelRenderer& shadow = world.get<ModelRenderer>(plants[2 * plant + 1]);
+            assert(!leaves.castsShadows && !leaves.shadowOnly && shadow.castsShadows && shadow.shadowOnly);
+            const Transform& pose = world.get<Transform>(plants[2 * plant]);
+            assert(pose.position.x == placed[plant].foot.x && pose.scale.y == placed[plant].scale);
+            assert(world.get<Transform>(plants[2 * plant + 1]).position.z == placed[plant].foot.z);
+
+            for (const TreePlacement& tree : game.getTreePlacements()) {
+                assert((Vec2{placed[plant].foot.x, placed[plant].foot.z} - Vec2{tree.foot.x, tree.foot.z}).length() >=
+                       ForestUnderstoreySettings{}.trunkClearance);
+            }
+        }
+    }
+}
+
+void testUnderstorey() {
+    testTheUnderstoreyIsPlaced();
+    testTheUnderstoreyThinsAwayFromThePath();
+    testAPlantStandsOnItsFoot();
+    testAKindsTallestPlantSetsItsScale();
+    testTheUnderstoreySettings();
+    testTheGamePlantsTheUnderstorey();
+}

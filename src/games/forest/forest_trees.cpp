@@ -624,7 +624,8 @@ int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, co
 }
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
-    visitor.field("Trees", settings.count, {.min = 0, .max = 500, .sliderMax = 50, .applies = FieldApplies::AtStartup});
+    visitor.field("Trees", settings.count, {.min = 0, .max = 5000, .sliderMax = 2000, .applies = FieldApplies::AtStartup});
+    visitor.field("Spacing share", settings.spacingShare, {.min = 0.1f, .max = 2.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Variants", settings.variants, {.min = 1, .max = 32, .sliderMax = 8, .applies = FieldApplies::AtStartup});
     visitor.field("Height", settings.height, {.min = 2.0f, .max = 120.0f, .sliderMax = 60.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Fork height", settings.forkHeight, {.min = 0.5f, .max = 100.0f, .sliderMax = 30.0f, .unit = "m", .applies = FieldApplies::AtStartup});
@@ -650,7 +651,8 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
 
 ForestTreeSettings emergentTreeSettings() {
     ForestTreeSettings settings;
-    settings.count = 5;
+    settings.count = 10;
+    settings.spacingShare = 1.0f;
     settings.variants = 3;
     settings.height = 55.0f;
     settings.forkHeight = 36.0f;
@@ -666,7 +668,8 @@ ForestTreeSettings emergentTreeSettings() {
 
 ForestTreeSettings midTreeSettings() {
     ForestTreeSettings settings;
-    settings.count = 400;
+    settings.count = 1200;
+    settings.spacingShare = 0.6f;
     settings.variants = 4;
     settings.height = 15.0f;
     settings.forkHeight = 10.0f;
@@ -926,7 +929,7 @@ std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const 
 
         // Each trunk outside the other's crown's middle, and every crown clear of the pillars (which bulge and lean).
         const bool crowded = std::any_of(trees.begin(), trees.end(), [&](const TreePlacement& other) {
-            return (Vec2{x, z} - Vec2{other.foot.x, other.foot.z}).length() < std::max(radius, placedCrownRadius(other, settings));
+            return (Vec2{x, z} - Vec2{other.foot.x, other.foot.z}).length() < settings.spacingShare * std::max(radius, placedCrownRadius(other, settings));
         });
         const bool byPillar = std::any_of(pillars.begin(), pillars.end(), [&](const PillarPlacement& pillar) {
             return (Vec2{x, z} - Vec2{pillar.foot.x, pillar.foot.z}).length() < 1.3f * pillar.radius + radius;
