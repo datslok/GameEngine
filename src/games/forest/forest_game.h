@@ -8,6 +8,7 @@
 #include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/understorey.h"
 #include "games/forest/valley_shapes.h"
 #include "gameplay/control_mode.h"
 #include "gameplay/player_controls.h"
@@ -171,6 +172,10 @@ public:
     const std::vector<TreePlacement>& getMidPlacements() const;
     // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, the emergents, the mid layer.
     const std::vector<Entity>& getTrees() const;
+    // The understorey's settings and places, and each plant's leaves and then its shadow's stand-in, plant by plant.
+    ForestUnderstoreySettings& getUnderstoreySettings();
+    const std::vector<UnderstoreyPlacement>& getUnderstoreyPlacements() const;
+    const std::vector<Entity>& getUnderstorey() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -190,6 +195,10 @@ private:
     void plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
                     std::uint32_t variantSeed, const Material& leaf);
 
+    // The understorey under the trees: each kind's scanned plants (or a stand-in) stood on their feet and simplified,
+    // placed many times.
+    void buildUnderstorey(World& world, AssetManager& assets);
+
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
 
@@ -205,6 +214,7 @@ private:
     ForestTreeSettings treeSettings;
     ForestTreeSettings emergentSettings = emergentTreeSettings();
     ForestTreeSettings midSettings = midTreeSettings();
+    ForestUnderstoreySettings understoreySettings;
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -222,6 +232,8 @@ private:
     std::vector<TreePlacement> treePlacements;
     std::vector<TreePlacement> emergentPlacements;
     std::vector<TreePlacement> midPlacements;
+    std::vector<UnderstoreyPlacement> understoreyPlacements;
+    std::vector<Entity> understorey;
     std::vector<Entity> trees;
     Entity ring;
     std::vector<Entity> monolith;

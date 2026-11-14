@@ -245,7 +245,7 @@ The project is developed on **Windows** with **MSYS2** (UCRT64 environment). You
 | Vulkan headers and validation layers | Building the renderer, and checking it in debug builds |
 | A GPU and driver with Vulkan support | Running the game (not needed for the tests) |
 
-Everything else is included in `external/`, so it needs no install: cgltf, Dear ImGui, MikkTSpace, volk, vk-bootstrap, the Vulkan Memory Allocator, AMD's FSR 3.1 (headers and its signed DLL, which the build copies beside the game) and NVIDIA Streamline's headers. DLSS's DLLs are the one thing to fetch, and only for DLSS (step 4 below).
+Everything else is included in `external/`, so it needs no install: cgltf, Dear ImGui, MikkTSpace, meshoptimizer, volk, vk-bootstrap, the Vulkan Memory Allocator, AMD's FSR 3.1 (headers and its signed DLL, which the build copies beside the game) and NVIDIA Streamline's headers. DLSS's DLLs are the one thing to fetch, and only for DLSS (step 4 below).
 
 ## Install
 
@@ -558,6 +558,7 @@ external/
   streamline      NVIDIA Streamline's headers (v2.14.16); its DLLs fetched into bin/ (git-ignored)
   imgui           Vendored Dear ImGui (the debug UI), with its SDL3 and Vulkan backends
   mikktspace      Vendored MikkTSpace (tangents for normal maps, C)
+  meshoptimizer   Vendored meshoptimizer (simplifying scanned meshes)
   volk            Vendored volk (loads Vulkan's functions from the driver, C)
   vk-bootstrap    Vendored vk-bootstrap (Vulkan instance, GPU and device set-up)
   vma             Vendored Vulkan Memory Allocator
@@ -576,6 +577,7 @@ build/            Build output (git-ignored)
 - [cgltf](https://github.com/jkuhlmann/cgltf) by Johannes Kuhlmann, for glTF parsing
 - [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut, for the debug UI
 - [MikkTSpace](https://github.com/mmikk/MikkTSpace) by Morten S. Mikkelsen, for tangents (zlib licence)
+- [meshoptimizer](https://github.com/zeux/meshoptimizer) by Arseny Kapoulkine, for simplifying meshes (MIT licence)
 - [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) v1.1.4, for FSR 3.1 upscaling (MIT licence)
 - **NVIDIA DLSS**, through [NVIDIA Streamline](https://github.com/NVIDIA-RTX/Streamline) v2.14.16 (Streamline MIT; DLSS under the NVIDIA RTX SDK licence). NVIDIA, the NVIDIA logo and DLSS are trademarks of NVIDIA Corporation.
 - The Yale Bright Star Catalogue, 5th revised edition (Hoffleit and Warren 1991, from the [CDS](https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50)), for the stars (`assets/stars/`)

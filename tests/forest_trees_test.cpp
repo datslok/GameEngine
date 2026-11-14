@@ -754,7 +754,7 @@ namespace {
 
             for (std::size_t j = 0; j < i; ++j) {
                 const float apart = (Vec2{tree.foot.x, tree.foot.z} - Vec2{trees[j].foot.x, trees[j].foot.z}).length();
-                assert(apart >= std::max(radius, placedCrownRadius(trees[j], settings)));
+                assert(apart >= settings.spacingShare * std::max(radius, placedCrownRadius(trees[j], settings)));
             }
 
             for (const PillarPlacement& pillar : pillars) {
@@ -808,7 +808,10 @@ namespace {
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 22 && counter.live == 0);
+        assert(counter.fields == 23 && counter.live == 0);
+
+        // Four times the first patch's crown cover (the user, Nov 14 2026): more trees, their crowns interlocking.
+        assert(settings.count >= 80 && settings.spacingShare < 0.6f);
         assert(settings.shadowCardsPerNode >= 1 && settings.shadowCardsPerNode < settings.cardsPerNode && settings.shadowCardScale > 1.0f);
     }
 
@@ -821,18 +824,18 @@ namespace {
         const ForestTreeSettings canopy;
         assert(emergent.height >= 50.0f && emergent.height <= 60.0f && emergent.forkHeight >= 0.6f * emergent.height);
         assert(2.0f * emergent.crownRadius >= 0.45f * emergent.height && 2.0f * emergent.crownRadius <= 0.55f * emergent.height);
-        assert(emergent.count >= 3 && emergent.count <= 8 && emergent.count < canopy.count);
+        assert(emergent.count >= 8 && emergent.count <= 12 && emergent.count < canopy.count && emergent.spacingShare == 1.0f);
         assert(emergent.leafLength == canopy.leafLength && emergent.clusterSize == canopy.clusterSize && emergent.clusterTexels == canopy.clusterTexels);
     }
 
     /*
-    * The mid layer (docs/JUNGLE.md): 400 slender trees 10-20 m tall, their crowns shallow (less deep than wide) and from
+    * The mid layer (docs/JUNGLE.md): 1200 slender trees 10-20 m tall, their crowns shallow (less deep than wide) and from
     * over half their height, under the canopy crowns' bottom, leaves as the canopy trees'.
     */
     void testTheMidLayerSettings() {
         const ForestTreeSettings mid = midTreeSettings();
         const ForestTreeSettings canopy;
-        assert(mid.count == 400 && mid.height >= 10.0f && mid.height <= 20.0f && mid.forkHeight >= 0.55f * mid.height);
+        assert(mid.count == 1200 && mid.spacingShare < 1.0f && mid.height >= 10.0f && mid.height <= 20.0f && mid.forkHeight >= 0.55f * mid.height);
         assert(mid.height - mid.forkHeight < 2.0f * mid.crownRadius);
         assert(mid.height * 1.15f < canopy.forkHeight);
         assert(mid.leafLength == canopy.leafLength && mid.clusterSize == canopy.clusterSize && mid.clusterTexels == canopy.clusterTexels);
@@ -859,7 +862,7 @@ namespace {
 
         const ForestTreeSettings midSettings = midTreeSettings();
         const std::vector<TreePlacement> mid = placeTrees(midSettings, pillars, lines, trunks, midPlaceSeed);
-        assert(mid.size() > 300);
+        assert(mid.size() > 900);
         int underACrown = 0;
 
         for (const TreePlacement& tree : mid) {

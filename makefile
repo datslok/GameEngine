@@ -57,7 +57,7 @@ MAIN_SOURCE := src/app/main.cpp
 # Vendored libraries compiled with the engine: Dear ImGui (the debug UI) and its SDL3 and Vulkan backends,
 # vk-bootstrap (Vulkan device set-up) and the Vulkan Memory Allocator, and in C, MikkTSpace (tangents for normal maps)
 # and volk (Vulkan function loading).
-EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-bootstrap/*.cpp) $(wildcard external/vma/*.cpp)
+EXTERNAL_SOURCES := $(wildcard external/imgui/*.cpp) $(wildcard external/vk-bootstrap/*.cpp) $(wildcard external/vma/*.cpp) $(wildcard external/meshoptimizer/*.cpp)
 EXTERNAL_C_SOURCES := $(wildcard external/mikktspace/*.c) $(wildcard external/volk/*.c)
 ENGINE_SOURCES := $(filter-out $(MAIN_SOURCE),$(SOURCES)) $(EXTERNAL_SOURCES)
 TEST_SOURCES := $(wildcard tests/*.cpp)

@@ -144,9 +144,14 @@ std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius)
 * emergents 45-60 m above it.
 */
 struct ForestTreeSettings {
-    // How many trees stand between the Ring and the clearing, and how many different shapes they are grown in.
-    int count = 28;
+    // How many trees stand between the Ring and the clearing, and how many different shapes they are grown in. Four
+    // times the first patch's crown cover (the user, Nov 14 2026: "the tall coverage isnt there").
+    int count = 80;
     int variants = 4;
+
+    // How close two trunks of the species may stand, as a share of the larger crown's radius: below 1 their crowns
+    // interlock, as a closed canopy's do.
+    float spacingShare = 0.55f;
 
     // The tree's top and where its trunk forks into limbs, above the ground, and the crown's radius across (metres):
     // a canopy tree at the canopy's top, its crown from about half its height (docs/JUNGLE.md, The mid layer's shape:
@@ -199,14 +204,14 @@ struct ForestTreeSettings {
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
 
 /*
-* The emergents' settings (docs/JUNGLE.md): a few trees 55 m tall standing over the canopy, a clear trunk to 36 m and a
+* The emergents' settings (docs/JUNGLE.md): ten trees 55 m tall, standing apart (their whole crown's radius), standing over the canopy, a clear trunk to 36 m and a
 * wide crown spread from its top, about half their height across, as real emergents' are; bigger buttresses, little
 * lean. Their leaves are the canopy trees', so both share one clusters' texture.
 */
 ForestTreeSettings emergentTreeSettings();
 
 /*
-* The mid layer's settings (docs/JUNGLE.md): 400 slender trees 15 m tall in the canopy's shade, a trunk 20-40 cm across,
+* The mid layer's settings (docs/JUNGLE.md): 1200 slender trees 15 m tall, their crowns interlocking, in the canopy's shade, a trunk 20-40 cm across,
 * a shallow crown from 10 m about 5 m in radius with few clumps (shade trees have flatter crowns and fewer leaf layers),
 * placed under and between the canopy crowns. Their leaves are the canopy trees'.
 */

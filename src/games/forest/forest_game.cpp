@@ -6,6 +6,7 @@
 #include "games/forest/forest_terrain.h"
 #include "games/forest/valley_strata.h"
 #include "scene/indexed_mesh.h"
+#include "scene/simplify_mesh.h"
 #include "gameplay/first_person_body.h"
 #include "math/transform.h"
 #include "scene/light.h"
@@ -14,6 +15,7 @@
 #include "scene/sun.h"
 
 #include <array>
+#include <filesystem>
 #include <utility>
 
 namespace {
@@ -236,6 +238,7 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     buildGround(world, assets);
     buildShapes(world, assets);
     buildTrees(world, assets);
+    buildUnderstorey(world, assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -424,6 +427,103 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     plantTrees(world, assets, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings));
 }
 
+namespace {
+    // A scanned plant's mesh in the file's frame: its part's vertices placed by the part's transform (normals and
+    // tangents turned by its normal matrix and made unit again).
+    IndexedMesh placedPart(const ModelPart& part) {
+        IndexedMesh mesh = buildIndexedMesh(*part.mesh);
+        const Mat4 normals = normalMatrix(part.transform);
+
+        for (MeshVertex& vertex : mesh.vertices) {
+            vertex.position = transformPoint(part.transform, vertex.position);
+            vertex.normal = transformDirection(normals, vertex.normal).normalized();
+            const Vec3 tangent = transformDirection(part.transform, Vec3{vertex.tangent.x, vertex.tangent.y, vertex.tangent.z}).normalized();
+            vertex.tangent = Vec4{tangent.x, tangent.y, tangent.z, vertex.tangent.w};
+        }
+
+        return mesh;
+    }
+
+    // The trunks the understorey keeps clear of, each as far round as its buttresses reach (the big trees') or its
+    // trunk (the mid layer's).
+    constexpr float bigTrunkReach = 2.0f;
+    constexpr float midTrunkReach = 0.4f;
+
+    // The stand-in plant's green.
+    constexpr Pixel understoreyStandInColour{58, 92, 40};
+
+    // One variant of a kind: its seen mesh, its shadow's stand-in and its material.
+    struct PlantVariant {
+        MeshHandle leaves;
+        MeshHandle shadow;
+        Material material;
+    };
+}
+
+void ForestGame::buildUnderstorey(World& world, AssetManager& assets) {
+    std::vector<StandingCrown> trunks = standingTrunks(treePlacements, bigTrunkReach);
+    const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, bigTrunkReach);
+    const std::vector<StandingCrown> midTrunks = standingTrunks(midPlacements, midTrunkReach);
+    trunks.insert(trunks.end(), emergentTrunks.begin(), emergentTrunks.end());
+    trunks.insert(trunks.end(), midTrunks.begin(), midTrunks.end());
+    understoreyPlacements = placeUnderstorey(understoreySettings, trunks, forestSightLines());
+
+    if (understoreyPlacements.empty()) {
+        return;
+    }
+
+    std::array<std::vector<PlantVariant>, understoreyKindCount> variants;
+
+    for (int kind = 0; kind < understoreyKindCount; ++kind) {
+        const std::string name = understoreyScanName(static_cast<UnderstoreyKind>(kind));
+        const std::filesystem::path file = std::filesystem::path{assetFolder} / name / (name + "_1k.gltf");
+
+        std::vector<IndexedMesh> plants;
+        std::vector<Material> materials;
+
+        if (std::filesystem::exists(file)) {
+            for (const ModelPart& part : assets.loadModel(file.string()).parts) {
+                plants.push_back(footedPlant(placedPart(part)));
+                materials.push_back(assets.makeMaterial(part.material));
+            }
+        }
+
+        if (plants.empty()) {
+            plants.push_back(understoreyStandIn());
+            Material material = plainMaterial(understoreyStandInColour, 0.7f);
+            material.doubleSided = true;
+            materials.push_back(material);
+        }
+
+        // The kind's tallest plant brought to its height, the others scaled alike: baked into the meshes.
+        const float scale = understoreyKindScale(plants, understoreyHeight(understoreySettings, static_cast<UnderstoreyKind>(kind)));
+
+        for (std::size_t plant = 0; plant < plants.size(); ++plant) {
+            for (MeshVertex& vertex : plants[plant].vertices) {
+                vertex.position = vertex.position * scale;
+            }
+
+            variants[static_cast<std::size_t>(kind)].push_back(PlantVariant{
+                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.keepShare, understoreySimplifyError, true)),
+                assets.addDrawnMesh(simplifyMesh(plants[plant], understoreySettings.shadowKeepShare, understoreySimplifyError, false)),
+                materials[plant]});
+        }
+    }
+
+    understorey.reserve(2 * understoreyPlacements.size());
+
+    for (const UnderstoreyPlacement& plant : understoreyPlacements) {
+        const std::vector<PlantVariant>& kind = variants[static_cast<std::size_t>(plant.kind)];
+        const PlantVariant& variant = kind[std::min(static_cast<std::size_t>(plant.variantPick * static_cast<float>(kind.size())), kind.size() - 1)];
+        const Transform pose{.position = plant.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, plant.turnRadians),
+                             .scale = Vec3{plant.scale, plant.scale, plant.scale}};
+        understorey.push_back(addShape(world, variant.leaves, variant.material, pose));
+        world.get<ModelRenderer>(understorey.back()).castsShadows = false;
+        understorey.push_back(addShape(world, variant.shadow, variant.material, pose));
+        world.get<ModelRenderer>(understorey.back()).shadowOnly = true;
+    }
+}
+
 void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
                             std::uint32_t variantSeed, const Material& leaf) {
     if (placements.empty()) {
@@ -596,6 +696,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Mid trees", [&] {
         visit(midSettings, visitor);
     });
+    visitor.group("Understorey", [&] {
+        visit(understoreySettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -756,6 +859,18 @@ ForestTreeSettings& ForestGame::getMidSettings() {
 
 const std::vector<TreePlacement>& ForestGame::getMidPlacements() const {
     return midPlacements;
+}
+
+ForestUnderstoreySettings& ForestGame::getUnderstoreySettings() {
+    return understoreySettings;
+}
+
+const std::vector<UnderstoreyPlacement>& ForestGame::getUnderstoreyPlacements() const {
+    return understoreyPlacements;
+}
+
+const std::vector<Entity>& ForestGame::getUnderstorey() const {
+    return understorey;
 }
 
 const std::vector<Entity>& ForestGame::getTrees() const {
