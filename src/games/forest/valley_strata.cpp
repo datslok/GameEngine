@@ -1,6 +1,7 @@
 #include "games/forest/valley_strata.h"
 
 #include "core/hash.h"
+#include "games/forest/forest_terrain.h"
 #include "math/smooth_step.h"
 
 #include <algorithm>
@@ -21,10 +22,6 @@ namespace {
     constexpr float hardChance = 0.22f;
     constexpr float smallestToneStep = 0.3f;
 
-    float unitRandom(std::uint64_t seed, std::uint64_t index) {
-        return static_cast<float>(mixBits(seed ^ mixBits(index + 0x9e3779b97f4a7c15ull)) >> 40) * (1.0f / 16777216.0f);
-    }
-
     /*
     * Value noise that repeats every period cells: random values at the corners of a grid wrapped round (cell period is
     * cell 0 again), blended by smoothstep in between. In and out in cells; 0..1.
@@ -37,7 +34,7 @@ namespace {
         const auto corner = [&](int dx, int dy) {
             const int cx = ((static_cast<int>(cellX) + dx) % period + period) % period;
             const int cy = ((static_cast<int>(cellY) + dy) % period + period) % period;
-            return unitRandom(seed, static_cast<std::uint64_t>(cy) * 4096u + static_cast<std::uint64_t>(cx));
+            return forestUnitRandom(seed, static_cast<std::uint64_t>(cy) * 4096u + static_cast<std::uint64_t>(cx));
         };
         const float bottom = corner(0, 0) + (corner(1, 0) - corner(0, 0)) * fx;
         const float top = corner(0, 1) + (corner(1, 1) - corner(0, 1)) * fx;
@@ -92,15 +89,15 @@ std::vector<StrataBand> valleyStrata() {
     float softTone = -1.0f;
 
     for (std::uint64_t bed = 0; bottom < valleyStrataTop; ++bed) {
-        const float thickness = unitRandom(strataSeed, 3 * bed);
-        const bool hard = !belowHard && unitRandom(strataSeed, 3 * bed + 1) < hardChance;
+        const float thickness = forestUnitRandom(strataSeed, 3 * bed);
+        const bool hard = !belowHard && forestUnitRandom(strataSeed, 3 * bed + 1) < hardChance;
         StrataBand band{.bottom = bottom, .hard = hard};
 
         if (hard) {
             band.top = bottom + thinnestHardBed + thickestHardExtra * thickness;
         } else {
             band.top = bottom + thinnestSoftBed + thickestSoftExtra * thickness * thickness;
-            const float random = unitRandom(strataSeed, 3 * bed + 2);
+            const float random = forestUnitRandom(strataSeed, 3 * bed + 2);
 
             // The first anywhere; then a step of 0.3 to 0.7 round the range from the soft bed below, wrapping past 1,
             // so the two always differ by at least 0.3 (the step, or one less it when it wraps).

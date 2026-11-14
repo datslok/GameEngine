@@ -59,6 +59,12 @@ inline constexpr std::size_t forestLitterLayer = 1;
 inline constexpr std::size_t forestMudLayer = 2;
 inline constexpr std::size_t forestRockLayer = 3;
 
+// A random number in 0..1 for (seed, index), the same every run on every machine.
+float forestUnitRandom(std::uint64_t seed, std::uint64_t index);
+
+// A seed of its own for one use of a shape's seed (its outline, its carving, its roots), so the uses do not repeat each other.
+std::uint32_t forestShapeSeed(std::uint32_t seed, std::uint32_t use);
+
 // Smooth value noise (0..1) on a unit lattice: hashed lattice values blended with a quintic fade, so its slope is
 // continuous too. The same place and seed always give the same value.
 float forestValueNoise(float x, float z, std::uint32_t seed);

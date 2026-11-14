@@ -47,6 +47,7 @@ void testHeightMap();
 void testTypicalGpu();
 void testGroundLayers();
 void testForest();
+void testIslandHangings();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
@@ -299,6 +300,7 @@ int main(int argumentCount, char** arguments) {
     testPlayerControls();
     testLightLab();
     testForest();
+    testIslandHangings();
     testFlashlight();
     testRawImagePng();
     testTangents();
