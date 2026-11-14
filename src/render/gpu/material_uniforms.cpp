@@ -1,4 +1,5 @@
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/ground_layers.h"
 #include "render/gpu/material_shared.h"
 #include "render/gpu/transparency.h"
 #include "core/srgb.h"
@@ -80,7 +81,18 @@ GpuMaterial packMaterial(const Material& material) {
         }
 
         data.groundWeights[0] = bindlessTextureSlot(material.groundWeights);
+        data.groundWeights[1] = (material.groundProjected ? groundProjectedFlag : 0u) | (material.groundPaint == GroundPaint::Strata ? groundStrataFlag : 0u);
         data.groundBlend[0] = std::max(material.groundBlendDepth, 0.0f);
+
+        // Strata: where the strip starts and how many of it a metre is; the layer that takes over facing up.
+        if (material.groundPaint == GroundPaint::Strata) {
+            const float span = material.strataTop - material.strataBottom;
+            data.groundWeights[2] = material.groundTopLayer >= 0 ? static_cast<std::uint32_t>(material.groundTopLayer) + 1 : 0u;
+            data.groundBlend[1] = material.strataBottom;
+            data.groundBlend[2] = span != 0.0f ? 1.0f / span : 0.0f;
+            data.groundFacing[0] = material.groundTopStart;
+            data.groundFacing[1] = material.groundTopFull;
+        }
     }
 
     return data;

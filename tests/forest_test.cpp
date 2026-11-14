@@ -4,6 +4,7 @@
 #include "games/forest/forest_ground.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/valley_shapes.h"
+#include "games/forest/valley_strata.h"
 #include "physics/static_level.h"
 #include "render/gpu/ground_layers.h"
 #include "scene/atmosphere.h"
@@ -608,6 +609,82 @@ namespace {
         assert(under && near(settled.y, under->hit.point.y, 0.1f));
     }
 
+    /*
+    * The valley's layer cake: beds touching from its bottom to its top, 4 to 30 m thick, no two neighbours the same rock,
+    * every rock used, the same every run; the rock at a height is its bed's.
+    */
+    void testTheStrataAreOneCake() {
+        const std::vector<StrataBand> bands = valleyStrata();
+        assert(bands.size() > 50 && bands.front().bottom == valleyStrataBottom && bands.back().top == valleyStrataTop);
+        std::array<int, valleyStrataRocks> used{};
+
+        for (std::size_t bed = 0; bed < bands.size(); ++bed) {
+            const StrataBand& band = bands[bed];
+            assert(band.rock >= 0 && band.rock < valleyStrataRocks);
+            assert(band.top - band.bottom <= 30.0f + 1e-3f);
+            assert(bed + 1 == bands.size() || band.top - band.bottom >= 4.0f - 1e-3f);
+            used[static_cast<std::size_t>(band.rock)] += 1;
+
+            if (bed > 0) {
+                assert(band.bottom == bands[bed - 1].top && band.rock != bands[bed - 1].rock);
+            }
+
+            assert(strataRockAt(bands, 0.5f * (band.bottom + band.top)) == band.rock);
+        }
+
+        for (const int count : used) {
+            assert(count > 5);
+        }
+
+        const std::vector<StrataBand> again = valleyStrata();
+        assert(again.size() == bands.size() && again[17].top == bands[17].top && again[17].rock == bands[17].rock);
+    }
+
+    /*
+    * The strip the rock is painted by: one texel tall, each texel's rocks adding up to one (within 8-bit rounding) and
+    * the moss's channel empty; a texel inside one bed is all that bed's rock.
+    */
+    void testTheStrataStripHoldsTheBeds() {
+        const std::vector<StrataBand> bands = valleyStrata();
+        const int texels = 1024;
+        const ImageData image = strataImage(bands, texels);
+        assert(image.width == static_cast<std::uint32_t>(texels) && image.height == 1 && image.encoding == TextureEncoding::Linear);
+        const float texelMetres = (valleyStrataTop - valleyStrataBottom) / static_cast<float>(texels);
+
+        for (int texel = 0; texel < texels; ++texel) {
+            const std::uint8_t* pixel = &image.pixels[static_cast<std::size_t>(texel) * 4];
+            assert(std::abs(pixel[0] + pixel[1] + pixel[2] - 255) <= 2 && pixel[3] == 0);
+            const float low = valleyStrataBottom + texelMetres * static_cast<float>(texel);
+
+            if (strataRockAt(bands, low) == strataRockAt(bands, low + texelMetres - 1e-3f)) {
+                assert(pixel[strataRockAt(bands, low)] == 255);
+            }
+        }
+    }
+
+    /*
+    * The pillars and islands share the rock: four layers projected in metres (the tile sizes' inverses), painted by the
+    * strata strip over the cake's heights, the moss on top; with no downloaded assets, the layers' stand-in colours.
+    */
+    void testThePillarsAreMadeOfTheStrata() {
+        Forest forest;
+        assert(forest.game.getRockShapes().size() == forest.game.getPillars().size() + forest.game.getIslands().size());
+        const Material& rock = forest.world.get<ModelRenderer>(forest.game.getRockShapes().front()).parts.front().material;
+        assert(rock.groundLayers.size() == 4 && rock.groundProjected && rock.groundPaint == GroundPaint::Strata && rock.groundWeights.isValid());
+        assert(rock.strataBottom == valleyStrataBottom && rock.strataTop == valleyStrataTop && rock.groundTopLayer == forestMossLayer);
+
+        for (std::size_t layer = 0; layer < 4; ++layer) {
+            assert(near(rock.groundRepeats[layer], 1.0f / forestRockLayers[layer].tileMetres, 1e-7f));
+            const Pixel standIn = forestRockLayers[layer].standIn;
+            const Pixel colour = rock.groundLayers[layer].colour;
+            assert(colour.r == standIn.r && colour.g == standIn.g && colour.b == standIn.b);
+        }
+
+        for (const Entity shape : forest.game.getRockShapes()) {
+            assert(forest.world.get<ModelRenderer>(shape).parts.front().material.groundWeights == rock.groundWeights);
+        }
+    }
+
     // forest-view places the camera at a named view and refuses names there are none of.
     void testViewsHaveACommand() {
         Forest forest;
@@ -637,6 +714,14 @@ namespace {
         const float farDepth = forest.world.get<ModelRenderer>(forest.game.getFarGround().front()).parts.front().material.groundBlendDepth;
         assert(farDepth > 0.45f && farDepth <= 1.0f);
 
+        forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f};
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+
+        for (const Entity shape : forest.game.getRockShapes()) {
+            const Material& rock = forest.world.get<ModelRenderer>(shape).parts.front().material;
+            assert(rock.groundBlendDepth == 0.6f && rock.groundTopStart == 0.4f && rock.groundTopFull == 0.9f);
+        }
+
         forest.game.getMistSettings().enabled = true;
         forest.game.getSunSettings().solarHours = 18.5f;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
@@ -658,6 +743,9 @@ void testForest() {
     testCoarsePaintBlendsSofter();
     testLayerFilesAreFoundByRole();
     testTheGameBuildsTheValley();
+    testTheStrataAreOneCake();
+    testTheStrataStripHoldsTheBeds();
+    testThePillarsAreMadeOfTheStrata();
     testViewsHaveACommand();
     testSettingsApplyEachFrame();
 }

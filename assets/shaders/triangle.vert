@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "frame_data.glsl"
+#include "ground_layers.glsl"
 #include "instances.glsl"
 #include "planar_reflection.glsl"
 #include "render/gpu/reflection_probe_shared.h"
@@ -38,6 +39,10 @@ layout(location = 4) flat out uint materialIndex;
 layout(location = 5) flat out float objectScale;
 // Where a capture is seen from, measured from the camera (the origin outside captures), for the fragments' view direction.
 layout(location = 6) flat out vec3 viewerPosition;
+// For projected layers (render/gpu/ground_layers.h): the vertex in the object's own axes, in metres, and those axes in the
+// world (the model's rotation), to turn normals into the object's frame and back.
+layout(location = 7) out vec3 framePosition;
+layout(location = 8) flat out mat3 frameAxes;
 
 // The depth prepass runs this same shader, and the main pass then shades only fragments whose depth EQUALS the one the
 // prepass stored. Invariant makes the compiler compute the position the same way in both pipelines, bit for bit (it
@@ -64,6 +69,11 @@ void main() {
 
     // The GPU interpolates UVs across the triangle.
     textureUv = uv;
+
+    // The model is a rotation times a scale: the vertex stretched by the scale is where it sits along the object's axes.
+    vec3 frameScale = projectionScale(mat3(instance.model));
+    frameAxes = projectionAxes(mat3(instance.model), frameScale);
+    framePosition = position * frameScale;
 
     // The normal matrix keeps normals perpendicular to the surface under non-uniform scaling.
     vec3 transformedNormal = mat3(normalMatrix) * normal;

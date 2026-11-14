@@ -18,5 +18,24 @@ void main() {
         GroundPaintTaps taps = groundPaintTaps(testInput(0).xy);
         testOutput(0, vec4(taps.first, taps.second));
         testOutput(1, vec4(taps.firstShare, 0.0, 0.0));
+    } else if (function == GPU_TEST_PROJECTION_WEIGHTS) {
+        // Input: (normal in the object's frame, 0). Output: (the three shares, 0).
+        testOutput(0, vec4(projectionWeights(testInput(0).xyz), 0.0));
+    } else if (function == GPU_TEST_PROJECTED_NORMAL) {
+        // Inputs: (normal, 0), the three tilts, (weights, 0). Output: (bumped normal, 0).
+        testOutput(0, vec4(projectedNormal(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz, testInput(3).xyz, testInput(4).xyz), 0.0));
+    } else if (function == GPU_TEST_STRATA_PAINT) {
+        // Inputs: strata weights, (top layer, upward, start, full). Output: the weights.
+        vec4 options = testInput(1);
+        testOutput(0, strataPaint(testInput(0), int(options.x), options.y, options.z, options.w));
+    } else if (function == GPU_TEST_PROJECTION_FRAME) {
+        // Inputs: the model's three columns (w 0). Outputs: (scale, 0), then the three axes.
+        mat3 model = mat3(testInput(0).xyz, testInput(1).xyz, testInput(2).xyz);
+        vec3 scale = projectionScale(model);
+        mat3 axes = projectionAxes(model, scale);
+        testOutput(0, vec4(scale, 0.0));
+        testOutput(1, vec4(axes[0], 0.0));
+        testOutput(2, vec4(axes[1], 0.0));
+        testOutput(3, vec4(axes[2], 0.0));
     }
 }

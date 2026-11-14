@@ -334,6 +334,8 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Distant shadows: the sun's far shadow map, 5 km round the camera (`far-shadows`)
 - [x] More assets: 15 more CC0 assets, layered rock, concrete, panels, painted metal, grating, ivy, a broad-leaved plant and a leaf (`more-assets`)
 - [ ] The pillars and floating islands, generated
+  - [ ] The rock: the scanned rocks projected along each shape's own axes in metres (triplanar), painted by one layer cake of beds for the whole valley, moss where the rock faces up (`rock-strata`, waiting for the user's look)
+  - [ ] Ledges where the hard beds stick out, from the same cake, so a pillar's outline steps where its colour changes
   - Sandstone pillars: wobbling, tapered columns with ledges, streaks and a crown of trees, in the scanned rock.
   - Floating islands: a rocky underside tapering to a point, a forested top, roots and vines hanging below, smaller rocks drifting round them.
   - Hanging moss generated (strands on cut-out cards, a strand texture the engine makes, coloured from `Moss001`): neither CC0 library has any.

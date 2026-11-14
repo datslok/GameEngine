@@ -24,8 +24,9 @@ struct MaterialData {
     uvec4 coatAndHeightSlots; // in the texture array: x coat amount (linear, red), y coat roughness (linear, green), z coat normal map (linear), w height map (linear, red)
     uvec4 groundLayers;     // a blended ground: each layer's material index plus one (0 none)
     vec4 groundRepeats;     // each layer's repeats over the texture coordinates
-    uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer)
-    vec4 groundBlend;       // x: the height blend's depth
+    uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer); y: GROUND_PROJECTED, GROUND_STRATA; z: the top layer plus one (0 none)
+    vec4 groundBlend;       // x: the height blend's depth; y: the strata's bottom (world height); z: one over their span
+    vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

@@ -22,6 +22,22 @@ struct ForestGroundLayer {
     float standInRoughness;
 };
 
+/*
+* The pillars' and islands' rock, in the strata strip's channel order (games/forest/valley_strata.h): red-brown strata
+* (Poly Haven's cliff_side, a 1.8 m scan, shown 4 m), grey layers (ambientCG's Rock061), big orange blocks (Poly Haven's
+* marble_cliff_03, 5.7 m from the air, shown 12 m, so a band of it reads from far off), and last the moss taking over
+* where the rock faces up (Poly Haven's aerial_rocks_02, 50 m of mossy rock from the air). Projected in metres.
+*/
+inline constexpr std::array<ForestGroundLayer, 4> forestRockLayers{{
+    {"cliff_side", 4.0f, Pixel{150, 96, 70}, 0.9f},
+    {"Rock061", 3.0f, Pixel{138, 130, 120}, 0.9f},
+    {"marble_cliff_03", 12.0f, Pixel{192, 142, 92}, 0.85f},
+    {"aerial_rocks_02", 50.0f, Pixel{92, 104, 68}, 0.9f}
+}};
+
+// The rock layer that takes over facing up.
+inline constexpr int forestMossLayer = 3;
+
 // Grass, leaf litter, mud and mossy rock, in the weights texture's channel order.
 inline constexpr std::array<ForestGroundLayer, 4> forestGroundLayers{{
     {"Grass004", 2.0f, Pixel{70, 100, 45}, 0.9f},
