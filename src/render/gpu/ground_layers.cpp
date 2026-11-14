@@ -1,5 +1,6 @@
 #include "render/gpu/ground_layers.h"
 
+#include "core/hash.h"
 #include "math/smooth_step.h"
 
 #include <algorithm>
@@ -166,4 +167,47 @@ Vec2 streakPlace(const Vec3& framePosition, int axis, float inverseWidth, float 
 
 float streakShade(float streakTexel, float strength, float sideShare) {
     return 1.0f - strength * sideShare * (1.0f - streakTexel);
+}
+
+/*
+* Mikkelsen 2022's triangle grid: the scaled place skewed so the grid's triangles become half squares, its cell and the
+* place's fraction in it; the corner across the diagonal (s) picks which half, and the three barycentric weights follow.
+* Each corner's offset is pcg3d of its cell (its top 24 bits a fraction), so it is the same all over the corner's
+* hexagon and the same on the GPU.
+*/
+HexTaps hexTiling(Vec2 uv) {
+    const float scale = static_cast<float>(GROUND_HEX_SCALE);
+    const Vec2 scaled = uv * scale;
+    const Vec2 skewed{scaled.x - 0.57735027f * scaled.y, 1.15470054f * scaled.y};
+    const Vec2 base{std::floor(skewed.x), std::floor(skewed.y)};
+    const float fx = skewed.x - base.x;
+    const float fy = skewed.y - base.y;
+    const float fz = 1.0f - fx - fy;
+    const float s = -fz >= 0.0f ? 1.0f : 0.0f;
+    const float s2 = 2.0f * s - 1.0f;
+    const Vec3 barycentric{-fz * s2, s - fy * s2, s - fx * s2};
+    const int baseX = static_cast<int>(base.x);
+    const int baseY = static_cast<int>(base.y);
+    const int is = static_cast<int>(s);
+
+    HexTaps taps{};
+    taps.cells = {{{baseX + is, baseY + is}, {baseX + is, baseY + 1 - is}, {baseX + 1 - is, baseY + is}}};
+
+    for (std::size_t tap = 0; tap < 3; ++tap) {
+        const std::array<std::uint32_t, 3> hashed = pcg3d({static_cast<std::uint32_t>(taps.cells[tap][0]), static_cast<std::uint32_t>(taps.cells[tap][1]), 0x48455841u});
+        const Vec2 offset{static_cast<float>(hashed[0] >> 8) * (1.0f / 16777216.0f), static_cast<float>(hashed[1] >> 8) * (1.0f / 16777216.0f)};
+        taps.places[tap] = uv + offset;
+    }
+
+    const Vec3 squared = barycentric * barycentric;
+    const Vec3 sixth = squared * squared * squared;
+    const float total = sixth.x + sixth.y + sixth.z;
+    const float smallest = static_cast<float>(GROUND_HEX_SMALLEST);
+    const Vec3 kept{std::max(sixth.x / total - smallest, 0.0f), std::max(sixth.y / total - smallest, 0.0f), std::max(sixth.z / total - smallest, 0.0f)};
+    taps.weights = kept * (1.0f / (kept.x + kept.y + kept.z));
+    return taps;
+}
+
+float variationShade(float variationTexel, float strength) {
+    return 1.0f + strength * (2.0f * variationTexel - 1.0f);
 }

@@ -11,6 +11,7 @@ namespace {
     constexpr std::uint64_t strataSeed = 0x5354'5241ull;
     constexpr std::uint64_t warpSeed = 0x5741'5250ull;
     constexpr std::uint64_t streakSeed = 0x5354'524bull;
+    constexpr std::uint64_t toneSeed = 0x544f'4e45ull;
 
     // The beds' thicknesses and how often one is hard.
     constexpr float thinnestSoftBed = 15.0f;
@@ -174,6 +175,13 @@ ImageData strataImage(const std::vector<StrataBand>& bands, int texels) {
 ImageData strataWarpImage(int size) {
     return seamlessNoiseImage(size, 4, 4, warpSeed, [](float noise) {
         return 0.5f + (noise - 0.5f) * 2.2f;
+    });
+}
+
+// Three octaves from 4 cells across, stretched like the warp's to reach most of the range.
+ImageData toneVariationImage(int size) {
+    return seamlessNoiseImage(size, 4, 3, toneSeed, [](float noise) {
+        return 0.5f + (noise - 0.5f) * 2.0f;
     });
 }
 

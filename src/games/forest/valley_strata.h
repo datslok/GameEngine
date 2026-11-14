@@ -54,3 +54,9 @@ ImageData strataWarpImage(int size);
 * stains where noise runs high; the material stretches it down the cliffs into streaks.
 */
 ImageData streakImage(int size);
+
+/*
+* The rock's slow tone variation (Material::groundVariation): a seamless square of value noise about the middle (0.5),
+* its own seed, lightening and darkening the rock in patches tens of metres across, as real cliffs vary.
+*/
+ImageData toneVariationImage(int size);

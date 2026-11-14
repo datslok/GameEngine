@@ -5,6 +5,7 @@
 #ifndef GROUND_LAYERS_GLSL
 #define GROUND_LAYERS_GLSL
 
+#include "hash.glsl"
 #include "render/gpu/ground_layers_shared.h"
 
 // The layers' shares from their painted weights and heights (groundBlendWeights in ground_layers.cpp): each painted
@@ -147,6 +148,46 @@ vec2 streakPlace(vec3 framePosition, int axis, float inverseWidth, float inverse
 // The albedo's factor under a streak (streakShade): the stain times the strength, on the sides only.
 float streakShade(float streakTexel, float strength, float sideShare) {
     return 1.0 - strength * sideShare * (1.0 - streakTexel);
+}
+
+// Hex tiling's three taps (hexTiling in ground_layers.cpp, which explains it): where each reads and its weight.
+struct HexTaps {
+    vec2 places[3];
+    vec3 weights;
+};
+
+HexTaps hexTiling(vec2 uv) {
+    vec2 scaled = uv * float(GROUND_HEX_SCALE);
+    vec2 skewed = vec2(scaled.x - 0.57735027 * scaled.y, 1.15470054 * scaled.y);
+    vec2 base = floor(skewed);
+    float fx = skewed.x - base.x;
+    float fy = skewed.y - base.y;
+    float fz = 1.0 - fx - fy;
+    float s = -fz >= 0.0 ? 1.0 : 0.0;
+    float s2 = 2.0 * s - 1.0;
+    vec3 barycentric = vec3(-fz * s2, s - fy * s2, s - fx * s2);
+    ivec2 baseCell = ivec2(base);
+    int is = int(s);
+    ivec2 cells[3] = ivec2[3](baseCell + ivec2(is, is), baseCell + ivec2(is, 1 - is), baseCell + ivec2(1 - is, is));
+
+    HexTaps taps;
+
+    for (int tap = 0; tap < 3; ++tap) {
+        uvec3 hashed = pcg3d(uvec3(uint(cells[tap].x), uint(cells[tap].y), 0x48455841u));
+        taps.places[tap] = uv + vec2(float(hashed.x >> 8u), float(hashed.y >> 8u)) * (1.0 / 16777216.0);
+    }
+
+    vec3 squared = barycentric * barycentric;
+    vec3 sixth = squared * squared * squared;
+    float total = sixth.x + sixth.y + sixth.z;
+    vec3 kept = max(sixth / total - float(GROUND_HEX_SMALLEST), vec3(0.0));
+    taps.weights = kept * (1.0 / (kept.x + kept.y + kept.z));
+    return taps;
+}
+
+// The tone variation's factor (variationShade): its texel (0.5 none) lightening or darkening by up to strength.
+float variationShade(float variationTexel, float strength) {
+    return 1.0 + strength * (2.0 * variationTexel - 1.0);
 }
 
 #endif

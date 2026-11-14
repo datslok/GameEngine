@@ -240,6 +240,36 @@ namespace {
     }
 }
 
+namespace {
+    // Places across a few cells and far out (a 300 m pillar at a 4 m tile is 75 tiles up), on cell corners and edges.
+    void checkHexTiling(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{73};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 400; ++i) {
+            const float spread = i % 3 == 0 ? 3.0f : 120.0f;
+            inputs.push_back(GpuVec4{random.between(-spread, spread), random.between(-spread, spread), random.between(0.0f, 1.0f), random.between(0.0f, 0.5f)});
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_HEX_TILING, inputs, 1, 3);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const HexTaps expected = hexTiling(Vec2{inputs[i][0], inputs[i][1]});
+            const GpuVec4* out = &outputs[i * 3];
+            report.check("hexTiling places", arithmeticTolerance, expected.places[0].x, out[0][0]);
+            report.check("hexTiling places", arithmeticTolerance, expected.places[0].y, out[0][1]);
+            report.check("hexTiling places", arithmeticTolerance, expected.places[1].x, out[0][2]);
+            report.check("hexTiling places", arithmeticTolerance, expected.places[1].y, out[0][3]);
+            report.check("hexTiling places", arithmeticTolerance, expected.places[2].x, out[1][0]);
+            report.check("hexTiling places", arithmeticTolerance, expected.places[2].y, out[1][1]);
+            report.check("variationShade", arithmeticTolerance, variationShade(inputs[i][2], inputs[i][3]), out[1][2]);
+            report.check("hexTiling weights", arithmeticTolerance, expected.weights.x, out[2][0]);
+            report.check("hexTiling weights", arithmeticTolerance, expected.weights.y, out[2][1]);
+            report.check("hexTiling weights", arithmeticTolerance, expected.weights.z, out[2][2]);
+        }
+    }
+}
+
 void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("ground_layers.glsl");
     checkBlendWeights(runner, report);
@@ -249,4 +279,5 @@ void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkStrataPaint(runner, report);
     checkProjectionFrame(runner, report);
     checkWarpAndStreaks(runner, report);
+    checkHexTiling(runner, report);
 }

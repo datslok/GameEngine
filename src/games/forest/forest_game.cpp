@@ -70,12 +70,18 @@ namespace {
     constexpr float streakWidthMetres = 24.0f;
     constexpr float streakLengthMetres = 300.0f;
 
+    // The tone variation's texture: 256 texels repeating every 400 m, so its patches are tens of metres across.
+    constexpr int toneVariationTexels = 256;
+    constexpr float toneVariationTileMetres = 400.0f;
+
     // The rock's tunable parts, applied each frame.
     void applyRockSettings(Material& material, const ForestRockSettings& settings) {
         material.groundBlendDepth = settings.blendDepth;
         material.groundTopStart = settings.mossStart;
         material.groundTopFull = settings.mossFull;
         material.streakStrength = settings.streakStrength;
+        material.groundHexTiling = settings.hexTiling;
+        material.variationStrength = settings.toneVariation;
     }
 
     Material plainMaterial(Pixel colour, float roughness, float metallic = 0.0f) {
@@ -126,6 +132,8 @@ namespace {
         material.groundStreaks = assets.addTexture(streakImage(streakTexels));
         material.streakWidth = streakWidthMetres;
         material.streakLength = streakLengthMetres;
+        material.groundVariation = assets.addTexture(toneVariationImage(toneVariationTexels));
+        material.variationTile = toneVariationTileMetres;
         applyRockSettings(material, settings);
         return material;
     }
@@ -186,6 +194,7 @@ void visit(ForestMistSettings& settings, SettingsVisitor& visitor) {
 
 void visit(ForestGroundSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Blend depth", settings.blendDepth, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Hex tiling", settings.hexTiling);
 }
 
 void visit(ForestRockSettings& settings, SettingsVisitor& visitor) {
@@ -194,6 +203,8 @@ void visit(ForestRockSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Moss full", settings.mossFull, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
     visitor.field("Bed waves", settings.warpMetres, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Streaks", settings.streakStrength, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Hex tiling", settings.hexTiling);
+    visitor.field("Tone variation", settings.toneVariation, {.min = 0.0f, .max = 1.0f});
 }
 
 void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {
@@ -356,11 +367,14 @@ void ForestGame::updateDaylight(World& world) {
         world.remove<Fog>(air);
     }
 
-    world.get<ModelRenderer>(ground).parts.front().material.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels.front());
+    Material& nearGround = world.get<ModelRenderer>(ground).parts.front().material;
+    nearGround.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels.front());
+    nearGround.groundHexTiling = groundSettings.hexTiling;
 
     for (std::size_t far = 0; far < farGround.size(); ++far) {
-        world.get<ModelRenderer>(farGround[far]).parts.front().material.groundBlendDepth =
-            forestBlendDepth(groundSettings.blendDepth, groundTexels[far + 1]);
+        Material& farMaterial = world.get<ModelRenderer>(farGround[far]).parts.front().material;
+        farMaterial.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels[far + 1]);
+        farMaterial.groundHexTiling = groundSettings.hexTiling;
     }
 
     for (const Entity shape : rockShapes) {

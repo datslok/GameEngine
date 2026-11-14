@@ -152,6 +152,15 @@ struct Material {
     float streakStrength = 0.0f;
     float streakWidth = 8.0f;
     float streakLength = 200.0f;
+    // Each layer read by hex tiling (render/gpu/ground_layers.h, hexTiling), so a texture repeated over a big object
+    // shows no repeat; about one to two times the reads.
+    bool groundHexTiling = false;
+    // With projected layers, slow tone variation (variationShade): groundVariation, a linear texture whose red channel
+    // (0.5 none) lightens or darkens the albedo by up to variationStrength, repeating every variationTile metres along
+    // each projection.
+    TextureHandle groundVariation;
+    float variationStrength = 0.0f;
+    float variationTile = 160.0f;
 };
 
 inline bool isCutOut(const Material& material) {

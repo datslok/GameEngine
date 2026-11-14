@@ -45,5 +45,13 @@ void main() {
         vec4 streak = testInput(2);
         vec2 streakUv = streakPlace(place.xyz, int(place.w), streak.x, streak.y);
         testOutput(0, vec4(warpedStrataHeight(warp.x, warp.y, warp.z), streakUv, streakShade(streak.z, streak.w, testInput(3).x)));
+    } else if (function == GPU_TEST_HEX_TILING) {
+        // Input: (uv, variation texel, strength). Outputs: (first tap, second tap), (third tap, variation shade, 0),
+        // (weights, 0).
+        vec4 in0 = testInput(0);
+        HexTaps taps = hexTiling(in0.xy);
+        testOutput(0, vec4(taps.places[0], taps.places[1]));
+        testOutput(1, vec4(taps.places[2], variationShade(in0.z, in0.w), 0.0));
+        testOutput(2, vec4(taps.weights, 0.0));
     }
 }

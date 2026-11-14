@@ -402,7 +402,78 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * Hex tiling: three taps, their weights never negative and adding up to one; each tap the place moved by a whole
+    * random offset in 0..1 of a tile, the same all over its cell (so the texture is not smeared), different from cell to
+    * cell. At a cell's own point only its tap is read; turning the place slowly never makes a weight jump; and most
+    * places read only one or two taps, the small weights dropped.
+    */
+    void testHexTilingHidesTheRepeat() {
+        int fewTaps = 0;
+        const int places = 4000;
+        HexTaps previous = hexTiling(Vec2{0.0f, 0.0f});
+
+        for (int step = 1; step <= places; ++step) {
+            const Vec2 uv{0.0013f * static_cast<float>(step), 0.0007f * static_cast<float>(step) - 1.3f};
+            const HexTaps taps = hexTiling(uv);
+            const float total = taps.weights.x + taps.weights.y + taps.weights.z;
+            assert(near(total, 1.0f, 1e-5f) && taps.weights.x >= 0.0f && taps.weights.y >= 0.0f && taps.weights.z >= 0.0f);
+            fewTaps += (taps.weights.x > 0.0f) + (taps.weights.y > 0.0f) + (taps.weights.z > 0.0f) <= 2 ? 1 : 0;
+
+            for (std::size_t tap = 0; tap < 3; ++tap) {
+                const Vec2 offset = taps.places[tap] - uv;
+                assert(offset.x > -1e-4f && offset.x < 1.0001f && offset.y > -1e-4f && offset.y < 1.0001f);
+            }
+
+            const Vec3 change = taps.weights - previous.weights;
+            const bool sameCells = taps.cells == previous.cells;
+            assert(!sameCells || std::fabs(change.x) + std::fabs(change.y) + std::fabs(change.z) < 0.1f);
+            previous = taps;
+        }
+
+        assert(fewTaps > places / 2);
+
+        // Two places close together in one cell share its offset; two cells far apart do not.
+        const HexTaps a = hexTiling(Vec2{0.1f, 0.1f});
+        const HexTaps b = hexTiling(Vec2{0.1002f, 0.1001f});
+        assert(a.cells == b.cells && near((a.places[0] - Vec2{0.1f, 0.1f}).x, (b.places[0] - Vec2{0.1002f, 0.1001f}).x, 1e-5f));
+        const HexTaps far = hexTiling(Vec2{7.3f, -4.1f});
+        assert((far.places[0] - Vec2{7.3f, -4.1f}).x != (a.places[0] - Vec2{0.1f, 0.1f}).x);
+    }
+
+    // The tone variation: its middle changes nothing, its ends lighten or darken by the strength.
+    void testToneVariation() {
+        assert(variationShade(0.5f, 0.3f) == 1.0f);
+        assert(near(variationShade(1.0f, 0.3f), 1.3f, 1e-6f) && near(variationShade(0.0f, 0.3f), 0.7f, 1e-6f));
+        assert(variationShade(0.9f, 0.0f) == 1.0f);
+    }
+
+    // The switch and the variation in the table, the variation only with its texture.
+    void testTheTableCarriesHexTilingAndVariation() {
+        Material rock;
+        rock.groundLayers.resize(2);
+        rock.groundWeights = TextureHandle{7};
+        rock.groundProjected = true;
+        rock.groundHexTiling = true;
+        rock.groundVariation = TextureHandle{11};
+        rock.variationStrength = 0.25f;
+        rock.variationTile = 160.0f;
+        const GpuMaterial packed = packMaterial(rock);
+        assert((packed.groundWeights[1] & groundHexFlag) != 0 && (packed.groundWeights[1] & groundProjectedFlag) != 0);
+        assert(packed.groundSlots[2] == 12 && packed.groundStreaks[3] == 0.25f && near(packed.groundFacing[3], 1.0f / 160.0f, 1e-9f));
+
+        rock.groundVariation = TextureHandle{};
+        rock.groundHexTiling = false;
+        const GpuMaterial plain = packMaterial(rock);
+        assert((plain.groundWeights[1] & groundHexFlag) == 0 && plain.groundSlots[2] == 0 && plain.groundStreaks[3] == 0.0f);
+    }
+}
+
 void testGroundLayers() {
+    testHexTilingHidesTheRepeat();
+    testToneVariation();
+    testTheTableCarriesHexTilingAndVariation();
     testBedsAreWarpedByTheNoise();
     testStreaksRunDownTheSides();
     testTheTableCarriesWarpAndStreaks();

@@ -24,11 +24,11 @@ struct MaterialData {
     uvec4 coatAndHeightSlots; // in the texture array: x coat amount (linear, red), y coat roughness (linear, green), z coat normal map (linear), w height map (linear, red)
     uvec4 groundLayers;     // a blended ground: each layer's material index plus one (0 none)
     vec4 groundRepeats;     // each layer's repeats over the texture coordinates
-    uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer); y: GROUND_PROJECTED, GROUND_STRATA; z: the top layer plus one (0 none)
+    uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer); y: GROUND_PROJECTED, GROUND_STRATA, GROUND_HEX; z: the top layer plus one (0 none)
     vec4 groundBlend;       // x: the height blend's depth; y: the strata's bottom (world height); z: one over their span; w: the warp's metres
-    vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full; z: one over the warp's tile
-    uvec4 groundSlots;      // x: the strata warp's texture slot; y: the streaks'
-    vec4 groundStreaks;     // x: the streaks' strength; y: one over their width; z: one over their length
+    vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full; z: one over the warp's tile; w: one over the tone variation's
+    uvec4 groundSlots;      // x: the strata warp's texture slot; y: the streaks'; z: the tone variation's
+    vec4 groundStreaks;     // x: the streaks' strength; y: one over their width; z: one over their length; w: the tone variation's strength
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

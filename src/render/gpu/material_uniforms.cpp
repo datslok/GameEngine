@@ -81,7 +81,8 @@ GpuMaterial packMaterial(const Material& material) {
         }
 
         data.groundWeights[0] = bindlessTextureSlot(material.groundWeights);
-        data.groundWeights[1] = (material.groundProjected ? groundProjectedFlag : 0u) | (material.groundPaint == GroundPaint::Strata ? groundStrataFlag : 0u);
+        data.groundWeights[1] = (material.groundProjected ? groundProjectedFlag : 0u) | (material.groundPaint == GroundPaint::Strata ? groundStrataFlag : 0u) |
+                                (material.groundHexTiling ? groundHexFlag : 0u);
         data.groundBlend[0] = std::max(material.groundBlendDepth, 0.0f);
 
         // Strata: where the strip starts and how many of it a metre is; the layer that takes over facing up.
@@ -107,6 +108,13 @@ GpuMaterial packMaterial(const Material& material) {
             data.groundStreaks[0] = std::clamp(material.streakStrength, 0.0f, 1.0f);
             data.groundStreaks[1] = 1.0f / material.streakWidth;
             data.groundStreaks[2] = 1.0f / material.streakLength;
+        }
+
+        // Tone variation over projected layers, only with its texture.
+        if (material.groundProjected && material.groundVariation.isValid() && material.variationTile > 0.0f) {
+            data.groundSlots[2] = bindlessTextureSlot(material.groundVariation);
+            data.groundStreaks[3] = std::clamp(material.variationStrength, 0.0f, 1.0f);
+            data.groundFacing[3] = 1.0f / material.variationTile;
         }
     }
 

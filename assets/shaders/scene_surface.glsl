@@ -928,10 +928,21 @@ void main() {
                                          vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0),
                                          vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0));
 
+        // Nothing painted anywhere reads as the first layer alone (groundBlendWeights' fallback), which must then be read.
+        if (!(painted.x > 0.0 || painted.y > 0.0 || painted.z > 0.0 || painted.w > 0.0)) {
+            painted = vec4(1.0, 0.0, 0.0, 0.0);
+        }
+
+        bool hexTiled = (material.groundWeights.y & GROUND_HEX) != 0u;
+
+        /*
+        * Each layer painted here (one not painted gets no share whatever its height, so it is not read: most rock pixels
+        * read one or two of the four), along each projection with a share, at each hex tap with a weight when hex tiled.
+        */
         for (int layer = 0; layer < 4; ++layer) {
             uint index = material.groundLayers[layer];
 
-            if (index == 0u) {
+            if (index == 0u || painted[layer] <= 0.0) {
                 painted[layer] = 0.0;
                 continue;
             }
@@ -960,17 +971,40 @@ void main() {
                     stepDown = gradientDown * repeats;
                 }
 
-                vec3 layerPacked = textureGrad(textures[nonuniformEXT(ground.textureSlots.y)], layerUv, stepAcross, stepDown).rgb;
-                layerColour[layer] += share * textureGrad(textures[nonuniformEXT(ground.textureSlots.x)], layerUv, stepAcross, stepDown) * ground.baseColour;
-                layerSurface[layer] += share * vec4(clamp(ground.surfaceParameters.x * layerPacked.b, 0.0, 1.0),
-                                                    clamp(ground.surfaceParameters.y * layerPacked.g, BRDF_SMALLEST_ROUGHNESS, 1.0),
-                                                    textureGrad(textures[nonuniformEXT(ground.extra.x)], layerUv, stepAcross, stepDown).r, 0.0);
-                // A layer without a height map stands halfway, and one without a normal map lies flat: their texture slots
-                // hold the white stand-in, which would make the layer the highest and tilt every normal.
-                float heightTexel = textureGrad(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], layerUv, stepAcross, stepDown).r;
-                vec3 normalSample = textureGrad(textures[nonuniformEXT(ground.textureSlots.z)], layerUv, stepAcross, stepDown).rgb;
-                heights[layer] += share * (ground.coatAndHeight.w > 0.0 ? heightTexel : 0.5);
-                layerNormals[layer * 3 + axis] = ground.surfaceParameters.z != 0.0 ? normalSample : vec3(0.5, 0.5, 1.0);
+                HexTaps taps;
+                taps.places[0] = layerUv;
+                taps.weights = vec3(1.0, 0.0, 0.0);
+
+                if (hexTiled) {
+                    taps = hexTiling(layerUv);
+                }
+
+                vec3 axisNormal = vec3(0.0);
+
+                for (int tap = 0; tap < 3; ++tap) {
+                    float weight = taps.weights[tap];
+
+                    if (weight <= 0.0) {
+                        continue;
+                    }
+
+                    // An offset does not change the steps across the pixel, so every tap takes the unmoved place's mip.
+                    vec2 place = taps.places[tap];
+                    float tapShare = share * weight;
+                    vec3 layerPacked = textureGrad(textures[nonuniformEXT(ground.textureSlots.y)], place, stepAcross, stepDown).rgb;
+                    layerColour[layer] += tapShare * textureGrad(textures[nonuniformEXT(ground.textureSlots.x)], place, stepAcross, stepDown) * ground.baseColour;
+                    layerSurface[layer] += tapShare * vec4(clamp(ground.surfaceParameters.x * layerPacked.b, 0.0, 1.0),
+                                                           clamp(ground.surfaceParameters.y * layerPacked.g, BRDF_SMALLEST_ROUGHNESS, 1.0),
+                                                           textureGrad(textures[nonuniformEXT(ground.extra.x)], place, stepAcross, stepDown).r, 0.0);
+                    // A layer without a height map stands halfway, and one without a normal map lies flat: their texture slots
+                    // hold the white stand-in, which would make the layer the highest and tilt every normal.
+                    float heightTexel = textureGrad(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], place, stepAcross, stepDown).r;
+                    vec3 normalSample = textureGrad(textures[nonuniformEXT(ground.textureSlots.z)], place, stepAcross, stepDown).rgb;
+                    heights[layer] += tapShare * (ground.coatAndHeight.w > 0.0 ? heightTexel : 0.5);
+                    axisNormal += weight * (ground.surfaceParameters.z != 0.0 ? normalSample : vec3(0.5, 0.5, 1.0));
+                }
+
+                layerNormals[layer * 3 + axis] = axisNormal;
             }
         }
 
@@ -1012,6 +1046,22 @@ void main() {
             }
 
             albedo.rgb *= streakShade(stain / sideShare, material.groundStreaks.x, sideShare);
+        }
+
+        // Slow tone variation over projected layers (variationShade): its texture along each projection with a share.
+        if (projected && material.groundSlots.z != 0u) {
+            float variation = 0.0;
+
+            for (int axis = 0; axis < 3; ++axis) {
+                if (projectionShares[axis] > 0.0) {
+                    float tile = material.groundFacing.w;
+                    variation += projectionShares[axis] * textureGrad(textures[nonuniformEXT(material.groundSlots.z)], projectedPlace(framePosition, axis) * tile,
+                                                                      projectedPlace(frameStepAcross, axis) * (tile * stepScale),
+                                                                      projectedPlace(frameStepDown, axis) * (tile * stepScale)).r;
+                }
+            }
+
+            albedo.rgb *= variationShade(variation, material.groundStreaks.w);
         }
 
         // Projected: each projection's blended texel decoded in its own plane and the three combined (projectedNormal),

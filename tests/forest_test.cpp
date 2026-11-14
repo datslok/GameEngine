@@ -887,6 +887,7 @@ namespace {
 
         assert(rock.strataWarp.isValid() && rock.strataWarpMetres == forest.game.getRockSettings().warpMetres);
         assert(rock.groundStreaks.isValid() && rock.streakStrength == forest.game.getRockSettings().streakStrength);
+        assert(rock.groundHexTiling && rock.groundVariation.isValid() && rock.variationStrength == forest.game.getRockSettings().toneVariation);
 
         for (std::size_t layer = 0; layer < 4; ++layer) {
             assert(near(rock.groundRepeats[layer], 1.0f / forestRockLayers[layer].tileMetres, 1e-7f));
@@ -931,21 +932,26 @@ namespace {
         Forest forest;
         Input input;
         forest.game.getMistSettings().enabled = false;
+        assert(forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundHexTiling);
         forest.game.getGroundSettings().blendDepth = 0.45f;
+        forest.game.getGroundSettings().hexTiling = false;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(!forest.world.has<Fog>(forest.game.getAir()));
+        assert(!forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundHexTiling);
+        assert(!forest.world.get<ModelRenderer>(forest.game.getFarGround().back()).parts.front().material.groundHexTiling);
         const float nearDepth = forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundBlendDepth;
         assert(near(nearDepth, forestBlendDepth(0.45f, 4.0f * forestFinestPaintTexel), 1e-6f)); // the tests' coarsest ground
         const float farDepth = forest.world.get<ModelRenderer>(forest.game.getFarGround().front()).parts.front().material.groundBlendDepth;
         assert(farDepth > 0.45f && farDepth <= 1.0f);
 
-        forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f, .warpMetres = 6.0f, .streakStrength = 0.2f};
+        forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f, .warpMetres = 6.0f, .streakStrength = 0.2f,
+                                                           .hexTiling = false, .toneVariation = 0.4f};
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
 
         for (const Entity shape : forest.game.getRockShapes()) {
             const Material& rock = forest.world.get<ModelRenderer>(shape).parts.front().material;
             assert(rock.groundBlendDepth == 0.6f && rock.groundTopStart == 0.4f && rock.groundTopFull == 0.9f);
-            assert(rock.streakStrength == 0.2f);
+            assert(rock.streakStrength == 0.2f && !rock.groundHexTiling && rock.variationStrength == 0.4f);
         }
 
         forest.game.getMistSettings().enabled = true;

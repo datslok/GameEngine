@@ -120,3 +120,25 @@ Vec2 streakPlace(const Vec3& framePosition, int axis, float inverseWidth, float 
 * only on the sides (sideShare: the side projections' shares, 0 on what faces straight up or down).
 */
 float streakShade(float streakTexel, float strength, float sideShare);
+
+/*
+* Hex tiling (Heitz and Neyret 2018, in Mikkelsen 2022's practical form), so a texture tiled over a 300 m object shows
+* no repeat. The texture coordinates, scaled by GROUND_HEX_SCALE, fall in a grid of triangles whose corners are the
+* centres of hexagonal cells; each of the three corners reads the texture moved by its own random offset (a whole tile's
+* worth, from pcg3d of the corner), weighted by its barycentric weight to the sixth power, normalised, so each cell shows
+* mostly its own patch with narrow blends between. Weights under GROUND_HEX_SMALLEST are dropped. Offsets only, no
+* turning: the sandstone's layers stay level and normal maps need no turning either. A tap's mips come from the
+* unmoved coordinates' steps, which an offset does not change.
+*/
+inline constexpr std::uint32_t groundHexFlag = GROUND_HEX;
+
+struct HexTaps {
+    std::array<Vec2, 3> places;           // where each tap reads
+    Vec3 weights;                         // their weights, adding up to one
+    std::array<std::array<int, 2>, 3> cells; // the corners' cells (for tests: the same cells, the same offsets)
+};
+
+HexTaps hexTiling(Vec2 uv);
+
+// The tone variation's factor on the albedo: its texel (0.5 none) lightening or darkening by up to strength.
+float variationShade(float variationTexel, float strength);
