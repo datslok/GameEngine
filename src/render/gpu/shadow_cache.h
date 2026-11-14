@@ -4,6 +4,7 @@
 #include "scene/frame_description.h"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 /*
@@ -23,9 +24,40 @@ std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const st
 // shadowCasterSignature, so tiles without glass are kept as before.
 std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass);
 
-// What a tile holds apart from where things are: its casters' meshes and shapes in order, their count, and its glass
-// exactly (tintedShadowSignature's). Equal while things only move.
-std::uint64_t shadowCasterLayout(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass);
+/*
+* Still and moving casters (docs/SHADOWCACHE.md): a tile that keeps them apart (ShadowTile::separateMovers, the far
+* shadow map) holds a cached copy of its still casters, and every frame its moving casters' patches are copied back from
+* that copy and the movers drawn over them, so things moving in it neither redraw it whole nor wait for a redraw.
+*/
+
+// Whether a draw moved since last frame: its matrix is not last frame's. One with no last frame (new, or teleported:
+// MotionHistory) has not.
+bool movedSinceLastFrame(const DrawItem& draw);
+
+// A tile's casters split into those standing still and those moving this frame, each in the casters' order.
+struct ShadowCasterSplit {
+    std::vector<std::size_t> still;
+    std::vector<std::size_t> moving;
+};
+
+ShadowCasterSplit splitMovingCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters);
+
+// A rectangle of the atlas, in texels: where a caster's shadow can be within its tile.
+struct ShadowPatch {
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
+/*
+* Where a caster with these bounds draws in a tile: its bounding sphere's box seen through the tile's view, rounded out
+* to whole texels and a texel more each way (a mover's shadow is in it, whatever the rounding of its triangles), clamped
+* to the tile. Rows are counted as the flipped viewport draws them (render/vulkan/vulkan_pipeline.cpp, setViewport): a
+* point at clip y lands on row tile.y + (1 - y) / 2 * size. None when the box misses the tile; the whole tile for
+* unknown bounds (a negative radius).
+*/
+std::optional<ShadowPatch> shadowPatch(const ShadowTile& tile, const BoundingSphere& bounds);
 
 // What was last drawn into each square of the atlas.
 class ShadowTileMemory {
@@ -33,13 +65,8 @@ public:
     // True when this tile's square last received exactly this view of casters with this signature.
     bool isCurrent(const ShadowTile& tile, std::uint64_t signature) const;
 
-    // The same, or for a tile with a refresh time (ShadowTile::refreshSeconds), the same view of the same layout of
-    // casters drawn less than that long before now (seconds on the renderer's clock): its casters only moved since.
-    bool isCurrent(const ShadowTile& tile, std::uint64_t signature, std::uint64_t layout, double now) const;
-
-    // Record a tile just drawn, its layout and when. Whatever was remembered in squares it overlaps is forgotten, since
-    // it drew over them.
-    void remember(const ShadowTile& tile, std::uint64_t signature, std::uint64_t layout = 0, double now = 0.0);
+    // Record a tile just drawn. Whatever was remembered in squares it overlaps is forgotten, since it drew over them.
+    void remember(const ShadowTile& tile, std::uint64_t signature);
 
     // After an error, or when the atlas's contents are lost.
     void forgetAll();
@@ -48,8 +75,6 @@ private:
     struct Entry {
         ShadowTile tile;
         std::uint64_t signature = 0;
-        std::uint64_t layout = 0;
-        double drawnAt = 0.0;
     };
 
     std::vector<Entry> entries;

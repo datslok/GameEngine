@@ -235,35 +235,52 @@ namespace {
         assert(!memory.isCurrent(tileAt(1024, 0, 1024), 3));
     }
 
+    // A caster moved when its matrix is not last frame's; one with no last frame (new, or teleported) has not.
+    void testMovingCasters() {
+        std::vector<DrawItem> draws = {drawAt(0.0f, 0), drawAt(2.0f, 1), drawAt(4.0f, 2), drawAt(6.0f, 3)};
+        draws[0].previousModel = draws[0].model;
+        draws[1].previousModel = Mat4::translation(1.5f, 0.0f, 0.0f);
+        draws[3].previousModel = Mat4::translation(5.0f, 0.0f, 0.0f);
+        assert(!movedSinceLastFrame(draws[0]) && movedSinceLastFrame(draws[1]) && !movedSinceLastFrame(draws[2]));
+
+        // Split in the casters' order; the still ones' fingerprint does not change while the movers move.
+        const ShadowCasterSplit split = splitMovingCasters(draws, {3, 0, 1, 2});
+        assert((split.still == std::vector<std::size_t>{0, 2}) && (split.moving == std::vector<std::size_t>{3, 1}));
+        const std::uint64_t still = tintedShadowSignature(draws, split.still, {});
+        draws[1].model = Mat4::translation(2.5f, 0.0f, 0.0f);
+        assert(tintedShadowSignature(draws, splitMovingCasters(draws, {3, 0, 1, 2}).still, {}) == still);
+
+        // A mover that stops joins the still casters, which changes their fingerprint (the still copy is redrawn once).
+        draws[1].previousModel = draws[1].model;
+        assert(tintedShadowSignature(draws, splitMovingCasters(draws, {3, 0, 1, 2}).still, {}) != still);
+    }
+
     /*
-    * A tile with a refresh time (the far shadow map) is kept while its casters only move (the same layout) until that
-    * long after it was drawn; anything else changing redraws it at once. Without one, any move redraws it.
+    * A caster's patch of its tile: its bounding sphere's box seen through the tile's view, rounded out to whole texels
+    * and a texel more each way, clamped to the tile, rows counted down from the top as the flipped viewport draws them;
+    * none outside the tile, the whole tile for unknown bounds.
     */
-    void testTilesKeptWhileCastersMove() {
-        ShadowTileMemory memory;
-        ShadowTile far = tileAt(0, 0, 1024);
-        far.refreshSeconds = 1.0f;
-        memory.remember(far, 5, 77, 10.0);
-        assert(memory.isCurrent(far, 5, 77, 10.5));
-        assert(memory.isCurrent(far, 6, 77, 10.9));   // moved, within the second
-        assert(!memory.isCurrent(far, 6, 77, 11.0));  // moved, a second on
-        assert(memory.isCurrent(far, 5, 77, 30.0));   // nothing moved: kept for ever
-        assert(!memory.isCurrent(far, 6, 78, 10.5));  // something came or went
-        assert(!memory.isCurrent(tileAt(0, 0, 1024, 0.5f), 6, 77, 10.5)); // the light moved
+    void testShadowPatches() {
+        // 200 m across a 1000-texel tile at (1000, 2000): 5 texels a metre. A patch holds its exact footprint (columns
+        // first to last, rows first to last) and a texel more each way, give or take one for rounding.
+        ShadowTile tile{Mat4::scaling(0.01f, 0.01f, 0.01f), 1000, 2000, 1000, BoundingSphere{}};
+        const auto covers = [](const ShadowPatch& patch, std::uint32_t first, std::uint32_t last, std::uint32_t top, std::uint32_t bottom) {
+            return patch.x + 1 <= first && patch.x + 2 >= first && patch.x + patch.width >= last + 1 && patch.x + patch.width <= last + 2 &&
+                   patch.y + 1 <= top && patch.y + 2 >= top && patch.y + patch.height >= bottom + 1 && patch.y + patch.height <= bottom + 2;
+        };
+        const std::optional<ShadowPatch> middle = shadowPatch(tile, BoundingSphere{Vec3{0.0f, 0.0f, 0.0f}, 2.0f});
+        assert(middle && covers(*middle, 1490, 1510, 2490, 2510));
 
-        ShadowTile cascade = tileAt(2048, 0, 1024);
-        memory.remember(cascade, 5, 77, 10.0);
-        assert(!memory.isCurrent(cascade, 6, 77, 10.1));
+        // Up the tile (+y) is up the rows' count backwards.
+        const std::optional<ShadowPatch> upRight = shadowPatch(tile, BoundingSphere{Vec3{40.0f, 30.0f, 0.0f}, 2.0f});
+        assert(upRight && covers(*upRight, 1690, 1710, 2340, 2360));
 
-        // The layout leaves out where things are, not what they are.
-        std::vector<DrawItem> draws = {drawAt(0.0f, 0), drawAt(2.0f, 1)};
-        const std::uint64_t layout = shadowCasterLayout(draws, {0, 1}, {});
-        std::vector<DrawItem> moved = draws;
-        moved[1].model = Mat4::translation(9.0f, 0.0f, 0.0f);
-        assert(shadowCasterLayout(moved, {0, 1}, {}) == layout);
-        moved[1].mesh = MeshHandle{4};
-        assert(shadowCasterLayout(moved, {0, 1}, {}) != layout);
-        assert(shadowCasterLayout(draws, {0}, {}) != layout);
+        const std::optional<ShadowPatch> edge = shadowPatch(tile, BoundingSphere{Vec3{99.0f, 0.0f, 0.0f}, 5.0f});
+        assert(edge && edge->x + edge->width == 2000 && edge->x + 1 <= 1970 && edge->x + 2 >= 1970);
+        assert(!shadowPatch(tile, BoundingSphere{Vec3{150.0f, 0.0f, 0.0f}, 5.0f}));
+
+        const std::optional<ShadowPatch> unknown = shadowPatch(tile, BoundingSphere{});
+        assert(unknown && unknown->x == 1000 && unknown->y == 2000 && unknown->width == 1000 && unknown->height == 1000);
     }
 
     PlacedPointLight lampAt(float x, std::uint32_t entityIndex) {
@@ -346,6 +363,7 @@ void testShadowAtlas() {
     testCasterSignature();
     testGlassSignature();
     testTileMemory();
-    testTilesKeptWhileCastersMove();
+    testMovingCasters();
+    testShadowPatches();
     testPlansKeepTilesBetweenFrames();
 }

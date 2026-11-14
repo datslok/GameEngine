@@ -428,7 +428,7 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
             const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
             addSunBox(plan, atlas, request.tiles.front(), light, box, sphere.radius, settings, origin);
             plan.tiles.back().smallestCaster = farShadowSmallestCaster(box.texelSize);
-            plan.tiles.back().refreshSeconds = std::max(settings.farShadowRefreshSeconds, 0.0f);
+            plan.tiles.back().separateMovers = true;
             plan.directional[request.slot].cascades += 1;
         }
         else if (request.kind == ShadowKind::Mirror) {
@@ -573,6 +573,5 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Mirror cascade resolution", settings.mirrorCascadeResolution, cascadeResolutionNames);
     visitor.field("Far shadow distance", settings.farShadowDistance, {.min = 0.0f, .max = 100000.0f, .sliderMax = 20000.0f, .unit = "m (0 off)"});
     visitor.choice("Far shadow resolution", settings.farShadowResolution, cascadeResolutionNames);
-    visitor.field("Far shadow refresh", settings.farShadowRefreshSeconds, {.min = 0.0f, .max = 10.0f, .sliderMax = 3.0f, .unit = "s (0 every move)"});
     visitor.field("Normal offset", settings.normalOffsetTexels, {.min = 0.0f, .sliderMax = 6.0f, .unit = "texels"});
 }

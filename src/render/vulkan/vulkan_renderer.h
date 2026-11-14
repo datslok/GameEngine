@@ -346,9 +346,12 @@ private:
     ShadowAtlasLayout shadowLayout;
     ShadowTileMemory shadowMemory;
 
-    // Real seconds since the renderer started (the frames' frameSeconds summed), for tiles kept a while as their
-    // casters move (ShadowTile::refreshSeconds).
-    double shadowClock = 0.0;
+    // The far shadow map's still casters (ShadowTile::separateMovers, render/gpu/shadow_cache.h): a depth image the far
+    // tile's size, drawn when they change; every frame the moving casters' patches, this frame's and last frame's, are
+    // copied back from it into the atlas and the movers drawn over them. moverPatches: last frame's.
+    VulkanImage stillShadow;
+    std::uint32_t stillShadowSize = 0;
+    std::vector<ShadowPatch> moverPatches;
 
     // The coloured shadow maps (render/gpu/transparency.h): the tint the glass each light sees passes, and the nearest
     // glass depth, at half the atlas's size (glassShadowMapSize), and the pipeline drawing the glass into them. The
@@ -529,19 +532,29 @@ private:
     // With coloured shadow maps a redrawn tile's glass is drawn too, into its square of the maps, after the solid casters
     // (its entries following theirs in the draw list); tileGlass says, for every tile of the plan, whether its square
     // holds glass, for the records the shaders read (markTileGlass).
+    // A tile to draw. For a tile keeping its movers apart (separateMovers): casters and glass are its still ones, drawn
+    // into the still copy only when redrawn (still); restore, the patches copied back from the still copy (the whole tile
+    // after a redraw); moving, drawn over them every frame.
     struct ShadowTileDraw {
         const ShadowTile* tile = nullptr;
         BatchedDraws casters;
         BatchedDraws glass;
         std::uint64_t signature = 0;
-        std::uint64_t layout = 0;
+        bool still = true;
+        BatchedDraws moving;
+        std::vector<ShadowPatch> restore;
     };
 
+    // nextMoverPatches: this frame's movers' patches, remembered once drawn (moverPatches).
     struct ShadowDraws {
         std::vector<ShadowTileDraw> tiles;
         std::vector<std::uint32_t> drawList;
         std::vector<bool> tileGlass;
+        std::vector<ShadowPatch> nextMoverPatches;
     };
+
+    // The still copy at this size (a new one when it changes, the GPU waited for first).
+    void ensureStillShadow(std::uint32_t size);
 
     // probes: the frame's probe cascades when this frame traces and samples them, else empty; hitLights: the lights their
     // rays' hits may need (empty without probes); motionDraws: the objects that moved, for the velocity pass.
