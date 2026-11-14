@@ -66,6 +66,15 @@ struct IslandPlacement {
 };
 
 /*
+* Vertical joints: real sandstone pillars split along near-vertical cracks into rough blocks (Zhangjiajie's look). Narrow
+* grooves rockJointDepth deep about every rockJointSpacing metres round the rock, wandering slowly as they rise. How deep
+* the joint at a place is (0..1 of the depth), from the angle round and the height in metres.
+*/
+inline constexpr float rockJointDepth = 2.5f;
+inline constexpr float rockJointSpacing = 9.0f;
+float jointGroove(float angleRadians, float height, float radius, std::uint32_t seed);
+
+/*
 * What carves the rock: the valley's beds (games/forest/valley_strata.h) at the heights the shader paints them, waved
 * by the same noise, so a hard bed stands out exactly where its band shows on every pillar. The first shapes, eight
 * unit meshes stretched to each pillar's size, could not: a bed's height in a shared mesh lands at a different world
@@ -76,6 +85,8 @@ struct RockCarving {
     ImageData warp;
     float warpTileMetres = 1500.0f;
     float warpMetres = 6.0f;
+    // How deep the joints are cut (rockJointDepth; 0 for a rock too small for them, as the drifting rocks).
+    float jointMetres = rockJointDepth;
 };
 
 // How far the beds are moved up or down at a world place: the warp texture's red channel read as the GPU reads it
@@ -91,15 +102,6 @@ inline constexpr float rockLedgeMetres = 2.0f;
 inline constexpr float rockUndercutMetres = 1.5f;
 inline constexpr float rockUndercutReach = 4.0f;
 float strataRelief(const std::vector<StrataBand>& bands, float height);
-
-/*
-* Vertical joints: real sandstone pillars split along near-vertical cracks into rough blocks (Zhangjiajie's look). Narrow
-* grooves rockJointDepth deep about every rockJointSpacing metres round the rock, wandering slowly as they rise. How deep
-* the joint at a place is (0..1 of the depth), from the angle round and the height in metres.
-*/
-inline constexpr float rockJointDepth = 2.5f;
-inline constexpr float rockJointSpacing = 9.0f;
-float jointGroove(float angleRadians, float height, float radius, std::uint32_t seed);
 
 // The shapes' resolution in metres: a row every rockRowMetres up and a column every rockColumnMetres round.
 inline constexpr float rockRowMetres = 2.5f;

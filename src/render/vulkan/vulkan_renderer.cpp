@@ -1440,6 +1440,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
 
+    shadowClock += static_cast<double>(description.frameSeconds);
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows);
 
     // The shaders read a tile's coloured shadow map only where it holds glass.
@@ -2290,8 +2291,9 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         const std::vector<std::size_t> glass = castersAtLeast(description.draws, shadowCasters(description.draws, glassReached, view), tile.smallestCaster);
         prepared.tileGlass[tileIndex] = !glass.empty();
         const std::uint64_t signature = tintedShadowSignature(description.draws, casters, glass);
+        const std::uint64_t layout = shadowCasterLayout(description.draws, casters, glass);
 
-        if (shadowMemory.isCurrent(tile, signature)) {
+        if (shadowMemory.isCurrent(tile, signature, layout, shadowClock)) {
             ++stats.shadowTilesCached;
             continue;
         }
@@ -2300,7 +2302,7 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         BatchedDraws panes = listed(glass);
         stats.shadowDrawn += casters.size();
         stats.shadowCulled += description.draws.size() - casters.size();
-        prepared.tiles.push_back(ShadowTileDraw{&tile, std::move(solid), std::move(panes), signature});
+        prepared.tiles.push_back(ShadowTileDraw{&tile, std::move(solid), std::move(panes), signature, layout});
     }
 
     return prepared;
@@ -2342,7 +2344,7 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
         stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
-        shadowMemory.remember(tile, drawing.signature);
+        shadowMemory.remember(tile, drawing.signature, drawing.layout, shadowClock);
     }
 
     vkCmdEndRendering(commands);

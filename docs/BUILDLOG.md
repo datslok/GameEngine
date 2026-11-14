@@ -1598,6 +1598,14 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Shared:** the islands' underside points and the bias towards the rim are one function each (`islandUnderside`, `towardsTheRim`), used by the roots and the moss.
   - **The user's look** (Nov 14 2026): "looks good". Merged.
 - `forest-test-jobs` (Nov 14 2026): "the testing time adds up quickly". The engine hands a game its job system, but the tests built their games without one, so every forest test's valley (ground, pillars, islands, roots, moss) was carved on one thread (`serialJobs()`). `tests/forest_helpers.h` now gives every forest test the same valley set-up (`TestForest`, which was copied in three files) on one job system for the whole run (`forestTestJobs`). The valley is the same either way, each job writing its own slot. Not measured, at the user's request.
+- `drifting-rocks` (Nov 14 2026): the user chose bobbing rocks that keep their far shadows ("so we get nice rays of light through the mist") and asked for some round the pillars too.
+  - **From the clock:** each rock's pose is a function of the simulation's time, as the spinners' is, so runs agree and nothing accumulates.
+  - **One bed's tones:** the rock's beds are painted by world height, which would slide over a bobbing rock; the drifting rocks' strip is a single soft bed, so nothing slides, while the moss and streaks, projected in the rock's own frame, ride with it.
+  - **No joints:** the islands' shape cuts joints 2.5 m deep, which would split a 3 m rock; the carving's joint depth is now a field (`RockCarving::jointMetres`), 0 for these.
+  - **Clear of everything:** rocks are thrown round their own shape and dropped if they would touch any other pillar or island.
+  - **Measured** (the RTX 4070 Laptop, the user's settings, from the rim): drifting, the far shadow map (5 km, 878 draws) was redrawn every frame, the shadow pass 2.33-2.40 ms and the GPU 18.2-18.7 ms; held still, the shadow pass cached (nothing drawn) and the GPU 16.4-16.7 ms. Explained three answers (accept it, a second small map for movers, redraw only after half a texel of movement); the user chose the last.
+  - **Half a texel of patience, tried and dropped:** rounding each caster's matrix to half the far map's texel (about 1.35 m) before fingerprinting. Measured the same 2.1-2.2 ms: each rock crosses a step only every second or so, but with about 370 bobbing out of step one crossed nearly every frame.
+  - **A second of patience** (`ShadowSettings::farShadowRefreshSeconds`, 1 s): the far tile remembers its layout (meshes and shapes, not places) and when it was drawn, and while only places change it is kept up to a second. A rock moves at most about a metre in that time, under half a 2.7 m texel. Anything arriving, leaving or changing redraws it at once; the cascades stay exact.
 
 ## Tools outside the phases
 

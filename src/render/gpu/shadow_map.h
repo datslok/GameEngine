@@ -100,6 +100,13 @@ struct ShadowSettings {
     float farShadowDistance = 5000.0f;
     CascadeResolution farShadowResolution = CascadeResolution::Pixels4096;
 
+    // While its casters only move (the same meshes, in the same order), the far shadow map is redrawn at most this often
+    // (seconds; 0: for any move, as the cascades always are). Rocks drifting slowly round the forest's islands redrew it,
+    // every caster over 5 km, each frame (2.3 ms of 18.5 on the RTX 4070 Laptop, Nov 14 2026); a metre a second at most,
+    // their shadows lag under half a 2.7 m texel, hundreds of metres off. Redrawing only after a caster had moved half a
+    // texel did not help: with hundreds of rocks bobbing out of step, one crossed a step nearly every frame.
+    float farShadowRefreshSeconds = 1.0f;
+
     // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
     // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
     // light grazes. Measured in texels, it shrinks and grows with each tile's size. For the sun it is how far points move
@@ -213,7 +220,8 @@ bool tileHasGlass(const ShadowTileData& data);
 // lightPlace (world space) is where its light is, for the coloured shadow map's glass (its angle to the light, and which
 // faces count): a local light's position with w 1, or for a sun's cascades the direction towards the sun with w 0.
 //
-// smallestCaster: casters with a smaller bounding sphere are not drawn into it (the far shadow map's, cascades.h); 0
+// refreshSeconds: while only its casters' places change, it is kept this long (the far shadow map's, ShadowSettings::
+// farShadowRefreshSeconds; 0, redrawn for any move). smallestCaster: casters with a smaller bounding sphere are not drawn into it (the far shadow map's, cascades.h); 0
 // draws every one.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
@@ -224,6 +232,7 @@ struct ShadowTile {
     Vec4 clipPlane = noClipPlane();
     Vec4 lightPlace{0.0f, 1.0f, 0.0f, 0.0f};
     float smallestCaster = 0.0f;
+    float refreshSeconds = 0.0f;
 };
 
 // A tile's square in the coloured shadow map: its place and size in the atlas, halved.

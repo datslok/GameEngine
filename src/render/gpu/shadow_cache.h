@@ -23,14 +23,23 @@ std::uint64_t shadowCasterSignature(const std::vector<DrawItem>& draws, const st
 // shadowCasterSignature, so tiles without glass are kept as before.
 std::uint64_t tintedShadowSignature(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass);
 
+// What a tile holds apart from where things are: its casters' meshes and shapes in order, their count, and its glass
+// exactly (tintedShadowSignature's). Equal while things only move.
+std::uint64_t shadowCasterLayout(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& casters, const std::vector<std::size_t>& glass);
+
 // What was last drawn into each square of the atlas.
 class ShadowTileMemory {
 public:
     // True when this tile's square last received exactly this view of casters with this signature.
     bool isCurrent(const ShadowTile& tile, std::uint64_t signature) const;
 
-    // Record a tile just drawn. Whatever was remembered in squares it overlaps is forgotten, since it drew over them.
-    void remember(const ShadowTile& tile, std::uint64_t signature);
+    // The same, or for a tile with a refresh time (ShadowTile::refreshSeconds), the same view of the same layout of
+    // casters drawn less than that long before now (seconds on the renderer's clock): its casters only moved since.
+    bool isCurrent(const ShadowTile& tile, std::uint64_t signature, std::uint64_t layout, double now) const;
+
+    // Record a tile just drawn, its layout and when. Whatever was remembered in squares it overlaps is forgotten, since
+    // it drew over them.
+    void remember(const ShadowTile& tile, std::uint64_t signature, std::uint64_t layout = 0, double now = 0.0);
 
     // After an error, or when the atlas's contents are lost.
     void forgetAll();
@@ -39,6 +48,8 @@ private:
     struct Entry {
         ShadowTile tile;
         std::uint64_t signature = 0;
+        std::uint64_t layout = 0;
+        double drawnAt = 0.0;
     };
 
     std::vector<Entry> entries;

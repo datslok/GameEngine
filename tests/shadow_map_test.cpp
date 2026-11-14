@@ -1143,9 +1143,12 @@ namespace {
         assert(nearlyEqual(plan.tileData[far].lens[3], sphere.radius, 1e-2f));
         assert(plan.tiles[far].size == std::min(cascadeTilePixels(settings.farShadowResolution), shadowAtlasSizeFor(settings).largestSquare));
         assert(nearlyEqual(plan.tiles[far].smallestCaster, farShadowSmallestCaster(plan.tileData[far].lens[2])));
+        // While its casters only move it is redrawn at most once a second; the cascades for any move.
+        assert(settings.farShadowRefreshSeconds == 1.0f && plan.tiles[far].refreshSeconds == 1.0f);
 
         for (int cascade = 0; cascade < settings.cascadeCount; ++cascade) {
             assert(plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)].smallestCaster == 0.0f);
+            assert(plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)].refreshSeconds == 0.0f);
         }
 
         const Vec3 ahead{10.0f, 2.0f, -2980.0f};

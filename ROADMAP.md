@@ -341,7 +341,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] Textures without a visible repeat: hex tiling on the rock and the ground, tone variation (`rock-strata`)
   - [x] Roots and vines hanging under the islands: bark tubes, ivy leaves on cut-out cards (`island-roots`)
   - [x] Hanging moss: a strand texture the game draws on crossed cut-out cards, from root tips, the islands' undersides and the pillars' ledges (`hanging-moss`)
-  - [ ] Smaller rocks drifting round the islands, bobbing slowly, carved as the islands are, casting shadows into the far shadow map for shafts through the mist (the user's choice, Nov 14 2026: its cost to be measured) (`drifting-rocks`)
+  - [ ] Smaller rocks drifting round the islands and some pillars, bobbing slowly, shaped as the islands are, casting shadows into the far shadow map for shafts through the mist (the user's choice, Nov 14 2026: its cost to be measured) (`drifting-rocks`, waiting for the user's look)
   - The pillars' and islands' crowns of trees moved to the forest item (Nov 14 2026), so one generator grows them all.
 - [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), on the valley floor and as crowns on the pillars' tops and the islands, the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
