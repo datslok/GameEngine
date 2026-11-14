@@ -234,6 +234,14 @@ namespace {
     }
 }
 
+float forestUnitRandom(std::uint64_t seed, std::uint64_t index) {
+    return static_cast<float>(mixBits(seed ^ mixBits(index + 0x9e3779b97f4a7c15ull)) >> 40) * (1.0f / 16777216.0f);
+}
+
+std::uint32_t forestShapeSeed(std::uint32_t seed, std::uint32_t use) {
+    return static_cast<std::uint32_t>(mixBits((static_cast<std::uint64_t>(seed) << 8) | use));
+}
+
 float forestValueNoise(float x, float z, std::uint32_t seed) {
     const float cellX = std::floor(x);
     const float cellZ = std::floor(z);

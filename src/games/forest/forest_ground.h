@@ -52,7 +52,8 @@ inline constexpr std::array<ForestGroundLayer, 4> forestGroundLayers{{
 /*
 * A texture set's files by role, as the fetch tool names them: colour, normal (OpenGL's convention, green up the picture)
 * and height, and either Poly Haven's packed occlusion, roughness and metal ("arm", red, green and blue, as glTF packs
-* them) or ambientCG's separate roughness and occlusion. Empty for a role with no file.
+* them) or ambientCG's separate roughness and occlusion, and a cut-out's opacity (ambientCG's leaves). Empty for a role
+* with no file.
 */
 struct ForestTextureFiles {
     std::string colour;
@@ -61,6 +62,7 @@ struct ForestTextureFiles {
     std::string packedSurface;
     std::string roughness;
     std::string occlusion;
+    std::string opacity;
 };
 
 // The files present in a folder, each role's name tried as .png and then .jpg.
@@ -68,6 +70,22 @@ ForestTextureFiles findForestTextureFiles(const std::string& folder);
 
 // A ground layer's material from the texture set in assetFolder/layer.folder, or its plain stand-in when there is none.
 Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolder, const ForestGroundLayer& layer);
+
+// The islands' roots and vines (games/forest/island_hangings.h): Poly Haven's brown bark, its tile set by the tubes'
+// own texture coordinates.
+inline constexpr ForestGroundLayer forestBarkLayer{"bark_brown_02", 2.0f, Pixel{88, 66, 48}, 0.9f};
+
+// The vines' ivy leaves: ambientCG's LeafSet017, six leaves in an atlas.
+inline constexpr const char* forestIvyFolder = "LeafSet017";
+
+// A leaf's alpha under this is a hole.
+inline constexpr float forestLeafCutoff = 0.5f;
+
+/*
+* The ivy's material: a double-sided cut-out, its colour with the opacity map in its alpha (made here, its mips keeping
+* the leaves' coverage), its normal and roughness maps; without the files, a plain green cut-out with no holes.
+*/
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder);
 
 // The finest paint's texels: 2048 over the walked-on ring's 1.28 km.
 inline constexpr float forestFinestPaintTexel = 0.625f;

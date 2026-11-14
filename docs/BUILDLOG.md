@@ -1585,6 +1585,13 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
 - `sky-cascade-blend` (Nov 14 2026): a line about 10 m round the camera on the forest's ground (the user's screenshot: warmer, more varied inside, flatter outside). The sky visibility grid's 0.5 m cascade gave way to the 1 m one over a single point spacing; the fine one follows the ground's own bumps (the hollows dimmed, the slopes' bounce added), the coarse one smooths them away. The user confirmed it was this grid. Explained three fixes (a wider blend; a bigger fine cascade, which only moves the edge for 4-8 times the points; leaving near blockers to the ambient occlusion, which would bring back leaks in rooms); the user chose the wider blend.
   - **The blend:** each cascade fades over `cascadeBlend` (0.5, live) of its reach along each axis, never less than one spacing, as cascaded shadows and probe cascades blend over a band: the densest at full weight to about 5.4 m, gone at 10.8 m. Nothing in the shaders changed, since the fade is in each cascade's record.
   - **The user's look** (Nov 14 2026): "it looks good now". Merged.
+- `island-roots` (Nov 14 2026): the islands' roots and vines, the first of the pillars-and-islands item's remaining pieces. Explained the four pieces (roots and vines, hanging moss, drifting rocks, crowns) with their choices; the user chose drifting rocks that bob and keep their far shadows ("so we get nice rays of light through the mist"), and the crowns moved to the forest item so one generator grows every tree.
+  - **Strands as heavy ropes:** each leaves the rock leaning out and turns down over about 4 m (1 - exp(-s / 4 m) of it pointing down), wandering a little by smooth noise, never climbing, so a strand hung from the underside stays clear of the island's narrowing cone.
+  - **Tubes without twist:** each ring's frame is the last one's made square to the strand, so the bark's texture runs straight down a root.
+  - **Ivy:** `LeafSet017`'s six leaves on cut-out cards along the vines, its separate opacity map put into the colour's alpha at load, with coverage-keeping mips.
+  - **Budget:** a 60 m island has 18 roots and 12 vines; roots 8 sides, vines 4. Built in each island's own job with its rock, two drawn-only meshes an island.
+  - **One random helper:** `unitRandom` was in both `valley_shapes.cpp` and `valley_strata.cpp`; it and `shapeSeed` now live once in `forest_terrain` (`forestUnitRandom`, `forestShapeSeed`), which the roots use too.
+  - **The user's look** (Nov 14 2026): "looks great". Merged.
 
 ## Tools outside the phases
 

@@ -1,8 +1,11 @@
 #include "games/forest/forest_ground.h"
 
+#include "assets/image_loader.h"
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <stdexcept>
 
 namespace {
     // A height map only needs a depth to count for the blend (render/gpu/ground_layers.h); this is also its parallax
@@ -31,7 +34,8 @@ ForestTextureFiles findForestTextureFiles(const std::string& folder) {
         .height = findRole(path, "height"),
         .packedSurface = findRole(path, "arm"),
         .roughness = findRole(path, "roughness"),
-        .occlusion = findRole(path, "occlusion")
+        .occlusion = findRole(path, "occlusion"),
+        .opacity = findRole(path, "opacity")
     };
 }
 
@@ -84,6 +88,46 @@ Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolde
         }
 
         material.metallic = 0.0f;
+    }
+
+    return material;
+}
+
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestIvyFolder).string());
+    Material material;
+    material.alphaMode = AlphaMode::Mask;
+    material.alphaCutoff = forestLeafCutoff;
+    material.doubleSided = true;
+
+    if (files.colour.empty() || files.opacity.empty()) {
+        material.colour = Pixel{70, 105, 50};
+        material.roughness = 0.6f;
+        return material;
+    }
+
+    ImageData colour = loadImage(files.colour);
+    const ImageData opacity = loadImage(files.opacity);
+
+    if (opacity.width != colour.width || opacity.height != colour.height) {
+        throw std::runtime_error("The ivy's opacity map is not the size of its colour map: " + files.opacity);
+    }
+
+    // The opacity's red (a grey image's every channel) into the colour's alpha.
+    for (std::size_t texel = 0; texel < colour.pixels.size() / 4; ++texel) {
+        colour.pixels[texel * 4 + 3] = opacity.pixels[texel * 4];
+    }
+
+    material.texture = assets.addTexture(std::move(colour), forestLeafCutoff);
+    material.roughness = 1.0f;
+    material.metallic = 0.0f;
+
+    if (!files.normal.empty()) {
+        material.normalTexture = assets.loadTexture(files.normal, true, TextureEncoding::Linear);
+    }
+
+    if (!files.roughness.empty()) {
+        material.metallicRoughnessTexture = assets.loadTexture(files.roughness, true, TextureEncoding::Linear);
     }
 
     return material;

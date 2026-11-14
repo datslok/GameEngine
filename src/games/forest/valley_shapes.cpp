@@ -53,15 +53,6 @@ namespace {
     constexpr float islandJag = 0.25f;
     constexpr float islandDome = 0.08f;
 
-    // A random number in 0..1 for (seed, index), the same every run on every machine.
-    float unitRandom(std::uint64_t seed, std::uint64_t index) {
-        return static_cast<float>(mixBits(seed ^ mixBits(index + 0x9e3779b97f4a7c15ull)) >> 40) * (1.0f / 16777216.0f);
-    }
-
-    std::uint32_t shapeSeed(std::uint32_t seed, std::uint32_t use) {
-        return static_cast<std::uint32_t>(mixBits((static_cast<std::uint64_t>(seed) << 8) | use));
-    }
-
     // A pillar's or island's place off the axis: thickest near it (the square of a random number is mostly small).
     float offAxis(float spread, float random, float side) {
         return (side < 0.5f ? -1.0f : 1.0f) * spread * random * random;
@@ -336,8 +327,8 @@ SurfaceGrid pillarSurface(const PillarPlacement& pillar, const RockCarving& carv
 
     // The axis leaning by slow noise along the height, in metres.
     const auto lean = [&](float share) {
-        return Vec2{pillarLean * radius * forestFractalNoise(1.5f * share, 0.5f, 2, shapeSeed(seed, 3)),
-                    pillarLean * radius * forestFractalNoise(0.5f, 1.5f * share, 2, shapeSeed(seed, 4))};
+        return Vec2{pillarLean * radius * forestFractalNoise(1.5f * share, 0.5f, 2, forestShapeSeed(seed, 3)),
+                    pillarLean * radius * forestFractalNoise(0.5f, 1.5f * share, 2, forestShapeSeed(seed, 4))};
     };
 
     // A point of the body at a height (metres above the foot) and column.
@@ -346,11 +337,11 @@ SurfaceGrid pillarSurface(const PillarPlacement& pillar, const RockCarving& carv
         const float around = std::cos(angle);
         const float across = std::sin(angle);
         const float share = std::clamp(y / height, 0.0f, 1.0f);
-        const float bulge = pillarBulge * forestFractalNoise(1.3f * around + 5.0f, 1.3f * across + 4.0f * share, 3, shapeSeed(seed, 1));
+        const float bulge = pillarBulge * forestFractalNoise(1.3f * around + 5.0f, 1.3f * across + 4.0f * share, 3, forestShapeSeed(seed, 1));
         const float plain = radius * (1.0f - pillarTaper * share) * (1.0f + bulge);
         const Vec2 axis = lean(share);
         const Vec3 local{axis.x + plain * across, y, axis.y + plain * around};
-        const float carved = carvedRadius(plain, angle, y, placed(pillar.foot, pillar.turnRadians, local), plain, shapeSeed(seed, 2), carving, 1.0f);
+        const float carved = carvedRadius(plain, angle, y, placed(pillar.foot, pillar.turnRadians, local), plain, forestShapeSeed(seed, 2), carving, 1.0f);
         return Vec3{axis.x + carved * across, y, axis.y + carved * around};
     };
 
@@ -363,7 +354,7 @@ SurfaceGrid pillarSurface(const PillarPlacement& pillar, const RockCarving& carv
         const Vec3 rim = bodyPoint(height, column);
         const Vec2 axis = lean(1.0f);
         const float angle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(columns);
-        const float jag = cap + 1 < capShrink.size() ? 1.2f * forestFractalNoise(3.0f * std::cos(angle), 3.0f * std::sin(angle) + static_cast<float>(cap), 2, shapeSeed(seed, 6)) : 0.0f;
+        const float jag = cap + 1 < capShrink.size() ? 1.2f * forestFractalNoise(3.0f * std::cos(angle), 3.0f * std::sin(angle) + static_cast<float>(cap), 2, forestShapeSeed(seed, 6)) : 0.0f;
         const float shrink = capShrink[cap];
         return Vec3{axis.x + (rim.x - axis.x) * shrink, height + capRise[cap] + jag, axis.y + (rim.z - axis.y) * shrink};
     });
@@ -387,7 +378,7 @@ SurfaceGrid islandSurface(const IslandPlacement& island, const RockCarving& carv
         const float around = std::cos(angle);
         const float across = std::sin(angle);
         const auto jag = [&](float rise) {
-            return 1.0f + islandJag * forestFractalNoise(2.5f * around + 3.0f, 2.5f * across + 6.0f * rise, 3, shapeSeed(seed, 5));
+            return 1.0f + islandJag * forestFractalNoise(2.5f * around + 3.0f, 2.5f * across + 6.0f * rise, 3, forestShapeSeed(seed, 5));
         };
 
         if (row <= underRows) {
@@ -395,14 +386,14 @@ SurfaceGrid islandSurface(const IslandPlacement& island, const RockCarving& carv
             const float plain = radius * std::pow(rise, 0.55f) * jag(rise);
             const float y = -islandDepth * radius * std::pow(1.0f - rise, 1.3f);
             const Vec3 local{plain * across, y, plain * around};
-            const float carved = carvedRadius(plain, angle, y, placed(island.rim, island.turnRadians, local), radius, shapeSeed(seed, 2), carving,
+            const float carved = carvedRadius(plain, angle, y, placed(island.rim, island.turnRadians, local), radius, forestShapeSeed(seed, 2), carving,
                                               smoothStep(0.05f, 0.35f, rise));
             return Vec3{carved * across, y, carved * around};
         }
 
         const float inward = static_cast<float>(row - underRows) / static_cast<float>(topRows) * (0.25f * fullTurnRadians);
         const float plain = radius * std::max(0.0f, std::cos(inward)) * jag(1.0f); // exactly 0 at the centre
-        const float bumps = 0.02f * radius * forestFractalNoise(4.0f * plain / radius * around, 4.0f * plain / radius * across, 2, shapeSeed(seed, 6));
+        const float bumps = 0.02f * radius * forestFractalNoise(4.0f * plain / radius * around, 4.0f * plain / radius * across, 2, forestShapeSeed(seed, 6));
         return Vec3{plain * across, islandDome * radius * std::sin(inward) + bumps, plain * around};
     });
 }
@@ -423,9 +414,9 @@ std::vector<PillarPlacement> placePillars(const ValleyLayout& layout) {
 
     for (int attempt = 0; attempt < tries && static_cast<int>(pillars.size()) < layout.pillarCount; ++attempt) {
         const std::uint64_t base = static_cast<std::uint64_t>(attempt) * 8u;
-        const float z = pillarNorthmost + (pillarSouthmost - pillarNorthmost) * unitRandom(pillarPlaceSeed, base);
-        const float x = valleyAxis(z) + offAxis(pillarSpread, unitRandom(pillarPlaceSeed, base + 1), unitRandom(pillarPlaceSeed, base + 2));
-        const float radius = pillarThinnest + pillarThickestExtra * std::pow(unitRandom(pillarPlaceSeed, base + 3), 1.5f);
+        const float z = pillarNorthmost + (pillarSouthmost - pillarNorthmost) * forestUnitRandom(pillarPlaceSeed, base);
+        const float x = valleyAxis(z) + offAxis(pillarSpread, forestUnitRandom(pillarPlaceSeed, base + 1), forestUnitRandom(pillarPlaceSeed, base + 2));
+        const float radius = pillarThinnest + pillarThickestExtra * std::pow(forestUnitRandom(pillarPlaceSeed, base + 3), 1.5f);
 
         if (!clearOfLandmarks(x, z, radius)) {
             continue;
@@ -442,9 +433,9 @@ std::vector<PillarPlacement> placePillars(const ValleyLayout& layout) {
         pillars.push_back(PillarPlacement{
             .foot = Vec3{x, lowestGround(x, z, radius), z},
             .radius = radius,
-            .height = pillarShortest + pillarTallestExtra * unitRandom(pillarPlaceSeed, base + 4),
-            .turnRadians = fullTurnRadians * unitRandom(pillarPlaceSeed, base + 5),
-            .seed = shapeSeed(static_cast<std::uint32_t>(attempt), 7)
+            .height = pillarShortest + pillarTallestExtra * forestUnitRandom(pillarPlaceSeed, base + 4),
+            .turnRadians = fullTurnRadians * forestUnitRandom(pillarPlaceSeed, base + 5),
+            .seed = forestShapeSeed(static_cast<std::uint32_t>(attempt), 7)
         });
     }
 
@@ -457,10 +448,10 @@ std::vector<IslandPlacement> placeIslands(const ValleyLayout& layout, const std:
 
     for (int attempt = 0; attempt < tries && static_cast<int>(islands.size()) < layout.islandCount; ++attempt) {
         const std::uint64_t base = static_cast<std::uint64_t>(attempt) * 8u;
-        const float z = islandNorthmost + (islandSouthmost - islandNorthmost) * unitRandom(islandPlaceSeed, base);
-        const float x = valleyAxis(z) + offAxis(islandSpread, std::sqrt(unitRandom(islandPlaceSeed, base + 1)), unitRandom(islandPlaceSeed, base + 2));
-        const float radius = islandSmallest + islandLargestExtra * std::pow(unitRandom(islandPlaceSeed, base + 3), 2.0f);
-        const float tip = std::max(forestHeight(x, z), 0.0f) + islandLowest + islandHighestExtra * unitRandom(islandPlaceSeed, base + 4);
+        const float z = islandNorthmost + (islandSouthmost - islandNorthmost) * forestUnitRandom(islandPlaceSeed, base);
+        const float x = valleyAxis(z) + offAxis(islandSpread, std::sqrt(forestUnitRandom(islandPlaceSeed, base + 1)), forestUnitRandom(islandPlaceSeed, base + 2));
+        const float radius = islandSmallest + islandLargestExtra * std::pow(forestUnitRandom(islandPlaceSeed, base + 3), 2.0f);
+        const float tip = std::max(forestHeight(x, z), 0.0f) + islandLowest + islandHighestExtra * forestUnitRandom(islandPlaceSeed, base + 4);
 
         if ((Vec2{x, z} - forestStartPlace).length() < islandStartGap + radius) {
             continue;
@@ -481,8 +472,8 @@ std::vector<IslandPlacement> placeIslands(const ValleyLayout& layout, const std:
         islands.push_back(IslandPlacement{
             .rim = Vec3{x, tip + islandDepth * radius, z},
             .radius = radius,
-            .turnRadians = fullTurnRadians * unitRandom(islandPlaceSeed, base + 5),
-            .seed = shapeSeed(static_cast<std::uint32_t>(attempt), 8)
+            .turnRadians = fullTurnRadians * forestUnitRandom(islandPlaceSeed, base + 5),
+            .seed = forestShapeSeed(static_cast<std::uint32_t>(attempt), 8)
         });
     }
 
@@ -538,7 +529,7 @@ PillarPlacement monolithPillar(float groundLevel) {
     const float x = forestMonolithPlace.x - 480.0f;
     const float z = forestMonolithPlace.y - 50.0f;
     const float foot = forestHeight(x, z);
-    return PillarPlacement{.foot = Vec3{x, foot, z}, .radius = 45.0f, .height = groundLevel + 470.0f - foot, .turnRadians = 0.0f, .seed = shapeSeed(0, 9)};
+    return PillarPlacement{.foot = Vec3{x, foot, z}, .radius = 45.0f, .height = groundLevel + 470.0f - foot, .turnRadians = 0.0f, .seed = forestShapeSeed(0, 9)};
 }
 
 /*

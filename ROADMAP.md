@@ -339,10 +339,11 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] The rock: projected scanned sandstone painted by one layer cake of beds for the valley, streaks, moss facing up (`rock-strata`)
   - [x] Carved shapes: each pillar and island its own mesh in metres, ledges, joints, a broken top (`rock-strata`)
   - [x] Textures without a visible repeat: hex tiling on the rock and the ground, tone variation (`rock-strata`)
-  - Sandstone pillars: wobbling, tapered columns with ledges, streaks and a crown of trees, in the scanned rock.
-  - Floating islands: a rocky underside tapering to a point, a forested top, roots and vines hanging below, smaller rocks drifting round them.
-  - Hanging moss generated (strands on cut-out cards, a strand texture the engine makes, coloured from `Moss001`): neither CC0 library has any.
-- [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
+  - [x] Roots and vines hanging under the islands: bark tubes, ivy leaves on cut-out cards (`island-roots`)
+  - [ ] Hanging moss generated (strands on cut-out cards, a strand texture the engine makes, coloured from `Moss001`): neither CC0 library has any; from root tips, the islands' undersides and pillar ledges (`hanging-moss`)
+  - [ ] Smaller rocks drifting round the islands, bobbing slowly, carved as the islands are, casting shadows into the far shadow map for shafts through the mist (the user's choice, Nov 14 2026: its cost to be measured) (`drifting-rocks`)
+  - The pillars' and islands' crowns of trees moved to the forest item (Nov 14 2026), so one generator grows them all.
+- [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), on the valley floor and as crowns on the pillars' tops and the islands, the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The structures, half reclaimed
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
