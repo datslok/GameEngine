@@ -275,7 +275,7 @@ Everything else is included in `external/`, so it needs no install: cgltf, Dear 
    python tools/fetch_streamline.py
    ```
 
-5. Optional, for the forest (`--game forest`): fetch its scanned plants, rocks and textures (30 CC0 assets from Poly Haven and ambientCG, about 160 MB, needs a real Python). Each file is checked against its recorded checksum; running it again fetches only what is missing. Without them the forest's ground is plain colours.
+5. Optional, for the forest (`--game forest`): fetch its scanned plants, rocks and textures (45 CC0 assets from Poly Haven and ambientCG, about 270 MB, needs a real Python). Each file is checked against its recorded checksum; running it again fetches only what is missing. Without them the forest's ground is plain colours.
 
    ```sh
    python tools/fetch_forest_assets.py

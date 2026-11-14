@@ -332,11 +332,12 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] The rough valley: the land in rings to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
 - [x] The ground's paint without squares: a texture per ring, turned noise, cubic reads (`ground-paint`)
 - [x] Distant shadows: the sun's far shadow map, 5 km round the camera (`far-shadows`)
-- [ ] More assets: jungle plants (broad leaves, bromeliads, palms or tree ferns), banded sandstone for the pillars, weathered concrete and panels for the structures, a vine leaf atlas, hanging moss; a CC0 survey and a shortlist for the user first, as for the first 30
+- [x] More assets: 15 more CC0 assets, layered rock, concrete, panels, painted metal, grating, ivy, a broad-leaved plant and a leaf (`more-assets`)
 - [ ] The pillars and floating islands, generated
   - Sandstone pillars: wobbling, tapered columns with ledges, streaks and a crown of trees, in the scanned rock.
   - Floating islands: a rocky underside tapering to a point, a forested top, roots and vines hanging below, smaller rocks drifting round them.
-- [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), the jungle understorey, logs and rocks, scattered by a seeded Poisson disk
+  - Hanging moss generated (strands on cut-out cards, a strand texture the engine makes, coloured from `Moss001`): neither CC0 library has any.
+- [ ] The forest: trees grown by the engine (generated trunks and branches in scanned bark, scanned leaf atlases on cut-out cards: Poly Haven's scanned trees are 2-17 million triangles each), the jungle understorey (broad-leaved plants grown from `Leaf001` on generated stems, as no CC0 library has palms, bananas or tree ferns), logs and rocks, scattered by a seeded Poisson disk
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The structures, half reclaimed
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
