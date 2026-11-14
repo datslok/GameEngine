@@ -794,13 +794,14 @@ namespace {
     }
 
     /*
-    * The canopy trees at the canopy's top (20-40 m, docs/JUNGLE.md), forking low, their leaves real-sized (15-25 cm, the
+    * The canopy trees at the canopy's top (20-40 m, docs/JUNGLE.md), their crowns from about half their height (room for
+    * the mid layer under them: docs/JUNGLE.md, The mid layer's shape), their leaves real-sized (15-25 cm, the
     * user's choice after the 30-40 cm ones made the trees read small), on cards that keep the clusters' twigs as full as
     * before (the leaf's share of a card unchanged).
     */
     void testTheSettings() {
         const ForestTreeSettings settings;
-        assert(settings.height >= 35.0f && settings.height <= 40.0f && settings.forkHeight < 0.4f * settings.height);
+        assert(settings.height >= 35.0f && settings.height <= 40.0f && settings.forkHeight >= 0.45f * settings.height);
         assert(settings.count >= 20 && settings.variants == 4 && settings.limbs == 4);
         assert(settings.leafLength >= 0.15f && settings.leafLength <= 0.25f);
         assert(settings.leafLength / settings.clusterSize >= 0.2f);
@@ -822,6 +823,56 @@ namespace {
         assert(2.0f * emergent.crownRadius >= 0.45f * emergent.height && 2.0f * emergent.crownRadius <= 0.55f * emergent.height);
         assert(emergent.count >= 3 && emergent.count <= 8 && emergent.count < canopy.count);
         assert(emergent.leafLength == canopy.leafLength && emergent.clusterSize == canopy.clusterSize && emergent.clusterTexels == canopy.clusterTexels);
+    }
+
+    /*
+    * The mid layer (docs/JUNGLE.md): 400 slender trees 10-20 m tall, their crowns shallow (less deep than wide) and from
+    * over half their height, under the canopy crowns' bottom, leaves as the canopy trees'.
+    */
+    void testTheMidLayerSettings() {
+        const ForestTreeSettings mid = midTreeSettings();
+        const ForestTreeSettings canopy;
+        assert(mid.count == 400 && mid.height >= 10.0f && mid.height <= 20.0f && mid.forkHeight >= 0.55f * mid.height);
+        assert(mid.height - mid.forkHeight < 2.0f * mid.crownRadius);
+        assert(mid.height * 1.15f < canopy.forkHeight);
+        assert(mid.leafLength == canopy.leafLength && mid.clusterSize == canopy.clusterSize && mid.clusterTexels == canopy.clusterTexels);
+    }
+
+    // A mid-layer tree grown: a slender trunk, 20-45 cm across at the foot (Leonardo's at the fork, trunkTaper more).
+    void testAMidTreeIsSlender() {
+        const TreeMeshes tree = growTreeMeshes(midTreeSettings(), 29u, 1.5f);
+        const float footAcross = 2.0f * tree.trunkRadius * (1.0f + trunkTaper);
+        assert(footAcross >= 0.2f && footAcross <= 0.45f);
+    }
+
+    /*
+    * The mid layer is placed after the big trees, under their crowns as much as between them, but its trunks keep
+    * midTrunkClearance from theirs.
+    */
+    void testMidTreesStandUnderTheCanopy() {
+        const std::vector<PillarPlacement> pillars = placePillars(ValleyLayout{});
+        const std::vector<SightLine> lines = forestSightLines();
+        const ForestTreeSettings canopySettings;
+        const std::vector<TreePlacement> canopy = placeTrees(canopySettings, pillars, lines, {}, canopyPlaceSeed);
+        const std::vector<StandingCrown> trunks = standingTrunks(canopy, midTrunkClearance);
+        assert(trunks.size() == canopy.size() && trunks.front().radius == midTrunkClearance);
+
+        const ForestTreeSettings midSettings = midTreeSettings();
+        const std::vector<TreePlacement> mid = placeTrees(midSettings, pillars, lines, trunks, midPlaceSeed);
+        assert(mid.size() > 300);
+        int underACrown = 0;
+
+        for (const TreePlacement& tree : mid) {
+            const Vec2 foot{tree.foot.x, tree.foot.z};
+
+            for (const TreePlacement& big : canopy) {
+                const float apart = (foot - Vec2{big.foot.x, big.foot.z}).length();
+                assert(apart >= midTrunkClearance);
+                underACrown += apart < placedCrownRadius(big, canopySettings) ? 1 : 0;
+            }
+        }
+
+        assert(underACrown > 20);
     }
 
     /*
@@ -921,11 +972,22 @@ namespace {
 
         // The emergents after them, the same way, each its bark and its leaves.
         const std::vector<TreePlacement>& emergents = game.getEmergentPlacements();
-        assert(!emergents.empty() && trees.size() == 3 * (placed.size() + emergents.size()));
+        const std::vector<TreePlacement>& mid = game.getMidPlacements();
+        assert(!emergents.empty() && !mid.empty() && trees.size() == 3 * (placed.size() + emergents.size() + mid.size()));
 
         for (std::size_t tree = 0; tree < emergents.size(); ++tree) {
             const Transform& pose = world.get<Transform>(trees[3 * (placed.size() + tree)]);
             assert(pose.position.x == emergents[tree].foot.x && pose.scale.x == emergents[tree].scale);
+        }
+
+        // The mid layer last, its trunks clear of every big tree's.
+        for (std::size_t tree = 0; tree < mid.size(); ++tree) {
+            const Transform& pose = world.get<Transform>(trees[3 * (placed.size() + emergents.size() + tree)]);
+            assert(pose.position.z == mid[tree].foot.z && pose.scale.y == mid[tree].scale);
+
+            for (const TreePlacement& big : emergents) {
+                assert((Vec2{mid[tree].foot.x, mid[tree].foot.z} - Vec2{big.foot.x, big.foot.z}).length() >= midTrunkClearance);
+            }
         }
     }
 }
@@ -954,5 +1016,8 @@ void testForestTrees() {
     testTheEmergentSettings();
     testAnEmergentIsBuilt();
     testCanopyTreesKeepClearOfEmergents();
+    testTheMidLayerSettings();
+    testAMidTreeIsSlender();
+    testMidTreesStandUnderTheCanopy();
     testTheGamePlantsThem();
 }

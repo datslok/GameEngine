@@ -166,7 +166,10 @@ public:
     const std::vector<TreePlacement>& getTreePlacements() const;
     ForestTreeSettings& getEmergentSettings();
     const std::vector<TreePlacement>& getEmergentPlacements() const;
-    // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, then the emergents.
+    // The mid layer's (docs/JUNGLE.md).
+    ForestTreeSettings& getMidSettings();
+    const std::vector<TreePlacement>& getMidPlacements() const;
+    // Each tree's bark, its leaves and its shadow leaves, tree by tree: the canopy trees, the emergents, the mid layer.
     const std::vector<Entity>& getTrees() const;
 
 private:
@@ -179,8 +182,8 @@ private:
     // The pillars, islands, the Ring, the Monolith and the far towers.
     void buildShapes(World& world, AssetManager& assets);
 
-    // The trees between the Ring and the clearing: the emergents placed first and the canopy trees round them, each
-    // species a few variants grown, each placed many times.
+    // The trees between the Ring and the clearing: the emergents placed first, the canopy trees round them, the mid
+    // layer under and between them, each species a few variants grown, each placed many times.
     void buildTrees(World& world, AssetManager& assets);
 
     // One species' variants grown and its placed trees added, bark then leaves, with its leaf material.
@@ -201,6 +204,7 @@ private:
     ForestDriftSettings driftSettings;
     ForestTreeSettings treeSettings;
     ForestTreeSettings emergentSettings = emergentTreeSettings();
+    ForestTreeSettings midSettings = midTreeSettings();
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -217,6 +221,7 @@ private:
     std::vector<Entity> driftingRocks;
     std::vector<TreePlacement> treePlacements;
     std::vector<TreePlacement> emergentPlacements;
+    std::vector<TreePlacement> midPlacements;
     std::vector<Entity> trees;
     Entity ring;
     std::vector<Entity> monolith;

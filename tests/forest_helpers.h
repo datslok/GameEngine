@@ -33,6 +33,9 @@ struct TestForest {
         game.getEmergentSettings().attractors = 300;
         game.getEmergentSettings().variants = 2;
         game.getEmergentSettings().clusterTexels = 64;
+        game.getMidSettings().attractors = 150;
+        game.getMidSettings().variants = 2;
+        game.getMidSettings().clusterTexels = 64;
         game.useJobs(testJobs());
         game.onInit(world, assets);
     }

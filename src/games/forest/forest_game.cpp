@@ -33,6 +33,7 @@ namespace {
     // The trees' variants' seeds.
     constexpr std::uint32_t treeVariantSeed = 0x4752'4f57u;
     constexpr std::uint32_t emergentVariantSeed = 0x454d'4752u;
+    constexpr std::uint32_t midVariantSeed = 0x4d49'4447u;
 
     // The day's hours for the golden views: mid-morning (the sun low in the east, light across the valley), and dusk.
     constexpr float morningHours = 9.5f;
@@ -400,8 +401,12 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     const std::vector<SightLine> sightLines = forestSightLines();
     emergentPlacements = placeTrees(emergentSettings, pillars, sightLines, {}, emergentPlaceSeed);
     treePlacements = placeTrees(treeSettings, pillars, sightLines, standingCrowns(emergentPlacements, emergentSettings), canopyPlaceSeed);
+    std::vector<StandingCrown> bigTrunks = standingTrunks(treePlacements, midTrunkClearance);
+    const std::vector<StandingCrown> emergentTrunks = standingTrunks(emergentPlacements, midTrunkClearance);
+    bigTrunks.insert(bigTrunks.end(), emergentTrunks.begin(), emergentTrunks.end());
+    midPlacements = placeTrees(midSettings, pillars, sightLines, bigTrunks, midPlaceSeed);
 
-    if (treePlacements.empty() && emergentPlacements.empty()) {
+    if (treePlacements.empty() && emergentPlacements.empty() && midPlacements.empty()) {
         return;
     }
 
@@ -414,6 +419,9 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
                             emergentSettings.leafLength / emergentSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
     plantTrees(world, assets, treeSettings, treePlacements, treeVariantSeed, canopyLeaf);
     plantTrees(world, assets, emergentSettings, emergentPlacements, emergentVariantSeed, sameLeaves ? canopyLeaf : leafFor(emergentSettings));
+    const bool midSameLeaves = midSettings.clusterTexels == treeSettings.clusterTexels &&
+                               midSettings.leafLength / midSettings.clusterSize == treeSettings.leafLength / treeSettings.clusterSize;
+    plantTrees(world, assets, midSettings, midPlacements, midVariantSeed, midSameLeaves ? canopyLeaf : leafFor(midSettings));
 }
 
 void ForestGame::plantTrees(World& world, AssetManager& assets, const ForestTreeSettings& settings, const std::vector<TreePlacement>& placements,
@@ -585,6 +593,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Emergent trees", [&] {
         visit(emergentSettings, visitor);
     });
+    visitor.group("Mid trees", [&] {
+        visit(midSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -737,6 +748,14 @@ ForestTreeSettings& ForestGame::getEmergentSettings() {
 
 const std::vector<TreePlacement>& ForestGame::getEmergentPlacements() const {
     return emergentPlacements;
+}
+
+ForestTreeSettings& ForestGame::getMidSettings() {
+    return midSettings;
+}
+
+const std::vector<TreePlacement>& ForestGame::getMidPlacements() const {
+    return midPlacements;
 }
 
 const std::vector<Entity>& ForestGame::getTrees() const {
