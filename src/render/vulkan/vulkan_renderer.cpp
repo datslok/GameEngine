@@ -1440,7 +1440,6 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // tile's casters, batched by mesh, so the scene buffers can be written once and the passes only draw.
     const BatchedDraws mainDraws = batchByMesh(description.draws, visible);
 
-    shadowClock += static_cast<double>(description.frameSeconds);
     const ShadowDraws shadowDraws = prepareShadowDraws(description, shadows.tiles, static_cast<std::uint32_t>(mainDraws.order.size()), colouredShadows);
 
     // The shaders read a tile's coloured shadow map only where it holds glass.
@@ -2297,40 +2296,140 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         }
 
         const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
-        const std::vector<std::size_t> casters = castersAtLeast(description.draws, shadowCasters(description.draws, inReach, view), tile.smallestCaster);
+        const std::vector<std::size_t> found = castersAtLeast(description.draws, shadowCasters(description.draws, inReach, view), tile.smallestCaster);
         const std::vector<std::size_t> glass = castersAtLeast(description.draws, shadowCasters(description.draws, glassReached, view), tile.smallestCaster);
         prepared.tileGlass[tileIndex] = !glass.empty();
-        const std::uint64_t signature = tintedShadowSignature(description.draws, casters, glass);
-        const std::uint64_t layout = shadowCasterLayout(description.draws, casters, glass);
 
-        if (shadowMemory.isCurrent(tile, signature, layout, shadowClock)) {
+        // A tile keeping its movers apart is fingerprinted by its still casters alone.
+        const ShadowCasterSplit split = tile.separateMovers ? splitMovingCasters(description.draws, found)
+                                                            : ShadowCasterSplit{found, {}};
+        const std::uint64_t signature = tintedShadowSignature(description.draws, split.still, glass);
+        const bool still = !shadowMemory.isCurrent(tile, signature);
+
+        if (tile.separateMovers) {
+            ensureStillShadow(tile.size);
+
+            for (std::size_t index : split.moving) {
+                if (const std::optional<ShadowPatch> patch = shadowPatch(tile, description.draws[index].bounds)) {
+                    prepared.nextMoverPatches.push_back(*patch);
+                }
+            }
+        }
+
+        if (!still && split.moving.empty() && (!tile.separateMovers || moverPatches.empty())) {
             ++stats.shadowTilesCached;
             continue;
         }
 
-        BatchedDraws solid = listed(casters);
-        BatchedDraws panes = listed(glass);
-        stats.shadowDrawn += casters.size();
-        stats.shadowCulled += description.draws.size() - casters.size();
-        prepared.tiles.push_back(ShadowTileDraw{&tile, std::move(solid), std::move(panes), signature, layout});
+        ShadowTileDraw drawing{&tile, still ? listed(split.still) : BatchedDraws{}, still ? listed(glass) : BatchedDraws{}, signature, still,
+                               listed(split.moving), {}};
+
+        // What to copy back from the still copy: all of it after a redraw, else where movers were and are.
+        if (tile.separateMovers) {
+            if (still) {
+                drawing.restore.push_back(ShadowPatch{tile.x, tile.y, tile.size, tile.size});
+            } else {
+                drawing.restore = moverPatches;
+                drawing.restore.insert(drawing.restore.end(), prepared.nextMoverPatches.begin(), prepared.nextMoverPatches.end());
+            }
+        }
+
+        stats.shadowDrawn += (still ? split.still.size() : 0) + split.moving.size();
+        stats.shadowCulled += description.draws.size() - found.size();
+        prepared.tiles.push_back(std::move(drawing));
     }
 
     return prepared;
 }
 
 /*
+* The still copy is drawn into as a depth target and copied from; nothing reads it as a texture. A new one starts
+* undefined and is drawn whole before anything is copied from it, since the tile memory forgets what the far tile held
+* at another size.
+*/
+void VulkanRenderer::ensureStillShadow(std::uint32_t size) {
+    if (stillShadowSize == size) {
+        return;
+    }
+
+    device.waitIdle();
+    ImageDescription description;
+    description.format = depthFormat;
+    description.width = size;
+    description.height = size;
+    description.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    description.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    description.name = "Still shadow";
+    stillShadow = VulkanImage{device, description};
+    stillShadowSize = size;
+    moverPatches.clear();
+}
+
+/*
 * The shadow maps, one tile per view (the viewport picks the tile), depth only: each redrawn tile is first reset to the
 * far depth, then its casters drawn, one instanced draw per mesh. When nothing changed there is no pass at all.
 *
-* Barriers: the atlas goes from being read by last frame's fragment shaders to being a depth target (its contents kept:
-* only some tiles are redrawn), and back to being read once the tiles are drawn, before the main pass samples it.
+* A tile keeping its movers apart (the far shadow map) works in three steps: its still casters drawn into the still copy
+* when they changed (its own pass, cleared to the far depth); the restore patches copied from the still copy into the
+* atlas (one copy, a region each); and in the atlas's pass, no reset, only its movers drawn over the patches.
+*
+* Barriers: the still copy from being copied from (or nothing yet) to a depth target, its old contents discarded, and
+* then to being copied from; the atlas from being read by last frame's fragment shaders to being copied into (its
+* contents kept) and then a depth target (kept: only some tiles are redrawn), and back to being read once the tiles are
+* drawn, before the main pass samples it.
 */
 void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowDraws, VkDescriptorSet sceneSet) {
+    moverPatches = shadowDraws.nextMoverPatches;
+
     if (shadowDraws.tiles.empty()) {
         return;
     }
 
     const VkCommandBuffer commands = frame.commands;
+
+    for (const ShadowTileDraw& drawing : shadowDraws.tiles) {
+        const ShadowTile& tile = *drawing.tile;
+
+        if (!tile.separateMovers) {
+            continue;
+        }
+
+        if (drawing.still) {
+            stillShadow.transition(commands, ImageState::DepthTarget, ImageContents::Discard);
+            const DepthAttachment target{stillShadow.getView(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
+            beginRendering(commands, {tile.size, tile.size}, nullptr, &target);
+            renderingOpen = true;
+            bindScene(commands, *sceneLayout, bindlessTextures->getSet(), sceneSet);
+            const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace);
+            vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
+            stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
+            vkCmdEndRendering(commands);
+            renderingOpen = false;
+        }
+
+        if (drawing.restore.empty()) {
+            continue;
+        }
+
+        std::vector<VkImageCopy> regions;
+        regions.reserve(drawing.restore.size());
+
+        for (const ShadowPatch& patch : drawing.restore) {
+            VkImageCopy region{};
+            region.srcSubresource = VkImageSubresourceLayers{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1};
+            region.dstSubresource = region.srcSubresource;
+            region.srcOffset = VkOffset3D{static_cast<std::int32_t>(patch.x - tile.x), static_cast<std::int32_t>(patch.y - tile.y), 0};
+            region.dstOffset = VkOffset3D{static_cast<std::int32_t>(patch.x), static_cast<std::int32_t>(patch.y), 0};
+            region.extent = VkExtent3D{patch.width, patch.height, 1};
+            regions.push_back(region);
+        }
+
+        stillShadow.transition(commands, ImageState::TransferSource);
+        shadowAtlas.transition(commands, ImageState::TransferDestination);
+        vkCmdCopyImage(commands, stillShadow.get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shadowAtlas.get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       static_cast<std::uint32_t>(regions.size()), regions.data());
+    }
+
     shadowAtlas.transition(commands, ImageState::DepthTarget);
 
     const DepthAttachment atlas{shadowAtlas.getView(), VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, gpuFarDepth};
@@ -2346,15 +2445,27 @@ void VulkanRenderer::drawShadows(FrameContext& frame, const ShadowDraws& shadowD
 
         setViewport(commands, static_cast<float>(tile.x), static_cast<float>(tile.y), static_cast<float>(tile.size), static_cast<float>(tile.size));
 
-        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowClearPipeline->get());
-        drawFullScreenTriangle(commands);
+        // A tile keeping its movers apart was filled from its still copy above: no reset, no still casters here.
+        if (!tile.separateMovers) {
+            vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowClearPipeline->get());
+            drawFullScreenTriangle(commands);
+        }
 
         // The tile's view goes to the shadow pipelines too: they share the scene's layout, so the push constants carry over.
         const GpuShadowView view = packShadowView(tile.matrix, tile.clipPlane, tile.lightPlace);
         vkCmdPushConstants(commands, sceneLayout->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
 
-        stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, {shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE});
-        shadowMemory.remember(tile, drawing.signature, drawing.layout, shadowClock);
+        const BatchPipelines casting{shadowPipeline->get(), shadowCutOutPipeline->get(), VK_CULL_MODE_NONE};
+
+        if (!tile.separateMovers) {
+            stats.shadowDrawCalls += drawBatches(commands, drawing.casters.batches, casting);
+        }
+
+        stats.shadowDrawCalls += drawBatches(commands, drawing.moving.batches, casting);
+
+        if (drawing.still) {
+            shadowMemory.remember(tile, drawing.signature);
+        }
     }
 
     vkCmdEndRendering(commands);
