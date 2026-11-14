@@ -49,6 +49,7 @@ void testGroundLayers();
 void testForest();
 void testIslandHangings();
 void testHangingMoss();
+void testDriftingRocks();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
@@ -303,6 +304,7 @@ int main(int argumentCount, char** arguments) {
     testForest();
     testIslandHangings();
     testHangingMoss();
+    testDriftingRocks();
     testFlashlight();
     testRawImagePng();
     testTangents();

@@ -235,6 +235,37 @@ namespace {
         assert(!memory.isCurrent(tileAt(1024, 0, 1024), 3));
     }
 
+    /*
+    * A tile with a refresh time (the far shadow map) is kept while its casters only move (the same layout) until that
+    * long after it was drawn; anything else changing redraws it at once. Without one, any move redraws it.
+    */
+    void testTilesKeptWhileCastersMove() {
+        ShadowTileMemory memory;
+        ShadowTile far = tileAt(0, 0, 1024);
+        far.refreshSeconds = 1.0f;
+        memory.remember(far, 5, 77, 10.0);
+        assert(memory.isCurrent(far, 5, 77, 10.5));
+        assert(memory.isCurrent(far, 6, 77, 10.9));   // moved, within the second
+        assert(!memory.isCurrent(far, 6, 77, 11.0));  // moved, a second on
+        assert(memory.isCurrent(far, 5, 77, 30.0));   // nothing moved: kept for ever
+        assert(!memory.isCurrent(far, 6, 78, 10.5));  // something came or went
+        assert(!memory.isCurrent(tileAt(0, 0, 1024, 0.5f), 6, 77, 10.5)); // the light moved
+
+        ShadowTile cascade = tileAt(2048, 0, 1024);
+        memory.remember(cascade, 5, 77, 10.0);
+        assert(!memory.isCurrent(cascade, 6, 77, 10.1));
+
+        // The layout leaves out where things are, not what they are.
+        std::vector<DrawItem> draws = {drawAt(0.0f, 0), drawAt(2.0f, 1)};
+        const std::uint64_t layout = shadowCasterLayout(draws, {0, 1}, {});
+        std::vector<DrawItem> moved = draws;
+        moved[1].model = Mat4::translation(9.0f, 0.0f, 0.0f);
+        assert(shadowCasterLayout(moved, {0, 1}, {}) == layout);
+        moved[1].mesh = MeshHandle{4};
+        assert(shadowCasterLayout(moved, {0, 1}, {}) != layout);
+        assert(shadowCasterLayout(draws, {0}, {}) != layout);
+    }
+
     PlacedPointLight lampAt(float x, std::uint32_t entityIndex) {
         PlacedPointLight placed{Vec3{x, 1.0f, 0.0f}, PointLight{}};
         placed.light.range = 5.0f;
@@ -315,5 +346,6 @@ void testShadowAtlas() {
     testCasterSignature();
     testGlassSignature();
     testTileMemory();
+    testTilesKeptWhileCastersMove();
     testPlansKeepTilesBetweenFrames();
 }

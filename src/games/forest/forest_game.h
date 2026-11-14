@@ -3,6 +3,7 @@
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
 #include "engine/game.h"
+#include "games/forest/drifting_rocks.h"
 #include "games/forest/forest_ground.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
@@ -146,6 +147,9 @@ public:
     ForestMossSettings& getMossSettings();
     // The moss under each pillar's ledges and each island, placed as the shape it hangs from.
     const std::vector<Entity>& getMoss() const;
+    ForestDriftSettings& getDriftSettings();
+    // The rocks drifting round the islands and some pillars.
+    const std::vector<Entity>& getDriftingRocks() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -168,6 +172,7 @@ private:
     ForestRockSettings rockSettings;
     ForestHangingSettings hangingSettings;
     ForestMossSettings mossSettings;
+    ForestDriftSettings driftSettings;
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -181,6 +186,7 @@ private:
     std::vector<Entity> rockShapes; // every pillar and island, which share the rock's material
     std::vector<Entity> hangingEntities;
     std::vector<Entity> mossEntities;
+    std::vector<Entity> driftingRocks;
     Entity ring;
     std::vector<Entity> monolith;
     Entity sun;

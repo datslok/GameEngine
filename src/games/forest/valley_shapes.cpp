@@ -303,7 +303,7 @@ namespace {
     float carvedRadius(float plain, float angle, float height, const Vec3& worldPlace, float jointRadius, std::uint32_t seed, const RockCarving& carving,
                        float carve) {
         const float bedHeight = worldPlace.y + carvingWarp(carving, worldPlace.x, worldPlace.z);
-        const float relief = strataRelief(carving.bands, bedHeight) - rockJointDepth * jointGroove(angle, height, jointRadius, seed);
+        const float relief = strataRelief(carving.bands, bedHeight) - carving.jointMetres * jointGroove(angle, height, jointRadius, seed);
         return std::max(plain + carve * relief, plain / 3.0f);
     }
 }

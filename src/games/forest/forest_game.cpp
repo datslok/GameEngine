@@ -1,5 +1,7 @@
 #include "games/forest/forest_game.h"
 
+#include "scene/interpolation.h"
+
 #include "core/srgb.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/valley_strata.h"
@@ -338,6 +340,26 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
         }
     }
 
+    // The rocks drifting round the islands and some pillars, each its own shape at its size, built on every core. Their
+    // rock is the shapes' painted in one bed's tones: beds by world height would slide over a rock that bobs.
+    const std::vector<DriftingRock> drifting = valleyRocks(pillars, islands, driftSettings);
+    std::vector<IndexedMesh> driftingShapes(drifting.size());
+    getJobs().parallelFor(drifting.size(), 1, [&](std::size_t index) {
+        driftingShapes[index] = wrappedSurfaceIndexedMesh(driftingRockSurface(drifting[index], drifting[index].seed));
+    });
+
+    Material driftingRock = rock;
+    driftingRock.groundWeights =
+        assets.addTexture(strataImage({StrataBand{.bottom = valleyStrataBottom, .top = valleyStrataTop, .hard = false, .tone = 0.5f}}, 4));
+
+    for (std::size_t index = 0; index < drifting.size(); ++index) {
+        const Transform pose = driftingRockPose(drifting[index], 0.0);
+        const Entity entity = addShape(world, assets.addDrawnMesh(std::move(driftingShapes[index])), driftingRock, pose);
+        world.add(entity, drifting[index]);
+        world.add(entity, PreviousTransform{pose});
+        driftingRocks.push_back(entity);
+    }
+
     // The Ring stands across the path, its centre at the ground there, so its lower half is buried.
     ring = addShape(world, assets.addMesh(ringMesh(forestRingTubeRadius / forestRingRadius)), plainMaterial(steel, 0.35f, 1.0f),
                     Transform{.position = onGround(forestRingPlace.x, forestRingPlace.y), .rotation = Quat{},
@@ -365,7 +387,7 @@ void ForestGame::onInput(World& world, const Input& input) {
 }
 
 void ForestGame::onFixedUpdate(World& world, float tickSeconds, double simulationSeconds) {
-    (void)simulationSeconds;
+    updateDriftingRocks(world, simulationSeconds, driftSettings.moving);
     sunSettings.solarHours = advanceSolarHours(sunSettings.solarHours, sunSettings.hoursPerSecond, tickSeconds);
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
@@ -418,6 +440,10 @@ void ForestGame::updateDaylight(World& world) {
 
     for (const Entity shape : rockShapes) {
         applyRockSettings(world.get<ModelRenderer>(shape).parts.front().material, rockSettings);
+    }
+
+    for (const Entity rock : driftingRocks) {
+        applyRockSettings(world.get<ModelRenderer>(rock).parts.front().material, rockSettings);
     }
 }
 
@@ -475,6 +501,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Moss", [&] {
         visit(mossSettings, visitor);
+    });
+    visitor.group("Drifting rocks", [&] {
+        visit(driftSettings, visitor);
     });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
@@ -604,4 +633,12 @@ ForestMossSettings& ForestGame::getMossSettings() {
 
 const std::vector<Entity>& ForestGame::getMoss() const {
     return mossEntities;
+}
+
+ForestDriftSettings& ForestGame::getDriftSettings() {
+    return driftSettings;
+}
+
+const std::vector<Entity>& ForestGame::getDriftingRocks() const {
+    return driftingRocks;
 }

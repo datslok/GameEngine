@@ -342,6 +342,10 @@ private:
     ShadowAtlasLayout shadowLayout;
     ShadowTileMemory shadowMemory;
 
+    // Real seconds since the renderer started (the frames' frameSeconds summed), for tiles kept a while as their
+    // casters move (ShadowTile::refreshSeconds).
+    double shadowClock = 0.0;
+
     // The coloured shadow maps (render/gpu/transparency.h): the tint the glass each light sees passes, and the nearest
     // glass depth, at half the atlas's size (glassShadowMapSize), and the pipeline drawing the glass into them. The
     // images exist only once a frame has drawn them (glassMapSize says their size; zero before).
@@ -526,6 +530,7 @@ private:
         BatchedDraws casters;
         BatchedDraws glass;
         std::uint64_t signature = 0;
+        std::uint64_t layout = 0;
     };
 
     struct ShadowDraws {
