@@ -1596,6 +1596,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Drawn by the game:** neither CC0 library has hanging moss, so a 512 x 1024 texture of strands is drawn at start-up, most strands short and a few the whole length (a random share squared), coloured from `Moss001`'s mean.
   - **Ledges found from the surface:** a point standing a metre or more out past the one below it is a lip; the hard beds' ledges stand 2 m out over an undercut, so their lower edges are found without the carving telling where they are.
   - **Shared:** the islands' underside points and the bias towards the rim are one function each (`islandUnderside`, `towardsTheRim`), used by the roots and the moss.
+  - **The user's look** (Nov 14 2026): "looks good". Merged.
 
 ## Tools outside the phases
 
