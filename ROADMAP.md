@@ -339,7 +339,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - [x] The rock: projected scanned sandstone painted by one layer cake of beds for the valley, streaks, moss facing up (`rock-strata`)
   - [x] Carved shapes: each pillar and island its own mesh in metres, ledges, joints, a broken top (`rock-strata`)
   - [x] Textures without a visible repeat: hex tiling on the rock and the ground, tone variation (`rock-strata`)
-  - [ ] Roots and vines hanging under the islands: drooping curves swept into bark tubes, ivy leaves on cut-out cards along the vines (`island-roots`, waiting for the user's look)
+  - [x] Roots and vines hanging under the islands: bark tubes, ivy leaves on cut-out cards (`island-roots`)
   - [ ] Hanging moss generated (strands on cut-out cards, a strand texture the engine makes, coloured from `Moss001`): neither CC0 library has any; from root tips, the islands' undersides and pillar ledges (`hanging-moss`)
   - [ ] Smaller rocks drifting round the islands, bobbing slowly, carved as the islands are, casting shadows into the far shadow map for shafts through the mist (the user's choice, Nov 14 2026: its cost to be measured) (`drifting-rocks`)
   - The pillars' and islands' crowns of trees moved to the forest item (Nov 14 2026), so one generator grows them all.

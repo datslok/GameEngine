@@ -1591,6 +1591,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Ivy:** `LeafSet017`'s six leaves on cut-out cards along the vines, its separate opacity map put into the colour's alpha at load, with coverage-keeping mips.
   - **Budget:** a 60 m island has 18 roots and 12 vines; roots 8 sides, vines 4. Built in each island's own job with its rock, two drawn-only meshes an island.
   - **One random helper:** `unitRandom` was in both `valley_shapes.cpp` and `valley_strata.cpp`; it and `shapeSeed` now live once in `forest_terrain` (`forestUnitRandom`, `forestShapeSeed`), which the roots use too.
+  - **The user's look** (Nov 14 2026): "looks great". Merged.
 
 ## Tools outside the phases
 
