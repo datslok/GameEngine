@@ -1856,7 +1856,7 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     if (fog->drawsFog() && inverseViewProjection) {
         beginGpuPass(frame, GpuPass::FogApply);
         fog->apply(frame.commands, frame.descriptors, bindlessTextures->getSet(), sceneSet, sceneColour, depth,
-                   packFogPicturePass(*inverseViewProjection, sceneSize));
+                   packFogPicturePass(*inverseViewProjection, sceneSize, settings.fog.farShadowSteps, static_cast<int>(taaFrame % noiseCycleFrames)));
         endGpuPass(frame, GpuPass::FogApply);
     }
 

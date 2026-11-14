@@ -36,6 +36,7 @@ void visit(FogSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Fog slices", settings.slices, {.min = FOG_MIN_SLICES, .max = FOG_MAX_SLICES, .sliderMax = 128});
     visitor.field("Fog history", settings.historyWeight, {.min = 0.0f, .max = static_cast<float>(FOG_MAX_HISTORY_WEIGHT)});
     visitor.field("Fog lit by probes", settings.probeLight);
+    visitor.field("Fog far shadow steps", settings.farShadowSteps, {.min = 0, .max = FOG_MAX_FAR_SHADOW_STEPS, .sliderMax = 32});
 }
 
 // Written so not a number fails too.
@@ -55,6 +56,10 @@ void validateFog(const FogSettings& settings) {
 
     if (!(settings.historyWeight >= 0.0f && settings.historyWeight <= static_cast<float>(FOG_MAX_HISTORY_WEIGHT))) {
         throw std::invalid_argument("Volumetric fog needs a history weight from 0 to FOG_MAX_HISTORY_WEIGHT");
+    }
+
+    if (settings.farShadowSteps < 0 || settings.farShadowSteps > FOG_MAX_FAR_SHADOW_STEPS) {
+        throw std::invalid_argument("Volumetric fog needs 0 to FOG_MAX_FAR_SHADOW_STEPS far shadow steps");
     }
 }
 
@@ -243,6 +248,33 @@ FogIntegration fogBeyondGrid(const Fog& fog, const Vec3& source, float originHei
     return FogIntegration{source * oneMinusExp(depth), std::exp(-depth)};
 }
 
+float fogFarSampleDistance(const Fog& fog, float originHeight, float directionY, float start, float end, float share) {
+    if (!(end > start)) {
+        return start;
+    }
+
+    const float length = end - start;
+    const float total = fogOpticalDepth(fog, originHeight, directionY, start, end);
+    const float density = fogDensity(fog, originHeight + directionY * start);
+
+    if (!(total > 0.0f) || !(density > 0.0f)) {
+        return start + share * length;
+    }
+
+    const float depth = -std::log(1.0f - share * oneMinusExp(total));
+
+    // Rounding: down a steep ray 1 - exp(-total) is 1 in floats, and share 1 gives an infinite depth.
+    if (!(depth < total)) {
+        return end;
+    }
+
+    const float change = directionY / fog.scaleHeight;
+    const float x = change * depth / density;
+    // -ln(1 - x) / x, its series near 0; x reaches 1 only far down a capped ray, which the clamp below ends.
+    const float stretch = std::abs(x) < 1e-3f ? 1.0f + x * (0.5f + x / 3.0f) : -std::log(std::max(1.0f - x, 1e-30f)) / x;
+    return std::clamp(start + depth / density * stretch, start, end);
+}
+
 GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProjection, const Mat4& previousViewProjection, bool historyUsable,
                bool probesRead, std::uint64_t frame, float cameraFar) {
     GpuFog packed{};
@@ -281,10 +313,12 @@ GpuFog packFog(const Fog* fog, const FogSettings& settings, const Mat4& viewProj
     return packed;
 }
 
-GpuFogPicturePass packFogPicturePass(const Mat4& inverseViewProjection, RenderSize size) {
+GpuFogPicturePass packFogPicturePass(const Mat4& inverseViewProjection, RenderSize size, int farShadowSteps, int frame) {
     GpuFogPicturePass pass{};
     writeColumnMajor(inverseViewProjection, pass.inverseViewProjection);
     pass.size[0] = static_cast<float>(size.width);
     pass.size[1] = static_cast<float>(size.height);
+    pass.size[2] = static_cast<float>(farShadowSteps);
+    pass.size[3] = static_cast<float>(frame);
     return pass;
 }

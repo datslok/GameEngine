@@ -74,14 +74,18 @@ FogIntegration fogVolumeToSurface(vec3 coordinate) {
     return fogFollow(fogVolumeAt(vec3(coordinate.xy, read.front)), fogThroughMedium(medium, read.stretch));
 }
 
-// The light the fog past the grid scatters towards the eye along a view direction per unit of optical depth: the
-// directional lights' (as they reach the ground) and the flat ambient, through the albedo. The flat ambient is what a
-// surface facing up gets; the air in the open gets the open field's share of it (SKY_OPEN_FIELD_OPEN: the sky above,
-// not the ground below), as the sky visibility grid and the probes give the air nearer, unless neither is read, when
-// all the fog takes the flat ambient alike.
-vec3 fogBeyondSource(vec3 viewDirection) {
+// The flat ambient the fog past the grid scatters (before the albedo): what a surface facing up gets; the air in the
+// open gets the open field's share of it (SKY_OPEN_FIELD_OPEN: the sky above, not the ground below), as the sky
+// visibility grid and the probes give the air nearer, unless neither is read, when all the fog takes the flat ambient alike.
+vec3 fogBeyondAmbient() {
     bool airModelled = skyVisibilityOptions.x > 0.5 || frameFog.options.z > 0.5;
-    vec3 light = flatAmbient() * (airModelled ? float(SKY_OPEN_FIELD_OPEN) : 1.0);
+    return flatAmbient() * (airModelled ? float(SKY_OPEN_FIELD_OPEN) : 1.0);
+}
+
+// The light the fog past the grid scatters towards the eye along a view direction per unit of optical depth: the
+// directional lights' (as they reach the ground, without shadows) and the flat ambient, through the albedo.
+vec3 fogBeyondSource(vec3 viewDirection) {
+    vec3 light = fogBeyondAmbient();
 
     for (int i = 0; i < counts.x; ++i) {
         light += fogInScattering(directional[i].radiance.rgb, directional[i].toLight.xyz, viewDirection, frameFog.medium.w);
@@ -90,21 +94,43 @@ vec3 fogBeyondSource(vec3 viewDirection) {
     return light * frameFog.albedo.rgb;
 }
 
+// The grid's fog between the camera and a point (measured from the camera), or along its ray through the whole grid
+// for the sky.
+FogIntegration fogNearView(vec3 relativePoint, bool sky) {
+    vec3 coordinate = fogVolumeCoordinate(relativePoint, frameFog.viewProjection, frameFog.grid.w);
+    return sky ? fogVolumeAt(vec3(coordinate.xy, 1.0)) : fogVolumeToSurface(coordinate);
+}
+
+// The stretch of a view ray past the grid: its direction, from the grid's end (the range over the ray's cosine to the
+// view axis) to the point, or for the sky the fog's farthest distance; empty (end not past start) inside the grid.
+struct FogFarStretch {
+    vec3 direction;
+    float start;
+    float end;
+};
+
+FogFarStretch fogFarStretch(vec3 relativePoint, bool sky) {
+    vec3 direction = normalize(relativePoint);
+    float end = min(sky ? frameFog.albedo.w : length(relativePoint), frameFog.albedo.w);
+    return FogFarStretch(direction, frameFog.grid.w / dot(direction, viewForward.xyz), end);
+}
+
+// The closed form's fog over a stretch past the grid, lit by a source (the light per unit of optical depth).
+FogIntegration fogOverStretch(FogFarStretch stretch, vec3 source) {
+    return fogBeyondGrid(frameFog.medium, source, cameraOrigin.y, stretch.direction.y, stretch.start, stretch.end);
+}
+
 /*
 * The fog between the camera and a point (measured from the camera), or along the ray through it out to the fog's
-* farthest distance for the sky (beyond everything drawn): the grid up to its range, then the closed form.
+* farthest distance for the sky (beyond everything drawn): the grid up to its range, then the closed form, sunlit
+* throughout (the picture pass shades it: scene_fog_shadows.glsl, fogAlongViewShadowed).
 */
 FogIntegration fogAlongView(vec3 relativePoint, bool sky) {
-    float range = frameFog.grid.w;
-    vec3 direction = normalize(relativePoint);
-    vec3 coordinate = fogVolumeCoordinate(relativePoint, frameFog.viewProjection, range);
-    FogIntegration fog = sky ? fogVolumeAt(vec3(coordinate.xy, 1.0)) : fogVolumeToSurface(coordinate);
+    FogIntegration fog = fogNearView(relativePoint, sky);
+    FogFarStretch stretch = fogFarStretch(relativePoint, sky);
 
-    float gridEnd = range / dot(direction, viewForward.xyz);
-    float end = min(sky ? frameFog.albedo.w : length(relativePoint), frameFog.albedo.w);
-
-    if (end > gridEnd) {
-        fog = fogFollow(fog, fogBeyondGrid(frameFog.medium, fogBeyondSource(direction), cameraOrigin.y, direction.y, gridEnd, end));
+    if (stretch.end > stretch.start) {
+        fog = fogFollow(fog, fogOverStretch(stretch, fogBeyondSource(stretch.direction)));
     }
 
     return fog;

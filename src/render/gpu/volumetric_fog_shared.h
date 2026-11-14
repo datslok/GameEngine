@@ -18,6 +18,9 @@
 #define FOG_MAX_SLICES 256
 #define FOG_MAX_HISTORY_WEIGHT 0.98
 
+// The most samples of the sun's shadow each pixel takes along the fog past the grid (FogSettings::farShadowSteps).
+#define FOG_MAX_FAR_SHADOW_STEPS 64
+
 // The froxels' sample points move round their middles over this many frames (Halton points), which last frame's light
 // carried along averages into a smooth grid.
 #define FOG_JITTER_FRAMES 16

@@ -23,6 +23,8 @@
 #include "scene_shadow_tiles.glsl"
 #include "scene_fog.glsl"
 #include "scene_sky_visibility.glsl"
+#include "dither.glsl"
+#include "scene_fog_shadows.glsl"
 
 layout(local_size_x = FOG_LIGHT_GROUP_SIDE, local_size_y = FOG_LIGHT_GROUP_SIDE, local_size_z = FOG_LIGHT_GROUP_SIDE) in;
 
@@ -33,22 +35,6 @@ layout(std430, set = 1, binding = 11) readonly buffer ClusterMasks {
 
 layout(set = 2, binding = 0) uniform sampler3D history;                // last frame's grid, filtered
 layout(set = 2, binding = 1, rgba16f) uniform writeonly image3D lighting; // rgb the scattered light, a the extinction
-
-// The sun's shadow at a point in the air: the finest cascade whose box holds it, moved towards the sun by the cascade's
-// own bias (cascades.h), one comparison; lit past the last.
-vec3 sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight) {
-    for (int cascade = 0; cascade < cascades; ++cascade) {
-        int tile = firstTile + cascade;
-        vec3 biased = position + toLight * shadowTiles[tile].offset.y;
-        vec4 clip = shadowTiles[tile].matrix * vec4(biased, 1.0);
-
-        if (cascadeEdgeDistance(clip.xyz / clip.w, shadowTiles[tile].lens.y / shadowTiles[tile].lens.w) > 0.0) {
-            return shadowTap(tile, biased);
-        }
-    }
-
-    return vec3(1.0);
-}
 
 // One point light's light scattered towards the eye at a point in the air; nothing beyond its range.
 vec3 pointLightInAir(int i, vec3 position, vec3 viewDirection) {

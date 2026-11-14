@@ -3,8 +3,8 @@
 
 /*
 * The picture before the glass seen through the fog (render/gpu/volumetric_fog.h), one invocation per render pixel: its
-* point from the depth (the sky's along its ray), the fog from the camera to it (the grid's, then the closed form's), and
-* the pixel dimmed and lit by it, in place.
+* point from the depth (the sky's along its ray), the fog from the camera to it (the grid's, then the closed form's in
+* the sun's shadows at the pass's steps, turned per pixel and frame), and the pixel dimmed and lit by it, in place.
 */
 #include "render/gpu/depth_shared.h"
 #include "screen_reflections.glsl"
@@ -12,6 +12,10 @@
 #include "scene_lights.glsl"
 #include "scene_sky.glsl"
 #include "scene_fog.glsl"
+#include "cascades.glsl"
+#include "scene_shadow_tiles.glsl"
+#include "dither.glsl"
+#include "scene_fog_shadows.glsl"
 
 layout(local_size_x = FOG_APPLY_GROUP_SIDE, local_size_y = FOG_APPLY_GROUP_SIDE) in;
 
@@ -21,7 +25,7 @@ layout(set = 2, binding = 1, rgba16f) uniform image2D picture;        // the sce
 // Must match GpuFogPicturePass in render/gpu/volumetric_fog.h.
 layout(push_constant) uniform Pass {
     mat4 inverseViewProjection; // camera-relative, as the frame was drawn (jitter included)
-    vec4 size;                  // xy: the render size in pixels
+    vec4 size;                  // xy: the render size in pixels, z the far shadow's steps, w the frame
 } pass;
 
 void main() {
@@ -36,5 +40,7 @@ void main() {
     // The sky's point is any on its ray: halfway in the depth range.
     vec3 point = positionAtPixel(pass.inverseViewProjection, vec2(texel) + 0.5, sky ? 0.5 : pixelDepth, pass.size.xy);
     vec4 colour = imageLoad(picture, texel);
-    imageStore(picture, texel, vec4(fogComposite(colour.rgb, fogAlongView(point, sky)), colour.a));
+    float turn = interleavedGradientNoise(vec2(texel) + 5.588238 * pass.size.w);
+    FogIntegration fog = fogAlongViewShadowed(point, sky, int(pass.size.z), turn);
+    imageStore(picture, texel, vec4(fogComposite(colour.rgb, fog), colour.a));
 }

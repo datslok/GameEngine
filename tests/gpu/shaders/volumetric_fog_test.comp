@@ -17,13 +17,14 @@ void main() {
     }
 
     if (function == GPU_TEST_FOG_MEDIUM) {
-        // Inputs: (density, base height, scale height, anisotropy), (origin height, direction y, start, end), (source, height).
+        // Inputs: (density, base height, scale height, anisotropy), (origin height, direction y, start, end), (source, height),
+        // (the far shadow sample's share, 0, 0, 0).
         vec4 medium = testInput(0);
         vec4 ray = testInput(1);
         vec4 source = testInput(2);
         FogIntegration beyond = fogBeyondGrid(medium, source.rgb, ray.x, ray.y, ray.z, ray.w);
         testOutput(0, vec4(fogDensity(medium, source.w), fogOpticalDepth(medium, ray.x, ray.y, ray.z, ray.w), beyond.transmittance, 0.0));
-        testOutput(1, vec4(beyond.light, 0.0));
+        testOutput(1, vec4(beyond.light, fogFarSampleDistance(medium, ray.x, ray.y, ray.z, ray.w, testInput(3).x)));
     } else if (function == GPU_TEST_FOG_GRID) {
         // Inputs: the view-projection's columns, its inverse's columns, (point, range), (coordinate, slices), (forward,
         // history weight), (froxel, 0), (grid size, 0).
