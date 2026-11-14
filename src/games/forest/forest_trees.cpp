@@ -13,7 +13,6 @@
 #include <utility>
 
 namespace {
-    constexpr std::uint64_t treePlaceSeed = 0x5452'4545ull;
     constexpr int triesPerTree = 60;
 
     // Clumps: 75-125% of the setting's radius, 55-100% of the way out, and how many tries each gets.
@@ -640,10 +639,29 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Cluster size", settings.clusterSize, {.min = 0.1f, .max = 10.0f, .sliderMax = 4.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leaf length", settings.leafLength, {.min = 0.02f, .max = 2.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leafy radius", settings.leafyRadius, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.15f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Cards per node", settings.cardsPerNode, {.min = 0, .max = 20, .sliderMax = 6, .applies = FieldApplies::AtStartup});
+    visitor.field("Cards per node", settings.cardsPerNode, {.min = 0, .max = 40, .sliderMax = 12, .applies = FieldApplies::AtStartup});
     visitor.field("Shell share", settings.shellShare, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
-    visitor.field("Filler cards", settings.fillCards, {.min = 0, .max = 50, .sliderMax = 10, .applies = FieldApplies::AtStartup});
+    visitor.field("Filler cards", settings.fillCards, {.min = 0, .max = 200, .sliderMax = 64, .applies = FieldApplies::AtStartup});
+    visitor.field("Shadow cards per node", settings.shadowCardsPerNode, {.min = 0, .max = 20, .sliderMax = 6, .applies = FieldApplies::AtStartup});
+    visitor.field("Shadow filler cards", settings.shadowFillCards, {.min = 0, .max = 100, .sliderMax = 32, .applies = FieldApplies::AtStartup});
+    visitor.field("Shadow card scale", settings.shadowCardScale, {.min = 0.5f, .max = 8.0f, .sliderMax = 4.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Cluster texels", settings.clusterTexels, {.min = 16, .max = 4096, .sliderMax = 2048, .applies = FieldApplies::AtStartup});
+}
+
+ForestTreeSettings emergentTreeSettings() {
+    ForestTreeSettings settings;
+    settings.count = 5;
+    settings.variants = 3;
+    settings.height = 55.0f;
+    settings.forkHeight = 36.0f;
+    settings.crownRadius = 14.0f;
+    settings.limbs = 5;
+    settings.clumps = 12;
+    settings.clumpRadius = 5.0f;
+    settings.buttress = 2.5f;
+    settings.lean = 1.0f;
+    settings.twigRadius = 0.045f; // a thicker trunk for the height: about 1.5 m across at the foot
+    return settings;
 }
 
 // A fork above the top is taken as a fork just under it, so the crown keeps some depth.
@@ -753,6 +771,13 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
     const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
     meshes.leafyCount = static_cast<int>(std::count(leafy.begin(), leafy.end(), true));
     meshes.cardCount = appendClusterCards(meshes.leaves, nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3));
+
+    // The shadow leaves: the same nodes and clumps, fewer and bigger cards.
+    ForestTreeSettings shadowCards = settings;
+    shadowCards.cardsPerNode = settings.shadowCardsPerNode;
+    shadowCards.fillCards = settings.shadowFillCards;
+    shadowCards.clusterSize = settings.clusterSize * settings.shadowCardScale;
+    meshes.shadowCardCount = appendClusterCards(meshes.shadowLeaves, nodes, radii, crown, clumps, shadowCards, forestShapeSeed(seed, 4));
     return meshes;
 }
 
@@ -859,15 +884,16 @@ float placedCrownRadius(const TreePlacement& tree, const ForestTreeSettings& set
 }
 
 std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const std::vector<PillarPlacement>& pillars,
-                                      const std::vector<SightLine>& sightLines) {
+                                      const std::vector<SightLine>& sightLines, const std::vector<StandingCrown>& standing,
+                                      std::uint64_t seed) {
     std::vector<TreePlacement> trees;
     const int variants = std::max(settings.variants, 1);
     const int tries = std::max(settings.count, 0) * triesPerTree;
 
     for (int attempt = 0; attempt < tries && static_cast<int>(trees.size()) < settings.count; ++attempt) {
         const std::uint64_t base = static_cast<std::uint64_t>(attempt) * 8u;
-        const float z = treeNorthmost + (treeSouthmost - treeNorthmost) * forestUnitRandom(treePlaceSeed, base);
-        const float x = valleyAxis(z) + treeSpread * (2.0f * forestUnitRandom(treePlaceSeed, base + 1) - 1.0f);
+        const float z = treeNorthmost + (treeSouthmost - treeNorthmost) * forestUnitRandom(seed, base);
+        const float x = valleyAxis(z) + treeSpread * (2.0f * forestUnitRandom(seed, base + 1) - 1.0f);
 
         if (forestPathDistance(x, z) < treePathGap) {
             continue;
@@ -875,9 +901,9 @@ std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const 
 
         TreePlacement tree{
             .foot = Vec3{x, 0.0f, z},
-            .scale = smallestTree + treeSizeRange * forestUnitRandom(treePlaceSeed, base + 2),
-            .turnRadians = fullTurnRadians * forestUnitRandom(treePlaceSeed, base + 3),
-            .variant = std::min(static_cast<int>(forestUnitRandom(treePlaceSeed, base + 4) * static_cast<float>(variants)), variants - 1)
+            .scale = smallestTree + treeSizeRange * forestUnitRandom(seed, base + 2),
+            .turnRadians = fullTurnRadians * forestUnitRandom(seed, base + 3),
+            .variant = std::min(static_cast<int>(forestUnitRandom(seed, base + 4) * static_cast<float>(variants)), variants - 1)
         };
         const float radius = placedCrownRadius(tree, settings);
 
@@ -889,7 +915,11 @@ std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const 
             return (Vec2{x, z} - Vec2{pillar.foot.x, pillar.foot.z}).length() < 1.3f * pillar.radius + radius;
         });
 
-        if (crowded || byPillar) {
+        const bool underStanding = std::any_of(standing.begin(), standing.end(), [&](const StandingCrown& crown) {
+            return (Vec2{x, z} - crown.foot).length() < crown.radius;
+        });
+
+        if (crowded || byPillar || underStanding) {
             continue;
         }
 
@@ -903,4 +933,15 @@ std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const 
     }
 
     return trees;
+}
+
+std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings) {
+    std::vector<StandingCrown> crowns;
+    crowns.reserve(trees.size());
+
+    for (const TreePlacement& tree : trees) {
+        crowns.push_back(StandingCrown{Vec2{tree.foot.x, tree.foot.z}, placedCrownRadius(tree, settings)});
+    }
+
+    return crowns;
 }

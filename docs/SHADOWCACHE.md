@@ -98,3 +98,26 @@ No source found describes reading a coarse map's distant blockers inside the nea
 - **Readers:** the main pass (`sunCascadeRow`), the fog (`sunShadowInAir`), the reflection probe's capture (the same shader library).
 - **Cost:** one texture read per pixel in the cascades, about 0.1-0.3 ms (to be measured). No extra drawing: the far map is drawn already.
 - **Limits:** a caster under two far texels (5.4 m) is not in the far map, so small things more than 200 m up cast nothing in the cascades (as now). With the far map off, nothing changes.
+
+# Cheaper cascades while the camera turns: research
+
+Gathered on Nov 14, 2026, after the jungle's canopy (`jungle-canopy`) cost 23 ms of shadows while turning, 7 ms after its shadow leaves (fewer, bigger cards drawn into shadows only), and 0.1 ms standing still (the RTX 4070 Laptop). The sun's four cascades follow the view, so turning redraws them all.
+
+## What engines do
+
+| Technique | Who | Notes | Source |
+|---|---|---|---|
+| Far cascades redrawn less often than near ones | Unreal (`r.Shadow.CSMShadowDepthReuse.FarInterval`) | conventional cascades can reuse their depths from earlier frames; by default the far ones use the same interval as the rest | [Epic](https://dev.epicgames.com/documentation/unreal-engine/debugging-shadows-in-unreal-engine) |
+| Cached cascades scrolled with the camera | Unreal (CSM caching) | the static casters' depth kept and scrolled until the overlap falls under 75% (`r.Shadow.CSMScrollingOverlapAreaThrottle`), then redrawn whole; a few newly exposed static casters drawn meanwhile | [wiki](https://indxzero.github.io/ue544cvarwiki/articles/r.shadow.csmscrollingoverlapareathrottle) **(unverified, community wiki of the source)** |
+| Far cascades drawn once and kept | CryEngine 3 | see the first part of this doc | [CryEngine](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1114113/pages/21267738) |
+| A budget of shadow updates a frame, chosen by visibility and distance | Cyberpunk 2077 | | [SIGGRAPH 2021](https://history.siggraph.org/wp-content/uploads/2022/06/2021-Talks-Dybisz_Shadows-Optimizations-in-Cyberpunk-2077.pdf) |
+| A lower level of detail for shadows; small things left out of far cascades | Unity instanced renderers ("Min Shadow LOD", "Max Shadow Cascade") | LOD0 drawn with LOD1 or LOD2's mesh in the shadows; grass in the first cascade only | [BRG docs](https://milk-drinker01.github.io/BRGInstancedRenderer/articles/features/shadow-optimization.html) |
+| Shadow proxy meshes, especially for groups of small things in distant cascades | Crysis | a mismatch between the seen mesh and the shadow's can shadow the seen one wrongly, needing care with the bias | [Unreal forum](https://forums.unrealengine.com/t/lod-for-shadow-geo/107499) **(unverified, a forum post)** |
+
+**A warning:** updating some cascades only every other frame makes those frames costlier than the rest, an uneven frame rate that can feel worse than a steady lower one ([Unreal forum](https://forums.unrealengine.com/t/csm-caching-repurpose/2683688)). Spreading it so each frame does the same work avoids that.
+
+## What it means here
+
+**Staggering:** the far two cascades take turns, one redrawn on even frames and the other on odd ones, so every frame does the same work. A cascade not redrawn keeps the box it was drawn with, matrix and all, so its shadows stay exactly in place: only its edge lags a frame behind the turn, and the next cascade or the far map covers what it misses meanwhile. Moving casters in it (the drifting rocks) move in its map at half the rate. The near two, whose shadows the eye watches, stay every frame.
+
+**Coarser leaves in coarser cascades:** a third leaf mesh per tree with fewer, bigger cards still, drawn only into the far cascades and the far map, whose texels are tens of centimetres to metres wide. The engine needs a draw's shadow mesh chosen per tile (a far-cascade mesh beside the seen and shadow ones).

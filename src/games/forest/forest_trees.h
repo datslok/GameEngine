@@ -138,27 +138,31 @@ int tubeSides(float radius);
 // The twigs' nodes, which carry foliage: every one but the root at most leafyRadius thick.
 std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius);
 
-// The trees (F5 Forest, Trees; read at start-up: they are grown once).
+/*
+* One species of tree (F5 Forest, Canopy trees and Emergent trees; read at start-up: they are grown once). The defaults
+* are the canopy trees'; emergentTreeSettings gives the emergents'. Sizes from docs/JUNGLE.md: the canopy 20-40 m, the
+* emergents 45-60 m above it.
+*/
 struct ForestTreeSettings {
     // How many trees stand between the Ring and the clearing, and how many different shapes they are grown in.
-    int count = 12;
+    int count = 28;
     int variants = 4;
 
     // The tree's top and where its trunk forks into limbs, above the ground, and the crown's radius across (metres):
-    // a canopy tree forking low, as figs and rain trees do (docs/TREES.md, Part 1). The crown fills the space between
-    // the fork and the top.
-    float height = 30.0f;
-    float forkHeight = 9.0f;
-    float crownRadius = 13.0f;
+    // a canopy tree forking low, as figs and rain trees do (docs/TREES.md, Part 1), at the canopy's top. The crown fills
+    // the space between the fork and the top.
+    float height = 38.0f;
+    float forkHeight = 12.0f;
+    float crownRadius = 16.0f;
 
     // How many scaffold limbs leave the fork (each variant one fewer to one more), and how many clumps of foliage of
     // about what radius they grow into.
     int limbs = 4;
-    int clumps = 12;
-    float clumpRadius = 4.5f;
+    int clumps = 14;
+    float clumpRadius = 5.5f;
 
     // How many attractors fill the clumps: more grow more, finer branches.
-    int attractors = 4000;
+    int attractors = 5000;
 
     // The tips' radius (metres), from which Leonardo's rule makes the limbs and trunk.
     float twigRadius = 0.035f;
@@ -167,22 +171,39 @@ struct ForestTreeSettings {
     float buttress = 1.5f;
 
     // How far the most leaning variant's fork stands off its foot (metres); each leans 30-100% of it its own way.
-    float lean = 2.0f;
+    float lean = 2.5f;
 
     // Foliage on leaf-cluster cards (docs/TREES.md, Part 2): a card's size (metres a side), a leaf's length on it, how
     // thick a branch may be and still carry foliage, how many cards each such node in a clump's shell carries, how far
     // out of its clump a node must be to have one (a share of the clump's radius), how many bigger cards fill each
-    // clump's inside so it cannot be seen through, and the clusters' texture's texels a cell (four cells).
-    float clusterSize = 2.0f;
-    float leafLength = 0.45f;
+    // clump's inside so it cannot be seen through, and the clusters' texture's texels a cell (four cells). Real-sized
+    // leaves (15-25 cm: oversized ones made the trees read small, the user, Nov 14 2026) on cards half as big as before,
+    // so each twig keeps its leaves, and more cards for the cover.
+    float clusterSize = 1.0f;
+    float leafLength = 0.22f;
     float leafyRadius = 0.06f;
-    int cardsPerNode = 2;
+    int cardsPerNode = 6;
     float shellShare = 0.3f;
-    int fillCards = 8;
+    int fillCards = 32;
     int clusterTexels = 1024;
+
+    // The shadow leaves (drawn into shadows only, the leaves seen casting none): shadowCardsPerNode cards at each shell
+    // node and shadowFillCards in each clump, each shadowCardScale times as big: about a sixth of the cards for about
+    // two thirds of the cover. Every leaf card was redrawn into the sun's cascades each frame the camera turned (23 ms of
+    // shadows on the RTX 4070 Laptop, Nov 14 2026).
+    int shadowCardsPerNode = 1;
+    int shadowFillCards = 8;
+    float shadowCardScale = 2.0f;
 };
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
+
+/*
+* The emergents' settings (docs/JUNGLE.md): a few trees 55 m tall standing over the canopy, a clear trunk to 36 m and a
+* wide crown spread from its top, about half their height across, as real emergents' are; bigger buttresses, little
+* lean. Their leaves are the canopy trees', so both share one clusters' texture.
+*/
+ForestTreeSettings emergentTreeSettings();
 
 // The clump a point belongs to: the one it is deepest in (the least distance over radius); -1 when there are none.
 int clumpOf(const Vec3& point, const std::vector<TreeClump>& clumps);
@@ -226,9 +247,11 @@ inline constexpr float treeGravity = 0.2f;          // the trees' tropism (TreeG
 struct TreeMeshes {
     IndexedMesh bark;
     IndexedMesh leaves;
+    IndexedMesh shadowLeaves; // the shadow passes' stand-in for the leaves (ForestTreeSettings::shadowCardsPerNode)
     int tipCount = 0;
     int leafyCount = 0;
     int cardCount = 0;
+    int shadowCardCount = 0;
     float trunkRadius = 0.0f; // Leonardo's, at the fork; the foot is trunkTaper thicker
 };
 
@@ -247,8 +270,8 @@ TreeVariantShape treeVariantShape(const ForestTreeSettings& settings, std::uint3
 /*
 * One variant grown and built: its clumps, its scaffold (the trunk to the fork, a limb towards each limb's clumps),
 * space colonisation from it into the clumps' attractors with the trees' gravity, the radii, the bark tubes (the trunk's
-* lobed into buttresses and tapering from the foot to the fork, every tube whole bark tiles of barkTileMetres round)
-* and its leaves. The same seed grows the same tree.
+* lobed into buttresses and tapering from the foot to the fork, every tube whole bark tiles of barkTileMetres round),
+* its leaves and its shadow leaves. The same seed grows the same tree.
 */
 TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed, float barkTileMetres);
 
@@ -289,18 +312,32 @@ Vec2 forestTreesStart(const std::vector<TreePlacement>& trees);
 bool blocksSight(const Vec3& centre, float radius, const std::vector<SightLine>& lines);
 
 /*
-* Where the emergents stand: by dart throwing (as the pillars), on the valley's floor between the Ring and the
-* clearing, within treeSpread of the valley's axis (so they show through the Ring from the path), their trunks
-* treePathGap from the path's centre and their crowns clear of each other's middles and of every pillar, sized
-* 85-115% and turned at random; never where the crown would block a sight line. Fewer than asked if the tries run out.
-* The same every run.
+* A tree already standing, which later species keep clear of: its trunk's place on the ground and its crown's radius.
+*/
+struct StandingCrown {
+    Vec2 foot;
+    float radius = 0.0f;
+};
+
+/*
+* Where a species' trees stand: by dart throwing (as the pillars), from its own seed, on the valley's floor between the
+* Ring and the clearing, within treeSpread of the valley's axis (so they show through the Ring from the path), their
+* trunks treePathGap from the path's centre and outside the crowns of each other and of the trees already standing,
+* their crowns clear of every pillar, sized 85-115% and turned at random; never where the crown would block a sight
+* line. Fewer than asked if the tries run out. The same every run.
 */
 inline constexpr float treeNorthmost = -210.0f;
 inline constexpr float treeSouthmost = -40.0f;
 inline constexpr float treeSpread = 130.0f;
 inline constexpr float treePathGap = 6.0f;
+inline constexpr std::uint64_t emergentPlaceSeed = 0x454d4552ull;
+inline constexpr std::uint64_t canopyPlaceSeed = 0x54524545ull;
 std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const std::vector<PillarPlacement>& pillars,
-                                      const std::vector<SightLine>& sightLines);
+                                      const std::vector<SightLine>& sightLines, const std::vector<StandingCrown>& standing,
+                                      std::uint64_t seed);
+
+// The placed trees as crowns for the next species to keep clear of.
+std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings);
 
 // The crown's bounding sphere of a placed tree in the world (what the sight lines are tested against).
 Vec3 placedCrownCentre(const TreePlacement& tree, const ForestTreeSettings& settings);

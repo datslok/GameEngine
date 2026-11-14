@@ -180,6 +180,21 @@ namespace {
 
         for (const DrawItem& draw : frame.draws) {
             assert(draw.castsShadows == (draw.mesh == MeshHandle{0}));
+            assert(!draw.shadowOnly);
+        }
+
+        // A model drawn only into shadows (a shadow proxy) says so in its draws.
+        const Entity proxy = world.create();
+        world.add(proxy, Transform{});
+        ModelRenderer proxyRenderer = makeMeshRenderer(MeshHandle{2});
+        proxyRenderer.shadowOnly = true;
+        world.add(proxy, proxyRenderer);
+
+        const FrameDescription withProxy = buildFrame(world, makeTestCamera(), 0.0f);
+        assert(withProxy.draws.size() == 3);
+
+        for (const DrawItem& draw : withProxy.draws) {
+            assert(draw.shadowOnly == (draw.mesh == MeshHandle{2}));
         }
     }
 }

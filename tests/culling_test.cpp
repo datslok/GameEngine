@@ -175,6 +175,25 @@ namespace {
         assert(shadowCasters(draws, light).empty());
     }
 
+    /*
+    * A shadow proxy (DrawItem::shadowOnly: the forest's cheaper leaves for shadows) is drawn into shadows only: no
+    * camera view picks it, wherever it is, while the light's view does.
+    */
+    void testShadowOnlyDrawsAreSeenOnlyByLights() {
+        std::vector<DrawItem> draws = {drawAt(0.0f, 0.0f, -5.0f, 0), drawAt(0.0f, 0.0f, -5.0f, 1)};
+        draws[1].shadowOnly = true;
+        attachBoundingSpheres(draws, {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}},
+                                      Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
+
+        const Frustum camera = Frustum::fromClipMatrix(testProjection(), ClipDepth::NegativeOneToOne);
+        assert((visibleDraws(draws, camera) == std::vector<std::size_t>{0}));
+
+        const Mat4 lightView = Mat4::lookAt(Vec3{0.0f, 8.0f, -5.0f}, Vec3{0.0f, 0.0f, -5.0f}, Vec3{0.0f, 0.0f, -1.0f});
+        const Frustum light = Frustum::fromClipMatrix(testProjection() * lightView, ClipDepth::NegativeOneToOne);
+        assert((shadowCasters(draws, light) == std::vector<std::size_t>{0, 1}));
+        assert((castersInReach(draws, BoundingSphere{}) == std::vector<std::size_t>{0, 1}));
+    }
+
     // A light only reaches as far as its range, so nothing wholly outside that sphere can block it where it shines: one
     // sphere test per caster and light, before the six face frustums. A blocker sits between the light and a lit point,
     // and the lit point is within range, so so is the blocker. (Only a soft shadow's filter, which reads texels around the
@@ -252,6 +271,7 @@ namespace {
 }
 
 void testCulling() {
+    testShadowOnlyDrawsAreSeenOnlyByLights();
     testSmallCastersCanBeLeftOut();
     testFrustumFromMatrix();
     testFrustumCorners();

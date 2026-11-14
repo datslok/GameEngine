@@ -23,6 +23,12 @@ namespace {
         assert((solidRayMask & visualOnlyRayMask) == 0);
         assert(solidRayMask != 0 && visualOnlyRayMask != 0);
         assert((everythingRayMask & solidRayMask) == solidRayMask && (everythingRayMask & visualOnlyRayMask) == visualOnlyRayMask);
+
+        // A shadow proxy keeps its place in the list (instances are numbered by draw) but no ray ever meets it: the
+        // shadow maps' stand-in, not a surface.
+        DrawItem proxy = drawAt(Mat4::identity(), true);
+        proxy.shadowOnly = true;
+        assert(rayMaskFor(proxy) == 0u);
     }
 
     /*

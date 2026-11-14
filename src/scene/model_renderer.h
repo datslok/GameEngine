@@ -27,6 +27,11 @@ struct ModelRenderer {
     // Whether it blocks light from shadow-casting lights. Off for things that surround their own light, like a glowing lamp shade.
     bool castsShadows = true;
 
+    // Drawn into shadow maps only, never seen: a cheaper stand-in for something whose own castsShadows is off (the
+    // forest's shadow leaves, fewer and bigger cards than the leaves seen, since every leaf card in the sun's cascades
+    // was redrawn each frame the camera turned). Rays never meet it either.
+    bool shadowOnly = false;
+
     // Part of the level that never moves (floors, walls): global illumination's probes move out of it at start-up, and
     // only things not marked static wake sleeping probes. Unmarked things count as moving, which costs only some probe
     // work, while a mover marked static would leave probes asleep beside it.
