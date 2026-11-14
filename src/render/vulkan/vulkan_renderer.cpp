@@ -1417,6 +1417,8 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
                                                                        fittedShadowDistance(mirrorShadowFit)}}
                                                                  : std::nullopt;
     ShadowPlan shadows = planShadows(prioritized.lighting, camera, shadowLayout, settings.shadows, fittedSunDistance, mirrorShadows);
+    holdStaggeredCascades(shadows, lastShadowPlan, cameraOrigin, settings.shadows, ++shadowFrame);
+    lastShadowPlan = shadows;
     attachShadows(lights, shadows);
 
     // Glass anywhere in the world (a window off screen still shades what is on it) tints the shadowed lights passing it

@@ -344,6 +344,9 @@ private:
 
     VulkanImage shadowAtlas;
     ShadowAtlasLayout shadowLayout;
+    // Last frame's shadow plan and a count of planned frames, for the cascades that take turns (holdStaggeredCascades).
+    ShadowPlan lastShadowPlan;
+    std::uint64_t shadowFrame = 0;
     ShadowTileMemory shadowMemory;
 
     // The far shadow map's still casters (ShadowTile::separateMovers, render/gpu/shadow_cache.h): a depth image the far

@@ -342,6 +342,8 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - **The jungle patch in stages (research in `docs/JUNGLE.md`, the user's go Nov 14 2026):** [ ] `jungle-canopy` (canopy trees to 38 m, emergents of 55 m over them, real-sized leaves), [ ] `jungle-midstorey` (a slender 10-20 m species every 8-10 m), [ ] `jungle-understorey` (palms, ferns, broad leaves), [ ] vines and epiphytes, [ ] light through leaves, [ ] wind.
   - **Sight lines (the user, Nov 14 2026):** some of the Monolith and the Ring stays in view from the path, the meadow and the clearing at all times: a tree whose crown meets a sight line from the path to them is not planted.
 - [x] Smooth moving shadows in the far shadow map (`far-shadow-movers`)
+- [x] Staggered far cascades: the far two take turns redrawing while the camera turns (`cascade-stagger`)
+- [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/SHADOWCACHE.md`)
 - [x] The islands' shadows inside the cascades (`distant-occluders`)
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The structures, half reclaimed
