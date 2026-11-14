@@ -34,7 +34,8 @@ namespace {
         return ShadowAtlasSize{shadowAtlasWidth, shadowAtlasHeight + extraRows, cascadeSize};
     }
 
-    constexpr std::uint32_t otherShadowsAtTheirSmallest = maxShadowedSpotLights + maxShadowedPointLights * 6 + maxShadowedDirectionalLights * maxShadowCascades;
+    constexpr std::uint32_t otherShadowsAtTheirSmallest = maxShadowedSpotLights + maxShadowedPointLights * 6 +
+                                                          maxShadowedDirectionalLights * (maxShadowCascades + 1); // mirror cascades, far map
 
     static_assert(maxShadowedDirectionalLights * maxShadowCascades * areaInSmallestTiles(standardShadowTileSize) +
                   otherShadowsAtTheirSmallest <= capacityOf(ShadowAtlasSize{}),
@@ -70,7 +71,8 @@ namespace {
         Directional,
         Spot,
         Point,
-        Mirror // a sun's cascades for a flat mirror's picture: the least important, last of all
+        Mirror, // a sun's cascades for a flat mirror's picture: the least important, last of all
+        Far     // a sun's far shadow map, right after its cascades, as the last box of their row
     };
 
     // One light's claim on the atlas: tileCount squares of one size, and where they were placed. For a point light,
@@ -104,8 +106,10 @@ namespace {
     /*
     * While the requests need more room than the atlas has, halve the tiles of the least important light that can still
     * shrink: requests are in order of importance (the sun, then spotlights and point lights in slot order), so the last
-    * ones lose detail first. The sun's cascades shrink only when nothing else can, and never below the standard size:
-    * they are its shadows everywhere on screen, and every point light's faces at their smallest leave them that much room.
+    * ones lose detail first. The sun's far shadow map gives way before any of them, down to the standard size: its
+    * shadows are kilometres away, where a lamp's are next to the camera. The sun's cascades shrink only when nothing else
+    * can, and never below the standard size: they are its shadows everywhere on screen, and every point light's faces at
+    * their smallest leave them that much room.
     */
     void shrinkToFit(std::vector<ShadowRequest>& requests, std::uint32_t atlasCapacity) {
         std::uint32_t used = 0;
@@ -116,8 +120,14 @@ namespace {
 
         while (used > atlasCapacity) {
             auto shrinkable = std::find_if(requests.rbegin(), requests.rend(), [](const ShadowRequest& request) {
-                return request.kind != ShadowKind::Directional && request.size > smallestShadowTileSize;
+                return request.kind == ShadowKind::Far && request.size > standardShadowTileSize;
             });
+
+            if (shrinkable == requests.rend()) {
+                shrinkable = std::find_if(requests.rbegin(), requests.rend(), [](const ShadowRequest& request) {
+                    return request.kind != ShadowKind::Directional && request.size > smallestShadowTileSize;
+                });
+            }
 
             if (shrinkable == requests.rend()) {
                 shrinkable = std::find_if(requests.rbegin(), requests.rend(), [](const ShadowRequest& request) {
@@ -195,6 +205,22 @@ namespace {
     * space, so the shader's version is the same box shifted to the camera (origin), rather than one snapped around the
     * camera, which would crawl as it moves.
     */
+    // A sun's box tile: the box for the shader (shifted to the camera), its base bias, where the sun is, and the lens soft
+    // shadows read (no near plane, the box's depth, a texel's size, the radius).
+    void addSunBox(ShadowPlan& plan, const ShadowAtlasSize& atlas, const ShadowTile& tile, const DirectionalLight& light,
+                   const CascadeBox& box, float radius, const ShadowSettings& settings, const Vec3& origin) {
+        addTile(plan, atlas, tile, box.matrix, box.matrix * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
+                settings.normalOffsetTexels * box.texelSize, BoundingSphere{});
+
+        const Vec3 towardsSun = light.direction.normalized() * -1.0f;
+        plan.tiles.back().lightPlace = Vec4{towardsSun.x, towardsSun.y, towardsSun.z, 0.0f};
+
+        float* lens = plan.tileData.back().lens;
+        lens[1] = box.depthRange;
+        lens[2] = box.texelSize;
+        lens[3] = radius;
+    }
+
     void addSunCascades(ShadowPlan& plan, const ShadowAtlasSize& atlas, const ShadowRequest& request, const DirectionalLight& light,
                         const Camera& view, float nearDistance, float farDistance, const ShadowSettings& settings, const Vec3& origin) {
         const std::vector<float> splits = cascadeSplits(nearDistance, farDistance, request.tileCount, settings.cascadeSplitLambda);
@@ -203,18 +229,14 @@ namespace {
             const std::size_t index = static_cast<std::size_t>(cascade);
             const BoundingSphere sphere = cascadeSphere(view, splits[index], splits[index + 1]);
             const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
-
-            addTile(plan, atlas, request.tiles[index], box.matrix, box.matrix * Mat4::translation(origin.x, origin.y, origin.z), 0.0f,
-                    settings.normalOffsetTexels * box.texelSize, BoundingSphere{});
-
-            const Vec3 towardsSun = light.direction.normalized() * -1.0f;
-            plan.tiles.back().lightPlace = Vec4{towardsSun.x, towardsSun.y, towardsSun.z, 0.0f};
-
-            float* lens = plan.tileData.back().lens;
-            lens[1] = box.depthRange;
-            lens[2] = box.texelSize;
-            lens[3] = sphere.radius;
+            addSunBox(plan, atlas, request.tiles[index], light, box, sphere.radius, settings, origin);
         }
+    }
+
+    // How far the far shadow map reaches, or 0 for none: off, or the view ending before the cascades do.
+    float farShadowReach(const ShadowSettings& settings, const Camera& camera) {
+        const float reach = std::min(settings.farShadowDistance, camera.getFarPlane());
+        return settings.farShadowDistance > 0.0f && reach > std::min(settings.directionalDistance, camera.getFarPlane()) ? reach : 0.0f;
     }
 }
 
@@ -312,6 +334,11 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
         if (selected.directionalLights[slot].castsShadows && static_cast<int>(slot) < maxShadowedDirectionalLights) {
             const int cascades = std::clamp(settings.cascadeCount, 1, maxShadowCascades);
             requests.push_back(ShadowRequest{ShadowKind::Directional, slot, cascades, cascadeTilePixels(settings.cascadeResolution), {}});
+
+            if (farShadowReach(settings, camera) > 0.0f) {
+                const std::uint32_t size = std::min(cascadeTilePixels(settings.farShadowResolution), atlas.largestSquare);
+                requests.push_back(ShadowRequest{ShadowKind::Far, slot, 1, size, {}});
+            }
         }
     }
 
@@ -393,6 +420,15 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 
             const float shadowDistance = std::min({settings.directionalDistance, camera.getFarPlane(), fittedSunDistance});
             addSunCascades(plan, atlas, request, light, camera, camera.getNearPlane(), shadowDistance, settings, origin);
+        }
+        else if (request.kind == ShadowKind::Far) {
+            // Its tile follows the cascades', so the row reads it as its last box.
+            const DirectionalLight& light = selected.directionalLights[request.slot];
+            const BoundingSphere sphere = farShadowSphere(origin, farShadowReach(settings, camera));
+            const CascadeBox box = cascadeBox(light.direction, sphere, settings.directionalCasterReach, request.size);
+            addSunBox(plan, atlas, request.tiles.front(), light, box, sphere.radius, settings, origin);
+            plan.tiles.back().smallestCaster = farShadowSmallestCaster(box.texelSize);
+            plan.directional[request.slot].cascades += 1;
         }
         else if (request.kind == ShadowKind::Mirror) {
             // The mirror's view from the glass to its farthest surface (never past the shadow distance), the same way.
@@ -534,5 +570,7 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.choice("Cascade resolution", settings.cascadeResolution, cascadeResolutionNames);
     visitor.field("Mirror cascades", settings.mirrorCascadeCount, {.min = 0, .max = maxShadowCascades});
     visitor.choice("Mirror cascade resolution", settings.mirrorCascadeResolution, cascadeResolutionNames);
+    visitor.field("Far shadow distance", settings.farShadowDistance, {.min = 0.0f, .max = 100000.0f, .sliderMax = 20000.0f, .unit = "m (0 off)"});
+    visitor.choice("Far shadow resolution", settings.farShadowResolution, cascadeResolutionNames);
     visitor.field("Normal offset", settings.normalOffsetTexels, {.min = 0.0f, .sliderMax = 6.0f, .unit = "texels"});
 }

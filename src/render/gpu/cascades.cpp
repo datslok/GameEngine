@@ -116,6 +116,24 @@ float shadowLadderStepBelow(float distance) {
     return ladderDistance(step);
 }
 
+float farShadowSnap(float distance) {
+    return distance * farShadowSnapShare;
+}
+
+// Rounding each axis to the nearest grid point leaves the camera at most half a step from it on each, so at most
+// half the cell's diagonal (sqrt(3) / 2 of a step) away: the radius adds that to the distance.
+BoundingSphere farShadowSphere(const Vec3& camera, float distance) {
+    const float snap = farShadowSnap(distance);
+    const auto onGrid = [&](float coordinate) {
+        return std::round(coordinate / snap) * snap;
+    };
+    return BoundingSphere{Vec3{onGrid(camera.x), onGrid(camera.y), onGrid(camera.z)}, distance + 0.5f * std::sqrt(3.0f) * snap};
+}
+
+float farShadowSmallestCaster(float texelSize) {
+    return farShadowSmallestCasterTexels * texelSize;
+}
+
 Vec3 shadowViewUp(const Vec3& forward) {
     return std::abs(forward.normalized().y) > 0.99f ? Vec3{0.0f, 0.0f, -1.0f} : Vec3{0.0f, 1.0f, 0.0f};
 }

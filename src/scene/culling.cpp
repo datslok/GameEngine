@@ -113,3 +113,17 @@ std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const
 
     return casters;
 }
+
+std::vector<std::size_t> castersAtLeast(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates, float smallestRadius) {
+    std::vector<std::size_t> kept;
+
+    for (const std::size_t index : candidates) {
+        const float radius = draws[index].bounds.radius;
+
+        if (radius < 0.0f || radius >= smallestRadius) {
+            kept.push_back(index);
+        }
+    }
+
+    return kept;
+}

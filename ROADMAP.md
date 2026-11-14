@@ -331,7 +331,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] The game: terrain, clearing, path, blended ground, sun, valley mist, stand-ins (`forest-assets`)
 - [x] The rough valley: the land in rings to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
 - [x] The ground's paint without squares: a texture per ring, turned noise, cubic reads (`ground-paint`)
-- [ ] Distant shadows: the sun's shadows reaching the far pillars, islands and towers (they stop at 200 m today, so everything past it is lit on all sides) without blurring the near ones: a far cascade of its own or baked shading
+- [x] Distant shadows: the sun's far shadow map, 5 km round the camera (`far-shadows`)
 - [ ] More assets: jungle plants (broad leaves, bromeliads, palms or tree ferns), banded sandstone for the pillars, weathered concrete and panels for the structures, a vine leaf atlas, hanging moss; a CC0 survey and a shortlist for the user first, as for the first 30
 - [ ] The pillars and floating islands, generated
   - Sandstone pillars: wobbling, tapered columns with ledges, streaks and a crown of trees, in the scanned rock.
@@ -340,6 +340,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The structures, half reclaimed
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
+  - Big searchlights sweeping the land (the user, Nov 14 2026): spot lights with shadows near the camera, and for beams kilometres long, more than the fog's 100 m grid can light, a beam of their own through the height fog (its closed form along the cone).
   - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, searchlights sweeping beams through the mist, vines hanging hundreds of metres.
 - [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured
 - [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer)

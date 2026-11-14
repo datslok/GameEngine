@@ -2286,8 +2286,8 @@ VulkanRenderer::ShadowDraws VulkanRenderer::prepareShadowDraws(const FrameDescri
         }
 
         const Frustum view = Frustum::fromClipMatrix(tile.matrix, ClipDepth::OneToZero);
-        const std::vector<std::size_t> casters = shadowCasters(description.draws, inReach, view);
-        const std::vector<std::size_t> glass = shadowCasters(description.draws, glassReached, view);
+        const std::vector<std::size_t> casters = castersAtLeast(description.draws, shadowCasters(description.draws, inReach, view), tile.smallestCaster);
+        const std::vector<std::size_t> glass = castersAtLeast(description.draws, shadowCasters(description.draws, glassReached, view), tile.smallestCaster);
         prepared.tileGlass[tileIndex] = !glass.empty();
         const std::uint64_t signature = tintedShadowSignature(description.draws, casters, glass);
 

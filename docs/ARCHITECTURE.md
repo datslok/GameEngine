@@ -1162,6 +1162,19 @@ Blending between cascades:
 - Blend band and transition reach the shader as `GpuFrameData::cascadeOptions`.
 - `sunCascadeRow` gives its row's own shadow and how much of the answer it is (`ownShare`); `sunShadow` mixes in what lies past the row: a flat mirror's row when there is one, else plain light (`sunRowOrLit`, the same `mix` as before rows existed, so frames without a mirror shade exactly as they did).
 
+### The far shadow map
+
+Past the cascades (200 m at most), everything used to count as lit, so mountains, pillars and towers kilometres away cast nothing (the forest's rough valley, Nov 14 2026). The far shadow map is one more box at the end of the sun's row: the shader's row walk (`sunCascadeRow`) reads it as the row's last cascade, blending into it from the last cascade's band and fading to lit over its own.
+
+- **Its sphere** (`farShadowSphere`, `render/gpu/cascades`): round the camera snapped to a grid `farShadowSnapShare` (1/8) of its distance apart, its radius the distance plus half the cell's diagonal, so it holds everything within the distance from anywhere in the cell and stays exactly where it is while the camera walks inside it. Its box (`cascadeBox`) is then the same every frame, and the tile cache keeps it.
+- **Its distance** (`ShadowSettings::farShadowDistance`, 5000 m, 0 off): at most the camera's far plane; none at all where the view ends before the cascades do (the demo's 100 m).
+- **Its tile** (`ShadowKind::Far`, right after the cascades' tiles, so the row is contiguous; `LightShadow::cascades` counts it): `farShadowResolution` (4096) at most the atlas's largest square, so 4096 on Ultra (about 2.7 m texels over 5 km) and 2048 otherwise (5.4 m). It gives way first when the atlas is short, down to the standard 1024, before any lamp's tiles shrink (`shrinkToFit`). The Ultra atlas did not grow: the far tile takes one of the two 4096 squares beside the cascades.
+- **Why metres-wide texels are enough:** the sun is a disc half a degree across, so a real shadow's edge blurs by about a hundredth of the distance from caster to ground (2.8 m under a pillar's top 300 m up), as wide as a texel; the soft shadows widen with that distance already.
+- **Small casters left out** (`ShadowTile::smallestCaster`, `farShadowSmallestCaster`: 2 texels; `castersAtLeast` in `scene/culling`, applied in `prepareShadowDraws` to the casters and glass, so the cache's signature leaves them out too): their shadows would be smaller than the map shows, and the player's body, moving every frame, would otherwise redraw kilometres of land every frame. Unknown bounds are always kept.
+- **Redrawn** only when the camera crosses into another cell, the sun turns, or a big caster in it changes.
+- **Its bias** is the cascades' (`normalOffsetTexels` of its texel towards the sun, more on slopes), so its shadows start a few metres from their casters' feet: invisible kilometres away, to be watched if it shows.
+- **Tests:** `cascades_test` (the sphere holds the view, sits on the grid, stays put within a cell, moves a whole step across one), `culling_test` (small casters left out, unknown kept), `shadow_map_test` (the far map ends the row, its size and smallest caster, a point 3 km ahead in it and in no cascade, none when off or with a 100 m view, its tile unchanged as the camera walks, giving way to lamps first; the full-atlas tests with it).
+
 ### A mirror's cascades
 
 A flat mirror's picture (see Planar reflections) shows mostly what is behind the camera, which the camera's cascades never hold, so everything in it stood in full sun. The sun gets a second row of cascades for the mirror's view (`MirrorShadowView`, the last argument of `planShadows`):

@@ -240,7 +240,19 @@ namespace {
     }
 }
 
+namespace {
+    // Only casters at least a size across are kept (the far shadow map's), in their order; unknown bounds always are.
+    void testSmallCastersCanBeLeftOut() {
+        std::vector<DrawItem> draws = {drawAt(0.0f, 0.0f, 0.0f, 0), drawAt(5.0f, 0.0f, 0.0f, 0), drawAt(9.0f, 0.0f, 0.0f, 9)};
+        attachBoundingSpheres(draws, {Aabb{Vec3{-1.0f, -1.0f, -1.0f}, Vec3{1.0f, 1.0f, 1.0f}}});
+        draws[1].bounds.radius = 40.0f;
+        assert((castersAtLeast(draws, {0, 1, 2}, 10.0f) == std::vector<std::size_t>{1, 2}));
+        assert((castersAtLeast(draws, {2, 1, 0}, 0.0f) == std::vector<std::size_t>{2, 1, 0}));
+    }
+}
+
 void testCulling() {
+    testSmallCastersCanBeLeftOut();
     testFrustumFromMatrix();
     testFrustumCorners();
     testFrustumsMayIntersect();

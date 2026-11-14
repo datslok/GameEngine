@@ -34,6 +34,10 @@ std::vector<std::size_t> castersInReach(const std::vector<DrawItem>& draws, cons
 // pane; solid casters never include glass, nor glass solid casters.
 std::vector<std::size_t> glassInReach(const std::vector<DrawItem>& draws, const BoundingSphere& reach);
 
+// The candidates at least smallestRadius in radius, in their order; those with unknown bounds (negative) always: the far
+// shadow map's, which leaves out what is too small for its texels (cascades.h).
+std::vector<std::size_t> castersAtLeast(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates, float smallestRadius);
+
 // The candidates (draw indices, such as castersInReach gives) inside a light view's frustum, in the candidates' order.
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,
                                        const Frustum& lightFrustum);

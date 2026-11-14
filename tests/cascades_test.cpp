@@ -326,7 +326,45 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The far map's sphere: round the camera snapped to a grid a share of its distance apart, big enough that every point
+    * within the distance of the camera lies inside. While the camera stays in its grid cell the sphere (and so the
+    * tile) stays exactly where it is; crossing into the next cell moves it a whole step.
+    */
+    void testFarSphereHoldsTheViewAndStaysPut() {
+        const float distance = 4000.0f;
+        const float snap = farShadowSnap(distance);
+        assert(nearlyEqual(snap, distance * farShadowSnapShare));
+
+        const Vec3 camera{123.0f, 45.0f, -678.0f};
+        const BoundingSphere sphere = farShadowSphere(camera, distance);
+
+        for (const float coordinate : {sphere.centre.x, sphere.centre.y, sphere.centre.z}) {
+            assert(nearlyEqual(coordinate / snap, std::round(coordinate / snap)));
+        }
+
+        for (int step = 0; step < 64; ++step) {
+            const float azimuth = 0.7f * static_cast<float>(step);
+            const float elevation = -1.5f + 3.0f * static_cast<float>(step) / 63.0f;
+            const Vec3 direction{std::cos(elevation) * std::cos(azimuth), std::sin(elevation), std::cos(elevation) * std::sin(azimuth)};
+            assert((camera + direction * distance - sphere.centre).length() <= sphere.radius);
+        }
+
+        const BoundingSphere nudged = farShadowSphere(camera + Vec3{20.0f, -10.0f, 30.0f}, distance);
+        assert(nudged.centre.x == sphere.centre.x && nudged.centre.y == sphere.centre.y && nudged.centre.z == sphere.centre.z);
+        assert(nudged.radius == sphere.radius);
+
+        const BoundingSphere moved = farShadowSphere(camera + Vec3{snap, 0.0f, 0.0f}, distance);
+        assert(nearlyEqual(moved.centre.x - sphere.centre.x, snap, 1e-2f));
+
+        // Casters smaller than two of its texels across cannot throw a shadow it could show.
+        assert(nearlyEqual(farShadowSmallestCaster(3.0f), 3.0f * farShadowSmallestCasterTexels));
+    }
+}
+
 void testCascades() {
+    testFarSphereHoldsTheViewAndStaysPut();
     testNothingMeasuredIsNotFitted();
     testTheFitRoundsUpToTheLadder();
     testTheLadderRoundsDown();

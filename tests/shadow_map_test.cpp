@@ -36,6 +36,11 @@ namespace {
     Camera makeOverviewCamera() {
         return Camera{Vec3{10.0f, 60.0f, 0.0f}, Vec3{10.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 1.5f, 1.5f, 0.1f, 200.0f};
     }
+
+    // The same, seeing kilometres, so the sun gets its far shadow map too: every tile there can be.
+    Camera makeFarOverviewCamera() {
+        return Camera{Vec3{10.0f, 60.0f, 0.0f}, Vec3{10.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 1.5f, 1.5f, 0.1f, 20000.0f};
+    }
 }
 
 namespace {
@@ -465,7 +470,8 @@ namespace {
         lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -1.0f, 0.6f}});
         lighting.spotLights.push_back(spotLightAt(Vec3{0.0f, 3.0f, 0.0f}, true));
         const Camera camera = mirrorTestCamera();
-        const ShadowSettings settings;
+        ShadowSettings settings;
+        settings.farShadowDistance = 0.0f; // the camera's row its cascades alone, so the mirror's follows them
         const float fitted = 9.3f;
 
         const ShadowPlan without = planShadows(lighting, camera, settings, fitted);
@@ -725,7 +731,7 @@ namespace {
         ShadowSettings high;
         high.cascadeResolution = CascadeResolution::Pixels2048;
         high.mirrorCascadeCount = maxShadowCascades;
-        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), high, std::numeric_limits<float>::infinity(), mirrorTestView());
+        const ShadowPlan plan = planShadows(everyShadowedLight(), makeFarOverviewCamera(), high, std::numeric_limits<float>::infinity(), mirrorTestView());
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
         assertTilesFitTheAtlas(plan, shadowAtlasSizeFor(high));
@@ -781,7 +787,7 @@ namespace {
         settings.cascadeResolution = CascadeResolution::Pixels4096;
         settings.mirrorCascadeCount = maxShadowCascades;
         ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
-        const ShadowPlan plan = planShadows(everyShadowedLight(), makeOverviewCamera(), layout, settings, std::numeric_limits<float>::infinity(), mirrorTestView());
+        const ShadowPlan plan = planShadows(everyShadowedLight(), makeFarOverviewCamera(), layout, settings, std::numeric_limits<float>::infinity(), mirrorTestView());
 
         assert(plan.tiles.size() == static_cast<std::size_t>(maxShadowTiles));
         assertTilesFitTheAtlas(plan, layout.size());
@@ -1107,7 +1113,106 @@ namespace {
     }
 }
 
+namespace {
+    // A camera on the ground looking north with a far plane kilometres away, as the forest's.
+    Camera makeFarCamera(const Vec3& position, float farPlane = 25000.0f) {
+        return Camera{position, position + Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, farPlane};
+    }
+
+    FrameLighting sunOnly() {
+        FrameLighting lighting;
+        lighting.directionalLights.push_back(DirectionalLight{Vec3{0.4f, -0.6f, -0.5f}});
+        return lighting;
+    }
+
+    /*
+    * Past the cascades, the far map: one more box at the end of the sun's row, round the camera snapped to its grid,
+    * reaching the far shadow distance; its own size (at most the atlas's largest square); small casters left out. A
+    * point 3 km ahead is in it and in no cascade.
+    */
+    void testTheFarMapEndsTheSunsRow() {
+        const ShadowSettings settings;
+        const Camera camera = makeFarCamera(Vec3{10.0f, 2.0f, 20.0f});
+        const ShadowPlan plan = planShadows(sunOnly(), camera, settings);
+        const LightShadow& sun = plan.directional[0];
+        assert(sun.cascades == settings.cascadeCount + 1);
+
+        const std::size_t far = static_cast<std::size_t>(sun.firstTile + settings.cascadeCount);
+        assert(plan.tiles.size() == far + 1);
+        const BoundingSphere sphere = farShadowSphere(camera.getPosition(), settings.farShadowDistance);
+        assert(nearlyEqual(plan.tileData[far].lens[3], sphere.radius, 1e-2f));
+        assert(plan.tiles[far].size == std::min(cascadeTilePixels(settings.farShadowResolution), shadowAtlasSizeFor(settings).largestSquare));
+        assert(nearlyEqual(plan.tiles[far].smallestCaster, farShadowSmallestCaster(plan.tileData[far].lens[2])));
+
+        for (int cascade = 0; cascade < settings.cascadeCount; ++cascade) {
+            assert(plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)].smallestCaster == 0.0f);
+        }
+
+        const Vec3 ahead{10.0f, 2.0f, -2980.0f};
+        assert(landsInside(project(plan.tiles[far].matrix, ahead)));
+        assert(!landsInside(project(plan.tiles[far - 1].matrix, ahead)));
+
+        // High's cascades (2048) keep the usual atlas, whose largest square is 2048: the far map shrinks to it.
+        ShadowSettings high;
+        high.cascadeResolution = CascadeResolution::Pixels2048;
+        const ShadowPlan highPlan = planShadows(sunOnly(), camera, high);
+        assert(highPlan.tiles[static_cast<std::size_t>(highPlan.directional[0].firstTile + high.cascadeCount)].size == 2048);
+    }
+
+    // With lamps filling the atlas's room beside Ultra's cascades (as the light lab's street does), the far map gives way
+    // first: the lamps' tiles are the same size as with no far map at all.
+    void testTheFarMapGivesWayToLamps() {
+        FrameLighting lighting = sunOnly();
+
+        for (int i = 0; i < 4; ++i) {
+            lighting.pointLights.push_back(pointLightAt(Vec3{static_cast<float>(i), 0.0f, 0.0f}, true, 40.0f));
+        }
+
+        ShadowSettings with;
+        ShadowSettings without;
+        without.farShadowDistance = 0.0f;
+        const ShadowPlan farPlan = planShadows(lighting, makeFarOverviewCamera(), with);
+        const ShadowPlan plain = planShadows(lighting, makeFarOverviewCamera(), without);
+        assert(farPlan.directional[0].cascades == with.cascadeCount + 1);
+        const std::size_t far = static_cast<std::size_t>(farPlan.directional[0].firstTile + with.cascadeCount);
+        assert(farPlan.tiles[far].size < 4096 && farPlan.tiles[far].size >= standardShadowTileSize);
+
+        for (std::size_t light = 0; light < plain.points.size(); ++light) {
+            const std::size_t first = static_cast<std::size_t>(plain.points[light].firstTile);
+            const std::size_t farFirst = static_cast<std::size_t>(farPlan.points[light].firstTile);
+            assert(farPlan.tiles[farFirst].size == plain.tiles[first].size);
+        }
+    }
+
+    // No far map when it is off, or when the view ends before the cascades do (the demo's 100 m).
+    void testNoFarMapWhereItWouldAddNothing() {
+        ShadowSettings off;
+        off.farShadowDistance = 0.0f;
+        assert(planShadows(sunOnly(), makeFarCamera(Vec3{}), off).directional[0].cascades == off.cascadeCount);
+
+        const ShadowSettings settings;
+        assert(planShadows(sunOnly(), makeFarCamera(Vec3{}, 100.0f), settings).directional[0].cascades == settings.cascadeCount);
+    }
+
+    // Walking a few metres leaves the far tile exactly as it was, so it is not redrawn, while the nearest cascade moves.
+    void testTheFarTileStaysPutAsTheCameraWalks() {
+        const ShadowSettings settings;
+        ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
+        const ShadowPlan before = planShadows(sunOnly(), makeFarCamera(Vec3{10.0f, 2.0f, 20.0f}), layout, settings);
+        const ShadowPlan after = planShadows(sunOnly(), makeFarCamera(Vec3{14.0f, 2.0f, 13.0f}), layout, settings);
+        const std::size_t far = static_cast<std::size_t>(before.directional[0].firstTile + settings.cascadeCount);
+        const std::size_t first = static_cast<std::size_t>(before.directional[0].firstTile);
+        assert(before.tiles[far].matrix == after.tiles[far].matrix);
+        assert(before.tiles[far].x == after.tiles[far].x && before.tiles[far].y == after.tiles[far].y);
+        assert(!(before.tiles[first].matrix == after.tiles[first].matrix));
+    }
+}
+
 void testShadowMap() {
+    testTheFarMapEndsTheSunsRow();
+    testNoFarMapWhereItWouldAddNothing();
+    testTheFarMapGivesWayToLamps();
+    testTheFarTileStaysPutAsTheCameraWalks();
     testAtlasGrowsForUltraCascades();
     testCascadesFollowTheirResolution();
     testEveryShadowFitsOnUltra();
