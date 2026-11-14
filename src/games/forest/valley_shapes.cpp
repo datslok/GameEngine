@@ -3,6 +3,8 @@
 #include "core/hash.h"
 #include "games/forest/forest_terrain.h"
 #include "math/angles.h"
+#include "math/quat.h"
+#include "math/smooth_step.h"
 
 #include <algorithm>
 #include <array>
@@ -46,7 +48,6 @@ namespace {
 
     // The shapes' noise: how much a pillar's radius bulges and its axis leans, and how jagged an island's underside is.
     constexpr float pillarBulge = 0.22f;
-    constexpr float pillarRidges = 0.08f;
     constexpr float pillarLean = 0.35f;
     constexpr float pillarTaper = 0.33f;
     constexpr float islandJag = 0.25f;
@@ -91,73 +92,105 @@ namespace {
     }
 }
 
-Mesh wrappedSurfaceMesh(int rows, int columns, bool wrapRows, const std::function<Vec3(int row, int column)>& point) {
+SurfaceGrid surfaceGrid(int rows, int columns, bool wrapRows, const std::function<Vec3(int row, int column)>& point) {
     if (rows < 1 || columns < 3 || (wrapRows && rows < 3)) {
         throw std::invalid_argument("A wrapped surface needs at least 3 columns and a row, or 3 rows when they wrap");
     }
 
-    Mesh mesh;
+    SurfaceGrid grid{.rows = rows, .columns = columns, .wrapRows = wrapRows, .points = {}};
     const int pointRows = wrapRows ? rows : rows + 1;
-    const auto index = [&](int row, int column) {
-        return static_cast<std::size_t>((row % pointRows) * columns + (column % columns));
-    };
-
-    mesh.vertices.reserve(static_cast<std::size_t>(pointRows * columns));
+    grid.points.reserve(static_cast<std::size_t>(pointRows * columns));
 
     for (int row = 0; row < pointRows; ++row) {
         for (int column = 0; column < columns; ++column) {
-            const Vec3 place = point(row, column);
-            mesh.vertices.push_back(Vec4{place.x, place.y, place.z, 1.0f});
+            grid.points.push_back(point(row, column));
         }
     }
 
-    // Each triangle's corners and its unnormalised normal (twice its area long), kept to share out to its corners.
-    struct Face {
-        std::array<std::size_t, 3> corners;
-        Vec3 areaNormal;
+    return grid;
+}
+
+Mesh wrappedSurfaceMesh(int rows, int columns, bool wrapRows, const std::function<Vec3(int row, int column)>& point) {
+    return wrappedSurfaceMesh(surfaceGrid(rows, columns, wrapRows, point));
+}
+
+namespace {
+    // A wrapped surface's triangles (each corner's point) and each point's smooth normal, shared by both builders.
+    struct SurfaceFaces {
+        std::vector<std::array<std::size_t, 3>> triangles;
+        std::vector<Vec3> normals;
     };
 
-    std::vector<Face> faces;
-    std::vector<Vec3> normals(mesh.vertices.size(), Vec3{0.0f, 0.0f, 0.0f});
-    const auto addFace = [&](std::size_t first, std::size_t second, std::size_t third) {
-        const Vec4& a = mesh.vertices[first];
-        const Vec4& b = mesh.vertices[second];
-        const Vec4& c = mesh.vertices[third];
-        const Vec3 areaNormal = Vec3{b.x - a.x, b.y - a.y, b.z - a.z}.cross(Vec3{c.x - a.x, c.y - a.y, c.z - a.z});
+    SurfaceFaces surfaceFaces(const SurfaceGrid& grid) {
+        const int pointRows = grid.wrapRows ? grid.rows : grid.rows + 1;
+        const auto index = [&](int row, int column) {
+            return static_cast<std::size_t>((row % pointRows) * grid.columns + (column % grid.columns));
+        };
 
-        if (areaNormal.lengthSquared() <= 0.0f) {
-            return;
+        SurfaceFaces faces;
+        faces.triangles.reserve(static_cast<std::size_t>(2 * grid.rows * grid.columns));
+        std::vector<Vec3> sums(grid.points.size(), Vec3{0.0f, 0.0f, 0.0f});
+
+        // Each triangle's unnormalised normal is twice its area long, so adding them weights each by its area.
+        const auto addFace = [&](std::size_t first, std::size_t second, std::size_t third) {
+            const Vec3& a = grid.points[first];
+            const Vec3 areaNormal = (grid.points[second] - a).cross(grid.points[third] - a);
+
+            if (areaNormal.lengthSquared() <= 0.0f) {
+                return;
+            }
+
+            faces.triangles.push_back({first, second, third});
+
+            for (const std::size_t corner : {first, second, third}) {
+                sums[corner] = sums[corner] + areaNormal;
+            }
+        };
+
+        for (int row = 0; row < grid.rows; ++row) {
+            for (int column = 0; column < grid.columns; ++column) {
+                const std::size_t here = index(row, column);
+                const std::size_t around = index(row, column + 1);
+                const std::size_t up = index(row + 1, column);
+                const std::size_t both = index(row + 1, column + 1);
+                addFace(here, around, both);
+                addFace(here, both, up);
+            }
         }
 
-        faces.push_back(Face{{first, second, third}, areaNormal});
+        faces.normals.reserve(sums.size());
 
-        for (const std::size_t corner : {first, second, third}) {
-            normals[corner] = normals[corner] + areaNormal;
+        for (const Vec3& sum : sums) {
+            faces.normals.push_back(sum.lengthSquared() > 0.0f ? sum.normalized() : Vec3{0.0f, 0.0f, 0.0f});
         }
-    };
 
-    for (int row = 0; row < rows; ++row) {
-        for (int column = 0; column < columns; ++column) {
-            const std::size_t here = index(row, column);
-            const std::size_t around = index(row, column + 1);
-            const std::size_t up = index(row + 1, column);
-            const std::size_t both = index(row + 1, column + 1);
-            addFace(here, around, both);
-            addFace(here, both, up);
-        }
+        return faces;
     }
 
-    mesh.triangles.reserve(faces.size());
+    Vec2 gridUv(const SurfaceGrid& grid, std::size_t point) {
+        const int row = static_cast<int>(point) / grid.columns;
+        const int column = static_cast<int>(point) % grid.columns;
+        return Vec2{static_cast<float>(column) / static_cast<float>(grid.columns), static_cast<float>(row) / static_cast<float>(grid.rows)};
+    }
+}
 
-    for (const Face& face : faces) {
-        Triangle triangle{face.corners[0], face.corners[1], face.corners[2]};
+Mesh wrappedSurfaceMesh(const SurfaceGrid& grid) {
+    const SurfaceFaces faces = surfaceFaces(grid);
+    Mesh mesh;
+    mesh.vertices.reserve(grid.points.size());
+
+    for (const Vec3& point : grid.points) {
+        mesh.vertices.push_back(Vec4{point.x, point.y, point.z, 1.0f});
+    }
+
+    mesh.triangles.reserve(faces.triangles.size());
+
+    for (const std::array<std::size_t, 3>& corners : faces.triangles) {
+        Triangle triangle{corners[0], corners[1], corners[2]};
 
         for (std::size_t slot = 0; slot < 3; ++slot) {
-            const std::size_t corner = face.corners[slot];
-            const int row = static_cast<int>(corner) / columns;
-            const int column = static_cast<int>(corner) % columns;
-            triangle.normals[slot] = normals[corner].normalized();
-            triangle.uvs[slot] = Vec2{static_cast<float>(column) / static_cast<float>(columns), static_cast<float>(row) / static_cast<float>(rows)};
+            triangle.normals[slot] = faces.normals[corners[slot]];
+            triangle.uvs[slot] = gridUv(grid, corners[slot]);
         }
 
         mesh.triangles.push_back(triangle);
@@ -167,48 +200,190 @@ Mesh wrappedSurfaceMesh(int rows, int columns, bool wrapRows, const std::functio
 }
 
 /*
-* Rows rise up the column; its last few rows round its top over to a point. The radius bulges by noise read round a
-* circle (so the seam where the columns meet matches), finer ridges run up it, and its axis leans by slow noise.
+* The tangent is the way round the surface at each point (to the next column less the last, so it is the same either
+* side of a point), made square to its normal; at a pole, where a row is one point, any direction square to the normal.
 */
-Mesh pillarMesh(std::uint32_t seed, int rings, int segments) {
-    const int domeRows = std::max(2, rings / 10);
-    const int bodyRows = rings - domeRows;
-    const float bodyTop = 0.97f;
+IndexedMesh wrappedSurfaceIndexedMesh(const SurfaceGrid& grid) {
+    const SurfaceFaces faces = surfaceFaces(grid);
+    IndexedMesh mesh;
+    mesh.vertices.reserve(grid.points.size());
 
-    return wrappedSurfaceMesh(rings, segments, false, [&](int row, int column) {
-        const float angle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(segments);
-        float height = 0.0f;
-        float shape = 1.0f;
+    for (std::size_t point = 0; point < grid.points.size(); ++point) {
+        const std::size_t row = point / static_cast<std::size_t>(grid.columns);
+        const std::size_t column = point % static_cast<std::size_t>(grid.columns);
+        const std::size_t columns = static_cast<std::size_t>(grid.columns);
+        const Vec3 round = grid.points[row * columns + (column + 1) % columns] - grid.points[row * columns + (column + columns - 1) % columns];
+        const Vec3& normal = faces.normals[point];
+        Vec3 tangent = round - normal * round.dot(normal);
 
-        if (row <= bodyRows) {
-            height = -pillarBuriedDepth + (bodyTop + pillarBuriedDepth) * static_cast<float>(row) / static_cast<float>(bodyRows);
-        } else {
-            const float dome = static_cast<float>(row - bodyRows) / static_cast<float>(domeRows) * (0.5f * fullTurnRadians / 2.0f);
-            height = bodyTop + (1.0f - bodyTop) * std::sin(dome);
-            shape = std::max(0.0f, std::cos(dome)); // exactly 0 at the top: cos rounds to a hair below it
+        if (tangent.lengthSquared() <= 1e-12f) {
+            const Vec3 side = std::fabs(normal.x) < 0.9f ? Vec3{1.0f, 0.0f, 0.0f} : Vec3{0.0f, 0.0f, 1.0f};
+            tangent = side - normal * side.dot(normal);
         }
 
+        tangent = tangent.lengthSquared() > 0.0f ? tangent.normalized() : Vec3{1.0f, 0.0f, 0.0f};
+        mesh.vertices.push_back(MeshVertex{grid.points[point], normal, gridUv(grid, point), Vec4{tangent.x, tangent.y, tangent.z, 1.0f}});
+    }
+
+    mesh.indices.reserve(faces.triangles.size() * 3);
+
+    for (const std::array<std::size_t, 3>& corners : faces.triangles) {
+        for (const std::size_t corner : corners) {
+            mesh.indices.push_back(static_cast<std::uint32_t>(corner));
+        }
+    }
+
+    return mesh;
+}
+
+float carvingWarp(const RockCarving& carving, float x, float z) {
+    const int size = static_cast<int>(carving.warp.width);
+
+    if (size == 0 || carving.warp.height != carving.warp.width || carving.warpTileMetres <= 0.0f) {
+        return 0.0f;
+    }
+
+    // Texel centres at k + 1/2, so the place in texels less a half is between centres; wrap round the repeat.
+    const float u = x / carving.warpTileMetres * static_cast<float>(size) - 0.5f;
+    const float v = z / carving.warpTileMetres * static_cast<float>(size) - 0.5f;
+    const float cellU = std::floor(u);
+    const float cellV = std::floor(v);
+    const float shareU = u - cellU;
+    const float shareV = v - cellV;
+    const auto texel = [&](float column, float row) {
+        const int wrappedColumn = (static_cast<int>(column) % size + size) % size;
+        const int wrappedRow = (static_cast<int>(row) % size + size) % size;
+        const std::size_t index = (static_cast<std::size_t>(wrappedRow) * static_cast<std::size_t>(size) + static_cast<std::size_t>(wrappedColumn)) * 4;
+        return static_cast<float>(carving.warp.pixels[index]) / 255.0f;
+    };
+    const float bottom = texel(cellU, cellV) + (texel(cellU + 1.0f, cellV) - texel(cellU, cellV)) * shareU;
+    const float top = texel(cellU, cellV + 1.0f) + (texel(cellU + 1.0f, cellV + 1.0f) - texel(cellU, cellV + 1.0f)) * shareU;
+    const float warpTexel = bottom + (top - bottom) * shareV;
+    return (2.0f * warpTexel - 1.0f) * carving.warpMetres;
+}
+
+float strataRelief(const std::vector<StrataBand>& bands, float height) {
+    for (std::size_t index = 0; index < bands.size(); ++index) {
+        const StrataBand& band = bands[index];
+
+        if (height >= band.top && index + 1 < bands.size()) {
+            continue;
+        }
+
+        if (band.hard) {
+            return rockLedgeMetres;
+        }
+
+        // Soft rock: cut back under a hard bed above it, deepest right under it.
+        const float under = band.top - height;
+
+        if (index + 1 < bands.size() && bands[index + 1].hard && under < rockUndercutReach) {
+            return -rockUndercutMetres * (1.0f - std::max(under, 0.0f) / rockUndercutReach);
+        }
+
+        return 0.0f;
+    }
+
+    return 0.0f;
+}
+
+/*
+* Noise read round a circle as many lattice cells round as the joints are (the radius over their spacing), slowly
+* along the height, so it wanders as it rises; a joint is where the noise crosses its middle (1 - |n| near 1), narrowed
+* by a smoothstep to a crack.
+*/
+float jointGroove(float angleRadians, float height, float radius, std::uint32_t seed) {
+    const float cells = std::max(radius / rockJointSpacing, 1.0f);
+    const float noise = forestFractalNoise(cells * std::cos(angleRadians) + 11.0f, cells * std::sin(angleRadians) + height / 250.0f, 2, seed);
+    return smoothStep(0.82f, 1.0f, 1.0f - std::fabs(noise));
+}
+
+namespace {
+    // The world place of a point of a shape placed at origin and turned about the up axis, as its Transform places it.
+    Vec3 placed(const Vec3& origin, float turnRadians, const Vec3& local) {
+        return origin + Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turnRadians).rotate(local);
+    }
+
+    /*
+    * The carved radius at a point of a rock's surface: its plain radius plus its beds' relief (at the world height of the
+    * point on the plain surface, waved as the shader waves the beds), less its joints, never under a third of the plain
+    * radius. carve (0..1) scales the carving, to fade it out where a shape narrows to a point.
+    */
+    float carvedRadius(float plain, float angle, float height, const Vec3& worldPlace, float jointRadius, std::uint32_t seed, const RockCarving& carving,
+                       float carve) {
+        const float bedHeight = worldPlace.y + carvingWarp(carving, worldPlace.x, worldPlace.z);
+        const float relief = strataRelief(carving.bands, bedHeight) - rockJointDepth * jointGroove(angle, height, jointRadius, seed);
+        return std::max(plain + carve * relief, plain / 3.0f);
+    }
+}
+
+/*
+* Rows rise up the column, one every rockRowMetres, then four close the top: shrinking to its centre over the last
+* metre and a half, their heights jagged, a broken, nearly flat top where trees can stand. Columns go round, one every
+* rockColumnMetres. The large-scale shape (taper, bulges, lean) is read in shares of the height, as the first pillars'
+* was; the joints and beds in metres, the same size on every pillar.
+*/
+SurfaceGrid pillarSurface(const PillarPlacement& pillar, const RockCarving& carving) {
+    const float radius = pillar.radius;
+    const float height = pillar.height;
+    const float buried = pillarBuriedDepth * height;
+    const int bodyRows = std::max(8, static_cast<int>(std::ceil((height + buried) / rockRowMetres)));
+    const std::array<float, 4> capShrink{0.9f, 0.65f, 0.3f, 0.0f};
+    const std::array<float, 4> capRise{0.5f, 1.0f, 1.4f, 1.6f};
+    const int rows = bodyRows + static_cast<int>(capShrink.size());
+    const int columns = std::clamp(static_cast<int>(std::lround(fullTurnRadians * radius / rockColumnMetres)), 24, 160);
+    const std::uint32_t seed = pillar.seed;
+
+    // The axis leaning by slow noise along the height, in metres.
+    const auto lean = [&](float share) {
+        return Vec2{pillarLean * radius * forestFractalNoise(1.5f * share, 0.5f, 2, shapeSeed(seed, 3)),
+                    pillarLean * radius * forestFractalNoise(0.5f, 1.5f * share, 2, shapeSeed(seed, 4))};
+    };
+
+    // A point of the body at a height (metres above the foot) and column.
+    const auto bodyPoint = [&](float y, int column) {
+        const float angle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(columns);
         const float around = std::cos(angle);
         const float across = std::sin(angle);
-        const float bulge = pillarBulge * forestFractalNoise(1.3f * around + 5.0f, 1.3f * across + 4.0f * height, 3, shapeSeed(seed, 1));
-        const float ridges = pillarRidges * forestFractalNoise(3.0f * around, 3.0f * across + 12.0f * height, 2, shapeSeed(seed, 2));
-        const float radius = shape * (1.0f - pillarTaper * std::max(height, 0.0f)) * (1.0f + bulge + ridges);
-        const float leanX = pillarLean * forestFractalNoise(1.5f * height, 0.5f, 2, shapeSeed(seed, 3));
-        const float leanZ = pillarLean * forestFractalNoise(0.5f, 1.5f * height, 2, shapeSeed(seed, 4));
-        return Vec3{leanX + radius * across, height, leanZ + radius * around};
+        const float share = std::clamp(y / height, 0.0f, 1.0f);
+        const float bulge = pillarBulge * forestFractalNoise(1.3f * around + 5.0f, 1.3f * across + 4.0f * share, 3, shapeSeed(seed, 1));
+        const float plain = radius * (1.0f - pillarTaper * share) * (1.0f + bulge);
+        const Vec2 axis = lean(share);
+        const Vec3 local{axis.x + plain * across, y, axis.y + plain * around};
+        const float carved = carvedRadius(plain, angle, y, placed(pillar.foot, pillar.turnRadians, local), plain, shapeSeed(seed, 2), carving, 1.0f);
+        return Vec3{axis.x + carved * across, y, axis.y + carved * around};
+    };
+
+    return surfaceGrid(rows, columns, false, [&](int row, int column) {
+        if (row <= bodyRows) {
+            return bodyPoint(-buried + (height + buried) * static_cast<float>(row) / static_cast<float>(bodyRows), column);
+        }
+
+        const std::size_t cap = static_cast<std::size_t>(row - bodyRows - 1);
+        const Vec3 rim = bodyPoint(height, column);
+        const Vec2 axis = lean(1.0f);
+        const float angle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(columns);
+        const float jag = cap + 1 < capShrink.size() ? 1.2f * forestFractalNoise(3.0f * std::cos(angle), 3.0f * std::sin(angle) + static_cast<float>(cap), 2, shapeSeed(seed, 6)) : 0.0f;
+        const float shrink = capShrink[cap];
+        return Vec3{axis.x + (rim.x - axis.x) * shrink, height + capRise[cap] + jag, axis.y + (rim.z - axis.y) * shrink};
     });
 }
 
 /*
-* Rows rise from the tip to the rim (the underside, widening fast, then slowly) and on inwards over the top to its
-* centre. The rim's jag continues over the top's edge, so the two meet.
+* Rows rise from the tip to the rim (the underside, widening fast, then slowly), one every rockRowMetres of its depth,
+* then on inwards over the top to its centre. The rim's jag continues over the top's edge, so the two meet. The
+* underside is carved like a pillar, the carving fading out towards the tip, where the shape narrows to a point.
 */
-Mesh islandMesh(std::uint32_t seed, int rings, int segments) {
-    const int underRows = std::max(2, rings * 7 / 10);
-    const int topRows = rings - underRows;
+SurfaceGrid islandSurface(const IslandPlacement& island, const RockCarving& carving) {
+    const float radius = island.radius;
+    const int underRows = std::clamp(static_cast<int>(std::ceil(islandDepth * radius / rockRowMetres)), 12, 120);
+    const int topRows = std::clamp(static_cast<int>(std::ceil(radius / (2.0f * rockRowMetres))), 6, 40);
+    const int rows = underRows + topRows;
+    const int columns = std::clamp(static_cast<int>(std::lround(fullTurnRadians * radius / (1.2f * rockColumnMetres))), 32, 240);
+    const std::uint32_t seed = island.seed;
 
-    return wrappedSurfaceMesh(rings, segments, false, [&](int row, int column) {
-        const float angle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(segments);
+    return surfaceGrid(rows, columns, false, [&](int row, int column) {
+        const float angle = fullTurnRadians * static_cast<float>(column) / static_cast<float>(columns);
         const float around = std::cos(angle);
         const float across = std::sin(angle);
         const auto jag = [&](float rise) {
@@ -217,15 +392,18 @@ Mesh islandMesh(std::uint32_t seed, int rings, int segments) {
 
         if (row <= underRows) {
             const float rise = static_cast<float>(row) / static_cast<float>(underRows);
-            const float radius = std::pow(rise, 0.55f) * jag(rise);
-            const float height = -islandDepth * std::pow(1.0f - rise, 1.3f);
-            return Vec3{radius * across, height, radius * around};
+            const float plain = radius * std::pow(rise, 0.55f) * jag(rise);
+            const float y = -islandDepth * radius * std::pow(1.0f - rise, 1.3f);
+            const Vec3 local{plain * across, y, plain * around};
+            const float carved = carvedRadius(plain, angle, y, placed(island.rim, island.turnRadians, local), radius, shapeSeed(seed, 2), carving,
+                                              smoothStep(0.05f, 0.35f, rise));
+            return Vec3{carved * across, y, carved * around};
         }
 
         const float inward = static_cast<float>(row - underRows) / static_cast<float>(topRows) * (0.25f * fullTurnRadians);
-        const float radius = std::max(0.0f, std::cos(inward)) * jag(1.0f); // exactly 0 at the centre
-        const float bumps = 0.02f * forestFractalNoise(4.0f * radius * around, 4.0f * radius * across, 2, shapeSeed(seed, 6));
-        return Vec3{radius * across, islandDome * std::sin(inward) + bumps, radius * around};
+        const float plain = radius * std::max(0.0f, std::cos(inward)) * jag(1.0f); // exactly 0 at the centre
+        const float bumps = 0.02f * radius * forestFractalNoise(4.0f * plain / radius * around, 4.0f * plain / radius * across, 2, shapeSeed(seed, 6));
+        return Vec3{plain * across, islandDome * radius * std::sin(inward) + bumps, plain * around};
     });
 }
 
@@ -266,7 +444,7 @@ std::vector<PillarPlacement> placePillars(const ValleyLayout& layout) {
             .radius = radius,
             .height = pillarShortest + pillarTallestExtra * unitRandom(pillarPlaceSeed, base + 4),
             .turnRadians = fullTurnRadians * unitRandom(pillarPlaceSeed, base + 5),
-            .variant = static_cast<int>(pillars.size()) % std::max(layout.variants, 1)
+            .seed = shapeSeed(static_cast<std::uint32_t>(attempt), 7)
         });
     }
 
@@ -304,7 +482,7 @@ std::vector<IslandPlacement> placeIslands(const ValleyLayout& layout, const std:
             .rim = Vec3{x, tip + islandDepth * radius, z},
             .radius = radius,
             .turnRadians = fullTurnRadians * unitRandom(islandPlaceSeed, base + 5),
-            .variant = static_cast<int>(islands.size()) % std::max(layout.variants, 1)
+            .seed = shapeSeed(static_cast<std::uint32_t>(attempt), 8)
         });
     }
 
@@ -360,7 +538,7 @@ PillarPlacement monolithPillar(float groundLevel) {
     const float x = forestMonolithPlace.x - 480.0f;
     const float z = forestMonolithPlace.y - 50.0f;
     const float foot = forestHeight(x, z);
-    return PillarPlacement{.foot = Vec3{x, foot, z}, .radius = 45.0f, .height = groundLevel + 470.0f - foot, .turnRadians = 0.0f, .variant = 0};
+    return PillarPlacement{.foot = Vec3{x, foot, z}, .radius = 45.0f, .height = groundLevel + 470.0f - foot, .turnRadians = 0.0f, .seed = shapeSeed(0, 9)};
 }
 
 /*

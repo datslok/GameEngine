@@ -46,6 +46,18 @@ public:
     // shape comes each frame from a DeformingMesh; the Mesh is its rest shape, its triangles and its UVs.
     MeshHandle addDeformingMesh(Mesh mesh);
 
+    /*
+    * Register a mesh that is only ever drawn, already in the render format: about a fifth of a Mesh's memory (a Mesh
+    * keeps 168 bytes a triangle), for big generated scenery such as the forest's 250 rock shapes, each its own. It cannot
+    * be walked against, cast at on the CPU or marked static: getMesh refuses it (std::invalid_argument). An empty mesh is
+    * refused too.
+    */
+    MeshHandle addDrawnMesh(IndexedMesh mesh);
+
+    // Whether a mesh was added as drawn only, and its render format (std::invalid_argument for one that was not).
+    bool isDrawnOnly(MeshHandle handle) const;
+    const IndexedMesh& getDrawnMesh(MeshHandle handle) const;
+
     // Whether a mesh was added as deforming, and its topology (std::invalid_argument for one that was not).
     bool isDeforming(MeshHandle handle) const;
     const DeformingTopology& getDeformingTopology(MeshHandle handle) const;
@@ -104,6 +116,9 @@ private:
     // Keyed by path, whether smoothed, and crease angle (0 when not smoothed, since it is unused then).
     std::map<std::tuple<std::string, bool, float>, MeshHandle> meshesByPath;
     std::map<const Mesh*, MeshHandle> meshesByPointer;
+
+    // The drawn-only meshes, by mesh number (their place in meshes holds no Mesh). std::map never moves its elements.
+    std::map<std::uint32_t, IndexedMesh> drawnMeshes;
 
     // The deforming meshes' topologies, by mesh number. std::map never moves its elements, so references stay valid.
     std::map<std::uint32_t, DeformingTopology> deformingTopologies;

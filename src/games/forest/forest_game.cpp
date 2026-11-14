@@ -3,6 +3,7 @@
 #include "core/srgb.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/valley_strata.h"
+#include "scene/indexed_mesh.h"
 #include "gameplay/first_person_body.h"
 #include "math/transform.h"
 #include "scene/light.h"
@@ -74,7 +75,6 @@ namespace {
         material.groundBlendDepth = settings.blendDepth;
         material.groundTopStart = settings.mossStart;
         material.groundTopFull = settings.mossFull;
-        material.strataWarpMetres = settings.warpMetres;
         material.streakStrength = settings.streakStrength;
     }
 
@@ -122,6 +122,7 @@ namespace {
         material.groundTopLayer = forestMossLayer;
         material.strataWarp = assets.addTexture(strataWarpImage(strataWarpTexels));
         material.strataWarpTile = strataWarpTileMetres;
+        material.strataWarpMetres = settings.warpMetres;
         material.groundStreaks = assets.addTexture(streakImage(streakTexels));
         material.streakWidth = streakWidthMetres;
         material.streakLength = streakLengthMetres;
@@ -191,7 +192,7 @@ void visit(ForestRockSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Blend depth", settings.blendDepth, {.min = 0.0f, .max = 1.0f});
     visitor.field("Moss starts", settings.mossStart, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
     visitor.field("Moss full", settings.mossFull, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
-    visitor.field("Bed waves", settings.warpMetres, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f, .unit = "m"});
+    visitor.field("Bed waves", settings.warpMetres, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Streaks", settings.streakStrength, {.min = 0.0f, .max = 1.0f});
 }
 
@@ -264,34 +265,27 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
 */
 void ForestGame::buildShapes(World& world, AssetManager& assets) {
     const ValleyLayout layout{.pillarCount = valleySettings.pillarCount, .islandCount = valleySettings.islandCount};
-    std::vector<MeshHandle> pillarShapes;
-    std::vector<MeshHandle> islandShapes;
-
-    for (int variant = 0; variant < layout.variants; ++variant) {
-        pillarShapes.push_back(assets.addMesh(pillarMesh(static_cast<std::uint32_t>(variant))));
-        islandShapes.push_back(assets.addMesh(islandMesh(static_cast<std::uint32_t>(variant))));
-    }
-
-    const Material rock = rockMaterial(assets, assetFolder, rockSettings);
-    const auto addPillar = [&](const PillarPlacement& pillar) {
-        rockShapes.push_back(addShape(world, pillarShapes[static_cast<std::size_t>(pillar.variant)], rock,
-                                      Transform{.position = pillar.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, pillar.turnRadians),
-                                                .scale = Vec3{pillar.radius, pillar.height, pillar.radius}}));
-    };
-
     pillars = placePillars(layout);
     pillars.push_back(monolithPillar(clearingLevel()));
-
-    for (const PillarPlacement& pillar : pillars) {
-        addPillar(pillar);
-    }
-
     islands = placeIslands(layout, pillars);
 
-    for (const IslandPlacement& island : islands) {
-        rockShapes.push_back(addShape(world, islandShapes[static_cast<std::size_t>(island.variant)], rock,
-                                      Transform{.position = island.rim, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, island.turnRadians),
-                                                .scale = Vec3{island.radius, island.radius, island.radius}}));
+    // Each pillar and island its own shape, carved by the beds where they stand, built on every core (each into its own
+    // slot, so the result is the same whatever order the jobs finish in) and kept only in the render format.
+    const RockCarving carving{.bands = valleyStrata(), .warp = strataWarpImage(strataWarpTexels), .warpTileMetres = strataWarpTileMetres,
+                              .warpMetres = rockSettings.warpMetres};
+    std::vector<IndexedMesh> shapes(pillars.size() + islands.size());
+    getJobs().parallelFor(shapes.size(), 1, [&](std::size_t index) {
+        shapes[index] = wrappedSurfaceIndexedMesh(index < pillars.size() ? pillarSurface(pillars[index], carving) : islandSurface(islands[index - pillars.size()], carving));
+    });
+
+    const Material rock = rockMaterial(assets, assetFolder, rockSettings);
+
+    for (std::size_t index = 0; index < shapes.size(); ++index) {
+        const bool isPillar = index < pillars.size();
+        const Vec3 place = isPillar ? pillars[index].foot : islands[index - pillars.size()].rim;
+        const float turn = isPillar ? pillars[index].turnRadians : islands[index - pillars.size()].turnRadians;
+        rockShapes.push_back(addShape(world, assets.addDrawnMesh(std::move(shapes[index])), rock,
+                                      Transform{.position = place, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turn)}));
     }
 
     // The Ring stands across the path, its centre at the ground there, so its lower half is buried.

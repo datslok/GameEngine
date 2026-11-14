@@ -302,6 +302,15 @@ void Application::prepareNewResources() {
         const MeshHandle next{static_cast<std::uint32_t>(renderer.getMeshCount())};
         // Convert to the render format once, when the mesh first reaches the GPU; a deforming mesh's rest shape is its
         // topology's, built when it was added.
+        // A drawn-only mesh is in the render format already, and is never a mirror (big rough scenery).
+        if (assets.isDrawnOnly(next)) {
+            const IndexedMesh& drawn = assets.getDrawnMesh(next);
+            renderer.uploadMesh(drawn);
+            boundsByMesh.push_back(indexedMeshBounds(drawn));
+            flatFacesByMesh.push_back({});
+            continue;
+        }
+
         if (assets.isDeforming(next)) {
             renderer.uploadMesh(assets.getDeformingTopology(next).rest, true);
         } else {
