@@ -282,21 +282,26 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
 
     // Each pillar and island its own shape, carved by the beds where they stand, built on every core (each into its own
     // slot, so the result is the same whatever order the jobs finish in) and kept only in the render format; each
-    // island's roots and vines grown from its surface in the same job.
+    // island's roots and vines grown from its surface in the same job, and every shape's hanging moss.
     const RockCarving carving{.bands = valleyStrata(), .warp = strataWarpImage(strataWarpTexels), .warpTileMetres = strataWarpTileMetres,
                               .warpMetres = rockSettings.warpMetres};
     std::vector<IndexedMesh> shapes(pillars.size() + islands.size());
     std::vector<IslandHangings> hangings(islands.size());
+    std::vector<IndexedMesh> moss(shapes.size());
     getJobs().parallelFor(shapes.size(), 1, [&](std::size_t index) {
         if (index < pillars.size()) {
-            shapes[index] = wrappedSurfaceIndexedMesh(pillarSurface(pillars[index], carving));
+            const SurfaceGrid surface = pillarSurface(pillars[index], carving);
+            shapes[index] = wrappedSurfaceIndexedMesh(surface);
+            moss[index] = pillarMoss(pillars[index], surface, mossSettings);
             return;
         }
 
         const IslandPlacement& island = islands[index - pillars.size()];
         const SurfaceGrid surface = islandSurface(island, carving);
         shapes[index] = wrappedSurfaceIndexedMesh(surface);
-        hangings[index - pillars.size()] = islandHangings(island, surface, hangingSettings);
+        IslandHangings& hung = hangings[index - pillars.size()];
+        hung = islandHangings(island, surface, hangingSettings);
+        moss[index] = islandMoss(island, surface, hung.tips, mossSettings);
     });
 
     const Material rock = rockMaterial(assets, assetFolder, rockSettings);
@@ -312,6 +317,14 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     // The roots and vines in the islands' own frames, placed and turned as their rock (none when the settings give none).
     const Material bark = forestLayerMaterial(assets, assetFolder, forestBarkLayer);
     const Material leaf = forestLeafMaterial(assets, assetFolder);
+
+    const Material mossMaterial = forestMossMaterial(assets, assetFolder);
+
+    for (std::size_t index = 0; index < shapes.size(); ++index) {
+        if (!moss[index].vertices.empty()) {
+            mossEntities.push_back(addShape(world, assets.addDrawnMesh(std::move(moss[index])), mossMaterial, world.get<Transform>(rockShapes[index])));
+        }
+    }
 
     for (std::size_t island = 0; island < islands.size(); ++island) {
         const Transform placed = world.get<Transform>(rockShapes[pillars.size() + island]);
@@ -460,6 +473,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Hangings", [&] {
         visit(hangingSettings, visitor);
     });
+    visitor.group("Moss", [&] {
+        visit(mossSettings, visitor);
+    });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
     });
@@ -580,4 +596,12 @@ ForestHangingSettings& ForestGame::getHangingSettings() {
 
 const std::vector<Entity>& ForestGame::getIslandHangings() const {
     return hangingEntities;
+}
+
+ForestMossSettings& ForestGame::getMossSettings() {
+    return mossSettings;
+}
+
+const std::vector<Entity>& ForestGame::getMoss() const {
+    return mossEntities;
 }

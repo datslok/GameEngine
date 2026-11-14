@@ -87,6 +87,20 @@ inline constexpr float forestLeafCutoff = 0.5f;
 */
 Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder);
 
+// Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
+inline constexpr const char* forestMossFolder = "Moss001";
+inline constexpr Pixel forestMossStandIn{96, 104, 62};
+
+// The moss strands' texture's size: tall, as the clumps are.
+inline constexpr int forestMossTextureWidth = 512;
+inline constexpr int forestMossTextureHeight = 1024;
+
+/*
+* Hanging moss's material (games/forest/hanging_moss.h): a double-sided cut-out of the strands' texture, drawn here in
+* the scan's mean colour (forestMossStandIn without it), its mips keeping the strands' coverage; rough, not metal.
+*/
+Material forestMossMaterial(AssetManager& assets, const std::string& assetFolder);
+
 // The finest paint's texels: 2048 over the walked-on ring's 1.28 km.
 inline constexpr float forestFinestPaintTexel = 0.625f;
 

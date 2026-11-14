@@ -64,14 +64,25 @@ struct ForestHangingSettings {
 
 void visit(ForestHangingSettings& settings, SettingsVisitor& visitor);
 
-// One island's roots and vines: their tubes in one mesh (bark), the vines' leaves in another, where each was anchored.
+// One island's roots and vines: their tubes in one mesh (bark), the vines' leaves in another, where each was anchored
+// and where its tip hangs.
 struct IslandHangings {
     IndexedMesh bark;
     IndexedMesh leaves;
     std::vector<Vec3> anchors;
+    std::vector<Vec3> tips;
     int rootCount = 0;
     int vineCount = 0;
 };
+
+// A direction made level and of unit length (+x when it has no level part): the way out of a shape at a point.
+Vec3 levelOutward(const Vec3& direction);
+
+// The points of an island's surface on its underside (below a fiftieth of its radius under the rim), tip first.
+std::vector<std::size_t> islandUnderside(const SurfaceGrid& surface, float radius);
+
+// One of them for a random share (0..1): its square root, mostly near 1, so more often near the rim than the tip.
+std::size_t towardsTheRim(const std::vector<std::size_t>& underside, float random);
 
 /*
 * An island's roots and vines, in its own frame: as many as the settings give for its radius, each anchored at a point

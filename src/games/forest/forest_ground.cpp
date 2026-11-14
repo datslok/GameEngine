@@ -1,8 +1,10 @@
 #include "games/forest/forest_ground.h"
 
 #include "assets/image_loader.h"
+#include "games/forest/hanging_moss.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -130,5 +132,38 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
         material.metallicRoughnessTexture = assets.loadTexture(files.roughness, true, TextureEncoding::Linear);
     }
 
+    return material;
+}
+
+/*
+* The mean is taken in sRGB bytes, as the colour is given: close enough for a tint, which the strands then shade
+* lighter and darker.
+*/
+Material forestMossMaterial(AssetManager& assets, const std::string& assetFolder) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestMossFolder).string());
+    Pixel colour = forestMossStandIn;
+
+    if (!files.colour.empty()) {
+        const ImageData scan = loadImage(files.colour);
+        std::array<double, 3> sum{0.0, 0.0, 0.0};
+
+        for (std::size_t texel = 0; texel < scan.pixels.size() / 4; ++texel) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                sum[channel] += scan.pixels[texel * 4 + channel];
+            }
+        }
+
+        const double texels = static_cast<double>(std::max<std::size_t>(scan.pixels.size() / 4, 1));
+        colour = Pixel{static_cast<std::uint8_t>(sum[0] / texels + 0.5), static_cast<std::uint8_t>(sum[1] / texels + 0.5),
+                       static_cast<std::uint8_t>(sum[2] / texels + 0.5)};
+    }
+
+    Material material;
+    material.alphaMode = AlphaMode::Mask;
+    material.alphaCutoff = forestLeafCutoff;
+    material.doubleSided = true;
+    material.roughness = 0.9f;
+    material.metallic = 0.0f;
+    material.texture = assets.addTexture(mossStrandImage(forestMossTextureWidth, forestMossTextureHeight, colour, 0x4d4f5353u), forestLeafCutoff);
     return material;
 }
