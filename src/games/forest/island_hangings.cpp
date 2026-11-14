@@ -44,11 +44,6 @@ namespace {
 
     const Vec3 down{0.0f, -1.0f, 0.0f};
 
-    Vec3 levelOutward(const Vec3& outward) {
-        const Vec3 level{outward.x, 0.0f, outward.z};
-        return level.lengthSquared() > 1e-12f ? level.normalized() : Vec3{1.0f, 0.0f, 0.0f};
-    }
-
     // Any unit direction square to a unit direction.
     Vec3 squareTo(const Vec3& direction) {
         const Vec3 side = std::fabs(direction.y) < 0.9f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
@@ -61,6 +56,28 @@ namespace {
         const Vec3 across = strand.points[std::min(i + 1, last)] - strand.points[i == 0 ? 0 : i - 1];
         return across.lengthSquared() > 1e-12f ? across.normalized() : down;
     }
+}
+
+Vec3 levelOutward(const Vec3& direction) {
+    const Vec3 level{direction.x, 0.0f, direction.z};
+    return level.lengthSquared() > 1e-12f ? level.normalized() : Vec3{1.0f, 0.0f, 0.0f};
+}
+
+std::vector<std::size_t> islandUnderside(const SurfaceGrid& surface, float radius) {
+    std::vector<std::size_t> underside;
+
+    for (std::size_t point = 0; point < surface.points.size(); ++point) {
+        if (surface.points[point].y < -anchorBelowRim * radius) {
+            underside.push_back(point);
+        }
+    }
+
+    return underside;
+}
+
+std::size_t towardsTheRim(const std::vector<std::size_t>& underside, float random) {
+    const float place = std::sqrt(random);
+    return underside[std::min(static_cast<std::size_t>(place * static_cast<float>(underside.size())), underside.size() - 1)];
 }
 
 HangingStrand hangingStrand(const Vec3& anchor, const Vec3& outward, float length, float startRadius, float tipRadius, std::uint32_t seed) {
@@ -211,14 +228,7 @@ IslandHangings islandHangings(const IslandPlacement& island, const SurfaceGrid& 
     hangings.rootCount = std::max(0, static_cast<int>(std::lround(settings.rootsPerTenMetres * tens)));
     hangings.vineCount = std::max(0, static_cast<int>(std::lround(settings.vinesPerTenMetres * tens)));
 
-    // The underside's points, tip first (the grid's rows run up from the tip).
-    std::vector<std::size_t> underside;
-
-    for (std::size_t point = 0; point < surface.points.size(); ++point) {
-        if (surface.points[point].y < -anchorBelowRim * island.radius) {
-            underside.push_back(point);
-        }
-    }
+    const std::vector<std::size_t> underside = islandUnderside(surface, island.radius);
 
     if (underside.empty()) {
         hangings.rootCount = 0;
@@ -231,10 +241,7 @@ IslandHangings islandHangings(const IslandPlacement& island, const SurfaceGrid& 
 
     for (int strand = 0; strand < count; ++strand) {
         const std::uint64_t base = static_cast<std::uint64_t>(strand) * 4;
-        // The square root of a random number is mostly near 1: more anchors near the rim than the tip.
-        const float place = std::sqrt(forestUnitRandom(seed, base));
-        const std::size_t chosen = underside[std::min(static_cast<std::size_t>(place * static_cast<float>(underside.size())), underside.size() - 1)];
-        const Vec3 point = surface.points[chosen];
+        const Vec3 point = surface.points[towardsTheRim(underside, forestUnitRandom(seed, base))];
         const Vec3 outward = levelOutward(point);
         const Vec3 anchor = point - outward * anchorSink;
         hangings.anchors.push_back(anchor);
@@ -247,11 +254,13 @@ IslandHangings islandHangings(const IslandPlacement& island, const SurfaceGrid& 
             const float length = share * settings.longestRoot;
             const HangingStrand hanging = hangingStrand(anchor, outward, length, thinnestRootStart + thickestRootExtra * share, rootTipRadius, strandSeed);
             appendTube(hangings.bark, hanging, rootSides, barkTileMetres);
+            hangings.tips.push_back(hanging.points.back());
         } else {
             const float length = share * settings.longestVine;
             const HangingStrand hanging = hangingStrand(anchor, outward, length, vineRadius, vineTipRadius, strandSeed);
             appendTube(hangings.bark, hanging, vineSides, barkTileMetres);
             appendLeafCards(hangings.leaves, hanging, settings.leafSpacing, settings.leafSize, forestShapeSeed(strandSeed, 3));
+            hangings.tips.push_back(hanging.points.back());
         }
     }
 

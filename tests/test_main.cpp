@@ -48,6 +48,7 @@ void testTypicalGpu();
 void testGroundLayers();
 void testForest();
 void testIslandHangings();
+void testHangingMoss();
 void testDepthPrepass();
 void testTextureEncoding();
 void testCoverageMips();
@@ -301,6 +302,7 @@ int main(int argumentCount, char** arguments) {
     testLightLab();
     testForest();
     testIslandHangings();
+    testHangingMoss();
     testFlashlight();
     testRawImagePng();
     testTangents();

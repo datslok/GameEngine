@@ -1592,6 +1592,10 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Budget:** a 60 m island has 18 roots and 12 vines; roots 8 sides, vines 4. Built in each island's own job with its rock, two drawn-only meshes an island.
   - **One random helper:** `unitRandom` was in both `valley_shapes.cpp` and `valley_strata.cpp`; it and `shapeSeed` now live once in `forest_terrain` (`forestUnitRandom`, `forestShapeSeed`), which the roots use too.
   - **The user's look** (Nov 14 2026): "looks great". Merged.
+- `hanging-moss` (Nov 14 2026): explained the strand texture, the crossed cards, where they hang and the cost (overdraw, not triangles); the user chose moss on the pillars' ledges as well as the islands.
+  - **Drawn by the game:** neither CC0 library has hanging moss, so a 512 x 1024 texture of strands is drawn at start-up, most strands short and a few the whole length (a random share squared), coloured from `Moss001`'s mean.
+  - **Ledges found from the surface:** a point standing a metre or more out past the one below it is a lip; the hard beds' ledges stand 2 m out over an undercut, so their lower edges are found without the carving telling where they are.
+  - **Shared:** the islands' underside points and the bias towards the rim are one function each (`islandUnderside`, `towardsTheRim`), used by the roots and the moss.
 
 ## Tools outside the phases
 

@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "engine/game.h"
 #include "games/forest/forest_ground.h"
+#include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
 #include "games/forest/valley_shapes.h"
 #include "gameplay/control_mode.h"
@@ -142,6 +143,9 @@ public:
     ForestHangingSettings& getHangingSettings();
     // Each island's roots and vines (bark) and then its leaves, island by island.
     const std::vector<Entity>& getIslandHangings() const;
+    ForestMossSettings& getMossSettings();
+    // The moss under each pillar's ledges and each island, placed as the shape it hangs from.
+    const std::vector<Entity>& getMoss() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -163,6 +167,7 @@ private:
     ForestGroundSettings groundSettings;
     ForestRockSettings rockSettings;
     ForestHangingSettings hangingSettings;
+    ForestMossSettings mossSettings;
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -175,6 +180,7 @@ private:
     std::vector<IslandPlacement> islands;
     std::vector<Entity> rockShapes; // every pillar and island, which share the rock's material
     std::vector<Entity> hangingEntities;
+    std::vector<Entity> mossEntities;
     Entity ring;
     std::vector<Entity> monolith;
     Entity sun;
