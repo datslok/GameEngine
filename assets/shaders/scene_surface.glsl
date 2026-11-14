@@ -860,7 +860,17 @@ void main() {
     * reads keep their derivatives. The normal maps' texels are blended before decoding, at the ground's own scale.
     */
     if (material.groundLayers.x != 0u) {
-        vec4 painted = texture(textures[nonuniformEXT(material.groundWeights.x)], textureUv, mipBias);
+        // The weights read as a cubic B-spline (groundPaintTaps), so the borders between layers are smooth curves, not
+        // staircases along the weights texture's grid; the four reads take the surface's own footprint for their mip.
+        vec2 paintSize = vec2(textureSize(textures[nonuniformEXT(material.groundWeights.x)], 0));
+        GroundPaintTaps paintTaps = groundPaintTaps(textureUv * paintSize);
+        vec2 paintFirst = paintTaps.first / paintSize;
+        vec2 paintSecond = paintTaps.second / paintSize;
+        vec2 paintShare = paintTaps.firstShare;
+        vec4 painted = paintShare.y * (paintShare.x * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], paintFirst, gradientAcross, gradientDown) +
+                                       (1.0 - paintShare.x) * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(paintSecond.x, paintFirst.y), gradientAcross, gradientDown)) +
+                       (1.0 - paintShare.y) * (paintShare.x * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(paintFirst.x, paintSecond.y), gradientAcross, gradientDown) +
+                                               (1.0 - paintShare.x) * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], paintSecond, gradientAcross, gradientDown));
         vec4 heights = vec4(0.0);
         vec4 layerColour[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
         vec4 layerSurface[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));

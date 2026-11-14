@@ -2,9 +2,11 @@
 #include "render/gpu/ground_layers.h"
 #include "render/gpu/material_uniforms.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace {
     bool near(float a, float b, float tolerance) {
@@ -125,7 +127,62 @@ namespace {
     }
 }
 
+namespace {
+    // A row of texels as the GPU reads it straight: between the two nearest centres (at k + 1/2), held at the ends.
+    float readStraight(const std::vector<float>& row, float place) {
+        const float centred = place - 0.5f;
+        const int lower = static_cast<int>(std::floor(centred));
+        const float share = centred - static_cast<float>(lower);
+        const auto at = [&](int texel) {
+            return row[static_cast<std::size_t>(std::clamp(texel, 0, static_cast<int>(row.size()) - 1))];
+        };
+        return at(lower) * (1.0f - share) + at(lower + 1) * share;
+    }
+
+    // The same row read smoothly: the cubic B-spline's four weights on the four nearest texels.
+    float readCubic(const std::vector<float>& row, float place) {
+        const float centred = place - 0.5f;
+        const int cell = static_cast<int>(std::floor(centred));
+        const float f = centred - static_cast<float>(cell);
+        const float weights[4] = {(1.0f - f) * (1.0f - f) * (1.0f - f) / 6.0f, (3.0f * f * f * f - 6.0f * f * f + 4.0f) / 6.0f,
+                                  (-3.0f * f * f * f + 3.0f * f * f + 3.0f * f + 1.0f) / 6.0f, f * f * f / 6.0f};
+        float sum = 0.0f;
+
+        for (int tap = 0; tap < 4; ++tap) {
+            sum += weights[tap] * row[static_cast<std::size_t>(std::clamp(cell - 1 + tap, 0, static_cast<int>(row.size()) - 1))];
+        }
+
+        return sum;
+    }
+
+    // The two reads at the taps give the B-spline's value; and across a texel border its slope does not jump, where the
+    // straight read's does: the kinks that made the forest's borders staircases.
+    void testPaintIsReadAsASmoothCurve() {
+        const std::vector<float> row{0.0f, 0.0f, 0.1f, 0.9f, 1.0f, 1.0f, 0.3f, 0.0f, 0.0f, 0.6f, 0.0f, 0.0f};
+
+        for (float place = 2.0f; place < 10.0f; place += 0.037f) {
+            const GroundPaintTaps taps = groundPaintTaps(Vec2{place, place});
+            assert(taps.first.x >= place - 2.0f && taps.first.x <= place && taps.second.x >= place && taps.second.x <= place + 2.0f);
+            assert(taps.firstShare.x > 0.0f && taps.firstShare.x < 1.0f && taps.first.y == taps.first.x);
+            const float twoReads = taps.firstShare.x * readStraight(row, taps.first.x) + (1.0f - taps.firstShare.x) * readStraight(row, taps.second.x);
+            assert(std::fabs(twoReads - readCubic(row, place)) < 1e-5f);
+        }
+
+        const float border = 4.0f; // between texels 3 and 4's centres lies 4.0; the centre of texel 3 is 3.5
+        const float step = 1e-3f;
+        const auto slopeJump = [&](float (*read)(const std::vector<float>&, float), float at) {
+            const float left = (read(row, at) - read(row, at - step)) / step;
+            const float right = (read(row, at + step) - read(row, at)) / step;
+            return std::fabs(right - left);
+        };
+
+        assert(slopeJump(readStraight, border - 0.5f) > 0.5f); // a texel's centre, where the straight read bends
+        assert(slopeJump(readCubic, border - 0.5f) < 0.01f);
+    }
+}
+
 void testGroundLayers() {
+    testPaintIsReadAsASmoothCurve();
     testBlendKeepsTheBasics();
     testTheHigherLayerWins();
     testUnevenAndEmptyWeights();
