@@ -38,15 +38,19 @@ struct GpuMaterial {
     // material table plus one (0 none), each layer's repeats over the texture coordinates (a metre when projected); the
     // weights texture's slot (0 for a material without layers), the switches (GROUND_PROJECTED, GROUND_STRATA,
     // render/gpu/ground_layers_shared.h) and the top layer's number plus one (0 none); the blend depth, the strata's
-    // bottom and one over their span; and the height of the normal's upward part where the top layer starts and is full
+    // bottom, one over their span and the warp's metres; the height of the normal's upward part where the top layer
+    // starts and is full, and one over the warp's tile; the warp's and the streaks' texture slots; and the streaks'
+    // strength, one over their width and one over their length
     std::uint32_t groundLayers[4];
     float groundRepeats[4];
     std::uint32_t groundWeights[4];
     float groundBlend[4];
     float groundFacing[4];
+    std::uint32_t groundSlots[4];
+    float groundStreaks[4];
 };
 
-static_assert(sizeof(GpuMaterial) == 224, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 256, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

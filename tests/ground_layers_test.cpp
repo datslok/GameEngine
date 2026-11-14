@@ -347,7 +347,65 @@ namespace {
     }
 }
 
+namespace {
+    // Wavy beds: the noise's middle moves nothing, its ends the full amplitude down or up.
+    void testBedsAreWarpedByTheNoise() {
+        assert(warpedStrataHeight(120.0f, 0.5f, 6.0f) == 120.0f);
+        assert(near(warpedStrataHeight(120.0f, 0.0f, 6.0f), 114.0f, 1e-5f));
+        assert(near(warpedStrataHeight(120.0f, 1.0f, 6.0f), 126.0f, 1e-5f));
+        assert(warpedStrataHeight(120.0f, 0.9f, 0.0f) == 120.0f);
+    }
+
+    /*
+    * Streaks: read on a side projection across as its plane's first coordinate and down as the height, each at its own
+    * repeat, so the texture is stretched into long vertical marks; darkening only the sides, by the stain times the
+    * strength, and nothing where the rock is clean.
+    */
+    void testStreaksRunDownTheSides() {
+        const Vec3 p{16.0f, 400.0f, -8.0f};
+        const Vec2 alongX = streakPlace(p, 0, 1.0f / 8.0f, 1.0f / 200.0f);
+        assert(near(alongX.x, -1.0f, 1e-6f) && near(alongX.y, 2.0f, 1e-6f));
+        const Vec2 alongZ = streakPlace(p, 2, 1.0f / 8.0f, 1.0f / 200.0f);
+        assert(near(alongZ.x, 2.0f, 1e-6f) && near(alongZ.y, 2.0f, 1e-6f));
+
+        assert(streakShade(1.0f, 0.6f, 1.0f) == 1.0f);
+        assert(near(streakShade(0.0f, 0.6f, 1.0f), 0.4f, 1e-6f));
+        assert(near(streakShade(0.5f, 0.6f, 0.5f), 0.85f, 1e-6f));
+        assert(streakShade(0.0f, 0.6f, 0.0f) == 1.0f);
+    }
+
+    // The warp's and streaks' textures, scales and strengths in the table; none without their textures.
+    void testTheTableCarriesWarpAndStreaks() {
+        Material rock;
+        rock.groundLayers.resize(2);
+        rock.groundWeights = TextureHandle{7};
+        rock.groundProjected = true;
+        rock.groundPaint = GroundPaint::Strata;
+        rock.strataWarp = TextureHandle{8};
+        rock.strataWarpMetres = 6.0f;
+        rock.strataWarpTile = 1500.0f;
+        rock.groundStreaks = TextureHandle{9};
+        rock.streakStrength = 0.5f;
+        rock.streakWidth = 10.0f;
+        rock.streakLength = 250.0f;
+
+        const GpuMaterial packed = packMaterial(rock);
+        assert(packed.groundSlots[0] == 9 && packed.groundSlots[1] == 10);
+        assert(packed.groundBlend[3] == 6.0f && near(packed.groundFacing[2], 1.0f / 1500.0f, 1e-9f));
+        assert(packed.groundStreaks[0] == 0.5f && near(packed.groundStreaks[1], 0.1f, 1e-7f) && near(packed.groundStreaks[2], 1.0f / 250.0f, 1e-9f));
+
+        Material plain = rock;
+        plain.strataWarp = TextureHandle{};
+        plain.groundStreaks = TextureHandle{};
+        const GpuMaterial bare = packMaterial(plain);
+        assert(bare.groundBlend[3] == 0.0f && bare.groundStreaks[0] == 0.0f);
+    }
+}
+
 void testGroundLayers() {
+    testBedsAreWarpedByTheNoise();
+    testStreaksRunDownTheSides();
+    testTheTableCarriesWarpAndStreaks();
     testTheFrameUndoesTheTurnNotTheScale();
     testProjectionSharesFollowTheFacing();
     testProjectedPlaces();

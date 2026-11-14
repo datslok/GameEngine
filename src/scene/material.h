@@ -139,6 +139,19 @@ struct Material {
     int groundTopLayer = -1;
     float groundTopStart = 0.6f;
     float groundTopFull = 0.8f;
+    // With strata, wavy beds (warpedStrataHeight): strataWarp, a linear texture whose red channel (0.5 none) moves the
+    // height the strata are read at by up to strataWarpMetres either way, repeating every strataWarpTile metres over the
+    // world's x and z. No texture or 0 metres: level beds.
+    TextureHandle strataWarp;
+    float strataWarpMetres = 0.0f;
+    float strataWarpTile = 1000.0f;
+    // With projected layers, water streaks down the sides (streakPlace, streakShade): groundStreaks, a linear texture
+    // whose red channel is clean rock (1) to the darkest stain (0), repeating every streakWidth metres across and every
+    // streakLength metres down, darkening the albedo by up to streakStrength. No texture or 0 strength: none.
+    TextureHandle groundStreaks;
+    float streakStrength = 0.0f;
+    float streakWidth = 8.0f;
+    float streakLength = 200.0f;
 };
 
 inline bool isCutOut(const Material& material) {

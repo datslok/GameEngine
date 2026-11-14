@@ -134,4 +134,19 @@ vec4 strataPaint(vec4 strata, int topLayer, float upward, float topStart, float 
     return result;
 }
 
+// Wavy beds: the height moved by the warp texel (0.5 none) up to amplitude either way (warpedStrataHeight).
+float warpedStrataHeight(float height, float warpTexel, float amplitude) {
+    return height + (2.0 * warpTexel - 1.0) * amplitude;
+}
+
+// Where along the streaks a point is, for a side projection (0 x, 2 z): across its plane, down the height (streakPlace).
+vec2 streakPlace(vec3 framePosition, int axis, float inverseWidth, float inverseLength) {
+    return vec2(projectedPlace(framePosition, axis).x * inverseWidth, framePosition.y * inverseLength);
+}
+
+// The albedo's factor under a streak (streakShade): the stain times the strength, on the sides only.
+float streakShade(float streakTexel, float strength, float sideShare) {
+    return 1.0 - strength * sideShare * (1.0 - streakTexel);
+}
+
 #endif

@@ -57,6 +57,7 @@ Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolde
     }
 
     material.texture = assets.loadTexture(files.colour);
+    material.colour = layer.tint;
     material.roughness = 1.0f;
 
     if (!files.normal.empty()) {

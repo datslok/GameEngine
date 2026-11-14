@@ -53,13 +53,16 @@ void visit(ForestGroundSettings& settings, SettingsVisitor& visitor);
 
 /*
 * The pillars' and islands' rock (Material's projected strata): the blend between beds (shallow keeps their edges
-* following the rocks' own shapes, deep cross-fades them), and where the moss starts and is full, as the upward part of
-* the surface's normal (1 level, 0 a wall).
+* following the rocks' own shapes, deep cross-fades them), where the moss starts and is full, as the upward part of
+* the surface's normal (1 level, 0 a wall), how far the beds rise and fall either way, and how dark the water streaks
+* down the sides are (0 none, 1 black).
 */
 struct ForestRockSettings {
     float blendDepth = 0.3f;
     float mossStart = 0.55f;
     float mossFull = 0.8f;
+    float warpMetres = 6.0f;
+    float streakStrength = 0.45f;
 };
 
 void visit(ForestRockSettings& settings, SettingsVisitor& visitor);

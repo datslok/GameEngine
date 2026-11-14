@@ -213,6 +213,33 @@ namespace {
     }
 }
 
+namespace {
+    // Heights over the cake, warp texels across their range, points of a pillar on both side projections, stains and
+    // strengths from none to full, sides to tops.
+    void checkWarpAndStreaks(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{71};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 400; ++i) {
+            inputs.push_back(GpuVec4{random.between(-400.0f, 1400.0f), random.between(0.0f, 1.0f), random.between(0.0f, 12.0f), 0.0f});
+            inputs.push_back(GpuVec4{random.between(-60.0f, 60.0f), random.between(-20.0f, 360.0f), random.between(-60.0f, 60.0f), i % 2 == 0 ? 0.0f : 2.0f});
+            inputs.push_back(GpuVec4{1.0f / random.between(2.0f, 20.0f), 1.0f / random.between(50.0f, 400.0f), random.between(0.0f, 1.0f), random.between(0.0f, 1.0f)});
+            inputs.push_back(GpuVec4{random.between(0.0f, 1.0f), 0.0f, 0.0f, 0.0f});
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_STRATA_WARP_AND_STREAKS, inputs, 4, 1);
+
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            const GpuVec4* in = &inputs[i * 4];
+            const Vec2 place = streakPlace(vec3Of(in[1]), static_cast<int>(in[1][3]), in[2][0], in[2][1]);
+            report.check("warpedStrataHeight", arithmeticTolerance, warpedStrataHeight(in[0][0], in[0][1], in[0][2]), outputs[i][0]);
+            report.check("streakPlace", arithmeticTolerance, place.x, outputs[i][1]);
+            report.check("streakPlace", arithmeticTolerance, place.y, outputs[i][2]);
+            report.check("streakShade", arithmeticTolerance, streakShade(in[2][2], in[2][3], in[3][0]), outputs[i][3]);
+        }
+    }
+}
+
 void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("ground_layers.glsl");
     checkBlendWeights(runner, report);
@@ -221,4 +248,5 @@ void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     checkProjectedNormal(runner, report);
     checkStrataPaint(runner, report);
     checkProjectionFrame(runner, report);
+    checkWarpAndStreaks(runner, report);
 }

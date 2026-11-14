@@ -880,7 +880,18 @@ void main() {
             * Strata (strataPlace, strataPaint): the strip of weights read at the world height, its mip from how fast the
             * height changes across the pixel, then the top layer taking over where the smooth normal faces up.
             */
-            float place = strataPlace(relativePosition.y + cameraOrigin.y, material.groundBlend.y, material.groundBlend.z);
+            float height = relativePosition.y + cameraOrigin.y;
+
+            // Wavy beds: the height moved by the warp texture over the world's x and z (warpedStrataHeight).
+            if (material.groundSlots.x != 0u) {
+                float warpScale = material.groundFacing.z;
+                vec2 warpPlace = (relativePosition.xz + cameraOrigin.xz) * warpScale;
+                float warpTexel = textureGrad(textures[nonuniformEXT(material.groundSlots.x)], warpPlace, positionStepRight.xz * (warpScale * exp2(mipBias)),
+                                              positionStepDown.xz * (warpScale * exp2(mipBias))).r;
+                height = warpedStrataHeight(height, warpTexel, material.groundBlend.w);
+            }
+
+            float place = strataPlace(height, material.groundBlend.y, material.groundBlend.z);
             float placeScale = material.groundBlend.z * exp2(mipBias);
             painted = textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(place, 0.5), vec2(positionStepRight.y * placeScale, 0.0),
                                   vec2(positionStepDown.y * placeScale, 0.0));
@@ -981,6 +992,27 @@ void main() {
         roughness = max(blendedSurface.y, BRDF_SMALLEST_ROUGHNESS);
         occlusionTexel = blendedSurface.z;
         normalTexel = projectionShares.x * axisTexels[0] + projectionShares.y * axisTexels[1] + projectionShares.z * axisTexels[2];
+
+        /*
+        * Water streaks down the sides (streakPlace, streakShade): the streak texture read on each side projection with a
+        * share, stretched along the height, their stains blended by the shares and darkening the albedo on the sides only.
+        */
+        float sideShare = projectionShares.x + projectionShares.z;
+
+        if (projected && material.groundSlots.y != 0u && sideShare > 0.0) {
+            float stain = 0.0;
+
+            for (int axis = 0; axis < 3; axis += 2) {
+                if (projectionShares[axis] > 0.0) {
+                    vec2 streakUv = streakPlace(framePosition, axis, material.groundStreaks.y, material.groundStreaks.z);
+                    vec2 streakAcross = streakPlace(frameStepAcross, axis, material.groundStreaks.y, material.groundStreaks.z) * stepScale;
+                    vec2 streakDown = streakPlace(frameStepDown, axis, material.groundStreaks.y, material.groundStreaks.z) * stepScale;
+                    stain += projectionShares[axis] * textureGrad(textures[nonuniformEXT(material.groundSlots.y)], streakUv, streakAcross, streakDown).r;
+                }
+            }
+
+            albedo.rgb *= streakShade(stain / sideShare, material.groundStreaks.x, sideShare);
+        }
 
         // Projected: each projection's blended texel decoded in its own plane and the three combined (projectedNormal),
         // then turned from the object's frame into the world.

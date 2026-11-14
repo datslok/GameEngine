@@ -155,3 +155,15 @@ GroundWeights strataPaint(const GroundWeights& strata, int topLayer, float upwar
     result[static_cast<std::size_t>(topLayer)] += top;
     return result;
 }
+
+float warpedStrataHeight(float height, float warpTexel, float amplitude) {
+    return height + (2.0f * warpTexel - 1.0f) * amplitude;
+}
+
+Vec2 streakPlace(const Vec3& framePosition, int axis, float inverseWidth, float inverseLength) {
+    return Vec2{projectedPlace(framePosition, axis).x * inverseWidth, framePosition.y * inverseLength};
+}
+
+float streakShade(float streakTexel, float strength, float sideShare) {
+    return 1.0f - strength * sideShare * (1.0f - streakTexel);
+}

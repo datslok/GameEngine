@@ -92,6 +92,21 @@ GpuMaterial packMaterial(const Material& material) {
             data.groundBlend[2] = span != 0.0f ? 1.0f / span : 0.0f;
             data.groundFacing[0] = material.groundTopStart;
             data.groundFacing[1] = material.groundTopFull;
+
+            // Wavy beds, only with their texture.
+            if (material.strataWarp.isValid() && material.strataWarpTile > 0.0f) {
+                data.groundSlots[0] = bindlessTextureSlot(material.strataWarp);
+                data.groundBlend[3] = std::max(material.strataWarpMetres, 0.0f);
+                data.groundFacing[2] = 1.0f / material.strataWarpTile;
+            }
+        }
+
+        // Streaks down the sides of projected layers, only with their texture.
+        if (material.groundProjected && material.groundStreaks.isValid() && material.streakWidth > 0.0f && material.streakLength > 0.0f) {
+            data.groundSlots[1] = bindlessTextureSlot(material.groundStreaks);
+            data.groundStreaks[0] = std::clamp(material.streakStrength, 0.0f, 1.0f);
+            data.groundStreaks[1] = 1.0f / material.streakWidth;
+            data.groundStreaks[2] = 1.0f / material.streakLength;
         }
     }
 

@@ -25,8 +25,10 @@ struct MaterialData {
     uvec4 groundLayers;     // a blended ground: each layer's material index plus one (0 none)
     vec4 groundRepeats;     // each layer's repeats over the texture coordinates
     uvec4 groundWeights;    // x: the weights texture's slot (linear RGBA, a channel a layer); y: GROUND_PROJECTED, GROUND_STRATA; z: the top layer plus one (0 none)
-    vec4 groundBlend;       // x: the height blend's depth; y: the strata's bottom (world height); z: one over their span
-    vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full
+    vec4 groundBlend;       // x: the height blend's depth; y: the strata's bottom (world height); z: one over their span; w: the warp's metres
+    vec4 groundFacing;      // x, y: the normal's upward part where the top layer starts and is full; z: one over the warp's tile
+    uvec4 groundSlots;      // x: the strata warp's texture slot; y: the streaks'
+    vec4 groundStreaks;     // x: the streaks' strength; y: one over their width; z: one over their length
 };
 
 layout(std430, set = 1, binding = 2) readonly buffer Materials {

@@ -56,14 +56,26 @@ namespace {
         };
     }
 
-    // The strata strip's texels: 4096 over the cake's 1.8 km, about 0.44 m each, finer than the thinnest bed (4 m).
+    // The strata strip's texels: 4096 over the cake's 1.8 km, about 0.44 m each, finer than the thinnest bed (5 m).
     constexpr int strataTexels = 4096;
+
+    // The wavy beds' noise: 256 texels repeating every 1.5 km, so its four octaves rise and fall over 375 m and less.
+    constexpr int strataWarpTexels = 256;
+    constexpr float strataWarpTileMetres = 1500.0f;
+
+    // The streaks' texture: 256 texels, one repeat every 24 m across and 300 m down, so a stain 3 m wide runs tens of
+    // metres.
+    constexpr int streakTexels = 256;
+    constexpr float streakWidthMetres = 24.0f;
+    constexpr float streakLengthMetres = 300.0f;
 
     // The rock's tunable parts, applied each frame.
     void applyRockSettings(Material& material, const ForestRockSettings& settings) {
         material.groundBlendDepth = settings.blendDepth;
         material.groundTopStart = settings.mossStart;
         material.groundTopFull = settings.mossFull;
+        material.strataWarpMetres = settings.warpMetres;
+        material.streakStrength = settings.streakStrength;
     }
 
     Material plainMaterial(Pixel colour, float roughness, float metallic = 0.0f) {
@@ -108,6 +120,11 @@ namespace {
         material.strataBottom = valleyStrataBottom;
         material.strataTop = valleyStrataTop;
         material.groundTopLayer = forestMossLayer;
+        material.strataWarp = assets.addTexture(strataWarpImage(strataWarpTexels));
+        material.strataWarpTile = strataWarpTileMetres;
+        material.groundStreaks = assets.addTexture(streakImage(streakTexels));
+        material.streakWidth = streakWidthMetres;
+        material.streakLength = streakLengthMetres;
         applyRockSettings(material, settings);
         return material;
     }
@@ -174,6 +191,8 @@ void visit(ForestRockSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Blend depth", settings.blendDepth, {.min = 0.0f, .max = 1.0f});
     visitor.field("Moss starts", settings.mossStart, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
     visitor.field("Moss full", settings.mossFull, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
+    visitor.field("Bed waves", settings.warpMetres, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f, .unit = "m"});
+    visitor.field("Streaks", settings.streakStrength, {.min = 0.0f, .max = 1.0f});
 }
 
 void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {

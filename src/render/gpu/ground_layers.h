@@ -99,3 +99,24 @@ float strataPlace(float height, float bottom, float inverseSpan);
 * between (a step at topStart if they are not in order). No top layer (topLayer < 0): the strata as they are.
 */
 GroundWeights strataPaint(const GroundWeights& strata, int topLayer, float upward, float topStart, float topFull);
+
+/*
+* Wavy beds: real beds are not ruled lines, they rise and fall a few metres over hundreds. The height the strata are read
+* at is moved by a slow noise texture over the world's x and z (its texel 0..1, 0.5 no move): up to amplitude metres
+* either way.
+*/
+float warpedStrataHeight(float height, float warpTexel, float amplitude);
+
+/*
+* Water streaks: dark stains running down a cliff, where rain carries dirt and algae grow. A noise texture read on the
+* sides' projections stretched along the height (one repeat every inverseWidth^-1 metres across, every inverseLength^-1
+* down), so any blotch becomes a long vertical streak. Where along the streaks a point of the object's frame is, for a
+* side projection (0 x, 2 z): across as projectedPlace's first coordinate, down as the height.
+*/
+Vec2 streakPlace(const Vec3& framePosition, int axis, float inverseWidth, float inverseLength);
+
+/*
+* How much a streak darkens the albedo (a factor, 1 none): its texel (1 clean rock, 0 the darkest stain) times strength,
+* only on the sides (sideShare: the side projections' shares, 0 on what faces straight up or down).
+*/
+float streakShade(float streakTexel, float strength, float sideShare);

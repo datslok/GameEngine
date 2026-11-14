@@ -37,5 +37,13 @@ void main() {
         testOutput(1, vec4(axes[0], 0.0));
         testOutput(2, vec4(axes[1], 0.0));
         testOutput(3, vec4(axes[2], 0.0));
+    } else if (function == GPU_TEST_STRATA_WARP_AND_STREAKS) {
+        // Inputs: (height, warp texel, amplitude, 0), (frame position, axis), (inverse width, inverse length, streak
+        // texel, strength), (side share, 0, 0, 0). Output: (warped height, streak place, streak shade).
+        vec4 warp = testInput(0);
+        vec4 place = testInput(1);
+        vec4 streak = testInput(2);
+        vec2 streakUv = streakPlace(place.xyz, int(place.w), streak.x, streak.y);
+        testOutput(0, vec4(warpedStrataHeight(warp.x, warp.y, warp.z), streakUv, streakShade(streak.z, streak.w, testInput(3).x)));
     }
 }

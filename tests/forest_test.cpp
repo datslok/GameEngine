@@ -610,39 +610,52 @@ namespace {
     }
 
     /*
-    * The valley's layer cake: beds touching from its bottom to its top, 4 to 30 m thick, no two neighbours the same rock,
-    * every rock used, the same every run; the rock at a height is its bed's.
+    * The valley's layer cake: beds touching from its bottom to its top; soft sandstone beds 15 to 60 m thick, each a tone
+    * between the two sandstone tints and a neighbouring soft bed's tone at least 0.3 apart, so each shows; hard beds of
+    * blocks 5 to 15 m thick, about a fifth of them and never two together; the same every run; the bed at a height its own.
     */
     void testTheStrataAreOneCake() {
         const std::vector<StrataBand> bands = valleyStrata();
-        assert(bands.size() > 50 && bands.front().bottom == valleyStrataBottom && bands.back().top == valleyStrataTop);
-        std::array<int, valleyStrataRocks> used{};
+        assert(bands.size() > 30 && bands.front().bottom == valleyStrataBottom && bands.back().top == valleyStrataTop);
+        int hardBeds = 0;
 
         for (std::size_t bed = 0; bed < bands.size(); ++bed) {
             const StrataBand& band = bands[bed];
-            assert(band.rock >= 0 && band.rock < valleyStrataRocks);
-            assert(band.top - band.bottom <= 30.0f + 1e-3f);
-            assert(bed + 1 == bands.size() || band.top - band.bottom >= 4.0f - 1e-3f);
-            used[static_cast<std::size_t>(band.rock)] += 1;
+            const float thickness = band.top - band.bottom;
+            const bool last = bed + 1 == bands.size();
+            assert(band.tone >= 0.0f && band.tone <= 1.0f);
 
-            if (bed > 0) {
-                assert(band.bottom == bands[bed - 1].top && band.rock != bands[bed - 1].rock);
+            if (band.hard) {
+                hardBeds += 1;
+                assert(thickness <= 15.0f + 1e-3f && (last || thickness >= 5.0f - 1e-3f));
+            } else {
+                assert(thickness <= 60.0f + 1e-3f && (last || thickness >= 15.0f - 1e-3f));
             }
 
-            assert(strataRockAt(bands, 0.5f * (band.bottom + band.top)) == band.rock);
+            if (bed > 0) {
+                const StrataBand& below = bands[bed - 1];
+                assert(band.bottom == below.top && !(band.hard && below.hard));
+            }
+
+            if (bed > 1 && !band.hard) {
+                const StrataBand& softBelow = bands[bed - 1].hard ? bands[bed - 2] : bands[bed - 1];
+                assert(std::fabs(band.tone - softBelow.tone) >= 0.3f - 1e-6f);
+            }
+
+            assert(strataBandAt(bands, 0.5f * (band.bottom + band.top)).bottom == band.bottom);
         }
 
-        for (const int count : used) {
-            assert(count > 5);
-        }
+        const float hardShare = static_cast<float>(hardBeds) / static_cast<float>(bands.size());
+        assert(hardShare > 0.1f && hardShare < 0.35f);
 
         const std::vector<StrataBand> again = valleyStrata();
-        assert(again.size() == bands.size() && again[17].top == bands[17].top && again[17].rock == bands[17].rock);
+        assert(again.size() == bands.size() && again[17].top == bands[17].top && again[17].tone == bands[17].tone);
     }
 
     /*
-    * The strip the rock is painted by: one texel tall, each texel's rocks adding up to one (within 8-bit rounding) and
-    * the moss's channel empty; a texel inside one bed is all that bed's rock.
+    * The strip the rock is painted by: one texel tall, each texel's layers adding up to one (within 8-bit rounding) and
+    * the moss's channel empty; a texel inside a soft bed mixes the two sandstone tints by its tone, inside a hard bed it
+    * is all blocks.
     */
     void testTheStrataStripHoldsTheBeds() {
         const std::vector<StrataBand> bands = valleyStrata();
@@ -655,11 +668,69 @@ namespace {
             const std::uint8_t* pixel = &image.pixels[static_cast<std::size_t>(texel) * 4];
             assert(std::abs(pixel[0] + pixel[1] + pixel[2] - 255) <= 2 && pixel[3] == 0);
             const float low = valleyStrataBottom + texelMetres * static_cast<float>(texel);
+            const StrataBand& band = strataBandAt(bands, low);
 
-            if (strataRockAt(bands, low) == strataRockAt(bands, low + texelMetres - 1e-3f)) {
-                assert(pixel[strataRockAt(bands, low)] == 255);
+            if (&band == &strataBandAt(bands, low + texelMetres - 1e-3f)) {
+                if (band.hard) {
+                    assert(pixel[2] == 255);
+                } else {
+                    assert(std::abs(static_cast<float>(pixel[1]) - band.tone * 255.0f) <= 1.0f && pixel[2] == 0);
+                }
             }
         }
+    }
+
+    /*
+    * The wavy beds' noise: it repeats seamlessly (its last column and row lead into its first as smoothly as any two
+    * neighbours do), spans most of its range about the middle, and is the same every time.
+    */
+    void testTheWarpRepeatsSeamlessly() {
+        const int size = 128;
+        const ImageData warp = strataWarpImage(size);
+        assert(warp.width == static_cast<std::uint32_t>(size) && warp.height == static_cast<std::uint32_t>(size) && warp.encoding == TextureEncoding::Linear);
+        const auto at = [&](int x, int y) {
+            return static_cast<int>(warp.pixels[(static_cast<std::size_t>(y) * size + static_cast<std::size_t>(x)) * 4]);
+        };
+        int largestStep = 0;
+        int lowest = 255;
+        int highest = 0;
+        long sum = 0;
+
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size - 1; ++x) {
+                largestStep = std::max(largestStep, std::abs(at(x + 1, y) - at(x, y)));
+                lowest = std::min(lowest, at(x, y));
+                highest = std::max(highest, at(x, y));
+                sum += at(x, y);
+            }
+        }
+
+        for (int y = 0; y < size; ++y) {
+            assert(std::abs(at(0, y) - at(size - 1, y)) <= largestStep + 1);
+            assert(std::abs(at(y, 0) - at(y, size - 1)) <= largestStep + 1);
+        }
+
+        assert(lowest < 70 && highest > 185);
+        const float mean = static_cast<float>(sum) / static_cast<float>(size * (size - 1));
+        assert(mean > 105.0f && mean < 150.0f);
+        assert(strataWarpImage(size).pixels == warp.pixels);
+    }
+
+    // The streaks' texture: mostly clean rock (bright), with dark stains in places, repeating seamlessly too.
+    void testStreaksAreMostlyClean() {
+        const int size = 128;
+        const ImageData streaks = streakImage(size);
+        assert(streaks.width == static_cast<std::uint32_t>(size) && streaks.encoding == TextureEncoding::Linear);
+        int clean = 0;
+        int darkest = 255;
+
+        for (std::size_t texel = 0; texel < static_cast<std::size_t>(size * size); ++texel) {
+            const int value = streaks.pixels[texel * 4];
+            clean += value > 230 ? 1 : 0;
+            darkest = std::min(darkest, value);
+        }
+
+        assert(clean > size * size / 2 && darkest < 60);
     }
 
     /*
@@ -673,12 +744,18 @@ namespace {
         assert(rock.groundLayers.size() == 4 && rock.groundProjected && rock.groundPaint == GroundPaint::Strata && rock.groundWeights.isValid());
         assert(rock.strataBottom == valleyStrataBottom && rock.strataTop == valleyStrataTop && rock.groundTopLayer == forestMossLayer);
 
+        assert(rock.strataWarp.isValid() && rock.strataWarpMetres == forest.game.getRockSettings().warpMetres);
+        assert(rock.groundStreaks.isValid() && rock.streakStrength == forest.game.getRockSettings().streakStrength);
+
         for (std::size_t layer = 0; layer < 4; ++layer) {
             assert(near(rock.groundRepeats[layer], 1.0f / forestRockLayers[layer].tileMetres, 1e-7f));
             const Pixel standIn = forestRockLayers[layer].standIn;
             const Pixel colour = rock.groundLayers[layer].colour;
             assert(colour.r == standIn.r && colour.g == standIn.g && colour.b == standIn.b);
         }
+
+        // The two sandstone tints are the same scan.
+        assert(std::string{forestRockLayers[0].folder} == forestRockLayers[1].folder);
 
         for (const Entity shape : forest.game.getRockShapes()) {
             assert(forest.world.get<ModelRenderer>(shape).parts.front().material.groundWeights == rock.groundWeights);
@@ -714,12 +791,13 @@ namespace {
         const float farDepth = forest.world.get<ModelRenderer>(forest.game.getFarGround().front()).parts.front().material.groundBlendDepth;
         assert(farDepth > 0.45f && farDepth <= 1.0f);
 
-        forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f};
+        forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f, .warpMetres = 3.0f, .streakStrength = 0.2f};
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
 
         for (const Entity shape : forest.game.getRockShapes()) {
             const Material& rock = forest.world.get<ModelRenderer>(shape).parts.front().material;
             assert(rock.groundBlendDepth == 0.6f && rock.groundTopStart == 0.4f && rock.groundTopFull == 0.9f);
+            assert(rock.strataWarpMetres == 3.0f && rock.streakStrength == 0.2f);
         }
 
         forest.game.getMistSettings().enabled = true;
@@ -745,6 +823,8 @@ void testForest() {
     testTheGameBuildsTheValley();
     testTheStrataAreOneCake();
     testTheStrataStripHoldsTheBeds();
+    testTheWarpRepeatsSeamlessly();
+    testStreaksAreMostlyClean();
     testThePillarsAreMadeOfTheStrata();
     testViewsHaveACommand();
     testSettingsApplyEachFrame();
