@@ -1302,6 +1302,133 @@ namespace {
         assert(project(far, nearCaster).z < moved.z);
         assert(project(far, nearCaster).z > project(far, point).z);
     }
+
+    // The same camera place looking another way: turning in place, as the user did when the cascades cost 7 ms.
+    Camera turnedCamera(const Vec3& position, float yawRadians, float farPlane = 25000.0f) {
+        const Vec3 ahead{std::sin(yawRadians), 0.0f, -std::cos(yawRadians)};
+        return Camera{position, position + ahead, Vec3{0.0f, 1.0f, 0.0f}, 1.2f, 16.0f / 9.0f, 0.1f, farPlane};
+    }
+
+    bool sameTile(const ShadowTile& a, const ShadowTile& b) {
+        return a.matrix == b.matrix && a.x == b.x && a.y == b.y && a.size == b.size;
+    }
+
+    /*
+    * Staggered cascades (ShadowSettings::cascadeStagger, 2): turning in place, the near half of the sun's cascades follow
+    * the view every frame, while the far half take turns, one redrawn a frame, the other keeping last frame's tile
+    * (its box and square, so the atlas cache keeps its contents); the next frame the other way round.
+    */
+    void testFarCascadesTakeTurns() {
+        const ShadowSettings settings;
+        assert(settings.cascadeStagger == 2);
+        ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
+        const Vec3 place{10.0f, 2.0f, 20.0f};
+        ShadowPlan previous = planShadows(sunOnly(), turnedCamera(place, 0.0f), layout, settings);
+        const int first = previous.directional[0].firstTile;
+        const int count = settings.cascadeCount;
+
+        for (std::uint64_t frame = 1; frame <= 4; ++frame) {
+            const ShadowPlan fresh = planShadows(sunOnly(), turnedCamera(place, 0.3f * static_cast<float>(frame)), layout, settings);
+            ShadowPlan held = fresh;
+            holdStaggeredCascades(held, previous, place, settings, frame);
+            int kept = 0;
+
+            for (int cascade = 0; cascade < count; ++cascade) {
+                const std::size_t tile = static_cast<std::size_t>(first + cascade);
+                const bool wasKept = sameTile(held.tiles[tile], previous.tiles[tile]) && !sameTile(held.tiles[tile], fresh.tiles[tile]);
+
+                if (cascade < count / 2) {
+                    assert(sameTile(held.tiles[tile], fresh.tiles[tile]));
+                } else {
+                    // Its turn comes when (frame + its place among the far half) is a whole number of intervals.
+                    const bool itsTurn = (frame + static_cast<std::uint64_t>(cascade - count / 2)) % static_cast<std::uint64_t>(settings.cascadeStagger) == 0;
+                    assert(wasKept == !itsTurn);
+                    kept += wasKept ? 1 : 0;
+                }
+            }
+
+            assert(kept == 1);
+
+            // The far map (round the camera, not the view) and every other tile are as planned.
+            const std::size_t far = static_cast<std::size_t>(held.directional[0].farTile);
+            assert(sameTile(held.tiles[far], fresh.tiles[far]));
+            previous = held;
+        }
+    }
+
+    /*
+    * A kept tile reads the same shadows as when it was drawn: its world view is last frame's, and the matrix the shader
+    * gets is that view of points measured from where the camera is now, so a camera that moved does not shift it.
+    */
+    void testAKeptTileFollowsTheCamerasPlace() {
+        const ShadowSettings settings;
+        ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
+        const ShadowPlan previous = planShadows(sunOnly(), turnedCamera(Vec3{10.0f, 2.0f, 20.0f}, 0.0f), layout, settings);
+        const Vec3 moved{10.3f, 2.0f, 19.6f};
+        ShadowPlan held = planShadows(sunOnly(), turnedCamera(moved, 0.4f), layout, settings);
+        holdStaggeredCascades(held, previous, moved, settings, 1);
+        // On frame 1 the first of the far half keeps its tile (its place 0: 1 + 0 is not a whole number of intervals).
+        const std::size_t kept = static_cast<std::size_t>(held.directional[0].firstTile + settings.cascadeCount / 2);
+        assert(sameTile(held.tiles[kept], previous.tiles[kept]));
+
+        const Vec3 point{25.0f, 0.5f, -40.0f};
+        const Vec3 world = project(held.tiles[kept].matrix, point);
+        Mat4 shaderMatrix;
+
+        for (int row = 0; row < 4; ++row) {
+            for (int column = 0; column < 4; ++column) {
+                shaderMatrix.values[row][column] = held.tileData[kept].matrix[column * 4 + row];
+            }
+        }
+
+        const Vec3 relative = project(shaderMatrix, point - moved);
+        assert(nearlyEqual(world.x, relative.x, 1e-4f) && nearlyEqual(world.y, relative.y, 1e-4f) && nearlyEqual(world.z, relative.z, 1e-4f));
+
+        // Everything else about the record is the one it was drawn with.
+        for (int i = 0; i < 4; ++i) {
+            assert(held.tileData[kept].offset[i] == previous.tileData[kept].offset[i]);
+            assert(held.tileData[kept].rect[i] == previous.tileData[kept].rect[i]);
+            assert(held.tileData[kept].lens[i] == previous.tileData[kept].lens[i]);
+        }
+    }
+
+    /*
+    * Nothing is kept when the box itself changed (the sun turned, so the shadows would point the old way; the fit or the
+    * settings changed its size), when its square moved, without a previous plan, or with staggering off (1).
+    */
+    void testNothingIsKeptWhenTheBoxChanged() {
+        const ShadowSettings settings;
+        ShadowAtlasLayout layout{shadowAtlasSizeFor(settings)};
+        const Vec3 place{10.0f, 2.0f, 20.0f};
+        const ShadowPlan previous = planShadows(sunOnly(), turnedCamera(place, 0.0f), layout, settings);
+        const auto keptAny = [&](const ShadowPlan& fresh, const ShadowPlan& before, const ShadowSettings& used) {
+            ShadowPlan held = fresh;
+            holdStaggeredCascades(held, before, place, used, 1);
+
+            for (std::size_t tile = 0; tile < held.tiles.size(); ++tile) {
+                if (!sameTile(held.tiles[tile], fresh.tiles[tile])) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        const ShadowPlan turned = planShadows(sunOnly(), turnedCamera(place, 0.5f), layout, settings);
+        assert(keptAny(turned, previous, settings));
+        assert(!keptAny(turned, ShadowPlan{}, settings));
+
+        ShadowSettings off;
+        off.cascadeStagger = 1;
+        assert(!keptAny(turned, previous, off));
+
+        FrameLighting movedSun;
+        movedSun.directionalLights.push_back(DirectionalLight{Vec3{0.41f, -0.6f, -0.5f}});
+        assert(!keptAny(planShadows(movedSun, turnedCamera(place, 0.5f), layout, settings), previous, settings));
+
+        // A shorter shadow distance makes every box smaller.
+        assert(!keptAny(planShadows(sunOnly(), turnedCamera(place, 0.5f), layout, settings, 60.0f), previous, settings));
+    }
 }
 
 void testShadowMap() {
@@ -1312,6 +1439,9 @@ void testShadowMap() {
     testTheSunNamesItsFarTileForDistantOccluders();
     testTheReachLeavesNoGapBetweenCascadeAndFarMap();
     testTheFarMapsTapFindsAnIslandTheCascadeMisses();
+    testFarCascadesTakeTurns();
+    testAKeptTileFollowsTheCamerasPlace();
+    testNothingIsKeptWhenTheBoxChanged();
     testAtlasGrowsForUltraCascades();
     testCascadesFollowTheirResolution();
     testEveryShadowFitsOnUltra();

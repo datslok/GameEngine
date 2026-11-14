@@ -83,6 +83,12 @@ struct ShadowSettings {
     // How the handover looks (see CascadeTransition).
     CascadeTransition cascadeTransition = CascadeTransition::Blend;
 
+    // The far half of the sun's cascades take turns (holdStaggeredCascades): each redrawn every this many frames, the
+    // others keeping their last box meanwhile, so turning the camera redraws fewer of them each frame. 1 redraws every
+    // cascade every frame. The cascades follow the view, so turning redrew them all: the jungle's leaves cost 7 ms of
+    // shadows a frame while turning (docs/SHADOWCACHE.md).
+    int cascadeStagger = 2;
+
     // Each cascade's tile size (see CascadeResolution); 4096 by default (Ultra), 2048 on High. The atlas is remade when
     // it changes, and every shadow redrawn.
     CascadeResolution cascadeResolution = CascadeResolution::Pixels4096;
@@ -267,6 +273,19 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
 ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, const ShadowSettings& settings = {},
                        float fittedSunDistance = std::numeric_limits<float>::infinity(),
                        const std::optional<MirrorShadowView>& mirror = std::nullopt);
+
+/*
+* Staggered cascades (ShadowSettings::cascadeStagger, docs/SHADOWCACHE.md): in the far half of each sun's own cascades
+* (not a mirror's, not the far map), the cascade at place k among them is redrawn on frames where (frame + k) is a whole
+* number of intervals; on the others it keeps previous's tile, its box and square (so the atlas cache keeps what it drew
+* there) and its record, with the shader's matrix rebuilt from the camera's place now (origin), so its shadows stay put
+* while the camera moves. With an interval of 2 and two far cascades, one is redrawn every frame, so every frame costs
+* the same. Only a box of the same shape (the same sun direction, size and depth) in the same square is kept: a sun that
+* turned, a new fit or new settings redraw it. Its edge lags behind a turning view by the frames it is kept, and the
+* next cascade or the far map covers what it misses meanwhile; moving casters in it are drawn at its rate.
+*/
+void holdStaggeredCascades(ShadowPlan& plan, const ShadowPlan& previous, const Vec3& origin, const ShadowSettings& settings,
+                           std::uint64_t frame);
 
 // Give each light record the shadow the plan handed out for its slot (the plan and the lights from the same frame's lights).
 void attachShadows(GpuLights& lights, const ShadowPlan& plan);

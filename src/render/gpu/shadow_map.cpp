@@ -490,6 +490,63 @@ ShadowPlan planShadows(const FrameLighting& lighting, const Camera& camera, Shad
     return plan;
 }
 
+namespace {
+    // The same box shape: its rotation, scale and depth (the matrix's upper 3 x 3) unchanged, whatever its translation.
+    bool sameBoxShape(const Mat4& a, const Mat4& b) {
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                if (a.values[row][column] != b.values[row][column]) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+}
+
+void holdStaggeredCascades(ShadowPlan& plan, const ShadowPlan& previous, const Vec3& origin, const ShadowSettings& settings,
+                           std::uint64_t frame) {
+    const int interval = std::max(settings.cascadeStagger, 1);
+    const int cascades = std::clamp(settings.cascadeCount, 1, maxShadowCascades);
+
+    if (interval == 1 || plan.tiles.size() != previous.tiles.size()) {
+        return;
+    }
+
+    for (const LightShadow& sun : plan.directional) {
+        if (sun.firstTile < 0 || sun.cascades < cascades) {
+            continue;
+        }
+
+        for (int cascade = cascades / 2; cascade < cascades; ++cascade) {
+            const std::uint64_t place = static_cast<std::uint64_t>(cascade - cascades / 2);
+
+            if ((frame + place) % static_cast<std::uint64_t>(interval) == 0) {
+                continue;
+            }
+
+            const std::size_t index = static_cast<std::size_t>(sun.firstTile + cascade);
+            const ShadowTile& before = previous.tiles[index];
+            const ShadowTile& now = plan.tiles[index];
+
+            if (before.x != now.x || before.y != now.y || before.size != now.size || now.size == 0 || !sameBoxShape(before.matrix, now.matrix)) {
+                continue;
+            }
+
+            plan.tiles[index] = before;
+            plan.tileData[index] = previous.tileData[index];
+            const Mat4 shaderMatrix = before.matrix * Mat4::translation(origin.x, origin.y, origin.z);
+
+            for (int row = 0; row < 4; ++row) {
+                for (int column = 0; column < 4; ++column) {
+                    plan.tileData[index].matrix[column * 4 + row] = shaderMatrix.values[row][column];
+                }
+            }
+        }
+    }
+}
+
 /*
 * Both lists come from the same selectDrawableLights, so slot i of the plan is slot i of the lights. A sun's shadow never
 * fades (it has no rival for its tiles), so only its tiles and its size go across.
@@ -576,6 +633,7 @@ void visit(ShadowSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Cascade blend band", settings.cascadeBlendBand, {.min = 0.0f, .max = 0.5f, .unit = "of a radius"});
     visitor.choice("Cascade transition", settings.cascadeTransition, cascadeTransitionNames);
     visitor.choice("Cascade resolution", settings.cascadeResolution, cascadeResolutionNames);
+    visitor.field("Cascade stagger", settings.cascadeStagger, {.min = 1, .max = 8, .unit = "frames"});
     visitor.field("Mirror cascades", settings.mirrorCascadeCount, {.min = 0, .max = maxShadowCascades});
     visitor.choice("Mirror cascade resolution", settings.mirrorCascadeResolution, cascadeResolutionNames);
     visitor.field("Far shadow distance", settings.farShadowDistance, {.min = 0.0f, .max = 100000.0f, .sliderMax = 20000.0f, .unit = "m (0 off)"});

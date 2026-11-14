@@ -1177,6 +1177,17 @@ Past the cascades (200 m at most), everything used to count as lit, so mountains
 - **Its bias** is the cascades' (`normalOffsetTexels` of its texel towards the sun, more on slopes), so its shadows start a few metres from their casters' feet: invisible kilometres away, to be watched if it shows.
 - **Tests:** `cascades_test` (the sphere holds the view, sits on the grid, stays put within a cell, moves a whole step across one), `culling_test` (small casters left out, unknown kept), `shadow_atlas_test` (moving casters and their split, patches), `shadow_map_test` (the far map ends the row, its size and smallest caster, its movers kept apart, the sun naming its far tile and reach for distant occluders (none when off or without a far map), no gap between a cascade's box and the reach, an island 600 m up found by the far map's tap and missed by the cascade while a caster 100 m up is not counted twice, a point 3 km ahead in it and in no cascade, none when off or with a 100 m view, its tile unchanged as the camera walks, giving way to lamps first; the full-atlas tests with it).
 
+### Staggered cascades
+
+The cascades follow the view, so turning the camera moves every box and redraws every caster in them each frame (the jungle's leaves: 7 ms of shadows turning, after their shadow leaves). The far half of each sun's own cascades take turns instead (`holdStaggeredCascades`, `render/gpu/shadow_map`; research in `docs/SHADOWCACHE.md`):
+
+- **Turns:** after `planShadows`, the cascade at place k among the far half is redrawn on frames where frame + k is a whole number of `ShadowSettings::cascadeStagger` (2; 1 off; live, `engine.render.shadows.cascadeStagger`). With two far cascades and 2, one is redrawn a frame, so every frame costs the same (an uneven frame rate feels worse than a steady lower one).
+- **Kept:** on its other frames a cascade keeps last frame's tile (`VulkanRenderer::lastShadowPlan`): its box, square, reach and record, so the tile cache keeps what it drew there; only the shader's matrix is rebuilt from the camera's place now, so its shadows stay put while the camera moves.
+- **Only the same box:** the same square and the same shape (the matrix's upper 3 x 3: the sun's direction, the box's size and depth). A sun that turned (a running clock), a new fit or new settings redraw it. The near half, the far map and a mirror's cascades are never kept.
+- **What it costs:** a kept cascade's edge lags a frame behind a turning view, the next cascade or the far map covering what it misses meanwhile; moving casters in it are redrawn at its rate.
+- **Measured** (the RTX 4070 Laptop, the forest's trees, turning 3 degrees a frame): shadows 7.1 ms to 4.6 ms, frames 25.2 to 22.6 ms; 0.1 ms standing still either way.
+- **Tests:** `shadow_map_test` (the far half taking turns while the near half and the far map follow the view, a kept tile's matrix following the camera's place with the rest of its record unchanged, nothing kept when the sun, the fit, the settings or the previous plan differ).
+
 ### A mirror's cascades
 
 A flat mirror's picture (see Planar reflections) shows mostly what is behind the camera, which the camera's cascades never hold, so everything in it stood in full sun. The sun gets a second row of cascades for the mirror's view (`MirrorShadowView`, the last argument of `planShadows`):
