@@ -7,6 +7,7 @@
 #include "ecs/world.h"
 #include "scene/model_renderer.h"
 
+#include "forest_helpers.h"
 #include "test_levels.h"
 
 #include <cassert>
@@ -262,11 +263,10 @@ namespace {
     * scanned bark's stand-in without the assets, the leaves a double-sided cut-out.
     */
     void testTheGameHangsThem() {
-        World world;
-        AssetManager assets;
-        ForestGame game{ControlMode::FirstPerson, true, "no-such-folder/forest"};
-        game.getValleySettings() = ForestValleySettings{.groundCoarseness = 2, .pillarCount = 10, .islandCount = 4};
-        game.onInit(world, assets);
+        TestForest forest{ForestValleySettings{.groundCoarseness = 2, .pillarCount = 10, .islandCount = 4}};
+        World& world = forest.world;
+        AssetManager& assets = forest.assets;
+        ForestGame& game = forest.game;
 
         const std::vector<Entity>& hung = game.getIslandHangings();
         assert(hung.size() == 2 * game.getIslands().size());

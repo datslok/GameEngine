@@ -13,6 +13,8 @@
 #include "math/transform.h"
 #include "scene/model_renderer.h"
 
+#include "forest_helpers.h"
+
 #include <cassert>
 #include <cmath>
 #include <filesystem>
@@ -98,20 +100,8 @@ namespace {
         assert(volume > 0.0f);
     }
 
-    /*
-    * A fresh valley, initialised headless with its stand-in ground (an asset folder that does not exist) and its
-    * coarsest ground and fewer shapes, so the tests neither need the downloaded assets nor spend long building it.
-    */
-    struct Forest {
-        World world;
-        AssetManager assets;
-        ForestGame game{ControlMode::FirstPerson, true, "no-such-folder/forest"};
-
-        Forest() {
-            game.getValleySettings() = ForestValleySettings{.groundCoarseness = 2, .pillarCount = 40, .islandCount = 8};
-            game.onInit(world, assets);
-        }
-    };
+    // A fresh valley on the shared job system (forest_helpers.h).
+    using Forest = TestForest;
 
     // It is a registered game, started with --game forest, and its title names its settings section.
     void testItIsRegistered() {

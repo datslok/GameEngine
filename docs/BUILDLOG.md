@@ -1597,6 +1597,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Ledges found from the surface:** a point standing a metre or more out past the one below it is a lip; the hard beds' ledges stand 2 m out over an undercut, so their lower edges are found without the carving telling where they are.
   - **Shared:** the islands' underside points and the bias towards the rim are one function each (`islandUnderside`, `towardsTheRim`), used by the roots and the moss.
   - **The user's look** (Nov 14 2026): "looks good". Merged.
+- `forest-test-jobs` (Nov 14 2026): "the testing time adds up quickly". The engine hands a game its job system, but the tests built their games without one, so every forest test's valley (ground, pillars, islands, roots, moss) was carved on one thread (`serialJobs()`). `tests/forest_helpers.h` now gives every forest test the same valley set-up (`TestForest`, which was copied in three files) on one job system for the whole run (`forestTestJobs`). The valley is the same either way, each job writing its own slot. Not measured, at the user's request.
 
 ## Tools outside the phases
 
