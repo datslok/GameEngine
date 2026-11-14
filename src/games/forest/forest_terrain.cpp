@@ -5,17 +5,21 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace {
-    // The noise's seeds: one per use, so the hills, the lumps, the openings and the paint's breakup do not line up.
+    // The noise's seeds: one per use, so the hills, the lumps, the mountains, the openings and the paint's breakup do not
+    // line up.
     constexpr std::uint32_t hillSeed = 11u;
     constexpr std::uint32_t lumpSeed = 23u;
     constexpr std::uint32_t openingSeed = 31u;
     constexpr std::uint32_t breakupSeed = 47u;
+    constexpr std::uint32_t mountainSeed = 59u;
 
     /*
-    * The land's shape, picked by eye against the walk: broad hills and hollows about 100 m across standing up to about
-    * 9 m from the mean, rockier knolls a quarter that size, and lumps a few metres across. The mist pools in the hollows.
+    * The small shapes over the whole land, picked by eye against the walk in the first forest: broad hills and hollows
+    * about 100 m across standing up to about 9 m from the mean, rockier knolls a quarter that size, and lumps a few metres
+    * across.
     */
     constexpr float hillMetres = 100.0f;
     constexpr float hillHeight = 9.0f;
@@ -23,6 +27,22 @@ namespace {
     constexpr float knollHeight = 7.0f;
     constexpr float lumpMetres = 6.0f;
     constexpr float lumpHeight = 0.25f;
+
+    /*
+    * The mountains beyond the rim: rising over the 300 m to 2.5 km past it to between 60% and 100% of 700 m by noise
+    * about 2.5 km across, so the valley seen from its rim is ringed by a skyline the haze turns blue.
+    */
+    constexpr float mountainHeight = 700.0f;
+    constexpr float mountainMetres = 2500.0f;
+    constexpr float mountainFrom = 300.0f;
+    constexpr float mountainTo = 2500.0f;
+
+    // The valley's axis: straight along the walk, then swinging up to 400 m either way over about 11 km a turn further
+    // north, so the valley's far end is not a corridor.
+    constexpr float axisStraightUntil = -700.0f;
+    constexpr float axisBlend = 800.0f;
+    constexpr float axisSwing = 400.0f;
+    constexpr float axisMetres = 1800.0f;
 
     // Where the canopy opens away from the clearing and the meadow: wide patches where the opening noise is high.
     constexpr float openingMetres = 70.0f;
@@ -42,12 +62,23 @@ namespace {
     constexpr float mudInnerShare = 0.7f;
     constexpr float mudOuterMetres = 0.8f;
 
-    // The path's level: the land averaged over this many metres either way along it, in this many samples each way.
-    constexpr float pathSmoothingMetres = 12.0f;
-    constexpr int pathSmoothingSamples = 4;
+    // The path's level: the land averaged over this many metres either way along it, in this many samples each way:
+    // 30 m, so the knolls on the ramp do not make it steeper than about 23 degrees (12 m, as on the first forest's
+    // gentle hills, left 33).
+    constexpr float pathSmoothingMetres = 30.0f;
+    constexpr int pathSmoothingSamples = 6;
 
-    // The step for the normal's central differences, in metres.
-    constexpr float normalStep = 0.5f;
+    // The ramp's shape: mostly a straight slope (70%), eased in at its foot and out at the rim by the rest, so its
+    // steepest part is a quarter less steep than an eased curve's.
+    constexpr float rampStraightShare = 0.7f;
+
+    // The rings' half sizes: each four times the last, the last twice (20.48 km), and how much coarser each ring's
+    // squares are than the finest.
+    constexpr std::array<float, 4> ringHalfSizes{forestNearHalfSize, 4.0f * forestNearHalfSize, 16.0f * forestNearHalfSize, 32.0f * forestNearHalfSize};
+    constexpr std::array<float, 4> ringCoarseness{1.0f, 8.0f, 32.0f, 128.0f};
+
+    // A place on a ring's border, within float rounding of grid points made from whole numbers of squares.
+    constexpr float borderTolerance = 1e-3f;
 
     float latticeValue(int x, int z, std::uint32_t seed) {
         const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32) | static_cast<std::uint32_t>(z);
@@ -114,21 +145,39 @@ namespace {
                lumpHeight * forestFractalNoise(x / lumpMetres, z / lumpMetres, 2, lumpSeed);
     }
 
-    // How much the clearing levels a place: 1 within its radius, fading to 0 across its blend.
-    float clearingShare(float x, float z) {
-        return 1.0f - smoothStep(forestClearingRadius, forestClearingRadius + forestClearingBlend, std::sqrt(x * x + z * z));
+    /*
+    * The valley's big shape: the floor at 0, the walls climbing to the rim either side of the axis, the ramp climbing to
+    * it southwards, and the mountains beyond, by how far a place is outside the valley.
+    */
+    float valleyShape(float x, float z) {
+        const float fromAxis = std::fabs(x - valleyAxis(z));
+        const float wall = smoothStep(valleyFloorHalfWidth, valleyFloorHalfWidth + valleyWallWidth, fromAxis);
+        const float rampLinear = std::clamp((z - valleyRampStart) / (valleyRampEnd - valleyRampStart), 0.0f, 1.0f);
+        const float ramp = rampStraightShare * rampLinear + (1.0f - rampStraightShare) * smoothStep(0.0f, 1.0f, rampLinear);
+        const float outside = std::max({fromAxis - valleyFloorHalfWidth - valleyWallWidth, z - valleyRampEnd, 0.0f});
+        const float rise = 0.6f + 0.4f * (0.5f + 0.5f * forestFractalNoise(x / mountainMetres, z / mountainMetres, 4, mountainSeed));
+        const float mountains = mountainHeight * smoothStep(mountainFrom, mountainTo, outside) * rise;
+        return valleyRimHeight * std::max(wall, ramp) + mountains;
     }
 
-    // The land before the path: the hills set so the clearing's centre is at 0, and the clearing levelled.
+    // How much the clearing levels a place: 1 within its radius, fading to 0 across its blend.
+    float clearingShare(float x, float z) {
+        const float distance = (Vec2{x, z} - forestClearingCentre).length();
+        return 1.0f - smoothStep(forestClearingRadius, forestClearingRadius + forestClearingBlend, distance);
+    }
+
+    // The land before the path: the valley and its hills, levelled in the clearing to the height at its centre.
     float landHeight(float x, float z) {
-        static const float clearingLevel = hills(0.0f, 0.0f);
-        return (hills(x, z) - clearingLevel) * (1.0f - clearingShare(x, z));
+        const float land = valleyShape(x, z) + hills(x, z);
+        static const float clearingLevel = valleyShape(forestClearingCentre.x, forestClearingCentre.y) +
+                                           hills(forestClearingCentre.x, forestClearingCentre.y);
+        return land + (clearingLevel - land) * clearingShare(x, z);
     }
 
     /*
     * The path's level a distance along it: the land's height averaged over pathSmoothingMetres either way along the
-    * path, so it follows the hills but cuts through the knolls and over the dips between them, as a trodden path does,
-    * and stays walkable however rocky the ground beside it. The clearing levels it as it levels the land.
+    * path, so it follows the land but cuts through the knolls and over the dips between them, as a trodden path does,
+    * and stays walkable however rocky the ground beside it.
     */
     float pathLevel(float metresAlong) {
         float sum = 0.0f;
@@ -139,13 +188,38 @@ namespace {
             sum += landHeight(point.x, point.y);
         }
 
-        const Vec2 centre = pathPointAlong(metresAlong);
-        const float smoothed = sum / static_cast<float>(2 * pathSmoothingSamples + 1);
-        return smoothed * (1.0f - clearingShare(centre.x, centre.y)) - forestPathSink;
+        return sum / static_cast<float>(2 * pathSmoothingSamples + 1) - forestPathSink;
     }
 
     float pathShare(float distance) {
         return 1.0f - smoothStep(forestPathHalfWidth, forestPathHalfWidth + forestPathBlend, distance);
+    }
+
+    bool isWhole(float value) {
+        return std::fabs(value - std::round(value)) < 1e-4f;
+    }
+
+    /*
+    * A ring's height along one border: between the next ring's grid points either side (along, measured from the ring's
+    * west or north edge), on the straight line joining their heights, as the coarser ring draws that edge.
+    */
+    float coarseEdgeHeight(float along, float across, bool alongX, const TerrainRing& ring) {
+        const float start = -ring.outerHalfSize;
+        const float steps = (along - start) / ring.outerSpacing;
+        const float lower = std::floor(steps);
+        const float share = steps - lower;
+        const float first = start + lower * ring.outerSpacing;
+        const float second = first + ring.outerSpacing;
+        const auto heightAt = [&](float point) {
+            return alongX ? forestHeight(forestTerrainCentre.x + point, forestTerrainCentre.y + across)
+                          : forestHeight(forestTerrainCentre.x + across, forestTerrainCentre.y + point);
+        };
+
+        if (share < 1e-6f) {
+            return heightAt(first);
+        }
+
+        return heightAt(first) + (heightAt(second) - heightAt(first)) * share;
     }
 }
 
@@ -177,9 +251,11 @@ float forestFractalNoise(float x, float z, int octaves, std::uint32_t seed) {
     return total > 0.0f ? sum / total : 0.0f;
 }
 
+// Down the ramp in wide bends, through the Ring and along the floor into the clearing.
 const std::vector<Vec2>& forestPathPoints() {
     static const std::vector<Vec2> points{
-        Vec2{0.0f, 0.0f}, Vec2{4.0f, 30.0f}, Vec2{-7.0f, 60.0f}, Vec2{3.0f, 92.0f}, Vec2{19.0f, 122.0f}, forestMeadowCentre
+        forestStartPlace, Vec2{25.0f, 660.0f}, Vec2{-20.0f, 530.0f}, Vec2{15.0f, 400.0f}, Vec2{-15.0f, 270.0f},
+        Vec2{10.0f, 140.0f}, forestRingPlace, Vec2{-10.0f, -140.0f}, Vec2{0.0f, -270.0f}
     };
     return points;
 }
@@ -188,14 +264,19 @@ float forestPathDistance(float x, float z) {
     return nearestPathPoint(x, z).distance;
 }
 
+float valleyAxis(float z) {
+    const float winding = 1.0f - smoothStep(axisStraightUntil - axisBlend, axisStraightUntil, z);
+    return axisSwing * winding * std::sin((z - axisStraightUntil) / axisMetres);
+}
+
 /*
 * Near the path the ground takes the height of the nearest point on its centre line, so it is level across; along it,
 * it follows the land, smoothed (pathLevel).
 */
 float forestHeight(float x, float z) {
+    const float land = landHeight(x, z);
     const PathPoint nearest = nearestPathPoint(x, z);
     const float share = pathShare(nearest.distance);
-    const float land = landHeight(x, z);
 
     if (share <= 0.0f) {
         return land;
@@ -204,17 +285,16 @@ float forestHeight(float x, float z) {
     return land + (pathLevel(nearest.along) - land) * share;
 }
 
-Vec3 forestNormal(float x, float z) {
-    const float slopeX = (forestHeight(x + normalStep, z) - forestHeight(x - normalStep, z)) / (2.0f * normalStep);
-    const float slopeZ = (forestHeight(x, z + normalStep) - forestHeight(x, z - normalStep)) / (2.0f * normalStep);
+Vec3 forestNormal(float x, float z, float step) {
+    const float slopeX = (forestHeight(x + step, z) - forestHeight(x - step, z)) / (2.0f * step);
+    const float slopeZ = (forestHeight(x, z + step) - forestHeight(x, z - step)) / (2.0f * step);
     return Vec3{-slopeX, 1.0f, -slopeZ}.normalized();
 }
 
 float forestMeadowShare(float x, float z) {
-    const float fromCentre = std::sqrt(x * x + z * z);
-    const float clearing = 1.0f - smoothStep(forestClearingRadius, forestClearingRadius + 5.0f, fromCentre);
-    const float fromMeadow = (Vec2{x, z} - forestMeadowCentre).length();
-    const float meadow = 1.0f - smoothStep(0.7f * forestMeadowRadius, forestMeadowRadius, fromMeadow);
+    const float clearing = clearingShare(x, z);
+    const float fromStart = (Vec2{x, z} - forestStartPlace).length();
+    const float meadow = 1.0f - smoothStep(0.7f * forestMeadowRadius, forestMeadowRadius, fromStart);
     const float opening = smoothStep(openingFrom, openingTo, forestFractalNoise(x / openingMetres, z / openingMetres, 2, openingSeed));
     return std::max({clearing, meadow, opening});
 }
@@ -223,10 +303,10 @@ float forestMeadowShare(float x, float z) {
 * The path's mud first, then mossy rock on the steep ground left, then grass where the canopy is open and leaf litter
 * where it is closed, their edge made ragged by fine noise.
 */
-std::array<float, 4> forestGroundPaint(float x, float z) {
+std::array<float, 4> forestGroundPaint(float x, float z, float normalStep) {
     const float pathDistance = forestPathDistance(x, z);
     const float mud = 1.0f - smoothStep(mudInnerShare * forestPathHalfWidth, forestPathHalfWidth + mudOuterMetres, pathDistance);
-    const float slope = 1.0f - forestNormal(x, z).y;
+    const float slope = 1.0f - forestNormal(x, z, normalStep).y;
     const float rock = smoothStep(rockFromSlope, rockToSlope, slope) * (1.0f - mud);
     const float rest = 1.0f - mud - rock;
     const float breakup = breakupStrength * forestFractalNoise(x / breakupMetres, z / breakupMetres, 2, breakupSeed);
@@ -240,58 +320,134 @@ std::array<float, 4> forestGroundPaint(float x, float z) {
     return paint;
 }
 
-float forestTextureU(float x) {
-    return (x + forestHalfSize) / (2.0f * forestHalfSize);
+float forestTextureU(float x, const GroundExtent& extent) {
+    return (x - extent.centre.x + extent.halfSize) / (2.0f * extent.halfSize);
 }
 
-float forestTextureV(float z) {
-    return (z + forestHalfSize) / (2.0f * forestHalfSize);
+float forestTextureV(float z, const GroundExtent& extent) {
+    return (z - extent.centre.y + extent.halfSize) / (2.0f * extent.halfSize);
 }
 
-float forestTexelCentre(int texel, int size) {
-    return -forestHalfSize + (static_cast<float>(texel) + 0.5f) * (2.0f * forestHalfSize / static_cast<float>(size));
+float forestTexelCentreX(int texel, int size, const GroundExtent& extent) {
+    return extent.centre.x - extent.halfSize + (static_cast<float>(texel) + 0.5f) * (2.0f * extent.halfSize / static_cast<float>(size));
+}
+
+float forestTexelCentreZ(int texel, int size, const GroundExtent& extent) {
+    return extent.centre.y - extent.halfSize + (static_cast<float>(texel) + 0.5f) * (2.0f * extent.halfSize / static_cast<float>(size));
+}
+
+std::vector<TerrainRing> forestTerrainRings(float nearSpacing) {
+    std::vector<TerrainRing> rings;
+
+    for (std::size_t ring = 0; ring < ringHalfSizes.size(); ++ring) {
+        const bool last = ring + 1 == ringHalfSizes.size();
+        rings.push_back(TerrainRing{
+            .innerHalfSize = ring == 0 ? 0.0f : ringHalfSizes[ring - 1],
+            .outerHalfSize = ringHalfSizes[ring],
+            .spacing = nearSpacing * ringCoarseness[ring],
+            .outerSpacing = nearSpacing * ringCoarseness[last ? ring : ring + 1]
+        });
+    }
+
+    for (const TerrainRing& ring : rings) {
+        if (!(nearSpacing > 0.0f) || !isWhole(ring.outerHalfSize / ring.outerSpacing) || !isWhole(ring.innerHalfSize / ring.spacing) ||
+            !isWhole(ring.outerSpacing / ring.spacing)) {
+            throw std::invalid_argument("The terrain rings need the finest squares 2, 4 or 8 m across");
+        }
+    }
+
+    return rings;
+}
+
+GroundExtent forestFarExtent() {
+    return GroundExtent{forestTerrainCentre, ringHalfSizes.back()};
+}
+
+GroundExtent forestNearExtent() {
+    return GroundExtent{forestTerrainCentre, forestNearHalfSize};
+}
+
+float forestRingHeight(float x, float z, const TerrainRing& ring) {
+    if (ring.outerSpacing == ring.spacing) {
+        return forestHeight(x, z);
+    }
+
+    const float localX = x - forestTerrainCentre.x;
+    const float localZ = z - forestTerrainCentre.y;
+
+    if (std::fabs(std::fabs(localZ) - ring.outerHalfSize) < borderTolerance) {
+        return coarseEdgeHeight(localX, localZ, true, ring);
+    }
+
+    if (std::fabs(std::fabs(localX) - ring.outerHalfSize) < borderTolerance) {
+        return coarseEdgeHeight(localZ, localX, false, ring);
+    }
+
+    return forestHeight(x, z);
 }
 
 /*
 * Rows run north to south (z rising), columns west to east; each square's two triangles turn counterclockwise seen from
-* above, so they face up.
+* above, so they face up. Squares inside the hole are left out, and the grid points only they use are never measured.
 */
-Mesh forestTerrainMesh(int squares) {
+Mesh forestTerrainRingMesh(const TerrainRing& ring, const GroundExtent& extent, JobSystem& jobs) {
     Mesh mesh;
+    const int squares = static_cast<int>(std::lround(2.0f * ring.outerHalfSize / ring.spacing));
+    const int holeSquares = static_cast<int>(std::lround(2.0f * ring.innerHalfSize / ring.spacing));
+    const int holeStart = (squares - holeSquares) / 2;
+    const int holeEnd = holeStart + holeSquares;
     const int across = squares + 1;
-    const float spacing = 2.0f * forestHalfSize / static_cast<float>(squares);
-    std::vector<Vec3> normals;
-    std::vector<Vec2> uvs;
-    mesh.vertices.reserve(static_cast<std::size_t>(across * across));
-    normals.reserve(mesh.vertices.capacity());
-    uvs.reserve(mesh.vertices.capacity());
-
-    for (int row = 0; row < across; ++row) {
-        for (int column = 0; column < across; ++column) {
-            const float x = -forestHalfSize + spacing * static_cast<float>(column);
-            const float z = -forestHalfSize + spacing * static_cast<float>(row);
-            mesh.vertices.push_back(Vec4{x, forestHeight(x, z), z, 1.0f});
-            normals.push_back(forestNormal(x, z));
-            uvs.push_back(Vec2{forestTextureU(x), forestTextureV(z)});
-        }
-    }
-
-    const auto corner = [&](std::size_t vertex, Triangle& triangle, std::size_t slot) {
-        triangle.normals[slot] = normals[vertex];
-        triangle.uvs[slot] = uvs[vertex];
+    const auto inHole = [&](int row, int column) {
+        return row >= holeStart && row < holeEnd && column >= holeStart && column < holeEnd;
     };
+    const auto pointUsed = [&](int row, int column) {
+        return !(row > holeStart && row < holeEnd && column > holeStart && column < holeEnd);
+    };
+
+    std::vector<Vec3> normals(static_cast<std::size_t>(across) * static_cast<std::size_t>(across));
+    std::vector<Vec2> uvs(normals.size());
+    mesh.vertices.resize(normals.size());
+
+    jobs.parallelFor(static_cast<std::size_t>(across), 1, [&](std::size_t rowIndex) {
+        const int row = static_cast<int>(rowIndex);
+
+        for (int column = 0; column < across; ++column) {
+            const float x = forestTerrainCentre.x - ring.outerHalfSize + ring.spacing * static_cast<float>(column);
+            const float z = forestTerrainCentre.y - ring.outerHalfSize + ring.spacing * static_cast<float>(row);
+            const std::size_t vertex = static_cast<std::size_t>(row * across + column);
+
+            if (!pointUsed(row, column)) {
+                mesh.vertices[vertex] = Vec4{x, 0.0f, z, 1.0f};
+                normals[vertex] = Vec3{0.0f, 1.0f, 0.0f};
+                continue;
+            }
+
+            mesh.vertices[vertex] = Vec4{x, forestRingHeight(x, z, ring), z, 1.0f};
+            normals[vertex] = forestNormal(x, z, ring.spacing);
+            uvs[vertex] = Vec2{forestTextureU(x, extent), forestTextureV(z, extent)};
+        }
+    });
+
     const auto addTriangle = [&](std::size_t first, std::size_t second, std::size_t third) {
         Triangle triangle{first, second, third};
-        corner(first, triangle, 0);
-        corner(second, triangle, 1);
-        corner(third, triangle, 2);
+        const std::size_t corners[3] = {first, second, third};
+
+        for (std::size_t slot = 0; slot < 3; ++slot) {
+            triangle.normals[slot] = normals[corners[slot]];
+            triangle.uvs[slot] = uvs[corners[slot]];
+        }
+
         mesh.triangles.push_back(triangle);
     };
 
-    mesh.triangles.reserve(static_cast<std::size_t>(2 * squares * squares));
+    mesh.triangles.reserve(static_cast<std::size_t>(2 * (squares * squares - holeSquares * holeSquares)));
 
     for (int row = 0; row < squares; ++row) {
         for (int column = 0; column < squares; ++column) {
+            if (inHole(row, column)) {
+                continue;
+            }
+
             const std::size_t northWest = static_cast<std::size_t>(row * across + column);
             const std::size_t northEast = northWest + 1;
             const std::size_t southWest = northWest + static_cast<std::size_t>(across);
@@ -304,23 +460,27 @@ Mesh forestTerrainMesh(int squares) {
     return mesh;
 }
 
-ImageData forestWeightsImage(int size) {
+ImageData forestWeightsImage(int size, const GroundExtent& extent, JobSystem& jobs) {
     ImageData image;
     image.width = static_cast<std::uint32_t>(size);
     image.height = static_cast<std::uint32_t>(size);
     image.encoding = TextureEncoding::Linear;
     image.pixels.resize(static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * 4);
+    const float texelMetres = 2.0f * extent.halfSize / static_cast<float>(size);
 
-    for (int row = 0; row < size; ++row) {
+    jobs.parallelFor(static_cast<std::size_t>(size), 1, [&](std::size_t rowIndex) {
+        const int row = static_cast<int>(rowIndex);
+
         for (int column = 0; column < size; ++column) {
-            const std::array<float, 4> paint = forestGroundPaint(forestTexelCentre(column, size), forestTexelCentre(row, size));
+            const std::array<float, 4> paint = forestGroundPaint(forestTexelCentreX(column, size, extent), forestTexelCentreZ(row, size, extent),
+                                                                 std::max(0.5f, texelMetres));
             const std::size_t texel = (static_cast<std::size_t>(row) * static_cast<std::size_t>(size) + static_cast<std::size_t>(column)) * 4;
 
             for (std::size_t layer = 0; layer < 4; ++layer) {
                 image.pixels[texel + layer] = static_cast<std::uint8_t>(std::lround(std::clamp(paint[layer], 0.0f, 1.0f) * 255.0f));
             }
         }
-    }
+    });
 
     return image;
 }

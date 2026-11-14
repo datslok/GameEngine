@@ -42,6 +42,7 @@ void Application::registerCommands() {
         runTick();
     });
     addCameraCommands(commands, game, world);
+    game.addCommands(commands, world);
 
     commands.add("screenshot", "screenshot <file.png> [width height]",
                  "Saves the picture as the window shows it (the window's size without one given), less the debug UI and lines.",

@@ -4,6 +4,7 @@
 #include "ecs/world.h"
 #include "engine/game.h"
 #include "games/forest/forest_ground.h"
+#include "games/forest/valley_shapes.h"
 #include "gameplay/control_mode.h"
 #include "gameplay/player_controls.h"
 #include "physics/static_level.h"
@@ -31,12 +32,13 @@ struct ForestSunSettings {
 void visit(ForestSunSettings& settings, SettingsVisitor& visitor);
 
 /*
-* The valley mist (a Fog, render/gpu/volumetric_fog.h): humid air pooling in the hollows below the clearing, about
-* 75 m of sight at its base 2 m below the clearing, thinning by e every 4 m up, picked by eye.
+* The valley's haze (a Fog, render/gpu/volumetric_fog.h): humid air filling the valley, about 6 km of sight on its floor
+* (3 / density), thinning by e every 300 m up, so the pillars' tops and the islands stand clearer than their feet, out
+* to 20 km along a ray (the far plane). A first guess for the rough valley, to be judged by eye.
 */
 struct ForestMistSettings {
     bool enabled = true;
-    Fog fog{.density = 0.04f, .baseHeight = -2.0f, .scaleHeight = 4.0f};
+    Fog fog{.density = 0.0005f, .baseHeight = 0.0f, .scaleHeight = 300.0f, .maxDistance = 20000.0f};
 };
 
 void visit(ForestMistSettings& settings, SettingsVisitor& visitor);
@@ -50,11 +52,33 @@ struct ForestGroundSettings {
 void visit(ForestGroundSettings& settings, SettingsVisitor& visitor);
 
 /*
-* The forest showcase (ROADMAP phase 18): a lush, damp forest with mist in its valleys, grass where the canopy opens and
-* a mechanical structure in a clearing. So far the land: rolling hills with a clearing and a path south to a meadow
-* (forest_terrain.h), its ground blended from scanned grass, leaf litter, mud and mossy rock (forest_ground.h; plain
-* stand-ins until tools/fetch_forest_assets.py has fetched them), a sun near the equator through a real sky and the
-* valley mist. The same controls as the other games (F1 first person, F2 MOBA view, F3 free camera).
+* What the valley is built with, read once at start-up: the finest ground squares (2 m, or 4 or 8 m for a quicker start:
+* 2 << groundCoarseness), and how many pillars and floating islands there are (fewer if they run out of room).
+*/
+struct ForestValleySettings {
+    int groundCoarseness = 0;
+    int pillarCount = 220;
+    int islandCount = 30;
+};
+
+void visit(ForestValleySettings& settings, SettingsVisitor& visitor);
+
+// A named place to look from (the concept art's plates), for the forest-view command and the golden views.
+struct ForestView {
+    const char* name;
+    Vec3 position;
+    Vec3 target;
+};
+
+// rim (the valley from the start), ring (the Ring from the path) and wall (up the Monolith from its foot).
+std::vector<ForestView> forestViews();
+
+/*
+* The jungle valley showcase (ROADMAP phase 18), so far the rough valley, its test of scale: the land in rings reaching
+* 20 km (forest_terrain.h), its ground blended from scanned grass, leaf litter, mud and mossy rock (forest_ground.h; plain
+* stand-ins until tools/fetch_forest_assets.py has fetched them), grey pillars, floating islands, the Ring, the Monolith
+* and far towers at their real sizes (valley_shapes.h), a sun near the equator through a real sky and the valley's haze.
+* The same controls as the other games (F1 first person, F2 MOBA view, F3 free camera), and forest-view <name>.
 */
 class ForestGame final : public Game {
 public:
@@ -72,12 +96,19 @@ public:
     Vec3 getLightFocus() override;
     bool wantsDebugView() const override;
     void visitSettings(SettingsVisitor& visitor) override;
+    void addCommands(CommandRegistry& registry, World& world) override;
     std::vector<GoldenView> goldenViews() const override;
     void prepareGoldenView(World& world, const GoldenView& view) override;
 
     // For tests.
     const StaticLevel& getLevel() const;
     Entity getGround() const;
+    const std::vector<Entity>& getFarGround() const;
+    const std::vector<PillarPlacement>& getPillars() const;
+    const std::vector<IslandPlacement>& getIslands() const;
+    Entity getRing() const;
+    const std::vector<Entity>& getMonolith() const;
+    ForestValleySettings& getValleySettings();
     Entity getSun() const;
     Entity getAir() const;
     PlayerControls& getControls();
@@ -89,21 +120,36 @@ private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
     void updateDaylight(World& world);
 
+    // The land's rings, each a static ground entity only where it is walked on (the finest).
+    void buildGround(World& world, AssetManager& assets);
+
+    // The pillars, islands, the Ring, the Monolith and the far towers.
+    void buildShapes(World& world, AssetManager& assets);
+
+    // Place the camera at a named view; false for a name there is none of.
+    bool showView(World& world, const std::string& name);
+
     std::string assetFolder;
     PlayerControls controls;
     ForestSunSettings sunSettings;
     ForestMistSettings mistSettings;
     ForestGroundSettings groundSettings;
+    ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
     Atmosphere atmosphereSettings;
 
     Entity ground;
+    std::vector<Entity> farGround;
+    std::vector<PillarPlacement> pillars;
+    std::vector<IslandPlacement> islands;
+    Entity ring;
+    std::vector<Entity> monolith;
     Entity sun;
     Entity air;
     Entity probes;
 
-    // The ground: built once in onInit, never rebuilt.
+    // What is walked on: the finest ring of ground and the Monolith, built once in onInit, never rebuilt.
     StaticLevel staticLevel;
 
     // F4: the engine's bounding boxes and culling readout.
