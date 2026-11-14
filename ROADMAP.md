@@ -328,9 +328,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Assets: 30 CC0 assets fetched by `tools/fetch_forest_assets.py` (`forest-assets`)
 - [x] Ground blending: up to four layers sharpened by their height maps (`forest-assets`)
 - [x] The game: terrain, clearing, path, blended ground, sun, valley mist, stand-ins (`forest-assets`)
-- [ ] The rough valley, the scale test before any content
-  - A coarse terrain several km across round a walkable floor about 1 km long, with grey generated pillars, floating islands and slabs at their real sizes (pillars 200-350 m, the Monolith 600 m, the Ring 400 m across); no plants.
-  - Measured on the laptop with the typical GPU setup: whether the haze reads as kilometres, how the sun's cascades hold at 5 km, the frame time. Its results set the order of the items below.
+- [x] The rough valley: the land in rings to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
 - [ ] Aerial perspective: the air between the camera and far scenery from the sky's own tables (Hillaire 2020's aerial perspective volume), so distant things turn blue by distance; the fog's grid near, this beyond it
 - [ ] Far terrain: the land in coarser rings or tiles away from the camera, the walkable floor at 1 m
 - [ ] Level of detail (moved from phase 12): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer)

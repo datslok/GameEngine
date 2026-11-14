@@ -1536,6 +1536,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **The engine hook:** `Game::addCommands`, so a game adds its own commands (the user's rule: every feature runs from the command line); `forest-view rim|ring|wall`.
   - **Measured (the laptop, release):** building the valley took 5.1 s on one thread; its ground rows on the job system brought it to 1.7 s on 16 threads. The golden views test builds it on one thread four times, so `make test-release` went to about 151 s here.
   - **Checked:** the tests (release); the debug game builds without warnings. Not run: the game (the user's look and the measurements); golden references not saved.
+  - **The user's look** (Nov 14 2026): "that works". Merged; the haze's colour, the far cascades and the frame time still to be read off for the next item's order.
 
 ## Tools outside the phases
 
