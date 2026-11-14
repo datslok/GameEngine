@@ -7,14 +7,21 @@
 
 // The sun's shadow at a point in the air (measured from the camera): the finest cascade whose box holds it, the far
 // shadow map last, moved towards the sun by the cascade's own bias (cascades.h), one comparison; lit past the last.
-vec3 sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight) {
+vec3 sunShadowInAir(int firstTile, int cascades, vec3 position, vec3 toLight, int farTile, float distantReach) {
     for (int cascade = 0; cascade < cascades; ++cascade) {
         int tile = firstTile + cascade;
         vec3 biased = position + toLight * shadowTiles[tile].offset.y;
         vec4 clip = shadowTiles[tile].matrix * vec4(biased, 1.0);
 
         if (cascadeEdgeDistance(clip.xyz / clip.w, shadowTiles[tile].lens.y / shadowTiles[tile].lens.w) > 0.0) {
-            return shadowTap(tile, biased);
+            vec3 own = shadowTap(tile, biased);
+
+            // A cascade's, with the far map's blockers further than its caster reach (distant occluders, cascades.glsl).
+            if (farTile < 0 || tile == farTile || max(own.r, max(own.g, own.b)) <= 0.0) {
+                return own;
+            }
+
+            return withDistantOccluders(own, shadowTap(farTile, distantOccluderPoint(position, toLight, distantReach)));
         }
     }
 
@@ -40,7 +47,8 @@ vec3 fogBeyondSourceShadowed(FogFarStretch stretch, int steps, float turn) {
             for (int k = 0; k < steps; ++k) {
                 float share = (float(k) + turn) / float(steps);
                 float distance = fogFarSampleDistance(frameFog.medium, cameraOrigin.y, stretch.direction.y, stretch.start, stretch.end, share);
-                sum += sunShadowInAir(tile, directional[i].cascadeCount, stretch.direction * distance, directional[i].toLight.xyz);
+                sum += sunShadowInAir(tile, directional[i].cascadeCount, stretch.direction * distance, directional[i].toLight.xyz,
+                                      directional[i].farShadowTile, directional[i].distantOccluderReach);
             }
 
             reached = sum / float(steps);

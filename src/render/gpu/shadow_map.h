@@ -100,6 +100,12 @@ struct ShadowSettings {
     float farShadowDistance = 5000.0f;
     CascadeResolution farShadowResolution = CascadeResolution::Pixels4096;
 
+    // Distant occluders (cascades.h, distantOccluderPoint): inside the cascades, one comparison of the far map more, from
+    // the point moved directionalCasterReach towards the sun, so casters further up than the cascades take (the forest's
+    // islands, 400-700 m up) still shadow what the cascades shade. Only with a far map. A reach of 2000 m instead drew
+    // the islands into every cascade (about 4 ms more shadows).
+    bool distantOccluders = true;
+
     // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
     // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
     // light grazes. Measured in texels, it shrinks and grows with each tile's size. For the sun it is how far points move
@@ -164,6 +170,10 @@ struct LightShadow {
     std::int32_t cascades = 0;
     std::int32_t mirrorFirstTile = -1;
     std::int32_t mirrorCascades = 0;
+    // A sun's far shadow map's tile, read inside its cascades for distant occluders (-1 none, or with them off), and the
+    // reach its cascades take casters from, which the tap's point is moved towards the sun.
+    std::int32_t farTile = -1;
+    float distantReach = 0.0f;
 };
 
 /*

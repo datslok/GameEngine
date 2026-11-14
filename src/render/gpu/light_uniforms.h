@@ -37,7 +37,11 @@ struct GpuDirectionalLight {
     float tanAngularRadius = 0.0f; // its size as seen from the ground, for soft shadows
     std::int32_t mirrorShadowTile = -1; // the first of its cascades for a flat mirror's picture (shadow_map.h, MirrorShadowView)
     std::int32_t mirrorCascadeCount = 0;
-    float unused[3]{};
+    // Its far shadow map's tile, read inside its cascades for distant occluders (cascades.h), -1 none, and the reach the
+    // tap's point is moved towards the sun.
+    std::int32_t farShadowTile = -1;
+    float distantOccluderReach = 0.0f;
+    float unused = 0.0f;
 };
 
 struct GpuPointLight {

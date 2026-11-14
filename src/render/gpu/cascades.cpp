@@ -185,6 +185,15 @@ bool cascadeDitherKeeps(float weight, float noise) {
     return noise < weight;
 }
 
+Vec3 distantOccluderPoint(const Vec3& position, const Vec3& toLight, float reach) {
+    return position + toLight * reach;
+}
+
+Vec3 withDistantOccluders(const Vec3& cascadeShadow, const Vec3& distantShadow) {
+    return Vec3{std::min(cascadeShadow.x, distantShadow.x), std::min(cascadeShadow.y, distantShadow.y),
+                std::min(cascadeShadow.z, distantShadow.z)};
+}
+
 float sunShadowBias(float baseOffset, float nDotL) {
     const float facing = std::clamp(nDotL, 0.0f, 1.0f);
     const float slope = std::sqrt(1.0f - facing * facing) / std::max(facing, 1e-6f);

@@ -126,7 +126,8 @@ void main() {
         int tile = directional[i].shadowTile;
 
         if (tile >= 0) {
-            irradiance *= sunShadowInAir(tile, directional[i].cascadeCount, position, directional[i].toLight.xyz);
+            irradiance *= sunShadowInAir(tile, directional[i].cascadeCount, position, directional[i].toLight.xyz,
+                                         directional[i].farShadowTile, directional[i].distantOccluderReach);
         }
 
         light += fogInScattering(irradiance, directional[i].toLight.xyz, viewDirection, frameFog.medium.w);

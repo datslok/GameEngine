@@ -378,8 +378,11 @@ vec3 atlasPoint(int tile, vec3 position) {
 * The sample pattern is turned by a different angle in every pixel, which trades banding for fine grain.
 * Glass in the tile's coloured shadow map is a blocker too for the search (its tint's edge as soft as a solid edge at its
 * distance), and each comparison of the filter is tinted by the glass in front of the point there.
+* lift is how far (in metres, sun boxes only) the point was moved towards the light before the lookup, which the
+* penumbra adds back: distant occluders look from a point moved the cascades' reach up, and their shadows must blur by
+* the real distance from the blocker to the surface.
 */
-vec3 softShadowFromTile(int tile, vec3 position, float emitterSize) {
+vec3 softShadowFromTileLifted(int tile, vec3 position, float emitterSize, float lift) {
     if (shadowTiles[tile].rect.z <= 0.0) {
         return vec3(1.0);
     }
@@ -419,7 +422,7 @@ vec3 softShadowFromTile(int tile, vec3 position, float emitterSize) {
     float angle = 6.2831853 * interleavedGradientNoise(gl_FragCoord.xy);
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
 
-    float receiverDistance = box ? boxShadowDistance(here.z, lens.y) : linearShadowDepth(here.z, lens.x, lens.y);
+    float receiverDistance = box ? boxShadowDistance(here.z, lens.y) + lift : linearShadowDepth(here.z, lens.x, lens.y);
     float searchRadius = box ? sunBlockerSearchTexels(emitterSize, receiverDistance, lens.z)
                              : blockerSearchTexels(emitterSize, receiverDistance, lens.x, lens.z);
     float blockerDistances = 0.0;
@@ -465,11 +468,35 @@ vec3 softShadowFromTile(int tile, vec3 position, float emitterSize) {
     return lit / 16.0;
 }
 
+// The soft shadow at the point itself (softShadowFromTileLifted with no lift): every light's lookup.
+vec3 softShadowFromTile(int tile, vec3 position, float emitterSize) {
+    return softShadowFromTileLifted(tile, position, emitterSize, 0.0);
+}
+
 // How far a point is inside a sun cascade's box, in units of its radius (see cascadeEdgeDistance): negative outside.
 float sunCascadeEdge(int tile, vec3 position) {
     vec4 clip = shadowTiles[tile].matrix * vec4(position, 1.0);
     vec4 lens = shadowTiles[tile].lens;
     return cascadeEdgeDistance(clip.xyz / clip.w, lens.y / lens.w);
+}
+
+/*
+* One of a sun's tiles' soft shadow at a point. A cascade's also takes the far shadow map's blockers further towards the
+* sun than the cascades' caster reach (distant occluders, cascades.glsl): the far tile's soft shadow from the unbiased
+* point moved that reach towards the sun (the reach is far more than any bias), its penumbra from the real distance down
+* to the surface, the darker of the two kept. One filtered comparison showed the far map's 2.7 m texels as steps (the
+* user, Nov 14 2026), while the sun blurs an island's shadow 600 m up over about 5 m. The far tile itself, a light
+* without one, and a point the cascade already has in full shadow need no tap.
+*/
+vec3 sunTileShadow(int tile, vec3 position, float tanAngularRadius, vec3 toLight, int farTile, float distantReach) {
+    vec3 own = softShadowFromTile(tile, position, tanAngularRadius);
+
+    if (farTile < 0 || tile == farTile || max(own.r, max(own.g, own.b)) <= 0.0) {
+        return own;
+    }
+
+    vec3 distant = softShadowFromTileLifted(farTile, distantOccluderPoint(relativePosition, toLight, distantReach), tanAngularRadius, distantReach);
+    return withDistantOccluders(own, distant);
 }
 
 /*
@@ -481,7 +508,8 @@ float sunCascadeEdge(int tile, vec3 position) {
 * cascade's edge, or held by no box) is left to the caller: the row gives its own shadow, and how much of the answer
 * that is (ownShare); the rest comes from beyond the row.
 */
-vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius, out float ownShare) {
+vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float tanAngularRadius, int farTile, float distantReach,
+                   out float ownShare) {
     ownShare = 1.0;
     float band = cascadeOptions.x;
     bool dither = cascadeOptions.y != 0.0;
@@ -499,7 +527,7 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
         float weight = cascadeBlendWeight(edge, band);
 
         if (weight >= 1.0) {
-            return softShadowFromTile(tile, position, tanAngularRadius);
+            return sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach);
         }
 
         // In the band: the next cascade's share comes from it, or past the last one from beyond the row. A point the
@@ -512,26 +540,26 @@ vec3 sunCascadeRow(int firstTile, int cascades, vec3 normal, vec3 toLight, float
             nextPosition = relativePosition + toLight * sunShadowBias(shadowTiles[nextTile].offset.y, nDotL);
 
             if (sunCascadeEdge(nextTile, nextPosition) <= 0.0) {
-                return softShadowFromTile(tile, position, tanAngularRadius);
+                return sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach);
             }
         }
 
         if (dither) {
             // Noise of its own, offset from the soft shadow's, so the choice does not follow the samples' turn.
             if (cascadeDitherKeeps(weight, interleavedGradientNoise(gl_FragCoord.xy + vec2(23.0, 41.0)))) {
-                return softShadowFromTile(tile, position, tanAngularRadius);
+                return sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach);
             }
 
             ownShare = last ? 0.0 : 1.0;
-            return last ? vec3(0.0) : softShadowFromTile(nextTile, nextPosition, tanAngularRadius);
+            return last ? vec3(0.0) : sunTileShadow(nextTile, nextPosition, tanAngularRadius, toLight, farTile, distantReach);
         }
 
         if (last) {
             ownShare = weight;
-            return softShadowFromTile(tile, position, tanAngularRadius);
+            return sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach);
         }
 
-        return mix(softShadowFromTile(nextTile, nextPosition, tanAngularRadius), softShadowFromTile(tile, position, tanAngularRadius), weight);
+        return mix(sunTileShadow(nextTile, nextPosition, tanAngularRadius, toLight, farTile, distantReach), sunTileShadow(tile, position, tanAngularRadius, toLight, farTile, distantReach), weight);
     }
 
     ownShare = 0.0;
@@ -549,16 +577,17 @@ vec3 sunRowOrLit(vec3 own, float ownShare, vec3 normal, vec3 toLight) {
 * last cascade fades into the mirror's rather than into a band of sunlight. Without a mirror, plain sunlight lies past
 * the camera's, as always.
 */
-vec3 sunShadow(int firstTile, int cascades, int mirrorFirstTile, int mirrorCascades, vec3 normal, vec3 toLight, float tanAngularRadius) {
+vec3 sunShadow(int firstTile, int cascades, int mirrorFirstTile, int mirrorCascades, vec3 normal, vec3 toLight, float tanAngularRadius,
+               int farTile, float distantReach) {
     float ownShare;
-    vec3 own = sunCascadeRow(firstTile, cascades, normal, toLight, tanAngularRadius, ownShare);
+    vec3 own = sunCascadeRow(firstTile, cascades, normal, toLight, tanAngularRadius, farTile, distantReach, ownShare);
 
     if (ownShare >= 1.0 || mirrorCascades <= 0) {
         return sunRowOrLit(own, ownShare, normal, toLight);
     }
 
     float mirrorShare;
-    vec3 mirrored = sunCascadeRow(mirrorFirstTile, mirrorCascades, normal, toLight, tanAngularRadius, mirrorShare);
+    vec3 mirrored = sunCascadeRow(mirrorFirstTile, mirrorCascades, normal, toLight, tanAngularRadius, farTile, distantReach, mirrorShare);
     return mix(sunRowOrLit(mirrored, mirrorShare, normal, toLight), own, ownShare);
 }
 
@@ -1166,7 +1195,8 @@ void main() {
 
             if (tile >= 0) {
                 radiance *= sunShadow(tile, directional[i].cascadeCount, directional[i].mirrorShadowTile, directional[i].mirrorCascadeCount, geometricNormal,
-                                      directional[i].toLight.xyz, directional[i].tanAngularRadius);
+                                      directional[i].toLight.xyz, directional[i].tanAngularRadius, directional[i].farShadowTile,
+                                      directional[i].distantOccluderReach);
 
                 // The brightest light's short shadows the shadow map misses, from the camera's own depths (none in
                 // captures, which have no depth image of their own, or for glass, which is not in it).

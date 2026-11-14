@@ -1209,6 +1209,99 @@ namespace {
         assert(before.tiles[far].x == after.tiles[far].x && before.tiles[far].y == after.tiles[far].y);
         assert(!(before.tiles[first].matrix == after.tiles[first].matrix));
     }
+
+    /*
+    * The sun's record names its far tile and the reach its cascades take casters from, for the far map's tap inside the
+    * cascades (distant occluders), and the shader gets both; none with the switch off or without a far map.
+    */
+    void testTheSunNamesItsFarTileForDistantOccluders() {
+        const ShadowSettings settings;
+        assert(settings.distantOccluders);
+        const ShadowPlan plan = planShadows(sunOnly(), makeFarCamera(Vec3{10.0f, 2.0f, 20.0f}), settings);
+        const LightShadow& sun = plan.directional[0];
+        assert(sun.farTile == sun.firstTile + settings.cascadeCount);
+        assert(sun.distantReach == settings.directionalCasterReach);
+
+        GpuLights lights = packLighting(sunOnly(), Vec3{10.0f, 2.0f, 20.0f});
+        attachShadows(lights, plan);
+        assert(lights.directional[0].farShadowTile == sun.farTile);
+        assert(lights.directional[0].distantOccluderReach == settings.directionalCasterReach);
+
+        ShadowSettings off;
+        off.distantOccluders = false;
+        assert(planShadows(sunOnly(), makeFarCamera(Vec3{10.0f, 2.0f, 20.0f}), off).directional[0].farTile == -1);
+
+        ShadowSettings noFarMap;
+        noFarMap.farShadowDistance = 0.0f;
+        assert(planShadows(sunOnly(), makeFarCamera(Vec3{10.0f, 2.0f, 20.0f}), noFarMap).directional[0].farTile == -1);
+    }
+
+    /*
+    * Nothing falls between the two: a point any cascade holds, moved the reach towards the sun, is still in that
+    * cascade's box, so every caster nearer than the reach is in the cascade, and the far map's tap only needs those
+    * further.
+    */
+    void testTheReachLeavesNoGapBetweenCascadeAndFarMap() {
+        const ShadowSettings settings;
+        const Camera camera = makeFarCamera(Vec3{10.0f, 2.0f, 20.0f});
+        const ShadowPlan plan = planShadows(sunOnly(), camera, settings);
+        const LightShadow& sun = plan.directional[0];
+        const Vec3 toLight = (Vec3{} - sunOnly().directionalLights[0].direction).normalized();
+        int checked = 0;
+
+        for (int step = 1; step <= 40; ++step) {
+            const Vec3 point = camera.getPosition() + Vec3{0.0f, -2.0f, -5.0f * static_cast<float>(step)};
+
+            for (int cascade = 0; cascade < settings.cascadeCount; ++cascade) {
+                const Mat4& matrix = plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)].matrix;
+
+                if (landsInside(project(matrix, point))) {
+                    assert(landsInside(project(matrix, distantOccluderPoint(point, toLight, sun.distantReach))));
+                    ++checked;
+                }
+            }
+        }
+
+        assert(checked > 40);
+    }
+
+    /*
+    * The forest's case: an island 600 m towards the sun from a point on the ground 30 m ahead. The point's own cascade
+    * does not hold the island; the far map does, and its tap from the moved point finds it in the way. A caster 100 m
+    * towards the sun, which the cascade holds, is not counted again (in the far map it would be).
+    */
+    void testTheFarMapsTapFindsAnIslandTheCascadeMisses() {
+        const ShadowSettings settings;
+        const Camera camera = makeFarCamera(Vec3{10.0f, 2.0f, 20.0f});
+        const ShadowPlan plan = planShadows(sunOnly(), camera, settings);
+        const LightShadow& sun = plan.directional[0];
+        const Vec3 toLight = (Vec3{} - sunOnly().directionalLights[0].direction).normalized();
+        const Vec3 point = camera.getPosition() + Vec3{0.0f, -2.0f, -30.0f};
+        const Vec3 island = point + toLight * 600.0f;
+        const Vec3 nearCaster = point + toLight * 100.0f;
+
+        // The finest cascade holding the point shades it, as in the shader.
+        int holding = -1;
+
+        for (int cascade = 0; cascade < settings.cascadeCount && holding < 0; ++cascade) {
+            if (landsInside(project(plan.tiles[static_cast<std::size_t>(sun.firstTile + cascade)].matrix, point))) {
+                holding = cascade;
+            }
+        }
+
+        assert(holding >= 0);
+        const Mat4& own = plan.tiles[static_cast<std::size_t>(sun.firstTile + holding)].matrix;
+        assert(!landsInside(project(own, island)));
+        assert(landsInside(project(own, nearCaster)));
+
+        const Mat4& far = plan.tiles[static_cast<std::size_t>(sun.farTile)].matrix;
+        const Vec3 moved = project(far, distantOccluderPoint(point, toLight, sun.distantReach));
+        assert(landsInside(moved));
+        // Depth runs from 1 on the sun's side: a stored depth above the moved point's is in the way.
+        assert(project(far, island).z > moved.z);
+        assert(project(far, nearCaster).z < moved.z);
+        assert(project(far, nearCaster).z > project(far, point).z);
+    }
 }
 
 void testShadowMap() {
@@ -1216,6 +1309,9 @@ void testShadowMap() {
     testNoFarMapWhereItWouldAddNothing();
     testTheFarMapGivesWayToLamps();
     testTheFarTileStaysPutAsTheCameraWalks();
+    testTheSunNamesItsFarTileForDistantOccluders();
+    testTheReachLeavesNoGapBetweenCascadeAndFarMap();
+    testTheFarMapsTapFindsAnIslandTheCascadeMisses();
     testAtlasGrowsForUltraCascades();
     testCascadesFollowTheirResolution();
     testEveryShadowFitsOnUltra();

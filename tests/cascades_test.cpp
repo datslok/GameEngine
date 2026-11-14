@@ -13,6 +13,10 @@ namespace {
         return std::abs(actual - expected) < tolerance;
     }
 
+    bool sameVector(const Vec3& a, const Vec3& b) {
+        return a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+
     Vec3 project(const Mat4& tileMatrix, const Vec3& point) {
         const Vec4 clip = tileMatrix * Vec4{point.x, point.y, point.z, 1.0f};
         return Vec3{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
@@ -214,6 +218,30 @@ namespace {
 
         assert(kept == 300);
     }
+
+    // The far map's tap inside the cascades looks from the point moved the reach towards the sun, so only blockers
+    // further than that count; no reach leaves the point where it is.
+    void testDistantOccluderPointMovesTowardsTheSun() {
+        const Vec3 point{3.0f, -1.0f, 7.0f};
+        const Vec3 toLight = Vec3{0.3f, 0.8f, -0.2f}.normalized();
+        const Vec3 moved = distantOccluderPoint(point, toLight, 200.0f);
+        assert(nearlyEqual((moved - point).length(), 200.0f, 1e-3f));
+        assert(nearlyEqual((moved - point).normalized().dot(toLight), 1.0f));
+        assert(sameVector(distantOccluderPoint(point, toLight, 0.0f), point));
+    }
+
+    /*
+    * The cascade's shadow and the distant blockers' are combined by the darker of the two, colour by colour (glass
+    * tints), not multiplied: a caster held by both (further than the reach but still inside the cascade's box) must not
+    * darken twice.
+    */
+    void testDistantOccludersTakeTheDarker() {
+        assert(sameVector(withDistantOccluders(Vec3{1.0f, 1.0f, 1.0f}, Vec3{0.0f, 0.0f, 0.0f}), Vec3{0.0f, 0.0f, 0.0f}));
+        assert(sameVector(withDistantOccluders(Vec3{0.2f, 0.2f, 0.2f}, Vec3{1.0f, 1.0f, 1.0f}), Vec3{0.2f, 0.2f, 0.2f}));
+        assert(sameVector(withDistantOccluders(Vec3{0.5f, 0.5f, 0.5f}, Vec3{0.5f, 0.5f, 0.5f}), Vec3{0.5f, 0.5f, 0.5f}));
+        assert(sameVector(withDistantOccluders(Vec3{0.9f, 0.3f, 0.6f}, Vec3{0.4f, 0.7f, 0.6f}), Vec3{0.4f, 0.3f, 0.6f}));
+    }
+
     /*
     * Moving a point straight towards the sun leaves it where it was in every cascade's map (only its depth changes), so
     * the bias against acne cannot move a shadow's edge, and two cascades with different texels agree on where it is.
@@ -382,4 +410,6 @@ void testCascades() {
     testEdgeDistance();
     testBlendWeight();
     testDitherKeepsTheWeightsShare();
+    testDistantOccluderPointMovesTowardsTheSun();
+    testDistantOccludersTakeTheDarker();
 }

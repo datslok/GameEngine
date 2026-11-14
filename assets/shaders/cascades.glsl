@@ -37,4 +37,15 @@ float sunShadowBias(float baseOffset, float nDotL) {
     return baseOffset * (1.0 + min(slope, maxSunBiasSlope));
 }
 
+// Distant occluders: the point the far shadow map is read from inside the cascades, moved reach towards the sun, so only
+// blockers further than the cascades' caster reach count.
+vec3 distantOccluderPoint(vec3 position, vec3 toLight, float reach) {
+    return position + toLight * reach;
+}
+
+// The cascade's shadow with the distant blockers': the darker, not the product (a caster may be in both).
+vec3 withDistantOccluders(vec3 cascadeShadow, vec3 distantShadow) {
+    return min(cascadeShadow, distantShadow);
+}
+
 #endif
