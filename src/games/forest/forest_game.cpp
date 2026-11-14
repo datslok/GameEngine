@@ -12,10 +12,15 @@
 #include <utility>
 
 namespace {
-    // The weights textures' size at the finest ground: 1024 texels over the near ring's 1.28 km (one about every
-    // 1.25 m; the layers' height maps make the borders finer than that), and over the whole 41 km (one every 40 m, slope
-    // and rock seen from far away). Halved for each step of coarser ground, so a quick start stays quick.
-    constexpr int weightsTextureSize = 1024;
+    /*
+    * The weights textures' sizes at the finest ground, one texture a ring over its own square: 2048 texels over the
+    * walked-on ring's 1.28 km (one every 0.625 m; the layers' height maps make the borders finer still), then 1024 over
+    * each coarser ring's square (5, 20 and 40 m), whose ground is that much farther away. One texture of 40 m texels for
+    * every far ring drew rock patches as squares near the walk (the user's look at the rough valley). Halved for each
+    * step of coarser ground, so a quick start stays quick.
+    */
+    constexpr int nearWeightsSize = 2048;
+    constexpr int farWeightsSize = 1024;
 
     // The far plane: past the farthest ring of land (20.5 km from its centre), which reversed-Z depth keeps precise.
     constexpr float valleyFarPlane = 25000.0f;
@@ -170,22 +175,28 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
 }
 
 /*
-* The finest ring is the ground walked on and the one the sky visibility grid's rays see (static), with its own weights
-* texture; the coarser rings share one over the whole land, are only drawn, and are not static: kilometres of them in
-* the static level's 1 m cells would cost far more than the far ground's shading gains.
+* The finest ring is the ground walked on and the one the sky visibility grid's rays see (static); the coarser rings are
+* only drawn, and are not static: kilometres of them in the static level's 1 m cells would cost far more than the far
+* ground's shading gains. Each ring has its own weights texture over its own square, blended the softer the coarser it is.
 */
 void ForestGame::buildGround(World& world, AssetManager& assets) {
     const int coarseness = std::clamp(valleySettings.groundCoarseness, 0, 2);
     const std::vector<TerrainRing> rings = forestTerrainRings(static_cast<float>(2 << coarseness));
-    const int weightsSize = weightsTextureSize >> coarseness;
-    const Material nearMaterial = groundMaterial(assets, assetFolder, forestNearExtent(), weightsSize, groundSettings.blendDepth, getJobs());
-    const Material farMaterial = groundMaterial(assets, assetFolder, forestFarExtent(), weightsSize, groundSettings.blendDepth, getJobs());
 
-    ground = addShape(world, assets.addMesh(forestTerrainRingMesh(rings.front(), forestNearExtent(), getJobs())), nearMaterial, Transform{}, true);
-    staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(ground)));
+    for (std::size_t index = 0; index < rings.size(); ++index) {
+        const GroundExtent extent{forestTerrainCentre, rings[index].outerHalfSize};
+        const int weightsSize = (index == 0 ? nearWeightsSize : farWeightsSize) >> coarseness;
+        const float texelMetres = 2.0f * extent.halfSize / static_cast<float>(weightsSize);
+        const Material material = groundMaterial(assets, assetFolder, extent, weightsSize, forestBlendDepth(groundSettings.blendDepth, texelMetres), getJobs());
+        const Entity entity = addShape(world, assets.addMesh(forestTerrainRingMesh(rings[index], extent, getJobs())), material, Transform{}, index == 0);
+        groundTexels.push_back(texelMetres);
 
-    for (std::size_t ring = 1; ring < rings.size(); ++ring) {
-        farGround.push_back(addShape(world, assets.addMesh(forestTerrainRingMesh(rings[ring], forestFarExtent(), getJobs())), farMaterial, Transform{}));
+        if (index == 0) {
+            ground = entity;
+            staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(ground)));
+        } else {
+            farGround.push_back(entity);
+        }
     }
 }
 
@@ -294,10 +305,11 @@ void ForestGame::updateDaylight(World& world) {
         world.remove<Fog>(air);
     }
 
-    world.get<ModelRenderer>(ground).parts.front().material.groundBlendDepth = groundSettings.blendDepth;
+    world.get<ModelRenderer>(ground).parts.front().material.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels.front());
 
-    for (const Entity far : farGround) {
-        world.get<ModelRenderer>(far).parts.front().material.groundBlendDepth = groundSettings.blendDepth;
+    for (std::size_t far = 0; far < farGround.size(); ++far) {
+        world.get<ModelRenderer>(farGround[far]).parts.front().material.groundBlendDepth =
+            forestBlendDepth(groundSettings.blendDepth, groundTexels[far + 1]);
     }
 }
 

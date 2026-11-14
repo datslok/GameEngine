@@ -1537,6 +1537,12 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Measured (the laptop, release):** building the valley took 5.1 s on one thread; its ground rows on the job system brought it to 1.7 s on 16 threads. The golden views test builds it on one thread four times, so `make test-release` went to about 151 s here.
   - **Checked:** the tests (release); the debug game builds without warnings. Not run: the game (the user's look and the measurements); golden references not saved.
   - **The user's look** (Nov 14 2026): "that works". Merged; the haze's colour, the far cascades and the frame time still to be read off for the next item's order.
+- **What the rough valley showed** (Nov 14 2026, the user's screenshots on the laptop): the haze turns blue, so aerial perspective waits; 7.4 ms of GPU from the rim with the typical setup (12.95 at Ultra with DLAA), so level of detail, impostors and occlusion culling wait for the trees; the sun's shadows stop at 200 m (`ShadowSettings::directionalDistance` and its caster reach), so every far pillar, island and tower is lit on all sides, a large part of why the distance looked flat; and "looks a bit square in some places". The roadmap was re-ordered: the ground's paint, distant shadows, then the content.
+- `ground-paint` (Nov 14 2026): the squares were the ground's paint. One weights texture of 40 m texels for every far ring, under a blend sharpened by the layers' height maps, turned rock patches into blocks with a corner at every texel.
+  - **A texture per ring** over its own square: 2048 over the walked-on ring (0.625 m texels, was 1.25), 1024 over each coarser one (5, 20 and 40 m). About 28 MB with mips.
+  - **Softer where coarse:** each ring's blend depth is the setting's times the square root of how many times coarser its texels are than the finest, at most 1, so far patches fade into each other.
+  - **Measured (the laptop, release):** the valley builds in 2.4 s on 16 threads (1.7 before).
+  - **Checked:** the tests (release, tests first); the debug game builds without warnings. Not run: the game (the user's look).
 
 ## Tools outside the phases
 

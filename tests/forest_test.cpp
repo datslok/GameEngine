@@ -445,6 +445,18 @@ namespace {
         assert(foundSteep && foundForest);
     }
 
+    /*
+    * The blend depth for a ring's paint: the setting's own on the finest texels, deeper as they grow (by the square root
+    * of how many times coarser), never past 1 (a plain cross-fade), and never shallower than the setting.
+    */
+    void testCoarsePaintBlendsSofter() {
+        assert(near(forestBlendDepth(0.2f, forestFinestPaintTexel), 0.2f, 1e-6f));
+        assert(near(forestBlendDepth(0.2f, 4.0f * forestFinestPaintTexel), 0.4f, 1e-6f));
+        assert(forestBlendDepth(0.2f, 64.0f * forestFinestPaintTexel) == 1.0f);
+        assert(forestBlendDepth(0.2f, 0.5f * forestFinestPaintTexel) == 0.2f);
+        assert(forestBlendDepth(0.0f, 100.0f) == 0.0f);
+    }
+
     // The weights texture: the paint at each texel's centre across its extent, one channel a layer, as linear bytes.
     void testTheWeightsTextureHoldsThePaint() {
         const int size = 32;
@@ -519,10 +531,20 @@ namespace {
         assert(near(material.groundRepeats[0], 2.0f * forestNearHalfSize / forestGroundLayers[0].tileMetres, 1e-2f));
 
         assert(forest.game.getFarGround().size() == 3);
+        TextureHandle lastWeights = material.groundWeights;
+        float lastDepth = material.groundBlendDepth;
 
         for (const Entity far : forest.game.getFarGround()) {
-            assert(!forest.world.get<ModelRenderer>(far).isStatic);
+            const ModelRenderer& farRenderer = forest.world.get<ModelRenderer>(far);
+            const Material& farMaterial = farRenderer.parts.front().material;
+            assert(!farRenderer.isStatic);
+            assert(farMaterial.groundWeights.isValid() && farMaterial.groundWeights != lastWeights);
+            assert(farMaterial.groundBlendDepth >= lastDepth);
+            lastWeights = farMaterial.groundWeights;
+            lastDepth = farMaterial.groundBlendDepth;
         }
+
+        assert(lastDepth > material.groundBlendDepth);
 
         assert(forest.game.getPillars().size() == 41 && forest.game.getIslands().size() == 8);
         assert(near(forest.world.get<Transform>(forest.game.getRing()).scale.x, forestRingRadius, 1e-3f));
@@ -585,8 +607,10 @@ namespace {
         forest.game.getGroundSettings().blendDepth = 0.45f;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(!forest.world.has<Fog>(forest.game.getAir()));
-        assert(near(forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundBlendDepth, 0.45f, 0.0f));
-        assert(near(forest.world.get<ModelRenderer>(forest.game.getFarGround().back()).parts.front().material.groundBlendDepth, 0.45f, 0.0f));
+        const float nearDepth = forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundBlendDepth;
+        assert(near(nearDepth, forestBlendDepth(0.45f, 4.0f * forestFinestPaintTexel), 1e-6f)); // the tests' coarsest ground
+        const float farDepth = forest.world.get<ModelRenderer>(forest.game.getFarGround().front()).parts.front().material.groundBlendDepth;
+        assert(farDepth > 0.45f && farDepth <= 1.0f);
 
         forest.game.getMistSettings().enabled = true;
         forest.game.getSunSettings().solarHours = 18.5f;
@@ -606,6 +630,7 @@ void testForest() {
     testShapesArePlacedApartAndClearOfTheWalk();
     testTheGroundIsPaintedByPlace();
     testTheWeightsTextureHoldsThePaint();
+    testCoarsePaintBlendsSofter();
     testLayerFilesAreFoundByRole();
     testTheGameBuildsTheValley();
     testViewsHaveACommand();

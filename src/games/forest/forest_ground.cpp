@@ -1,5 +1,7 @@
 #include "games/forest/forest_ground.h"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 
 namespace {
@@ -39,6 +41,11 @@ ForestTextureFiles findForestTextureFiles(const std::string& folder) {
 * blue, which would be metal, is cancelled by a metallic factor of 0. The textures are read with the engine's default
 * flip, matching the terrain's bottom-left texture coordinates.
 */
+float forestBlendDepth(float blendDepth, float texelMetres) {
+    const float coarser = std::max(texelMetres / forestFinestPaintTexel, 1.0f);
+    return std::min(blendDepth * std::sqrt(coarser), 1.0f);
+}
+
 Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolder, const ForestGroundLayer& layer) {
     const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / layer.folder).string());
     Material material;
