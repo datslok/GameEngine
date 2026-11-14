@@ -87,6 +87,13 @@ inline constexpr const char* forestTreeLeafFolder = "LeafSet024";
 // as colour pickers give it): about a quarter of the light, a little greener.
 inline constexpr Pixel forestTreeLeafTint{140, 150, 125};
 
+// LeafSet024's grid of leaves.
+inline constexpr int forestTreeLeafColumns = 3;
+inline constexpr int forestTreeLeafRows = 3;
+
+// The leaves' plain colour without the scans.
+inline constexpr Pixel forestLeafStandIn{70, 105, 50};
+
 // A leaf's alpha under this is a hole.
 inline constexpr float forestLeafCutoff = 0.5f;
 
@@ -97,6 +104,14 @@ inline constexpr float forestLeafCutoff = 0.5f;
 */
 Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder = forestIvyFolder,
                             Pixel tint = Pixel{255, 255, 255});
+
+/*
+* The trees' leaf clusters' material (games/forest/leaf_clusters.h): twigs of LeafSet024's leaves (or the stand-in
+* leaf without the scan) composed at start-up into a 2 x 2 atlas of cellTexels a cell, its colour (tinted), normal and
+* roughness maps; a double-sided cut-out, its mips keeping the leaves' coverage. leafShare is a leaf's length on a
+* cluster as a share of the cell.
+*/
+Material forestLeafClusterMaterial(AssetManager& assets, const std::string& assetFolder, Pixel tint, int cellTexels, float leafShare);
 
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";

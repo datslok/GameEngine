@@ -1465,9 +1465,11 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
 
     const BatchedDraws motionDraws = batchByMesh(description.draws, moving, static_cast<std::uint32_t>(mainDraws.order.size() + shadowDraws.drawList.size()));
 
-    // The probe round the camera is captured every frame reflections run. Each of its faces draws what its own view
-    // holds, those entries following the velocity pass's in the draw list.
+    // The probe round the camera is captured while reflections run, a few faces a frame (probeCaptureStep), each from the
+    // place its cycle started. Each face drawn draws what its own view holds, those entries following the velocity
+    // pass's in the draw list.
     const bool captureProbe = screenReflections && settings.reflections.probe;
+    ProbeCaptureStep probeStep{};
     const float probeFar = settings.reflections.probeFar;
     // The probe's six faces, then the flat mirror's view, which draws the same way.
     std::array<BatchedDraws, cubeFaceCount + 1> captureDraws;
@@ -1484,9 +1486,15 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
             reflectionProbe->ensureSize(static_cast<std::uint32_t>(settings.reflections.probeSize));
         }
 
-        for (int face = 0; face < cubeFaceCount; ++face) {
+        probeStep = probeCaptureStep(probeNextFace, settings.reflections.probeFacesPerFrame, !reflectionProbe->hasCapture());
+
+        if (probeStep.startsCycle) {
+            probeCycleOrigin = cameraOrigin;
+        }
+
+        for (int face = probeStep.firstFace; face < probeStep.firstFace + probeStep.faceCount; ++face) {
             const Mat4 worldView = cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), probeFar) *
-                                   Mat4::translation(-cameraOrigin.x, -cameraOrigin.y, -cameraOrigin.z);
+                                   Mat4::translation(-probeCycleOrigin.x, -probeCycleOrigin.y, -probeCycleOrigin.z);
             const std::vector<std::size_t> inView = opaqueDraws(description.draws, visibleDraws(description.draws, Frustum::fromClipMatrix(worldView, ClipDepth::OneToZero)));
             captureDraws[static_cast<std::size_t>(face)] = batchByMesh(description.draws, inView, firstCaptureEntry);
             firstCaptureEntry += static_cast<std::uint32_t>(inView.size());
@@ -1801,7 +1809,9 @@ BloomComposite VulkanRenderer::drawScene(FrameContext& frame, const FrameDescrip
     // The reflection probe, captured where the camera is this frame.
     if (captureProbe) {
         beginGpuPass(frame, GpuPass::ReflectionProbe);
-        drawProbeCapture(frame, captureDraws, sceneSet, traceProbes, captureTracesRays, probeFar, description.lighting.background, air.has_value());
+        drawProbeCapture(frame, probeStep, captureDraws, sceneSet, traceProbes, captureTracesRays, probeFar, description.lighting.background,
+                         air.has_value());
+        probeNextFace = probeStep.nextFace;
         endGpuPass(frame, GpuPass::ReflectionProbe);
     }
 
@@ -2638,41 +2648,47 @@ void VulkanRenderer::drawTransparent(FrameContext& frame, const SortedTransparen
 }
 
 /*
-* The reflection probe's capture: each face drawn into its own layer of the capture (its old contents discarded and
-* cleared to the background), with the capture's pipeline and that face's view-projection as push constants, then the
-* sky over its background, as the main pass draws it. The faces are separate images to the GPU, so they need no
-* barriers between them; the probe's own passes follow (finishCapture).
+* The reflection probe's capture: this frame's faces (step), each drawn into its own layer of the capture (cleared to
+* the background), with the capture's pipeline and that face's view-projection as push constants, then the sky over its
+* background, as the main pass draws it. The faces are separate images to the GPU, so they need no barriers between
+* them, and faces drawn in earlier frames of the cycle are kept. Everything is drawn from the cycle's origin: the vertex
+* shader measures from the camera, so each face's view is moved by the camera's offset from it. The probe's own passes
+* follow the cycle's last face (finishCapture).
 */
-void VulkanRenderer::drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
-                                      bool traceRays, float farPlane, const Vec3& background, bool sky) {
+void VulkanRenderer::drawProbeCapture(FrameContext& frame, const ProbeCaptureStep& step, std::span<const BatchedDraws> captureDraws,
+                                      VkDescriptorSet sceneSet, bool sampleProbes, bool traceRays, float farPlane, const Vec3& background, bool sky) {
     const VkCommandBuffer commands = frame.commands;
     const std::uint32_t size = reflectionProbe->getSize();
     const VulkanPipeline& pipeline = *capturePipelines[capturePipelineIndex(sampleProbes, false, traceRays)];
     const BatchPipelines capturing{pipeline.get(), capturePipelines[capturePipelineIndex(sampleProbes, true, traceRays)]->get(), VK_CULL_MODE_FRONT_BIT};
     const VkPipelineLayout layout = pipeline.getLayout();
-    reflectionProbe->beginCapture(commands);
+    reflectionProbe->beginCapture(commands, step.startsCycle);
+    const Vec3 offset = cameraOrigin - probeCycleOrigin;
+    const Mat4 fromCamera = Mat4::translation(offset.x, offset.y, offset.z);
 
-    for (int face = 0; face < cubeFaceCount; ++face) {
+    for (int face = step.firstFace; face < step.firstFace + step.faceCount; ++face) {
         const ColourAttachment colour = reflectionProbe->faceColour(face, background);
         const DepthAttachment faceDepth = reflectionProbe->faceDepth(face);
         beginRendering(commands, {size, size}, &colour, &faceDepth);
         renderingOpen = true;
 
         bindCaptureScene(frame, layout, sceneSet, traceRays);
-        const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane), noClipPlane());
+        const GpuCaptureView view = packCaptureView(cubeFaceViewProjection(face, static_cast<float>(PROBE_NEAR), farPlane) * fromCamera, noClipPlane());
         vkCmdPushConstants(commands, layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(view), &view);
         stats.drawCalls += drawBatches(commands, captureDraws[static_cast<std::size_t>(face)].batches, capturing);
 
         if (sky) {
             atmosphere->drawSky(commands, frame.descriptors, frames[frame.frameIndex].scene->atmosphere.describe(),
-                                packCubeFaceRays(face, cameraOrigin, size));
+                                packCubeFaceRays(face, probeCycleOrigin, size));
         }
 
         vkCmdEndRendering(commands);
         renderingOpen = false;
     }
 
-    reflectionProbe->finishCapture(commands, frame.descriptors, static_cast<float>(PROBE_NEAR), farPlane, cameraOrigin);
+    if (step.finishesCycle) {
+        reflectionProbe->finishCapture(commands, frame.descriptors, static_cast<float>(PROBE_NEAR), farPlane, probeCycleOrigin);
+    }
 }
 
 void VulkanRenderer::bindCaptureScene(FrameContext& frame, VkPipelineLayout layout, VkDescriptorSet sceneSet, bool traceRays) {

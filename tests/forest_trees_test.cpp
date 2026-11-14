@@ -2,6 +2,7 @@
 #include "games/forest/forest_game.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/leaf_clusters.h"
 #include "games/forest/valley_shapes.h"
 #include "assets/asset_manager.h"
 #include "ecs/world.h"
@@ -497,54 +498,100 @@ namespace {
         assert(std::count(grownLeafy.begin(), grownLeafy.end(), true) > std::count(tips.begin(), tips.end(), true));
     }
 
+    // A node belongs to the clump it is deepest in, not merely the nearest centre.
+    void testClumpOf() {
+        const std::vector<TreeClump> clumps{{Vec3{0.0f, 0.0f, 0.0f}, 1.0f, 0}, {Vec3{2.5f, 0.0f, 0.0f}, 3.0f, 1}};
+        assert(clumpOf(Vec3{1.0f, 0.0f, 0.0f}, clumps) == 1);  // 1 radius out of the first, a half of the second
+        assert(clumpOf(Vec3{-0.2f, 0.0f, 0.0f}, clumps) == 0);
+        assert(clumpOf(Vec3{0.0f, 0.0f, 0.0f}, {}) == -1);
+    }
+
+    // The foliage's normals: the downward part halved, the blend unit and leaning out of the clump.
+    void testFoliageNormals() {
+        const Vec3 up{0.0f, 1.0f, 0.0f};
+        const Vec3 cone = coneFlattened(Vec3{1.0f, -1.0f, 0.0f}.normalized());
+        assert(near(cone.length(), 1.0f, 1e-5f) && near(cone.y / cone.x, -0.5f, 1e-5f));
+        assert(coneFlattened(up).y == 1.0f && coneFlattened(Vec3{0.0f, -1.0f, 0.0f}).y == -1.0f);
+
+        const Vec3 facing = Vec3{0.0f, 0.2f, 1.0f}.normalized();
+        const Vec3 clumpOut{1.0f, 0.0f, 0.0f};
+        const Vec3 normal = foliageNormal(facing, clumpOut, up);
+        const Vec3 expected = (facing * cardNormalShare + clumpOut * clumpNormalShare + up * crownNormalShare).normalized();
+        assert(near(normal.length(), 1.0f, 1e-5f) && near(normal.x, expected.x, 1e-5f) && near(normal.z, expected.z, 1e-5f));
+        assert(near(cardNormalShare + clumpNormalShare + crownNormalShare, 1.0f, 1e-6f));
+    }
+
     /*
-    * Leaves along the twigs: leavesPerNode cards round every leafy node, every card's front facing out of the crown,
-    * its corners' normals leaning further out, its picture one of the atlas's nine leaves, its stem near a leafy node.
+    * Cluster cards on a small clumped tree: one a leafy node in a clump's shell and the fillers, every shell card facing
+    * out of its clump, each clusterSize a side (fillers half as big again), its picture one of the four clusters, its
+    * normals unit and the triangles facing them; the same seed the same cards.
     */
-    void testLeavesFaceOutOfTheCrown() {
-        const std::vector<TreeNode> nodes = smallTree(5u);
-        const std::vector<float> radii = leonardoRadii(nodes, 0.02f, leonardoExponent);
-        const std::vector<bool> tips = leafyNodes(radii, 0.04f);
-        const std::size_t leafyCount = static_cast<std::size_t>(std::count(tips.begin(), tips.end(), true));
-        IndexedMesh leaves;
-        appendTreeLeaves(leaves, nodes, radii, smallCrown, 0.04f, 3, 0.7f, 4u);
-        const std::size_t cards = leafyCount * 3;
-        assert(leaves.vertices.size() == cards * 4 && leaves.indices.size() == cards * 6);
-        assert(trianglesFaceTheirNormals(leaves));
-        std::set<int> cellsUsed;
+    void testClusterCards() {
+        ForestTreeSettings settings;
+        settings.clumpRadius = 1.5f;
+        const CrownEnvelope crown{.centre = Vec3{0.0f, 9.5f, 0.0f}, .radius = 5.0f, .halfHeight = 4.5f};
+        const std::vector<TreeClump> clumps = treeClumps(crown, 5, 1.5f, 3, 3u);
+        std::vector<Vec3> targets(3, Vec3{0.0f, 0.0f, 0.0f});
+        std::vector<int> counts(3, 0);
 
-        for (std::size_t card = 0; card < cards; ++card) {
-            const MeshVertex* corner = &leaves.vertices[card * 4];
-            const Vec3 stem = (corner[0].position + corner[1].position) * 0.5f;
-            const Vec3 facing = (corner[1].position - corner[0].position).cross(corner[2].position - corner[0].position).normalized();
-            const Vec3 out = crownOutward(smallCrown, stem);
-            assert(facing.dot(out) > 0.0f);
-            assert(near((corner[3].position - corner[0].position).length(), 0.7f, 1e-4f));
-
-            const int column = static_cast<int>(std::floor((corner[0].uv.x + corner[2].uv.x) * 0.5f * treeLeafColumns));
-            const int row = static_cast<int>(std::floor((corner[0].uv.y + corner[2].uv.y) * 0.5f * treeLeafRows));
-            cellsUsed.insert(row * treeLeafColumns + column);
-
-            for (int k = 0; k < 4; ++k) {
-                assert(near(corner[k].normal.length(), 1.0f, 1e-4f) && corner[k].normal.dot(out) >= facing.dot(out) - 1e-4f);
-                const Vec3 tangent{corner[k].tangent.x, corner[k].tangent.y, corner[k].tangent.z};
-                assert(near(tangent.length(), 1.0f, 1e-4f) && std::fabs(tangent.dot(corner[k].normal)) < 1e-3f);
-                assert(corner[k].uv.x >= column / 3.0f - 1e-6f && corner[k].uv.x <= (column + 1) / 3.0f + 1e-6f);
-                assert(corner[k].uv.y >= row / 3.0f - 1e-6f && corner[k].uv.y <= (row + 1) / 3.0f + 1e-6f);
-            }
-
-            float nearest = 1e9f;
-
-            for (std::size_t node = 0; node < nodes.size(); ++node) {
-                if (tips[node]) {
-                    nearest = std::min(nearest, (nodes[node].position - stem).length());
-                }
-            }
-
-            assert(nearest < 0.5f * 0.7f);
+        for (const TreeClump& clump : clumps) {
+            targets[static_cast<std::size_t>(clump.limb)] = targets[static_cast<std::size_t>(clump.limb)] + clump.centre;
+            ++counts[static_cast<std::size_t>(clump.limb)];
         }
 
-        assert(cellsUsed.size() >= 7);
+        for (std::size_t limb = 0; limb < 3; ++limb) {
+            targets[limb] = targets[limb] / static_cast<float>(counts[limb]);
+        }
+
+        const std::vector<TreeNode> nodes =
+            coloniseTree(growScaffold(Vec3{0.0f, -1.0f, 0.0f}, Vec3{0.0f, 5.0f, 0.0f}, targets, 1.5f, 0.5f, 4u), crown,
+                         clumpAttractors(clumps, 400, 5u), TreeGrowth{});
+        const std::vector<float> radii = leonardoRadii(nodes, settings.twigRadius, leonardoExponent);
+        const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
+        int shellNodes = 0;
+
+        for (std::size_t node = 0; node < nodes.size(); ++node) {
+            const int clump = clumpOf(nodes[node].position, clumps);
+
+            if (leafy[node] && clump >= 0) {
+                const TreeClump& home = clumps[static_cast<std::size_t>(clump)];
+                shellNodes += (nodes[node].position - home.centre).length() >= settings.shellShare * home.radius ? 1 : 0;
+            }
+        }
+
+        IndexedMesh cards;
+        const int made = appendClusterCards(cards, nodes, radii, crown, clumps, settings, 9u);
+        const int fillers = static_cast<int>(clumps.size()) * settings.fillCards;
+        assert(shellNodes > 20 && made == shellNodes * settings.cardsPerNode + fillers);
+        assert(cards.vertices.size() == static_cast<std::size_t>(made) * 4 && cards.indices.size() == static_cast<std::size_t>(made) * 6);
+        assert(trianglesFaceTheirNormals(cards));
+
+        for (int card = 0; card < made; ++card) {
+            const MeshVertex* corner = &cards.vertices[static_cast<std::size_t>(card) * 4];
+            const bool filler = card >= made - fillers;
+            const float side = (corner[1].position - corner[0].position).length();
+            assert(near(side, filler ? 1.5f * settings.clusterSize : settings.clusterSize, 1e-3f));
+
+            if (!filler) {
+                const Vec3 stem = (corner[0].position + corner[1].position) * 0.5f;
+                const TreeClump& home = clumps[static_cast<std::size_t>(clumpOf(stem, clumps))];
+                const Vec3 facing = (corner[1].position - corner[0].position).cross(corner[2].position - corner[0].position).normalized();
+                assert(facing.dot((stem - home.centre).normalized()) > 0.0f);
+            }
+
+            const int column = static_cast<int>(std::floor((corner[0].uv.x + corner[2].uv.x) * 0.5f * clusterColumns));
+            const int row = static_cast<int>(std::floor((corner[0].uv.y + corner[2].uv.y) * 0.5f * clusterRows));
+
+            for (int k = 0; k < 4; ++k) {
+                assert(near(corner[k].normal.length(), 1.0f, 1e-4f));
+                assert(corner[k].uv.x >= column * 0.5f - 1e-6f && corner[k].uv.x <= (column + 1) * 0.5f + 1e-6f);
+                assert(corner[k].uv.y >= row * 0.5f - 1e-6f && corner[k].uv.y <= (row + 1) * 0.5f + 1e-6f);
+            }
+        }
+
+        IndexedMesh again;
+        appendClusterCards(again, nodes, radii, crown, clumps, settings, 9u);
+        assert((again.vertices[5].position - cards.vertices[5].position).lengthSquared() == 0.0f);
     }
 
     ForestTreeSettings smallSettings() {
@@ -570,7 +617,7 @@ namespace {
 
         const TreeMeshes tree = growTreeMeshes(settings, 21u, 1.5f);
         assert(tree.tipCount > 20 && tree.leafyCount > tree.tipCount && !tree.bark.vertices.empty());
-        assert(tree.leaves.vertices.size() == static_cast<std::size_t>(tree.leafyCount * settings.leavesPerNode * 4));
+        assert(tree.cardCount > settings.clumps * settings.fillCards && tree.leaves.vertices.size() == static_cast<std::size_t>(tree.cardCount) * 4);
         assert(near(tree.trunkRadius, settings.twigRadius * std::pow(static_cast<float>(tree.tipCount), 1.0f / leonardoExponent), 1e-3f * tree.trunkRadius));
         assert(trianglesFaceTheirNormals(tree.bark));
 
@@ -709,13 +756,30 @@ namespace {
         assert(placeTrees(settings, pillars, wall).empty());
     }
 
+    /*
+    * The start among the trees: treesStartDistance south of the tree with the most others within treesStartNeighbourhood
+    * (the first on a tie); the path's point 100 m past the Ring when there are none.
+    */
+    void testTheStartAmongTheTrees() {
+        const std::vector<TreePlacement> trees{
+            {Vec3{100.0f, 0.0f, -50.0f}, 1.0f, 0.0f, 0},  // alone
+            {Vec3{-40.0f, 0.0f, -120.0f}, 1.0f, 0.0f, 0}, // two neighbours
+            {Vec3{-20.0f, 0.0f, -140.0f}, 1.0f, 0.0f, 0},
+            {Vec3{-50.0f, 0.0f, -160.0f}, 1.0f, 0.0f, 0}};
+        const Vec2 start = forestTreesStart(trees);
+        assert(near(start.x, -40.0f, 1e-5f) && near(start.y, -120.0f + treesStartDistance, 1e-5f));
+
+        const Vec2 none = forestTreesStart({});
+        assert(near(none.y, -100.0f, 1e-4f) && forestPathDistance(none.x, none.y) < 0.1f);
+    }
+
     void testTheSettings() {
         const ForestTreeSettings settings;
-        assert(settings.count == 12 && settings.variants == 4 && settings.crownRadius == 13.0f && settings.limbs == 4 && settings.clumps == 9);
+        assert(settings.count == 12 && settings.variants == 4 && settings.crownRadius == 13.0f && settings.limbs == 4 && settings.clumps == 12 && settings.clusterSize == 2.0f);
         ForestTreeSettings visited;
         FieldCounter counter;
         visit(visited, counter);
-        assert(counter.fields == 15 && counter.live == 0);
+        assert(counter.fields == 19 && counter.live == 0);
     }
 
     /*
@@ -765,10 +829,13 @@ void testForestTrees() {
     testTubeSides();
     testButtressLobes();
     testLeafyNodes();
-    testLeavesFaceOutOfTheCrown();
+    testClumpOf();
+    testFoliageNormals();
+    testClusterCards();
     testATreeIsBuilt();
     testSightLines();
     testTreesArePlaced();
+    testTheStartAmongTheTrees();
     testTheSettings();
     testTheGamePlantsThem();
 }

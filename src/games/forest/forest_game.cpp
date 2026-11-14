@@ -13,6 +13,7 @@
 #include "scene/probe_volume.h"
 #include "scene/sun.h"
 
+#include <array>
 #include <utility>
 
 namespace {
@@ -216,6 +217,7 @@ void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {
     visitor.field("Ground coarseness", settings.groundCoarseness, {.min = 0, .max = 2, .applies = FieldApplies::AtStartup});
     visitor.field("Pillars", settings.pillarCount, {.min = 0, .max = 2000, .sliderMax = 600, .applies = FieldApplies::AtStartup});
     visitor.field("Floating islands", settings.islandCount, {.min = 0, .max = 500, .sliderMax = 100, .applies = FieldApplies::AtStartup});
+    visitor.choice("Start", settings.start, std::array<const char*, 2>{"Rim", "Trees"}, FieldApplies::AtStartup);
 }
 
 ForestGame::ForestGame(ControlMode startMode, bool debugModeSwitching, std::string assetFolder):
@@ -237,6 +239,11 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
     const Pixel& litter = forestGroundLayers[forestLitterLayer].standIn;
     atmosphereSettings.groundAlbedo = Vec3{srgbByteToLinear(litter.r), srgbByteToLinear(litter.g), srgbByteToLinear(litter.b)};
+
+    if (valleySettings.start == ForestStart::Trees) {
+        const Vec2 start = forestTreesStart(treePlacements);
+        controls.setFirstPersonFeet(onGround(start.x, start.y));
+    }
 
     controls.spawnBody(world);
     sun = world.create();
@@ -410,7 +417,8 @@ void ForestGame::buildTrees(World& world, AssetManager& assets) {
     }
 
     const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
-    const Material leaf = forestLeafMaterial(assets, assetFolder, forestTreeLeafFolder, forestTreeLeafTint);
+    const Material leaf = forestLeafClusterMaterial(assets, assetFolder, forestTreeLeafTint, treeSettings.clusterTexels,
+                                                     treeSettings.leafLength / treeSettings.clusterSize);
 
     for (const TreePlacement& tree : treePlacements) {
         const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),

@@ -16,9 +16,9 @@
 * built on the run's one job system (test_jobs.h). A fresh valley, initialised headless with its stand-in ground (an
 * asset folder that does not exist), its coarsest ground and fewer shapes by default, so the tests neither need the
 * downloaded assets nor spend long building it. Its
-* trees are two sparse variants (a few hundred attractors each, where the game grows four of 2500): placed exactly as
+* trees are two sparse variants (a few hundred attractors each, where the game grows four of 4000): placed exactly as
 * the game's, since the crowns' sizes are the same, but grown in a fraction of the time (forest_trees_test grows full
-* ones).
+* ones), and their leaf clusters' texture small.
 */
 struct TestForest {
     World world;
@@ -29,6 +29,7 @@ struct TestForest {
         game.getValleySettings() = valley;
         game.getTreeSettings().attractors = 300;
         game.getTreeSettings().variants = 2;
+        game.getTreeSettings().clusterTexels = 64;
         game.useJobs(testJobs());
         game.onInit(world, assets);
     }

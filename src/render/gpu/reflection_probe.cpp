@@ -81,6 +81,18 @@ Mat4 cubeFaceViewProjection(int face, float nearPlane, float farPlane) {
 }
 
 // The 90-degree lens reaches as far sideways as forward (tan 45 = 1), so the rays' right and up are the face's own.
+ProbeCaptureStep probeCaptureStep(int nextFace, int facesPerFrame, bool restart) {
+    if (restart) {
+        return ProbeCaptureStep{.firstFace = 0, .faceCount = cubeFaceCount, .startsCycle = true, .finishesCycle = true, .nextFace = 0};
+    }
+
+    const int first = std::clamp(nextFace, 0, cubeFaceCount - 1);
+    const int count = std::min(std::clamp(facesPerFrame, 1, cubeFaceCount), cubeFaceCount - first);
+    const bool finishes = first + count == cubeFaceCount;
+    return ProbeCaptureStep{.firstFace = first, .faceCount = count, .startsCycle = first == 0, .finishesCycle = finishes,
+                            .nextFace = finishes ? 0 : first + count};
+}
+
 GpuRayDebugView packCubeFaceRays(int face, const Vec3& origin, std::uint32_t size) {
     const CubeFaceAxes axes = cubeFaceAxes(face);
     GpuRayDebugView rays{};

@@ -63,6 +63,10 @@ struct ReflectionSettings {
     // How far the probe's capture sees (metres); beyond it the sky.
     float probeFar = 300.0f;
 
+    // How many of the probe's six faces are drawn a frame (render/gpu/reflection_probe.h, probeCaptureStep): 1 spreads a
+    // capture over six frames for a sixth of the drawing, its reflections up to six frames behind; 6 every frame.
+    int probeFacesPerFrame = 1;
+
     // Flat mirrors drawn for real (render/gpu/planar_reflection.h): how many planes a frame draws, each a second draw of
     // the scene, chosen by themselves; 0 leaves them to the probe. Without ray-traced reflections, which are exact anyway.
     int planarMirrors = 1;

@@ -423,6 +423,9 @@ namespace {
         assert(rejects(ReflectionSettings{.probeSize = 100}));
         assert(rejects(ReflectionSettings{.probeSize = 8}));
         assert(rejects(ReflectionSettings{.probeFar = 0.01f}));
+        assert(rejects(ReflectionSettings{.probeFacesPerFrame = 0}));
+        assert(rejects(ReflectionSettings{.probeFacesPerFrame = 7}));
+        assert(ReflectionSettings{}.probeFacesPerFrame == 1);
     }
 
     // The pass's numbers land where reflections.comp reads them.

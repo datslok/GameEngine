@@ -36,6 +36,10 @@ void PlayerControls::spawnBody(World& world) {
     firstPersonBody = spawnFirstPersonBody(world, setup.firstPersonFeet);
 }
 
+void PlayerControls::setFirstPersonFeet(const Vec3& feet) {
+    setup.firstPersonFeet = feet;
+}
+
 void PlayerControls::setControlMode(World& world, ControlMode mode) {
     switch (mode) {
     case ControlMode::FirstPerson:

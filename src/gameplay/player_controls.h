@@ -41,6 +41,9 @@ public:
     // entities, before the first setControlMode.
     void spawnBody(World& world);
 
+    // Where spawnBody puts the body's feet, for a game that chooses its start after construction (from its settings).
+    void setFirstPersonFeet(const Vec3& feet);
+
     /*
     * Switch to a mode from its predictable start: first person from the free camera drops the body where the camera is
     * (it falls onto whatever is below) and keeps the view, otherwise it looks straight ahead (-z) from the body's eyes;

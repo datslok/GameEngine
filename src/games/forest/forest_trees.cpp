@@ -2,12 +2,14 @@
 
 #include "games/forest/forest_terrain.h"
 #include "games/forest/island_hangings.h"
+#include "games/forest/leaf_clusters.h"
 #include "math/angles.h"
 #include "math/closest_points.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace {
@@ -20,6 +22,20 @@ namespace {
     constexpr float innermostClump = 0.55f;
     constexpr int triesPerClump = 40;
 
+    // Cluster cards: how far a card's facing strays from out of its clump, how its twig reaches (out, up and a random
+    // share), and the fillers' reach into their clump (a share of its radius) and size (against a shell card's).
+    constexpr float cardFacingStray = 0.8f;
+    constexpr float cardReachUp = 0.4f;
+    constexpr float cardReachStray = 0.5f;
+    constexpr float fillerReach = 0.4f;
+    constexpr float fillerSize = 1.5f;
+
+    // The cone under a clump: its downward part kept at this share.
+    constexpr float coneFlattening = 0.5f;
+
+    // The least a foliage normal leans to its card's front (the cosine between them, before making it unit again).
+    constexpr float leastFrontShare = 0.1f;
+
     // The smallest and largest tree against its variant.
     constexpr float smallestTree = 0.85f;
     constexpr float treeSizeRange = 0.3f;
@@ -31,14 +47,6 @@ namespace {
     constexpr float tubeSideMetres = 0.15f;
     constexpr int fewestTubeSides = 3;
     constexpr int mostTubeSides = 16;
-
-    // Leaves: how far a card's stem may stray from its tip (a share of its size), how far its facing strays from
-    // straight out of the crown, and which way it reaches (out, down and a random share).
-    constexpr float leafStray = 0.3f;
-    constexpr float leafFacingStray = 0.8f;
-    constexpr float leafReachOut = 0.5f;
-    constexpr float leafReachDown = 0.6f;
-    constexpr float leafReachStray = 0.5f;
 
     // The sight lines' targets: a point this high on the Monolith's face, and the Ring's top. The viewpoints round the
     // meadow and the clearing: this many, at these shares of their radii.
@@ -519,37 +527,101 @@ std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius)
     return leafy;
 }
 
-void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
-                      float leafyRadius, int leavesPerNode, float size, std::uint32_t seed) {
-    if (leavesPerNode <= 0 || size <= 0.0f) {
-        return;
+int clumpOf(const Vec3& point, const std::vector<TreeClump>& clumps) {
+    int best = -1;
+    float deepest = std::numeric_limits<float>::max();
+
+    for (std::size_t clump = 0; clump < clumps.size(); ++clump) {
+        const float depth = (point - clumps[clump].centre).length() / clumps[clump].radius;
+
+        if (depth < deepest) {
+            deepest = depth;
+            best = static_cast<int>(clump);
+        }
     }
 
-    const std::vector<bool> leafy = leafyNodes(radii, leafyRadius);
-    constexpr int cells = treeLeafColumns * treeLeafRows;
+    return best;
+}
+
+Vec3 coneFlattened(const Vec3& direction) {
+    if (direction.y >= 0.0f || std::fabs(direction.y) > 0.999999f) {
+        return direction;
+    }
+
+    return Vec3{direction.x, direction.y * coneFlattening, direction.z}.normalized();
+}
+
+// Never past square to the card's own front: a normal behind the card would light it from the wrong side.
+Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOut) {
+    const Vec3 blend = (facing * cardNormalShare + coneFlattened(clumpOut) * clumpNormalShare + coneFlattened(crownOut) * crownNormalShare).normalized();
+    const float front = blend.dot(facing);
+    return front >= leastFrontShare ? blend : (blend + facing * (leastFrontShare - front)).normalized();
+}
+
+/*
+* A card: its stem at a node, its front a random turn from the way out of its clump (out plus a shorter random
+* direction, never past square), the twig reaching out of the clump and a little up within the card's plane.
+*/
+int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
+                       const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed) {
+    if (clumps.empty()) {
+        return 0;
+    }
+
+    const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
+    constexpr int cells = clusterColumns * clusterRows;
+    int made = 0;
+
+    const auto addCard = [&](const Vec3& stem, const Vec3& facing, const Vec3& reach, const Vec3& normal, float size, std::uint64_t base) {
+        const Vec3 inPlane = reach - facing * reach.dot(facing);
+        const Vec3 towardsTip = inPlane.lengthSquared() > 1e-8f ? inPlane.normalized() : squareTo(facing);
+        const int cell = std::min(static_cast<int>(forestUnitRandom(seed, base) * static_cast<float>(cells)), cells - 1);
+        const AtlasCell picture = atlasCell(cell, clusterColumns, clusterRows);
+        appendLeafCard(mesh, stem, towardsTip, facing, normal, size, size, picture.uvMin, picture.uvMax);
+        ++made;
+    };
 
     for (std::size_t node = 0; node < nodes.size(); ++node) {
-        if (!leafy[node]) {
+        const int clump = clumpOf(nodes[node].position, clumps);
+
+        if (!leafy[node] || clump < 0) {
             continue;
         }
 
-        for (int leaf = 0; leaf < leavesPerNode; ++leaf) {
-            const std::uint64_t base = (static_cast<std::uint64_t>(node) * static_cast<std::uint64_t>(leavesPerNode) + static_cast<std::uint64_t>(leaf)) * 8;
-            const Vec3 stem = nodes[node].position + randomDirection(seed, base) * (leafStray * size * forestUnitRandom(seed, base + 2));
-            const Vec3 out = crownOutward(crown, stem);
+        const TreeClump& home = clumps[static_cast<std::size_t>(clump)];
+        const Vec3 fromCentre = nodes[node].position - home.centre;
 
-            // Its front out of the crown: out plus a shorter random direction never turns past square to out.
-            const Vec3 facing = (out + randomDirection(seed, base + 3) * leafFacingStray).normalized();
-            const Vec3 reach = out * leafReachOut + down * leafReachDown + randomDirection(seed, base + 5) * leafReachStray;
-            const Vec3 inPlane = reach - facing * reach.dot(facing);
-            const Vec3 towardsTip = inPlane.lengthSquared() > 1e-8f ? inPlane.normalized() : squareTo(facing);
-            const Vec3 normal = (facing * (1.0f - crownNormalBend) + out * crownNormalBend).normalized();
+        if (fromCentre.length() < settings.shellShare * home.radius) {
+            continue;
+        }
 
-            const int cell = std::min(static_cast<int>(forestUnitRandom(seed, base + 7) * static_cast<float>(cells)), cells - 1);
-            const AtlasCell picture = atlasCell(cell, treeLeafColumns, treeLeafRows);
-            appendLeafCard(mesh, stem, towardsTip, facing, normal, size, size, picture.uvMin, picture.uvMax);
+        const Vec3 clumpOut = fromCentre.normalized();
+        const Vec3 crownOut = crownOutward(crown, nodes[node].position);
+
+        for (int card = 0; card < settings.cardsPerNode; ++card) {
+            const std::uint64_t base = (static_cast<std::uint64_t>(node) * static_cast<std::uint64_t>(std::max(settings.cardsPerNode, 1)) +
+                                        static_cast<std::uint64_t>(card)) * 8;
+            const Vec3 facing = (clumpOut + randomDirection(seed, base) * cardFacingStray).normalized();
+            const Vec3 reach = clumpOut + up * cardReachUp + randomDirection(seed, base + 2) * cardReachStray;
+            addCard(nodes[node].position, facing, reach, foliageNormal(facing, clumpOut, crownOut), settings.clusterSize, base + 4);
         }
     }
+
+    // The fillers: inside each clump near its middle, facing every way, shading with the crown's way out there.
+    for (std::size_t clump = 0; clump < clumps.size(); ++clump) {
+        for (int card = 0; card < settings.fillCards; ++card) {
+            const std::uint64_t base = (1ull << 40) + (static_cast<std::uint64_t>(clump) * 64 + static_cast<std::uint64_t>(card)) * 8;
+            const TreeClump& home = clumps[clump];
+            const Vec3 stem = home.centre + randomDirection(seed, base) * (fillerReach * home.radius * forestUnitRandom(seed, base + 2));
+            // Any way round, but its front turned to the crown's outside, which its normals lean towards.
+            const Vec3 crownOut = crownOutward(crown, stem);
+            const Vec3 turned = randomDirection(seed, base + 3);
+            const Vec3 facing = turned.dot(crownOut) >= 0.0f ? turned : turned * -1.0f;
+            addCard(stem, facing, randomDirection(seed, base + 5), foliageNormal(facing, crownOut, crownOut), fillerSize * settings.clusterSize, base + 7);
+        }
+    }
+
+    return made;
 }
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
@@ -565,9 +637,13 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Twig radius", settings.twigRadius, {.min = 0.002f, .max = 0.2f, .sliderMax = 0.05f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Buttresses", settings.buttress, {.min = 0.0f, .max = 5.0f, .sliderMax = 3.0f, .applies = FieldApplies::AtStartup});
     visitor.field("Lean", settings.lean, {.min = 0.0f, .max = 20.0f, .sliderMax = 8.0f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Leaf size", settings.leafSize, {.min = 0.05f, .max = 5.0f, .sliderMax = 2.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Cluster size", settings.clusterSize, {.min = 0.1f, .max = 10.0f, .sliderMax = 4.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Leaf length", settings.leafLength, {.min = 0.02f, .max = 2.0f, .sliderMax = 1.0f, .unit = "m", .applies = FieldApplies::AtStartup});
     visitor.field("Leafy radius", settings.leafyRadius, {.min = 0.0f, .max = 1.0f, .sliderMax = 0.15f, .unit = "m", .applies = FieldApplies::AtStartup});
-    visitor.field("Leaves per node", settings.leavesPerNode, {.min = 0, .max = 20, .sliderMax = 8, .applies = FieldApplies::AtStartup});
+    visitor.field("Cards per node", settings.cardsPerNode, {.min = 0, .max = 20, .sliderMax = 6, .applies = FieldApplies::AtStartup});
+    visitor.field("Shell share", settings.shellShare, {.min = 0.0f, .max = 1.0f, .applies = FieldApplies::AtStartup});
+    visitor.field("Filler cards", settings.fillCards, {.min = 0, .max = 50, .sliderMax = 10, .applies = FieldApplies::AtStartup});
+    visitor.field("Cluster texels", settings.clusterTexels, {.min = 16, .max = 4096, .sliderMax = 2048, .applies = FieldApplies::AtStartup});
 }
 
 // A fork above the top is taken as a fork just under it, so the crown keeps some depth.
@@ -676,7 +752,7 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
 
     const std::vector<bool> leafy = leafyNodes(radii, settings.leafyRadius);
     meshes.leafyCount = static_cast<int>(std::count(leafy.begin(), leafy.end(), true));
-    appendTreeLeaves(meshes.leaves, nodes, radii, crown, settings.leafyRadius, settings.leavesPerNode, settings.leafSize, forestShapeSeed(seed, 3));
+    meshes.cardCount = appendClusterCards(meshes.leaves, nodes, radii, crown, clumps, settings, forestShapeSeed(seed, 3));
     return meshes;
 }
 
@@ -729,6 +805,39 @@ std::vector<SightLine> forestSightLines() {
     }
 
     return lines;
+}
+
+Vec2 forestTreesStart(const std::vector<TreePlacement>& trees) {
+    if (trees.empty()) {
+        // The path from the Ring to its next point, 100 m along northwards.
+        const std::vector<Vec2>& path = forestPathPoints();
+        const std::size_t ring = static_cast<std::size_t>(std::find_if(path.begin(), path.end(), [](const Vec2& point) {
+            return point.x == forestRingPlace.x && point.y == forestRingPlace.y;
+        }) - path.begin());
+        const Vec2 from = path[ring];
+        const Vec2 to = path[std::min(ring + 1, path.size() - 1)];
+        const float share = to.y != from.y ? (-100.0f - from.y) / (to.y - from.y) : 0.0f;
+        return from + (to - from) * share;
+    }
+
+    std::size_t best = 0;
+    int mostNeighbours = -1;
+
+    for (std::size_t i = 0; i < trees.size(); ++i) {
+        int neighbours = 0;
+
+        for (std::size_t j = 0; j < trees.size(); ++j) {
+            const float apart = (Vec2{trees[i].foot.x, trees[i].foot.z} - Vec2{trees[j].foot.x, trees[j].foot.z}).length();
+            neighbours += j != i && apart <= treesStartNeighbourhood ? 1 : 0;
+        }
+
+        if (neighbours > mostNeighbours) {
+            mostNeighbours = neighbours;
+            best = i;
+        }
+    }
+
+    return Vec2{trees[best].foot.x, trees[best].foot.z + treesStartDistance};
 }
 
 bool blocksSight(const Vec3& centre, float radius, const std::vector<SightLine>& lines) {

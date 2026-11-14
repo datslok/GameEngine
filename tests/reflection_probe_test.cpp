@@ -459,7 +459,37 @@ namespace {
     }
 }
 
+namespace {
+    /*
+    * The capture spread over frames: a restart (nothing captured yet, or a new size) draws all six faces at once and
+    * finishes; otherwise a cycle starts at face 0 (taking its origin there), draws facesPerFrame faces a frame, and
+    * finishes with the sixth, never past it; facesPerFrame is held within 1 and 6.
+    */
+    void testCaptureSchedule() {
+        const ProbeCaptureStep restart = probeCaptureStep(3, 1, true);
+        assert(restart.firstFace == 0 && restart.faceCount == 6 && restart.startsCycle && restart.finishesCycle && restart.nextFace == 0);
+
+        int next = 0;
+
+        for (int frame = 0; frame < 6; ++frame) {
+            const ProbeCaptureStep step = probeCaptureStep(next, 1, false);
+            assert(step.firstFace == frame && step.faceCount == 1);
+            assert(step.startsCycle == (frame == 0) && step.finishesCycle == (frame == 5));
+            next = step.nextFace;
+        }
+
+        assert(next == 0);
+
+        const ProbeCaptureStep four = probeCaptureStep(4, 4, false);
+        assert(four.firstFace == 4 && four.faceCount == 2 && four.finishesCycle && four.nextFace == 0);
+        const ProbeCaptureStep all = probeCaptureStep(0, 6, false);
+        assert(all.faceCount == 6 && all.startsCycle && all.finishesCycle);
+        assert(probeCaptureStep(0, 0, false).faceCount == 1 && probeCaptureStep(0, 9, false).faceCount == 6);
+    }
+}
+
 void testReflectionProbe() {
+    testCaptureSchedule();
     testCubeAddressing();
     testFaceViews();
     testFaceRays();

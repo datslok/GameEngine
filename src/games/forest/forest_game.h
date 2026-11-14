@@ -76,14 +76,23 @@ struct ForestRockSettings {
 
 void visit(ForestRockSettings& settings, SettingsVisitor& visitor);
 
+// Where the player starts: on the rim, seeing the valley's scale (the design's start), or among the trees on the path
+// between the Ring and the clearing (for looking at them).
+enum class ForestStart {
+    Rim,
+    Trees
+};
+
 /*
 * What the valley is built with, read once at start-up: the finest ground squares (2 m, or 4 or 8 m for a quicker start:
-* 2 << groundCoarseness), and how many pillars and floating islands there are (fewer if they run out of room).
+* 2 << groundCoarseness), how many pillars and floating islands there are (fewer if they run out of room), and where the
+* player starts.
 */
 struct ForestValleySettings {
     int groundCoarseness = 0;
     int pillarCount = 220;
     int islandCount = 30;
+    ForestStart start = ForestStart::Rim;
 };
 
 void visit(ForestValleySettings& settings, SettingsVisitor& visitor);

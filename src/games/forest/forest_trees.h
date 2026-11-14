@@ -135,21 +135,7 @@ std::vector<std::vector<int>> branchChains(const std::vector<TreeNode>& nodes, c
 // How many sides a tube of a radius gets: about one every 15 cm round it, 3 for a twig, 16 at most.
 int tubeSides(float radius);
 
-/*
-* Leaf cards along the twigs, appended to mesh: leavesPerNode cards round every node at most leafyRadius thick (the last
-* metre or two of every twig, as real foliage is spread, not only the tips), each size metres a side showing one leaf
-* of a 3 x 3 atlas (LeafSet024), its stem near the node and the leaf reaching out and down from it. Each card's front
-* faces out of the crown (its normal a random turn from crownOutward, never past square to it), and its vertex normals
-* lean further towards crownOutward (crownNormalBend), so the canopy shades as one rounded mass, lit on the sun's side,
-* rather than as thousands of flat cards facing every way. Tangent across the leaf (+u), bitangent stem to tip (+v).
-*/
-inline constexpr int treeLeafColumns = 3;
-inline constexpr int treeLeafRows = 3;
-inline constexpr float crownNormalBend = 0.6f;
-void appendTreeLeaves(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
-                      float leafyRadius, int leavesPerNode, float size, std::uint32_t seed);
-
-// The nodes appendTreeLeaves dresses: every one but the root at most leafyRadius thick.
+// The twigs' nodes, which carry foliage: every one but the root at most leafyRadius thick.
 std::vector<bool> leafyNodes(const std::vector<float>& radii, float leafyRadius);
 
 // The trees (F5 Forest, Trees; read at start-up: they are grown once).
@@ -168,11 +154,11 @@ struct ForestTreeSettings {
     // How many scaffold limbs leave the fork (each variant one fewer to one more), and how many clumps of foliage of
     // about what radius they grow into.
     int limbs = 4;
-    int clumps = 9;
-    float clumpRadius = 3.5f;
+    int clumps = 12;
+    float clumpRadius = 4.5f;
 
     // How many attractors fill the clumps: more grow more, finer branches.
-    int attractors = 2500;
+    int attractors = 4000;
 
     // The tips' radius (metres), from which Leonardo's rule makes the limbs and trunk.
     float twigRadius = 0.035f;
@@ -183,14 +169,47 @@ struct ForestTreeSettings {
     // How far the most leaning variant's fork stands off its foot (metres); each leans 30-100% of it its own way.
     float lean = 2.0f;
 
-    // A leaf card's size, how thick a branch may be and still carry leaves, and how many sit round each such node
-    // (nodes are half a metre apart).
-    float leafSize = 0.9f;
+    // Foliage on leaf-cluster cards (docs/TREES.md, Part 2): a card's size (metres a side), a leaf's length on it, how
+    // thick a branch may be and still carry foliage, how many cards each such node in a clump's shell carries, how far
+    // out of its clump a node must be to have one (a share of the clump's radius), how many bigger cards fill each
+    // clump's inside so it cannot be seen through, and the clusters' texture's texels a cell (four cells).
+    float clusterSize = 2.0f;
+    float leafLength = 0.45f;
     float leafyRadius = 0.06f;
-    int leavesPerNode = 2;
+    int cardsPerNode = 2;
+    float shellShare = 0.3f;
+    int fillCards = 8;
+    int clusterTexels = 1024;
 };
 
 void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
+
+// The clump a point belongs to: the one it is deepest in (the least distance over radius); -1 when there are none.
+int clumpOf(const Vec3& point, const std::vector<TreeClump>& clumps);
+
+// A direction with its downward part halved, made unit again: the clump's underside lit as a cone, not a floor
+// (docs/TREES.md, Part 3).
+Vec3 coneFlattened(const Vec3& direction);
+
+/*
+* The foliage's normals: a card's own facing, its clump's way out and the crown's, blended (30%, 50%, 20%) and the
+* last two cone-flattened. Each clump gets its own lit top and shaded underside, which gives the crown its depth; the
+* card's own share keeps the clusters catching light one by one.
+*/
+inline constexpr float cardNormalShare = 0.3f;
+inline constexpr float clumpNormalShare = 0.5f;
+inline constexpr float crownNormalShare = 0.2f;
+Vec3 foliageNormal(const Vec3& facing, const Vec3& clumpOut, const Vec3& crownOut);
+
+/*
+* Leaf-cluster cards, appended to mesh: cardsPerNode cards at every leafy node in its clump's shell (at least
+* shellShare of the clump's radius out of its centre), each clusterSize a side, its stem near the node, the twig reaching
+* out of the clump and a little up, its front facing out of the clump (a random turn, never past square), its picture
+* one of the clusters' four cells; then fillCards cards half as big again inside each clump, near its middle, facing
+* every way, shading with the crown's way out. Normals by foliageNormal. Returns the cards made.
+*/
+int appendClusterCards(IndexedMesh& mesh, const std::vector<TreeNode>& nodes, const std::vector<float>& radii, const CrownEnvelope& crown,
+                       const std::vector<TreeClump>& clumps, const ForestTreeSettings& settings, std::uint32_t seed);
 
 // The fixed parts of a tree's shape. Leonardo's n of 2.5 keeps the limbs thick against the twigs (measured trees: 2-3).
 inline constexpr float leonardoExponent = 2.5f;
@@ -209,6 +228,7 @@ struct TreeMeshes {
     IndexedMesh leaves;
     int tipCount = 0;
     int leafyCount = 0;
+    int cardCount = 0;
     float trunkRadius = 0.0f; // Leonardo's, at the fork; the foot is trunkTaper thicker
 };
 
@@ -255,6 +275,15 @@ struct SightLine {
 inline constexpr float sightLineSpacing = 10.0f;
 inline constexpr float sightEyeHeight = 1.7f;
 std::vector<SightLine> forestSightLines();
+
+/*
+* Where to start among the trees (ForestStart::Trees): treesStartDistance metres south of the tree with the most others
+* within treesStartNeighbourhood (the first on a tie), so the player stands under the grove facing it (north); the
+* path's point 100 m past the Ring when there are no trees.
+*/
+inline constexpr float treesStartDistance = 12.0f;
+inline constexpr float treesStartNeighbourhood = 60.0f;
+Vec2 forestTreesStart(const std::vector<TreePlacement>& trees);
 
 // Whether a sphere meets any of the lines.
 bool blocksSight(const Vec3& centre, float radius, const std::vector<SightLine>& lines);

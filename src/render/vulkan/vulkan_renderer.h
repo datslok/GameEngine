@@ -328,6 +328,10 @@ private:
     // with the ray tracing set as set 2, which the main pass's glass ray pipelines share.
     std::unique_ptr<VulkanReflectionProbe> reflectionProbe;
 
+    // The probe's capture spread over frames: the face the cycle goes on with, and where the cycle's faces are drawn from.
+    int probeNextFace = 0;
+    Vec3 probeCycleOrigin{0.0f, 0.0f, 0.0f};
+
     // A flat mirror's picture (render/gpu/planar_reflection.h), and last frame's mirror, kept until another is clearly better.
     std::unique_ptr<VulkanPlanarReflection> planarReflection;
     std::optional<MirrorPlane> lastMirror;
@@ -612,8 +616,8 @@ private:
                               const Mat4& viewProjection, const Vec4& clipPlane, const Vec3& eye, const GpuRayDebugView& skyRays, const Vec3& background,
                               bool sky);
 
-    void drawProbeCapture(FrameContext& frame, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet, bool sampleProbes,
-                          bool traceRays, float farPlane, const Vec3& background, bool sky);
+    void drawProbeCapture(FrameContext& frame, const ProbeCaptureStep& step, std::span<const BatchedDraws> captureDraws, VkDescriptorSet sceneSet,
+                          bool sampleProbes, bool traceRays, float farPlane, const Vec3& background, bool sky);
     // Draw frames of the description before a capture, the first as given, the rest as repeated (the same frame without
     // its probe events, which happen once).
     void drawFramesBeforeCapture(const FrameDescription& description, const FrameDescription& repeated, const RenderSettings& settings, int frames);
