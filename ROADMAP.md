@@ -340,6 +340,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [ ] Grass and ground cover: blades merged into one mesh per 8 x 8 m patch, thinning with distance
 - [ ] The structures, half reclaimed
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
+  - Big searchlights sweeping the land (the user, Nov 14 2026): spot lights with shadows near the camera, and for beams kilometres long, more than the fog's 100 m grid can light, a beam of their own through the height fog (its closed form along the cone).
   - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, searchlights sweeping beams through the mist, vines hanging hundreds of metres.
 - [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured
 - [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer)

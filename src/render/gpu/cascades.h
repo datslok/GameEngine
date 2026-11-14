@@ -76,6 +76,30 @@ float fittedShadowDistance(const ShadowDistanceFit& fit);
 // (render/gpu/planar_reflection.h, mirrorCascadesStart): never past the distance, and moving only a step at a time.
 float shadowLadderStepBelow(float distance);
 
+/*
+* The far shadow map: one more box past the cascades, so mountains, pillars and towers kilometres away still cast
+* shadows (shadow_map.h, ShadowSettings::farShadowDistance). Its texels are metres wide, which loses nothing a viewer
+* could see: the sun is a disc half a degree across, so a real shadow's edge blurs by about a hundredth of the distance
+* from the caster to where it falls (2.8 m under a pillar's top 300 m up), as wide as a texel.
+*
+* It must not move as the camera walks, or it would be redrawn every frame (all of the land and everything on it):
+* its sphere's centre is the camera snapped to a grid farShadowSnapShare of the distance apart, so it moves only when
+* the camera crosses into another cell, and its radius covers the distance from anywhere in the cell. Casters smaller
+* than farShadowSmallestCasterTexels of its texels are left out of it (the player's own body among them, which moves
+* every frame and would otherwise redraw it every frame): their shadows would be smaller than what it can show.
+*/
+inline constexpr float farShadowSnapShare = 0.125f;
+inline constexpr float farShadowSmallestCasterTexels = 2.0f;
+
+// The far map's grid spacing for a distance.
+float farShadowSnap(float distance);
+
+// The far map's sphere round the camera: its centre on the grid, holding everything within distance of the camera.
+BoundingSphere farShadowSphere(const Vec3& camera, float distance);
+
+// The smallest caster (bounding sphere radius) the far map draws, for its texel size.
+float farShadowSmallestCaster(float texelSize);
+
 // Any up direction works for a shadow view, as long as it is not parallel to the way the view looks.
 Vec3 shadowViewUp(const Vec3& forward);
 

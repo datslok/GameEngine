@@ -93,6 +93,13 @@ struct ShadowSettings {
     int mirrorCascadeCount = 2;
     CascadeResolution mirrorCascadeResolution = CascadeResolution::Pixels2048;
 
+    // The far shadow map (cascades.h): one more box at the end of the sun's row, reaching this far round the camera (at
+    // most its far plane), so far mountains, pillars and towers cast shadows. 0 turns it off; there is none where the
+    // view ends before the cascades do. Its tile is at most the atlas's largest square: 4096 on Ultra (about 2.7 m
+    // texels over 5 km), 2048 otherwise.
+    float farShadowDistance = 5000.0f;
+    CascadeResolution farShadowResolution = CascadeResolution::Pixels4096;
+
     // Shadow acne fix: points are moved off their surface along the normal by this many texels. It is the only bias (the
     // shadow pass has no hardware depth bias), so it is a little larger than usual: 1.5 left faint stripes on faces the
     // light grazes. Measured in texels, it shrinks and grows with each tile's size. For the sun it is how far points move
@@ -120,7 +127,8 @@ ShadowAtlasSize glassShadowMapSize(const ShadowAtlasSize& atlas);
 inline constexpr int maxShadowedPointLights = 64;      // 6 tiles each; cached tiles cost little, but each shadowed pixel pays 32 samples per light
 inline constexpr int maxShadowedSpotLights = 8;        // 1 tile each
 inline constexpr int maxShadowedDirectionalLights = 1; // the sun: up to maxShadowCascades tiles of cascadeTileSize
-inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights + maxShadowedDirectionalLights * maxShadowCascades * 2; // a mirror's cascades too
+inline constexpr int maxShadowTiles = maxShadowedPointLights * 6 + maxShadowedSpotLights +
+                                     maxShadowedDirectionalLights * (maxShadowCascades * 2 + 1); // a mirror's cascades and the far map too
 
 // Tile edge length in pixels for a square view of the given half-width (tan of its half-angle) reaching range: enough
 // for one texel to cover texelTarget across the far end of the view, as a power of two from the smallest tile size up
@@ -204,6 +212,9 @@ bool tileHasGlass(const ShadowTileData& data);
 //
 // lightPlace (world space) is where its light is, for the coloured shadow map's glass (its angle to the light, and which
 // faces count): a local light's position with w 1, or for a sun's cascades the direction towards the sun with w 0.
+//
+// smallestCaster: casters with a smaller bounding sphere are not drawn into it (the far shadow map's, cascades.h); 0
+// draws every one.
 struct ShadowTile {
     Mat4 matrix = Mat4::identity();
     std::uint32_t x = 0;
@@ -212,6 +223,7 @@ struct ShadowTile {
     BoundingSphere reach;
     Vec4 clipPlane = noClipPlane();
     Vec4 lightPlace{0.0f, 1.0f, 0.0f, 0.0f};
+    float smallestCaster = 0.0f;
 };
 
 // A tile's square in the coloured shadow map: its place and size in the atlas, halved.
