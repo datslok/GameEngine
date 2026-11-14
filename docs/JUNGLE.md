@@ -39,6 +39,35 @@ An Ecuadorian hectare held about 600 trees over 10 cm **(unverified: a fragment)
 
 **What it means here:** a jungle's density is mostly small and middle stems. The big trees are 25-35 m apart, their crowns touching; what closes the view is a mid layer every 8-10 m and an understorey every few metres, then palms, ferns and vines.
 
+## The mid layer's shape
+
+- **Shade-tolerant trees** (the mid layer grows in the canopy's shade) have flatter crowns, fewer leaf layers and thinner stems than less tolerant ones (a Bornean study: [Plant Ecology 153](https://boris.unibe.ch/81050/1/PlantEcol_153_279.pdf)).
+- Horn (1971)'s wide, flat "monolayer" crown for shade trees is a simplification: shade-tolerant species vary, some intermediate, some layered ([Smithsonian](https://repository.si.edu/bitstream/handle/10088/3723/Pearcy_Valladares_Wright_and_Paulis.pdf), [PubMed](https://pubmed.ncbi.nlm.nih.gov/27489160/)).
+
+**What it means here:** the mid layer's trees are slender (trunks 20-40 cm), with shallow, flattish crowns a few metres deep and fewer clumps, standing under and between the canopy crowns. The canopy trees' crowns, from their 12 m fork to 38 m, leave no room under them for a layer 10-20 m tall; real canopy trees carry their crowns higher, from 50-60% of their height.
+
+## The understorey
+
+Gathered on Nov 14, 2026, after the user's look at the mid layer: "it doesnt really have that dense jungle look tho". What was missing, biggest first: nothing at eye level, temperate shapes (round puffs on poles; no palms, big leaves or vines), an open canopy, cool colours in dry light.
+
+**How dense real understoreys are:**
+
+- Small saplings (10-50 cm) in four Neotropical lowland forests: 4.8-7.5 a square metre at three sites, 0.7-1.6 at La Selva, where understorey palms and herbs cover much of the ground and crowd the saplings out ([Harms et al. 2004](https://repository.si.edu/bitstream/handle/10088/6754/Harms_Powers_and_Montgomery_2004.pdf)).
+- Herb cover in Costa Rican forests: 2% (young) to 23% (intermediate age) of the ground in 25 m^2 plots, less again in old forest ([Diversity 2024](https://doaj.org/article/d11f4c42a5f74f0499a1a0301e311bed)).
+- Some forests are fern-rich (Cocha Cashu, Peru), some palm-rich (La Selva), some sparse (Barro Colorado) (Harms et al.).
+
+**How games build the plants:**
+
+- **Palms:** a frond is a curved rachis (midrib) carrying leaflets in pairs; fronds placed round the crown by the golden angle, each varied ([PalmGenerator](https://github.com/edap/PalmGenerator), [SpeedTree](https://docs.unity3d.com/speedtree-modeler/manual/modeling-approach.html)). Crysis modelled each palm frond's leaves as geometry (GPU Gems 3, chapter 16).
+- **Big leaves** (aroids, bananas): cut-out cards suit big leaves with wavy edges (Valve's wiki: [Vegetation](https://developer.valvesoftware.com/wiki/Vegetation)); small plants and herbs as cards, far plants as impostors.
+- **Overdraw is the cost of cards,** more than triangles: a cut-out card's empty part still runs the pixel shader, and a pixel under many cards runs it many times. Cutting each card's mesh to its leaf's outline, a few more triangles for much less empty area, is the usual cure ([80.lv](https://80.lv/articles/tips-on-utilizing-vegetation-in-game-scenes), [Polycount](https://polycount.com/discussion/112248/alphas-vs-geo-for-foliage)); and a depth prepass with the cut-out test, so the main pass shades each pixel once (this engine has one). **(Forum and vendor sources, unverified numbers.)**
+
+**What it means here:**
+
+- **Plants built as geometry, not cards:** a palm frond's leaflets and a big leaf as meshes cut to their outline, so nothing is drawn where there is no leaf, and the depth prepass keeps the main pass's cost to the pixels seen. No CC0 library has palm or banana scans (`docs/TREES.md`), so their shapes are generated and their surface takes the scanned broad leaf's (`Leaf001`) colour and detail.
+- **Three kinds** at mixed heights: understorey palms (2-6 m: a short or no stem, a fan of arching pinnate fronds), big-leaved herbs (0.5-2.5 m: a few huge leaves on long stalks, like elephant ears and young bananas) and ferns (0.3-1.5 m: a rosette of finely divided fronds).
+- **Density:** thick along and round the path, where the view should close at eye level, thinning away from it; a few thousand plants in the patch, a few variants of each kind instanced.
+
 ## How games draw it
 
 **Crysis** (Sousa, GPU Gems 3, chapter 16: [NVIDIA](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis)):

@@ -149,10 +149,10 @@ struct ForestTreeSettings {
     int variants = 4;
 
     // The tree's top and where its trunk forks into limbs, above the ground, and the crown's radius across (metres):
-    // a canopy tree forking low, as figs and rain trees do (docs/TREES.md, Part 1), at the canopy's top. The crown fills
-    // the space between the fork and the top.
+    // a canopy tree at the canopy's top, its crown from about half its height (docs/JUNGLE.md, The mid layer's shape:
+    // forking at 12 m left no room under it for the mid layer). The crown fills the space between the fork and the top.
     float height = 38.0f;
-    float forkHeight = 12.0f;
+    float forkHeight = 18.0f;
     float crownRadius = 16.0f;
 
     // How many scaffold limbs leave the fork (each variant one fewer to one more), and how many clumps of foliage of
@@ -204,6 +204,13 @@ void visit(ForestTreeSettings& settings, SettingsVisitor& visitor);
 * lean. Their leaves are the canopy trees', so both share one clusters' texture.
 */
 ForestTreeSettings emergentTreeSettings();
+
+/*
+* The mid layer's settings (docs/JUNGLE.md): 400 slender trees 15 m tall in the canopy's shade, a trunk 20-40 cm across,
+* a shallow crown from 10 m about 5 m in radius with few clumps (shade trees have flatter crowns and fewer leaf layers),
+* placed under and between the canopy crowns. Their leaves are the canopy trees'.
+*/
+ForestTreeSettings midTreeSettings();
 
 // The clump a point belongs to: the one it is deepest in (the least distance over radius); -1 when there are none.
 int clumpOf(const Vec3& point, const std::vector<TreeClump>& clumps);
@@ -332,12 +339,18 @@ inline constexpr float treeSpread = 130.0f;
 inline constexpr float treePathGap = 6.0f;
 inline constexpr std::uint64_t emergentPlaceSeed = 0x454d4552ull;
 inline constexpr std::uint64_t canopyPlaceSeed = 0x54524545ull;
+inline constexpr std::uint64_t midPlaceSeed = 0x4d494444ull;
 std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const std::vector<PillarPlacement>& pillars,
                                       const std::vector<SightLine>& sightLines, const std::vector<StandingCrown>& standing,
                                       std::uint64_t seed);
 
 // The placed trees as crowns for the next species to keep clear of.
 std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings);
+
+// The placed trees' trunks for the mid layer to keep clear of, each clearance metres round (its crown may stand under
+// theirs): past the buttresses, with room to walk between.
+inline constexpr float midTrunkClearance = 4.0f;
+std::vector<StandingCrown> standingTrunks(const std::vector<TreePlacement>& trees, float clearance);
 
 // The crown's bounding sphere of a placed tree in the world (what the sight lines are tested against).
 Vec3 placedCrownCentre(const TreePlacement& tree, const ForestTreeSettings& settings);

@@ -664,6 +664,23 @@ ForestTreeSettings emergentTreeSettings() {
     return settings;
 }
 
+ForestTreeSettings midTreeSettings() {
+    ForestTreeSettings settings;
+    settings.count = 400;
+    settings.variants = 4;
+    settings.height = 15.0f;
+    settings.forkHeight = 10.0f;
+    settings.crownRadius = 5.0f;
+    settings.limbs = 3;
+    settings.clumps = 5;
+    settings.clumpRadius = 2.2f;
+    settings.attractors = 1500;
+    settings.twigRadius = 0.02f; // a trunk about 25 cm across at the foot
+    settings.buttress = 0.3f;
+    settings.lean = 1.5f;
+    return settings;
+}
+
 // A fork above the top is taken as a fork just under it, so the crown keeps some depth.
 CrownEnvelope treeCrown(const ForestTreeSettings& settings) {
     const float fork = std::min(settings.forkHeight, settings.height - 1.0f);
@@ -933,6 +950,17 @@ std::vector<TreePlacement> placeTrees(const ForestTreeSettings& settings, const 
     }
 
     return trees;
+}
+
+std::vector<StandingCrown> standingTrunks(const std::vector<TreePlacement>& trees, float clearance) {
+    std::vector<StandingCrown> trunks;
+    trunks.reserve(trees.size());
+
+    for (const TreePlacement& tree : trees) {
+        trunks.push_back(StandingCrown{Vec2{tree.foot.x, tree.foot.z}, clearance});
+    }
+
+    return trunks;
 }
 
 std::vector<StandingCrown> standingCrowns(const std::vector<TreePlacement>& trees, const ForestTreeSettings& settings) {
