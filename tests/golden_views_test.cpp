@@ -5,6 +5,8 @@
 #include "render/gpu/shadow_map.h"
 #include "scene/frame_description.h"
 
+#include "test_jobs.h"
+
 #include <algorithm>
 #include <cassert>
 #include <memory>
@@ -13,13 +15,18 @@
 #include <vector>
 
 namespace {
-    // A golden view as the capture runs it: a fresh game in a fresh world, set up and simulated to the view's time.
+    /*
+    * A golden view as the capture runs it: a fresh game in a fresh world, set up and simulated to the view's time, on the
+    * run's job system as the engine gives a game its own (on one thread the forest's eight builds here took most of the
+    * whole suite's time).
+    */
     struct PreparedView {
         World world;
         AssetManager assets;
         std::unique_ptr<Game> game;
 
         PreparedView(const GameEntry& entry, const GoldenView& view): game(entry.make()) {
+            game->useJobs(testJobs());
             game->onInit(world, assets);
             advanceToGoldenView(*game, world, view, EngineSettings{}.ticksPerSecond);
         }

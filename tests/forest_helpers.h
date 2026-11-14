@@ -1,30 +1,21 @@
 #pragma once
 
 #include "assets/asset_manager.h"
-#include "core/job_system.h"
 #include "ecs/world.h"
 #include "games/forest/forest_game.h"
 #include "core/settings_visitor.h"
 #include "gameplay/control_mode.h"
 #include "scene/indexed_mesh.h"
 
+#include "test_jobs.h"
+
 #include <functional>
 
 /*
-* A valley for the tests (forest_test, island_hangings_test, hanging_moss_test), so each does not grow its own copy.
-* The engine hands a game its job system (Game::useJobs); without one a game builds on serialJobs(), one thread, and
-* every test's valley (its ground, every pillar and island, their roots and moss) was carved on one core. One job
-* system for the whole run serves them all; the valley is the same whatever order its jobs finish in (each writes its
-* own slot), so the tests see what one thread would build.
-*/
-inline JobSystem& forestTestJobs() {
-    static JobSystem jobs;
-    return jobs;
-}
-
-/*
-* A fresh valley, initialised headless with its stand-in ground (an asset folder that does not exist), its coarsest
-* ground and fewer shapes by default, so the tests neither need the downloaded assets nor spend long building it. Its
+* A valley for the tests (forest_test, island_hangings_test, hanging_moss_test, drifting_rocks_test, forest_trees_test),
+* built on the run's one job system (test_jobs.h). A fresh valley, initialised headless with its stand-in ground (an
+* asset folder that does not exist), its coarsest ground and fewer shapes by default, so the tests neither need the
+* downloaded assets nor spend long building it. Its
 * trees are two sparse variants (a few hundred attractors each, where the game grows four of 2500): placed exactly as
 * the game's, since the crowns' sizes are the same, but grown in a fraction of the time (forest_trees_test grows full
 * ones).
@@ -38,7 +29,7 @@ struct TestForest {
         game.getValleySettings() = valley;
         game.getTreeSettings().attractors = 300;
         game.getTreeSettings().variants = 2;
-        game.useJobs(forestTestJobs());
+        game.useJobs(testJobs());
         game.onInit(world, assets);
     }
 };

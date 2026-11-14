@@ -1,5 +1,10 @@
+#include <algorithm>
+#include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 void testPixelBuffer();
 void testRasterizer();
@@ -221,6 +226,34 @@ void runParkedTests() {
     testGpuClothEngine();
 }
 
+namespace {
+    // Each routine test's wall time, for --times: which tests make the run slow.
+    std::vector<std::pair<double, const char*>> testTimes;
+
+    void runTest(const char* name, void (*test)()) {
+        const auto start = std::chrono::steady_clock::now();
+        test();
+        testTimes.emplace_back(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), name);
+    }
+
+    // The slowest tests first, with their share of the whole run.
+    void printTestTimes(std::size_t shown) {
+        std::sort(testTimes.begin(), testTimes.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        double total = 0.0;
+
+        for (const auto& [seconds, name] : testTimes) {
+            total += seconds;
+        }
+
+        std::cout << std::fixed << std::setprecision(2) << "Routine tests: " << total << " s in all; the slowest:\n";
+
+        for (std::size_t i = 0; i < std::min(shown, testTimes.size()); ++i) {
+            std::cout << std::setw(8) << testTimes[i].first << " s  " << std::setw(5) << std::setprecision(1)
+                      << 100.0 * testTimes[i].first / total << "%  " << testTimes[i].second << std::setprecision(2) << "\n";
+        }
+    }
+}
+
 int main(int argumentCount, char** arguments) {
     if (argumentCount > 1 && std::string_view{arguments[1]} == "--slow") {
         runSlowTests();
@@ -234,162 +267,166 @@ int main(int argumentCount, char** arguments) {
         return 0;
     }
 
-    testPixelBuffer();
-    testRasterizer();
-    testFilledTriangle();
-    testVec2();
-    testVec3();
-    testVec4();
-    testMat4();
-    testQuat();
-    testClipper();
-    testDepthBuffer();
-    testTriangleDepth();
-    testShading();
-    testTransform();
-    testObjLoader();
-    testObjUvs();
-    testGltfLoader();
-    testGltfAttributes();
-    testGltfTextures();
-    testGlbTextures();
-    testModelBounds();
-    testRay();
-    testMoveToController();
-    testCharacter();
-    testInput();
-    testFixedTimestep();
-    testSdlInput();
-    testWorld();
-    testModelRenderer();
-    testEdgePan();
-    testDemoGame();
-    testCameraControllers();
-    testAssetManager();
-    testIndexedMesh();
-    testLighting();
-    testLightUniforms();
-    testMaterialUniforms();
-    testGpuScene();
-    testDeferredChanges();
-    testDeterminism();
-    testEngineSettings();
-    testBrdf();
-    testParallax();
-    testHeightMap();
-    testTypicalGpu();
-    testGroundLayers();
-    testDepthPrepass();
-    testTextureEncoding();
-    testCoverageMips();
-    testAlphaMask();
-    testTransparency();
-    testGltfMaterials();
-    testGltfNormalMaps();
-    testSmoothNormals();
-    testNormalMatrix();
-    testNormalMapping();
-    testHalfFloat();
-    testImageCompare();
-    testGoldenViews();
-    testSun();
-    testCelestial();
-    testStars();
-    testEyeAdaptation();
-    testGameRegistry();
-    testCommandRegistry();
-    testEngineCommands();
-    testCommandSocket();
-    testPlayerControls();
-    testLightLab();
-    testForest();
-    testIslandHangings();
-    testHangingMoss();
-    testDriftingRocks();
-    testForestTrees();
-    testFlashlight();
-    testRawImagePng();
-    testTangents();
-    testGpuDepthRange();
-    testCameraRelative();
-    testMipLevels();
-    testSrgb();
-    testFrameDescription();
-    testShadowMap();
-    testShadowAtlas();
-    testSoftShadow();
-    testCascades();
-    testDepthRange();
-    testAtmosphere();
-    testRayTracing();
-    testVideoMemory();
-    testSkyObject();
-    testLightPriority();
-    testDebugDraw();
-    testCulling();
-    testDebugText();
-    testDither();
-    testSphereMesh();
-    testLatheMesh();
-    testFirefly();
-    testSpinner();
-    testClosestPoints();
-    testDelaunay();
-    testOverlap();
-    testRaycast();
-    testCollisionMesh();
-    testAffineInverse();
-    testCollider();
-    testColliderRaycast();
-    testShapeBounds();
-    testUniformGrid();
-    testCollisionScene();
-    testTriangleContact();
-    testStaticLevel();
-    testCharacterController();
-    testAngles();
-    testFirstPersonBody();
-    testSphereCast();
-    testParticle();
-    testGrenade();
-    testProfiler();
-    testJobSystem();
-    testDeformingMesh();
-    testDeformingSlots();
-    testGpuTiming();
-    testToneMapping();
-    testToneMapUniforms();
-    testCameraFinish();
-    testMotionBlur();
-    testDepthOfField();
-    testFrostedGlass();
-    testImageLights();
-    testBloom();
-    testBlueNoise();
-    testTaa();
-    testScreenReflections();
-    testReflectionProbe();
-    testPlanarReflection();
-    testMirroredLight();
-    testAmbientOcclusion();
-    testContactShadows();
-    testVolumetricFog();
-    testSkyVisibility();
-    testPipelineCompiler();
-    testLoadingScreen();
-    testStaticGeometry();
-    testUpscaling();
-    testDisplayOutput();
-    testSettingsFile();
-    testQualityPreset();
-    testOverlayComposite();
-    testSwapchainChoice();
-    testImageState();
-    testUniformRing();
-    testFloatTolerance();
-    testLightFalloff();
-    testComputeDispatch();
-    testClusters();
+    runTest("testPixelBuffer", testPixelBuffer);
+    runTest("testRasterizer", testRasterizer);
+    runTest("testFilledTriangle", testFilledTriangle);
+    runTest("testVec2", testVec2);
+    runTest("testVec3", testVec3);
+    runTest("testVec4", testVec4);
+    runTest("testMat4", testMat4);
+    runTest("testQuat", testQuat);
+    runTest("testClipper", testClipper);
+    runTest("testDepthBuffer", testDepthBuffer);
+    runTest("testTriangleDepth", testTriangleDepth);
+    runTest("testShading", testShading);
+    runTest("testTransform", testTransform);
+    runTest("testObjLoader", testObjLoader);
+    runTest("testObjUvs", testObjUvs);
+    runTest("testGltfLoader", testGltfLoader);
+    runTest("testGltfAttributes", testGltfAttributes);
+    runTest("testGltfTextures", testGltfTextures);
+    runTest("testGlbTextures", testGlbTextures);
+    runTest("testModelBounds", testModelBounds);
+    runTest("testRay", testRay);
+    runTest("testMoveToController", testMoveToController);
+    runTest("testCharacter", testCharacter);
+    runTest("testInput", testInput);
+    runTest("testFixedTimestep", testFixedTimestep);
+    runTest("testSdlInput", testSdlInput);
+    runTest("testWorld", testWorld);
+    runTest("testModelRenderer", testModelRenderer);
+    runTest("testEdgePan", testEdgePan);
+    runTest("testDemoGame", testDemoGame);
+    runTest("testCameraControllers", testCameraControllers);
+    runTest("testAssetManager", testAssetManager);
+    runTest("testIndexedMesh", testIndexedMesh);
+    runTest("testLighting", testLighting);
+    runTest("testLightUniforms", testLightUniforms);
+    runTest("testMaterialUniforms", testMaterialUniforms);
+    runTest("testGpuScene", testGpuScene);
+    runTest("testDeferredChanges", testDeferredChanges);
+    runTest("testDeterminism", testDeterminism);
+    runTest("testEngineSettings", testEngineSettings);
+    runTest("testBrdf", testBrdf);
+    runTest("testParallax", testParallax);
+    runTest("testHeightMap", testHeightMap);
+    runTest("testTypicalGpu", testTypicalGpu);
+    runTest("testGroundLayers", testGroundLayers);
+    runTest("testDepthPrepass", testDepthPrepass);
+    runTest("testTextureEncoding", testTextureEncoding);
+    runTest("testCoverageMips", testCoverageMips);
+    runTest("testAlphaMask", testAlphaMask);
+    runTest("testTransparency", testTransparency);
+    runTest("testGltfMaterials", testGltfMaterials);
+    runTest("testGltfNormalMaps", testGltfNormalMaps);
+    runTest("testSmoothNormals", testSmoothNormals);
+    runTest("testNormalMatrix", testNormalMatrix);
+    runTest("testNormalMapping", testNormalMapping);
+    runTest("testHalfFloat", testHalfFloat);
+    runTest("testImageCompare", testImageCompare);
+    runTest("testGoldenViews", testGoldenViews);
+    runTest("testSun", testSun);
+    runTest("testCelestial", testCelestial);
+    runTest("testStars", testStars);
+    runTest("testEyeAdaptation", testEyeAdaptation);
+    runTest("testGameRegistry", testGameRegistry);
+    runTest("testCommandRegistry", testCommandRegistry);
+    runTest("testEngineCommands", testEngineCommands);
+    runTest("testCommandSocket", testCommandSocket);
+    runTest("testPlayerControls", testPlayerControls);
+    runTest("testLightLab", testLightLab);
+    runTest("testForest", testForest);
+    runTest("testIslandHangings", testIslandHangings);
+    runTest("testHangingMoss", testHangingMoss);
+    runTest("testDriftingRocks", testDriftingRocks);
+    runTest("testForestTrees", testForestTrees);
+    runTest("testFlashlight", testFlashlight);
+    runTest("testRawImagePng", testRawImagePng);
+    runTest("testTangents", testTangents);
+    runTest("testGpuDepthRange", testGpuDepthRange);
+    runTest("testCameraRelative", testCameraRelative);
+    runTest("testMipLevels", testMipLevels);
+    runTest("testSrgb", testSrgb);
+    runTest("testFrameDescription", testFrameDescription);
+    runTest("testShadowMap", testShadowMap);
+    runTest("testShadowAtlas", testShadowAtlas);
+    runTest("testSoftShadow", testSoftShadow);
+    runTest("testCascades", testCascades);
+    runTest("testDepthRange", testDepthRange);
+    runTest("testAtmosphere", testAtmosphere);
+    runTest("testRayTracing", testRayTracing);
+    runTest("testVideoMemory", testVideoMemory);
+    runTest("testSkyObject", testSkyObject);
+    runTest("testLightPriority", testLightPriority);
+    runTest("testDebugDraw", testDebugDraw);
+    runTest("testCulling", testCulling);
+    runTest("testDebugText", testDebugText);
+    runTest("testDither", testDither);
+    runTest("testSphereMesh", testSphereMesh);
+    runTest("testLatheMesh", testLatheMesh);
+    runTest("testFirefly", testFirefly);
+    runTest("testSpinner", testSpinner);
+    runTest("testClosestPoints", testClosestPoints);
+    runTest("testDelaunay", testDelaunay);
+    runTest("testOverlap", testOverlap);
+    runTest("testRaycast", testRaycast);
+    runTest("testCollisionMesh", testCollisionMesh);
+    runTest("testAffineInverse", testAffineInverse);
+    runTest("testCollider", testCollider);
+    runTest("testColliderRaycast", testColliderRaycast);
+    runTest("testShapeBounds", testShapeBounds);
+    runTest("testUniformGrid", testUniformGrid);
+    runTest("testCollisionScene", testCollisionScene);
+    runTest("testTriangleContact", testTriangleContact);
+    runTest("testStaticLevel", testStaticLevel);
+    runTest("testCharacterController", testCharacterController);
+    runTest("testAngles", testAngles);
+    runTest("testFirstPersonBody", testFirstPersonBody);
+    runTest("testSphereCast", testSphereCast);
+    runTest("testParticle", testParticle);
+    runTest("testGrenade", testGrenade);
+    runTest("testProfiler", testProfiler);
+    runTest("testJobSystem", testJobSystem);
+    runTest("testDeformingMesh", testDeformingMesh);
+    runTest("testDeformingSlots", testDeformingSlots);
+    runTest("testGpuTiming", testGpuTiming);
+    runTest("testToneMapping", testToneMapping);
+    runTest("testToneMapUniforms", testToneMapUniforms);
+    runTest("testCameraFinish", testCameraFinish);
+    runTest("testMotionBlur", testMotionBlur);
+    runTest("testDepthOfField", testDepthOfField);
+    runTest("testFrostedGlass", testFrostedGlass);
+    runTest("testImageLights", testImageLights);
+    runTest("testBloom", testBloom);
+    runTest("testBlueNoise", testBlueNoise);
+    runTest("testTaa", testTaa);
+    runTest("testScreenReflections", testScreenReflections);
+    runTest("testReflectionProbe", testReflectionProbe);
+    runTest("testPlanarReflection", testPlanarReflection);
+    runTest("testMirroredLight", testMirroredLight);
+    runTest("testAmbientOcclusion", testAmbientOcclusion);
+    runTest("testContactShadows", testContactShadows);
+    runTest("testVolumetricFog", testVolumetricFog);
+    runTest("testSkyVisibility", testSkyVisibility);
+    runTest("testPipelineCompiler", testPipelineCompiler);
+    runTest("testLoadingScreen", testLoadingScreen);
+    runTest("testStaticGeometry", testStaticGeometry);
+    runTest("testUpscaling", testUpscaling);
+    runTest("testDisplayOutput", testDisplayOutput);
+    runTest("testSettingsFile", testSettingsFile);
+    runTest("testQualityPreset", testQualityPreset);
+    runTest("testOverlayComposite", testOverlayComposite);
+    runTest("testSwapchainChoice", testSwapchainChoice);
+    runTest("testImageState", testImageState);
+    runTest("testUniformRing", testUniformRing);
+    runTest("testFloatTolerance", testFloatTolerance);
+    runTest("testLightFalloff", testLightFalloff);
+    runTest("testComputeDispatch", testComputeDispatch);
+    runTest("testClusters", testClusters);
+
+    if (argumentCount > 1 && std::string_view{arguments[1]} == "--times") {
+        printTestTimes(30);
+    }
 
     std::cout << "All tests passed!\n";
     return 0;
