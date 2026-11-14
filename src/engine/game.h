@@ -2,6 +2,7 @@
 
 #include "assets/asset_manager.h"
 #include "cloth/cloth.h"
+#include "core/command_registry.h"
 #include "core/job_system.h"
 #include "core/settings_visitor.h"
 #include "ecs/world.h"
@@ -77,6 +78,14 @@ public:
         (void)position;
         (void)target;
         return false;
+    }
+
+    // The game's own commands (core/command_registry.h), for actions that are not a setting's value (the engine's
+    // commands rule: every feature a developer would trigger can be run from the command line). Optional; the handlers
+    // run between frames, given the world they act on.
+    virtual void addCommands(CommandRegistry& registry, World& world) {
+        (void)registry;
+        (void)world;
     }
 
     // The game's own tunable values (its settings structs' visit()), optional: the debug UI shows them under the game's

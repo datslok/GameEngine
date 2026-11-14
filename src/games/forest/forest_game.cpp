@@ -12,43 +12,106 @@
 #include <utility>
 
 namespace {
-    // The weights texture's size: 512 texels over 400 m, one about every 0.8 m; the layers' height maps make the
-    // borders between them finer than that.
-    constexpr int weightsTextureSize = 512;
+    // The weights textures' size at the finest ground: 1024 texels over the near ring's 1.28 km (one about every
+    // 1.25 m; the layers' height maps make the borders finer than that), and over the whole 41 km (one every 40 m, slope
+    // and rock seen from far away). Halved for each step of coarser ground, so a quick start stays quick.
+    constexpr int weightsTextureSize = 1024;
 
-    // The start: on the path at the meadow's northern edge, looking north up it towards the clearing.
-    const Vec2 startPlace{25.6f, 138.8f};
+    // The far plane: past the farthest ring of land (20.5 km from its centre), which reversed-Z depth keeps precise.
+    constexpr float valleyFarPlane = 25000.0f;
+
+    // The day's hours for the golden views: mid-morning (the sun low in the east, light across the valley), and dusk.
+    constexpr float morningHours = 9.5f;
+    constexpr float duskHours = 17.8f;
+
+    // The grey stand-in materials, in sRGB as colour pickers give them: sandstone, the Monolith's concrete, the Ring's
+    // steel.
+    constexpr Pixel sandstone{178, 162, 138};
+    constexpr Pixel concrete{122, 126, 130};
+    constexpr Pixel steel{160, 164, 168};
 
     Vec3 onGround(float x, float z, float above = 0.0f) {
         return Vec3{x, forestHeight(x, z) + above, z};
     }
 
-    PlayerControlsSetup forestViews() {
+    // The clearing's level, where the Monolith stands.
+    float clearingLevel() {
+        return forestHeight(forestClearingCentre.x, forestClearingCentre.y);
+    }
+
+    PlayerControlsSetup forestControls() {
+        const ForestView rim = forestViews().front();
         return PlayerControlsSetup{
-            .freeCameraPosition = onGround(startPlace.x, startPlace.y, 1.7f),
-            .freeCameraTarget = onGround(0.0f, 0.0f, 2.0f),
-            .mobaLookPoint = onGround(startPlace.x, startPlace.y - 8.0f),
-            .firstPersonFeet = onGround(startPlace.x, startPlace.y),
+            .freeCameraPosition = rim.position,
+            .freeCameraTarget = rim.target,
+            .mobaLookPoint = onGround(forestStartPlace.x, forestStartPlace.y - 8.0f),
+            .firstPersonFeet = onGround(forestStartPlace.x, forestStartPlace.y),
             .verticalFovDegrees = 70.0f,
             .nearPlane = 0.1f,
-            .farPlane = 1000.0f
+            .farPlane = valleyFarPlane
         };
     }
 
+    Material plainMaterial(Pixel colour, float roughness, float metallic = 0.0f) {
+        Material material;
+        material.colour = colour;
+        material.roughness = roughness;
+        material.metallic = metallic;
+        return material;
+    }
+
+    // The ground's material over an extent: the four layers, each repeated by its tile size, painted by a weights texture.
+    Material groundMaterial(AssetManager& assets, const std::string& assetFolder, const GroundExtent& extent, int weightsSize, float blendDepth,
+                            JobSystem& jobs) {
+        Material material;
+
+        for (std::size_t layer = 0; layer < forestGroundLayers.size(); ++layer) {
+            material.groundLayers.push_back(forestLayerMaterial(assets, assetFolder, forestGroundLayers[layer]));
+            material.groundRepeats[layer] = 2.0f * extent.halfSize / forestGroundLayers[layer].tileMetres;
+        }
+
+        material.groundWeights = assets.addTexture(forestWeightsImage(weightsSize, extent, jobs));
+        material.groundBlendDepth = blendDepth;
+        return material;
+    }
+
+    Entity addShape(World& world, MeshHandle mesh, const Material& material, const Transform& transform, bool isStatic = false) {
+        ModelRenderer renderer = makeMeshRenderer(mesh, material);
+        renderer.isStatic = isStatic;
+        const Entity entity = world.create();
+        world.add(entity, transform);
+        world.add(entity, std::move(renderer));
+        return entity;
+    }
+
+    Transform boxTransform(const ValleyBox& box) {
+        return Transform{.position = box.centre, .rotation = Quat{}, .scale = box.halfSize};
+    }
+
     /*
-    * The golden views: the meadow by mid-morning looking up the path, and the clearing at dusk from its southern edge,
-    * the mist lit low across the hollows.
+    * The golden views: the concept art's plates. The valley from the rim by morning and at dusk, the Ring from the path,
+    * and up the Monolith from its foot.
     */
     struct ForestGoldenView {
         GoldenView view;
-        Vec3 cameraPosition;
-        Vec3 cameraTarget;
+        const char* place;
         float solarHours;
     };
 
     const ForestGoldenView forestGoldenViews[] = {
-        {{"meadow", 0.5, false}, onGround(startPlace.x, startPlace.y, 1.7f), onGround(3.0f, 92.0f, 1.0f), 9.5f},
-        {{"clearing-dusk", 0.5, false}, onGround(4.0f, 30.0f, 1.7f), onGround(0.0f, -20.0f, 2.0f), 17.8f}
+        {{"rim", 0.5, false}, "rim", morningHours},
+        {{"ring", 0.5, false}, "ring", morningHours},
+        {{"wall", 0.5, false}, "wall", morningHours},
+        {{"rim-dusk", 0.5, false}, "rim", duskHours}
+    };
+}
+
+std::vector<ForestView> forestViews() {
+    const float level = clearingLevel();
+    return {
+        ForestView{"rim", onGround(forestStartPlace.x, forestStartPlace.y, 1.7f), Vec3{forestMonolithPlace.x, level + 220.0f, forestMonolithPlace.y}},
+        ForestView{"ring", onGround(12.0f, 230.0f, 1.7f), onGround(forestRingPlace.x, forestRingPlace.y, 90.0f)},
+        ForestView{"wall", Vec3{-150.0f, level + 1.7f, forestClearingCentre.y + 60.0f}, Vec3{60.0f, level + 220.0f, forestMonolithPlace.y}}
     };
 }
 
@@ -70,9 +133,15 @@ void visit(ForestGroundSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Blend depth", settings.blendDepth, {.min = 0.0f, .max = 1.0f});
 }
 
+void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Ground coarseness", settings.groundCoarseness, {.min = 0, .max = 2, .applies = FieldApplies::AtStartup});
+    visitor.field("Pillars", settings.pillarCount, {.min = 0, .max = 2000, .sliderMax = 600, .applies = FieldApplies::AtStartup});
+    visitor.field("Floating islands", settings.islandCount, {.min = 0, .max = 500, .sliderMax = 100, .applies = FieldApplies::AtStartup});
+}
+
 ForestGame::ForestGame(ControlMode startMode, bool debugModeSwitching, std::string assetFolder):
     assetFolder(std::move(assetFolder)),
-    controls(forestViews(), startMode, debugModeSwitching)
+    controls(forestControls(), startMode, debugModeSwitching)
 {
 }
 
@@ -80,27 +149,9 @@ const char* ForestGame::title() const {
     return "Forest";
 }
 
-/*
-* The ground is one static entity: the triangles drawn are the triangles walked on, and the sky visibility grid's rays
-* and the light probes see it. Its material holds the four layers and the weights painting them.
-*/
 void ForestGame::onInit(World& world, AssetManager& assets) {
-    Material groundMaterial;
-
-    for (std::size_t layer = 0; layer < forestGroundLayers.size(); ++layer) {
-        groundMaterial.groundLayers.push_back(forestLayerMaterial(assets, assetFolder, forestGroundLayers[layer]));
-        groundMaterial.groundRepeats[layer] = 2.0f * forestHalfSize / forestGroundLayers[layer].tileMetres;
-    }
-
-    groundMaterial.groundWeights = assets.addTexture(forestWeightsImage(weightsTextureSize));
-    groundMaterial.groundBlendDepth = groundSettings.blendDepth;
-
-    ModelRenderer renderer = makeMeshRenderer(assets.addMesh(forestTerrainMesh()), groundMaterial);
-    renderer.isStatic = true;
-    staticLevel.add(assets.makeCollisionMesh(renderer));
-    ground = world.create();
-    world.add(ground, Transform{});
-    world.add(ground, std::move(renderer));
+    buildGround(world, assets);
+    buildShapes(world, assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -118,6 +169,81 @@ void ForestGame::onInit(World& world, AssetManager& assets) {
     updateDaylight(world);
 }
 
+/*
+* The finest ring is the ground walked on and the one the sky visibility grid's rays see (static), with its own weights
+* texture; the coarser rings share one over the whole land, are only drawn, and are not static: kilometres of them in
+* the static level's 1 m cells would cost far more than the far ground's shading gains.
+*/
+void ForestGame::buildGround(World& world, AssetManager& assets) {
+    const int coarseness = std::clamp(valleySettings.groundCoarseness, 0, 2);
+    const std::vector<TerrainRing> rings = forestTerrainRings(static_cast<float>(2 << coarseness));
+    const int weightsSize = weightsTextureSize >> coarseness;
+    const Material nearMaterial = groundMaterial(assets, assetFolder, forestNearExtent(), weightsSize, groundSettings.blendDepth, getJobs());
+    const Material farMaterial = groundMaterial(assets, assetFolder, forestFarExtent(), weightsSize, groundSettings.blendDepth, getJobs());
+
+    ground = addShape(world, assets.addMesh(forestTerrainRingMesh(rings.front(), forestNearExtent(), getJobs())), nearMaterial, Transform{}, true);
+    staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(ground)));
+
+    for (std::size_t ring = 1; ring < rings.size(); ++ring) {
+        farGround.push_back(addShape(world, assets.addMesh(forestTerrainRingMesh(rings[ring], forestFarExtent(), getJobs())), farMaterial, Transform{}));
+    }
+}
+
+/*
+* A few pillar and island shapes, each placed many times turned and scaled, so the GPU draws all of one shape in one
+* instanced draw. Only the Monolith is static and walked against: a handful of big boxes; the pillars, islands and Ring
+* stand clear of the path, so nobody walks into them yet.
+*/
+void ForestGame::buildShapes(World& world, AssetManager& assets) {
+    const ValleyLayout layout{.pillarCount = valleySettings.pillarCount, .islandCount = valleySettings.islandCount};
+    std::vector<MeshHandle> pillarShapes;
+    std::vector<MeshHandle> islandShapes;
+
+    for (int variant = 0; variant < layout.variants; ++variant) {
+        pillarShapes.push_back(assets.addMesh(pillarMesh(static_cast<std::uint32_t>(variant))));
+        islandShapes.push_back(assets.addMesh(islandMesh(static_cast<std::uint32_t>(variant))));
+    }
+
+    const Material rock = plainMaterial(sandstone, 0.9f);
+    const auto addPillar = [&](const PillarPlacement& pillar) {
+        addShape(world, pillarShapes[static_cast<std::size_t>(pillar.variant)], rock,
+                 Transform{.position = pillar.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, pillar.turnRadians),
+                           .scale = Vec3{pillar.radius, pillar.height, pillar.radius}});
+    };
+
+    pillars = placePillars(layout);
+    pillars.push_back(monolithPillar(clearingLevel()));
+
+    for (const PillarPlacement& pillar : pillars) {
+        addPillar(pillar);
+    }
+
+    islands = placeIslands(layout, pillars);
+
+    for (const IslandPlacement& island : islands) {
+        addShape(world, islandShapes[static_cast<std::size_t>(island.variant)], rock,
+                 Transform{.position = island.rim, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, island.turnRadians),
+                           .scale = Vec3{island.radius, island.radius, island.radius}});
+    }
+
+    // The Ring stands across the path, its centre at the ground there, so its lower half is buried.
+    ring = addShape(world, assets.addMesh(ringMesh(forestRingTubeRadius / forestRingRadius)), plainMaterial(steel, 0.35f, 1.0f),
+                    Transform{.position = onGround(forestRingPlace.x, forestRingPlace.y), .rotation = Quat{},
+                              .scale = Vec3{forestRingRadius, forestRingRadius, forestRingRadius}});
+
+    const MeshHandle box = assets.addMesh(Mesh::cube());
+    const Material concreteMaterial = plainMaterial(concrete, 0.8f);
+
+    for (const ValleyBox& part : monolithBoxes(clearingLevel())) {
+        monolith.push_back(addShape(world, box, concreteMaterial, boxTransform(part), true));
+        staticLevel.add(assets.makeCollisionMesh(world.get<ModelRenderer>(monolith.back())), boxTransform(part).getMatrix());
+    }
+
+    for (const ValleyBox& tower : farTowerBoxes()) {
+        addShape(world, box, concreteMaterial, boxTransform(tower));
+    }
+}
+
 void ForestGame::onInput(World& world, const Input& input) {
     controls.updateFirstPersonCommands(world, input);
 
@@ -132,7 +258,7 @@ void ForestGame::onFixedUpdate(World& world, float tickSeconds, double simulatio
     updateFirstPersonBodies(world, staticLevel, tickSeconds);
 }
 
-// The daylight, mist and blend follow the settings every frame, so a slider or a set command changes them at once.
+// The daylight, haze and blend follow the settings every frame, so a slider or a set command changes them at once.
 void ForestGame::onUpdate(World& world, const Input& input, float frameSeconds, float alpha) {
     // Motion from the previous mode must not rotate the new camera pose.
     if (!controls.updateModeSwitching(world, input)) {
@@ -169,6 +295,21 @@ void ForestGame::updateDaylight(World& world) {
     }
 
     world.get<ModelRenderer>(ground).parts.front().material.groundBlendDepth = groundSettings.blendDepth;
+
+    for (const Entity far : farGround) {
+        world.get<ModelRenderer>(far).parts.front().material.groundBlendDepth = groundSettings.blendDepth;
+    }
+}
+
+bool ForestGame::showView(World& world, const std::string& name) {
+    for (const ForestView& view : forestViews()) {
+        if (name == view.name) {
+            controls.poseFreeCamera(world, view.position, view.target);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 Camera& ForestGame::getCamera() {
@@ -206,7 +347,32 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     visitor.group("Ground", [&] {
         visit(groundSettings, visitor);
     });
+    visitor.group("Valley", [&] {
+        visit(valleySettings, visitor);
+    });
     controls.visitSettings(visitor);
+}
+
+// forest-view: the concept art's places to look from, by name, through the free camera.
+void ForestGame::addCommands(CommandRegistry& registry, World& world) {
+    std::string names;
+
+    for (const ForestView& view : forestViews()) {
+        names += names.empty() ? view.name : std::string{", "} + view.name;
+    }
+
+    registry.add("forest-view", "forest-view <name>", "Places the camera at one of the valley's views: " + names + ".",
+                 [this, &world, names](const CommandArguments& arguments) {
+                     if (arguments.size() != 1) {
+                         return commandError("Usage: forest-view <name>, one of " + names);
+                     }
+
+                     if (!showView(world, arguments.front())) {
+                         return commandError("No view called " + arguments.front() + "; there are " + names);
+                     }
+
+                     return commandOk("Looking from " + arguments.front());
+                 });
 }
 
 std::vector<GoldenView> ForestGame::goldenViews() const {
@@ -225,7 +391,7 @@ void ForestGame::prepareGoldenView(World& world, const GoldenView& view) {
             // The clock stands still, so the view's ticks do not move the sun off its hour.
             sunSettings.solarHours = golden.solarHours;
             sunSettings.hoursPerSecond = 0.0f;
-            controls.poseFreeCamera(world, golden.cameraPosition, golden.cameraTarget);
+            showView(world, golden.place);
             updateDaylight(world);
         }
     }
@@ -237,6 +403,30 @@ const StaticLevel& ForestGame::getLevel() const {
 
 Entity ForestGame::getGround() const {
     return ground;
+}
+
+const std::vector<Entity>& ForestGame::getFarGround() const {
+    return farGround;
+}
+
+const std::vector<PillarPlacement>& ForestGame::getPillars() const {
+    return pillars;
+}
+
+const std::vector<IslandPlacement>& ForestGame::getIslands() const {
+    return islands;
+}
+
+Entity ForestGame::getRing() const {
+    return ring;
+}
+
+const std::vector<Entity>& ForestGame::getMonolith() const {
+    return monolith;
+}
+
+ForestValleySettings& ForestGame::getValleySettings() {
+    return valleySettings;
 }
 
 Entity ForestGame::getSun() const {

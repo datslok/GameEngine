@@ -162,6 +162,8 @@ The engine's text interface (`command-line-control`, Oct 29 2026): tools, script
 - `wait [frames]`: the queue stops for that many frames (so lighting and anti-aliasing settle before a screenshot), and its reply goes when they are done.
 - `save-settings` (`Application::saveSettings`, shared with F5's Save) and `quit` (the loop ends after the replies are sent).
 
+A game adds its own through `Game::addCommands(registry, world)` (`engine/game.h`, optional), called right after the camera's, for actions that are not a setting's value: the forest's `forest-view`.
+
 ### Where they run
 
 `Application::runCommands` runs at the top of each frame, before its time is measured: the time commands take is added to `previousFrameStart`, so a slow screenshot or a long step is not game time and no burst of catch-up ticks follows. It takes the server's new requests into `pendingCommands` (after any script queued by `queueCommands`, `--run`), and runs them in order until the queue is empty or a `wait` holds it (`waitFrames`, the held reply in `waiting`). Replies go back to the connection, or for a script to the standard output as "> line" and the reply. Commands land between frames, like key presses, so they never break a tick's determinism; `step` runs `Application::runTick`, the loop's own tick.
@@ -3507,23 +3509,53 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 
 ### The forest
 
-`ForestGame` (`games/forest/forest_game`, `--game forest`, title "Forest"): the phase 18 showcase, a lush forest with mist in its valleys, meadows and, later, a sci-fi structure. So far the land, its ground, the sun and the mist.
+`ForestGame` (`games/forest/forest_game`, `--game forest`, title "Forest"): the phase 18 showcase, a jungle valley at a scale meant to be felt (re-planned Nov 13 2026, ROADMAP phase 18). So far the rough valley, its test of scale: the land, grey shapes at their real sizes, the sun and the haze. North is -z.
 
 **The land** (`games/forest/forest_terrain`), pure functions of the place, so the drawn ground, the walked ground and the paint agree:
 
-- 400 m square (`forestHalfSize` 200), drawn and walked as one 1 m grid (`forestTerrainMesh`, 160,801 vertices, smooth normals, texture coordinates 0 to 1 across the land).
-- Heights from value noise (`forestValueNoise`: hashed lattice values with a quintic fade; `forestFractalNoise`, octaves): broad hills about 100 m across (9 m), rockier knolls about 28 m across (7 m) and lumps (0.25 m), set so the clearing's centre is at 0. Hollows go about 9 m below it, hills 11 m above.
-- A level clearing round the origin (`forestClearingRadius` 25 m, blending back over 18 m), where the structure will stand.
-- A path (`forestPathPoints`) winding south from the clearing to the meadow, level across within 1.2 m of its centre line and sunk 8 cm. Along it its level is the land averaged over 12 m either way, so it cuts through knolls and over dips and stays walkable (at most about 16 degrees).
-- `forestMeadowShare`: open canopy in the clearing, the meadow (`forestMeadowCentre`, 32 m round) and wide openings where low-frequency noise is high.
+- The valley runs north. Its floor is at 0 within `valleyFloorHalfWidth` (200 m) of its axis (`valleyAxis`: straight along the walk, swinging up to 400 m either way north of z = -700). Walls climb to the rim (`valleyRimHeight`, 150 m) over `valleyWallWidth` (150 m).
+- The ramp: the floor climbs south from z = 50 to the rim at z = 750, 70% a straight slope and 30% eased, so its steepest part is gentler than an eased curve's. The start (`forestStartPlace`) is on the rim at its top.
+- Mountains beyond the rim: rising over 300 m to 2.5 km outside the valley to 60-100% of 700 m by noise about 2.5 km across.
+- Over all of it the first forest's small shapes from value noise (`forestValueNoise`, `forestFractalNoise`): hills about 100 m across (9 m), knolls about 28 m (7 m), lumps (0.25 m).
+- A level clearing at the Monolith's foot (`forestClearingCentre`, 120 m round, blending over 60 m).
+- The path (`forestPathPoints`): from the start down the ramp in wide bends, through the Ring's middle and along the floor into the clearing. Level across within 1.5 m of its centre line, sunk 8 cm; along it the land averaged over 30 m either way (12 m left the knolls on the ramp at 33 degrees), at most about 23 degrees.
+- `forestMeadowShare`: open canopy in the clearing, a meadow round the start (60 m) and wide openings where low-frequency noise is high.
 
-**The ground's paint** (`forestGroundPaint`, baked into a 512 x 512 weights texture, `forestWeightsImage`): mud on the path, mossy rock where the ground is steeper than about 23 degrees (all of it past 33), then grass where the canopy is open and leaf litter where it is closed, their edge ragged by fine noise.
+**The rings** (`TerrainRing`, `forestTerrainRings`, `forestTerrainRingMesh`): the land as four nested squares round `forestTerrainCentre` (halfway along the walk), each with coarser squares than the one inside, so 1.24 million triangles reach 20 km.
+
+| Ring | Half size | Squares | Triangles |
+|---|---|---|---|
+| 0 (walked on, static) | 640 m | 2 m | 819,200 |
+| 1 | 2.56 km | 16 m | 192,000 |
+| 2 | 10.24 km | 64 m | 192,000 |
+| 3 | 20.48 km | 256 m | 38,400 |
+
+- Each ring's outer border follows the next ring's coarser edge exactly (`forestRingHeight`: on the straight line between its grid points), so there are no cracks. The halves must hold whole squares of every ring, so the finest squares are 2, 4 or 8 m (`ForestValleySettings::groundCoarseness`, start-up: 2 by default, the tests' 8).
+- Normals are measured over each ring's own spacing. Rows are measured on the game's job system (`Game::getJobs`), each into its own slots: the valley builds in 1.7 s on the laptop's 16 threads (5.1 s on one).
+- Only ring 0 is static and walked on: the far rings in the static level's 1 m cells would cost the sky visibility grid's rays far more than the far ground's shading gains.
+
+**The ground's paint** (`forestGroundPaint`, its slope measured over the texel's size): mud on the path, mossy rock where the ground is steeper than about 23 degrees (all of it past 33: the valley's walls), then grass where the canopy is open and leaf litter where it is closed, their edge ragged by fine noise. Two weights textures (`forestWeightsImage` over a `GroundExtent`): 1024 texels over ring 0 (1.25 m each) and 1024 over all 41 km (40 m each) for the far rings, halved for each step of coarser ground. Each ground material repeats its layers by its extent (`groundRepeats`).
 
 **The layers** (`games/forest/forest_ground`): grass (ambientCG `Grass004`, 2 m tiles), leaf litter (Poly Haven `leaves_forest_ground`, 2.5 m), mud (`brown_mud_leaves_01`, 2.5 m) and mossy rock (`mossy_rock`, 3 m), from `assets/forest` (`tools/fetch_forest_assets.py`). `findForestTextureFiles` finds each role's file (colour, normal, height, and Poly Haven's packed occlusion-roughness-metal map or ambientCG's separate roughness and occlusion); `forestLayerMaterial` loads them, or gives a plain coloured stand-in where the folder is missing (a fresh clone before the fetch; the tests, which pass a folder that does not exist).
 
-**The rest:** a sun near the equator (`ForestSunSettings`: 5 degrees north, the March equinox, 9:30 by default) through a real sky (an `Atmosphere`, its ground the leaf litter's colour); the valley mist (`ForestMistSettings`: a `Fog` 0.04 per metre at 2 m below the clearing, thinning by e every 4 m up); `ProbeCascades` for when ray tracing is on; the player starting on the path at the meadow's edge, facing north. Settings in F5 under Forest (Sun, Atmosphere, Mist, Ground's blend depth), all live. Golden views `meadow` and `clearing-dusk` (references not saved yet).
+**The shapes** (`games/forest/valley_shapes`), grey for now:
 
-**Tests:** `forest_test` (registered, the noise, the clearing, hollows and path, the mesh, the paint by place, the weights texture, layer files by role and the stand-ins, the game headless, its settings applied each frame).
+- `wrappedSurfaceMesh(rows, columns, wrapRows, point)`: a grid of points, rows up and columns round, the last column joined to the first (and the last row to the first for a torus). Triangles wind so "around" crossed with "up" points out; those with no area (at a pole) are left out; normals are area-weighted means.
+- `pillarMesh(seed)`: unit height (5% of it buried) and a base radius about 1, tapering by a third, bulging by noise read round a circle (so the seam matches), finer ridges up it, its axis leaning by slow noise, a rounded top (its last row exactly on the axis: cos(pi/2) rounds a hair below zero, which once flipped a ring of tiny triangles). 40 rings by 24 segments.
+- `islandMesh(seed)`: unit radius; a jagged underside narrowing from the rim down to a point 1.4 below (`islandDepth`), and a gently domed top.
+- `ringMesh(tubeShare)`: a torus round the z axis, unit radius.
+- `placePillars`: dart throwing (a Poisson disk: random places, kept only if far enough from all kept so far), 220 by default (`ForestValleySettings::pillarCount`, start-up), 200-350 m tall and 12-45 m in radius, thickest near the valley's axis, 70 m of air between two, clear of the path (40 m plus a third of the radius), the Ring, the clearing, the Monolith and the start; each on the lowest ground under its edge. Eight shapes, each placed many times turned and scaled, so the GPU draws each in one instanced draw.
+- `placeIslands`: 30 by default, 25-150 m in radius, tips 380-700 m over the ground below, never over a pillar that reaches within 120 m of their tip, none within 400 m of the start. Still for now, moving later (the user's choice, Nov 13 2026); the machines are what keeps them up (the story hook the user took).
+- The Ring (`forestRingRadius` 200 m, tube 12 m): metal, across the path at the origin, its centre at the ground there, so its lower half is buried.
+- The Monolith (`monolithBoxes`): a 600 m slab 260 m wide across the clearing's north end (its front at `forestMonolithPlace`), a 400 m block west and a 330 m annex east, a crown with masts, a deck standing out east, and a truss bridge 330 m up to a pillar on the western rim (`monolithPillar`). Engine cubes scaled by `ValleyBox::halfSize`, static and in the walked-on level.
+- Ten far towers (`farTowerBoxes`), 300-800 m tall, placed by hand 2.5-7 km north in the haze.
+- Only the ground's first ring and the Monolith are static; the pillars, islands and Ring stand clear of the path and have no collision yet.
+
+**The rest:** a sun near the equator (`ForestSunSettings`: 5 degrees north, the March equinox, 9:30 by default) through a real sky (an `Atmosphere`, its ground the leaf litter's colour); the valley's haze (`ForestMistSettings`: a `Fog` 0.0005 per metre on the floor, about 6 km of sight, thinning by e every 300 m up, out to 20 km along a ray); the far plane at 25 km (reversed-Z depth keeps it precise); `ProbeCascades` for when ray tracing is on; the player starting on the rim, facing north. Settings in F5 under Forest (Sun, Atmosphere, Mist, Ground's blend depth live; Valley at start-up).
+
+**Views:** `forestViews()`: `rim` (the valley from the start, towards the Monolith), `ring` (the Ring from the path 230 m south of it) and `wall` (up the Monolith from its foot), the concept art's plates. `forest-view <name>` places the free camera there (`Game::addCommands`). Golden views `rim`, `ring`, `wall` (9:30) and `rim-dusk` (17:48), references not saved yet.
+
+**Tests:** `forest_test` (registered, the noise, the valley's floor, walls, rim, mountains and clearing, the path, the rings meeting without cracks, the shapes facing outwards, the placements spaced and clear of the walk, the paint by place, the weights texture, layer files by role and the stand-ins, the game headless at its coarsest ground, `forest-view`, its settings applied each frame).
 
 ## Characters
 
