@@ -1,8 +1,12 @@
 #pragma once
 
+#include "math/mat4.h"
 #include "math/vec2.h"
+#include "math/vec3.h"
+#include "render/gpu/ground_layers_shared.h"
 
 #include <array>
+#include <cstdint>
 
 /*
 * A blended ground: up to four layer materials (grass, moss, leaf litter, mud, rock) painted over one mesh by a weights
@@ -41,3 +45,100 @@ struct GroundPaintTaps {
 };
 
 GroundPaintTaps groundPaintTaps(Vec2 texelPlace);
+
+/*
+* Projected layers (triplanar mapping), for shapes made by code whose texture coordinates are stretched with them: the
+* sandstone pillars and floating islands, one mesh drawn hundreds of times at different sizes. Each layer is read three
+* times instead, projected straight along the object's own axes, in metres (so it keeps its size however the object is
+* scaled, and stays stuck to it when it moves), and the three blended by how squarely the surface faces each axis.
+*
+* The frame: the object's model matrix is a rotation R times a scale S (Transform's); a vertex p of the mesh is at S p in
+* the object's own axes, in metres, and a normal there is R^T times the world's. Mirrored from triangle.vert.
+*/
+inline constexpr std::uint32_t groundProjectedFlag = GROUND_PROJECTED;
+inline constexpr std::uint32_t groundStrataFlag = GROUND_STRATA;
+inline constexpr float groundProjectionSmallest = static_cast<float>(GROUND_PROJECTION_SMALLEST);
+
+struct ProjectionFrame {
+    std::array<Vec3, 3> axes; // R's columns: the object's x, y and z in the world, unit length
+    Vec3 scale;               // S: how much the object stretches along each of them
+};
+
+ProjectionFrame projectionFrame(const Mat4& model);
+
+/*
+* The three projections' shares from the normal in the object's frame: each axis's |n|^4, so a surface tilted a little
+* off an axis is still almost all that axis's; then shares under groundProjectionSmallest are dropped and the rest scaled
+* back to one (subtracting rather than cutting, so a share fades to nothing without a jump). A zero normal reads from above.
+*/
+Vec3 projectionWeights(const Vec3& frameNormal);
+
+// Where projection along an axis (0 x, 1 y, 2 z) reads its texture, in metres: along x the plane (z, y), along y (x, z),
+// along z (x, y), so up the picture is up the world on every side.
+Vec2 projectedPlace(const Vec3& framePosition, int axis);
+
+/*
+* The bumped normal in the object's frame from each projection's normal map direction (decodeNormalTexel's, in that
+* projection's plane: x along its first coordinate, y along its second, z out of it), blended by the weights. Each is
+* combined with the surface's own normal by the whiteout blend (Barre-Brisebois and Hill 2012, as Golus 2017 applies it
+* to triplanar mapping): the tilts added to the normal's sideways parts and the outward parts multiplied, the normal's
+* own sign kept, so a flat map gives back the surface's normal on every side. Zero for no usable direction.
+*/
+Vec3 projectedNormal(const Vec3& frameNormal, const std::array<Vec3, 3>& tilts, const Vec3& weights);
+
+/*
+* Strata: the layers painted by height, a strip of weights from bottom to top (one cake of rock bands for a whole
+* valley, so the same band stands at the same height on every pillar, as real eroded sandstone's does). Where along the
+* strip (0 bottom, 1 top) a world height is, given the bottom and one over the strip's span.
+*/
+float strataPlace(float height, float bottom, float inverseSpan);
+
+/*
+* The strata's weights with a layer taking over where the surface faces up (moss on ledges and tops, where water and
+* soil gather): none of it while the smooth normal's upward part is under topStart, all of it from topFull, smoothly
+* between (a step at topStart if they are not in order). No top layer (topLayer < 0): the strata as they are.
+*/
+GroundWeights strataPaint(const GroundWeights& strata, int topLayer, float upward, float topStart, float topFull);
+
+/*
+* Wavy beds: real beds are not ruled lines, they rise and fall a few metres over hundreds. The height the strata are read
+* at is moved by a slow noise texture over the world's x and z (its texel 0..1, 0.5 no move): up to amplitude metres
+* either way.
+*/
+float warpedStrataHeight(float height, float warpTexel, float amplitude);
+
+/*
+* Water streaks: dark stains running down a cliff, where rain carries dirt and algae grow. A noise texture read on the
+* sides' projections stretched along the height (one repeat every inverseWidth^-1 metres across, every inverseLength^-1
+* down), so any blotch becomes a long vertical streak. Where along the streaks a point of the object's frame is, for a
+* side projection (0 x, 2 z): across as projectedPlace's first coordinate, down as the height.
+*/
+Vec2 streakPlace(const Vec3& framePosition, int axis, float inverseWidth, float inverseLength);
+
+/*
+* How much a streak darkens the albedo (a factor, 1 none): its texel (1 clean rock, 0 the darkest stain) times strength,
+* only on the sides (sideShare: the side projections' shares, 0 on what faces straight up or down).
+*/
+float streakShade(float streakTexel, float strength, float sideShare);
+
+/*
+* Hex tiling (Heitz and Neyret 2018, in Mikkelsen 2022's practical form), so a texture tiled over a 300 m object shows
+* no repeat. The texture coordinates, scaled by GROUND_HEX_SCALE, fall in a grid of triangles whose corners are the
+* centres of hexagonal cells; each of the three corners reads the texture moved by its own random offset (a whole tile's
+* worth, from pcg3d of the corner), weighted by its barycentric weight to the sixth power, normalised, so each cell shows
+* mostly its own patch with narrow blends between. Weights under GROUND_HEX_SMALLEST are dropped. Offsets only, no
+* turning: the sandstone's layers stay level and normal maps need no turning either. A tap's mips come from the
+* unmoved coordinates' steps, which an offset does not change.
+*/
+inline constexpr std::uint32_t groundHexFlag = GROUND_HEX;
+
+struct HexTaps {
+    std::array<Vec2, 3> places;           // where each tap reads
+    Vec3 weights;                         // their weights, adding up to one
+    std::array<std::array<int, 2>, 3> cells; // the corners' cells (for tests: the same cells, the same offsets)
+};
+
+HexTaps hexTiling(Vec2 uv);
+
+// The tone variation's factor on the albedo: its texel (0.5 none) lightening or darkening by up to strength.
+float variationShade(float variationTexel, float strength);

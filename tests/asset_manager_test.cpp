@@ -1,4 +1,5 @@
 #include "assets/asset_manager.h"
+#include "scene/indexed_mesh.h"
 
 #include <cassert>
 #include <cstdint>
@@ -106,4 +107,23 @@ void testAssetManager() {
     assert(throws([&] { assets.getMesh(MeshHandle{99}); }));
     assert(throws([&] { assets.getTexture(TextureHandle{}); }));
     assert(throws([&] { assets.addMesh(std::shared_ptr<const Mesh>{}); }));
+
+    /*
+    * A mesh only drawn, kept in the render format: it takes the next handle like any mesh and comes back as given, but
+    * it is no Mesh (getMesh refuses it, so it can never be walked against by mistake); an ordinary mesh is not one, and
+    * an empty one is refused.
+    */
+    IndexedMesh drawn;
+    drawn.vertices = {MeshVertex{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}},
+                      MeshVertex{Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}},
+                      MeshVertex{Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 1.0f, 0.0f}, Vec2{}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}}};
+    drawn.indices = {0, 1, 2};
+    const std::size_t before = assets.getMeshCount();
+    const MeshHandle drawnHandle = assets.addDrawnMesh(drawn);
+    assert(drawnHandle.index == before && assets.getMeshCount() == before + 1);
+    assert(assets.isDrawnOnly(drawnHandle) && !assets.isDrawnOnly(cube) && !assets.isDrawnOnly(MeshHandle{}));
+    assert(assets.getDrawnMesh(drawnHandle).indices == drawn.indices && assets.getDrawnMesh(drawnHandle).vertices.size() == 3);
+    assert(throws([&] { assets.getMesh(drawnHandle); }));
+    assert(throws([&] { assets.getDrawnMesh(cube); }));
+    assert(throws([&] { assets.addDrawnMesh(IndexedMesh{}); }));
 }

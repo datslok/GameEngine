@@ -35,15 +35,23 @@ struct GpuMaterial {
     float coatAndHeight[4];
     std::uint32_t coatAndHeightTextures[4]; // slots in the texture array: x coat amount, y coat roughness, z coat normal map, w height map
     // A blended ground (render/gpu/ground_layers.h; MaterialTable::add fills the layers): each layer's place in the frame's
-    // material table plus one (0 none), each layer's repeats over the texture coordinates, x the weights texture's slot (0
-    // for a material without layers), x the blend depth
+    // material table plus one (0 none), each layer's repeats over the texture coordinates (a metre when projected); the
+    // weights texture's slot (0 for a material without layers), the switches (GROUND_PROJECTED, GROUND_STRATA,
+    // render/gpu/ground_layers_shared.h) and the top layer's number plus one (0 none); the blend depth, the strata's
+    // bottom, one over their span and the warp's metres; the height of the normal's upward part where the top layer
+    // starts and is full, one over the warp's tile and one over the tone variation's; the warp's, the streaks' and the
+    // tone variation's texture slots; and the streaks' strength, one over their width and their length, and the
+    // variation's strength. GROUND_HEX in the switches reads each layer by hex tiling.
     std::uint32_t groundLayers[4];
     float groundRepeats[4];
     std::uint32_t groundWeights[4];
     float groundBlend[4];
+    float groundFacing[4];
+    std::uint32_t groundSlots[4];
+    float groundStreaks[4];
 };
 
-static_assert(sizeof(GpuMaterial) == 208, "GpuMaterial must match the shader's MaterialData struct");
+static_assert(sizeof(GpuMaterial) == 256, "GpuMaterial must match the shader's MaterialData struct");
 
 // Convert a material into the shader's layout.
 GpuMaterial packMaterial(const Material& material);

@@ -2,6 +2,8 @@
 
 #include "core/srgb.h"
 #include "games/forest/forest_terrain.h"
+#include "games/forest/valley_strata.h"
+#include "scene/indexed_mesh.h"
 #include "gameplay/first_person_body.h"
 #include "math/transform.h"
 #include "scene/light.h"
@@ -29,9 +31,7 @@ namespace {
     constexpr float morningHours = 9.5f;
     constexpr float duskHours = 17.8f;
 
-    // The grey stand-in materials, in sRGB as colour pickers give them: sandstone, the Monolith's concrete, the Ring's
-    // steel.
-    constexpr Pixel sandstone{178, 162, 138};
+    // The grey stand-in materials, in sRGB as colour pickers give them: the Monolith's concrete, the Ring's steel.
     constexpr Pixel concrete{122, 126, 130};
     constexpr Pixel steel{160, 164, 168};
 
@@ -57,6 +57,33 @@ namespace {
         };
     }
 
+    // The strata strip's texels: 4096 over the cake's 1.8 km, about 0.44 m each, finer than the thinnest bed (5 m).
+    constexpr int strataTexels = 4096;
+
+    // The wavy beds' noise: 256 texels repeating every 1.5 km, so its four octaves rise and fall over 375 m and less.
+    constexpr int strataWarpTexels = 256;
+    constexpr float strataWarpTileMetres = 1500.0f;
+
+    // The streaks' texture: 256 texels, one repeat every 24 m across and 300 m down, so a stain 3 m wide runs tens of
+    // metres.
+    constexpr int streakTexels = 256;
+    constexpr float streakWidthMetres = 24.0f;
+    constexpr float streakLengthMetres = 300.0f;
+
+    // The tone variation's texture: 256 texels repeating every 400 m, so its patches are tens of metres across.
+    constexpr int toneVariationTexels = 256;
+    constexpr float toneVariationTileMetres = 400.0f;
+
+    // The rock's tunable parts, applied each frame.
+    void applyRockSettings(Material& material, const ForestRockSettings& settings) {
+        material.groundBlendDepth = settings.blendDepth;
+        material.groundTopStart = settings.mossStart;
+        material.groundTopFull = settings.mossFull;
+        material.streakStrength = settings.streakStrength;
+        material.groundHexTiling = settings.hexTiling;
+        material.variationStrength = settings.toneVariation;
+    }
+
     Material plainMaterial(Pixel colour, float roughness, float metallic = 0.0f) {
         Material material;
         material.colour = colour;
@@ -77,6 +104,37 @@ namespace {
 
         material.groundWeights = assets.addTexture(forestWeightsImage(weightsSize, extent, jobs));
         material.groundBlendDepth = blendDepth;
+        return material;
+    }
+
+    /*
+    * The pillars' and islands' rock: the four rock layers projected along each shape's own axes, each repeating by its
+    * tile size in metres, painted by the valley's strata (one strip by world height for every shape) with the moss on
+    * what faces up.
+    */
+    Material rockMaterial(AssetManager& assets, const std::string& assetFolder, const ForestRockSettings& settings) {
+        Material material;
+
+        for (std::size_t layer = 0; layer < forestRockLayers.size(); ++layer) {
+            material.groundLayers.push_back(forestLayerMaterial(assets, assetFolder, forestRockLayers[layer]));
+            material.groundRepeats[layer] = 1.0f / forestRockLayers[layer].tileMetres;
+        }
+
+        material.groundProjected = true;
+        material.groundPaint = GroundPaint::Strata;
+        material.groundWeights = assets.addTexture(strataImage(valleyStrata(), strataTexels));
+        material.strataBottom = valleyStrataBottom;
+        material.strataTop = valleyStrataTop;
+        material.groundTopLayer = forestMossLayer;
+        material.strataWarp = assets.addTexture(strataWarpImage(strataWarpTexels));
+        material.strataWarpTile = strataWarpTileMetres;
+        material.strataWarpMetres = settings.warpMetres;
+        material.groundStreaks = assets.addTexture(streakImage(streakTexels));
+        material.streakWidth = streakWidthMetres;
+        material.streakLength = streakLengthMetres;
+        material.groundVariation = assets.addTexture(toneVariationImage(toneVariationTexels));
+        material.variationTile = toneVariationTileMetres;
+        applyRockSettings(material, settings);
         return material;
     }
 
@@ -136,6 +194,17 @@ void visit(ForestMistSettings& settings, SettingsVisitor& visitor) {
 
 void visit(ForestGroundSettings& settings, SettingsVisitor& visitor) {
     visitor.field("Blend depth", settings.blendDepth, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Hex tiling", settings.hexTiling);
+}
+
+void visit(ForestRockSettings& settings, SettingsVisitor& visitor) {
+    visitor.field("Blend depth", settings.blendDepth, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Moss starts", settings.mossStart, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
+    visitor.field("Moss full", settings.mossFull, {.min = -1.0f, .max = 1.0f, .sliderMin = 0.0f});
+    visitor.field("Bed waves", settings.warpMetres, {.min = 0.0f, .max = 100.0f, .sliderMax = 20.0f, .unit = "m", .applies = FieldApplies::AtStartup});
+    visitor.field("Streaks", settings.streakStrength, {.min = 0.0f, .max = 1.0f});
+    visitor.field("Hex tiling", settings.hexTiling);
+    visitor.field("Tone variation", settings.toneVariation, {.min = 0.0f, .max = 1.0f});
 }
 
 void visit(ForestValleySettings& settings, SettingsVisitor& visitor) {
@@ -207,34 +276,27 @@ void ForestGame::buildGround(World& world, AssetManager& assets) {
 */
 void ForestGame::buildShapes(World& world, AssetManager& assets) {
     const ValleyLayout layout{.pillarCount = valleySettings.pillarCount, .islandCount = valleySettings.islandCount};
-    std::vector<MeshHandle> pillarShapes;
-    std::vector<MeshHandle> islandShapes;
-
-    for (int variant = 0; variant < layout.variants; ++variant) {
-        pillarShapes.push_back(assets.addMesh(pillarMesh(static_cast<std::uint32_t>(variant))));
-        islandShapes.push_back(assets.addMesh(islandMesh(static_cast<std::uint32_t>(variant))));
-    }
-
-    const Material rock = plainMaterial(sandstone, 0.9f);
-    const auto addPillar = [&](const PillarPlacement& pillar) {
-        addShape(world, pillarShapes[static_cast<std::size_t>(pillar.variant)], rock,
-                 Transform{.position = pillar.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, pillar.turnRadians),
-                           .scale = Vec3{pillar.radius, pillar.height, pillar.radius}});
-    };
-
     pillars = placePillars(layout);
     pillars.push_back(monolithPillar(clearingLevel()));
-
-    for (const PillarPlacement& pillar : pillars) {
-        addPillar(pillar);
-    }
-
     islands = placeIslands(layout, pillars);
 
-    for (const IslandPlacement& island : islands) {
-        addShape(world, islandShapes[static_cast<std::size_t>(island.variant)], rock,
-                 Transform{.position = island.rim, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, island.turnRadians),
-                           .scale = Vec3{island.radius, island.radius, island.radius}});
+    // Each pillar and island its own shape, carved by the beds where they stand, built on every core (each into its own
+    // slot, so the result is the same whatever order the jobs finish in) and kept only in the render format.
+    const RockCarving carving{.bands = valleyStrata(), .warp = strataWarpImage(strataWarpTexels), .warpTileMetres = strataWarpTileMetres,
+                              .warpMetres = rockSettings.warpMetres};
+    std::vector<IndexedMesh> shapes(pillars.size() + islands.size());
+    getJobs().parallelFor(shapes.size(), 1, [&](std::size_t index) {
+        shapes[index] = wrappedSurfaceIndexedMesh(index < pillars.size() ? pillarSurface(pillars[index], carving) : islandSurface(islands[index - pillars.size()], carving));
+    });
+
+    const Material rock = rockMaterial(assets, assetFolder, rockSettings);
+
+    for (std::size_t index = 0; index < shapes.size(); ++index) {
+        const bool isPillar = index < pillars.size();
+        const Vec3 place = isPillar ? pillars[index].foot : islands[index - pillars.size()].rim;
+        const float turn = isPillar ? pillars[index].turnRadians : islands[index - pillars.size()].turnRadians;
+        rockShapes.push_back(addShape(world, assets.addDrawnMesh(std::move(shapes[index])), rock,
+                                      Transform{.position = place, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, turn)}));
     }
 
     // The Ring stands across the path, its centre at the ground there, so its lower half is buried.
@@ -305,11 +367,18 @@ void ForestGame::updateDaylight(World& world) {
         world.remove<Fog>(air);
     }
 
-    world.get<ModelRenderer>(ground).parts.front().material.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels.front());
+    Material& nearGround = world.get<ModelRenderer>(ground).parts.front().material;
+    nearGround.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels.front());
+    nearGround.groundHexTiling = groundSettings.hexTiling;
 
     for (std::size_t far = 0; far < farGround.size(); ++far) {
-        world.get<ModelRenderer>(farGround[far]).parts.front().material.groundBlendDepth =
-            forestBlendDepth(groundSettings.blendDepth, groundTexels[far + 1]);
+        Material& farMaterial = world.get<ModelRenderer>(farGround[far]).parts.front().material;
+        farMaterial.groundBlendDepth = forestBlendDepth(groundSettings.blendDepth, groundTexels[far + 1]);
+        farMaterial.groundHexTiling = groundSettings.hexTiling;
+    }
+
+    for (const Entity shape : rockShapes) {
+        applyRockSettings(world.get<ModelRenderer>(shape).parts.front().material, rockSettings);
     }
 }
 
@@ -358,6 +427,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Ground", [&] {
         visit(groundSettings, visitor);
+    });
+    visitor.group("Rock", [&] {
+        visit(rockSettings, visitor);
     });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
@@ -463,4 +535,12 @@ ForestMistSettings& ForestGame::getMistSettings() {
 
 ForestGroundSettings& ForestGame::getGroundSettings() {
     return groundSettings;
+}
+
+ForestRockSettings& ForestGame::getRockSettings() {
+    return rockSettings;
+}
+
+const std::vector<Entity>& ForestGame::getRockShapes() const {
+    return rockShapes;
 }

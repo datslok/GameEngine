@@ -105,6 +105,10 @@ std::uint32_t MaterialTable::add(const Material& material) {
             throw std::invalid_argument("A blended ground takes one to four layers and a weights texture");
         }
 
+        if (material.groundPaint == GroundPaint::Strata && material.groundTopLayer >= static_cast<int>(material.groundLayers.size())) {
+            throw std::invalid_argument("A blended ground's top layer must be one of its layers");
+        }
+
         for (std::size_t layer = 0; layer < material.groundLayers.size(); ++layer) {
             if (!material.groundLayers[layer].groundLayers.empty()) {
                 throw std::invalid_argument("A blended ground's layers may not be layered themselves");

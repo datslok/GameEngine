@@ -12,15 +12,34 @@ inline constexpr const char* forestAssetFolder = "assets/forest";
 
 /*
 * One of the ground's layers (games/forest/forest_terrain.h's channels): the downloaded texture set's folder, its
-* texture's size on the ground (it repeats across the land), and the plain colour and roughness it stands in with when
-* the folder is missing (a fresh clone before the fetch, and the tests).
+* texture's size on the ground (it repeats across the land), the plain colour and roughness it stands in with when
+* the folder is missing (a fresh clone before the fetch, and the tests), and a tint multiplying its colour texture
+* (sRGB, white for none), so one scan can serve as two tones of the same rock.
 */
 struct ForestGroundLayer {
     const char* folder;
     float tileMetres;
     Pixel standIn;
     float standInRoughness;
+    Pixel tint{255, 255, 255};
 };
+
+/*
+* The pillars' and islands' rock, in the strata strip's channel order (games/forest/valley_strata.h): one sandstone
+* (Poly Haven's cliff_side, a 1.8 m scan of red-brown strata, shown 4 m) in two tones, its own and a greyer, darker one,
+* which the soft beds mix by their tone; the hard beds' big blocks (Poly Haven's marble_cliff_03, 5.7 m from the air,
+* shown 12 m); and last the moss taking over where the rock faces up (Poly Haven's aerial_rocks_02, 50 m of mossy rock
+* from the air). Projected in metres.
+*/
+inline constexpr std::array<ForestGroundLayer, 4> forestRockLayers{{
+    {"cliff_side", 4.0f, Pixel{150, 96, 70}, 0.9f},
+    {"cliff_side", 4.0f, Pixel{122, 100, 84}, 0.9f, Pixel{205, 190, 178}},
+    {"marble_cliff_03", 12.0f, Pixel{192, 142, 92}, 0.85f},
+    {"aerial_rocks_02", 50.0f, Pixel{92, 104, 68}, 0.9f}
+}};
+
+// The rock layer that takes over facing up.
+inline constexpr int forestMossLayer = 3;
 
 // Grass, leaf litter, mud and mossy rock, in the weights texture's channel order.
 inline constexpr std::array<ForestGroundLayer, 4> forestGroundLayers{{

@@ -19,6 +19,13 @@ enum class AlphaMode {
     Blend
 };
 
+// What paints a layered material's layers (Material::groundPaint): a weights texture over the mesh's texture
+// coordinates, or strata, a strip of weights by world height.
+enum class GroundPaint {
+    TextureCoordinates,
+    Strata
+};
+
 /*
 * How the renderer colours a part: a base colour multiplied by a texture, how metallic and rough it is, and any light it emits.
 * No texture handle means plain colour (the renderer uses a white texture).
@@ -117,6 +124,43 @@ struct Material {
     std::array<float, 4> groundRepeats{1.0f, 1.0f, 1.0f, 1.0f};
     TextureHandle groundWeights;
     float groundBlendDepth = 0.2f;
+    // Projected layers (render/gpu/ground_layers.h, projectionWeights): each layer's textures read along the object's own
+    // three axes in metres instead of the mesh's texture coordinates (triplanar mapping), for shapes made by code and
+    // stretched to size; groundRepeats then count repeats a metre.
+    bool groundProjected = false;
+    // What paints the layers: groundWeights over the mesh's texture coordinates, or strata: groundWeights as a strip of
+    // weights by world height, its first column at strataBottom and its last at strataTop (render/gpu/ground_layers.h,
+    // strataPlace), so every object with this material shows the same bands at the same heights.
+    GroundPaint groundPaint = GroundPaint::TextureCoordinates;
+    float strataBottom = 0.0f;
+    float strataTop = 1.0f;
+    // With strata, a layer (0..3; -1 none) taking over where the surface faces up: none of it while the normal's upward
+    // part is under groundTopStart, all of it from groundTopFull (strataPaint).
+    int groundTopLayer = -1;
+    float groundTopStart = 0.6f;
+    float groundTopFull = 0.8f;
+    // With strata, wavy beds (warpedStrataHeight): strataWarp, a linear texture whose red channel (0.5 none) moves the
+    // height the strata are read at by up to strataWarpMetres either way, repeating every strataWarpTile metres over the
+    // world's x and z. No texture or 0 metres: level beds.
+    TextureHandle strataWarp;
+    float strataWarpMetres = 0.0f;
+    float strataWarpTile = 1000.0f;
+    // With projected layers, water streaks down the sides (streakPlace, streakShade): groundStreaks, a linear texture
+    // whose red channel is clean rock (1) to the darkest stain (0), repeating every streakWidth metres across and every
+    // streakLength metres down, darkening the albedo by up to streakStrength. No texture or 0 strength: none.
+    TextureHandle groundStreaks;
+    float streakStrength = 0.0f;
+    float streakWidth = 8.0f;
+    float streakLength = 200.0f;
+    // Each layer read by hex tiling (render/gpu/ground_layers.h, hexTiling), so a texture repeated over a big object
+    // shows no repeat; about one to two times the reads.
+    bool groundHexTiling = false;
+    // With projected layers, slow tone variation (variationShade): groundVariation, a linear texture whose red channel
+    // (0.5 none) lightens or darkens the albedo by up to variationStrength, repeating every variationTile metres along
+    // each projection.
+    TextureHandle groundVariation;
+    float variationStrength = 0.0f;
+    float variationTile = 160.0f;
 };
 
 inline bool isCutOut(const Material& material) {

@@ -146,3 +146,19 @@ IndexedMesh buildIndexedMesh(const Mesh& mesh) {
 
     return result;
 }
+
+Aabb indexedMeshBounds(const IndexedMesh& mesh) {
+    if (mesh.vertices.empty()) {
+        return Aabb{};
+    }
+
+    Aabb bounds{mesh.vertices.front().position, mesh.vertices.front().position};
+
+    for (const MeshVertex& vertex : mesh.vertices) {
+        const Vec3& p = vertex.position;
+        bounds.minimum = Vec3{std::min(bounds.minimum.x, p.x), std::min(bounds.minimum.y, p.y), std::min(bounds.minimum.z, p.z)};
+        bounds.maximum = Vec3{std::max(bounds.maximum.x, p.x), std::max(bounds.maximum.y, p.y), std::max(bounds.maximum.z, p.z)};
+    }
+
+    return bounds;
+}

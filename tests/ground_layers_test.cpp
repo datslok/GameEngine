@@ -1,6 +1,8 @@
 #include "render/gpu/gpu_scene.h"
 #include "render/gpu/ground_layers.h"
 #include "render/gpu/material_uniforms.h"
+#include "render/gpu/normal_mapping.h"
+#include "math/transform.h"
 
 #include <algorithm>
 #include <cassert>
@@ -181,7 +183,306 @@ namespace {
     }
 }
 
+namespace {
+    bool nearVec(const Vec3& a, const Vec3& b, float tolerance) {
+        return near(a.x, b.x, tolerance) && near(a.y, b.y, tolerance) && near(a.z, b.z, tolerance);
+    }
+
+    /*
+    * The projection's frame from a model matrix built as rotation times scale (Transform's): its axes are the rotation's
+    * columns, unit length and square to each other, and a mesh point p sits at the axes weighted by S p, plus the
+    * object's place, which is where the model matrix puts it.
+    */
+    void testTheFrameUndoesTheTurnNotTheScale() {
+        const Transform transform{.position = Vec3{300.0f, -20.0f, 40.0f}, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, 0.7f),
+                                  .scale = Vec3{25.0f, 310.0f, 25.0f}};
+        const Mat4 model = transform.getMatrix();
+        const ProjectionFrame frame = projectionFrame(model);
+
+        assert(near(frame.scale.x, 25.0f, 1e-3f) && near(frame.scale.y, 310.0f, 1e-2f) && near(frame.scale.z, 25.0f, 1e-3f));
+
+        for (int axis = 0; axis < 3; ++axis) {
+            assert(near(frame.axes[static_cast<std::size_t>(axis)].length(), 1.0f, 1e-5f));
+            assert(near(frame.axes[static_cast<std::size_t>(axis)].dot(frame.axes[static_cast<std::size_t>((axis + 1) % 3)]), 0.0f, 1e-5f));
+        }
+
+        const Vec3 p{0.3f, 0.8f, -0.6f};
+        const Vec3 inFrame{p.x * frame.scale.x, p.y * frame.scale.y, p.z * frame.scale.z};
+        const Vec3 rebuilt = frame.axes[0] * inFrame.x + frame.axes[1] * inFrame.y + frame.axes[2] * inFrame.z + transform.position;
+        assert(nearVec(rebuilt, transformPoint(model, p), 1e-2f));
+    }
+
+    /*
+    * The projections' shares always add up to one and are never negative; a surface squarely facing an axis reads that
+    * axis alone (either side), one halfway between two reads both equally, and one only a little off an axis still reads
+    * that axis alone, as the small shares are dropped. Turning the normal slowly never makes a share jump.
+    */
+    void testProjectionSharesFollowTheFacing() {
+        for (const Vec3& facing : {Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}}) {
+            const Vec3 weights = projectionWeights(facing);
+            assert(nearVec(weights, Vec3{std::fabs(facing.x), std::fabs(facing.y), std::fabs(facing.z)}, 0.0f));
+        }
+
+        const Vec3 diagonal = projectionWeights(Vec3{1.0f, 0.0f, -1.0f}.normalized());
+        assert(near(diagonal.x, 0.5f, 1e-6f) && diagonal.y == 0.0f && near(diagonal.z, 0.5f, 1e-6f));
+
+        const Vec3 nearlyUp = projectionWeights(Vec3{0.3f, 1.0f, 0.2f}.normalized());
+        assert(nearlyUp.x == 0.0f && nearlyUp.z == 0.0f && nearlyUp.y == 1.0f);
+
+        assert(nearVec(projectionWeights(Vec3{0.0f, 0.0f, 0.0f}), Vec3{0.0f, 1.0f, 0.0f}, 0.0f));
+
+        Vec3 previous = projectionWeights(Vec3{1.0f, 0.0f, 0.0f});
+
+        for (int step = 1; step <= 2000; ++step) {
+            const float angle = 1.5707964f * static_cast<float>(step) / 2000.0f;
+            const Vec3 normal{std::cos(angle) * 0.8f, 0.6f * std::sin(3.0f * angle), std::sin(angle) * 0.8f};
+            const Vec3 weights = projectionWeights(normal.normalized());
+            assert(near(weights.x + weights.y + weights.z, 1.0f, 1e-5f));
+            assert(weights.x >= 0.0f && weights.y >= 0.0f && weights.z >= 0.0f);
+            assert(nearVec(weights, previous, 0.02f));
+            previous = weights;
+        }
+    }
+
+    // Each projection reads the plane across its axis, in metres, with up the world up the picture on the sides.
+    void testProjectedPlaces() {
+        const Vec3 p{1.5f, -7.0f, 22.0f};
+        assert(projectedPlace(p, 0).x == 22.0f && projectedPlace(p, 0).y == -7.0f);
+        assert(projectedPlace(p, 1).x == 1.5f && projectedPlace(p, 1).y == 22.0f);
+        assert(projectedPlace(p, 2).x == 1.5f && projectedPlace(p, 2).y == -7.0f);
+    }
+
+    /*
+    * The bumped normal: flat normal maps give back the surface's own normal, whichever way it faces. On a face squarely
+    * across an axis it is exactly ordinary normal mapping with that projection's plane as the tangent frame (perturbNormal):
+    * a tilt along the picture's first coordinate leans towards it on both sides of the object. It is unit length.
+    */
+    void testProjectedNormalsBendLikeNormalMaps() {
+        const Vec3 flat{0.0f, 0.0f, 1.0f};
+
+        for (const Vec3& raw : {Vec3{1.0f, 0.2f, -0.4f}, Vec3{-0.3f, -1.0f, 0.1f}, Vec3{0.2f, 0.5f, 0.9f}}) {
+            const Vec3 normal = raw.normalized();
+            assert(nearVec(projectedNormal(normal, {flat, flat, flat}, projectionWeights(normal)), normal, 1e-5f));
+        }
+
+        const Vec3 tilt = Vec3{0.3f, -0.2f, 0.9f}.normalized();
+        const std::array<Vec3, 3> tilts{tilt, tilt, tilt};
+
+        // Facing +x: the plane (z, y), so the tangent runs along +z and up the picture is +y.
+        assert(nearVec(projectedNormal(Vec3{1.0f, 0.0f, 0.0f}, tilts, Vec3{1.0f, 0.0f, 0.0f}),
+                       perturbNormal(Vec3{1.0f, 0.0f, 0.0f}, Vec4{0.0f, 0.0f, 1.0f, -1.0f}, tilt), 1e-5f));
+        // Facing -x: the same plane seen from behind; the tilt still leans towards +z and -y.
+        const Vec3 behind = projectedNormal(Vec3{-1.0f, 0.0f, 0.0f}, tilts, Vec3{1.0f, 0.0f, 0.0f});
+        assert(behind.x < 0.0f && behind.z > 0.0f && behind.y < 0.0f && near(behind.length(), 1.0f, 1e-5f));
+        // Facing +y: the plane (x, z).
+        assert(nearVec(projectedNormal(Vec3{0.0f, 1.0f, 0.0f}, tilts, Vec3{0.0f, 1.0f, 0.0f}),
+                       perturbNormal(Vec3{0.0f, 1.0f, 0.0f}, Vec4{1.0f, 0.0f, 0.0f, -1.0f}, tilt), 1e-5f));
+        // Facing +z: the plane (x, y).
+        assert(nearVec(projectedNormal(Vec3{0.0f, 0.0f, 1.0f}, tilts, Vec3{0.0f, 0.0f, 1.0f}),
+                       perturbNormal(Vec3{0.0f, 0.0f, 1.0f}, Vec4{1.0f, 0.0f, 0.0f, 1.0f}, tilt), 1e-5f));
+
+        const Vec3 blended = projectedNormal(Vec3{0.6f, 0.0f, 0.8f}, tilts, projectionWeights(Vec3{0.6f, 0.0f, 0.8f}));
+        assert(near(blended.length(), 1.0f, 1e-5f));
+    }
+
+    /*
+    * Strata: a height's place along the strip; and the top layer taking over facing up, none of it below its start, all
+    * of it from its full, the shares still adding up to the strata's.
+    */
+    void testStrataAndTheTopLayer() {
+        assert(near(strataPlace(-100.0f, -100.0f, 1.0f / 1500.0f), 0.0f, 0.0f));
+        assert(near(strataPlace(650.0f, -100.0f, 1.0f / 1500.0f), 0.5f, 1e-6f));
+
+        const GroundWeights strata{0.25f, 0.75f, 0.0f, 0.0f};
+        const GroundWeights wall = strataPaint(strata, 3, 0.1f, 0.6f, 0.8f);
+        assert(wall == strata);
+
+        const GroundWeights top = strataPaint(strata, 3, 0.95f, 0.6f, 0.8f);
+        assert(top[0] == 0.0f && top[1] == 0.0f && top[3] == 1.0f);
+
+        const GroundWeights between = strataPaint(strata, 3, 0.7f, 0.6f, 0.8f);
+        assert(near(between[3], 0.5f, 1e-6f) && near(between[0] + between[1] + between[3], 1.0f, 1e-6f));
+
+        assert(strataPaint(strata, -1, 1.0f, 0.6f, 0.8f) == strata);
+        assert(strataPaint(strata, 2, 0.59f, 0.6f, 0.6f)[2] == 0.0f && strataPaint(strata, 2, 0.6f, 0.6f, 0.6f)[2] == 1.0f);
+    }
+
+    /*
+    * A projected, strata-painted material in the table: the switches as flags, the top layer as its number plus one,
+    * the strip's bottom and one over its span, and the facing limits. A top layer that is not one of the layers is refused.
+    */
+    void testTheTableCarriesProjectionAndStrata() {
+        Material rock;
+        rock.groundLayers.resize(4);
+        rock.groundWeights = TextureHandle{7};
+        rock.groundProjected = true;
+        rock.groundPaint = GroundPaint::Strata;
+        rock.strataBottom = -200.0f;
+        rock.strataTop = 1300.0f;
+        rock.groundTopLayer = 3;
+        rock.groundTopStart = 0.55f;
+        rock.groundTopFull = 0.85f;
+
+        MaterialTable table;
+        const GpuMaterial& packed = table.getEntries()[table.add(rock)];
+        assert(packed.groundWeights[1] == (groundProjectedFlag | groundStrataFlag) && packed.groundWeights[2] == 4);
+        assert(packed.groundBlend[1] == -200.0f && near(packed.groundBlend[2], 1.0f / 1500.0f, 1e-9f));
+        assert(packed.groundFacing[0] == 0.55f && packed.groundFacing[1] == 0.85f);
+
+        Material painted;
+        painted.groundLayers.resize(1);
+        painted.groundWeights = TextureHandle{1};
+        const GpuMaterial ground = packMaterial(painted);
+        assert(ground.groundWeights[1] == 0 && ground.groundWeights[2] == 0);
+
+        Material wrongTop = rock;
+        wrongTop.groundLayers.resize(2);
+        bool refused = false;
+        try {
+            MaterialTable{}.add(wrongTop);
+        } catch (const std::invalid_argument&) {
+            refused = true;
+        }
+        assert(refused);
+    }
+}
+
+namespace {
+    // Wavy beds: the noise's middle moves nothing, its ends the full amplitude down or up.
+    void testBedsAreWarpedByTheNoise() {
+        assert(warpedStrataHeight(120.0f, 0.5f, 6.0f) == 120.0f);
+        assert(near(warpedStrataHeight(120.0f, 0.0f, 6.0f), 114.0f, 1e-5f));
+        assert(near(warpedStrataHeight(120.0f, 1.0f, 6.0f), 126.0f, 1e-5f));
+        assert(warpedStrataHeight(120.0f, 0.9f, 0.0f) == 120.0f);
+    }
+
+    /*
+    * Streaks: read on a side projection across as its plane's first coordinate and down as the height, each at its own
+    * repeat, so the texture is stretched into long vertical marks; darkening only the sides, by the stain times the
+    * strength, and nothing where the rock is clean.
+    */
+    void testStreaksRunDownTheSides() {
+        const Vec3 p{16.0f, 400.0f, -8.0f};
+        const Vec2 alongX = streakPlace(p, 0, 1.0f / 8.0f, 1.0f / 200.0f);
+        assert(near(alongX.x, -1.0f, 1e-6f) && near(alongX.y, 2.0f, 1e-6f));
+        const Vec2 alongZ = streakPlace(p, 2, 1.0f / 8.0f, 1.0f / 200.0f);
+        assert(near(alongZ.x, 2.0f, 1e-6f) && near(alongZ.y, 2.0f, 1e-6f));
+
+        assert(streakShade(1.0f, 0.6f, 1.0f) == 1.0f);
+        assert(near(streakShade(0.0f, 0.6f, 1.0f), 0.4f, 1e-6f));
+        assert(near(streakShade(0.5f, 0.6f, 0.5f), 0.85f, 1e-6f));
+        assert(streakShade(0.0f, 0.6f, 0.0f) == 1.0f);
+    }
+
+    // The warp's and streaks' textures, scales and strengths in the table; none without their textures.
+    void testTheTableCarriesWarpAndStreaks() {
+        Material rock;
+        rock.groundLayers.resize(2);
+        rock.groundWeights = TextureHandle{7};
+        rock.groundProjected = true;
+        rock.groundPaint = GroundPaint::Strata;
+        rock.strataWarp = TextureHandle{8};
+        rock.strataWarpMetres = 6.0f;
+        rock.strataWarpTile = 1500.0f;
+        rock.groundStreaks = TextureHandle{9};
+        rock.streakStrength = 0.5f;
+        rock.streakWidth = 10.0f;
+        rock.streakLength = 250.0f;
+
+        const GpuMaterial packed = packMaterial(rock);
+        assert(packed.groundSlots[0] == 9 && packed.groundSlots[1] == 10);
+        assert(packed.groundBlend[3] == 6.0f && near(packed.groundFacing[2], 1.0f / 1500.0f, 1e-9f));
+        assert(packed.groundStreaks[0] == 0.5f && near(packed.groundStreaks[1], 0.1f, 1e-7f) && near(packed.groundStreaks[2], 1.0f / 250.0f, 1e-9f));
+
+        Material plain = rock;
+        plain.strataWarp = TextureHandle{};
+        plain.groundStreaks = TextureHandle{};
+        const GpuMaterial bare = packMaterial(plain);
+        assert(bare.groundBlend[3] == 0.0f && bare.groundStreaks[0] == 0.0f);
+    }
+}
+
+namespace {
+    /*
+    * Hex tiling: three taps, their weights never negative and adding up to one; each tap the place moved by a whole
+    * random offset in 0..1 of a tile, the same all over its cell (so the texture is not smeared), different from cell to
+    * cell. At a cell's own point only its tap is read; turning the place slowly never makes a weight jump; and most
+    * places read only one or two taps, the small weights dropped.
+    */
+    void testHexTilingHidesTheRepeat() {
+        int fewTaps = 0;
+        const int places = 4000;
+        HexTaps previous = hexTiling(Vec2{0.0f, 0.0f});
+
+        for (int step = 1; step <= places; ++step) {
+            const Vec2 uv{0.0013f * static_cast<float>(step), 0.0007f * static_cast<float>(step) - 1.3f};
+            const HexTaps taps = hexTiling(uv);
+            const float total = taps.weights.x + taps.weights.y + taps.weights.z;
+            assert(near(total, 1.0f, 1e-5f) && taps.weights.x >= 0.0f && taps.weights.y >= 0.0f && taps.weights.z >= 0.0f);
+            fewTaps += (taps.weights.x > 0.0f) + (taps.weights.y > 0.0f) + (taps.weights.z > 0.0f) <= 2 ? 1 : 0;
+
+            for (std::size_t tap = 0; tap < 3; ++tap) {
+                const Vec2 offset = taps.places[tap] - uv;
+                assert(offset.x > -1e-4f && offset.x < 1.0001f && offset.y > -1e-4f && offset.y < 1.0001f);
+            }
+
+            const Vec3 change = taps.weights - previous.weights;
+            const bool sameCells = taps.cells == previous.cells;
+            assert(!sameCells || std::fabs(change.x) + std::fabs(change.y) + std::fabs(change.z) < 0.1f);
+            previous = taps;
+        }
+
+        assert(fewTaps > places / 2);
+
+        // Two places close together in one cell share its offset; two cells far apart do not.
+        const HexTaps a = hexTiling(Vec2{0.1f, 0.1f});
+        const HexTaps b = hexTiling(Vec2{0.1002f, 0.1001f});
+        assert(a.cells == b.cells && near((a.places[0] - Vec2{0.1f, 0.1f}).x, (b.places[0] - Vec2{0.1002f, 0.1001f}).x, 1e-5f));
+        const HexTaps far = hexTiling(Vec2{7.3f, -4.1f});
+        assert((far.places[0] - Vec2{7.3f, -4.1f}).x != (a.places[0] - Vec2{0.1f, 0.1f}).x);
+    }
+
+    // The tone variation: its middle changes nothing, its ends lighten or darken by the strength.
+    void testToneVariation() {
+        assert(variationShade(0.5f, 0.3f) == 1.0f);
+        assert(near(variationShade(1.0f, 0.3f), 1.3f, 1e-6f) && near(variationShade(0.0f, 0.3f), 0.7f, 1e-6f));
+        assert(variationShade(0.9f, 0.0f) == 1.0f);
+    }
+
+    // The switch and the variation in the table, the variation only with its texture.
+    void testTheTableCarriesHexTilingAndVariation() {
+        Material rock;
+        rock.groundLayers.resize(2);
+        rock.groundWeights = TextureHandle{7};
+        rock.groundProjected = true;
+        rock.groundHexTiling = true;
+        rock.groundVariation = TextureHandle{11};
+        rock.variationStrength = 0.25f;
+        rock.variationTile = 160.0f;
+        const GpuMaterial packed = packMaterial(rock);
+        assert((packed.groundWeights[1] & groundHexFlag) != 0 && (packed.groundWeights[1] & groundProjectedFlag) != 0);
+        assert(packed.groundSlots[2] == 12 && packed.groundStreaks[3] == 0.25f && near(packed.groundFacing[3], 1.0f / 160.0f, 1e-9f));
+
+        rock.groundVariation = TextureHandle{};
+        rock.groundHexTiling = false;
+        const GpuMaterial plain = packMaterial(rock);
+        assert((plain.groundWeights[1] & groundHexFlag) == 0 && plain.groundSlots[2] == 0 && plain.groundStreaks[3] == 0.0f);
+    }
+}
+
 void testGroundLayers() {
+    testHexTilingHidesTheRepeat();
+    testToneVariation();
+    testTheTableCarriesHexTilingAndVariation();
+    testBedsAreWarpedByTheNoise();
+    testStreaksRunDownTheSides();
+    testTheTableCarriesWarpAndStreaks();
+    testTheFrameUndoesTheTurnNotTheScale();
+    testProjectionSharesFollowTheFacing();
+    testProjectedPlaces();
+    testProjectedNormalsBendLikeNormalMaps();
+    testStrataAndTheTopLayer();
+    testTheTableCarriesProjectionAndStrata();
     testPaintIsReadAsASmoothCurve();
     testBlendKeepsTheBasics();
     testTheHigherLayerWins();

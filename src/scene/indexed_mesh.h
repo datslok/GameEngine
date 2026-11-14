@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/aabb.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
 #include "math/vec4.h"
@@ -49,3 +50,6 @@ std::vector<MeshVertex> resolveCorners(const Mesh& mesh);
 * share one vertex.
 */
 IndexedMesh buildIndexedMesh(const Mesh& mesh);
+
+// The smallest box holding every vertex (a zero box for none), as meshBounds gives a Mesh's.
+Aabb indexedMeshBounds(const IndexedMesh& mesh);

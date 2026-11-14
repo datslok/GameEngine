@@ -4,6 +4,7 @@
 #include "games/forest/forest_ground.h"
 #include "games/forest/forest_terrain.h"
 #include "games/forest/valley_shapes.h"
+#include "games/forest/valley_strata.h"
 #include "physics/static_level.h"
 #include "render/gpu/ground_layers.h"
 #include "scene/atmosphere.h"
@@ -304,6 +305,139 @@ namespace {
         assert(forestRingHeight(10.0f, 20.0f, nearRing) == forestHeight(10.0f, 20.0f));
     }
 
+    // The valley's carving as the game makes it, with a smaller warp texture for speed.
+    RockCarving valleyCarving() {
+        return RockCarving{.bands = valleyStrata(), .warp = strataWarpImage(64), .warpTileMetres = 1500.0f, .warpMetres = 6.0f};
+    }
+
+    /*
+    * The beds' relief: a hard bed stands out its ledge, the soft rock right under one is cut back the most, less further
+    * down, nothing past the reach, and soft rock under soft rock is left alone.
+    */
+    void testHardBedsStandOut() {
+        const std::vector<StrataBand> bands{{.bottom = 0.0f, .top = 30.0f}, {.bottom = 30.0f, .top = 40.0f, .hard = true}, {.bottom = 40.0f, .top = 90.0f},
+                                            {.bottom = 90.0f, .top = 120.0f, .tone = 0.5f}};
+        assert(strataRelief(bands, 35.0f) == rockLedgeMetres);
+        assert(near(strataRelief(bands, 29.99f), -rockUndercutMetres, 0.01f));
+        assert(near(strataRelief(bands, 28.0f), -rockUndercutMetres * 0.5f, 1e-4f));
+        assert(strataRelief(bands, 20.0f) == 0.0f);
+        assert(strataRelief(bands, 89.0f) == 0.0f && strataRelief(bands, 100.0f) == 0.0f);
+        assert(strataRelief(bands, 500.0f) == 0.0f && strataRelief(bands, -50.0f) == 0.0f);
+    }
+
+    /*
+    * The joints: shares from 0 to 1, a few narrow cracks round a pillar (more round a wider one), each running up it: a
+    * crack at one height is still there a row higher.
+    */
+    void testJointsAreNarrowVerticalCracks() {
+        const auto cracks = [](float radius, float height) {
+            int count = 0;
+            bool inside = false;
+
+            for (int step = 0; step < 720; ++step) {
+                const float groove = jointGroove(6.2831853f * static_cast<float>(step) / 720.0f, height, radius, 5u);
+                assert(groove >= 0.0f && groove <= 1.0f);
+                count += !inside && groove > 0.5f ? 1 : 0;
+                inside = groove > 0.5f;
+            }
+
+            return count;
+        };
+
+        const int narrow = cracks(15.0f, 100.0f);
+        const int wide = cracks(45.0f, 100.0f);
+        assert(narrow >= 2 && wide > narrow && wide < 60);
+
+        int kept = 0;
+        int deep = 0;
+
+        for (int step = 0; step < 720; ++step) {
+            const float angle = 6.2831853f * static_cast<float>(step) / 720.0f;
+
+            if (jointGroove(angle, 100.0f, 30.0f, 5u) > 0.8f) {
+                deep += 1;
+                kept += jointGroove(angle, 100.0f + rockRowMetres, 30.0f, 5u) > 0.4f ? 1 : 0;
+            }
+        }
+
+        assert(deep > 0 && kept * 10 >= deep * 8);
+    }
+
+    /*
+    * The bed waves on the shapes match the shader's: the warp texture's texel at its centre gives that texel's move, it
+    * repeats every tile, and nothing moves without an amplitude.
+    */
+    void testShapesWaveTheirBedsAsTheShaderDoes() {
+        const RockCarving carving = valleyCarving();
+        const float texelMetres = carving.warpTileMetres / static_cast<float>(carving.warp.width);
+        const float x = 10.5f * texelMetres;
+        const float z = 3.5f * texelMetres;
+        const float texel = static_cast<float>(carving.warp.pixels[(3 * carving.warp.width + 10) * 4]) / 255.0f;
+        assert(near(carvingWarp(carving, x, z), (2.0f * texel - 1.0f) * carving.warpMetres, 1e-4f));
+        assert(near(carvingWarp(carving, x + carving.warpTileMetres, z - 2.0f * carving.warpTileMetres), carvingWarp(carving, x, z), 1e-3f));
+
+        RockCarving level = carving;
+        level.warpMetres = 0.0f;
+        assert(carvingWarp(level, x, z) == 0.0f);
+    }
+
+    /*
+    * The ledges are where the beds are: the same pillar carved by beds all hard stands out from the one carved by beds
+    * all soft by the ledge, everywhere but its buried foot and top, so the relief follows the beds, not the shape.
+    */
+    void testPillarsStandOutAtHardBeds() {
+        RockCarving soft{.bands = {{.bottom = -1000.0f, .top = 2000.0f}}, .warp = {}, .warpTileMetres = 1500.0f, .warpMetres = 0.0f};
+        RockCarving hard = soft;
+        hard.bands.front().hard = true;
+        const PillarPlacement placement{.foot = Vec3{0.0f, 0.0f, 0.0f}, .radius = 20.0f, .height = 220.0f, .turnRadians = 0.0f, .seed = 9u};
+        const Mesh softPillar = wrappedSurfaceMesh(pillarSurface(placement, soft));
+        const Mesh hardPillar = wrappedSurfaceMesh(pillarSurface(placement, hard));
+        assert(softPillar.vertices.size() == hardPillar.vertices.size());
+        float sumOut = 0.0f;
+        int counted = 0;
+
+        for (std::size_t vertex = 0; vertex < softPillar.vertices.size(); ++vertex) {
+            const Vec4& a = softPillar.vertices[vertex];
+            const Vec4& b = hardPillar.vertices[vertex];
+
+            if (a.y > 10.0f && a.y < 200.0f) {
+                sumOut += Vec2{b.x, b.z}.length() - Vec2{a.x, a.z}.length();
+                counted += 1;
+            }
+        }
+
+        assert(counted > 1000 && near(sumOut / static_cast<float>(counted), rockLedgeMetres, 0.4f));
+    }
+
+    /*
+    * The render format straight from a surface's points: one vertex a point at its place, the same triangles and
+    * normals as the Mesh built from the same points, and each tangent square to its normal, running round the surface
+    * (up the picture, w times normal cross tangent, is up the surface).
+    */
+    void testSurfacesGoStraightToTheRenderFormat() {
+        const PillarPlacement placement{.foot = Vec3{0.0f, 0.0f, 0.0f}, .radius = 14.0f, .height = 210.0f, .turnRadians = 0.0f, .seed = 6u};
+        const SurfaceGrid grid = pillarSurface(placement, valleyCarving());
+        const Mesh mesh = wrappedSurfaceMesh(grid);
+        const IndexedMesh indexed = wrappedSurfaceIndexedMesh(grid);
+        assert(indexed.vertices.size() == grid.points.size() && indexed.indices.size() == 3 * mesh.triangles.size());
+
+        for (std::size_t triangle = 0; triangle < mesh.triangles.size(); ++triangle) {
+            const Triangle& expected = mesh.triangles[triangle];
+            assert(indexed.indices[3 * triangle] == expected.first && indexed.indices[3 * triangle + 1] == expected.second &&
+                   indexed.indices[3 * triangle + 2] == expected.third);
+            const Vec3& normal = indexed.vertices[expected.first].normal;
+            assert(near((normal - *expected.normals[0]).length(), 0.0f, 1e-6f));
+        }
+
+        for (std::size_t point = grid.columns; point + grid.columns < grid.points.size(); point += 37) {
+            const MeshVertex& vertex = indexed.vertices[point];
+            const Vec3 tangent{vertex.tangent.x, vertex.tangent.y, vertex.tangent.z};
+            assert(vertex.position.x == grid.points[point].x && near(tangent.length(), 1.0f, 1e-4f) && near(tangent.dot(vertex.normal), 0.0f, 1e-4f));
+            const Vec3 up = vertex.normal.cross(tangent) * vertex.tangent.w;
+            assert(std::fabs(vertex.normal.y) > 0.6f || up.y > 0.0f);
+        }
+    }
+
     // A wrapped surface needs enough rows and columns; a pillar, an island and the Ring face outwards with smooth normals.
     void testTheShapesFaceOutwards() {
         bool refused = false;
@@ -316,32 +450,40 @@ namespace {
 
         assert(refused);
 
-        const int segments = 24;
-        const Mesh pillar = pillarMesh(3u, 40, segments);
-        checkFacesOutFromRows(pillar, static_cast<std::size_t>(segments));
-        float lowest = 1.0f;
-        float highest = 0.0f;
+        const RockCarving carving = valleyCarving();
+        const PillarPlacement placement{.foot = Vec3{120.0f, 4.0f, -900.0f}, .radius = 25.0f, .height = 280.0f, .turnRadians = 0.6f, .seed = 3u};
+        const Mesh pillar = wrappedSurfaceMesh(pillarSurface(placement, carving));
+        const std::size_t columns = static_cast<std::size_t>(std::lround(6.2831853f * 25.0f / rockColumnMetres));
+        checkFacesOutFromRows(pillar, columns);
+        float lowest = 1e9f;
+        float highest = -1e9f;
 
         for (const Vec4& point : pillar.vertices) {
             lowest = std::min(lowest, point.y);
             highest = std::max(highest, point.y);
         }
 
-        assert(near(lowest, -pillarBuriedDepth, 1e-4f) && near(highest, 1.0f, 1e-3f));
-        assert(pillarMesh(3u, 40, segments).vertices[100].x == pillar.vertices[100].x);
-        assert(pillarMesh(4u, 40, segments).vertices[100].x != pillar.vertices[100].x);
+        // Its own size in metres: buried a twentieth of its height, its broken top a little over its height.
+        assert(near(lowest, -pillarBuriedDepth * 280.0f, 1e-3f) && highest > 280.0f && highest < 284.0f);
+        assert(pillar.vertices.size() > 100 * columns);
+        assert(wrappedSurfaceMesh(pillarSurface(placement, carving)).vertices[100].x == pillar.vertices[100].x);
+        PillarPlacement other = placement;
+        other.seed = 4u;
+        assert(wrappedSurfaceMesh(pillarSurface(other, carving)).vertices[100].x != pillar.vertices[100].x);
 
-        const Mesh island = islandMesh(2u, 28, 32);
-        checkFacesOutFromRows(island, 32);
+        const IslandPlacement islandPlace{.rim = Vec3{-300.0f, 620.0f, -2000.0f}, .radius = 60.0f, .turnRadians = 1.0f, .seed = 2u};
+        const Mesh island = wrappedSurfaceMesh(islandSurface(islandPlace, carving));
+        const std::size_t islandColumns = static_cast<std::size_t>(std::lround(6.2831853f * 60.0f / (1.2f * rockColumnMetres)));
+        checkFacesOutFromRows(island, islandColumns);
         lowest = 0.0f;
-        highest = -1.0f;
+        highest = -1e9f;
 
         for (const Vec4& point : island.vertices) {
             lowest = std::min(lowest, point.y);
             highest = std::max(highest, point.y);
         }
 
-        assert(near(lowest, -islandDepth, 1e-4f) && highest > 0.0f && highest < 0.15f);
+        assert(near(lowest, -islandDepth * 60.0f, 1e-3f) && highest > 0.0f && highest < 0.15f * 60.0f);
 
         const float tube = 0.06f;
         const Mesh ring = ringMesh(tube, 48, 12);
@@ -374,7 +516,7 @@ namespace {
             assert((Vec2{pillar.foot.x, pillar.foot.z} - forestStartPlace).length() > 250.0f);
             assert((Vec2{pillar.foot.x, pillar.foot.z} - forestClearingCentre).length() > forestClearingRadius);
             assert(pillar.foot.y <= forestHeight(pillar.foot.x, pillar.foot.z) + 1e-3f);
-            assert(pillar.variant >= 0 && pillar.variant < layout.variants);
+            assert(index == 0 || pillar.seed != pillars[index - 1].seed);
 
             for (std::size_t other = index + 1; other < pillars.size(); ++other) {
                 const float apart = (Vec2{pillar.foot.x, pillar.foot.z} - Vec2{pillars[other].foot.x, pillars[other].foot.z}).length();
@@ -608,6 +750,167 @@ namespace {
         assert(under && near(settled.y, under->hit.point.y, 0.1f));
     }
 
+    /*
+    * The valley's layer cake: beds touching from its bottom to its top; soft sandstone beds 15 to 60 m thick, each a tone
+    * between the two sandstone tints and a neighbouring soft bed's tone at least 0.3 apart, so each shows; hard beds of
+    * blocks 5 to 15 m thick, about a fifth of them and never two together; the same every run; the bed at a height its own.
+    */
+    void testTheStrataAreOneCake() {
+        const std::vector<StrataBand> bands = valleyStrata();
+        assert(bands.size() > 30 && bands.front().bottom == valleyStrataBottom && bands.back().top == valleyStrataTop);
+        int hardBeds = 0;
+
+        for (std::size_t bed = 0; bed < bands.size(); ++bed) {
+            const StrataBand& band = bands[bed];
+            const float thickness = band.top - band.bottom;
+            const bool last = bed + 1 == bands.size();
+            assert(band.tone >= 0.0f && band.tone <= 1.0f);
+
+            if (band.hard) {
+                hardBeds += 1;
+                assert(thickness <= 15.0f + 1e-3f && (last || thickness >= 5.0f - 1e-3f));
+            } else {
+                assert(thickness <= 60.0f + 1e-3f && (last || thickness >= 15.0f - 1e-3f));
+            }
+
+            if (bed > 0) {
+                const StrataBand& below = bands[bed - 1];
+                assert(band.bottom == below.top && !(band.hard && below.hard));
+            }
+
+            if (bed > 1 && !band.hard) {
+                const StrataBand& softBelow = bands[bed - 1].hard ? bands[bed - 2] : bands[bed - 1];
+                assert(std::fabs(band.tone - softBelow.tone) >= 0.3f - 1e-6f);
+            }
+
+            assert(strataBandAt(bands, 0.5f * (band.bottom + band.top)).bottom == band.bottom);
+        }
+
+        const float hardShare = static_cast<float>(hardBeds) / static_cast<float>(bands.size());
+        assert(hardShare > 0.1f && hardShare < 0.35f);
+
+        const std::vector<StrataBand> again = valleyStrata();
+        assert(again.size() == bands.size() && again[17].top == bands[17].top && again[17].tone == bands[17].tone);
+    }
+
+    /*
+    * The strip the rock is painted by: one texel tall, each texel's layers adding up to one (within 8-bit rounding) and
+    * the moss's channel empty; a texel inside a soft bed mixes the two sandstone tints by its tone, inside a hard bed it
+    * is all blocks.
+    */
+    void testTheStrataStripHoldsTheBeds() {
+        const std::vector<StrataBand> bands = valleyStrata();
+        const int texels = 1024;
+        const ImageData image = strataImage(bands, texels);
+        assert(image.width == static_cast<std::uint32_t>(texels) && image.height == 1 && image.encoding == TextureEncoding::Linear);
+        const float texelMetres = (valleyStrataTop - valleyStrataBottom) / static_cast<float>(texels);
+
+        for (int texel = 0; texel < texels; ++texel) {
+            const std::uint8_t* pixel = &image.pixels[static_cast<std::size_t>(texel) * 4];
+            assert(std::abs(pixel[0] + pixel[1] + pixel[2] - 255) <= 2 && pixel[3] == 0);
+            const float low = valleyStrataBottom + texelMetres * static_cast<float>(texel);
+            const StrataBand& band = strataBandAt(bands, low);
+
+            if (&band == &strataBandAt(bands, low + texelMetres - 1e-3f)) {
+                if (band.hard) {
+                    assert(pixel[2] == 255);
+                } else {
+                    assert(std::abs(static_cast<float>(pixel[1]) - band.tone * 255.0f) <= 1.0f && pixel[2] == 0);
+                }
+            }
+        }
+    }
+
+    /*
+    * The wavy beds' noise: it repeats seamlessly (its last column and row lead into its first as smoothly as any two
+    * neighbours do), spans most of its range about the middle, and is the same every time.
+    */
+    void testTheWarpRepeatsSeamlessly() {
+        const int size = 128;
+        const ImageData warp = strataWarpImage(size);
+        assert(warp.width == static_cast<std::uint32_t>(size) && warp.height == static_cast<std::uint32_t>(size) && warp.encoding == TextureEncoding::Linear);
+        const auto at = [&](int x, int y) {
+            return static_cast<int>(warp.pixels[(static_cast<std::size_t>(y) * size + static_cast<std::size_t>(x)) * 4]);
+        };
+        int largestStep = 0;
+        int lowest = 255;
+        int highest = 0;
+        long sum = 0;
+
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size - 1; ++x) {
+                largestStep = std::max(largestStep, std::abs(at(x + 1, y) - at(x, y)));
+                lowest = std::min(lowest, at(x, y));
+                highest = std::max(highest, at(x, y));
+                sum += at(x, y);
+            }
+        }
+
+        for (int y = 0; y < size; ++y) {
+            assert(std::abs(at(0, y) - at(size - 1, y)) <= largestStep + 1);
+            assert(std::abs(at(y, 0) - at(y, size - 1)) <= largestStep + 1);
+        }
+
+        assert(lowest < 70 && highest > 185);
+        const float mean = static_cast<float>(sum) / static_cast<float>(size * (size - 1));
+        assert(mean > 105.0f && mean < 150.0f);
+        assert(strataWarpImage(size).pixels == warp.pixels);
+    }
+
+    // The streaks' texture: mostly clean rock (bright), with dark stains in places, repeating seamlessly too.
+    void testStreaksAreMostlyClean() {
+        const int size = 128;
+        const ImageData streaks = streakImage(size);
+        assert(streaks.width == static_cast<std::uint32_t>(size) && streaks.encoding == TextureEncoding::Linear);
+        int clean = 0;
+        int darkest = 255;
+
+        for (std::size_t texel = 0; texel < static_cast<std::size_t>(size * size); ++texel) {
+            const int value = streaks.pixels[texel * 4];
+            clean += value > 230 ? 1 : 0;
+            darkest = std::min(darkest, value);
+        }
+
+        assert(clean > size * size / 2 && darkest < 60);
+    }
+
+    /*
+    * The pillars and islands share the rock: four layers projected in metres (the tile sizes' inverses), painted by the
+    * strata strip over the cake's heights, the moss on top; with no downloaded assets, the layers' stand-in colours.
+    */
+    void testThePillarsAreMadeOfTheStrata() {
+        Forest forest;
+        assert(forest.game.getRockShapes().size() == forest.game.getPillars().size() + forest.game.getIslands().size());
+        const Material& rock = forest.world.get<ModelRenderer>(forest.game.getRockShapes().front()).parts.front().material;
+        assert(rock.groundLayers.size() == 4 && rock.groundProjected && rock.groundPaint == GroundPaint::Strata && rock.groundWeights.isValid());
+        assert(rock.strataBottom == valleyStrataBottom && rock.strataTop == valleyStrataTop && rock.groundTopLayer == forestMossLayer);
+
+        assert(rock.strataWarp.isValid() && rock.strataWarpMetres == forest.game.getRockSettings().warpMetres);
+        assert(rock.groundStreaks.isValid() && rock.streakStrength == forest.game.getRockSettings().streakStrength);
+        assert(rock.groundHexTiling && rock.groundVariation.isValid() && rock.variationStrength == forest.game.getRockSettings().toneVariation);
+
+        for (std::size_t layer = 0; layer < 4; ++layer) {
+            assert(near(rock.groundRepeats[layer], 1.0f / forestRockLayers[layer].tileMetres, 1e-7f));
+            const Pixel standIn = forestRockLayers[layer].standIn;
+            const Pixel colour = rock.groundLayers[layer].colour;
+            assert(colour.r == standIn.r && colour.g == standIn.g && colour.b == standIn.b);
+        }
+
+        // The two sandstone tints are the same scan.
+        assert(std::string{forestRockLayers[0].folder} == forestRockLayers[1].folder);
+
+        // Each its own shape, drawn only, at its real size (not scaled).
+        MeshHandle lastShape;
+
+        for (const Entity shape : forest.game.getRockShapes()) {
+            const RenderPart& part = forest.world.get<ModelRenderer>(shape).parts.front();
+            assert(part.material.groundWeights == rock.groundWeights);
+            assert(forest.assets.isDrawnOnly(part.mesh) && part.mesh != lastShape);
+            assert(forest.world.get<Transform>(shape).scale.x == 1.0f && forest.world.get<Transform>(shape).scale.y == 1.0f);
+            lastShape = part.mesh;
+        }
+    }
+
     // forest-view places the camera at a named view and refuses names there are none of.
     void testViewsHaveACommand() {
         Forest forest;
@@ -629,13 +932,27 @@ namespace {
         Forest forest;
         Input input;
         forest.game.getMistSettings().enabled = false;
+        assert(forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundHexTiling);
         forest.game.getGroundSettings().blendDepth = 0.45f;
+        forest.game.getGroundSettings().hexTiling = false;
         forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
         assert(!forest.world.has<Fog>(forest.game.getAir()));
+        assert(!forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundHexTiling);
+        assert(!forest.world.get<ModelRenderer>(forest.game.getFarGround().back()).parts.front().material.groundHexTiling);
         const float nearDepth = forest.world.get<ModelRenderer>(forest.game.getGround()).parts.front().material.groundBlendDepth;
         assert(near(nearDepth, forestBlendDepth(0.45f, 4.0f * forestFinestPaintTexel), 1e-6f)); // the tests' coarsest ground
         const float farDepth = forest.world.get<ModelRenderer>(forest.game.getFarGround().front()).parts.front().material.groundBlendDepth;
         assert(farDepth > 0.45f && farDepth <= 1.0f);
+
+        forest.game.getRockSettings() = ForestRockSettings{.blendDepth = 0.6f, .mossStart = 0.4f, .mossFull = 0.9f, .warpMetres = 6.0f, .streakStrength = 0.2f,
+                                                           .hexTiling = false, .toneVariation = 0.4f};
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+
+        for (const Entity shape : forest.game.getRockShapes()) {
+            const Material& rock = forest.world.get<ModelRenderer>(shape).parts.front().material;
+            assert(rock.groundBlendDepth == 0.6f && rock.groundTopStart == 0.4f && rock.groundTopFull == 0.9f);
+            assert(rock.streakStrength == 0.2f && !rock.groundHexTiling && rock.variationStrength == 0.4f);
+        }
 
         forest.game.getMistSettings().enabled = true;
         forest.game.getSunSettings().solarHours = 18.5f;
@@ -651,13 +968,23 @@ void testForest() {
     testTheValleyHasAFloorWallsAndARim();
     testThePathRunsFromTheRimThroughTheRingToTheClearing();
     testTheRingsMeetWithoutCracks();
+    testHardBedsStandOut();
+    testJointsAreNarrowVerticalCracks();
+    testShapesWaveTheirBedsAsTheShaderDoes();
+    testPillarsStandOutAtHardBeds();
     testTheShapesFaceOutwards();
+    testSurfacesGoStraightToTheRenderFormat();
     testShapesArePlacedApartAndClearOfTheWalk();
     testTheGroundIsPaintedByPlace();
     testTheWeightsTextureHoldsThePaint();
     testCoarsePaintBlendsSofter();
     testLayerFilesAreFoundByRole();
     testTheGameBuildsTheValley();
+    testTheStrataAreOneCake();
+    testTheStrataStripHoldsTheBeds();
+    testTheWarpRepeatsSeamlessly();
+    testStreaksAreMostlyClean();
+    testThePillarsAreMadeOfTheStrata();
     testViewsHaveACommand();
     testSettingsApplyEachFrame();
 }

@@ -40,6 +40,11 @@ layout(location = 5) flat in float objectScale;
 layout(location = 6) flat in vec3 viewerPosition;
 #endif
 
+// For projected layers (render/gpu/ground_layers.h): the fragment in the object's own axes, in metres, and those axes in
+// the world.
+layout(location = 7) in vec3 framePosition;
+layout(location = 8) flat in mat3 frameAxes;
+
 // Every texture (bindless) and the frame's materials.
 #include "materials.glsl"
 
@@ -761,6 +766,9 @@ vec4 surfaceTexture(uint slot, vec2 uv, bool shifted, vec2 gradientAcross, vec2 
 void main() {
     positionStepRight = dFdx(relativePosition);
     positionStepDown = dFdy(relativePosition);
+    // Projected layers' steps to the next pixel, in the object's frame, taken before any branch like the others.
+    vec3 frameStepAcross = dFdx(framePosition);
+    vec3 frameStepDown = dFdy(framePosition);
 
     // How fast the smooth normal turns to the next pixel across and down, for geometric specular anti-aliasing: taken
     // here, before any branch or discard, as derivatives must be (a mirrored double-sided back turns the same amount).
@@ -859,60 +867,212 @@ void main() {
     * (groundBlendWeights). Read only on such a material, which is the same for a primitive's whole 2 x 2 quads, so the
     * reads keep their derivatives. The normal maps' texels are blended before decoding, at the ground's own scale.
     */
+    // Projected layers' bumped normal in the world, used in place of the normal map's when projectedBump is set.
+    bool projectedBump = false;
+    vec3 projectedWorldNormal = vec3(0.0);
+
     if (material.groundLayers.x != 0u) {
-        // The weights read as a cubic B-spline (groundPaintTaps), so the borders between layers are smooth curves, not
-        // staircases along the weights texture's grid; the four reads take the surface's own footprint for their mip.
-        vec2 paintSize = vec2(textureSize(textures[nonuniformEXT(material.groundWeights.x)], 0));
-        GroundPaintTaps paintTaps = groundPaintTaps(textureUv * paintSize);
-        vec2 paintFirst = paintTaps.first / paintSize;
-        vec2 paintSecond = paintTaps.second / paintSize;
-        vec2 paintShare = paintTaps.firstShare;
-        vec4 painted = paintShare.y * (paintShare.x * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], paintFirst, gradientAcross, gradientDown) +
-                                       (1.0 - paintShare.x) * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(paintSecond.x, paintFirst.y), gradientAcross, gradientDown)) +
-                       (1.0 - paintShare.y) * (paintShare.x * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(paintFirst.x, paintSecond.y), gradientAcross, gradientDown) +
-                                               (1.0 - paintShare.x) * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], paintSecond, gradientAcross, gradientDown));
+        bool projected = (material.groundWeights.y & GROUND_PROJECTED) != 0u;
+        vec4 painted;
+
+        if ((material.groundWeights.y & GROUND_STRATA) != 0u) {
+            /*
+            * Strata (strataPlace, strataPaint): the strip of weights read at the world height, its mip from how fast the
+            * height changes across the pixel, then the top layer taking over where the smooth normal faces up.
+            */
+            float height = relativePosition.y + cameraOrigin.y;
+
+            // Wavy beds: the height moved by the warp texture over the world's x and z (warpedStrataHeight).
+            if (material.groundSlots.x != 0u) {
+                float warpScale = material.groundFacing.z;
+                vec2 warpPlace = (relativePosition.xz + cameraOrigin.xz) * warpScale;
+                float warpTexel = textureGrad(textures[nonuniformEXT(material.groundSlots.x)], warpPlace, positionStepRight.xz * (warpScale * exp2(mipBias)),
+                                              positionStepDown.xz * (warpScale * exp2(mipBias))).r;
+                height = warpedStrataHeight(height, warpTexel, material.groundBlend.w);
+            }
+
+            float place = strataPlace(height, material.groundBlend.y, material.groundBlend.z);
+            float placeScale = material.groundBlend.z * exp2(mipBias);
+            painted = textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(place, 0.5), vec2(positionStepRight.y * placeScale, 0.0),
+                                  vec2(positionStepDown.y * placeScale, 0.0));
+            painted = strataPaint(painted, int(material.groundWeights.z) - 1, smoothNormal.y * side, material.groundFacing.x, material.groundFacing.y);
+        } else {
+            // The weights read as a cubic B-spline (groundPaintTaps), so the borders between layers are smooth curves, not
+            // staircases along the weights texture's grid; the four reads take the surface's own footprint for their mip.
+            vec2 paintSize = vec2(textureSize(textures[nonuniformEXT(material.groundWeights.x)], 0));
+            GroundPaintTaps paintTaps = groundPaintTaps(textureUv * paintSize);
+            vec2 paintFirst = paintTaps.first / paintSize;
+            vec2 paintSecond = paintTaps.second / paintSize;
+            vec2 paintShare = paintTaps.firstShare;
+            painted = paintShare.y * (paintShare.x * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], paintFirst, gradientAcross, gradientDown) +
+                                      (1.0 - paintShare.x) * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(paintSecond.x, paintFirst.y), gradientAcross, gradientDown)) +
+                      (1.0 - paintShare.y) * (paintShare.x * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], vec2(paintFirst.x, paintSecond.y), gradientAcross, gradientDown) +
+                                              (1.0 - paintShare.x) * textureGrad(textures[nonuniformEXT(material.groundWeights.x)], paintSecond, gradientAcross, gradientDown));
+        }
+
+        /*
+        * Projected layers (projectionWeights): the smooth normal in the object's frame says how much of each of the three
+        * projections to read; one whose share is zero is not read at all. Every read takes its mip from its place's own
+        * steps across the pixel (textureGrad), since a read skipped in one pixel must not leave its neighbours without one.
+        * Not projected: the mesh's texture coordinates, one read, as the first "projection".
+        */
+        vec3 frameNormal = transpose(frameAxes) * (smoothNormal * side);
+        vec3 projectionShares = projected ? projectionWeights(frameNormal) : vec3(1.0, 0.0, 0.0);
+        float stepScale = exp2(mipBias);
+
         vec4 heights = vec4(0.0);
         vec4 layerColour[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
         vec4 layerSurface[4] = vec4[4](vec4(0.0), vec4(0.0), vec4(0.0), vec4(0.0));
-        vec3 layerNormals[4] = vec3[4](vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0));
+        // Each layer's normal map texel along each projection, three a layer (only the first when not projected).
+        vec3 layerNormals[12] = vec3[12](vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0),
+                                         vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0),
+                                         vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0), vec3(0.5, 0.5, 1.0));
 
+        // Nothing painted anywhere reads as the first layer alone (groundBlendWeights' fallback), which must then be read.
+        if (!(painted.x > 0.0 || painted.y > 0.0 || painted.z > 0.0 || painted.w > 0.0)) {
+            painted = vec4(1.0, 0.0, 0.0, 0.0);
+        }
+
+        bool hexTiled = (material.groundWeights.y & GROUND_HEX) != 0u;
+
+        /*
+        * Each layer painted here (one not painted gets no share whatever its height, so it is not read: most rock pixels
+        * read one or two of the four), along each projection with a share, at each hex tap with a weight when hex tiled.
+        */
         for (int layer = 0; layer < 4; ++layer) {
             uint index = material.groundLayers[layer];
 
-            if (index == 0u) {
+            if (index == 0u || painted[layer] <= 0.0) {
                 painted[layer] = 0.0;
                 continue;
             }
 
             MaterialData ground = materials[index - 1u];
-            vec2 layerUv = textureUv * material.groundRepeats[layer];
-            vec3 layerPacked = texture(textures[nonuniformEXT(ground.textureSlots.y)], layerUv, mipBias).rgb;
-            layerColour[layer] = texture(textures[nonuniformEXT(ground.textureSlots.x)], layerUv, mipBias) * ground.baseColour;
-            layerSurface[layer] = vec4(clamp(ground.surfaceParameters.x * layerPacked.b, 0.0, 1.0),
-                                       clamp(ground.surfaceParameters.y * layerPacked.g, BRDF_SMALLEST_ROUGHNESS, 1.0),
-                                       texture(textures[nonuniformEXT(ground.extra.x)], layerUv, mipBias).r, 0.0);
-            // A layer without a height map stands halfway, and one without a normal map lies flat: their texture slots
-            // hold the white stand-in, which would make the layer the highest and tilt every normal.
-            float heightTexel = texture(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], layerUv, mipBias).r;
-            vec3 normalSample = texture(textures[nonuniformEXT(ground.textureSlots.z)], layerUv, mipBias).rgb;
-            heights[layer] = ground.coatAndHeight.w > 0.0 ? heightTexel : 0.5;
-            layerNormals[layer] = ground.surfaceParameters.z != 0.0 ? normalSample : vec3(0.5, 0.5, 1.0);
+            float repeats = material.groundRepeats[layer];
+
+            for (int axis = 0; axis < 3; ++axis) {
+                float share = projectionShares[axis];
+
+                if (share <= 0.0) {
+                    continue;
+                }
+
+                vec2 layerUv;
+                vec2 stepAcross;
+                vec2 stepDown;
+
+                if (projected) {
+                    layerUv = projectedPlace(framePosition, axis) * repeats;
+                    stepAcross = projectedPlace(frameStepAcross, axis) * (repeats * stepScale);
+                    stepDown = projectedPlace(frameStepDown, axis) * (repeats * stepScale);
+                } else {
+                    layerUv = textureUv * repeats;
+                    stepAcross = gradientAcross * repeats;
+                    stepDown = gradientDown * repeats;
+                }
+
+                HexTaps taps;
+                taps.places[0] = layerUv;
+                taps.weights = vec3(1.0, 0.0, 0.0);
+
+                if (hexTiled) {
+                    taps = hexTiling(layerUv);
+                }
+
+                vec3 axisNormal = vec3(0.0);
+
+                for (int tap = 0; tap < 3; ++tap) {
+                    float weight = taps.weights[tap];
+
+                    if (weight <= 0.0) {
+                        continue;
+                    }
+
+                    // An offset does not change the steps across the pixel, so every tap takes the unmoved place's mip.
+                    vec2 place = taps.places[tap];
+                    float tapShare = share * weight;
+                    vec3 layerPacked = textureGrad(textures[nonuniformEXT(ground.textureSlots.y)], place, stepAcross, stepDown).rgb;
+                    layerColour[layer] += tapShare * textureGrad(textures[nonuniformEXT(ground.textureSlots.x)], place, stepAcross, stepDown) * ground.baseColour;
+                    layerSurface[layer] += tapShare * vec4(clamp(ground.surfaceParameters.x * layerPacked.b, 0.0, 1.0),
+                                                           clamp(ground.surfaceParameters.y * layerPacked.g, BRDF_SMALLEST_ROUGHNESS, 1.0),
+                                                           textureGrad(textures[nonuniformEXT(ground.extra.x)], place, stepAcross, stepDown).r, 0.0);
+                    // A layer without a height map stands halfway, and one without a normal map lies flat: their texture slots
+                    // hold the white stand-in, which would make the layer the highest and tilt every normal.
+                    float heightTexel = textureGrad(textures[nonuniformEXT(ground.coatAndHeightSlots.w)], place, stepAcross, stepDown).r;
+                    vec3 normalSample = textureGrad(textures[nonuniformEXT(ground.textureSlots.z)], place, stepAcross, stepDown).rgb;
+                    heights[layer] += tapShare * (ground.coatAndHeight.w > 0.0 ? heightTexel : 0.5);
+                    axisNormal += weight * (ground.surfaceParameters.z != 0.0 ? normalSample : vec3(0.5, 0.5, 1.0));
+                }
+
+                layerNormals[layer * 3 + axis] = axisNormal;
+            }
         }
 
         vec4 shares = groundBlendWeights(painted, heights, material.groundBlend.x);
         albedo = vec4(0.0);
         vec4 blendedSurface = vec4(0.0);
-        normalTexel = vec3(0.0);
+        vec3 axisTexels[3] = vec3[3](vec3(0.0), vec3(0.0), vec3(0.0));
 
         for (int layer = 0; layer < 4; ++layer) {
             albedo += shares[layer] * layerColour[layer];
             blendedSurface += shares[layer] * layerSurface[layer];
-            normalTexel += shares[layer] * layerNormals[layer];
+
+            for (int axis = 0; axis < 3; ++axis) {
+                axisTexels[axis] += shares[layer] * layerNormals[layer * 3 + axis];
+            }
         }
 
         metallic = blendedSurface.x;
         roughness = max(blendedSurface.y, BRDF_SMALLEST_ROUGHNESS);
         occlusionTexel = blendedSurface.z;
+        normalTexel = projectionShares.x * axisTexels[0] + projectionShares.y * axisTexels[1] + projectionShares.z * axisTexels[2];
+
+        /*
+        * Water streaks down the sides (streakPlace, streakShade): the streak texture read on each side projection with a
+        * share, stretched along the height, their stains blended by the shares and darkening the albedo on the sides only.
+        */
+        float sideShare = projectionShares.x + projectionShares.z;
+
+        if (projected && material.groundSlots.y != 0u && sideShare > 0.0) {
+            float stain = 0.0;
+
+            for (int axis = 0; axis < 3; axis += 2) {
+                if (projectionShares[axis] > 0.0) {
+                    vec2 streakUv = streakPlace(framePosition, axis, material.groundStreaks.y, material.groundStreaks.z);
+                    vec2 streakAcross = streakPlace(frameStepAcross, axis, material.groundStreaks.y, material.groundStreaks.z) * stepScale;
+                    vec2 streakDown = streakPlace(frameStepDown, axis, material.groundStreaks.y, material.groundStreaks.z) * stepScale;
+                    stain += projectionShares[axis] * textureGrad(textures[nonuniformEXT(material.groundSlots.y)], streakUv, streakAcross, streakDown).r;
+                }
+            }
+
+            albedo.rgb *= streakShade(stain / sideShare, material.groundStreaks.x, sideShare);
+        }
+
+        // Slow tone variation over projected layers (variationShade): its texture along each projection with a share.
+        if (projected && material.groundSlots.z != 0u) {
+            float variation = 0.0;
+
+            for (int axis = 0; axis < 3; ++axis) {
+                if (projectionShares[axis] > 0.0) {
+                    float tile = material.groundFacing.w;
+                    variation += projectionShares[axis] * textureGrad(textures[nonuniformEXT(material.groundSlots.z)], projectedPlace(framePosition, axis) * tile,
+                                                                      projectedPlace(frameStepAcross, axis) * (tile * stepScale),
+                                                                      projectedPlace(frameStepDown, axis) * (tile * stepScale)).r;
+                }
+            }
+
+            albedo.rgb *= variationShade(variation, material.groundStreaks.w);
+        }
+
+        // Projected: each projection's blended texel decoded in its own plane and the three combined (projectedNormal),
+        // then turned from the object's frame into the world.
+        if (projected && dot(frameNormal, frameNormal) > 0.0) {
+            float scale = material.surfaceParameters.z;
+            vec3 bumped = projectedNormal(frameNormal, decodeNormalTexel(axisTexels[0], scale), decodeNormalTexel(axisTexels[1], scale),
+                                          decodeNormalTexel(axisTexels[2], scale), projectionShares);
+            projectedWorldNormal = frameAxes * bumped;
+            projectedBump = dot(projectedWorldNormal, projectedWorldNormal) > 0.0;
+        }
     }
 #ifdef TRANSPARENT
     // Glass's transmission, its texture's red channel times the factor.
@@ -947,7 +1107,9 @@ void main() {
     vec3 geometricNormal = normalLength > 0.0 ? surfaceNormal / normalLength : vec3(0.0, 1.0, 0.0);
     vec3 normal = geometricNormal;
 
-    if (normalLength > 0.0) {
+    if (normalLength > 0.0 && projectedBump) {
+        normal = normalize(projectedWorldNormal);
+    } else if (normalLength > 0.0) {
         vec3 tilt = decodeNormalTexel(normalTexel, material.surfaceParameters.z);
         vec3 bumped = perturbNormal(surfaceNormal, surfaceTangent, tilt);
 

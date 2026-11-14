@@ -44,12 +44,33 @@ struct ForestMistSettings {
 void visit(ForestMistSettings& settings, SettingsVisitor& visitor);
 
 // The ground's blend between its layers (Material::groundBlendDepth): shallow keeps borders crisp along the textures'
-// own shapes, deep cross-fades them.
+// own shapes, deep cross-fades them; and whether its layers are read by hex tiling, so their 2-3 m repeat does not show
+// (off to compare).
 struct ForestGroundSettings {
     float blendDepth = 0.2f;
+    bool hexTiling = true;
 };
 
 void visit(ForestGroundSettings& settings, SettingsVisitor& visitor);
+
+/*
+* The pillars' and islands' rock (Material's projected strata): the blend between beds (shallow keeps their edges
+* following the rocks' own shapes, deep cross-fades them), where the moss starts and is full, as the upward part of
+* the surface's normal (1 level, 0 a wall), how far the beds rise and fall either way (at start-up: the shapes are carved
+* by them), how dark the water streaks down the sides are (0 none, 1 black), whether the textures are read by hex tiling
+* (so their repeat does not show; off to compare), and how much the rock's tone varies in patches tens of metres across.
+*/
+struct ForestRockSettings {
+    float blendDepth = 0.3f;
+    float mossStart = 0.55f;
+    float mossFull = 0.8f;
+    float warpMetres = 6.0f;
+    float streakStrength = 0.45f;
+    bool hexTiling = true;
+    float toneVariation = 0.25f;
+};
+
+void visit(ForestRockSettings& settings, SettingsVisitor& visitor);
 
 /*
 * What the valley is built with, read once at start-up: the finest ground squares (2 m, or 4 or 8 m for a quicker start:
@@ -115,6 +136,8 @@ public:
     ForestSunSettings& getSunSettings();
     ForestMistSettings& getMistSettings();
     ForestGroundSettings& getGroundSettings();
+    ForestRockSettings& getRockSettings();
+    const std::vector<Entity>& getRockShapes() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -134,6 +157,7 @@ private:
     ForestSunSettings sunSettings;
     ForestMistSettings mistSettings;
     ForestGroundSettings groundSettings;
+    ForestRockSettings rockSettings;
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -144,6 +168,7 @@ private:
     std::vector<float> groundTexels; // each ring's paint texels in metres, the finest first
     std::vector<PillarPlacement> pillars;
     std::vector<IslandPlacement> islands;
+    std::vector<Entity> rockShapes; // every pillar and island, which share the rock's material
     Entity ring;
     std::vector<Entity> monolith;
     Entity sun;

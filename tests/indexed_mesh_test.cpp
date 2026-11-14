@@ -41,7 +41,23 @@ namespace {
     }
 }
 
+namespace {
+    // The bounds of a mesh in the render format hold every vertex and no more; an empty one has none to hold.
+    void testIndexedBounds() {
+        IndexedMesh mesh;
+        mesh.vertices = {MeshVertex{Vec3{-1.0f, 2.0f, 5.0f}, Vec3{}, Vec2{}, Vec4{}}, MeshVertex{Vec3{3.0f, -4.0f, 0.5f}, Vec3{}, Vec2{}, Vec4{}},
+                         MeshVertex{Vec3{0.0f, 0.0f, 0.0f}, Vec3{}, Vec2{}, Vec4{}}};
+        const Aabb bounds = indexedMeshBounds(mesh);
+        assert(bounds.minimum.x == -1.0f && bounds.minimum.y == -4.0f && bounds.minimum.z == 0.0f);
+        assert(bounds.maximum.x == 3.0f && bounds.maximum.y == 2.0f && bounds.maximum.z == 5.0f);
+
+        const Aabb none = indexedMeshBounds(IndexedMesh{});
+        assert(none.minimum.x == 0.0f && none.maximum.x == 0.0f);
+    }
+}
+
 void testIndexedMesh() {
+    testIndexedBounds();
     // A cube: 8 positions, but each corner touches 3 faces with different normals, so 6 faces x 4 corners = 24 vertices.
     // The two triangles of each face share their diagonal, so 36 corners become 24 vertices.
     {

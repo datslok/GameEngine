@@ -39,6 +39,31 @@ MeshHandle AssetManager::addDeformingMesh(Mesh mesh) {
     return handle;
 }
 
+MeshHandle AssetManager::addDrawnMesh(IndexedMesh mesh) {
+    if (mesh.vertices.empty() || mesh.indices.empty()) {
+        throw std::invalid_argument("A drawn mesh needs vertices and triangles");
+    }
+
+    const MeshHandle handle{static_cast<std::uint32_t>(meshes.size())};
+    meshes.push_back(nullptr);
+    drawnMeshes.emplace(handle.index, std::move(mesh));
+    return handle;
+}
+
+bool AssetManager::isDrawnOnly(MeshHandle handle) const {
+    return handle.isValid() && drawnMeshes.contains(handle.index);
+}
+
+const IndexedMesh& AssetManager::getDrawnMesh(MeshHandle handle) const {
+    const auto found = drawnMeshes.find(handle.index);
+
+    if (!handle.isValid() || found == drawnMeshes.end()) {
+        throw std::invalid_argument("Not a drawn-only mesh");
+    }
+
+    return found->second;
+}
+
 bool AssetManager::isDeforming(MeshHandle handle) const {
     return handle.isValid() && deformingTopologies.contains(handle.index);
 }
@@ -227,6 +252,10 @@ ModelRenderer AssetManager::makeModelRenderer(const Model& model, const Mat4& no
 const Mesh& AssetManager::getMesh(MeshHandle handle) const {
     if (!handle.isValid() || handle.index >= meshes.size()) {
         throw std::out_of_range("Unknown mesh handle");
+    }
+
+    if (!meshes[handle.index]) {
+        throw std::invalid_argument("A drawn-only mesh has no Mesh to read");
     }
 
     return *meshes[handle.index];
