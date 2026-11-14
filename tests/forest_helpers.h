@@ -4,7 +4,11 @@
 #include "core/job_system.h"
 #include "ecs/world.h"
 #include "games/forest/forest_game.h"
+#include "core/settings_visitor.h"
 #include "gameplay/control_mode.h"
+#include "scene/indexed_mesh.h"
+
+#include <functional>
 
 /*
 * A valley for the tests (forest_test, island_hangings_test, hanging_moss_test), so each does not grow its own copy.
@@ -33,3 +37,58 @@ struct TestForest {
         game.onInit(world, assets);
     }
 };
+
+// Counts the fields a settings visit names, and how many apply every frame (the rest apply at start-up).
+class FieldCounter : public SettingsVisitor {
+public:
+    int fields = 0;
+    int live = 0;
+
+protected:
+    void visitFloat(const char*, float&, const FloatLimits& limits) override {
+        count(limits.applies);
+    }
+
+    void visitInt(const char*, int&, const IntLimits& limits) override {
+        count(limits.applies);
+    }
+
+    void visitBool(const char*, bool&, FieldApplies applies) override {
+        count(applies);
+    }
+
+    void visitChoice(const char*, int&, const char* const*, int, FieldApplies applies) override {
+        count(applies);
+    }
+
+    void visitGroup(const char*, const std::function<void()>& contents) override {
+        contents();
+    }
+
+private:
+    void count(FieldApplies applies) {
+        ++fields;
+        live += applies == FieldApplies::EveryFrame ? 1 : 0;
+    }
+};
+
+// Every triangle of a mesh faces the way its corners' normals say (wound counterclockwise seen from outside).
+inline bool trianglesFaceTheirNormals(const IndexedMesh& mesh) {
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        const MeshVertex& a = mesh.vertices[mesh.indices[i]];
+        const MeshVertex& b = mesh.vertices[mesh.indices[i + 1]];
+        const MeshVertex& c = mesh.vertices[mesh.indices[i + 2]];
+        const Vec3 facing = (b.position - a.position).cross(c.position - a.position);
+
+        if (facing.lengthSquared() < 1e-12f) {
+            continue;
+        }
+
+        if (facing.dot(a.normal + b.normal + c.normal) <= 0.0f) {
+            return false;
+        }
+    }
+
+    return true;
+}
+

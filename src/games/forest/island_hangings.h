@@ -32,12 +32,56 @@ struct HangingStrand {
 HangingStrand hangingStrand(const Vec3& anchor, const Vec3& outward, float length, float startRadius, float tipRadius, std::uint32_t seed);
 
 /*
+* Lobes standing out round a tube near the ground (a tree's buttress roots): count fins, each at its own angle (evenly
+* spread, jittered by the seed) and its own height (60-100% of amplitude, a share of the radius), falling away by e every
+* heightMetres above groundHeight (full below it), each as narrow as cos^sharpness. No lobes when count is 0.
+*/
+struct TubeLobes {
+    int count = 0;
+    float amplitude = 0.0f;
+    float heightMetres = 1.0f;
+    float sharpness = 8.0f;
+    float groundHeight = 0.0f;
+    std::uint32_t seed = 0;
+};
+
+/*
+* The radius of a lobed tube at an angle round it (radians from its frame's first axis) and a height:
+* r (1 + exp(-max(height - ground, 0) / h) sum_j a_j max(0, cos(angle - angle_j))^p).
+*/
+float lobedRadius(float radius, float angle, float height, const TubeLobes& lobes);
+
+// How a tube is drawn beyond its shape: its bark in whole tiles round it (u from 0 to round(2 pi r / tile) at its first
+// point's radius, at least 1) rather than once round, so a thick trunk's bark is not stretched, and its lobes.
+struct TubeOptions {
+    bool wholeTilesRound = false;
+    TubeLobes lobes;
+};
+
+/*
 * The tube round a strand, appended to mesh: at each point a ring of sides + 1 vertices (the seam's twice, so u runs 0 to
 * 1 round it), turned along the strand without twisting (each ring's frame the last one's, made square to the strand);
 * normals out from the strand, v along it in tiles of tileMetres, the tangent round it (+u) with w +1 (the bitangent runs
-* down the strand, +v). Triangles face out.
+* down the strand, +v). Triangles face out. With lobes, each ring's radius is lobedRadius at its point's height, and the
+* normals and tangents come from the surface's own differences round and along it.
 */
-void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float tileMetres);
+void appendTube(IndexedMesh& mesh, const HangingStrand& strand, int sides, float tileMetres, const TubeOptions& options = {});
+
+/*
+* One leaf card appended to mesh: its stem's edge centred on stem, reaching length metres along towardsTip, width across
+* (towardsTip x facing); facing is the way its front faces (unit, square to towardsTip), normal the normal its corners
+* shade with; its picture the atlas's rectangle from uvMin (stem's edge) to uvMax. Tangent across (+u) made square to
+* the normal, w +1.
+*/
+void appendLeafCard(IndexedMesh& mesh, const Vec3& stem, const Vec3& towardsTip, const Vec3& facing, const Vec3& normal, float length,
+                    float width, const Vec2& uvMin, const Vec2& uvMax);
+
+// The texture rectangle of an atlas's cell (counted along rows from the bottom left), as {lower left, upper right}.
+struct AtlasCell {
+    Vec2 uvMin;
+    Vec2 uvMax;
+};
+AtlasCell atlasCell(int cell, int columns, int rows);
 
 /*
 * Ivy leaves along a vine, appended to mesh: one about every spacing metres, each a card size long (stem to tip) and half
@@ -74,6 +118,9 @@ struct IslandHangings {
     int rootCount = 0;
     int vineCount = 0;
 };
+
+// Any unit direction square to a unit direction.
+Vec3 squareTo(const Vec3& direction);
 
 // A direction made level and of unit length (+x when it has no level part): the way out of a shape at a point.
 Vec3 levelOutward(const Vec3& direction);

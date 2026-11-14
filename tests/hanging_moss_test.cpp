@@ -17,22 +17,6 @@
 #include <vector>
 
 namespace {
-    // Every triangle of a mesh faces the way its corners' normals say.
-    bool trianglesFaceTheirNormals(const IndexedMesh& mesh) {
-        for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-            const MeshVertex& a = mesh.vertices[mesh.indices[i]];
-            const MeshVertex& b = mesh.vertices[mesh.indices[i + 1]];
-            const MeshVertex& c = mesh.vertices[mesh.indices[i + 2]];
-            const Vec3 facing = (b.position - a.position).cross(c.position - a.position);
-
-            if (facing.lengthSquared() > 1e-12f && facing.dot(a.normal + b.normal + c.normal) <= 0.0f) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     // The share of a row of the image (row 0 at the bottom, v 0) that is moss (alpha at least half).
     float rowCoverage(const ImageData& image, std::uint32_t row) {
         int covered = 0;
@@ -202,43 +186,11 @@ namespace {
         assert(islandMoss(island, surface, hangings.tips, none).vertices.empty());
     }
 
-    // Counts the fields a visit names, and whether all of them apply at start-up.
-    class FieldCounter : public SettingsVisitor {
-    public:
-        int fields = 0;
-        bool allAtStartup = true;
-
-    protected:
-        void visitFloat(const char*, float&, const FloatLimits& limits) override {
-            ++fields;
-            allAtStartup = allAtStartup && limits.applies == FieldApplies::AtStartup;
-        }
-
-        void visitInt(const char*, int&, const IntLimits& limits) override {
-            ++fields;
-            allAtStartup = allAtStartup && limits.applies == FieldApplies::AtStartup;
-        }
-
-        void visitBool(const char*, bool&, FieldApplies applies) override {
-            ++fields;
-            allAtStartup = allAtStartup && applies == FieldApplies::AtStartup;
-        }
-
-        void visitChoice(const char*, int&, const char* const*, int, FieldApplies applies) override {
-            ++fields;
-            allAtStartup = allAtStartup && applies == FieldApplies::AtStartup;
-        }
-
-        void visitGroup(const char*, const std::function<void()>& contents) override {
-            contents();
-        }
-    };
-
     void testTheSettings() {
         ForestMossSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 4 && counter.allAtStartup);
+        assert(counter.fields == 4 && counter.live == 0);
     }
 
     /*

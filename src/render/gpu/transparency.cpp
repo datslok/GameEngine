@@ -54,12 +54,6 @@ bool glassHiddenFromLight(float glassDepth, float solidDepth) {
     return solidDepth > glassDepth;
 }
 
-// The segment's nearest point to the centre: the centre's place along it, held within its ends.
-bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius) {
-    const float along = std::clamp((centre - from).dot(direction), 0.0f, length);
-    return (from + direction * along - centre).lengthSquared() <= radius * radius;
-}
-
 namespace {
     std::vector<std::size_t> chosenWhere(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen, bool transparent) {
         std::vector<std::size_t> kept;

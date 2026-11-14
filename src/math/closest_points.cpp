@@ -38,6 +38,12 @@ Vec3 closestPointOnSegment(const Vec3& point, const Vec3& a, const Vec3& b) {
     return a + (b - a) * segmentShare(point, a, b);
 }
 
+// The segment's nearest point to the centre: the centre's place along it, held within its ends.
+bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius) {
+    const float along = std::clamp((centre - from).dot(direction), 0.0f, length);
+    return (from + direction * along - centre).lengthSquared() <= radius * radius;
+}
+
 /*
 * Clamp each coordinate into the box's range. The axes are independent for an axis-aligned box, so clamping each one
 * separately gives the nearest point.

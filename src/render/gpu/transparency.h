@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "math/closest_points.h"
 #include "math/mat4.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
@@ -84,9 +85,6 @@ Vec3 glassShadowTint(float receiverDepth, float glassDepth, const Vec3& tint);
 * which is all a hidden pane's tint could reach that the solid thing does not shadow anyway.
 */
 bool glassHiddenFromLight(float glassDepth, float solidDepth);
-
-// Whether the segment from a point along a unit direction for length passes within radius of centre.
-bool segmentMeetsSphere(const Vec3& from, const Vec3& direction, float length, const Vec3& centre, float radius);
 
 // The chosen draws (indices into draws) that are opaque, and those that are transparent (isTransparent), in the order chosen.
 std::vector<std::size_t> opaqueDraws(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& chosen);

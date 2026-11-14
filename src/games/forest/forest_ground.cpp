@@ -95,8 +95,8 @@ Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolde
     return material;
 }
 
-Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder) {
-    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / forestIvyFolder).string());
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder) {
+    const ForestTextureFiles files = findForestTextureFiles((std::filesystem::path{assetFolder} / leafFolder).string());
     Material material;
     material.alphaMode = AlphaMode::Mask;
     material.alphaCutoff = forestLeafCutoff;
@@ -112,7 +112,7 @@ Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder
     const ImageData opacity = loadImage(files.opacity);
 
     if (opacity.width != colour.width || opacity.height != colour.height) {
-        throw std::runtime_error("The ivy's opacity map is not the size of its colour map: " + files.opacity);
+        throw std::runtime_error("A leaf atlas's opacity map is not the size of its colour map: " + files.opacity);
     }
 
     // The opacity's red (a grey image's every channel) into the colour's alpha.

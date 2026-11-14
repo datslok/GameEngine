@@ -29,6 +29,9 @@ namespace {
     // The far plane: past the farthest ring of land (20.5 km from its centre), which reversed-Z depth keeps precise.
     constexpr float valleyFarPlane = 25000.0f;
 
+    // The trees' variants' seeds.
+    constexpr std::uint32_t treeVariantSeed = 0x4752'4f57u;
+
     // The day's hours for the golden views: mid-morning (the sun low in the east, light across the valley), and dusk.
     constexpr float morningHours = 9.5f;
     constexpr float duskHours = 17.8f;
@@ -228,6 +231,7 @@ const char* ForestGame::title() const {
 void ForestGame::onInit(World& world, AssetManager& assets) {
     buildGround(world, assets);
     buildShapes(world, assets);
+    buildTrees(world, assets);
 
     // The planet beyond the land is forest too, so the ground seen past the edge, and its light scattered back up into
     // the air, match it: the leaf litter's colour, in linear light as material colours are decoded.
@@ -378,6 +382,45 @@ void ForestGame::buildShapes(World& world, AssetManager& assets) {
     }
 }
 
+/*
+* The variants are grown on every core, each into its own slot, and drawn only. Every tree of a variant shares its two
+* meshes, so the GPU draws all of them in one instanced draw each; each is turned and scaled by its Transform. Not
+* static yet: the trunks and leaves join the sky visibility grid's rays with the forest floor.
+*/
+void ForestGame::buildTrees(World& world, AssetManager& assets) {
+    treePlacements = placeTrees(treeSettings, pillars, forestSightLines());
+
+    if (treePlacements.empty()) {
+        return;
+    }
+
+    const std::size_t variants = static_cast<std::size_t>(std::max(treeSettings.variants, 1));
+    std::vector<TreeMeshes> grown(variants);
+    getJobs().parallelFor(variants, 1, [&](std::size_t variant) {
+        grown[variant] = growTreeMeshes(treeSettings, forestShapeSeed(treeVariantSeed, static_cast<std::uint32_t>(variant) + 1),
+                                        forestTreeBarkLayer.tileMetres);
+    });
+
+    std::vector<MeshHandle> barkMeshes;
+    std::vector<MeshHandle> leafMeshes;
+
+    for (TreeMeshes& variant : grown) {
+        barkMeshes.push_back(assets.addDrawnMesh(std::move(variant.bark)));
+        leafMeshes.push_back(assets.addDrawnMesh(std::move(variant.leaves)));
+    }
+
+    const Material bark = forestLayerMaterial(assets, assetFolder, forestTreeBarkLayer);
+    const Material leaf = forestLeafMaterial(assets, assetFolder, forestTreeLeafFolder);
+
+    for (const TreePlacement& tree : treePlacements) {
+        const Transform pose{.position = tree.foot, .rotation = Quat::fromAxisAngle(Vec3{0.0f, 1.0f, 0.0f}, tree.turnRadians),
+                             .scale = Vec3{tree.scale, tree.scale, tree.scale}};
+        const std::size_t variant = static_cast<std::size_t>(tree.variant);
+        trees.push_back(addShape(world, barkMeshes[variant], bark, pose));
+        trees.push_back(addShape(world, leafMeshes[variant], leaf, pose));
+    }
+}
+
 void ForestGame::onInput(World& world, const Input& input) {
     controls.updateFirstPersonCommands(world, input);
 
@@ -504,6 +547,9 @@ void ForestGame::visitSettings(SettingsVisitor& visitor) {
     });
     visitor.group("Drifting rocks", [&] {
         visit(driftSettings, visitor);
+    });
+    visitor.group("Trees", [&] {
+        visit(treeSettings, visitor);
     });
     visitor.group("Valley", [&] {
         visit(valleySettings, visitor);
@@ -641,4 +687,16 @@ ForestDriftSettings& ForestGame::getDriftSettings() {
 
 const std::vector<Entity>& ForestGame::getDriftingRocks() const {
     return driftingRocks;
+}
+
+ForestTreeSettings& ForestGame::getTreeSettings() {
+    return treeSettings;
+}
+
+const std::vector<TreePlacement>& ForestGame::getTreePlacements() const {
+    return treePlacements;
+}
+
+const std::vector<Entity>& ForestGame::getTrees() const {
+    return trees;
 }

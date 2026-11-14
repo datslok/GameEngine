@@ -5,6 +5,7 @@
 #include "engine/game.h"
 #include "games/forest/drifting_rocks.h"
 #include "games/forest/forest_ground.h"
+#include "games/forest/forest_trees.h"
 #include "games/forest/hanging_moss.h"
 #include "games/forest/island_hangings.h"
 #include "games/forest/valley_shapes.h"
@@ -101,7 +102,8 @@ std::vector<ForestView> forestViews();
 * The jungle valley showcase (ROADMAP phase 18), so far the rough valley, its test of scale: the land in rings reaching
 * 20 km (forest_terrain.h), its ground blended from scanned grass, leaf litter, mud and mossy rock (forest_ground.h; plain
 * stand-ins until tools/fetch_forest_assets.py has fetched them), grey pillars, floating islands, the Ring, the Monolith
-* and far towers at their real sizes (valley_shapes.h), a sun near the equator through a real sky and the valley's haze.
+* and far towers at their real sizes (valley_shapes.h), the first grown trees (forest_trees.h), a sun near the equator
+* through a real sky and the valley's haze.
 * The same controls as the other games (F1 first person, F2 MOBA view, F3 free camera), and forest-view <name>.
 */
 class ForestGame final : public Game {
@@ -150,6 +152,10 @@ public:
     ForestDriftSettings& getDriftSettings();
     // The rocks drifting round the islands and some pillars.
     const std::vector<Entity>& getDriftingRocks() const;
+    ForestTreeSettings& getTreeSettings();
+    const std::vector<TreePlacement>& getTreePlacements() const;
+    // Each tree's bark and then its leaves, tree by tree.
+    const std::vector<Entity>& getTrees() const;
 
 private:
     // Point the sun and set the air (sky and mist) for the current settings, and the ground's blend.
@@ -160,6 +166,9 @@ private:
 
     // The pillars, islands, the Ring, the Monolith and the far towers.
     void buildShapes(World& world, AssetManager& assets);
+
+    // The emergent trees between the Ring and the clearing: a few variants grown, each placed many times.
+    void buildTrees(World& world, AssetManager& assets);
 
     // Place the camera at a named view; false for a name there is none of.
     bool showView(World& world, const std::string& name);
@@ -173,6 +182,7 @@ private:
     ForestHangingSettings hangingSettings;
     ForestMossSettings mossSettings;
     ForestDriftSettings driftSettings;
+    ForestTreeSettings treeSettings;
     ForestValleySettings valleySettings;
 
     // The real sky's air, on the air entity, with the mist's Fog while it is on.
@@ -187,6 +197,8 @@ private:
     std::vector<Entity> hangingEntities;
     std::vector<Entity> mossEntities;
     std::vector<Entity> driftingRocks;
+    std::vector<TreePlacement> treePlacements;
+    std::vector<Entity> trees;
     Entity ring;
     std::vector<Entity> monolith;
     Entity sun;

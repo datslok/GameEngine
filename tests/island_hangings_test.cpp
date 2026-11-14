@@ -29,26 +29,6 @@ namespace {
         return length;
     }
 
-    // Every triangle of a mesh faces the way its corners' normals say (wound counterclockwise seen from outside).
-    bool trianglesFaceTheirNormals(const IndexedMesh& mesh) {
-        for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-            const MeshVertex& a = mesh.vertices[mesh.indices[i]];
-            const MeshVertex& b = mesh.vertices[mesh.indices[i + 1]];
-            const MeshVertex& c = mesh.vertices[mesh.indices[i + 2]];
-            const Vec3 facing = (b.position - a.position).cross(c.position - a.position);
-
-            if (facing.lengthSquared() < 1e-12f) {
-                continue;
-            }
-
-            if (facing.dot(a.normal + b.normal + c.normal) <= 0.0f) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     /*
     * A strand hangs from its anchor: it starts there leaning out, turns down under its own weight within a few metres,
     * never climbs, and its points are a step apart over the length asked for. It tapers from its start radius to its
@@ -218,44 +198,12 @@ namespace {
         assert(bare.bark.vertices.empty() && bare.leaves.vertices.empty() && bare.anchors.empty());
     }
 
-    // Counts the fields a visit names, and whether all of them apply at start-up.
-    class FieldCounter : public SettingsVisitor {
-    public:
-        int fields = 0;
-        bool allAtStartup = true;
-
-    protected:
-        void visitFloat(const char*, float&, const FloatLimits& limits) override {
-            ++fields;
-            allAtStartup = allAtStartup && limits.applies == FieldApplies::AtStartup;
-        }
-
-        void visitInt(const char*, int&, const IntLimits& limits) override {
-            ++fields;
-            allAtStartup = allAtStartup && limits.applies == FieldApplies::AtStartup;
-        }
-
-        void visitBool(const char*, bool&, FieldApplies applies) override {
-            ++fields;
-            allAtStartup = allAtStartup && applies == FieldApplies::AtStartup;
-        }
-
-        void visitChoice(const char*, int&, const char* const*, int, FieldApplies applies) override {
-            ++fields;
-            allAtStartup = allAtStartup && applies == FieldApplies::AtStartup;
-        }
-
-        void visitGroup(const char*, const std::function<void()>& contents) override {
-            contents();
-        }
-    };
-
     // The settings, each read at start-up (the meshes are built once).
     void testTheSettings() {
         ForestHangingSettings settings;
         FieldCounter counter;
         visit(settings, counter);
-        assert(counter.fields == 6 && counter.allAtStartup);
+        assert(counter.fields == 6 && counter.live == 0);
     }
 
     /*

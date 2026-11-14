@@ -78,14 +78,20 @@ inline constexpr ForestGroundLayer forestBarkLayer{"bark_brown_02", 2.0f, Pixel{
 // The vines' ivy leaves: ambientCG's LeafSet017, six leaves in an atlas.
 inline constexpr const char* forestIvyFolder = "LeafSet017";
 
+// The trees' bark (Poly Haven's oak bark, a tile 1.5 m round the trunk) and leaves (ambientCG's LeafSet024, nine
+// beech-like leaves in a 3 x 3 atlas).
+inline constexpr ForestGroundLayer forestTreeBarkLayer{"jolcham_oak_bark_01", 1.5f, Pixel{92, 78, 64}, 0.9f};
+inline constexpr const char* forestTreeLeafFolder = "LeafSet024";
+
 // A leaf's alpha under this is a hole.
 inline constexpr float forestLeafCutoff = 0.5f;
 
 /*
-* The ivy's material: a double-sided cut-out, its colour with the opacity map in its alpha (made here, its mips keeping
-* the leaves' coverage), its normal and roughness maps; without the files, a plain green cut-out with no holes.
+* A leaf atlas's material (the ivy's by default): a double-sided cut-out, its colour with the opacity map in its alpha
+* (made here, its mips keeping the leaves' coverage), its normal and roughness maps; without the files, a plain green
+* cut-out with no holes.
 */
-Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder);
+Material forestLeafMaterial(AssetManager& assets, const std::string& assetFolder, const char* leafFolder = forestIvyFolder);
 
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
