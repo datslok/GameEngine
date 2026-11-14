@@ -3516,7 +3516,7 @@ The lab's night (`LightLabNightSettings`, group "Night"), all by eye, since the 
 - The valley runs north. Its floor is at 0 within `valleyFloorHalfWidth` (200 m) of its axis (`valleyAxis`: straight along the walk, swinging up to 400 m either way north of z = -700). Walls climb to the rim (`valleyRimHeight`, 150 m) over `valleyWallWidth` (150 m).
 - The ramp: the floor climbs south from z = 50 to the rim at z = 750, 70% a straight slope and 30% eased, so its steepest part is gentler than an eased curve's. The start (`forestStartPlace`) is on the rim at its top.
 - Mountains beyond the rim: rising over 300 m to 2.5 km outside the valley to 60-100% of 700 m by noise about 2.5 km across.
-- Over all of it the first forest's small shapes from value noise (`forestValueNoise`, `forestFractalNoise`): hills about 100 m across (9 m), knolls about 28 m (7 m), lumps (0.25 m).
+- Over all of it the first forest's small shapes from value noise (`forestValueNoise`, `forestFractalNoise`, each octave turned its own way so the sum has no square grain: unturned, a third of its slopes ran within 10 degrees of an axis): hills about 100 m across (9 m), knolls about 28 m (7 m), lumps (0.25 m).
 - A level clearing at the Monolith's foot (`forestClearingCentre`, 120 m round, blending over 60 m).
 - The path (`forestPathPoints`): from the start down the ramp in wide bends, through the Ring's middle and along the floor into the clearing. Level across within 1.5 m of its centre line, sunk 8 cm; along it the land averaged over 30 m either way (12 m left the knolls on the ramp at 33 degrees), at most about 23 degrees.
 - `forestMeadowShare`: open canopy in the clearing, a meadow round the start (60 m) and wide openings where low-frequency noise is high.

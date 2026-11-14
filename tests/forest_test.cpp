@@ -143,6 +143,31 @@ namespace {
 
         assert(highest - lowest > 0.6f);
         assert(forestValueNoise(10.5f, 3.25f, 1u) != forestValueNoise(10.5f, 3.25f, 2u));
+
+        // No square grain: the fractal noise's slopes point every way alike, as few within 10 degrees of an axis as
+        // random directions give (2/9), where the unturned octaves gave a third.
+        int alongAxis = 0;
+        int slopes = 0;
+
+        for (int row = 0; row < 300; ++row) {
+            for (int column = 0; column < 300; ++column) {
+                const float x = 0.137f * static_cast<float>(column) + 3.1f;
+                const float z = 0.113f * static_cast<float>(row) - 7.7f;
+                const float step = 1e-3f;
+                const float slopeX = forestFractalNoise(x + step, z, 3, 11u) - forestFractalNoise(x - step, z, 3, 11u);
+                const float slopeZ = forestFractalNoise(x, z + step, 3, 11u) - forestFractalNoise(x, z - step, 3, 11u);
+
+                if (slopeX * slopeX + slopeZ * slopeZ < 1e-12f) {
+                    continue;
+                }
+
+                const float degrees = std::fmod(std::atan2(slopeZ, slopeX) * 57.29578f + 360.0f, 90.0f);
+                alongAxis += degrees < 10.0f || degrees > 80.0f ? 1 : 0;
+                ++slopes;
+            }
+        }
+
+        assert(static_cast<float>(alongAxis) / static_cast<float>(slopes) < 0.25f);
     }
 
     /*

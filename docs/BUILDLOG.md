@@ -1543,6 +1543,7 @@ After a three-way review of the roadmap (a hyper-critical, a neutral and an adva
   - **Softer where coarse:** each ring's blend depth is the setting's times the square root of how many times coarser its texels are than the finest, at most 1, so far patches fade into each other.
   - **Measured (the laptop, release):** the valley builds in 2.4 s on 16 threads (1.7 before).
   - **Checked:** the tests (release, tests first); the debug game builds without warnings. Not run: the game (the user's look).
+  - **Still square** (the user's look, Nov 14 2026). Baking the near paint to an image on the CPU showed its edges smooth at the texel size, but its shapes square: rock patches and openings running along x and z. Value noise interpolates along its lattice's axes, so its slopes do too: 47% of one octave's slopes lay within 10 degrees of an axis, 32% of the summed octaves', against 22% for random directions. Each octave is now turned and shifted its own way (the first by atan(3/4), each next by the golden angle more): 21.6%, and the baked paint's shapes wander. A test holds the share under 25%. The path stays at most 0.43.
 
 ## Tools outside the phases
 
