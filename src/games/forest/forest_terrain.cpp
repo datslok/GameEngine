@@ -77,6 +77,17 @@ namespace {
     constexpr std::array<float, 4> ringHalfSizes{forestNearHalfSize, 4.0f * forestNearHalfSize, 16.0f * forestNearHalfSize, 32.0f * forestNearHalfSize};
     constexpr std::array<float, 4> ringCoarseness{1.0f, 8.0f, 32.0f, 128.0f};
 
+    /*
+    * Each octave of the fractal noise is turned and shifted on its own, the first by atan(3/4) and each next by the
+    * golden angle more: value noise interpolates along its lattice's axes, so its slopes (and the rock painted on them,
+    * the openings' edges) run along x and z; summed unturned, a third of the slopes lay within 10 degrees of an axis and
+    * the ground looked square (the user's look at the rough valley), turned about 22%, as random directions do.
+    */
+    constexpr float firstOctaveTurn = 0.6435011f;
+    constexpr float octaveTurnStep = 2.3999632f;
+    constexpr float octaveShiftX = 17.31f;
+    constexpr float octaveShiftZ = -9.87f;
+
     // A place on a ring's border, within float rounding of grid points made from whole numbers of squares.
     constexpr float borderTolerance = 1e-3f;
 
@@ -242,7 +253,12 @@ float forestFractalNoise(float x, float z, int octaves, std::uint32_t seed) {
     float frequency = 1.0f;
 
     for (int octave = 0; octave < octaves; ++octave) {
-        sum += amplitude * (2.0f * forestValueNoise(x * frequency, z * frequency, seed + static_cast<std::uint32_t>(octave) * 101u) - 1.0f);
+        const float turn = firstOctaveTurn + octaveTurnStep * static_cast<float>(octave);
+        const float cosine = std::cos(turn);
+        const float sine = std::sin(turn);
+        const float u = (cosine * x - sine * z) * frequency + octaveShiftX * static_cast<float>(octave);
+        const float v = (sine * x + cosine * z) * frequency + octaveShiftZ * static_cast<float>(octave);
+        sum += amplitude * (2.0f * forestValueNoise(u, v, seed + static_cast<std::uint32_t>(octave) * 101u) - 1.0f);
         total += amplitude;
         amplitude *= 0.5f;
         frequency *= 2.0f;

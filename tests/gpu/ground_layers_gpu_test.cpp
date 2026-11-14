@@ -3,6 +3,7 @@
 
 #include "render/gpu/ground_layers.h"
 
+#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -49,9 +50,36 @@ namespace {
             }
         }
     }
+
+    // Places across texels and far out on a big texture, at and between texel centres.
+    void checkPaintTaps(GpuFunctionRunner& runner, GpuCheckReport& report) {
+        CaseRandom random{47};
+        std::vector<GpuVec4> inputs;
+
+        for (int i = 0; i < 400; ++i) {
+            const float spread = i % 3 == 0 ? 8.0f : 2048.0f;
+            const float x = i % 10 == 0 ? std::floor(random.between(0.0f, spread)) + 0.5f : random.between(0.0f, spread);
+            inputs.push_back(GpuVec4{x, random.between(0.0f, spread), 0.0f, 0.0f});
+        }
+
+        const std::vector<GpuVec4> outputs = runner.run(shader, GPU_TEST_GROUND_PAINT_TAPS, inputs, 1, 2);
+
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            const GroundPaintTaps expected = groundPaintTaps(Vec2{inputs[i][0], inputs[i][1]});
+            const GpuVec4& places = outputs[i * 2];
+            const GpuVec4& shares = outputs[i * 2 + 1];
+            report.check("groundPaintTaps first", arithmeticTolerance, expected.first.x, places[0]);
+            report.check("groundPaintTaps first", arithmeticTolerance, expected.first.y, places[1]);
+            report.check("groundPaintTaps second", arithmeticTolerance, expected.second.x, places[2]);
+            report.check("groundPaintTaps second", arithmeticTolerance, expected.second.y, places[3]);
+            report.check("groundPaintTaps share", arithmeticTolerance, expected.firstShare.x, shares[0]);
+            report.check("groundPaintTaps share", arithmeticTolerance, expected.firstShare.y, shares[1]);
+        }
+    }
 }
 
 void gpuTestGroundLayers(GpuFunctionRunner& runner, GpuCheckReport& report) {
     report.section("ground_layers.glsl");
     checkBlendWeights(runner, report);
+    checkPaintTaps(runner, report);
 }

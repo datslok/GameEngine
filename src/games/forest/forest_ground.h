@@ -49,3 +49,14 @@ ForestTextureFiles findForestTextureFiles(const std::string& folder);
 
 // A ground layer's material from the texture set in assetFolder/layer.folder, or its plain stand-in when there is none.
 Material forestLayerMaterial(AssetManager& assets, const std::string& assetFolder, const ForestGroundLayer& layer);
+
+// The finest paint's texels: 2048 over the walked-on ring's 1.28 km.
+inline constexpr float forestFinestPaintTexel = 0.625f;
+
+/*
+* The ground's blend depth (Material::groundBlendDepth) for paint whose texels are texelMetres across: the setting's own
+* on the finest, deeper by the square root of how many times coarser they are, at most 1 (a plain cross-fade). A shallow
+* blend turns the weights' bilinear slopes into hard edges, which on texels tens of metres wide show their corners as
+* squares; a deeper one lets them fade.
+*/
+float forestBlendDepth(float blendDepth, float texelMetres);

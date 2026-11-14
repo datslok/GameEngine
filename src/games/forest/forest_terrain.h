@@ -63,7 +63,8 @@ inline constexpr std::size_t forestRockLayer = 3;
 // continuous too. The same place and seed always give the same value.
 float forestValueNoise(float x, float z, std::uint32_t seed);
 
-// Octaves of value noise, each twice as fine and half as strong as the last, centred on 0 (-1..1).
+// Octaves of value noise, each twice as fine and half as strong as the last and turned its own way (so the sum has no
+// square grain), centred on 0 (-1..1).
 float forestFractalNoise(float x, float z, int octaves, std::uint32_t seed);
 
 // The path's centre line, from the start to the clearing (x, z points).

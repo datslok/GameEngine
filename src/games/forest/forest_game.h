@@ -141,6 +141,7 @@ private:
 
     Entity ground;
     std::vector<Entity> farGround;
+    std::vector<float> groundTexels; // each ring's paint texels in metres, the finest first
     std::vector<PillarPlacement> pillars;
     std::vector<IslandPlacement> islands;
     Entity ring;

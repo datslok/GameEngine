@@ -322,6 +322,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - Added Nov 13 2026 at the user's request, before phase 17, as a 400 m forest with a clearing.
 - Re-planned the same day after concept art and the user's references (floating mountains, karst pillars, overgrown megastructures): "something large and epic, i want the scale to be felt huge", with floating islands.
 - The scale is mostly an engine problem (drawing less far away), so the level of detail, impostor, occlusion culling and texture compression items moved here from phases 12 and 14, and a rough valley comes first to measure what is needed.
+- Re-ordered Nov 14 2026 after the rough valley (the user's look: the haze turns blue, 7.4 ms of GPU with the typical setup, "looks a bit square in some places"): the ground's paint, then distant shadows, then the content; the scale items wait until the content makes the frame heavy.
 
 **Items**
 
@@ -329,13 +330,8 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Ground blending: up to four layers sharpened by their height maps (`forest-assets`)
 - [x] The game: terrain, clearing, path, blended ground, sun, valley mist, stand-ins (`forest-assets`)
 - [x] The rough valley: the land in rings to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
-- [ ] Aerial perspective: the air between the camera and far scenery from the sky's own tables (Hillaire 2020's aerial perspective volume), so distant things turn blue by distance; the fog's grid near, this beyond it
-- [ ] Far terrain: the land in coarser rings or tiles away from the camera, the walkable floor at 1 m
-- [ ] Level of detail (moved from phase 12): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer)
-- [ ] Impostors (moved from phase 14): far trees and plants as cards baked from their full meshes from several directions, so a valley's canopy of tens of thousands of trees costs little
-- [ ] Occlusion culling (moved from phase 14): culling in compute against last frame's depth pyramid (Hi-Z), so what hides behind the Monolith or a pillar is not drawn
-- [ ] Texture compression (moved from phase 12's asset cooking): BC7 colour and BC5 normal maps, about a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB
-- [ ] Distant shadows: far scenery past the last cascade shaded without coarse or torn shadows (a far cascade of its own or baked shading), chosen from the rough valley's measurements
+- [x] The ground's paint without squares: a texture per ring, turned noise, cubic reads (`ground-paint`)
+- [ ] Distant shadows: the sun's shadows reaching the far pillars, islands and towers (they stop at 200 m today, so everything past it is lit on all sides) without blurring the near ones: a far cascade of its own or baked shading
 - [ ] More assets: jungle plants (broad leaves, bromeliads, palms or tree ferns), banded sandstone for the pillars, weathered concrete and panels for the structures, a vine leaf atlas, hanging moss; a CC0 survey and a shortlist for the user first, as for the first 30
 - [ ] The pillars and floating islands, generated
   - Sandstone pillars: wobbling, tapered columns with ledges, streaks and a crown of trees, in the scanned rock.
@@ -346,6 +342,12 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
   - The Monolith: a 600 m plated slab with setbacks, a truss bridge to a pillar, lit slots and beacons. The Ring: 400 m across, on edge, sunk to its waist. Far towers in the haze.
   - Parallax hull plates, clear-coated paint, chrome pipes, glowing strips with real lights, searchlights sweeping beams through the mist, vines hanging hundreds of metres.
 - [ ] Wind: a field of travelling gusts bending stems like cantilevers and fluttering leaves and vines, identical in the depth prepass, main pass, shadows, velocity pass (last frame's wind too) and captures; the shadow cache's cost measured
+- [ ] Level of detail (moved from phase 12; when the trees make the frame heavy: the rough valley ran at 7.4 ms of GPU with the typical setup): simpler meshes for distant objects, chosen per view; generated meshes (pillars, islands, structures, trees) made at several resolutions by their own code, scanned ones simplified (meshoptimizer)
+- [ ] Impostors (moved from phase 14): far trees and plants as cards baked from their full meshes from several directions, so a valley's canopy of tens of thousands of trees costs little
+- [ ] Occlusion culling (moved from phase 14): culling in compute against last frame's depth pyramid (Hi-Z), so what hides behind the Monolith or a pillar is not drawn
+- [ ] Texture compression (moved from phase 12's asset cooking): BC7 colour and BC5 normal maps, about a quarter of the memory, so the plants, rock and metals fit the laptop's 8 GB
+- [ ] Far terrain following the camera, only if needed: the rough valley's fixed rings reach 20 km round the walk
+- [ ] Aerial perspective: the air between the camera and far scenery from the sky's own tables (Hillaire 2020's aerial perspective volume), so distant things turn blue by distance; the fog's grid near, this beyond it (only if the haze looks wrong later: the rough valley showed it already turns blue)
 - [ ] Golden views, tests, packaging with the downloaded assets, docs
 
 **Milestone:** with the typical GPU setup, the scale is felt from the valley's rim (pillars, floating islands and the Monolith layered into kilometres of haze), and walking down through the jungle to the Monolith's foot looks lush and alive (wind in leaves and vines, light through the canopy, mist in the valley) by day and at dusk, at a frame rate a mid-range GPU holds (measured on the laptop's RTX 4070, 8 GB).
