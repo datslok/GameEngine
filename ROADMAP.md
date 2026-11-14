@@ -330,7 +330,7 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Ground blending: up to four layers sharpened by their height maps (`forest-assets`)
 - [x] The game: terrain, clearing, path, blended ground, sun, valley mist, stand-ins (`forest-assets`)
 - [x] The rough valley: the land in rings to 20 km, grey pillars, floating islands, the Ring and the Monolith at real size (`rough-valley`)
-- [ ] The ground's paint without squares: a weights texture per ring, softer blends where its texels are coarse
+- [x] The ground's paint without squares: a texture per ring, turned noise, cubic reads (`ground-paint`)
 - [ ] Distant shadows: the sun's shadows reaching the far pillars, islands and towers (they stop at 200 m today, so everything past it is lit on all sides) without blurring the near ones: a far cascade of its own or baked shading
 - [ ] More assets: jungle plants (broad leaves, bromeliads, palms or tree ferns), banded sandstone for the pillars, weathered concrete and panels for the structures, a vine leaf atlas, hanging moss; a CC0 survey and a shortlist for the user first, as for the first 30
 - [ ] The pillars and floating islands, generated
