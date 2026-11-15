@@ -5,6 +5,7 @@
 #include "math/vec3.h"
 #include "scene/indexed_mesh.h"
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -56,6 +57,33 @@ float lobedRadius(float radius, float angle, float height, const TubeLobes& lobe
 struct TubeOptions {
     bool wholeTilesRound = false;
     TubeLobes lobes;
+};
+
+/*
+* A tube's frame at one of its strand's points: two unit directions square to the strand and to each other, the ring's
+* angle 0 along across and a quarter turn along second (lobedRadius's angles are measured so).
+*/
+struct TubeFrame {
+    Vec3 across;
+    Vec3 second;
+
+    Vec3 direction(float angle) const {
+        return across * std::cos(angle) + second * std::sin(angle);
+    }
+};
+
+// The frames appendTube builds a strand's rings with: the first square to its first direction, each next one the last
+// one's turned square to the strand at its point, so the tube does not twist.
+std::vector<TubeFrame> tubeFrames(const HangingStrand& strand);
+
+/*
+* A trunk climbers grow on (games/forest/climbers.h): the strand its tube was built from (from under the ground past
+* its fork) with its lobes, and the height in its own frame to which climbers may climb (its fork's).
+*/
+struct ClimbHost {
+    HangingStrand trunk;
+    TubeLobes lobes;
+    float topHeight = 0.0f;
 };
 
 /*

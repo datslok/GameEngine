@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/settings_visitor.h"
+#include "games/forest/island_hangings.h"
 #include "games/forest/valley_shapes.h"
 #include "math/vec2.h"
 #include "math/vec3.h"
@@ -302,6 +303,9 @@ struct TreeMeshes {
     float barkLevelError = 0.0f;
     float shadowBarkError = 0.0f;
     float trunkRadius = 0.0f; // Leonardo's, at the fork; the foot is trunkTaper thicker
+
+    // The trunk's strand and lobes as its tube was built, up to its fork, for climbers (games/forest/climbers.h).
+    ClimbHost trunk;
 };
 
 // The crown a tree of these settings grows into, in its own frame: from the fork to the top, crownRadius across.

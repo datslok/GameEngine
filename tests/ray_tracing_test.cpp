@@ -109,6 +109,7 @@ namespace {
     void testDebugRaysFollowTheCamera() {
         const Camera camera{Vec3{2.0f, 1.0f, 3.0f}, Vec3{-4.0f, 0.5f, -9.0f}, Vec3{0.0f, 1.0f, 0.0f}, 1.1f, 16.0f / 9.0f, 0.1f, 500.0f};
         const GpuRayDebugView view = packRayDebugView(camera, RayDebugView::Faces, 1920, 1080);
+        assert(view.screen[2] == skyWithDiscs); // the camera's own sky shows the sun and the moon
         const Vec3 right{view.right[0], view.right[1], view.right[2]};
         const Vec3 up{view.up[0], view.up[1], view.up[2]};
         const Vec3 forward{view.forward[0], view.forward[1], view.forward[2]};

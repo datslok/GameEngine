@@ -60,6 +60,7 @@ void testForestTrees();
 void testUnderstorey();
 void testPalms();
 void testLianas();
+void testClimbers();
 void testSimplifyMesh();
 void testLevelOfDetail();
 void testTerrain();
@@ -355,6 +356,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testUnderstorey", testUnderstorey);
     runTest("testPalms", testPalms);
     runTest("testLianas", testLianas);
+    runTest("testClimbers", testClimbers);
     runTest("testSimplifyMesh", testSimplifyMesh);
     runTest("testLevelOfDetail", testLevelOfDetail);
     runTest("testTerrain", testTerrain);

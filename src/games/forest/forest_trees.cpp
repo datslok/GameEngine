@@ -797,6 +797,11 @@ TreeMeshes growTreeMeshes(const ForestTreeSettings& settings, std::uint32_t seed
             sides = lobedTrunkSides;
         }
 
+        // The trunk (the first chain, from the foot) for climbers: its whole strand, so their frames are the tube's.
+        if (index == 0) {
+            meshes.trunk = ClimbHost{.trunk = strand, .lobes = options.lobes, .topHeight = forkHeight};
+        }
+
         appendTube(meshes.bark, strand, sides, barkTileMetres, options);
     }
 

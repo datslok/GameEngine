@@ -146,6 +146,16 @@ inline constexpr int forestPalmLeafletTexels = 256;
 inline constexpr float forestPalmLeafletDepth = 0.01f;
 Material forestPalmLeafMaterial(AssetManager& assets, const std::string& assetFolder);
 
+/*
+* The climbers' leaves' material (games/forest/climbers.h): their picture drawn at start-up (aroidLeafImages, a normal
+* map from its height) in the trees' leaves' colour, tinted as theirs; opaque and double-sided as the palms' are, but
+* glossier, as a philodendron's leaves are.
+*/
+inline constexpr int forestAroidLeafTexels = 256;
+inline constexpr float forestAroidLeafDepth = 0.01f;
+inline constexpr float forestAroidLeafRoughness = 0.4f;
+Material forestAroidLeafMaterial(AssetManager& assets, const std::string& assetFolder);
+
 // Hanging moss's colour comes from ambientCG's Moss001 scan (its mean), or this without it.
 inline constexpr const char* forestMossFolder = "Moss001";
 inline constexpr Pixel forestMossStandIn{96, 104, 62};
