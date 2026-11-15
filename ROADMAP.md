@@ -347,7 +347,8 @@ A fourth game (`--game forest`) showing everything phases 6 and 16 built, at a s
 - [x] Big copies off the frame: the terrain's draws into room kept for them, the sky bake reading a grid copy brought up to date, only new planes walked (`frame-copies`)
 - [ ] A persistent scene: static objects' instances uploaded once, only moving ones each frame (Unreal's GPU Scene, Unity's BatchRendererGroup). Research and plan in `docs/PERSISTENTSCENE.md` (the user's go, Nov 15 2026):
   - [x] Still objects: `ModelRenderer::still`, their draws kept between frames, changes announced (`still-objects`)
-  - [ ] A persistent GPU scene: instances in lasting slots, only changes uploaded; a lasting material table
+  - [x] Still draws' records kept: instances, last-frame matrices and a material table packed once, repacked where built (`gpu-scene-persistent`)
+  - [ ] Lasting GPU buffers updated only where they change (the 8 MB copy a frame left, about 2 ms; measured first)
   - [ ] Views without full scans (measured first)
 - [x] Cheaper forest shadows: the understorey in the nearest two cascades, shadow bark, leaf cards cut to their twigs' outline (`understorey-shadow-cascades`)
 - [ ] Coarser leaves in the far cascades: a cheaper shadow leaf mesh where their texels are too coarse to show it (research in `docs/SHADOWCACHE.md`)

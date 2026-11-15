@@ -117,6 +117,9 @@ namespace {
         assert(second.draws.size() == 4 && second.stillDraws == 3 && builtCount(second) == 0);
         assert(second.draws[1].bounds.radius == 123.0f);
         assert(second.draws[3].mesh == MeshHandle{1});
+
+        // Each frame a new version, naming the one before, so the renderer knows whether it saw that one.
+        assert(second.stillVersion != first.stillVersion && second.stillPreviousVersion == first.stillVersion);
         still.giveBack(std::move(second.draws));
 
         // Room kept for the terrain's draws as without kept draws.

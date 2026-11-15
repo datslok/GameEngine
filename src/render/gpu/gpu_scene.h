@@ -154,7 +154,7 @@ std::uint64_t materialHash(const GpuMaterial& packed);
 * give: the materials packed and hashed and the instances packed on every core, the indices handed out in draw order on
 * one (with 20,000 objects, packing on one thread took 11 ms).
 */
-std::vector<GpuInstance> packInstances(const std::vector<DrawItem>& draws, MaterialTable& materials, JobSystem& jobs);
+std::vector<GpuInstance> packInstances(std::span<const DrawItem> draws, MaterialTable& materials, JobSystem& jobs);
 
 // One instanced draw: mesh, drawn instanceCount times, as instances firstInstance onwards, and how its draws are drawn:
 // cut-outs by pipelines that throw away their holes, double-sided ones without culling back faces.

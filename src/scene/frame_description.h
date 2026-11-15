@@ -139,6 +139,11 @@ struct FrameDescription {
     std::size_t stillDraws = 0;
     std::vector<DrawRange> builtStillDraws{};
 
+    // Each frame from kept draws is a new version and names the one before, so the renderer, which keeps what it packed
+    // from them, knows builtStillDraws is all that changed only when it packed that one (render/gpu/still_instances.h).
+    std::uint64_t stillVersion = 0;
+    std::uint64_t stillPreviousVersion = 0;
+
     // Where the action is: when there are more lights than the renderer can use, the brightest ones here win.
     // The camera's position unless the game names a better point (a MOBA camera floats far above the ground it shows).
     Vec3 lightFocus{0.0f, 0.0f, 0.0f};
