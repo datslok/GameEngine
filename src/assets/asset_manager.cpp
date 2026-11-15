@@ -73,6 +73,7 @@ void AssetManager::setMeshLevels(MeshHandle base, std::vector<MeshLevel> levels)
     }
 
     meshLevels[base.index] = std::move(levels);
+    ++levelsVersion;
 }
 
 MeshHandle AssetManager::addDrawnMeshWithLevels(IndexedMesh mesh, std::vector<SimplifiedLevel> levels) {
@@ -101,10 +102,15 @@ void AssetManager::setMeshLevelOptions(MeshHandle mesh, MeshLevelOptions options
     }
 
     meshLevelOptions[mesh.index] = options;
+    ++levelsVersion;
 }
 
 const std::vector<MeshLevelOptions>& AssetManager::getMeshLevelOptions() const {
     return meshLevelOptions;
+}
+
+std::uint64_t AssetManager::getLevelsVersion() const {
+    return levelsVersion;
 }
 
 bool AssetManager::isDrawnOnly(MeshHandle handle) const {

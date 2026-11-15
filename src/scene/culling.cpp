@@ -22,7 +22,7 @@ BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model) {
     return BoundingSphere{Vec3{centre.x, centre.y, centre.z}, localRadius * largestScale};
 }
 
-void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>& boundsByMesh) {
+void attachBoundingSpheres(std::span<DrawItem> draws, const std::vector<Aabb>& boundsByMesh) {
     for (DrawItem& draw : draws) {
         if (draw.mesh.isValid() && draw.mesh.index < boundsByMesh.size()) {
             draw.bounds = boundingSphere(boundsByMesh[draw.mesh.index], draw.model);
@@ -30,7 +30,7 @@ void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>
     }
 }
 
-void attachFlatFaces(std::vector<DrawItem>& draws, const std::vector<std::vector<FlatFace>>& facesByMesh) {
+void attachFlatFaces(std::span<DrawItem> draws, const std::vector<std::vector<FlatFace>>& facesByMesh) {
     for (DrawItem& draw : draws) {
         if (draw.mesh.isValid() && draw.mesh.index < facesByMesh.size()) {
             draw.flatFaces = facesByMesh[draw.mesh.index];

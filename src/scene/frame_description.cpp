@@ -2,6 +2,7 @@
 #include "math/transform.h"
 #include "scene/interpolation.h"
 #include "scene/model_renderer.h"
+#include "scene/still_draws.h"
 
 #include <algorithm>
 
@@ -62,8 +63,33 @@ void MotionHistory::reserveSlots(std::size_t count) {
 * list; then the entities are built on every core, each writing only its own draws and its own motion record, so the
 * list is the same whatever order the threads finish in (with 20,000 objects, one thread took 12 ms).
 */
-FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs, std::size_t laterDraws) {
-    FrameDescription frame{camera, collectLighting(world, alpha), {}, camera.getPosition(), 0.0f, {}, {}, {}, {}, 0, {}, {}, {}, 0};
+void buildEntityDraws(const World& world, Entity entity, const ModelRenderer& renderer, float alpha, MotionHistory* history,
+                      std::span<DrawItem> draws) {
+    const Mat4 entityMatrix = getRenderTransform(world, entity, alpha).getMatrix();
+
+    for (std::size_t part = 0; part < renderer.parts.size(); ++part) {
+        const RenderPart& piece = renderer.parts[part];
+        const Mat4 model = entityMatrix * piece.localTransform;
+        DrawItem& draw = draws[part];
+        draw = DrawItem{piece.mesh, model, piece.material, renderer.castsShadows, renderer.isStatic, BoundingSphere{},
+                        history != nullptr ? history->previous(entity, part) : std::nullopt};
+        draw.shadowOnly = renderer.shadowOnly;
+        draw.shadowCascades = renderer.shadowCascades;
+        draw.hidden = renderer.hidden;
+
+        if (history != nullptr) {
+            history->remember(entity, part, model);
+        }
+    }
+}
+
+/*
+* With kept draws, the still entities' come first from them (StillDraws::update) and only the others are counted and
+* built here, after them.
+*/
+FrameDescription buildFrame(World& world, const Camera& camera, float alpha, MotionHistory* history, JobSystem& jobs, std::size_t laterDraws,
+                            StillDraws* still) {
+    FrameDescription frame{.camera = camera, .lighting = collectLighting(world, alpha), .lightFocus = camera.getPosition()};
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
     if (renderers == nullptr) {
@@ -71,11 +97,24 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
     } else {
         const std::vector<Entity>& entities = renderers->getEntities();
         const std::vector<ModelRenderer>& components = renderers->getComponents();
-        std::vector<std::size_t> firstDraw(entities.size() + 1, 0);
+        const ComponentStorage<Transform>* transforms = world.storageOf<Transform>();
+        std::vector<std::uint8_t> kept;
+        std::size_t stillCount = 0;
+
+        if (still != nullptr) {
+            StillDraws::Update update = still->update(world, alpha, jobs);
+            frame.draws = std::move(update.draws);
+            frame.stillDraws = update.count;
+            frame.builtStillDraws = std::move(update.built);
+            kept = std::move(update.kept);
+            stillCount = update.count;
+        }
+
+        std::vector<std::size_t> firstDraw(entities.size() + 1, stillCount);
         std::size_t slots = 0;
 
         for (std::size_t index = 0; index < entities.size(); ++index) {
-            const bool drawn = components[index].visible && world.tryGet<Transform>(entities[index]) != nullptr;
+            const bool drawn = (kept.empty() || kept[index] == 0) && components[index].visible && transforms != nullptr && transforms->contains(entities[index]);
             firstDraw[index + 1] = firstDraw[index] + (drawn ? components[index].parts.size() : 0);
             slots = std::max<std::size_t>(slots, entities[index].index + 1);
         }
@@ -94,24 +133,8 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
                 return;
             }
 
-            const Entity entity = entities[index];
-            const ModelRenderer& modelRenderer = components[index];
-            const Mat4 entityMatrix = getRenderTransform(reading, entity, alpha).getMatrix();
-
-            for (std::size_t part = 0; part < modelRenderer.parts.size(); ++part) {
-                const RenderPart& piece = modelRenderer.parts[part];
-                const Mat4 model = entityMatrix * piece.localTransform;
-                DrawItem& draw = frame.draws[firstDraw[index] + part];
-                draw = DrawItem{piece.mesh, model, piece.material, modelRenderer.castsShadows, modelRenderer.isStatic, BoundingSphere{},
-                                history != nullptr ? history->previous(entity, part) : std::nullopt};
-                draw.shadowOnly = modelRenderer.shadowOnly;
-                draw.shadowCascades = modelRenderer.shadowCascades;
-                draw.hidden = modelRenderer.hidden;
-
-                if (history != nullptr) {
-                    history->remember(entity, part, model);
-                }
-            }
+            buildEntityDraws(reading, entities[index], components[index], alpha, history,
+                             std::span<DrawItem>{frame.draws}.subspan(firstDraw[index], components[index].parts.size()));
         });
     }
 
@@ -123,7 +146,7 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
 }
 
 // A frame has few deforming meshes, so each draw looks through them.
-void attachShapes(std::vector<DrawItem>& draws, const std::vector<DeformedMesh>& deformedMeshes) {
+void attachShapes(std::span<DrawItem> draws, const std::vector<DeformedMesh>& deformedMeshes) {
     for (DrawItem& draw : draws) {
         for (const DeformedMesh& deformed : deformedMeshes) {
             if (draw.mesh.index == deformed.mesh.index && draw.mesh.isValid()) {

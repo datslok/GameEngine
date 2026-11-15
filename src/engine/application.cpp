@@ -1,4 +1,5 @@
 #include "engine/application.h"
+#include "core/build_info.h"
 #include "scene/flat_faces.h"
 #include "engine/debug_views.h"
 #include "engine/golden.h"
@@ -382,6 +383,7 @@ void Application::render(float alpha, float frameSeconds, ImDrawData* ui) {
     handOverClothWork(alpha);
     renderer.setClothPassTiming(game.wantsDebugView());
     const bool rendered = renderer.render(frame, settings.render, ui);
+    giveBackStillDraws(frame);
     profiler.record(renderSection, profilerSeconds() - renderStart);
 
     // What finished frames left of the GPU cloths, for picking and grabbing them.
@@ -437,11 +439,34 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     double terrainSeconds = profilerSeconds() - partStart;
     partStart = profilerSeconds();
 
-    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs, terrainDraws);
+    /*
+    * Still objects' draws come kept from last frame (scene/still_draws.h), let go when the assets' levels changed, since
+    * draws hold spans of them. Debug builds check a few kept matrices a frame against where their entities stand.
+    */
+    StillDraws* still = nullptr;
+
+    if (settings.keepStillDraws) {
+        if (assets.getLevelsVersion() != stillLevelsVersion) {
+            stillDraws.invalidate();
+            stillLevelsVersion = assets.getLevelsVersion();
+        }
+
+        if (isDebugBuild) {
+            constexpr std::size_t stillChecksPerFrame = 256;
+            stillDraws.verify(world, stillChecksPerFrame);
+        }
+
+        still = &stillDraws;
+    } else {
+        stillDraws.invalidate();
+    }
+
+    FrameDescription frame = buildFrame(world, game.getCamera(), alpha, &motionHistory, jobs, terrainDraws, still);
     frame.lightFocus = game.getLightFocus();
 
-    // Probe events last one frame: this one carries them.
+    // Probe events and still objects' change marks last one frame: this one carries them.
     clearProbeEvents(world);
+    clearRenderChanged(world);
     frame.frameSeconds = frameSeconds;
     partDone(SceneStage::Build);
 
@@ -467,13 +492,24 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     for (const DeformedMesh& deformed : frame.deformedMeshes) {
         boundsByMesh.at(deformed.mesh.index) = deformed.bounds;
     }
-    attachShapes(frame.draws, frame.deformedMeshes);
+    // Kept still draws never hold a deforming mesh, so only the draws after them can.
+    const std::span<DrawItem> builtDraws = std::span<DrawItem>{frame.draws}.subspan(frame.stillDraws);
+    attachShapes(builtDraws, frame.deformedMeshes);
     partDone(SceneStage::Deform);
 
-    // Spheres around each draw let the renderer skip what a view cannot see.
-    attachBoundingSpheres(frame.draws, boundsByMesh);
-    attachFlatFaces(frame.draws, flatFacesByMesh);
-    attachMeshLevels(frame.draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
+    // Spheres around each draw let the renderer skip what a view cannot see: attached to the draws built this frame,
+    // since kept still draws keep theirs.
+    const auto attach = [&](std::span<DrawItem> draws) {
+        attachBoundingSpheres(draws, boundsByMesh);
+        attachFlatFaces(draws, flatFacesByMesh);
+        attachMeshLevels(draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
+    };
+
+    for (const DrawRange& range : frame.builtStillDraws) {
+        attach(std::span<DrawItem>{frame.draws}.subspan(range.first, range.count));
+    }
+
+    attach(builtDraws);
     partDone(SceneStage::Attach);
 
     for (const auto& [terrain, nodes] : terrains) {
@@ -497,6 +533,13 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     return frame;
 }
 
+// A frame built from kept draws gives them back; one built without them leaves the kept draws let go.
+void Application::giveBackStillDraws(FrameDescription& frame) {
+    if (settings.keepStillDraws) {
+        stillDraws.giveBack(std::move(frame.draws));
+    }
+}
+
 /*
 * The loop's steps without real time: the game is set up and simulated to the view's time, the assets it loaded are
 * uploaded, and the frame is drawn at alpha 1 (on the last tick) off screen at the golden size, after the light probes'
@@ -507,8 +550,10 @@ CapturedFrame Application::captureGoldenView(const GoldenView& view, int probeWa
     prepareNewResources();
 
     const float tickSeconds = static_cast<float>(1.0 / static_cast<double>(settings.ticksPerSecond));
-    const FrameDescription frame = describeFrame(1.0f, tickSeconds);
-    return renderer.capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr), probeWarmUpFrames);
+    FrameDescription frame = describeFrame(1.0f, tickSeconds);
+    CapturedFrame captured = renderer.capture(frame, settings.render, goldenImageWidth, goldenImageHeight, goldenDisplayOutput(view.hdr), probeWarmUpFrames);
+    giveBackStillDraws(frame);
+    return captured;
 }
 
 std::string Application::getRendererName() const {

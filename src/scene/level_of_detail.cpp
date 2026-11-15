@@ -110,7 +110,7 @@ std::array<std::size_t, meshLevelSlots> levelsChosen(const std::vector<DrawItem>
     return counts;
 }
 
-void attachMeshLevels(std::vector<DrawItem>& draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
+void attachMeshLevels(std::span<DrawItem> draws, const std::vector<std::vector<MeshLevel>>& levelsByMesh,
                       const std::vector<MeshLevelOptions>& optionsByMesh) {
     for (DrawItem& draw : draws) {
         if (!draw.mesh.isValid()) {

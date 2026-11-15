@@ -22,6 +22,7 @@
 #include "render/captured_frame.h"
 #include "render/vulkan/vulkan_renderer.h"
 #include "scene/frame_description.h"
+#include "scene/still_draws.h"
 
 #include <cstdint>
 #include <deque>
@@ -162,6 +163,12 @@ private:
 
     // What every model part was drawn with last frame, so each frame's draws say how they moved (for temporal anti-aliasing).
     MotionHistory motionHistory;
+
+    // Still objects' draws kept from frame to frame, given back after each frame is drawn (giveBackStillDraws), and the
+    // assets' levels version they were built with.
+    StillDraws stillDraws;
+    std::uint64_t stillLevelsVersion = 0;
+    void giveBackStillDraws(FrameDescription& frame);
 
     // The static draws as triangles for the sky visibility grid's rays, rebuilt only when they change.
     StaticGeometry staticGeometry;

@@ -13,10 +13,10 @@ BoundingSphere boundingSphere(const Aabb& localBounds, const Mat4& model);
 
 // Give each draw the sphere around its mesh, from bounds indexed like MeshHandle. Draws whose mesh has no known bounds keep
 // a negative radius, which means "unknown, never cull".
-void attachBoundingSpheres(std::vector<DrawItem>& draws, const std::vector<Aabb>& boundsByMesh);
+void attachBoundingSpheres(std::span<DrawItem> draws, const std::vector<Aabb>& boundsByMesh);
 
 // Give each draw its mesh's flat faces, from lists indexed like MeshHandle, which must outlive the frame.
-void attachFlatFaces(std::vector<DrawItem>& draws, const std::vector<std::vector<FlatFace>>& facesByMesh);
+void attachFlatFaces(std::span<DrawItem> draws, const std::vector<std::vector<FlatFace>>& facesByMesh);
 
 // The draws the camera can see (by index, in order).
 std::vector<std::size_t> visibleDraws(const std::vector<DrawItem>& draws, const Frustum& cameraFrustum);
@@ -44,4 +44,4 @@ std::vector<std::size_t> castersAtLeast(const std::vector<DrawItem>& draws, cons
 
 // The candidates (draw indices, such as castersInReach gives) inside a light view's frustum, in the candidates' order.
 std::vector<std::size_t> shadowCasters(const std::vector<DrawItem>& draws, const std::vector<std::size_t>& candidates,
-                                       const Frustum& lightFrustum);
+                                       const Frustum& lightFrustum);

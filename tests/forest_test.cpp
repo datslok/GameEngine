@@ -13,6 +13,7 @@
 #include "math/transform.h"
 #include "scene/model_renderer.h"
 #include "scene/indexed_mesh.h"
+#include "scene/still_draws.h"
 #include "scene/terrain.h"
 
 #include "forest_helpers.h"
@@ -953,6 +954,20 @@ namespace {
         assert(!registry.execute("forest-view").ok);
     }
 
+    // The valley never moves, so all of it is still (its draws kept from frame to frame) but for the drifting rocks.
+    void testTheValleyIsStill() {
+        Forest forest;
+        std::size_t moving = 0;
+
+        forest.world.each<ModelRenderer>([&](Entity entity, const ModelRenderer& renderer) {
+            const bool drifts = forest.world.has<DriftingRock>(entity);
+            assert(renderer.still == !drifts);
+            moving += drifts ? 1 : 0;
+        });
+
+        assert(moving > 0);
+    }
+
     // The haze and the ground's blend follow their settings each frame, so set commands and F5 change them at once.
     void testSettingsApplyEachFrame() {
         Forest forest;
@@ -980,6 +995,17 @@ namespace {
             const Material& rock = forest.world.get<ModelRenderer>(shape).parts.front().material;
             assert(rock.groundBlendDepth == 0.6f && rock.groundTopStart == 0.4f && rock.groundTopFull == 0.9f);
             assert(rock.streakStrength == 0.2f && !rock.groundHexTiling && rock.variationStrength == 0.4f);
+            assert(forest.world.has<RenderChanged>(shape));
+        }
+
+        // The ground and the rocks are still: a change marks them to be built again, an unchanged frame marks nothing.
+        assert(forest.world.has<RenderChanged>(forest.game.getGround()));
+        clearRenderChanged(forest.world);
+        forest.game.onUpdate(forest.world, input, 1.0f / 60.0f, 1.0f);
+        assert(!forest.world.has<RenderChanged>(forest.game.getGround()));
+
+        for (const Entity shape : forest.game.getRockShapes()) {
+            assert(!forest.world.has<RenderChanged>(shape));
         }
 
         forest.game.getMistSettings().enabled = true;
@@ -1016,4 +1042,5 @@ void testForest() {
     testThePillarsAreMadeOfTheStrata();
     testViewsHaveACommand();
     testSettingsApplyEachFrame();
+    testTheValleyIsStill();
 }

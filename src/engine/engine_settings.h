@@ -56,6 +56,10 @@ struct EngineSettings {
     // GPU, those a few frames old, so it jumps a little).
     bool clothOnGpu = true;
 
+    // Keep still objects' draws from frame to frame (ModelRenderer::still, scene/still_draws.h), building only what moves;
+    // off builds every draw every frame, as before (for measuring). Read every frame.
+    bool keepStillDraws = true;
+
     // Listen for commands (core/command_registry.h) from tools and AIs on 127.0.0.1 at commandPort, which nothing
     // outside this computer can reach: game.exe --send <command> talks to it. Read once, at start-up.
     bool commandServer = true;
