@@ -40,6 +40,8 @@ namespace {
 */
 StillDraws::Update StillDraws::update(const World& world, float alpha, JobSystem& jobs) {
     Update result;
+    result.previousVersion = version;
+    result.version = ++version;
     const ComponentStorage<ModelRenderer>* renderers = world.storageOf<ModelRenderer>();
 
     if (renderers == nullptr) {

@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 /*
@@ -101,6 +102,13 @@ public:
         write(elements.data(), elements.size() * sizeof(Element));
     }
 
+    // Replace the contents with first then second, one after the other (a frame's kept still records, then the rest),
+    // without joining them into one array first.
+    template<typename Element>
+    void write(std::span<const Element> first, std::span<const Element> second) {
+        writeParts(first.data(), first.size_bytes(), second.data(), second.size_bytes());
+    }
+
     // The whole buffer, for a descriptor (shaders read only as many elements as the frame says there are).
     VkDescriptorBufferInfo describe() const;
 
@@ -108,6 +116,8 @@ public:
     VkDeviceAddress getDeviceAddress() const;
 
 private:
+    void writeParts(const void* first, std::size_t firstBytes, const void* second, std::size_t secondBytes);
+
     // Room for a few dozen records of any kind before the first growth.
     static constexpr std::size_t smallestBytes = 4096;
 

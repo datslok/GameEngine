@@ -7,6 +7,7 @@
 #include "render/gpu/ddgi_sampling.h"
 #include "render/gpu/display_output.h"
 #include "render/gpu/gpu_scene.h"
+#include "render/gpu/still_instances.h"
 #include "render/gpu/terrain_gpu.h"
 #include "render/gpu/light_priority.h"
 #include "render/gpu/light_uniforms.h"
@@ -322,6 +323,10 @@ private:
     // The sky visibility grid (render/gpu/sky_visibility.h): baked on the CPU round the camera, its points copied up
     // when they change, read by the main pass and the fog without light probes.
     std::unique_ptr<VulkanSkyVisibility> skyVisibility;
+
+    // The still draws' instance records, last-frame matrices and materials, kept from frame to frame and packed again
+    // only where a frame built still draws again (render/gpu/still_instances.h).
+    StillInstances stillInstances;
 
     // The reflection probe round the camera (render/gpu/reflection_probe.h): its cubes, and the capture's pipelines
     // without and with the light probes (probe_capture.frag), each for cut-outs too, indexed by capturePipelineIndex. On GPUs with ray queries each again

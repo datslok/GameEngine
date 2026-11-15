@@ -106,6 +106,8 @@ FrameDescription buildFrame(World& world, const Camera& camera, float alpha, Mot
             frame.draws = std::move(update.draws);
             frame.stillDraws = update.count;
             frame.builtStillDraws = std::move(update.built);
+            frame.stillVersion = update.version;
+            frame.stillPreviousVersion = update.previousVersion;
             kept = std::move(update.kept);
             stillCount = update.count;
         }

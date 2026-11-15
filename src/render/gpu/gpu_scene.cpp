@@ -159,7 +159,7 @@ std::uint32_t MaterialTable::addPacked(const GpuMaterial& packed, std::uint64_t 
     return index;
 }
 
-std::vector<GpuInstance> packInstances(const std::vector<DrawItem>& draws, MaterialTable& materials, JobSystem& jobs) {
+std::vector<GpuInstance> packInstances(std::span<const DrawItem> draws, MaterialTable& materials, JobSystem& jobs) {
     constexpr std::size_t drawsPerPiece = 256;
     std::vector<GpuMaterial> packed(draws.size());
     std::vector<std::uint64_t> hashes(draws.size(), 0);

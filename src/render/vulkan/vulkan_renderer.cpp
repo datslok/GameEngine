@@ -2109,14 +2109,25 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
                                            bool occlusionBlurred, bool occlusionAccumulates, bool gathersLight, bool glassShadows, const GpuFog& frameFog,
                                            bool readsSkyVisibility, const ContactShadowFrame& contact) {
     const bool mirrorLight = !mirrorPairs.empty();
-    MaterialTable materials;
-    const std::vector<GpuInstance> instances = packInstances(description.draws, materials, jobs);
-    std::vector<std::array<float, 16>> previousModels(description.draws.size());
 
-    jobs.parallelFor(description.draws.size(), 256, [&](std::size_t draw) {
-        checkTexturesUploaded(description.draws[draw].material);
-        writeColumnMajor(description.draws[draw].previousModel.value_or(description.draws[draw].model), previousModels[draw].data());
-    });
+    /*
+    * The still draws' records come kept from earlier frames (render/gpu/still_instances.h), packed again only where the
+    * frame built them; the moving draws' are packed now, their materials added to a copy of the still table. Textures
+    * are checked where something was packed: a kept record's were checked when it was.
+    */
+    const std::vector<DrawRange> repacked = stillInstances.update(description, jobs);
+    const SceneRecords records = packMovingDraws(description, stillInstances, jobs);
+    const auto checkTextures = [&](std::size_t first, std::size_t count) {
+        jobs.parallelFor(count, 256, [&](std::size_t draw) {
+            checkTexturesUploaded(description.draws[first + draw].material);
+        });
+    };
+
+    for (const DrawRange& range : repacked) {
+        checkTextures(range.first, range.count);
+    }
+
+    checkTextures(description.stillDraws, description.draws.size() - description.stillDraws);
 
     std::vector<std::uint32_t> drawList;
     drawList.reserve(mainDraws.order.size() + shadowDraws.drawList.size());
@@ -2183,14 +2194,14 @@ VkDescriptorSet VulkanRenderer::writeScene(FrameContext& frame, const FrameDescr
     buffers.glassBounds.write(&glassBounds, sizeof(glassBounds));
     buffers.fog.write(&frameFog, sizeof(frameFog));
     buffers.skyVisibilityCascades.write(packProbeCascades(skyCascades, cameraOrigin));
-    buffers.instances.write(instances);
-    buffers.materials.write(materials.getEntries());
+    buffers.instances.write(stillInstances.getInstances(), std::span<const GpuInstance>{records.moving});
+    buffers.materials.write(records.materials.getEntries());
     buffers.directionalLights.write(lights.directional);
     buffers.pointLights.write(lights.points);
     buffers.spotLights.write(lights.spots);
     buffers.shadowTiles.write(shadows.tileData);
     buffers.drawList.write(drawList);
-    buffers.previousModels.write(previousModels);
+    buffers.previousModels.write(stillInstances.getPreviousModels(), std::span<const std::array<float, 16>>{records.movingPrevious});
 
     // The terrain's patches (at least one record, so the buffer is never empty).
     std::vector<GpuTerrainPatch> patches(std::max<std::size_t>(description.terrainPatches.size(), 1));

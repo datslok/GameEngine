@@ -112,13 +112,26 @@ UploadArray::UploadArray(VmaAllocator allocator, VkBufferUsageFlags usage):
 }
 
 void UploadArray::write(const void* data, std::size_t bytes) {
+    writeParts(data, bytes, nullptr, 0);
+}
+
+void UploadArray::writeParts(const void* first, std::size_t firstBytes, const void* second, std::size_t secondBytes) {
+    const std::size_t bytes = firstBytes + secondBytes;
+
     if (bytes > buffer.getSize()) {
         const std::size_t grown = std::max(bytes, 2 * static_cast<std::size_t>(buffer.getSize()));
         buffer = VulkanBuffer{allocator, grown, usage, BufferMemory::Upload};
     }
 
+    if (firstBytes > 0) {
+        std::memcpy(buffer.getMapped(), first, firstBytes);
+    }
+
+    if (secondBytes > 0) {
+        std::memcpy(static_cast<std::byte*>(buffer.getMapped()) + firstBytes, second, secondBytes);
+    }
+
     if (bytes > 0) {
-        std::memcpy(buffer.getMapped(), data, bytes);
         buffer.flush();
     }
 }

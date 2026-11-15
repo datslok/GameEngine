@@ -44,6 +44,8 @@ public:
         std::size_t count = 0;
         std::vector<DrawRange> built;
         std::vector<std::uint8_t> kept;
+        std::uint64_t version = 0;         // this update's, never 0
+        std::uint64_t previousVersion = 0; // the update before's (0: none)
     };
 
     // The still draws brought up to date with the world, placed at alpha (still entities have no PreviousTransform, so
@@ -82,4 +84,5 @@ private:
     bool holding = false; // the list is here (given back since the last update)
     bool valid = false;   // what it holds is a whole build, not let go
     std::size_t verifyNext = 0;
+    std::uint64_t version = 0;
 };

@@ -96,6 +96,7 @@ void testMipLevels();
 void testSrgb();
 void testFrameDescription();
 void testStillDraws();
+void testStillInstances();
 void testShadowMap();
 void testShadowAtlas();
 void testSoftShadow();
@@ -366,6 +367,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testSrgb", testSrgb);
     runTest("testFrameDescription", testFrameDescription);
     runTest("testStillDraws", testStillDraws);
+    runTest("testStillInstances", testStillInstances);
     runTest("testShadowMap", testShadowMap);
     runTest("testShadowAtlas", testShadowAtlas);
     runTest("testSoftShadow", testSoftShadow);
