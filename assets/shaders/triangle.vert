@@ -90,7 +90,7 @@ void main() {
     * frames and the card agree. The fragment shader gets the card point (offset from the middle over the radius) and the
     * view direction in the tree's frame, and the tree's axes to turn the baked normals into the world.
     */
-    if (instance.material.w == 1u) {
+    if (instance.material.w == uint(INSTANCE_KIND_IMPOSTOR)) {
         vec3 treeScale = projectionScale(mat3(instance.model));
         mat3 treeAxes = projectionAxes(mat3(instance.model), treeScale);
         vec3 middle = (model * vec4(position - vec3(uv * normal.x, 0.0), 1.0)).xyz;
@@ -113,6 +113,7 @@ void main() {
     }
 
     relativePosition = (model * vec4(position, 1.0)).xyz;
+    relativePosition.y += groundLift(instance.material.w, relativePosition + cameraOrigin.xyz);
     gl_Position = (captureView ? captureViewProjection : relativeViewProjection) * vec4(relativePosition, 1.0);
     gl_ClipDistance[0] = captureView ? planarClipDistance(captureClipPlane, relativePosition) : 1.0;
     viewerPosition = captureView ? captureEye.xyz : vec3(0.0);

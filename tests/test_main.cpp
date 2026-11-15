@@ -65,6 +65,7 @@ void testEpiphytes();
 void testSimplifyMesh();
 void testLevelOfDetail();
 void testTerrain();
+void testGroundFollow();
 void testImpostors();
 void testLeafClusters();
 void testDepthPrepass();
@@ -362,6 +363,7 @@ int main(int argumentCount, char** arguments) {
     runTest("testSimplifyMesh", testSimplifyMesh);
     runTest("testLevelOfDetail", testLevelOfDetail);
     runTest("testTerrain", testTerrain);
+    runTest("testGroundFollow", testGroundFollow);
     runTest("testImpostors", testImpostors);
     runTest("testLeafClusters", testLeafClusters);
     runTest("testFlashlight", testFlashlight);

@@ -3,6 +3,7 @@
 
 #include "instances.glsl"
 #include "planar_reflection.glsl"
+#include "terrain_data.glsl"
 
 /*
 * The coloured shadow map's glass (render/gpu/transparency.h): each pane as the shadow pass places it, with what its
@@ -32,6 +33,7 @@ out float gl_ClipDistance[1];
 void main() {
     InstanceData instance = instances[drawList[gl_InstanceIndex]];
     vec4 world = instance.model * vec4(position, 1.0);
+    world.y += groundLift(instance.material.w, world.xyz);
     gl_Position = tileMatrix * world;
     gl_ClipDistance[0] = planarClipDistance(tileClipPlane, world.xyz);
     worldNormal = mat3(instance.normalMatrix) * normal;

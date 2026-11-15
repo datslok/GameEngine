@@ -5,6 +5,7 @@
 #include "math/vec3.h"
 #include "math/vec4.h"
 #include "render/gpu/clusters.h"
+#include "render/gpu/instance_shared.h"
 #include "render/gpu/light_uniforms.h"
 #include "render/gpu/material_uniforms.h"
 #include "render/gpu/shadow_map.h"
@@ -34,11 +35,16 @@
 * (all column-major), and the number of its material in the frame's material table. Each view multiplies in its own
 * matrix on the GPU. Ray tracing's instances (6d) and GPU culling will read the same records.
 */
+// An instance's kinds (GpuInstance::material[3]), from instance_shared.h.
+inline constexpr std::uint32_t instanceKindPlain = INSTANCE_KIND_PLAIN;
+inline constexpr std::uint32_t instanceKindImpostor = INSTANCE_KIND_IMPOSTOR;
+inline constexpr std::uint32_t instanceKindFollowsGround = INSTANCE_KIND_FOLLOWS_GROUND;
+
 struct GpuInstance {
     float model[16];        // places the vertex in the world
     float normalMatrix[16]; // inverse transpose of the model's 3x3 part (zero if squashed flat)
     float handedness[4];    // x: -1 if the model matrix mirrors space, else +1; y: its scale (uniformScale), for lengths in model units
-    std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: 1 for an impostor's card
+    std::uint32_t material[4]; // x: the material's number in the frame's material buffer, y: the mesh's (for ray hits), z: its terrain patch's one past (0 none), w: its kind (instance_shared.h)
 };
 
 static_assert(sizeof(GpuInstance) == 160, "GpuInstance must match the shader's InstanceData struct");

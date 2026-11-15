@@ -1,10 +1,11 @@
 // The terrain's heights and patches as the scene's vertex shaders read them (render/gpu/terrain_gpu.h), and the patch
 // vertex built from them: terrainHeight, terrainNormal and terrainVertex mirror scene/terrain_heights.cpp. Included by
-// triangle.vert and shadow.vert.
+// every vertex shader reading instances.
 #ifndef TERRAIN_DATA_GLSL
 #define TERRAIN_DATA_GLSL
 
 #include "terrain.glsl"
+#include "render/gpu/instance_shared.h"
 
 // Must match GpuTerrainGrid.
 struct TerrainGrid {
@@ -64,6 +65,12 @@ float terrainHeight(vec2 place) {
     }
 
     return terrainGridCount > 0u ? terrainSampleGrid(terrainGrids[terrainGridCount - 1u], place) : 0.0;
+}
+
+// How far a vertex of an instance of a kind is lifted at a place in the world: the land's height there for a mesh
+// following the ground (INSTANCE_KIND_FOLLOWS_GROUND, scene/ground_follow.h, liftedOntoGround), nothing for any other.
+float groundLift(uint kind, vec3 world) {
+    return kind == uint(INSTANCE_KIND_FOLLOWS_GROUND) ? terrainHeight(world.xz) : 0.0;
 }
 
 // The land's unit normal from its slope over step metres either way.

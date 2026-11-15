@@ -6,8 +6,9 @@
 std::uint32_t rayMaskFor(const DrawItem& draw) {
     // A shadow map's stand-in is no surface: kept in the list (instances are numbered by draw), met by no ray; nor is a
     // hidden draw, nor a terrain patch, whose mesh is a flat grid only the vertex shaders lift onto the land, nor an
-    // impostor's card, which only the vertex shader turns to face the viewer.
-    if (draw.shadowOnly || draw.hidden || draw.terrainPatch >= 0 || draw.material.impostorFrames > 0) {
+    // impostor's card, which only the vertex shader turns to face the viewer, nor a mesh following the ground, which only
+    // the vertex shaders lift onto it.
+    if (draw.shadowOnly || draw.hidden || draw.terrainPatch >= 0 || draw.material.impostorFrames > 0 || draw.followsGround) {
         return 0u;
     }
 

@@ -6,6 +6,7 @@
 #include "engine/gpu_cloth.h"
 #include "scene/culling.h"
 #include "scene/frame_description.h"
+#include "scene/ground_follow.h"
 #include "scene/indexed_mesh.h"
 #include "scene/level_of_detail.h"
 #include "scene/terrain.h"
@@ -498,11 +499,14 @@ FrameDescription Application::describeFrame(float alpha, float frameSeconds) {
     partDone(SceneStage::Deform);
 
     // Spheres around each draw let the renderer skip what a view cannot see: attached to the draws built this frame,
-    // since kept still draws keep theirs.
+    // since kept still draws keep theirs. Those following the ground are lifted onto the land the shaders lift them
+    // onto (the last terrain's heights, as the frame's are below).
+    const TerrainHeights* groundHeights = terrains.empty() ? nullptr : terrains.back().first->heights.get();
     const auto attach = [&](std::span<DrawItem> draws) {
         attachBoundingSpheres(draws, boundsByMesh);
         attachFlatFaces(draws, flatFacesByMesh);
         attachMeshLevels(draws, assets.getMeshLevels(), assets.getMeshLevelOptions());
+        liftGroundDraws(draws, groundHeights);
     };
 
     for (const DrawRange& range : frame.builtStillDraws) {

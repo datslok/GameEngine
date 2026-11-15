@@ -72,6 +72,10 @@ struct DrawItem {
     // flat grid the vertex shaders lift onto the land.
     int terrainPatch = -1;
 
+    // Lifted onto the land by the vertex shaders (ModelRenderer::followsGround, scene/ground_follow.h); its bounds lifted
+    // to match by the engine (liftGroundDraws).
+    bool followsGround = false;
+
     // A deforming mesh's shape this frame (DeformedMesh::shape, set by attachShapes), 0 for every other mesh: the shadow
     // cache's fingerprint of the casters includes it, so a caster that changes shape where it stands is drawn again.
     std::uint64_t shape = 0;

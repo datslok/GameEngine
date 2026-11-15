@@ -10,6 +10,7 @@
 */
 #include "frame_data.glsl"
 #include "instances.glsl"
+#include "terrain_data.glsl"
 
 // Each instance's model matrix last frame (its current one when it did not move), as instances numbers them.
 layout(std430, set = 1, binding = 21) readonly buffer PreviousModels {
@@ -40,13 +41,17 @@ void main() {
     // As triangle.vert does: the camera subtracted from the translation first (camera-relative rendering).
     mat4 model = instances[instance].model;
     model[3].xyz -= cameraOrigin.xyz;
+    uint kind = instances[instance].material.w;
     vec3 relativePosition = (model * vec4(position, 1.0)).xyz;
+    relativePosition.y += groundLift(kind, relativePosition + cameraOrigin.xyz);
     gl_Position = relativeViewProjection * vec4(relativePosition, 1.0);
 
     mat4 before = previousModels[instance];
     before[3].xyz -= cameraOrigin.xyz;
     currentClip = view.current * vec4(relativePosition, 1.0);
-    previousClip = view.previous * (before * vec4(previousPosition, 1.0));
+    vec3 previousRelative = (before * vec4(previousPosition, 1.0)).xyz;
+    previousRelative.y += groundLift(kind, previousRelative + cameraOrigin.xyz);
+    previousClip = view.previous * vec4(previousRelative, 1.0);
     textureUv = uv;
     materialIndex = instances[instance].material.x;
 }
